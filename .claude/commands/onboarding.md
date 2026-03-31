@@ -353,6 +353,8 @@ pm2 startup
 ```
 
 > "PM2 just printed a command starting with `sudo env PATH=...`. Open a new terminal window, paste that command, and run it. It sets up the daemon to survive reboots. You only need to do this once."
+>
+> "When you run it, your computer may ask for your password — this is normal. It's your Mac login password (or Linux user password), not any cortextOS password. Just type it in and press Enter. You won't see the characters appear as you type — that's normal for password prompts. Once it runs, come back here."
 
 Wait for them to confirm they've run it before continuing.
 

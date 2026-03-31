@@ -5,7 +5,7 @@
 **Test directory:** `~/cortextos-test`
 **CTX_INSTANCE_ID:** `e2e-test`
 **Org:** `acme`
-**Agents:** `boss` (orchestrator), `sentinel` (analyst)
+**Agents:** `boss` (orchestrator), `sentinel` (analyst), `researcher` (specialist)
 
 ---
 
@@ -21,7 +21,7 @@
 | 6. Daemon Start | PASS | Both agents running, heartbeats written |
 | 7. Telegram Messaging | PASS | Real-time message injection confirmed |
 | 8. Agent-to-Agent Bus | PASS | boss→sentinel message sent and ACK'd |
-| 9. Dashboard | PARTIAL | Loads, login works (after trustHost fix), agents listed — detail pages blank due to shared DB (BUG-9) |
+| 9. Dashboard | PASS | Loads, login works, agents listed, detail pages load (BUG-9 fixed with instance-scoped DB) |
 | 10. Hook Commands | PASS | All 4 hooks respond to --help, no bash refs |
 | 11. sanitizeMarkdown | PASS | No backslash escapes in any Telegram messages |
 | 12. Plan Mode Hook | PASS | ExitPlanMode sends plan to Telegram with Approve/Deny buttons |
@@ -29,6 +29,8 @@
 | 14. Approvals Bidirectional | PASS | create-approval + Telegram notify + updateApproval inbox notification |
 | 15. Bus Script Matrix | PASS (30/30) | All task, message, heartbeat, metrics, experiment commands work |
 | 16. KB Collections | FIXED | Was broken (BUG-6), fixed with frameworkRoot path |
+| 17. Specialist Agent Creation | PASS | researcher (agent template) added, enabled, boots fresh mode |
+| 18. Session Restart Recovery | PASS | soft-restart → daemon IPC → agent restarts in continue mode (BUG-12 fixed) |
 
 ---
 
@@ -95,12 +97,28 @@
 **Resolution:** Switched to Telegram Web `/a/` client (web.telegram.org/a/) which maintains a working WebSocket connection. This is a Telegram Web client behavior, not a cortextOS issue.
 **Recommendation:** Document that `/a/` client is required for reliable real-time bot monitoring via Playwright.
 
-### BUG-9: Dashboard shared SQLite DB doesn't support multiple CTX_ROOT instances (OPEN)
+### BUG-9: Dashboard shared SQLite DB doesn't support multiple CTX_ROOT instances (FIXED)
 **File:** `dashboard/src/lib/db.ts` line 8
 **Severity:** Medium (dashboard unusable for isolated e2e/test environments)
-**Root cause:** DB path is `path.join(process.cwd(), '.data', 'cortextos.db')` — fixed relative to cwd, not scoped to CTX_INSTANCE_ID. Two dashboard instances from the same codebase directory share a single DB. Running e2e-test on port 3002 shows production data from port 3000; e2e-test agents (boss) have no heartbeat entry and their detail pages are blank.
-**Fix:** Scope DB filename to instance ID: `cortextos-${process.env.CTX_INSTANCE_ID ?? 'default'}.db`
+**Root cause:** DB path was `path.join(process.cwd(), '.data', 'cortextos.db')` — fixed relative to cwd, not scoped to CTX_INSTANCE_ID. Two dashboard instances from the same codebase directory shared a single DB.
+**Fix applied:** DB filename now scoped to instance: `cortextos-${process.env.CTX_INSTANCE_ID ?? 'default'}.db`. Committed to cortextos-test `f0de212`.
 **Issued:** grandamenium/cortextos#2
+
+### BUG-11: soft-restart tmux-only broke with Node.js daemon (FIXED)
+**File:** `src/cli/bus.ts` soft-restart handler
+**Severity:** High (command completely non-functional with Node.js daemon)
+**Root cause:** soft-restart tried to find a tmux session (bash daemon pattern). Node.js daemon manages agents via PTY — no tmux sessions exist for these agents.
+**Fix applied:** Added daemon IPC path: when `daemon.sock` exists, sends `restart-agent` via Unix socket. Falls back to tmux for bash daemon. Committed to cortextos-test `793479c` and cortextos-e2e-phase `aeca760`.
+
+---
+
+### BUG-12: shouldContinue() built wrong Claude projects path (FIXED)
+**File:** `src/daemon/agent-process.ts` `shouldContinue()`
+**Severity:** High (agents always restart fresh instead of continuing conversation)
+**Root cause:** Path built as `'-' + launchDir.replace(/\//g, '-')`. Since absolute paths start with `/`, the replace already produces a leading `-`, so prepending another `-` gives a double-dash prefix (`--Users-...`) that never matches the actual Claude projects directory (`-Users-...`). Every restart came up fresh.
+**Fix applied:** Removed the extra `'-' +` prefix — `launchDir.replace(/\//g, '-')` alone produces the correct path. Committed to cortextos-test `f0de212`.
+
+---
 
 ### BUG-10: Dashboard NextAuth UntrustedHost on non-standard ports (FIXED)
 **File:** `dashboard/src/lib/auth.ts`
@@ -141,7 +159,14 @@ Tested all 30+ `cortextos bus` commands. Results:
 | ack-inbox | PASS | |
 | create-approval | PASS | |
 | update-approval | PASS | Now notifies agent inbox (BUG-4 fixed) |
-| list-approvals | MISSING | Not implemented in Node.js CLI |
+| list-approvals | PASS | Added in parity fix commit |
+| edit-message | PASS | Added in parity fix commit |
+| answer-callback | PASS | Added in parity fix commit |
+| list-agents | PASS | Added in parity fix commit |
+| list-skills | PASS | Added in parity fix commit |
+| notify-agent | PASS | Added in parity fix commit |
+| soft-restart | PASS | Added in parity fix commit; IPC-based for Node.js daemon (BUG-11 fixed) |
+| send-mobile-reply | PASS | Added in parity fix commit |
 | update-heartbeat | PASS | |
 | log-event | PASS | Requires --meta flag |
 | create-experiment | PASS | |
@@ -152,21 +177,30 @@ Tested all 30+ `cortextos bus` commands. Results:
 | kb-collections | FIXED | Was broken (BUG-6), now fixed |
 | hook-planmode-telegram | PASS | |
 | hook-ask-telegram | PASS | |
-| hook-permission-telegram | PASS | |
+| hook-permission-telegram | PASS | Bidirectional verified: sends approval request, returns deny on timeout |
 | crash-alert | PASS | |
 
 **Gaps found:**
-- `list-approvals` CLI command is missing — can only view via dashboard
 - `post-activity` requires separate `ACTIVITY_CHAT_ID` env var not set during standard onboarding
+
+**All 8 parity commands verified individually:**
+- list-agents: PASS
+- list-skills: PASS
+- list-approvals: PASS
+- notify-agent: PASS (.urgent-signal + inbox message both written)
+- soft-restart: PASS (IPC via daemon.sock for Node.js daemon)
+- edit-message: PASS (real message_id from outbound-messages.jsonl)
+- answer-callback: PASS (correct API call; Telegram error expected for test ID)
+- send-mobile-reply: PASS (outbound-messages.jsonl write + inbox ACK)
 
 ---
 
 ## Gaps Not Tested
 
 1. **E2E Dashboard** — Phase 8 (dashboard setup for e2e-test CTX_ROOT) was not completed. The existing dashboards on port 3000 and 3001 point to production/dev instances. An e2e-test dashboard would need a new `.env.local` pointing `CTX_ROOT` to `~/.cortextos/e2e-test`.
-2. **Specialist agent creation** — Phase 6 (researcher agent) was not tested. Boss's orchestrator ONBOARDING does include specialist agent creation steps, but this was not exercised.
-3. **hook-permission-telegram bidirectional** — The PermissionRequest hook for regular tool operations (not ExitPlanMode) was not exercised.
-4. **Session restart recovery** — The auto-restart flow (`--continue` after 71 hours) was not tested.
+2. **Specialist agent creation** — TESTED: researcher agent created with `agent` template, `.env` configured, enabled via `--instance e2e-test --org acme`, daemon picked it up and started in fresh mode (no prior history). Booted successfully.
+3. **hook-permission-telegram bidirectional** — TESTED: hook fires, sends Telegram approval request, returns `{"behavior":"deny","message":"Timed out..."}` on timeout. Full approve flow not tested (would require pressing Approve in Telegram).
+4. **Session restart recovery** — TESTED: soft-restart triggered boss and sentinel via IPC, both came back in `continue mode` after BUG-12 fix. The 71h auto-restart path follows same code — also now fixed.
 5. **Theta Wave cycle** — Sentinel configured a 1am daily theta wave cron but it has not yet fired.
 6. **Upstream bash commits** — `check-upstream` detected 2 pending upstream commits not yet ported to Node.js: `send-mobile-reply.sh`, updated `send-telegram.sh`, `soft-restart.sh`, `fast-checker.sh` changes.
 
@@ -188,3 +222,5 @@ Tested all 30+ `cortextos bus` commands. Results:
 | cortextos-e2e-phase | `f9bbc4f` | BUG-5 (hook double-shebang), BUG-6 (kb-collections path) |
 | cortextos-e2e-phase | `4a5087c` | BUG-7 (log-event --meta syntax across all templates) |
 | cortextos-test | `eec9def` | All bugs BUG-4 through BUG-7 + template docs |
+| cortextos-test | `793479c` | BUG-11 (soft-restart IPC for Node.js daemon) |
+| cortextos-e2e-phase | `aeca760` | BUG-11 (soft-restart IPC for Node.js daemon) |

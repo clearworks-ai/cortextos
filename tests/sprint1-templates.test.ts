@@ -40,7 +40,7 @@ describe('Sprint 1: Template Completeness', () => {
     it('has all 5 skills', () => {
       const expectedSkills = ['autoresearch', 'comms', 'cron-management', 'google-workspace', 'tasks'];
       for (const skill of expectedSkills) {
-        const skillPath = join(agentDir, 'skills', skill, 'SKILL.md');
+        const skillPath = join(agentDir, '.claude', 'skills', skill, 'SKILL.md');
         expect(existsSync(skillPath), `Missing skill: ${skill}`).toBe(true);
       }
     });
@@ -104,7 +104,7 @@ describe('Sprint 1: Template Completeness', () => {
     });
 
     it('skill files have YAML frontmatter', () => {
-      const skillPath = join(agentDir, 'skills', 'autoresearch', 'SKILL.md');
+      const skillPath = join(agentDir, '.claude', 'skills', 'autoresearch', 'SKILL.md');
       const content = readFileSync(skillPath, 'utf-8');
       expect(content).toMatch(/^---\n/);
       expect(content).toContain('name: autoresearch');
@@ -143,7 +143,7 @@ describe('Sprint 1: Template Completeness', () => {
         'nighttime-mode', 'theta-wave', 'weekly-review',
       ];
       for (const skill of expectedSkills) {
-        const skillPath = join(orchDir, 'skills', skill, 'SKILL.md');
+        const skillPath = join(orchDir, '.claude', 'skills', skill, 'SKILL.md');
         expect(existsSync(skillPath), `Missing skill: ${skill}`).toBe(true);
       }
     });
@@ -212,7 +212,7 @@ describe('Sprint 1: Template Completeness', () => {
         'theta-wave', 'upstream-sync',
       ];
       for (const skill of expectedSkills) {
-        const skillPath = join(analystDir, 'skills', skill, 'SKILL.md');
+        const skillPath = join(analystDir, '.claude', 'skills', skill, 'SKILL.md');
         expect(existsSync(skillPath), `Missing skill: ${skill}`).toBe(true);
       }
     });
@@ -230,8 +230,8 @@ describe('Sprint 1: Template Completeness', () => {
     });
 
     it('analyst theta-wave skill is different from orchestrator', () => {
-      const analystTW = readFileSync(join(analystDir, 'skills', 'theta-wave', 'SKILL.md'), 'utf-8');
-      const orchTW = readFileSync(join(TEMPLATE_ROOT, 'orchestrator', 'skills', 'theta-wave', 'SKILL.md'), 'utf-8');
+      const analystTW = readFileSync(join(analystDir, '.claude', 'skills', 'theta-wave', 'SKILL.md'), 'utf-8');
+      const orchTW = readFileSync(join(TEMPLATE_ROOT, 'orchestrator', '.claude', 'skills', 'theta-wave', 'SKILL.md'), 'utf-8');
       // Analyst version has "Deep System Scan" and "system_effectiveness"
       expect(analystTW).toContain('Deep System Scan');
       expect(analystTW).toContain('system_effectiveness');

@@ -247,7 +247,6 @@ export interface BusPaths {
   taskDir: string;
   approvalDir: string;
   analyticsDir: string;
-  heartbeatDir: string;
 }
 
 // IPC Types

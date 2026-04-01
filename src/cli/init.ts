@@ -26,14 +26,8 @@ export const initCommand = new Command('init')
     console.log(`  Project: ${projectRoot}\n`);
 
     // Create state directories
+    // Rule: init creates org-level dirs only. Instance-level dirs are created by install.
     const stateDirs = [
-      ctxRoot,
-      join(ctxRoot, 'inbox'),
-      join(ctxRoot, 'inflight'),
-      join(ctxRoot, 'processed'),
-      join(ctxRoot, 'logs'),
-      join(ctxRoot, 'state'),
-      join(ctxRoot, 'heartbeats'),
       join(ctxRoot, 'orgs', orgName, 'tasks'),
       join(ctxRoot, 'orgs', orgName, 'approvals'),
       join(ctxRoot, 'orgs', orgName, 'approvals', 'pending'),

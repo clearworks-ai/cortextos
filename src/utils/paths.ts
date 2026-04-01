@@ -8,18 +8,19 @@ import type { BusPaths } from '../types/index.js';
  *
  * The directory layout is:
  *   ~/.cortextos/{instance}/
+ *     config/                - enabled-agents.json
+ *     state/{agent}/         - flat, per-agent subdirs
+ *     state/{agent}/heartbeat.json - canonical heartbeat location
+ *     state/oauth/           - OAuth accounts.json (token store)
+ *     state/usage/           - Usage monitoring snapshots
  *     inbox/{agent}/         - flat (not org-nested)
  *     inflight/{agent}/      - flat
  *     processed/{agent}/     - flat
+ *     outbox/{agent}/        - flat
  *     logs/{agent}/          - flat
- *     state/{agent}/         - flat
- *     state/{agent}/heartbeat.json - per-agent heartbeat (matches dashboard)
  *     orgs/{org}/tasks/      - org-scoped
  *     orgs/{org}/approvals/  - org-scoped
  *     orgs/{org}/analytics/  - org-scoped
- *     tasks/                 - fallback (no org)
- *     approvals/             - fallback (no org)
- *     analytics/             - fallback (no org)
  */
 export function resolvePaths(
   agentName: string,
@@ -41,7 +42,6 @@ export function resolvePaths(
     taskDir: join(orgBase, 'tasks'),
     approvalDir: join(orgBase, 'approvals'),
     analyticsDir: join(orgBase, 'analytics'),
-    heartbeatDir: join(ctxRoot, 'heartbeats'),
   };
 }
 

@@ -124,24 +124,6 @@ function buildAgentInfo(
     }
   }
 
-  // Also check heartbeats dir (the other heartbeat location)
-  if (!lastHeartbeat) {
-    const hbFile = join(ctxRoot, 'heartbeats', `${name}.json`);
-    if (existsSync(hbFile)) {
-      try {
-        const hb = JSON.parse(readFileSync(hbFile, 'utf-8'));
-        lastHeartbeat = hb.timestamp || null;
-        // Consider running if heartbeat is recent (< 60s)
-        if (hb.timestamp) {
-          const age = Date.now() - new Date(hb.timestamp).getTime();
-          if (age < 60000) running = true;
-        }
-      } catch {
-        // Skip corrupt
-      }
-    }
-  }
-
   // Get role from IDENTITY.md
   let role = '';
   const frameworkRoot = process.env.CTX_FRAMEWORK_ROOT || process.env.CTX_PROJECT_ROOT || '';

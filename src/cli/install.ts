@@ -44,22 +44,20 @@ export const installCommand = new Command('install')
     }
 
     // Create state directories
+    // Rule: install = instance-level dirs only. init = org-level dirs (tasks, approvals, analytics).
     console.log('\nCreating state directories...');
     const dirs = [
       ctxRoot,
       join(ctxRoot, 'config'),
       join(ctxRoot, 'state'),
+      join(ctxRoot, 'state', 'oauth'),   // OAuth token store (accounts.json)
+      join(ctxRoot, 'state', 'usage'),   // Usage monitoring snapshots
       join(ctxRoot, 'inbox'),
       join(ctxRoot, 'inflight'),
       join(ctxRoot, 'processed'),
+      join(ctxRoot, 'outbox'),
       join(ctxRoot, 'logs'),
       join(ctxRoot, 'orgs'),
-      join(ctxRoot, 'tasks'),
-      join(ctxRoot, 'approvals'),
-      join(ctxRoot, 'approvals', 'pending'),
-      join(ctxRoot, 'analytics'),
-      join(ctxRoot, 'analytics', 'events'),
-      join(ctxRoot, 'analytics', 'reports'),
     ];
 
     for (const dir of dirs) {

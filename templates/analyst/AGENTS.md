@@ -21,7 +21,7 @@ If `ONBOARDED`: continue with the session start protocol below.
 2. Read org knowledge base: `../../knowledge.md` (shared facts all agents need)
 3. Discover available skills: `cortextos bus list-skills --format text`
 4. Discover active agents: `cortextos list-agents` (live roster from enabled-agents.json)
-5. Read `config.json` and set up crons via `/loop` (check CronList first - no duplicates)
+5. Restore crons from `config.json` — run CronList first (no duplicates). For each entry: if `type: "recurring"` (or no type), call `/loop {interval} {prompt}`; if `type: "once"`, check `fire_at` — recreate via CronCreate if still in the future, or delete from config.json if expired.
 6. Check today's memory file (`memory/YYYY-MM-DD.md`) for any in-progress work
 7. Check inbox for pending messages
 8. Notify user on Telegram that you're online
@@ -104,13 +104,17 @@ Always include `msg_id` as reply_to (auto-ACKs the original). Un-ACK'd messages 
 
 ## Crons
 
-Defined in `config.json` under `crons` array. Set up once per session via `/loop`.
+All crons — recurring schedules AND one-shot reminders — live in `config.json` under the `crons` array. This is the single source of truth that survives restarts.
 
-**Add:** Create `/loop {interval} {prompt}`, then add to `config.json`
-**Remove:** Cancel the `/loop`, remove from `config.json`
-**Format:** `{"name": "...", "interval": "5m", "prompt": "..."}`
+**Recurring:** `{"name": "...", "type": "recurring", "interval": "4h", "prompt": "..."}`
+**One-shot:** `{"name": "...", "type": "once", "fire_at": "2026-04-02T15:00:00Z", "prompt": "..."}`
 
-Crons expire after 3 days but are recreated from config on each restart.
+**Add recurring:** Write entry to config.json, then `/loop {interval} {prompt}`
+**Add one-shot:** Write entry to config.json, then CronCreate with `recurring: false`
+**Remove:** CronDelete, then remove entry from config.json
+**After one-shot fires:** Delete its entry from config.json
+
+See `.claude/skills/cron-management/SKILL.md` for full restore protocol on session start.
 
 ---
 

@@ -30,7 +30,7 @@ Then complete the following in order:
 2. Read org knowledge base: `../../knowledge.md` (shared facts all agents need)
 3. Discover available skills: `cortextos bus list-skills --format text`
 4. Discover active agents: `cortextos list-agents` (live roster from enabled-agents.json)
-5. Read `config.json` and set up crons via `/loop` — **run CronList first**, compare against config.json crons, recreate any missing. Do NOT assume crons survived a restart.
+5. Restore crons from `config.json` — run CronList first (no duplicates). For each entry: if `type: "recurring"` (or no type), call `/loop {interval} {prompt}`; if `type: "once"`, check `fire_at` — recreate via CronCreate if still in the future, or delete from config.json if expired. Do NOT assume crons survived a restart.
 6. Check today's memory file (`memory/$(date -u +%Y-%m-%d).md`) for any in-progress work
 7. If resuming a task, query the knowledge base: `cortextos bus kb-query "<task topic>" --org $CTX_ORG`
 8. Check inbox: `cortextos bus check-inbox`
@@ -316,17 +316,21 @@ Always include `msg_id` as reply_to — this auto-ACKs the original. Un-ACK'd me
 
 ## Crons
 
-Defined in `config.json` under `crons` array. Set up once per session via `/loop`.
+All crons — recurring schedules AND one-shot reminders — live in `config.json` under the `crons` array. Write to config.json FIRST, then create the live cron.
 
-**On every session start:** Run CronList first. Compare against config.json. Recreate any missing crons BEFORE notifying the user you are online. Never tell the user a cron is active without first confirming it exists in CronList.
+**Recurring:** `{"name": "heartbeat", "type": "recurring", "interval": "4h", "prompt": "..."}`
+**One-shot:** `{"name": "remind-james", "type": "once", "fire_at": "2026-04-02T15:00:00Z", "prompt": "..."}`
 
-**Add:** Create `/loop {interval} {prompt}`, then add to `config.json`
-**Remove:** Cancel the `/loop`, remove from `config.json`
-**Format:** `{"name": "...", "interval": "5m", "prompt": "..."}`
+**On every session start:** Run CronList first (no duplicates). Recreate recurring crons with `/loop`; recreate once crons with CronCreate only if `fire_at` is still in the future — delete expired entries from config.json. Never tell the user a cron is active without confirming it in CronList.
 
-Crons expire after 3 days. They are recreated from config.json on each session start — but only if you actively recreate them. This does not happen automatically.
+**Add recurring:** Write to config.json, then `/loop {interval} {prompt}`
+**Add one-shot:** Write to config.json with `fire_at`, then CronCreate
+**Remove:** CronDelete, then remove from config.json
+**After one-shot fires:** Delete its entry from config.json
 
-For troubleshooting and one-shot reminders, see `.claude/skills/cron-management/SKILL.md`.
+Crons expire after 7 days. They are recreated from config.json on each session start — but only if you actively recreate them. This does not happen automatically.
+
+For full restore protocol, see `.claude/skills/cron-management/SKILL.md`.
 
 ---
 

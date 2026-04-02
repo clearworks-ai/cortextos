@@ -94,8 +94,8 @@ cat >> "memory/$TODAY.md" << MEMEOF
 MEMEOF
 ```
 
-### 7. Set up crons
-Read config.json. Use `/loop` to create crons. Check CronList first - NO DUPLICATES.
+### 7. Restore crons
+Run CronList first (no duplicates). Read config.json crons array. For each entry: if `type: "recurring"` (or no type), call `/loop {interval} {prompt}`; if `type: "once"`, check `fire_at` — recreate via CronCreate if still in the future, delete from config.json if expired.
 
 ### 8. Log session start event
 ```bash

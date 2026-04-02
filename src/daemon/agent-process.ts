@@ -305,11 +305,13 @@ export class AgentProcess {
       onboardingAppend = ' IMPORTANT: This is your FIRST BOOT. Before doing anything else, read ONBOARDING.md and complete the onboarding protocol.';
     }
 
-    return `You are starting a new session. Read AGENTS.md and all bootstrap files listed there. Then read config.json and set up your crons using /loop for each entry in the crons array. After setting up crons, send a Telegram message to the user saying you are back online.${onboardingAppend}`;
+    const nowUtc = new Date().toISOString();
+    return `You are starting a new session. Current UTC time: ${nowUtc}. Read AGENTS.md and all bootstrap files listed there. Then restore your crons from config.json: for each entry with type "recurring" (or no type field), call /loop {interval} {prompt}; for each entry with type "once", compare fire_at against the current UTC time above — if fire_at is still in the future recreate the CronCreate, if fire_at is in the past delete that entry from config.json. Run CronList first to avoid duplicates. After setting up crons, send a Telegram message to the user saying you are back online.${onboardingAppend}`;
   }
 
   private buildContinuePrompt(): string {
-    return 'SESSION CONTINUATION: Your CLI process was restarted with --continue to reload configs. Your full conversation history is preserved. Re-read AGENTS.md and ALL bootstrap files listed there. Set up your crons from config.json using /loop. Check inbox. Resume normal operations.';
+    const nowUtc = new Date().toISOString();
+    return `SESSION CONTINUATION: Your CLI process was restarted with --continue to reload configs. Current UTC time: ${nowUtc}. Your full conversation history is preserved. Re-read AGENTS.md and ALL bootstrap files listed there. Restore your crons from config.json: recurring entries use /loop, once entries use CronCreate only if fire_at is still in the future (delete expired ones from config.json). Run CronList first — no duplicates. Check inbox. Resume normal operations.`;
   }
 
   private startSessionTimer(): void {

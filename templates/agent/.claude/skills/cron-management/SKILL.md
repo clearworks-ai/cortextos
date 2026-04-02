@@ -6,39 +6,76 @@ triggers: ["remind me", "every day", "every hour", "every week", "schedule", "re
 
 # Cron Management
 
-Your scheduled tasks are defined in `config.json` under the `crons` array. This skill explains how to manage them.
+`config.json` under the `crons` array is the single source of truth for ALL scheduled tasks — recurring AND one-shot reminders. Every cron you create must be written to config.json first so it survives restarts.
+
+## Two cron types
+
+**Recurring** — fires on a repeating interval forever.
+```json
+{ "name": "heartbeat", "type": "recurring", "interval": "4h", "prompt": "Read HEARTBEAT.md and follow its instructions." }
+```
+
+**Once** — fires at a specific datetime, then is deleted.
+```json
+{ "name": "remind-james-3pm", "type": "once", "fire_at": "2026-04-02T15:00:00Z", "prompt": "Remind James about the 3pm call." }
+```
+
+`type` defaults to `"recurring"` if omitted (backward compatible with existing config.json files).
+
+---
 
 ## On Session Start
 
-Check if your crons are active. If not, recreate them:
+Restore all crons from config.json:
 
-1. Read `config.json` to get your cron definitions
-2. For each entry in the `crons` array, create a loop: `/loop {interval} {prompt}`
-3. Verify all crons are running
+1. Run CronList — note which crons are already active (avoid duplicates)
+2. For each entry in `config.json` crons:
+   - **type: recurring** (or no type): call `/loop {interval} {prompt}` if not already active
+   - **type: once**: check if `fire_at` is in the future
+     - Yes: recreate with CronCreate (set `recurring: false`, compute cron expression from fire_at)
+     - No (already past): delete this entry from config.json — it expired while you were offline
 
-## Default Crons
+---
 
-No crons are defined by default. Users can add any recurring tasks they need to `config.json`.
+## Creating a Recurring Cron
 
-## Adding a New Cron
-
-1. Create the `/loop` for immediate use: `/loop {interval} {prompt}`
-2. **Persist it** - Add the cron to `config.json` so it survives restarts:
+1. Write to `config.json` first:
    ```json
-   {"name": "descriptive-name", "interval": "5m", "prompt": "What to do each cycle"}
+   { "name": "descriptive-name", "type": "recurring", "interval": "1h", "prompt": "What to do each cycle" }
    ```
+2. Create the live cron: `/loop 1h What to do each cycle`
 3. Confirm to the user that the cron is active and persisted
+
+---
+
+## Creating a One-Shot Reminder
+
+When a user asks for a one-time reminder (e.g. "remind me at 3pm"):
+
+1. Write to `config.json` first:
+   ```json
+   { "name": "remind-james-3pm", "type": "once", "fire_at": "2026-04-02T15:00:00Z", "prompt": "Remind James about the 3pm call." }
+   ```
+2. Create the live cron via CronCreate with `recurring: false` and the cron expression for that time
+3. After the reminder fires, delete the entry from config.json
+
+---
 
 ## Removing a Cron
 
-1. Cancel the active `/loop`
+1. Cancel the active cron via CronDelete
 2. Remove the entry from `config.json`
+
+---
 
 ## Cron Expiry
 
-Built-in `/loop` crons expire after 3 days. Since your session restarts via PM2, this isn't an issue — crons are recreated from `config.json` on each fresh start.
+Built-in crons expire after 7 days. Since your session restarts via the daemon, this is not an issue — crons are recreated from config.json on each fresh start. The 7-day window covers any normal restart cycle.
+
+---
 
 ## Troubleshooting
 
-- If a cron isn't firing, check if it was created this session
-- If crons are missing after a restart, re-read `config.json` and recreate them
+- Cron not firing after restart: check config.json — the entry may be missing or have an expired fire_at
+- Duplicate crons: always run CronList before recreating; if a cron is already active, skip it
+- One-shot that already fired: if fire_at is in the past and the entry is still in config.json, the reminder was likely missed during a restart — delete the entry, notify the user

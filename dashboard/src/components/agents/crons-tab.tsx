@@ -5,7 +5,9 @@ import { IconPlus, IconTrash, IconDeviceFloppy, IconClock } from '@tabler/icons-
 
 interface Cron {
   name: string;
-  interval: string;
+  type?: 'recurring' | 'once';
+  interval?: string;
+  fire_at?: string;
   prompt: string;
 }
 
@@ -30,7 +32,7 @@ export function CronsTab({ agentName }: CronsTabProps) {
       .catch(() => setLoading(false));
   }, [agentName]);
 
-  const updateCron = (index: number, field: keyof Cron, value: string) => {
+  const updateCron = (index: number, field: keyof Cron, value: string | undefined) => {
     setCrons(prev => {
       const updated = [...prev];
       updated[index] = { ...updated[index], [field]: value };
@@ -41,7 +43,7 @@ export function CronsTab({ agentName }: CronsTabProps) {
   };
 
   const addCron = () => {
-    setCrons(prev => [...prev, { name: '', interval: '1h', prompt: '' }]);
+    setCrons(prev => [...prev, { name: '', type: 'recurring', interval: '1h', prompt: '' }]);
     setDirty(true);
     setMessage(null);
   };
@@ -75,7 +77,13 @@ export function CronsTab({ agentName }: CronsTabProps) {
     }
   };
 
-  const intervalToHuman = (interval: string): string => {
+  const intervalToHuman = (cron: Cron): string => {
+    if ((cron.type ?? 'recurring') === 'once') {
+      if (!cron.fire_at) return 'One-time (no time set)';
+      const d = new Date(cron.fire_at);
+      return isNaN(d.getTime()) ? 'One-time (invalid time)' : `Once at ${d.toLocaleString()}`;
+    }
+    const interval = cron.interval ?? '';
     const match = interval.match(/^(\d+)([smhd])$/);
     if (!match) return interval;
     const [, num, unit] = match;
@@ -153,16 +161,30 @@ export function CronsTab({ agentName }: CronsTabProps) {
                     />
                   </div>
                   <div>
-                    <label className="text-xs text-muted-foreground">Interval</label>
-                    <input
-                      type="text"
-                      value={cron.interval}
-                      onChange={e => updateCron(i, 'interval', e.target.value)}
-                      placeholder="4h"
-                      className="mt-1 block w-full rounded-md border bg-background px-3 py-1.5 text-sm focus:border-primary focus:outline-none"
-                    />
+                    {(cron.type ?? 'recurring') === 'once' ? (
+                      <>
+                        <label className="text-xs text-muted-foreground">Fire At (UTC)</label>
+                        <input
+                          type="datetime-local"
+                          value={cron.fire_at ? cron.fire_at.slice(0, 16) : ''}
+                          onChange={e => updateCron(i, 'fire_at', e.target.value ? new Date(e.target.value).toISOString() : undefined)}
+                          className="mt-1 block w-full rounded-md border bg-background px-3 py-1.5 text-sm focus:border-primary focus:outline-none"
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <label className="text-xs text-muted-foreground">Interval</label>
+                        <input
+                          type="text"
+                          value={cron.interval ?? ''}
+                          onChange={e => updateCron(i, 'interval', e.target.value)}
+                          placeholder="4h"
+                          className="mt-1 block w-full rounded-md border bg-background px-3 py-1.5 text-sm focus:border-primary focus:outline-none"
+                        />
+                      </>
+                    )}
                     <span className="text-[10px] text-muted-foreground">
-                      {intervalToHuman(cron.interval)}
+                      {intervalToHuman(cron)}
                     </span>
                   </div>
                 </div>

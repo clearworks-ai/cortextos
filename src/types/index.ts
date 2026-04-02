@@ -135,8 +135,15 @@ export interface AgentConfig {
 }
 
 export interface CronEntry {
-  interval: string; // e.g., "10m", "1h"
+  name: string;
+  /** For recurring crons: how often to fire (e.g. "4h", "1d"). */
+  interval?: string;
+  /** For one-shot crons: ISO 8601 datetime when the cron should fire. */
+  fire_at?: string;
   prompt: string;
+  /** "recurring" (default) restores on every session start.
+   *  "once" restores only if fire_at is still in the future; deleted after firing. */
+  type?: 'recurring' | 'once';
 }
 
 export interface OrgContext {

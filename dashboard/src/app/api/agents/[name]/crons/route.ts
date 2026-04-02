@@ -8,7 +8,11 @@ export const dynamic = 'force-dynamic';
 
 interface Cron {
   name: string;
-  interval: string;
+  type?: 'recurring' | 'once';
+  /** Required for recurring crons (e.g. "4h", "1d"). */
+  interval?: string;
+  /** Required for once crons — ISO 8601 datetime. */
+  fire_at?: string;
   prompt: string;
 }
 
@@ -72,9 +76,9 @@ export async function PUT(
       return Response.json({ error: 'crons must be an array' }, { status: 400 });
     }
     for (const cron of crons) {
-      if (!cron.name || !cron.interval || !cron.prompt) {
+      if (!cron.name || !cron.prompt) {
         return Response.json(
-          { error: 'Each cron must have name, interval, and prompt' },
+          { error: 'Each cron must have name and prompt' },
           { status: 400 }
         );
       }
@@ -84,9 +88,24 @@ export async function PUT(
           { status: 400 }
         );
       }
-      if (!/^\d+[smhd]$/.test(cron.interval)) {
+      const cronType = cron.type ?? 'recurring';
+      if (cronType === 'recurring') {
+        if (!cron.interval || !/^\d+[smhd]$/.test(cron.interval)) {
+          return Response.json(
+            { error: `Recurring cron "${cron.name}" must have a valid interval (e.g. "4h")` },
+            { status: 400 }
+          );
+        }
+      } else if (cronType === 'once') {
+        if (!cron.fire_at || isNaN(Date.parse(cron.fire_at))) {
+          return Response.json(
+            { error: `Once cron "${cron.name}" must have a valid fire_at ISO timestamp` },
+            { status: 400 }
+          );
+        }
+      } else {
         return Response.json(
-          { error: `Invalid interval: ${cron.interval}` },
+          { error: `Invalid cron type "${cron.type}" for "${cron.name}"` },
           { status: 400 }
         );
       }

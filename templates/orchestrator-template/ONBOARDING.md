@@ -78,7 +78,7 @@ Wait for confirmation before continuing.
 
 > "One important thing: as orchestrator, I have authority to write goals for your other agents. Each morning I update each agent's goals.json based on our north star and your daily focus — they don't have a say in this, I set the direction. This keeps the whole team aligned.
 >
-> You can always override by messaging me or editing their goals directly. Is this workflow okay with you?"
+> You can always override by messaging me, messaging your agents directly, or editing their goals.json directly. Is this workflow okay with you?"
 
 Write user's answer to SOUL.md under Autonomy Rules.
 

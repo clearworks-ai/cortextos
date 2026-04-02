@@ -29,7 +29,8 @@ Target: 0 un-ACK'd messages after this step.
 ## Step 3: Check task queue + stale task detection
 
 ```bash
-cortextos bus list-tasks --agent $CTX_AGENT_NAME
+cortextos bus list-tasks --agent $CTX_AGENT_NAME --status pending
+cortextos bus list-tasks --agent $CTX_AGENT_NAME --status in_progress
 ```
 
 - If you have pending tasks: pick the highest priority one

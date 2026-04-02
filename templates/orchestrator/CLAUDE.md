@@ -22,14 +22,14 @@ YOU MUST read these files at the start of EVERY session. NO EXCEPTIONS:
 2. SOUL.md - how you behave
 3. GUARDRAILS.md - patterns to watch for and correct
 4. GOALS.md - what you're working toward
-4. HEARTBEAT.md - your recurring checklist
 5. MEMORY.md - long-term learnings
 6. memory/YYYY-MM-DD.md - today's session state (check for WORKING ON: entries)
-7. TOOLS.md - available bus scripts
-8. SYSTEM.md - cross-agent context
-9. config.json - cron schedule
-10. USER.md - who your user is, their preferences and working style
-11. ../../knowledge.md - org knowledge base (shared facts all agents need)
+7. SYSTEM.md - cross-agent context
+8. config.json - cron schedule
+9. USER.md - who your user is, their preferences and working style
+10. ../../knowledge.md - org knowledge base (shared facts all agents need)
+
+Bus scripts reference: see `.claude/skills/bus-reference/SKILL.md`. Heartbeat protocol: see HEARTBEAT.md (loaded by cron).
 
 DO NOT start any work until all files are read. This is not optional.
 
@@ -71,7 +71,8 @@ Process ALL messages. ACK every one.
 
 ### 5. Check task queue
 ```bash
-cortextos bus list-tasks --agent $CTX_AGENT_NAME
+cortextos bus list-tasks --agent $CTX_AGENT_NAME --status pending
+cortextos bus list-tasks --agent $CTX_AGENT_NAME --status in_progress
 ```
 Resume any in_progress tasks. Check for WORKING ON: entries in today's memory.
 
@@ -306,38 +307,4 @@ TARGET: >= 3 coordination events per active session.
 
 ## Knowledge Base (RAG)
 
-The knowledge base lets you search indexed documents using natural language - your memory, research, notes, and org knowledge.
-
-### Query (before starting research)
-```bash
-cortextos bus kb-query "your question" --org $CTX_ORG --agent $CTX_AGENT_NAME
-```
-
-### Ingest (after completing research or updating memory)
-```bash
-# Ingest to shared org collection (visible to all agents)
-cortextos bus kb-ingest /path/to/docs --org $CTX_ORG --scope shared
-
-# Ingest to your private collection (only visible to you)
-cortextos bus kb-ingest /path/to/docs --org $CTX_ORG --agent $CTX_AGENT_NAME --scope private
-```
-
-### When to query
-- Before starting a research task - check if knowledge already exists
-- When referencing named entities (people, projects, tools) - check for existing context
-- When answering factual questions about the org - query before searching externally
-
-### When to ingest
-- After completing substantive research (always ingest your findings)
-- After writing or updating MEMORY.md (knowledge persists across sessions)
-- After learning important facts about the org, users, or systems
-
-### List collections
-```bash
-cortextos bus kb-collections --org $CTX_ORG
-```
-
-### First-time setup (if knowledge base not initialized)
-```bash
-cortextos bus kb-setup --org $CTX_ORG
-```
+Query and ingest org documents using natural language. See `.claude/skills/knowledge-base/SKILL.md` for full reference.

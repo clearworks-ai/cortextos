@@ -269,8 +269,10 @@ cortextos bus list-skills [--format text|json]
 Aggregate all agent heartbeats into a single JSON object keyed by agent name.
 
 ```bash
-cortextos bus read-all-heartbeats
+cortextos bus read-all-heartbeats [--brief]
 ```
+
+- **--brief**: Omit `current_task` and `loop_interval` fields (~60% smaller output). Use during automated heartbeat checks.
 
 ---
 

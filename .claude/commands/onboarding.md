@@ -327,7 +327,7 @@ jq --arg model "claude-opus-4-6" '.model = $model' "${ORCH_CONFIG}" > "${TMPDIR:
 ### 6d. Enable Orchestrator
 
 ```bash
-node dist/cli.js enable "${ORCH_NAME}" --instance "${INSTANCE_ID}"
+node dist/cli.js enable "${ORCH_NAME}" --org "${ORG_NAME}"
 ```
 
 Verify:

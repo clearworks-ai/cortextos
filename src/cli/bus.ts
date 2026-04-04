@@ -27,8 +27,11 @@ busCommand
   .argument('<to>', 'Target agent')
   .argument('<priority>', 'Message priority (urgent, high, normal, low)')
   .argument('<text>', 'Message text')
+  .argument('[reply-to]', 'Reply to message ID (optional positional form)')
   .option('--reply-to <id>', 'Reply to message ID')
-  .action((to: string, priority: string, text: string, opts: { replyTo?: string }) => {
+  .action((to: string, priority: string, text: string, replyToArg: string | undefined, opts: { replyTo?: string }) => {
+    // Accept reply-to as either positional arg or --reply-to flag (P2 fix #9)
+    const effectiveReplyTo = opts.replyTo ?? replyToArg;
     const validPriorities: Priority[] = ['urgent', 'high', 'normal', 'low'];
     if (!validPriorities.includes(priority as Priority)) {
       console.error(`Invalid priority '${priority}'. Must be one of: ${validPriorities.join(', ')}`);
@@ -66,7 +69,7 @@ busCommand
       console.error(`Warning: agent '${to}' not found in project. Message will be queued but may never be read.`);
     }
 
-    const msgId = sendMessage(paths, env.agentName, to, priority as Priority, text, opts.replyTo);
+    const msgId = sendMessage(paths, env.agentName, to, priority as Priority, text, effectiveReplyTo);
     console.log(msgId);
   });
 
@@ -129,11 +132,14 @@ busCommand
 busCommand
   .command('complete-task')
   .argument('<id>', 'Task ID')
+  .argument('[result]', 'Completion result (optional positional form)')
   .option('--result <text>', 'Completion result')
-  .action((id: string, opts: { result?: string }) => {
+  .action((id: string, resultArg: string | undefined, opts: { result?: string }) => {
+    // Accept result as either positional arg or --result flag (P1 fix #8)
+    const effectiveResult = opts.result ?? resultArg;
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
-    completeTask(paths, id, opts.result);
+    completeTask(paths, id, effectiveResult);
     console.log(`Completed ${id}`);
   });
 

@@ -11,7 +11,9 @@ import { createExperiment, runExperiment, evaluateExperiment, listExperiments, g
 import { browseCatalog, installCommunityItem, prepareSubmission, submitCommunityItem } from '../bus/catalog.js';
 import { collectMetrics, parseUsageOutput, storeUsageData, checkUpstream, collectTelegramCommands, registerTelegramCommands } from '../bus/metrics.js';
 import { createApproval, updateApproval } from '../bus/approval.js';
+import { createReminder, listReminders, ackReminder, pruneReminders } from '../bus/reminders.js';
 import { queryKnowledgeBase, ingestKnowledgeBase, ensureKBDirs } from '../bus/knowledge-base.js';
+import { checkUsageApi, refreshOAuthToken, rotateOAuth, loadAccounts, ALERT_5H, ALERT_7D } from '../bus/oauth.js';
 import { resolvePaths } from '../utils/paths.js';
 import { resolveEnv } from '../utils/env.js';
 import { IPCClient } from '../daemon/ipc-server.js';
@@ -27,8 +29,11 @@ busCommand
   .argument('<to>', 'Target agent')
   .argument('<priority>', 'Message priority (urgent, high, normal, low)')
   .argument('<text>', 'Message text')
+  .argument('[reply-to]', 'Reply to message ID (optional positional form)')
   .option('--reply-to <id>', 'Reply to message ID')
-  .action((to: string, priority: string, text: string, opts: { replyTo?: string }) => {
+  .action((to: string, priority: string, text: string, replyToArg: string | undefined, opts: { replyTo?: string }) => {
+    // Accept reply-to as either positional arg or --reply-to flag (P2 fix #9)
+    const effectiveReplyTo = opts.replyTo ?? replyToArg;
     const validPriorities: Priority[] = ['urgent', 'high', 'normal', 'low'];
     if (!validPriorities.includes(priority as Priority)) {
       console.error(`Invalid priority '${priority}'. Must be one of: ${validPriorities.join(', ')}`);
@@ -66,7 +71,7 @@ busCommand
       console.error(`Warning: agent '${to}' not found in project. Message will be queued but may never be read.`);
     }
 
-    const msgId = sendMessage(paths, env.agentName, to, priority as Priority, text, opts.replyTo);
+    const msgId = sendMessage(paths, env.agentName, to, priority as Priority, text, effectiveReplyTo);
     console.log(msgId);
   });
 
@@ -129,11 +134,14 @@ busCommand
 busCommand
   .command('complete-task')
   .argument('<id>', 'Task ID')
+  .argument('[result]', 'Completion result (optional positional form)')
   .option('--result <text>', 'Completion result')
-  .action((id: string, opts: { result?: string }) => {
+  .action((id: string, resultArg: string | undefined, opts: { result?: string }) => {
+    // Accept result as either positional arg or --result flag (P1 fix #8)
+    const effectiveResult = opts.result ?? resultArg;
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
-    completeTask(paths, id, opts.result);
+    completeTask(paths, id, effectiveResult);
     console.log(`Completed ${id}`);
   });
 
@@ -437,7 +445,9 @@ busCommand
   .option('--json', 'Output as JSON')
   .action((opts: { agent?: string; status?: string; metric?: string; json?: boolean }) => {
     const env = resolveEnv();
-    const agentDir = env.agentDir || process.cwd();
+    const agentDir = opts.agent && env.frameworkRoot
+      ? join(env.frameworkRoot, 'orgs', env.org, 'agents', opts.agent)
+      : (env.agentDir || process.cwd());
     const experiments = listExperiments(agentDir, {
       agent: opts.agent,
       status: opts.status,
@@ -453,8 +463,10 @@ busCommand
   .option('--format <fmt>', 'Output format: json or markdown', 'json')
   .action((opts: { agent?: string; format?: string }) => {
     const env = resolveEnv();
-    const agentDir = env.agentDir || process.cwd();
     const agentName = opts.agent || env.agentName;
+    const agentDir = opts.agent && env.frameworkRoot
+      ? join(env.frameworkRoot, 'orgs', env.org, 'agents', opts.agent)
+      : (env.agentDir || process.cwd());
     const context = gatherContext(agentDir, agentName, { format: opts.format as 'json' | 'markdown' });
     console.log(JSON.stringify(context, null, 2));
   });
@@ -1298,6 +1310,75 @@ busCommand
     }
   });
 
+// ---------------------------------------------------------------------------
+// Reminder commands — persistent cron state that survives hard-restarts (#69)
+// ---------------------------------------------------------------------------
+
+busCommand
+  .command('create-reminder')
+  .argument('<fire-at>', 'When to fire, ISO 8601 UTC (e.g. 2026-04-05T08:00:00Z)')
+  .argument('<prompt>', 'Text to inject into boot prompt when overdue')
+  .description('Create a persistent reminder that survives hard-restarts')
+  .action((fireAt: string, prompt: string) => {
+    const env = resolveEnv();
+    const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    const reminder = createReminder(paths, fireAt, prompt);
+    console.log(reminder.id);
+  });
+
+busCommand
+  .command('list-reminders')
+  .option('--all', 'Include acked reminders', false)
+  .option('--format <fmt>', 'Output format: json or text', 'text')
+  .description('List pending (or all) reminders')
+  .action((opts: { all?: boolean; format?: string }) => {
+    const env = resolveEnv();
+    const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    const reminders = listReminders(paths, { all: opts.all });
+
+    if (opts.format === 'json') {
+      console.log(JSON.stringify(reminders, null, 2));
+      return;
+    }
+
+    if (reminders.length === 0) {
+      console.log('No pending reminders');
+      return;
+    }
+
+    const now = Date.now();
+    for (const r of reminders) {
+      const overdue = Date.parse(r.fire_at) <= now;
+      const overdueTag = overdue ? ' [OVERDUE]' : '';
+      console.log(`[${r.id}]${overdueTag}`);
+      console.log(`  fire_at: ${r.fire_at}  status: ${r.status}`);
+      console.log(`  prompt:  ${r.prompt}`);
+      console.log('');
+    }
+  });
+
+busCommand
+  .command('ack-reminder')
+  .argument('<id>', 'Reminder ID to acknowledge')
+  .description('Mark a reminder as handled')
+  .action((id: string) => {
+    const env = resolveEnv();
+    const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    ackReminder(paths, id);
+    console.log(`ACK'd reminder ${id}`);
+  });
+
+busCommand
+  .command('prune-reminders')
+  .option('--days <n>', 'Retain acked reminders for N days', '7')
+  .description('Delete acked reminders older than N days')
+  .action((opts: { days?: string }) => {
+    const env = resolveEnv();
+    const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    const pruned = pruneReminders(paths, parseInt(opts.days ?? '7', 10));
+    console.log(`Pruned ${pruned} acked reminder(s)`);
+  });
+
 busCommand
   .command('hook-ask-telegram')
   .description('PreToolUse hook: forward AskUserQuestion to Telegram (cross-platform)')
@@ -1312,3 +1393,111 @@ busCommand
   .command('hook-planmode-telegram')
   .description('ExitPlanMode hook: send plan for review to Telegram (cross-platform)')
   .action(() => runHook('hook-planmode-telegram'));
+
+busCommand
+  .command('hook-compact-telegram')
+  .description('PreCompact hook: notify user via Telegram when context compaction starts (#18)')
+  .action(() => runHook('hook-compact-telegram'));
+
+// --- OAuth token rotation commands ---
+
+busCommand
+  .command('check-usage-api')
+  .description('Fetch Claude OAuth utilization from Anthropic usage API (3-min TTL cache)')
+  .option('--account <name>', 'Check specific account (default: active account)')
+  .option('--force', 'Bypass cache and fetch fresh data')
+  .option('--json', 'Output as JSON')
+  .action(async (opts: { account?: string; force?: boolean; json?: boolean }) => {
+    const env = resolveEnv();
+    try {
+      const result = await checkUsageApi(env.ctxRoot, { force: opts.force, account: opts.account });
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        const cached = result.cached ? ' (cached)' : '';
+        const warn5h = result.five_hour_utilization >= ALERT_5H ? ' ⚠️' : '';
+        const warn7d = result.seven_day_utilization >= ALERT_7D ? ' ⚠️' : '';
+        console.log(`Account: ${result.account}${cached}`);
+        console.log(`5h utilization:  ${pct(result.five_hour_utilization)}${warn5h}`);
+        console.log(`7d utilization:  ${pct(result.seven_day_utilization)}${warn7d}`);
+        console.log(`Fetched at: ${result.fetched_at}`);
+      }
+    } catch (err) {
+      console.error(`Error: ${err}`);
+      process.exit(1);
+    }
+  });
+
+busCommand
+  .command('refresh-oauth-token')
+  .description('Refresh OAuth token for an account using its refresh_token (one-time use — writes atomically)')
+  .option('--account <name>', 'Account to refresh (default: active account)')
+  .action(async (opts: { account?: string }) => {
+    const env = resolveEnv();
+    try {
+      const result = await refreshOAuthToken(env.ctxRoot, opts.account);
+      const expiresIn = Math.round((result.expires_at - Date.now()) / 1000 / 60);
+      console.log(`Refreshed account: ${result.account}`);
+      console.log(`New token expires in: ${expiresIn} minutes`);
+    } catch (err) {
+      console.error(`Error: ${err}`);
+      process.exit(1);
+    }
+  });
+
+busCommand
+  .command('rotate-oauth')
+  .description('Rotate to the next OAuth account if utilization thresholds are met')
+  .option('--force', 'Force rotation regardless of utilization')
+  .option('--agent <name>', 'Only update this agent\'s .env (default: all agents in org)')
+  .option('--reason <text>', 'Reason for rotation (logged)')
+  .option('--json', 'Output as JSON')
+  .action(async (opts: { force?: boolean; agent?: string; reason?: string; json?: boolean }) => {
+    const env = resolveEnv();
+    if (!env.frameworkRoot) {
+      console.error('CTX_FRAMEWORK_ROOT is required for rotate-oauth');
+      process.exit(1);
+    }
+    try {
+      const result = await rotateOAuth(env.ctxRoot, env.frameworkRoot, env.org, {
+        force: opts.force,
+        agent: opts.agent,
+        reason: opts.reason,
+      });
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else if (result.rotated) {
+        console.log(`Rotated: ${result.from} → ${result.to}`);
+        console.log(`Reason: ${result.reason}`);
+      } else {
+        console.log(`No rotation needed: ${result.reason}`);
+      }
+    } catch (err) {
+      console.error(`Error: ${err}`);
+      process.exit(1);
+    }
+  });
+
+busCommand
+  .command('list-oauth-accounts')
+  .description('List all OAuth accounts and their utilization')
+  .action((opts: Record<string, unknown>) => {
+    const env = resolveEnv();
+    const store = loadAccounts(env.ctxRoot);
+    if (!store) {
+      console.log('No accounts.json found at state/oauth/accounts.json');
+      return;
+    }
+    for (const [name, acct] of Object.entries(store.accounts)) {
+      const active = name === store.active ? ' (active)' : '';
+      const expiry = new Date(acct.expires_at).toISOString();
+      const warn5h = acct.five_hour_utilization >= ALERT_5H ? ' ⚠️' : '';
+      const warn7d = acct.seven_day_utilization >= ALERT_7D ? ' ⚠️' : '';
+      console.log(`${name}${active}`);
+      console.log(`  5h: ${pct(acct.five_hour_utilization)}${warn5h}  7d: ${pct(acct.seven_day_utilization)}${warn7d}  expires: ${expiry}`);
+    }
+  });
+
+function pct(v: number): string {
+  return `${Math.round(v * 100)}%`;
+}

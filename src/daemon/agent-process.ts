@@ -6,6 +6,8 @@ import { AgentPTY } from '../pty/agent-pty.js';
 import { MessageDedup, injectMessage } from '../pty/inject.js';
 import { ensureDir } from '../utils/atomic.js';
 import { writeCortextosEnv } from '../utils/env.js';
+import { getOverdueReminders } from '../bus/reminders.js';
+import { resolvePaths } from '../utils/paths.js';
 
 type LogFn = (msg: string) => void;
 
@@ -330,12 +332,33 @@ export class AgentProcess {
     }
 
     const nowUtc = new Date().toISOString();
-    return `You are starting a new session. Current UTC time: ${nowUtc}. Read AGENTS.md and all bootstrap files listed there. Then restore your crons from config.json: for each entry with type "recurring" (or no type field), call /loop {interval} {prompt}; for each entry with type "once", compare fire_at against the current UTC time above — if fire_at is still in the future recreate the CronCreate, if fire_at is in the past delete that entry from config.json. Run CronList first to avoid duplicates. After setting up crons, send a Telegram message to the user saying you are back online.${onboardingAppend}`;
+    const reminderBlock = this.buildReminderBlock();
+    return `You are starting a new session. Current UTC time: ${nowUtc}. Read AGENTS.md and all bootstrap files listed there. Then restore your crons from config.json: for each entry with type "recurring" (or no type field), call /loop {interval} {prompt}; for each entry with type "once", compare fire_at against the current UTC time above — if fire_at is still in the future recreate the CronCreate, if fire_at is in the past delete that entry from config.json. Run CronList first to avoid duplicates.${reminderBlock} After setting up crons, send a Telegram message to the user saying you are back online.${onboardingAppend}`;
   }
 
   private buildContinuePrompt(): string {
     const nowUtc = new Date().toISOString();
-    return `SESSION CONTINUATION: Your CLI process was restarted with --continue to reload configs. Current UTC time: ${nowUtc}. Your full conversation history is preserved. Re-read AGENTS.md and ALL bootstrap files listed there. Restore your crons from config.json: recurring entries use /loop, once entries use CronCreate only if fire_at is still in the future (delete expired ones from config.json). Run CronList first — no duplicates. Check inbox. Resume normal operations.`;
+    const reminderBlock = this.buildReminderBlock();
+    return `SESSION CONTINUATION: Your CLI process was restarted with --continue to reload configs. Current UTC time: ${nowUtc}. Your full conversation history is preserved. Re-read AGENTS.md and ALL bootstrap files listed there. Restore your crons from config.json: recurring entries use /loop, once entries use CronCreate only if fire_at is still in the future (delete expired ones from config.json). Run CronList first — no duplicates.${reminderBlock} Check inbox. Resume normal operations.`;
+  }
+
+  /**
+   * Build a reminder block for the boot prompt.
+   * If any pending reminders are overdue, include them so the agent handles them
+   * even after a hard-restart that cleared in-memory cron state (#69).
+   */
+  private buildReminderBlock(): string {
+    try {
+      const paths = resolvePaths(this.name, this.env.instanceId, this.env.org);
+      const overdue = getOverdueReminders(paths);
+      if (overdue.length === 0) return '';
+      const items = overdue.map(r =>
+        `  - [${r.id}] (due ${r.fire_at}): ${r.prompt}`,
+      ).join('\n');
+      return ` You also have ${overdue.length} overdue persistent reminder(s) from before this restart — handle each one, then run: cortextos bus ack-reminder <id>\n${items}`;
+    } catch {
+      return '';
+    }
   }
 
   private startSessionTimer(): void {

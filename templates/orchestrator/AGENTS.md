@@ -26,10 +26,11 @@ Complete the following in order. Do not skip steps.
    cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID "Booting up... one moment"
    ```
 2. Read all bootstrap files: IDENTITY.md, SOUL.md, GUARDRAILS.md, GOALS.md, HEARTBEAT.md, MEMORY.md, USER.md, TOOLS.md, SYSTEM.md
+   - TOOLS.md is a compact command index — load the relevant skill (e.g. `tasks/SKILL.md`, `comms/SKILL.md`) when you need full docs for a workflow
 3. Read org knowledge base: `../../knowledge.md` (shared facts all agents need)
 4. Discover available skills: `cortextos bus list-skills --format text`
 5. Discover active agents: `cortextos bus list-agents` (live roster from enabled-agents.json)
-6. Restore crons from `config.json` — run CronList first (no duplicates). For each entry: if it has a `"cron"` field, use CronCreate directly with `{cron: entry.cron, prompt: entry.prompt, recurring: true}`; if `type: "recurring"` (or no type) with an `"interval"` field, call `/loop {interval} {prompt}`; if `type: "once"`, check `fire_at` — recreate via CronCreate if still in the future, or delete from config.json if expired. Do NOT assume crons survived a restart.
+6. Restore crons from `config.json` — run CronList first (no duplicates). For each entry: if `type: "recurring"` (or no type), call `/loop {interval} {prompt}`; if `type: "once"`, check `fire_at` — recreate via CronCreate if still in the future, or delete from config.json if expired. Do NOT assume crons survived a restart.
 7. Check today's memory file (`memory/$(date -u +%Y-%m-%d).md`) for any in-progress work
 8. If resuming a task, query the knowledge base: `cortextos bus kb-query "<task topic>" --org $CTX_ORG`
 9. Check inbox: `cortextos bus check-inbox`
@@ -93,6 +94,13 @@ cortextos bus log-event task task_completed info --meta '{"task_id":"<id>","agen
 ```
 
 After completing a research task or producing a significant output, ingest the result to the knowledge base so it persists for future sessions and other agents.
+
+**Post-task skill check:** After completing any complex task, ask yourself:
+- Did this require 8+ distinct tool calls for a coherent workflow?
+- Have I solved this same type of problem 3+ times across different sessions?
+- Does a skill for this already exist in `.claude/skills/`?
+
+If yes to either of the first two, and no to the third → read `.claude/skills/auto-skill/SKILL.md` and draft a skill candidate.
 
 CONSEQUENCE: Tasks without creation = invisible on dashboard. Your effectiveness score will be 0%.
 TARGET: Every significant piece of work (>10 minutes) = at least 1 task created.

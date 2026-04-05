@@ -1,8 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "Edit(.claude/**)",
-      "Write(.claude/**)"
+      "Bash",
+      "Read",
+      "Edit",
+      "Write",
+      "WebFetch",
+      "WebSearch"
     ]
   },
   "hooks": {
@@ -45,6 +49,17 @@
           {
             "type": "command",
             "command": "cortextos crash-alert",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cortextos bus hook-compact-telegram",
             "timeout": 10
           }
         ]

@@ -12,8 +12,10 @@ describe('Agent Discovery', () => {
   beforeEach(() => {
     testDir = mkdtempSync(join(tmpdir(), 'cortextos-agents-test-'));
     ctxRoot = testDir;
-    // Ensure no env leakage from real system
-    delete process.env.CTX_FRAMEWORK_ROOT;
+    // Point CTX_FRAMEWORK_ROOT at an isolated subdir (no orgs/ inside) so that
+    // listAgents() sees a configured but empty framework root and does NOT fall
+    // back to process.cwd() — which is the repo root and has a real orgs/ dir.
+    process.env.CTX_FRAMEWORK_ROOT = join(testDir, 'framework');
     delete process.env.CTX_PROJECT_ROOT;
   });
 

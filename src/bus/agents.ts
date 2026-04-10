@@ -43,8 +43,11 @@ export function listAgents(ctxRoot: string, org?: string): AgentInfo[] {
   if (cliProjectRoot && existsSync(join(cliProjectRoot, 'orgs'))) {
     scanRoots.push(cliProjectRoot);
   }
-  // Fallback: cwd, but only if no framework root is set
-  if (scanRoots.length === 0) {
+  // Fallback: cwd, but ONLY when CTX_FRAMEWORK_ROOT is completely unset.
+  // If CTX_FRAMEWORK_ROOT is set (even to a path without orgs/), respect it and
+  // do not scan cwd — the caller explicitly configured a root that has no agents.
+  // This prevents test contamination when cwd happens to be the framework repo.
+  if (scanRoots.length === 0 && !cliProjectRoot) {
     const cwd = process.cwd();
     if (existsSync(join(cwd, 'orgs'))) {
       scanRoots.push(cwd);

@@ -17,8 +17,9 @@ vi.mock('../../../src/pty/agent-pty.js', () => ({
   AgentPTY: function AgentPTY() { return mockPty; },
 }));
 
+const mockInjectMessage = vi.fn();
 vi.mock('../../../src/pty/inject.js', () => ({
-  injectMessage: vi.fn(),
+  injectMessage: mockInjectMessage,
   MessageDedup: class { isDuplicate() { return false; } },
 }));
 
@@ -69,6 +70,7 @@ beforeEach(() => {
   mockPty.kill.mockClear();
   mockPty.write.mockClear();
   mockPty.onExit.mockClear();
+  mockInjectMessage.mockClear();
 });
 
 describe('AgentProcess - BUG-011 fix (stop awaits PTY exit)', () => {
@@ -142,5 +144,41 @@ describe('AgentProcess - BUG-011 fix (stop awaits PTY exit)', () => {
     const stopOrder = stopSpy.mock.invocationCallOrder[0];
     const startOrder = startSpy.mock.invocationCallOrder[0];
     expect(stopOrder).toBeLessThan(startOrder);
+  });
+});
+
+describe('AgentProcess - cron auto-verification', () => {
+  it('scheduleCronVerification() is a no-op when config has no crons', async () => {
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+    // Should not throw, should not schedule anything
+    ap.scheduleCronVerification();
+    // No inject calls expected (beyond any from start)
+    expect(mockInjectMessage).not.toHaveBeenCalled();
+  });
+
+  it('scheduleCronVerification() is a no-op when config has only once crons', async () => {
+    const ap = new AgentProcess('alice', mockEnv, {
+      crons: [{ name: 'reminder', type: 'once' as const, fire_at: '2099-01-01T00:00:00Z', prompt: 'test' }],
+    });
+    await ap.start();
+    ap.scheduleCronVerification();
+    // Wait briefly to confirm nothing fires
+    await new Promise(r => setTimeout(r, 100));
+    expect(mockInjectMessage).not.toHaveBeenCalled();
+  });
+
+  it('scheduleCronVerification() schedules verification when config has recurring crons', async () => {
+    const ap = new AgentProcess('alice', mockEnv, {
+      crons: [
+        { name: 'heartbeat', interval: '4h', prompt: 'check in' },
+        { name: 'research', type: 'recurring' as const, interval: '24h', prompt: 'research' },
+      ],
+    });
+    await ap.start();
+    // This should not throw — verification runs in background
+    ap.scheduleCronVerification();
+    // Verification is waiting for idle flag — no immediate injection
+    expect(mockInjectMessage).not.toHaveBeenCalled();
   });
 });

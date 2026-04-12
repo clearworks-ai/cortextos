@@ -9,17 +9,17 @@ module.exports = {
     {
       name: 'cortextos-daemon',
       script: "/Users/joshweiss/cortextos/dist/daemon.js",
-      args: '--instance ' + (process.env.CTX_INSTANCE_ID || "cortextos1"),
+      args: '--instance ' + (process.env.CTX_INSTANCE_ID || "default"),
       cwd: "/Users/joshweiss/cortextos",
       env: {
-        CTX_INSTANCE_ID: process.env.CTX_INSTANCE_ID || "cortextos1",
-        CTX_ROOT: process.env.CTX_ROOT || "/Users/joshweiss/.cortextos/cortextos1",
+        CTX_INSTANCE_ID: process.env.CTX_INSTANCE_ID || "default",
+        CTX_ROOT: process.env.CTX_ROOT || "/Users/joshweiss/.cortextos/default",
         CTX_FRAMEWORK_ROOT: "/Users/joshweiss/cortextos",
         CTX_PROJECT_ROOT: "/Users/joshweiss/cortextos",
         CTX_ORG: process.env.CTX_ORG || "clearworksai",
       },
       max_restarts: 50,
-      restart_delay: 5000,
+      restart_delay: 15000,
       autorestart: true,
     },
     {
@@ -33,7 +33,7 @@ module.exports = {
       // Dashboard reads its real config from dashboard/.env.local — populated
       // by /onboarding Phase 7. PM2 just supervises the npm process.
       max_restarts: 50,
-      restart_delay: 5000,
+      restart_delay: 15000,
       autorestart: true,
     },
   ],

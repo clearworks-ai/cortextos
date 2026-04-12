@@ -81,9 +81,16 @@ class Daemon {
       process.exit(0);
     };
 
-    // Wrap in a synchronous handler that catches unhandled promise rejections
-    // so a shutdown error never leaves the process hanging.
+    // BUG-003 fix: re-entrancy guard. A second SIGTERM arriving while
+    // shutdown() is in flight would start a parallel stopAll(), causing
+    // unpredictable signal cascades across child PTY processes.
+    let shuttingDown = false;
     const handleSignal = () => {
+      if (shuttingDown) {
+        console.log('[daemon] Shutdown already in progress, ignoring signal');
+        return;
+      }
+      shuttingDown = true;
       shutdown().catch((err) => {
         console.error('[daemon] Fatal shutdown error:', err);
         process.exit(1);

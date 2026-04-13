@@ -222,10 +222,17 @@ export class AgentProcess {
       } catch {
         // Ignore write errors during shutdown
       }
-      try {
-        pty.kill();
-      } catch {
-        // PTY may have already exited — ignore
+      // BUG-032 follow-up: only kill the PTY if the process is still alive.
+      // After /exit + 5s wait, the child has usually exited cleanly. Calling
+      // pty.kill() on an already-exited PTY tears down the file descriptor,
+      // which can send SIGHUP (exit code 129) to a process that was in the
+      // middle of flushing. Polling first eliminates the remaining SIGHUP risk.
+      if (pty.isAlive()) {
+        try {
+          pty.kill();
+        } catch {
+          // PTY may have exited between the check and the kill — ignore
+        }
       }
 
       // BUG-011 fix: AWAIT the exit handler before resolving stop().
@@ -487,11 +494,42 @@ export class AgentProcess {
   }
 
   private startSessionTimer(): void {
-    const maxSession = (this.config.max_session_seconds || 255600) * 1000;
-    this.sessionTimer = setTimeout(() => {
-      this.log(`Session timer fired after ${maxSession / 1000}s`);
-      this.sessionRefresh().catch(err => this.log(`Session refresh failed: ${err}`));
-    }, maxSession);
+    const DEFAULT_MAX_SESSION_S = 255600;
+    const startedAt = Date.now();
+    const initialMs = (this.config.max_session_seconds || DEFAULT_MAX_SESSION_S) * 1000;
+
+    // BUG-048 fix: re-read max_session_seconds from config.json on each timer
+    // fire so that config changes after start() take effect. Without this, a
+    // briefly-low max_session_seconds baked at start time causes a fleet-wide
+    // simultaneous restart when all agents hit the same stale deadline.
+    const scheduleCheck = (delayMs: number): void => {
+      this.sessionTimer = setTimeout(() => {
+        // Re-read current config from disk
+        let currentMaxMs = initialMs;
+        try {
+          const configPath = join(this.env.agentDir, 'config.json');
+          if (existsSync(configPath)) {
+            const cfg = JSON.parse(readFileSync(configPath, 'utf-8'));
+            currentMaxMs = (cfg.max_session_seconds || DEFAULT_MAX_SESSION_S) * 1000;
+          }
+        } catch { /* use initial value on read error */ }
+
+        const elapsedMs = Date.now() - startedAt;
+        const remainingMs = currentMaxMs - elapsedMs;
+
+        if (remainingMs > 5000) {
+          // Config was updated to a longer duration — reschedule for the remaining time.
+          this.log(`Session timer: config updated to ${currentMaxMs / 1000}s, rescheduling (${Math.round(remainingMs / 1000)}s remaining)`);
+          scheduleCheck(remainingMs);
+          return;
+        }
+
+        this.log(`Session timer fired after ${Math.round(elapsedMs / 1000)}s (limit: ${currentMaxMs / 1000}s)`);
+        this.sessionRefresh().catch(err => this.log(`Session refresh failed: ${err}`));
+      }, delayMs);
+    };
+
+    scheduleCheck(initialMs);
   }
 
   private clearSessionTimer(): void {

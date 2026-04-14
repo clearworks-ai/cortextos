@@ -1,4 +1,5 @@
 import { appendFileSync } from 'fs';
+import { redactSecrets } from './redact.js';
 
 // Dynamic import for strip-ansi (ESM module)
 let stripAnsi: (text: string) => string;
@@ -27,9 +28,18 @@ export class OutputBuffer {
   /**
    * Push new output data into the buffer.
    * Also streams to log file if configured.
+   *
+   * Secret redaction runs once at the top via `redactSecrets` and the
+   * scrubbed string is used for BOTH the in-memory ring buffer AND the
+   * disk log. Without this, any JWT or session cookie an agent's shell
+   * happens to print (e.g. curl -v against an authenticated endpoint)
+   * would end up persisted to stdout.log verbatim. See src/pty/redact.ts
+   * for the rationale + the known chunk-boundary limitation.
    */
   push(data: string): void {
-    this.chunks.push(data);
+    const safe = redactSecrets(data);
+
+    this.chunks.push(safe);
     if (this.chunks.length > this.maxChunks) {
       this.chunks.shift();
     }
@@ -37,7 +47,7 @@ export class OutputBuffer {
     // Stream to log file (replaces tmux pipe-pane)
     if (this.logPath) {
       try {
-        appendFileSync(this.logPath, data, 'utf-8');
+        appendFileSync(this.logPath, safe, 'utf-8');
       } catch {
         // Ignore log write errors
       }
@@ -97,6 +107,35 @@ export class OutputBuffer {
       size += chunk.length;
     }
     return size;
+  }
+
+  /**
+   * Check whether the recent PTY output contains signatures of an Anthropic
+   * API rate-limit or overload response. Used by the daemon to distinguish
+   * rate-limit exits from real crashes so it can apply an extended pause
+   * instead of the normal crash-backoff cycle.
+   *
+   * Patterns matched (case-insensitive, ANSI stripped):
+   *   - "overloaded_error" / "overloaded" (HTTP 529 body)
+   *   - "rate_limit_error" / "rate limit" / "rate-limit"
+   *   - "too many requests"
+   *   - "quota exceeded" / "usage limit"
+   *   - "529"
+   */
+  hasRateLimitSignature(): boolean {
+    // Only scan the last 200 chunks — rate-limit messages appear near session end
+    const text = this.chunks.slice(-200).join('').replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').toLowerCase();
+    return (
+      text.includes('overloaded_error') ||
+      text.includes('rate_limit_error') ||
+      text.includes('rate limit') ||
+      text.includes('rate-limit') ||
+      text.includes('too many requests') ||
+      text.includes('quota exceeded') ||
+      text.includes('usage limit') ||
+      // HTTP 529 status line or JSON error code
+      (text.includes('529') && (text.includes('overload') || text.includes('error')))
+    );
   }
 
   /**

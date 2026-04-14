@@ -17,6 +17,7 @@ import {
   IconSearch,
   IconClock,
   IconTarget,
+  IconMessages,
 } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -38,6 +39,7 @@ const navItems: NavItem[] = [
   { label: 'Activity', href: '/activity', icon: IconActivity, section: 'core' },
 
   // Operations
+  { label: 'Comms', href: '/comms', icon: IconMessages, section: 'ops' },
   { label: 'Approvals', href: '/approvals', icon: IconShieldCheck, section: 'ops' },
   { label: 'Workflows', href: '/workflows', icon: IconClock, section: 'ops' },
   { label: 'Strategy', href: '/strategy', icon: IconTarget, section: 'ops' },
@@ -56,6 +58,7 @@ const sectionLabels: Record<string, string> = {
 };
 
 interface SidebarProps {
+  brandName?: string;
   pendingApprovals?: number;
   inProgressTasks?: number;
   onNavigate?: () => void;
@@ -63,6 +66,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({
+  brandName,
   pendingApprovals = 0,
   inProgressTasks = 0,
   onNavigate,
@@ -99,7 +103,7 @@ export function Sidebar({
         <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground text-xs font-bold">
           cO
         </div>
-        <span className="text-sm font-semibold tracking-tight">cortextOS</span>
+        <span className="text-sm font-semibold tracking-tight">{brandName || 'cortextOS'}</span>
       </div>
 
       {/* Search trigger */}

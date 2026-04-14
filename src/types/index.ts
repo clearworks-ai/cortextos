@@ -29,6 +29,15 @@ export interface InboxMessage {
 
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'blocked' | 'cancelled';
 
+export interface TaskOutput {
+  /** Output kind. "file" links to a saved deliverable; other shapes reserved. */
+  type: 'file';
+  /** For type:"file", the path to the file relative to CTX_ROOT (forward-slash separated). */
+  value: string;
+  /** Optional human-readable label shown in dashboard task detail. */
+  label?: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -48,6 +57,8 @@ export interface Task {
   due_date: string | null;
   archived: boolean;
   result?: string;
+  /** Linked deliverables (files saved via `cortextos bus save-output`). */
+  outputs?: TaskOutput[];
 }
 
 // Event Types
@@ -138,6 +149,24 @@ export interface AgentConfig {
   max_session_seconds?: number;
   max_crashes_per_day?: number;
   model?: string;
+  /**
+   * Cost tier for model routing: 'haiku' | 'sonnet' | 'opus'.
+   * Ignored when `model` is set (explicit model takes precedence).
+   * Resolved to a concrete model ID via model_tiers (or DEFAULT_MODEL_TIERS).
+   */
+  tier?: 'haiku' | 'sonnet' | 'opus';
+  /**
+   * Per-agent overrides for the tier→model ID mapping.
+   * Merges on top of DEFAULT_MODEL_TIERS — only specify the tiers you want to override.
+   */
+  model_tiers?: { haiku?: string; sonnet?: string; opus?: string };
+  /**
+   * How long to pause (seconds) when an Anthropic rate-limit exit is detected,
+   * before restarting the agent. Defaults to 18000 (5 hours) — the standard
+   * Anthropic rolling rate-limit window. Rate-limit pauses do NOT count toward
+   * max_crashes_per_day and do NOT trigger the git watchdog.
+   */
+  rate_limit_pause_seconds?: number;
   working_directory?: string;
   enabled?: boolean;
   crons?: CronEntry[];
@@ -145,6 +174,12 @@ export interface AgentConfig {
   day_mode_start?: string;
   day_mode_end?: string;
   communication_style?: string;
+  /**
+   * Display name for the business or team operating this agent.
+   * When set, the dashboard sidebar and title show this name instead of "cortextOS".
+   * Typically set by the onboarding wizard from the user's company name.
+   */
+  brand_name?: string;
   approval_rules?: {
     always_ask: string[];
     never_ask: string[];
@@ -179,6 +214,11 @@ export interface OrgContext {
   default_approval_categories?: string[];
   communication_style?: string;
   dashboard_url?: string;
+  /** When true, agents are instructed at startup that every task submitted
+   *  for review must have at least one file deliverable attached via
+   *  save-output. The instruction is injected into the boot prompt
+   *  dynamically — no agent markdown files are modified. */
+  require_deliverables?: boolean;
 }
 
 // Telegram Types
@@ -298,6 +338,12 @@ export interface BusPaths {
   taskDir: string;
   approvalDir: string;
   analyticsDir: string;
+  /**
+   * Per-org deliverables root: {ctxRoot}/orgs/{org}/deliverables/.
+   * Files saved here are servable by the dashboard's /api/media route because
+   * they live under CTX_ROOT.
+   */
+  deliverablesDir: string;
 }
 
 // IPC Types
@@ -365,7 +411,7 @@ export interface AgentInfo {
 
 export interface AgentStatus {
   name: string;
-  status: 'running' | 'stopped' | 'crashed' | 'starting' | 'halted';
+  status: 'running' | 'stopped' | 'crashed' | 'starting' | 'halted' | 'rate-limited';
   pid?: number;
   uptime?: number; // seconds
   lastHeartbeat?: string;

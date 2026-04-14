@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, existsSync, writeFileSync, unlinkSync, statSync, openSync, readSync, closeSync } from 'fs';
 import { exec } from 'child_process';
 import { join } from 'path';
+import { tmpdir } from 'os';
 import { createHash } from 'crypto';
 import type { InboxMessage, BusPaths, TelegramMessage, TelegramCallbackQuery } from '../types/index.js';
 import { checkInbox, ackInbox } from '../bus/message.js';
@@ -52,9 +53,19 @@ export class FastChecker {
   private stdoutLastSize: number = 0;
   private stdoutLastChangeAt: number = 0;
   private watchdogTriggered: boolean = false;
+  // Numeric-context ports (from old frank CRM fast-checker.sh)
+  private ctxAlert70Sent: boolean = false;
+  private ctxAlert85Sent: boolean = false;
+  private safetyNetArmed: boolean = false;
   private readonly BOOTSTRAP_GRACE_MS = 10 * 60 * 1000;
   private readonly HARD_RESTART_COOLDOWN_MS = 15 * 60 * 1000;
   private readonly STDOUT_FROZEN_MS = 30 * 60 * 1000;
+  private readonly CTX_RESTART_PCT = 85;
+  private readonly CTX_WARN_PCT = 70;
+  private readonly CTX_EMERGENCY_PCT = 85;
+  private readonly ZOMBIE_TRANSCRIPT_STALE_MS = 15 * 60 * 1000;
+  private readonly ZOMBIE_CTX_MIN_PCT = 50;
+  private readonly BRIDGE_FRESH_MS = 5 * 60 * 1000;
 
   constructor(
     agent: AgentProcess,
@@ -212,12 +223,14 @@ export class FastChecker {
    * Detect stuck agent and trigger hard-restart.
    * Ported from CRM fast-checker.sh (FROZEN_RESTART + context-threshold logic).
    *
-   * Two signals:
-   *   1. Claude Code's "How is Claude doing this session?" survey prompt — fires
-   *      when context is exhausted and the session needs to end. If it appears
-   *      in stdout, the agent is cooked.
-   *   2. stdout log unchanged for 30+ min while the agent is "active" (has a
-   *      pending message and no idle flag) — passively frozen.
+   * Signals:
+   *   1. Numeric context pct from bridge file (gsd-statusline). Graduated
+   *      warnings at 70%/85%, restart at 85% with delay scaled by severity,
+   *      post-restart verification + retry.
+   *   2. Transcript mtime zombie: transcript jsonl > 15min stale AND context
+   *      >= 50% = cooked after real work.
+   *   3. Claude Code's "How is Claude doing this session?" survey prompt.
+   *   4. stdout log unchanged for 30+ min while the agent is "active".
    */
   private watchdogCheck(): void {
     if (this.watchdogTriggered) return;
@@ -236,7 +249,40 @@ export class FastChecker {
       this.stdoutLastChangeAt = now;
     }
 
-    // Signal 1: scan last 20KB of stdout for the session-survey prompt.
+    // Signal 1: numeric context pct with graduated warnings + scaled grace.
+    const ctxPct = this.readContextPct();
+    if (ctxPct > 0) {
+      if (ctxPct >= this.CTX_WARN_PCT && !this.ctxAlert70Sent && this.telegramApi && this.chatId) {
+        this.ctxAlert70Sent = true;
+        this.log(`WATCHDOG: context at ${ctxPct}% — sending 70pct heads-up`);
+        this.telegramApi
+          .sendMessage(this.chatId, `Heads-up: context at ${ctxPct} percent (threshold ${this.CTX_RESTART_PCT}). Proactive restart will fire at ${this.CTX_RESTART_PCT}.`)
+          .catch(() => { /* non-critical */ });
+      }
+      if (ctxPct >= this.CTX_EMERGENCY_PCT && !this.ctxAlert85Sent && this.telegramApi && this.chatId) {
+        this.ctxAlert85Sent = true;
+        this.log(`WATCHDOG: context at ${ctxPct}% — sending 85pct emergency`);
+        this.telegramApi
+          .sendMessage(this.chatId, `Emergency: context at ${ctxPct} percent. Self-restart first, safety net will force in seconds if no action.`)
+          .catch(() => { /* non-critical */ });
+      }
+      if (ctxPct >= this.CTX_RESTART_PCT) {
+        const delay = this.safetyNetDelayMs(ctxPct);
+        this.log(`WATCHDOG: context ${ctxPct}% >= ${this.CTX_RESTART_PCT}% — arming safety net (delay=${delay}ms)`);
+        this.armSafetyNet(`context at ${ctxPct}%`, delay);
+        return;
+      }
+    }
+
+    // Signal 2: transcript mtime zombie check.
+    const zombie = this.checkTranscriptZombie();
+    if (zombie && ctxPct >= this.ZOMBIE_CTX_MIN_PCT) {
+      this.log(`WATCHDOG: transcript ${zombie.ageSec}s stale at ${ctxPct}% ctx — zombie, hard-restarting`);
+      this.triggerHardRestart(`zombie: transcript ${zombie.ageSec}s stale + ctx ${ctxPct}%`);
+      return;
+    }
+
+    // Signal 3: scan last 20KB of stdout for the session-survey prompt.
     // Claude Code emits this when context is full ("How is Claude doing this session?").
     try {
       const tailBytes = Math.min(20000, size);
@@ -246,7 +292,7 @@ export class FastChecker {
         readSync(fd, buf, 0, tailBytes, size - tailBytes);
         closeSync(fd);
         const tail = buf.toString('utf-8');
-        if (/How is Claude doing this session\?/.test(tail)) {
+        if (/How is Claude doing this session\?|Error during compaction: Conversation too long/.test(tail)) {
           this.log('WATCHDOG: ctx-exhaustion survey prompt detected — hard-restarting');
           this.triggerHardRestart('ctx exhaustion: session survey prompt in stdout');
           return;
@@ -254,7 +300,7 @@ export class FastChecker {
       }
     } catch { /* non-critical */ }
 
-    // Signal 2: stdout frozen for 30+ min while agent is active.
+    // Signal 4: stdout frozen for 30+ min while agent is active.
     if (
       this.lastMessageInjectedAt > 0 &&
       now - this.stdoutLastChangeAt > this.STDOUT_FROZEN_MS &&
@@ -264,6 +310,107 @@ export class FastChecker {
       this.log(`WATCHDOG: stdout frozen for ${stalledSec}s while active — hard-restarting`);
       this.triggerHardRestart(`frozen: stdout unchanged ${stalledSec}s while active`);
     }
+  }
+
+  /**
+   * Read numeric context pct from gsd-statusline bridge file.
+   * Returns 0-100, or 0 if bridge missing/stale/invalid.
+   * Prefers raw remaining_percentage over used_pct (avoids autocompact inflation).
+   */
+  private readContextPct(): number {
+    const agentName = this.agent.name;
+    const candidates = [
+      join(tmpdir(), `claude-ctx-agent-${agentName}.json`),
+      `/tmp/claude-ctx-agent-${agentName}.json`,
+    ];
+    for (const bridgePath of candidates) {
+      if (!existsSync(bridgePath)) continue;
+      try {
+        const st = statSync(bridgePath);
+        if (Date.now() - st.mtimeMs > this.BRIDGE_FRESH_MS) continue;
+        const raw = JSON.parse(readFileSync(bridgePath, 'utf-8'));
+        if (typeof raw.remaining_percentage === 'number') {
+          return Math.max(0, Math.min(100, 100 - raw.remaining_percentage));
+        }
+        if (typeof raw.used_pct === 'number') {
+          return Math.max(0, Math.min(100, raw.used_pct));
+        }
+      } catch { /* non-critical */ }
+    }
+    return 0;
+  }
+
+  /**
+   * Check transcript jsonl mtime under ~/.claude/projects/<escaped-cwd>/.
+   * Returns age info if stale >15min AND session is >15min old, else null.
+   * Staleness alone is NOT a zombie — idle agents have stale transcripts by
+   * design. Caller gates on ctx pct.
+   */
+  private checkTranscriptZombie(): { ageSec: number; sessionAgeSec: number } | null {
+    const cwd = this.agent.getWorkingDirectory();
+    if (!cwd) return null;
+    const escaped = cwd.replace(/\//g, '-');
+    const transcriptDir = join(process.env.HOME || '', '.claude', 'projects', escaped);
+    if (!existsSync(transcriptDir)) return null;
+    let latest: { path: string; mtime: number } | null = null;
+    try {
+      for (const name of readdirSync(transcriptDir)) {
+        if (!name.endsWith('.jsonl')) continue;
+        const p = join(transcriptDir, name);
+        const st = statSync(p);
+        if (!latest || st.mtimeMs > latest.mtime) {
+          latest = { path: p, mtime: st.mtimeMs };
+        }
+      }
+    } catch { return null; }
+    if (!latest) return null;
+    const now = Date.now();
+    const ageMs = now - latest.mtime;
+    const sessionAgeMs = this.bootstrappedAt > 0 ? now - this.bootstrappedAt : 0;
+    if (ageMs < this.ZOMBIE_TRANSCRIPT_STALE_MS) return null;
+    if (sessionAgeMs < this.ZOMBIE_TRANSCRIPT_STALE_MS) return null;
+    return { ageSec: Math.round(ageMs / 1000), sessionAgeSec: Math.round(sessionAgeMs / 1000) };
+  }
+
+  /**
+   * Graduated safety net delay: tighter at higher ctx (agent too cooked to
+   * execute bash reliably past ~95%).
+   */
+  private safetyNetDelayMs(ctxPct: number): number {
+    if (ctxPct >= 95) return 20_000;
+    if (ctxPct >= 90) return 45_000;
+    return 120_000;
+  }
+
+  /**
+   * Arm the safety net: inject a self-restart instruction + start a delayed
+   * forced hard-restart. After the forced restart, verify the agent has
+   * bootstrapped again; if not, retry once.
+   */
+  private armSafetyNet(reason: string, delayMs: number): void {
+    if (this.safetyNetArmed) return;
+    this.safetyNetArmed = true;
+    this.watchdogTriggered = true;
+    this.lastHardRestartAt = Date.now();
+
+    const instruction = `SYSTEM: Context threshold reached (${reason}). Before restarting: 1) Write handoff files. 2) Notify Josh via Telegram. 3) Run: cortextos bus hard-restart --reason '${reason}'`;
+    this.agent.injectMessage(instruction);
+
+    setTimeout(() => {
+      this.log(`WATCHDOG: safety net firing forced hard-restart (${reason})`);
+      this.agent.hardRestartSelf(`forced: context threshold not acted on (${reason})`)
+        .catch(e => this.log(`hardRestartSelf failed: ${e}`));
+      // Verify after 90s; retry once if still not bootstrapped.
+      setTimeout(() => {
+        if (!this.agent.isBootstrapped()) {
+          this.log('WATCHDOG: post-restart verification FAILED — retrying restart once');
+          this.agent.hardRestartSelf(`retry: first restart did not bootstrap (${reason})`)
+            .catch(e => this.log(`hardRestartSelf retry failed: ${e}`));
+        } else {
+          this.log('WATCHDOG: post-restart verification PASSED');
+        }
+      }, 90_000);
+    }, delayMs);
   }
 
   private triggerHardRestart(reason: string): void {

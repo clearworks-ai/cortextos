@@ -328,6 +328,14 @@ export class AgentProcess {
     return this.pty?.getOutputBuffer();
   }
 
+  /**
+   * Resolve the agent's working directory (cwd where Claude Code runs).
+   * Used by the watchdog to locate the transcript jsonl under ~/.claude/projects/.
+   */
+  getWorkingDirectory(): string {
+    return this.config.working_directory || this.env.agentDir || '';
+  }
+
   // --- Private methods ---
 
   private handleExit(exitCode: number): void {

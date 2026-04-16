@@ -341,7 +341,10 @@ export class AgentManager {
             // BUG-046: Convert absolute paths to relative (from agent working dir).
             // Claude Code strips absolute paths from pasted user input, so the
             // agent never sees them. Relative paths survive injection.
-            const toRel = (p: string | undefined) => p ? relative(agentDir, p) : '';
+            // BUG-049: Use the agent's actual launch cwd (config.working_directory
+            // if set, else agentDir) so the path resolves when Read() is invoked.
+            const launchDir = config?.working_directory || agentDir;
+            const toRel = (p: string | undefined) => p ? relative(launchDir, p) : '';
             const relImagePath = toRel(media.image_path);
             const relFilePath = toRel(media.file_path);
 

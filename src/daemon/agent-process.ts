@@ -520,8 +520,34 @@ export class AgentProcess {
     );
 
     try {
-      const files = require('fs').readdirSync(convDir);
-      return files.some((f: string) => f.endsWith('.jsonl'));
+      const fs = require('fs') as typeof import('fs');
+      const files: string[] = fs.readdirSync(convDir);
+      const jsonlFiles = files.filter((f: string) => f.endsWith('.jsonl'));
+      if (jsonlFiles.length === 0) return false;
+
+      // BUG-086: guard against bloated transcripts that cause infinite
+      // compaction loops at boot. If the largest .jsonl exceeds the threshold,
+      // force a fresh session instead of --continue.
+      const thresholdMb: number =
+        typeof this.config.max_continue_transcript_mb === 'number'
+          ? this.config.max_continue_transcript_mb
+          : 5;
+      if (thresholdMb > 0) {
+        const thresholdBytes = thresholdMb * 1024 * 1024;
+        for (const file of jsonlFiles) {
+          try {
+            const { size } = fs.statSync(join(convDir, file));
+            if (size > thresholdBytes) {
+              console.error(
+                `[agent-process/${this.name}] BUG-086: transcript ${file} is ${(size / 1024 / 1024).toFixed(1)}MB > ${thresholdMb}MB limit — forcing fresh session to prevent compaction loop`,
+              );
+              return false;
+            }
+          } catch { /* ignore stat errors */ }
+        }
+      }
+
+      return true;
     } catch {
       return false;
     }

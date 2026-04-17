@@ -764,6 +764,193 @@ describe('FastChecker', () => {
     });
   });
 
+  describe('watchdogCheck — BUG-061: .pending-user-input guard', () => {
+    it('skips frozen-stdout hard-restart when .pending-user-input marker is fresh (<30 min)', () => {
+      const agent = createMockAgent();
+      const api = createMockTelegramApi();
+      const checker = new FastChecker(agent, paths, '/tmp/framework', {
+        telegramApi: api,
+        chatId: '12345',
+      });
+
+      // Simulate post-bootstrap state
+      (checker as any).bootstrappedAt = Date.now() - 5 * 60 * 1000; // 5 min ago
+
+      // Create stdout.log that appears frozen (last change was 11 min ago)
+      const stdoutPath = join(paths.logDir, 'stdout.log');
+      writeFileSync(stdoutPath, 'some output\n');
+      (checker as any).stdoutLastSize = 12;
+      (checker as any).stdoutLastChangeAt = Date.now() - 11 * 60 * 1000; // 11 min ago
+
+      // Write a fresh .pending-user-input marker (2 min old)
+      const markerPath = join(paths.stateDir, '.pending-user-input');
+      writeFileSync(markerPath, 'waiting for user');
+      // Manually set mtime to 2 minutes ago via utimes
+      const twoMinAgo = (Date.now() - 2 * 60 * 1000) / 1000;
+      require('fs').utimesSync(markerPath, twoMinAgo, twoMinAgo);
+
+      // Invoke watchdog
+      (checker as any).watchdogCheck();
+
+      // Hard-restart must NOT have been triggered
+      expect(api.sendMessage).not.toHaveBeenCalled();
+      expect((checker as any).watchdogTriggered).toBe(false);
+    });
+
+    it('proceeds with frozen-stdout hard-restart when .pending-user-input marker is stale (>=30 min)', () => {
+      const agent = createMockAgent();
+      agent.hardRestartSelf = vi.fn().mockResolvedValue(undefined);
+      const api = createMockTelegramApi();
+      const checker = new FastChecker(agent, paths, '/tmp/framework', {
+        telegramApi: api,
+        chatId: '12345',
+      });
+
+      (checker as any).bootstrappedAt = Date.now() - 5 * 60 * 1000;
+
+      const stdoutPath = join(paths.logDir, 'stdout.log');
+      writeFileSync(stdoutPath, 'some output\n');
+      (checker as any).stdoutLastSize = 12;
+      (checker as any).stdoutLastChangeAt = Date.now() - 11 * 60 * 1000;
+
+      // Write a STALE .pending-user-input marker (35 min old)
+      const markerPath = join(paths.stateDir, '.pending-user-input');
+      writeFileSync(markerPath, 'old marker');
+      const thirtyFiveMinAgo = (Date.now() - 35 * 60 * 1000) / 1000;
+      require('fs').utimesSync(markerPath, thirtyFiveMinAgo, thirtyFiveMinAgo);
+
+      (checker as any).watchdogCheck();
+
+      // Hard-restart SHOULD have been triggered (stale marker is ignored)
+      expect(agent.hardRestartSelf).toHaveBeenCalled();
+      expect((checker as any).watchdogTriggered).toBe(true);
+    });
+
+    it('proceeds with frozen-stdout hard-restart when no .pending-user-input marker exists', () => {
+      const agent = createMockAgent();
+      agent.hardRestartSelf = vi.fn().mockResolvedValue(undefined);
+      const api = createMockTelegramApi();
+      const checker = new FastChecker(agent, paths, '/tmp/framework', {
+        telegramApi: api,
+        chatId: '12345',
+      });
+
+      (checker as any).bootstrappedAt = Date.now() - 5 * 60 * 1000;
+
+      const stdoutPath = join(paths.logDir, 'stdout.log');
+      writeFileSync(stdoutPath, 'some output\n');
+      (checker as any).stdoutLastSize = 12;
+      (checker as any).stdoutLastChangeAt = Date.now() - 11 * 60 * 1000;
+
+      // No marker file — proceed normally
+      (checker as any).watchdogCheck();
+
+      expect(agent.hardRestartSelf).toHaveBeenCalled();
+      expect((checker as any).watchdogTriggered).toBe(true);
+    });
+  });
+
+  describe('watchdogCheck — BUG-065: repeated identical failure escalation', () => {
+    it('sends Telegram escalation alert when same failure class fires again within cooldown window', () => {
+      const agent = createMockAgent();
+      const api = createMockTelegramApi();
+      const checker = new FastChecker(agent, paths, '/tmp/framework', {
+        telegramApi: api,
+        chatId: '12345',
+      });
+
+      (checker as any).bootstrappedAt = Date.now() - 5 * 60 * 1000;
+
+      // Simulate: watchdog already triggered with a frozen-stdout reason
+      (checker as any).watchdogTriggered = true;
+      (checker as any).lastWatchdogReason = 'frozen: stdout unchanged 620s';
+
+      // stdout.log frozen for 11+ min — same failure class ("frozen")
+      const stdoutPath = join(paths.logDir, 'stdout.log');
+      writeFileSync(stdoutPath, 'some output\n');
+      (checker as any).stdoutLastSize = 12;
+      (checker as any).stdoutLastChangeAt = Date.now() - 11 * 60 * 1000;
+
+      (checker as any).watchdogCheck();
+
+      // Should have sent an escalation alert via Telegram
+      expect(api.sendMessage).toHaveBeenCalledWith(
+        '12345',
+        expect.stringMatching(/ALERT.*same reason.*frozen/i),
+      );
+    });
+
+    it('does NOT escalate when different failure class fires within cooldown window', () => {
+      const agent = createMockAgent();
+      const api = createMockTelegramApi();
+      const checker = new FastChecker(agent, paths, '/tmp/framework', {
+        telegramApi: api,
+        chatId: '12345',
+      });
+
+      (checker as any).bootstrappedAt = Date.now() - 5 * 60 * 1000;
+
+      // Previous failure was ctx-exhaustion; current signal is frozen-stdout — different class
+      (checker as any).watchdogTriggered = true;
+      (checker as any).lastWatchdogReason = 'ctx exhaustion: session survey prompt in stdout';
+
+      // stdout.log frozen — different failure class from lastWatchdogReason
+      const stdoutPath = join(paths.logDir, 'stdout.log');
+      writeFileSync(stdoutPath, 'some output\n');
+      (checker as any).stdoutLastSize = 12;
+      (checker as any).stdoutLastChangeAt = Date.now() - 11 * 60 * 1000;
+
+      (checker as any).watchdogCheck();
+
+      // No escalation — different failure class
+      expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('does NOT escalate when no previous watchdog reason is recorded', () => {
+      const agent = createMockAgent();
+      const api = createMockTelegramApi();
+      const checker = new FastChecker(agent, paths, '/tmp/framework', {
+        telegramApi: api,
+        chatId: '12345',
+      });
+
+      (checker as any).bootstrappedAt = Date.now() - 5 * 60 * 1000;
+      (checker as any).watchdogTriggered = true;
+      // lastWatchdogReason is '' (initial value) — no previous failure
+
+      const stdoutPath = join(paths.logDir, 'stdout.log');
+      writeFileSync(stdoutPath, 'some output\n');
+      (checker as any).stdoutLastSize = 12;
+      (checker as any).stdoutLastChangeAt = Date.now() - 11 * 60 * 1000;
+
+      (checker as any).watchdogCheck();
+
+      expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('records lastWatchdogReason when triggerHardRestart is called', () => {
+      const agent = createMockAgent();
+      agent.hardRestartSelf = vi.fn().mockResolvedValue(undefined);
+      const api = createMockTelegramApi();
+      const checker = new FastChecker(agent, paths, '/tmp/framework', {
+        telegramApi: api,
+        chatId: '12345',
+      });
+
+      (checker as any).bootstrappedAt = Date.now() - 5 * 60 * 1000;
+
+      const stdoutPath = join(paths.logDir, 'stdout.log');
+      writeFileSync(stdoutPath, 'some output\n');
+      (checker as any).stdoutLastSize = 12;
+      (checker as any).stdoutLastChangeAt = Date.now() - 11 * 60 * 1000;
+
+      (checker as any).watchdogCheck();
+
+      // lastWatchdogReason should now be set
+      expect((checker as any).lastWatchdogReason).toMatch(/frozen/);
+    });
+  });
+
   describe('formatTelegramVideoMessage', () => {
     it('formats video message with all fields', () => {
       const result = FastChecker.formatTelegramVideoMessage(

@@ -7,7 +7,7 @@ import { checkInbox, ackInbox } from '../bus/message.js';
 import { updateApproval } from '../bus/approval.js';
 import { AgentProcess } from './agent-process.js';
 import type { TelegramAPI } from '../telegram/api.js';
-import { KEYS } from '../pty/inject.js';
+import { KEYS, isValidInboxMsgId } from '../pty/inject.js';
 import { stripControlChars } from '../utils/validate.js';
 
 type LogFn = (msg: string) => void;
@@ -35,8 +35,12 @@ export class FastChecker {
   private stdoutLastSize: number = 0;
   private stdoutLastChangeAt: number = 0;
   private watchdogTriggered: boolean = false;
+  // BUG-065: track last watchdog reason to detect repeated identical failures
+  private lastWatchdogReason: string = '';
   private readonly BOOTSTRAP_GRACE_MS = 2 * 60 * 1000;
   private readonly HARD_RESTART_COOLDOWN_MS = 15 * 60 * 1000;
+  // BUG-061: max age for .pending-user-input marker before we ignore it
+  private readonly PENDING_USER_INPUT_MAX_AGE_MS = 30 * 60 * 1000;
   // 10 min — halved from original 30 min so freezes are caught faster
   private readonly STDOUT_FROZEN_MS = 10 * 60 * 1000;
   // "Continue / Exit and fix manually" dialog auto-dismiss
@@ -76,6 +80,12 @@ export class FastChecker {
   // BUG-066: Telegram unreachable fallback — alert agent, replay on recovery
   private telegramUnreachableAlertedAt: number = 0;
   private readonly TELEGRAM_UNREACHABLE_ALERT_COOLDOWN_MS = 10 * 60 * 1000;
+
+  // BUG-062: Stuck-with-pending detector — agent has unread inbox messages
+  // but has not sent a Telegram message in >4h
+  private stuckPendingAlertedAt: number = 0;
+  private readonly STUCK_PENDING_SILENCE_MS = 4 * 60 * 60 * 1000; // 4 hours
+  private readonly STUCK_PENDING_ALERT_COOLDOWN_MS = 60 * 60 * 1000; // re-alert at most once/hour
 
   constructor(
     agent: AgentProcess,
@@ -139,6 +149,7 @@ export class FastChecker {
         this.watchdogCheck();
         this.parseFallbackCheck();
         await this.telegramUnreachableCheck();
+        await this.stuckPendingCheck();
         await this.pollCycle();
       } catch (err) {
         this.log(`Poll error: ${err}`);
@@ -199,7 +210,20 @@ export class FastChecker {
     // Check agent inbox
     const inboxMessages = checkInbox(this.paths);
     for (const msg of inboxMessages) {
-      messageBlock += this.formatInboxMessage(msg);
+      // BUG-079: Validate message ID before injecting. IDs that don't match the
+      // expected pattern ({epochMs}-{agent}-{rand5}) could indicate a tampered
+      // or corrupted message file — skip and log, but still ACK to prevent
+      // re-delivery loops.
+      if (!isValidInboxMsgId(msg.id)) {
+        this.log(`SECURITY: dropping inbox message with invalid ID pattern: ${msg.id.slice(0, 40)}`);
+        ackIds.push(msg.id);
+        continue;
+      }
+      // BUG-079: Strip control chars from message body before formatting for injection.
+      // The formatInboxMessage output goes into the PTY via injectMessage, which also
+      // strips, but we strip here too so the log line captures the sanitized text.
+      const sanitized: InboxMessage = { ...msg, text: stripControlChars(msg.text) };
+      messageBlock += this.formatInboxMessage(sanitized);
       ackIds.push(msg.id);
     }
 
@@ -918,9 +942,36 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
    *   2. stdout unchanged for STDOUT_FROZEN_MS while agent is active.
    */
   private watchdogCheck(): void {
-    if (this.watchdogTriggered) return;
     const now = Date.now();
     if (this.bootstrappedAt === 0 || now - this.bootstrappedAt < this.BOOTSTRAP_GRACE_MS) return;
+
+    // BUG-065: when in cooldown, check if the same failure class is being
+    // triggered again (indicating a stuck restart loop) and escalate.
+    if (this.watchdogTriggered) {
+      // Determine current failure signals so we can compare against lastWatchdogReason
+      const stdoutPath = join(this.paths.logDir, 'stdout.log');
+      if (existsSync(stdoutPath)) {
+        try {
+          const sz = statSync(stdoutPath).size;
+          const tailBytes = Math.min(20000, sz);
+          if (tailBytes > 0) {
+            const fd = openSync(stdoutPath, 'r');
+            const buf = Buffer.alloc(tailBytes);
+            readSync(fd, buf, 0, tailBytes, sz - tailBytes);
+            closeSync(fd);
+            const tail = buf.toString('utf-8');
+            if (/How is Claude doing this session\?/.test(tail)) {
+              this.watchdogRepeatCheck('ctx exhaustion: session survey prompt in stdout');
+            } else if (now - this.stdoutLastChangeAt > this.STDOUT_FROZEN_MS) {
+              const stalledSec = Math.round((now - this.stdoutLastChangeAt) / 1000);
+              this.watchdogRepeatCheck(`frozen: stdout unchanged ${stalledSec}s`);
+            }
+          }
+        } catch { /* non-critical */ }
+      }
+      return;
+    }
+
     if (this.lastHardRestartAt > 0 && now - this.lastHardRestartAt < this.HARD_RESTART_COOLDOWN_MS) return;
 
     const stdoutPath = join(this.paths.logDir, 'stdout.log');
@@ -983,6 +1034,26 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     // autonomous cron work with no recent message injection are equally at risk.
     if (now - this.stdoutLastChangeAt > this.STDOUT_FROZEN_MS) {
       const stalledSec = Math.round((now - this.stdoutLastChangeAt) / 1000);
+
+      // BUG-061: skip frozen restart if agent is waiting for an AskUserQuestion response.
+      // Check for .pending-user-input marker in the agent's state directory.
+      // If it exists and is <30 minutes old, the agent is legitimately blocked on
+      // user input — do NOT hard-restart or we'll kill the pending question.
+      const pendingInputPath = join(this.paths.stateDir, '.pending-user-input');
+      if (existsSync(pendingInputPath)) {
+        try {
+          const markerStat = statSync(pendingInputPath);
+          const markerAgeMs = now - markerStat.mtimeMs;
+          if (markerAgeMs < this.PENDING_USER_INPUT_MAX_AGE_MS) {
+            const markerAgeSec = Math.round(markerAgeMs / 1000);
+            this.log(`WATCHDOG: stdout frozen ${stalledSec}s but .pending-user-input is ${markerAgeSec}s old — skipping restart, waiting on user input`);
+            return;
+          }
+          // Marker is stale (>=30 min) — ignore it and proceed with restart
+          this.log(`WATCHDOG: .pending-user-input exists but is stale (${Math.round(markerAgeMs / 60000)}min old) — proceeding with restart`);
+        } catch { /* non-critical — proceed with restart if stat fails */ }
+      }
+
       this.log(`WATCHDOG: stdout frozen ${stalledSec}s — hard-restarting`);
       this.triggerHardRestart(`frozen: stdout unchanged ${stalledSec}s`);
     }
@@ -991,6 +1062,7 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
   private triggerHardRestart(reason: string): void {
     this.watchdogTriggered = true;
     this.lastHardRestartAt = Date.now();
+    this.lastWatchdogReason = reason;
     if (this.telegramApi && this.chatId) {
       this.telegramApi
         .sendMessage(this.chatId, `Got stuck (${reason}). Hard-restarting now.`)
@@ -999,6 +1071,28 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     this.agent.hardRestartSelf(reason).catch(e => this.log(`hardRestartSelf failed: ${e}`));
     // Reset so the watchdog can fire again after cooldown
     setTimeout(() => { this.watchdogTriggered = false; }, this.HARD_RESTART_COOLDOWN_MS);
+  }
+
+  /**
+   * BUG-065: Called at the top of watchdogCheck() when watchdogTriggered is true.
+   * If the same failure reason fires again within the cooldown window, escalate:
+   * log at ERROR severity and send a Telegram alert. Different reasons (e.g. a new
+   * ctx-exhaustion after a frozen-stdout) are normal and silently ignored as before.
+   */
+  private watchdogRepeatCheck(currentReason: string): void {
+    if (!this.lastWatchdogReason) return;
+    // Normalize: compare the type prefix only (before the colon) so minor
+    // variations like different stall durations ("frozen: stdout unchanged 620s"
+    // vs "frozen: stdout unchanged 660s") still count as the same failure class.
+    const typeOf = (r: string) => r.split(':')[0].trim();
+    if (typeOf(currentReason) === typeOf(this.lastWatchdogReason)) {
+      this.log(`WATCHDOG-ESCALATION: same failure class "${typeOf(currentReason)}" repeated within cooldown window — agent may be stuck in a restart loop`);
+      if (this.telegramApi && this.chatId) {
+        this.telegramApi
+          .sendMessage(this.chatId, `ALERT: ${this.agent.name} has failed with the same reason ("${typeOf(currentReason)}") again within the cooldown window. It may be stuck in a restart loop. Manual intervention may be needed.`)
+          .catch(() => { /* non-critical */ });
+      }
+    }
   }
 
   /**
@@ -1183,6 +1277,79 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     this.log('TELEGRAM-UNREACHABLE: Telegram unreachable — injecting alert to agent');
     const alert = `=== SYSTEM ALERT ===\nTelegram is unreachable. Your recent send-telegram calls have failed and messages were queued in narration-fallback.jsonl. Do NOT keep trying to send — the daemon will replay queued messages automatically when connectivity is restored. Log notes internally until connectivity is confirmed.\n\n`;
     this.agent.injectMessage(alert);
+  }
+
+  /**
+   * BUG-062: Stuck-with-pending detector.
+   *
+   * An agent is considered "stuck" when:
+   *   1. There are >0 unread inbox messages pending delivery, AND
+   *   2. The agent has not sent a Telegram message in >4h
+   *      (measured by outbound-messages.jsonl last-modified time)
+   *
+   * When detected: log a warning event and send a Telegram alert to the
+   * orchestrator (uses this.telegramApi + this.chatId, which for worker
+   * agents are wired to the orchestrator's bot for alerting).
+   *
+   * Alert is rate-limited to once per STUCK_PENDING_ALERT_COOLDOWN_MS.
+   */
+  async stuckPendingCheck(): Promise<void> {
+    if (this.bootstrappedAt === 0) return;
+    const now = Date.now();
+    if (now - this.bootstrappedAt < this.BOOTSTRAP_GRACE_MS) return;
+    if (now - this.stuckPendingAlertedAt < this.STUCK_PENDING_ALERT_COOLDOWN_MS) return;
+
+    // Count unread inbox messages (files in inbox dir, not yet moved to inflight)
+    let pendingCount = 0;
+    try {
+      const files = readdirSync(this.paths.inbox).filter(
+        (f) => f.endsWith('.json') && !f.startsWith('.'),
+      );
+      pendingCount = files.length;
+    } catch { /* inbox dir may not exist yet — treat as 0 */ }
+
+    if (pendingCount === 0) return;
+
+    // Check last outbound Telegram send time via outbound-messages.jsonl mtime
+    const outboundPath = join(this.paths.logDir, 'outbound-messages.jsonl');
+    let lastOutboundMs = 0;
+    try {
+      if (existsSync(outboundPath)) {
+        lastOutboundMs = statSync(outboundPath).mtimeMs;
+      }
+    } catch { /* non-critical */ }
+
+    const silentMs = lastOutboundMs > 0 ? now - lastOutboundMs : now - this.bootstrappedAt;
+    if (silentMs < this.STUCK_PENDING_SILENCE_MS) return;
+
+    // Agent is stuck: has pending inbox messages and hasn't sent Telegram in >4h
+    const silentHours = (silentMs / 1000 / 3600).toFixed(1);
+    this.stuckPendingAlertedAt = now;
+    this.log(
+      `STUCK-PENDING: ${pendingCount} unread inbox message(s), no Telegram output for ${silentHours}h — alerting orchestrator`,
+    );
+
+    // Log a warning event for fleet monitoring visibility
+    execFile(
+      'cortextos',
+      [
+        'bus', 'log-event', 'error', 'agent_stuck', 'warning',
+        '--meta', JSON.stringify({ agent: this.agent.name, pending_count: pendingCount, silent_hours: parseFloat(silentHours) }),
+      ],
+      (err) => { if (err) this.log(`STUCK-PENDING: log-event failed: ${err.message}`); },
+    );
+
+    // Send Telegram alert to orchestrator if configured
+    if (this.telegramApi && this.chatId) {
+      try {
+        await this.telegramApi.sendMessage(
+          this.chatId,
+          `ALERT: Agent ${this.agent.name} appears stuck. It has ${pendingCount} unread inbox message(s) but has not sent a Telegram message in ${silentHours}h. Check the agent or run a soft-restart.`,
+        );
+      } catch (err) {
+        this.log(`STUCK-PENDING: Telegram alert failed: ${err}`);
+      }
+    }
   }
 }
 

@@ -83,6 +83,44 @@ export function logInboundMessage(
 }
 
 /**
+ * Append a parse-fallback event to telegram-parse-failures.jsonl (BUG-067).
+ *
+ * Fires when sendMessage retries with plain text after a Telegram parse-entity
+ * error. Provides a durable, queryable record separate from outbound-messages.jsonl
+ * so parse-failure rates can be tracked as a theta-wave metric.
+ *
+ * final_status:
+ *   - "sent_plain"  — fallback succeeded; message delivered as plain text
+ *   - "failed_both" — both Markdown and plain-text attempts failed; message lost
+ *
+ * Path: {ctxRoot}/logs/{agentName}/telegram-parse-failures.jsonl
+ */
+export function logParseFallback(
+  ctxRoot: string,
+  agentName: string,
+  chatId: string | number,
+  originalText: string,
+  errorMessage: string,
+  finalStatus: 'sent_plain' | 'failed_both',
+): void {
+  try {
+    const logDir = join(ctxRoot, 'logs', agentName);
+    mkdirSync(logDir, { recursive: true });
+    const entry = JSON.stringify({
+      ts: new Date().toISOString(),
+      agent: agentName,
+      chat_id: String(chatId),
+      error_message: errorMessage,
+      final_status: finalStatus,
+      original_text_preview: originalText.slice(0, 200),
+    });
+    appendFileSync(join(logDir, 'telegram-parse-failures.jsonl'), entry + '\n', 'utf-8');
+  } catch {
+    // Non-critical — never block message sending on log write failures
+  }
+}
+
+/**
  * Cache the last-sent text for a given chat.
  * Path: {ctxRoot}/state/{agentName}/last-telegram-{chatId}.txt
  */

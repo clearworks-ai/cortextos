@@ -1,10 +1,10 @@
 import { Command } from 'commander';
 import { spawnSync, execFileSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { join } from 'path';
 import { sendMessage, checkInbox, ackInbox } from '../bus/message.js';
 import { validateAgentName } from '../utils/validate.js';
-import { createTask, updateTask, completeTask, listTasks, checkStaleTasks, archiveTasks, checkHumanTasks } from '../bus/task.js';
+import { createTask, updateTask, completeTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, checkStaleTasks, archiveTasks, checkHumanTasks } from '../bus/task.js';
 import { saveOutput } from '../bus/save-output.js';
 import { logEvent } from '../bus/event.js';
 import { updateHeartbeat, readAllHeartbeats } from '../bus/heartbeat.js';
@@ -14,15 +14,14 @@ import { browseCatalog, installCommunityItem, prepareSubmission, submitCommunity
 import { collectMetrics, parseUsageOutput, storeUsageData, checkUpstream, collectTelegramCommands, registerTelegramCommands } from '../bus/metrics.js';
 import { createApproval, updateApproval } from '../bus/approval.js';
 import { createReminder, listReminders, ackReminder, pruneReminders } from '../bus/reminders.js';
+import { updateCronFire } from '../bus/cron-state.js';
 import { queryKnowledgeBase, ingestKnowledgeBase, ensureKBDirs } from '../bus/knowledge-base.js';
 import { checkUsageApi, refreshOAuthToken, rotateOAuth, loadAccounts, ALERT_5H, ALERT_7D } from '../bus/oauth.js';
-import { createSkillPr } from '../bus/skill-autopr.js';
-import { atomicWriteSync } from '../utils/atomic.js';
 import { resolvePaths } from '../utils/paths.js';
 import { resolveEnv } from '../utils/env.js';
 import { IPCClient } from '../daemon/ipc-server.js';
 import { TelegramAPI } from '../telegram/api.js';
-import { logOutboundMessage, cacheLastSent } from '../telegram/logging.js';
+import { logOutboundMessage, cacheLastSent, logParseFallback } from '../telegram/logging.js';
 import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext } from '../types/index.js';
 
 /**
@@ -112,9 +111,6 @@ busCommand
     }
 
     const msgId = sendMessage(paths, env.agentName, to, priority as Priority, text, effectiveReplyTo);
-    try {
-      logEvent(paths, env.agentName, env.org, 'message', 'agent_message_sent', 'info', JSON.stringify({ to, priority, msg_id: msgId, reply_to: effectiveReplyTo ?? null }));
-    } catch { /* non-fatal */ }
     console.log(msgId);
   });
 
@@ -134,9 +130,6 @@ busCommand
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
     ackInbox(paths, id);
-    try {
-      logEvent(paths, env.agentName, env.org, 'message', 'inbox_ack', 'info', JSON.stringify({ msg_id: id }));
-    } catch { /* non-fatal */ }
     console.log(`ACK'd ${id}`);
   });
 
@@ -148,17 +141,29 @@ busCommand
   .option('--priority <p>', 'Priority (urgent, high, normal, low)', 'normal')
   .option('--project <name>', 'Project name')
   .option('--needs-approval', 'Require human approval before execution')
-  .action((title: string, opts: { desc?: string; assignee?: string; priority: string; project?: string; needsApproval?: boolean }) => {
+  .option('--blocked-by <ids>', 'Comma-separated task IDs that must complete before this task can progress')
+  .option('--blocks <ids>', 'Comma-separated task IDs that this new task will block (symmetric reverse edge)')
+  .action((title: string, opts: { desc?: string; assignee?: string; priority: string; project?: string; needsApproval?: boolean; blockedBy?: string; blocks?: string }) => {
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    const parseList = (raw?: string) => (raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : []);
     const taskId = createTask(paths, env.agentName, env.org, title, {
       description: opts.desc,
       assignee: opts.assignee,
       priority: opts.priority as Priority,
       project: opts.project,
       needsApproval: opts.needsApproval ?? false,
+      blockedBy: parseList(opts.blockedBy),
+      blocks: parseList(opts.blocks),
     });
     console.log(taskId);
+    // Auto-notify assignee so the task is visible immediately (issue #78)
+    if (opts.assignee && opts.assignee !== env.agentName) {
+      const assigneePaths = resolvePaths(opts.assignee, env.instanceId, env.org);
+      const desc = opts.desc ? ` — ${opts.desc.slice(0, 120)}` : '';
+      sendMessage(assigneePaths, env.agentName, opts.assignee, 'normal',
+        `Task assigned: [${opts.priority}] ${title}${desc} (id: ${taskId})`);
+    }
   });
 
 busCommand
@@ -187,6 +192,93 @@ busCommand
 
     updateTask(paths, id, status as TaskStatus);
     console.log(`Updated ${id} -> ${status}`);
+  });
+
+busCommand
+  .command('compact-tasks')
+  .description('Archive completed tasks older than N days into a per-month archive-YYYY-MM.jsonl and remove them from the active list — preserves audit logs, skips tasks still needed as blockers')
+  .option('--older-than <days>', 'Cutoff in days (default: 30)', '30')
+  .option('--dry-run', 'Report what would be compacted without modifying anything')
+  .action((opts: { olderThan: string; dryRun?: boolean }) => {
+    const env = resolveEnv();
+    const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    const olderThanDays = parseInt(opts.olderThan, 10);
+    if (isNaN(olderThanDays) || olderThanDays < 0) {
+      console.error('--older-than must be a non-negative integer');
+      process.exit(1);
+    }
+    const report = compactTasks(paths, { olderThanDays, dryRun: opts.dryRun });
+    const verb = report.dry_run ? 'would compact' : 'compacted';
+    console.log(`${verb} ${report.archived.length} task${report.archived.length === 1 ? '' : 's'}, skipped ${report.skipped.length}`);
+    for (const a of report.archived) console.log(`  ✓ ${a.id}  ->  ${a.archive_file}`);
+    if (report.skipped.length > 0) {
+      console.log(`\nSkipped (common reasons: within cutoff, still needed as blocker):`);
+      for (const s of report.skipped) console.log(`  - ${s.id}  (${s.reason})`);
+    }
+  });
+
+busCommand
+  .command('check-deps')
+  .description('Show open dependencies blocking a task — lists blocked_by entries that are not yet completed')
+  .argument('<id>', 'Task ID')
+  .action((id: string) => {
+    const env = resolveEnv();
+    const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    const open = checkTaskDependencies(paths, id);
+    if (open.length === 0) {
+      console.log(`${id}: no open dependencies — ready to work`);
+      return;
+    }
+    console.log(`${id} blocked by ${open.length} dependency${open.length === 1 ? '' : 's'}:`);
+    for (const d of open) console.log(`  ${d.id}  [${d.status}]`);
+  });
+
+busCommand
+  .command('task-history')
+  .description("Show a task's append-only audit log (every status change, claim, and completion)")
+  .argument('<id>', 'Task ID')
+  .option('--json', 'Emit raw JSONL instead of formatted text')
+  .action((id: string, opts: { json?: boolean }) => {
+    const env = resolveEnv();
+    const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    const entries = readTaskAudit(paths, id);
+    if (entries.length === 0) {
+      console.log(`No audit log for task ${id}`);
+      return;
+    }
+    if (opts.json) {
+      for (const e of entries) console.log(JSON.stringify(e));
+      return;
+    }
+    console.log(`Audit log for ${id} (${entries.length} entries):`);
+    for (const e of entries) {
+      const transition = e.from && e.to ? `${e.from} -> ${e.to}` : e.to || '';
+      const note = e.note ? ` | ${e.note}` : '';
+      console.log(`  ${e.ts}  ${e.event.padEnd(8)}  ${e.agent.padEnd(16)}  ${transition}${note}`);
+    }
+  });
+
+busCommand
+  .command('claim-task')
+  .description('Atomically claim a pending task — marks in_progress + sets assignee in one shot, rejecting if another agent already owns it')
+  .argument('<id>', 'Task ID')
+  .option('--agent <name>', 'Agent claiming the task (defaults to CTX_AGENT_NAME)')
+  .action((id: string, opts: { agent?: string }) => {
+    const env = resolveEnv();
+    const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    const agent = opts.agent || env.agentName;
+    if (!agent) {
+      console.error('ERROR: --agent or CTX_AGENT_NAME required');
+      process.exit(1);
+    }
+    try {
+      const task = claimTask(paths, id, agent);
+      console.log(`Claimed ${id} -> in_progress (assigned to ${agent})`);
+      console.log(`  Title: ${task.title}`);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
   });
 
 busCommand
@@ -248,12 +340,14 @@ busCommand
   .option('--agent <name>', 'Filter by agent')
   .option('--status <s>', 'Filter by status')
   .option('--format <fmt>', 'Output format: json or text', 'text')
-  .action((opts: { agent?: string; status?: string; format?: string }) => {
+  .option('--respect-deps', 'Sort DAG-aware: unblocked tasks first, blocked tasks last')
+  .action((opts: { agent?: string; status?: string; format?: string; respectDeps?: boolean }) => {
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
     const tasks = listTasks(paths, {
       agent: opts.agent,
       status: opts.status as TaskStatus,
+      respectDeps: opts.respectDeps ?? false,
     });
 
     if (opts.format === 'json') {
@@ -363,14 +457,6 @@ busCommand
       currentTask: opts.task,
       displayName,
     });
-    // Auto-emit a heartbeat event so the activity feed surfaces any live agent
-    // even if the agent itself forgets to call log-event. This makes the
-    // dashboard "agents" list derive from heartbeats, not just explicit events.
-    try {
-      logEvent(paths, env.agentName, env.org, 'heartbeat', 'heartbeat', 'info', JSON.stringify({ status, task: opts.task ?? '' }));
-    } catch {
-      // Non-fatal: heartbeat write already succeeded
-    }
     console.log(`Heartbeat updated: ${env.agentName}`);
   });
 
@@ -883,19 +969,24 @@ busCommand
           parseFallback: parseFallbackReason !== null,
           parseFallbackReason: parseFallbackReason ?? undefined,
         });
+        // BUG-067: durable parse-failure record for theta-wave metric tracking
+        if (parseFallbackReason !== null) {
+          logParseFallback(env.ctxRoot, env.agentName, chatId, message, parseFallbackReason, 'sent_plain');
+        }
         cacheLastSent(env.ctxRoot, env.agentName, chatId, message);
-        // Auto-emit activity event so dashboard sees every Telegram send,
-        // even from agents that never call log-event directly.
-        try {
-          const paths = resolvePaths(env.agentName, env.instanceId, env.org);
-          const preview = message.length > 120 ? message.slice(0, 120) + '…' : message;
-          logEvent(paths, env.agentName, env.org, 'message', 'telegram_sent', 'info', JSON.stringify({ chat_id: chatId, message_id: sentMessageId, preview }));
-        } catch { /* non-fatal */ }
       }
 
       console.log('Message sent');
     } catch (err: any) {
-      console.error(`Failed to send: ${err.message || err}`);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      // BUG-067: if both Markdown and plain-text attempts failed, log failed_both
+      if (parseFallbackReason !== null) {
+        const env = resolveEnv();
+        if (env.agentName && env.ctxRoot) {
+          logParseFallback(env.ctxRoot, env.agentName, chatId, message, parseFallbackReason, 'failed_both');
+        }
+      }
+      console.error(`Failed to send: ${errMsg}`);
       process.exit(1);
     }
   });
@@ -1013,7 +1104,7 @@ busCommand
       process.exit(1);
     }
 
-    ensureKBDirs(env.instanceId, env.frameworkRoot, org);
+    ensureKBDirs(env.instanceId, org);
 
     ingestKnowledgeBase(paths, {
       org,
@@ -1652,6 +1743,18 @@ busCommand
   });
 
 busCommand
+  .command('update-cron-fire')
+  .argument('<cron-name>', 'Name of the cron as defined in config.json')
+  .option('--interval <interval>', 'Expected interval, e.g. "6h", "24h", "30m"')
+  .description('Record that a named cron just fired (enables daemon gap detection for dead zones)')
+  .action((cronName: string, opts: { interval?: string }) => {
+    const env = resolveEnv();
+    const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    updateCronFire(paths.stateDir, cronName, opts.interval);
+    console.log(`Recorded fire for cron "${cronName}"`);
+  });
+
+busCommand
   .command('hook-ask-telegram')
   .description('PreToolUse hook: forward AskUserQuestion to Telegram (cross-platform)')
   .action(() => runHook('hook-ask-telegram'));
@@ -1675,74 +1778,6 @@ busCommand
   .command('hook-idle-flag')
   .description('Stop hook: writes last_idle.flag timestamp so fast-checker knows agent finished its turn')
   .action(() => runHook('hook-idle-flag'));
-
-busCommand
-  .command('hook-extract-facts')
-  .description('PreCompact hook: extracts and stores session summary as structured fact entry for cross-session memory')
-  .action(() => runHook('hook-extract-facts'));
-
-busCommand
-  .command('hook-session-restore')
-  .description('SessionStart hook: injects the most recent compaction snapshot as additionalContext to restore working state')
-  .action(() => runHook('hook-session-restore'));
-
-busCommand
-  .command('hook-loop-detector')
-  .description('PreToolUse hook: detects and blocks repeated tool loops (repetition and ping-pong patterns)')
-  .action(() => runHook('hook-loop-detector'));
-
-busCommand
-  .command('hook-skill-autopr')
-  .description('PostToolUse hook: auto-stages community skill writes and opens a draft PR against grandamenium/cortextos')
-  .action(() => runHook('hook-skill-autopr'));
-
-busCommand
-  .command('create-skill-pr')
-  .description('Background worker: commits and draft-PRs a community skill (called by hook-skill-autopr)')
-  .argument('<skill-name>', 'Skill directory name under community/skills/')
-  .action(async (skillName: string) => {
-    if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(skillName)) {
-      console.error(`create-skill-pr: invalid skill name "${skillName}" — must be a lowercase alphanumeric slug`);
-      process.exit(1);
-    }
-    try {
-      await createSkillPr(skillName);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`create-skill-pr failed: ${msg}`);
-      process.exit(1);
-    }
-  });
-
-// --- Brand name command ---
-
-busCommand
-  .command('set-brand-name')
-  .description('Set the business name shown in the dashboard sidebar (written to dashboard-settings.json)')
-  .argument('<name>', 'Business or team name to display (max 100 characters, use empty string "" to clear)')
-  .action((name: string) => {
-    const trimmed = name.trim().slice(0, 100);
-    const env = resolveEnv();
-    const settingsPath = join(env.ctxRoot, 'config', 'dashboard-settings.json');
-    try {
-      let current: Record<string, unknown> = {};
-      if (existsSync(settingsPath)) {
-        try { current = JSON.parse(readFileSync(settingsPath, 'utf-8')); } catch { /* ignore corrupt file */ }
-      }
-      if (trimmed) {
-        current.brand_name = trimmed;
-      } else {
-        delete current.brand_name;
-      }
-      // Atomic write — prevents corrupt file on crash or concurrent access
-      atomicWriteSync(settingsPath, JSON.stringify(current, null, 2));
-      console.log(trimmed ? `Brand name set to: ${trimmed}` : 'Brand name cleared');
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`set-brand-name failed: ${msg}`);
-      process.exit(1);
-    }
-  });
 
 // --- OAuth token rotation commands ---
 

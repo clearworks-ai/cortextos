@@ -200,6 +200,13 @@ export interface AgentConfig {
    * Defaults to 5MB. Set to 0 to disable the guard (not recommended).
    */
   max_continue_transcript_mb?: number;
+  /**
+   * BUG-064: How long (seconds) the fast-checker waits after bootstrap before
+   * the watchdog starts monitoring stdout for frozen output or ctx exhaustion.
+   * Defaults to 120s (2 minutes). Increase for complex onboarding agents that
+   * take longer to complete their first boot sequence.
+   */
+  bootstrap_grace_seconds?: number;
 }
 
 export interface CronEntry {
@@ -373,7 +380,8 @@ export type IPCCommandType =
   | 'spawn-worker'
   | 'terminate-worker'
   | 'list-workers'
-  | 'inject-worker';
+  | 'inject-worker'
+  | 'interrupt-agent';
 
 export interface IPCRequest {
   type: IPCCommandType;

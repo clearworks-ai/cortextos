@@ -265,6 +265,7 @@ export class AgentManager {
       telegramApi,
       chatId,
       allowedUserId: allowedUserId ? parseInt(allowedUserId, 10) : undefined,
+      config,
     });
 
     // Send Telegram notification on crashes and session refreshes
@@ -661,6 +662,26 @@ export class AgentManager {
    */
   getAgentNames(): string[] {
     return [...this.agents.keys()];
+  }
+
+  /**
+   * Send SIGINT to the PTY process of a running agent (BUG-083).
+   * Returns the PID that was signalled, or null when the agent is not running
+   * or has no known PID.
+   */
+  interruptAgent(name: string): number | null {
+    const entry = this.agents.get(name);
+    if (!entry) return null;
+    const status = entry.process.getStatus();
+    if (status.status !== 'running' || !status.pid) return null;
+    try {
+      process.kill(status.pid, 'SIGINT');
+      console.log(`[agent-manager] Sent SIGINT to ${name} (pid ${status.pid})`);
+      return status.pid;
+    } catch (err) {
+      console.error(`[agent-manager] Failed to send SIGINT to ${name} (pid ${status.pid}):`, err);
+      return null;
+    }
   }
 
   // --- Worker management ---

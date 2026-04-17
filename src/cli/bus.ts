@@ -1609,6 +1609,52 @@ busCommand
   });
 
 busCommand
+  .command('interrupt-agent')
+  .description('Send SIGINT to a running agent\'s PTY process (BUG-083: soft interrupt without full restart)')
+  .argument('<agent>', 'Agent name to interrupt')
+  .action(async (agent: string) => {
+    const { appendFileSync, mkdirSync } = require('fs');
+    const { join } = require('path');
+    const env = resolveEnv();
+
+    const ipc = new IPCClient(env.instanceId);
+    const daemonRunning = await ipc.isDaemonRunning();
+    if (!daemonRunning) {
+      console.error('ERROR: Node daemon is not running. Start it with: cortextos start');
+      process.exit(1);
+    }
+
+    const resp = await ipc.send({
+      type: 'interrupt-agent',
+      agent,
+      source: 'cortextos bus interrupt-agent',
+    });
+
+    if (resp.success) {
+      const { pid } = (resp.data as { agent: string; pid: number });
+      console.log(`Sent SIGINT to ${agent} (pid ${pid})`);
+
+      // Log the interrupt action to the agent's event log
+      const ctxRoot = require('path').join(require('os').homedir(), '.cortextos', env.instanceId);
+      const logDir = join(ctxRoot, 'logs', agent);
+      mkdirSync(logDir, { recursive: true });
+      const logEntry = JSON.stringify({
+        timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+        action: 'interrupt-agent',
+        agent,
+        pid,
+        source: 'cortextos bus interrupt-agent',
+      });
+      try {
+        appendFileSync(join(logDir, 'activity.log'), logEntry + '\n');
+      } catch { /* non-fatal */ }
+    } else {
+      console.error(`ERROR: ${resp.error}`);
+      process.exit(1);
+    }
+  });
+
+busCommand
   .command('send-mobile-reply')
   .description('Reply to a mobile app user message and ACK the inbox message')
   .argument('<agent>', 'Agent name sending the reply')

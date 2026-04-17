@@ -95,6 +95,15 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cortextos bus hook-extract-facts",
+            "timeout": 20
+          }
+        ]
       }
     ]
   }

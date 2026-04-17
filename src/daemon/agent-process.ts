@@ -605,7 +605,49 @@ export class AgentProcess {
         }
       }
 
+      // BUG-DIALOG: detect stuck permission/write dialogs in stdout tail.
+      // When an agent is killed mid-dialog and restarted with --continue, it
+      // reloads the same conversation and the dialog re-appears immediately,
+      // creating an infinite freeze→kill→reload→freeze loop. Detect these
+      // patterns in the last 10KB of stdout and force a fresh session instead.
+      if (this.hasStuckDialogInStdout()) {
+        console.error(
+          `[agent-process/${this.name}] BUG-DIALOG: stuck permission dialog detected in stdout tail — forcing fresh session to break loop`,
+        );
+        return false;
+      }
+
       return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Scan the last 10KB of stdout.log for Claude Code interactive dialog signatures.
+   * These dialogs (file-creation confirmations, permission prompts) block the agent
+   * indefinitely when replayed via --continue. Detecting them here lets us break the
+   * freeze→kill→reload→freeze loop by forcing a fresh session instead.
+   */
+  private hasStuckDialogInStdout(): boolean {
+    const stdoutPath = join(this.env.ctxRoot, 'logs', this.name, 'stdout.log');
+    try {
+      const { statSync, openSync, readSync, closeSync } = require('fs') as typeof import('fs');
+      const { size } = statSync(stdoutPath);
+      if (size === 0) return false;
+      const readBytes = Math.min(size, 10 * 1024);
+      const fd = openSync(stdoutPath, 'r');
+      const buf = Buffer.alloc(readBytes);
+      readSync(fd, buf, 0, readBytes, size - readBytes);
+      closeSync(fd);
+      // Strip ANSI escape codes for clean pattern matching
+      const tail = buf.toString('utf-8').replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+      return (
+        tail.includes('Esc to cancel') ||
+        (tail.includes('Tab to amend') && tail.includes('Yes')) ||
+        /Do you want to (create|overwrite|edit)\b/.test(tail) ||
+        /ctrl\+b to run in background/.test(tail)
+      );
     } catch {
       return false;
     }

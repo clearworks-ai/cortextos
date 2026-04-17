@@ -35,7 +35,7 @@ export class FastChecker {
   private stdoutLastSize: number = 0;
   private stdoutLastChangeAt: number = 0;
   private watchdogTriggered: boolean = false;
-  private readonly BOOTSTRAP_GRACE_MS = 10 * 60 * 1000;
+  private readonly BOOTSTRAP_GRACE_MS = 2 * 60 * 1000;
   private readonly HARD_RESTART_COOLDOWN_MS = 15 * 60 * 1000;
   // 10 min — halved from original 30 min so freezes are caught faster
   private readonly STDOUT_FROZEN_MS = 10 * 60 * 1000;
@@ -935,15 +935,14 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       }
     } catch { /* non-critical */ }
 
-    // Signal 3: stdout frozen for STDOUT_FROZEN_MS while agent is active
-    if (
-      this.lastMessageInjectedAt > 0 &&
-      now - this.stdoutLastChangeAt > this.STDOUT_FROZEN_MS &&
-      this.isAgentActive()
-    ) {
+    // Signal 3: stdout frozen for STDOUT_FROZEN_MS — hard restart.
+    // A healthy PTY always produces TUI ANSI codes; 10 min of silence = dead PTY.
+    // Do NOT gate on lastMessageInjectedAt or isAgentActive() — agents doing
+    // autonomous cron work with no recent message injection are equally at risk.
+    if (now - this.stdoutLastChangeAt > this.STDOUT_FROZEN_MS) {
       const stalledSec = Math.round((now - this.stdoutLastChangeAt) / 1000);
-      this.log(`WATCHDOG: stdout frozen ${stalledSec}s while active — hard-restarting`);
-      this.triggerHardRestart(`frozen: stdout unchanged ${stalledSec}s while active`);
+      this.log(`WATCHDOG: stdout frozen ${stalledSec}s — hard-restarting`);
+      this.triggerHardRestart(`frozen: stdout unchanged ${stalledSec}s`);
     }
   }
 

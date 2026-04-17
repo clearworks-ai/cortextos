@@ -11,6 +11,7 @@ import { resolveEnv } from '../utils/env.js';
 import { logInboundMessage, cacheLastSent, logOutboundMessage } from '../telegram/logging.js';
 import { collectTelegramCommands, registerTelegramCommands } from '../bus/metrics.js';
 import { stripControlChars } from '../utils/validate.js';
+import { validateAgentSettingsForDir } from '../utils/validate-settings.js';
 import { processMediaMessage } from '../telegram/media.js';
 
 type LogFn = (msg: string) => void;
@@ -177,6 +178,27 @@ export class AgentManager {
       config = this.loadAgentConfig(agentDir);
     }
 
+    // Validate settings.json before launching — catches FM21 (invalid hook events),
+    // FM22 (bad permission patterns), FM23 (invalid matcher regex). Errors block
+    // launch to prevent the "Settings Warning / Exit and fix manually" boot dialog.
+    const settingsDir = config.working_directory || agentDir;
+    if (settingsDir) {
+      const settingsValidation = validateAgentSettingsForDir(settingsDir);
+      if (settingsValidation.errors.length > 0) {
+        console.error(`[agent-manager] settings.json validation FAILED for ${name}:`);
+        for (const err of settingsValidation.errors) {
+          console.error(`[agent-manager]   ERROR: ${err}`);
+        }
+        console.error(`[agent-manager] Fix settings.json before starting ${name}. Agent will not launch.`);
+        return;
+      }
+      if (settingsValidation.warnings.length > 0) {
+        for (const warn of settingsValidation.warnings) {
+          console.warn(`[agent-manager] settings.json warning for ${name}: ${warn}`);
+        }
+      }
+    }
+
     const env: CtxEnv = {
       instanceId: this.instanceId,
       ctxRoot: this.ctxRoot,
@@ -273,6 +295,10 @@ export class AgentManager {
     // matches config.json. Handles both fresh and --continue restarts safely.
     agentProcess.scheduleCronVerification();
 
+    // Schedule background cron gap detection: polls cron-state.json every 10 min
+    // and nudges the agent if any cron has been silent >2x its expected interval.
+    agentProcess.scheduleGapDetection();
+
     // Start fast checker in background
     checker.start().catch(err => {
       console.error(`[${name}] Fast checker error:`, err);
@@ -337,7 +363,10 @@ export class AgentManager {
             // BUG-046: Convert absolute paths to relative (from agent working dir).
             // Claude Code strips absolute paths from pasted user input, so the
             // agent never sees them. Relative paths survive injection.
-            const toRel = (p: string | undefined) => p ? relative(agentDir, p) : '';
+            // BUG-049: Use the agent's actual launch cwd (config.working_directory
+            // if set, else agentDir) so the path resolves when Read() is invoked.
+            const launchDir = config?.working_directory || agentDir;
+            const toRel = (p: string | undefined) => p ? relative(launchDir, p) : '';
             const relImagePath = toRel(media.image_path);
             const relFilePath = toRel(media.file_path);
 

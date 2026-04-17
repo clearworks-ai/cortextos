@@ -39,6 +39,10 @@ export class FastChecker {
   private readonly HARD_RESTART_COOLDOWN_MS = 15 * 60 * 1000;
   // 10 min — halved from original 30 min so freezes are caught faster
   private readonly STDOUT_FROZEN_MS = 10 * 60 * 1000;
+  // "Continue / Exit and fix manually" dialog auto-dismiss
+  private dialogAutoResumeAt: number = 0;
+  private dialogAutoResumeCount: number = 0;
+  private readonly DIALOG_AUTO_RESUME_COOLDOWN_MS = 30 * 1000;
   private frameworkRoot: string;
   private telegramApi?: TelegramAPI;
   private chatId?: string;
@@ -904,7 +908,34 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       }
     } catch { /* non-critical */ }
 
-    // Signal 2: stdout frozen for STDOUT_FROZEN_MS while agent is active
+    // Signal 2: "Continue / Exit and fix manually" error-recovery dialog — auto-dismiss
+    try {
+      const dialogTailBytes = Math.min(4000, size);
+      if (dialogTailBytes > 0) {
+        const dfd = openSync(stdoutPath, 'r');
+        const dbuf = Buffer.alloc(dialogTailBytes);
+        readSync(dfd, dbuf, 0, dialogTailBytes, size - dialogTailBytes);
+        closeSync(dfd);
+        if (/Exit and fix manually/.test(dbuf.toString('utf-8'))) {
+          const nowD = Date.now();
+          if (nowD - this.dialogAutoResumeAt > this.DIALOG_AUTO_RESUME_COOLDOWN_MS) {
+            this.dialogAutoResumeAt = nowD;
+            this.dialogAutoResumeCount++;
+            if (this.dialogAutoResumeCount <= 3) {
+              this.log(`WATCHDOG: dialog auto-dismiss (attempt ${this.dialogAutoResumeCount}) — pressing Enter to continue`);
+              this.agent.write(KEYS.ENTER);
+              this.stdoutLastChangeAt = nowD;
+            } else {
+              this.log('WATCHDOG: dialog auto-dismiss exceeded 3 attempts — hard-restarting');
+              this.triggerHardRestart('dialog loop: "Exit and fix manually" repeated >3 times');
+            }
+          }
+          return;
+        }
+      }
+    } catch { /* non-critical */ }
+
+    // Signal 3: stdout frozen for STDOUT_FROZEN_MS while agent is active
     if (
       this.lastMessageInjectedAt > 0 &&
       now - this.stdoutLastChangeAt > this.STDOUT_FROZEN_MS &&

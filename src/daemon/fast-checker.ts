@@ -61,6 +61,18 @@ export class FastChecker {
   // Idle-session heartbeat watchdog
   private heartbeatTimer: NodeJS.Timeout | null = null;
 
+  // BUG-068: parse-failure watcher — detect failed_both entries and alert agent
+  private parseFallbackCheckedAt: number = 0;
+
+  // BUG-050: narration enforcement — nudge agent if silent >5 min after activity
+  private lastNarrationSentAt: number = 0;
+  private outboundLogSizeAtLastNarration: number = -1;
+  private messagesInjectedSinceNarration: number = 0;
+  private narrationNudgeSentAt: number = 0;
+  private readonly NARRATION_SILENCE_MS = 5 * 60 * 1000;
+  private readonly NARRATION_MIN_MESSAGES = 2;
+  private readonly NARRATION_NUDGE_COOLDOWN_MS = 5 * 60 * 1000;
+
   constructor(
     agent: AgentProcess,
     paths: BusPaths,
@@ -121,6 +133,7 @@ export class FastChecker {
         // Check for urgent signal file
         this.checkUrgentSignal();
         this.watchdogCheck();
+        this.parseFallbackCheck();
         await this.pollCycle();
       } catch (err) {
         this.log(`Poll error: ${err}`);
@@ -200,10 +213,34 @@ export class FastChecker {
         if (hasTelegramMessage) {
           this.lastMessageInjectedAt = Date.now();
         }
+        // BUG-050: count injected messages for narration enforcement
+        this.messagesInjectedSinceNarration++;
         // Cooldown after injection
         await sleep(5000);
       }
     }
+
+    // BUG-050: detect when agent sends a Telegram message (outbound log grows)
+    // and reset narration silence window
+    const outboundPath = join(this.paths.logDir, 'outbound-messages.jsonl');
+    try {
+      if (existsSync(outboundPath)) {
+        const { size } = statSync(outboundPath);
+        if (this.outboundLogSizeAtLastNarration === -1) {
+          // First check: seed baseline, don't trigger yet
+          this.outboundLogSizeAtLastNarration = size;
+          this.lastNarrationSentAt = Date.now();
+        } else if (size > this.outboundLogSizeAtLastNarration) {
+          // New outbound message — agent narrated; reset silence window
+          this.outboundLogSizeAtLastNarration = size;
+          this.lastNarrationSentAt = Date.now();
+          this.messagesInjectedSinceNarration = 0;
+        }
+      }
+    } catch { /* non-critical */ }
+
+    // BUG-050: narration enforcement nudge
+    this.narrationCheck();
 
     // Typing indicator: send while Claude is actively working
     if (this.chatId && this.telegramApi && this.isAgentActive()) {
@@ -1016,6 +1053,69 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       return this.lastMessageInjectedAt > idleTs;
     } catch {
       return true; // Can't read flag — assume still active
+    }
+  }
+
+  /**
+   * BUG-068: Poll telegram-parse-failures.jsonl for failed_both entries since
+   * last check. On detection, inject a system alert to the PTY so the agent
+   * knows it is fully dark (not just format-degraded).
+   */
+  private parseFallbackCheck(): void {
+    if (this.bootstrappedAt === 0) return;
+
+    const failurePath = join(this.paths.logDir, 'telegram-parse-failures.jsonl');
+    if (!existsSync(failurePath)) return;
+
+    try {
+      const content = readFileSync(failurePath, 'utf-8');
+      const lines = content.trim().split('\n').filter(Boolean);
+      const now = Date.now();
+      let foundFailedBoth = false;
+      let lastError = '';
+
+      for (const line of lines) {
+        try {
+          const entry = JSON.parse(line) as { ts?: string; final_status?: string; error_message?: string };
+          const entryTs = entry.ts ? new Date(entry.ts).getTime() : 0;
+          if (entryTs > this.parseFallbackCheckedAt && entry.final_status === 'failed_both') {
+            foundFailedBoth = true;
+            lastError = entry.error_message ?? 'unknown error';
+          }
+        } catch { /* skip malformed lines */ }
+      }
+
+      this.parseFallbackCheckedAt = now;
+
+      if (foundFailedBoth) {
+        this.log('PARSE-FAILURE-WATCHER: failed_both detected — injecting alert to agent');
+        const alert = `=== SYSTEM ALERT ===\nYour last Telegram message failed to send (both Markdown and plain text attempts failed). Error: ${lastError}. Telegram may be unreachable. Use plain text only and check connectivity, or notify Josh via another channel if available.\n\n`;
+        this.agent.injectMessage(alert);
+      }
+    } catch { /* non-critical */ }
+  }
+
+  /**
+   * BUG-050: Narration enforcement. If the agent has processed >=2 messages
+   * since it last sent a Telegram update AND has been silent for >5 minutes,
+   * inject a nudge. Skipped during bootstrap grace and nudge cooldown.
+   */
+  private narrationCheck(): void {
+    if (this.bootstrappedAt === 0) return;
+    const now = Date.now();
+    if (now - this.bootstrappedAt < this.BOOTSTRAP_GRACE_MS) return;
+    if (this.lastNarrationSentAt === 0) return;
+    if (now - this.narrationNudgeSentAt < this.NARRATION_NUDGE_COOLDOWN_MS) return;
+
+    const silentMs = now - this.lastNarrationSentAt;
+    if (
+      silentMs > this.NARRATION_SILENCE_MS &&
+      this.messagesInjectedSinceNarration >= this.NARRATION_MIN_MESSAGES
+    ) {
+      this.log(`NARRATION-WATCHDOG: silent ${Math.round(silentMs / 1000)}s after ${this.messagesInjectedSinceNarration} messages — nudging`);
+      const nudge = `=== SYSTEM ===\nYou have been silent for 5+ minutes while processing messages. Send a brief Telegram progress update now via: cortextos bus send-telegram ${this.chatId ?? '<chat_id>'} "_<what you are working on>_"\n\n`;
+      this.agent.injectMessage(nudge);
+      this.narrationNudgeSentAt = now;
     }
   }
 }

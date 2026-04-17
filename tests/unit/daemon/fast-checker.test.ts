@@ -971,4 +971,190 @@ describe('FastChecker', () => {
       expect(result).toContain("cortextos bus send-telegram 123456789 '<your reply>'");
     });
   });
+
+  // BUG-062: Stuck-with-pending detector tests
+  describe('stuckPendingCheck (BUG-062)', () => {
+    it('does not alert when no inbox messages are pending', async () => {
+      const agent = createMockAgent();
+      const api = createMockTelegramApi();
+      const checker = new FastChecker(agent, paths, '/tmp/framework', {
+        telegramApi: api,
+        chatId: '12345',
+      });
+
+      // Bootstrap complete, past grace period
+      (checker as any).bootstrappedAt = Date.now() - 10 * 60 * 1000;
+
+      // inbox dir is empty (createTestPaths already made it)
+      await (checker as any).stuckPendingCheck();
+
+      expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('does not alert when agent has been active recently (outbound log fresh)', async () => {
+      const agent = createMockAgent();
+      const api = createMockTelegramApi();
+      const checker = new FastChecker(agent, paths, '/tmp/framework', {
+        telegramApi: api,
+        chatId: '12345',
+      });
+
+      (checker as any).bootstrappedAt = Date.now() - 10 * 60 * 1000;
+
+      // Drop an inbox message file
+      writeFileSync(join(paths.inbox, '1-1713400000000-from-sage-ab12c.json'), JSON.stringify({
+        id: '1713400000000-sage-ab12c',
+        from: 'sage',
+        to: 'test-agent',
+        priority: 'normal',
+        timestamp: new Date().toISOString(),
+        text: 'hello',
+        reply_to: null,
+      }));
+
+      // Write a fresh outbound log (mtime = now)
+      const outboundPath = join(paths.logDir, 'outbound-messages.jsonl');
+      writeFileSync(outboundPath, JSON.stringify({ ts: new Date().toISOString(), text: 'hi' }) + '\n');
+
+      await (checker as any).stuckPendingCheck();
+
+      // outbound log is fresh — agent is not stuck
+      expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('alerts when pending inbox messages exist and agent has been silent >4h', async () => {
+      const agent = createMockAgent();
+      const api = createMockTelegramApi();
+      const checker = new FastChecker(agent, paths, '/tmp/framework', {
+        telegramApi: api,
+        chatId: '12345',
+      });
+
+      (checker as any).bootstrappedAt = Date.now() - 10 * 60 * 1000;
+
+      // Drop an inbox message file
+      writeFileSync(join(paths.inbox, '1-1713400000000-from-sage-ab12c.json'), JSON.stringify({
+        id: '1713400000000-sage-ab12c',
+        from: 'sage',
+        to: 'test-agent',
+        priority: 'normal',
+        timestamp: new Date().toISOString(),
+        text: 'hello',
+        reply_to: null,
+      }));
+
+      // Write a stale outbound log (mtime = 5 hours ago)
+      const outboundPath = join(paths.logDir, 'outbound-messages.jsonl');
+      writeFileSync(outboundPath, JSON.stringify({ ts: new Date().toISOString(), text: 'old' }) + '\n');
+      const fiveHoursAgo = (Date.now() - 5 * 60 * 60 * 1000) / 1000;
+      require('fs').utimesSync(outboundPath, fiveHoursAgo, fiveHoursAgo);
+
+      await (checker as any).stuckPendingCheck();
+
+      // Should have sent a Telegram alert
+      expect(api.sendMessage).toHaveBeenCalledWith(
+        '12345',
+        expect.stringMatching(/stuck.*1 unread inbox/i),
+      );
+    });
+
+    it('respects the alert cooldown — does not re-alert within 1h', async () => {
+      const agent = createMockAgent();
+      const api = createMockTelegramApi();
+      const checker = new FastChecker(agent, paths, '/tmp/framework', {
+        telegramApi: api,
+        chatId: '12345',
+      });
+
+      (checker as any).bootstrappedAt = Date.now() - 10 * 60 * 1000;
+      // Simulate a recent alert (30 min ago — within the 1h cooldown)
+      (checker as any).stuckPendingAlertedAt = Date.now() - 30 * 60 * 1000;
+
+      // Drop an inbox message file
+      writeFileSync(join(paths.inbox, '1-1713400000000-from-sage-ab12c.json'), JSON.stringify({
+        id: '1713400000000-sage-ab12c',
+        from: 'sage',
+        to: 'test-agent',
+        priority: 'normal',
+        timestamp: new Date().toISOString(),
+        text: 'hello',
+        reply_to: null,
+      }));
+
+      // Stale outbound log
+      const outboundPath = join(paths.logDir, 'outbound-messages.jsonl');
+      writeFileSync(outboundPath, 'old\n');
+      const fiveHoursAgo = (Date.now() - 5 * 60 * 60 * 1000) / 1000;
+      require('fs').utimesSync(outboundPath, fiveHoursAgo, fiveHoursAgo);
+
+      await (checker as any).stuckPendingCheck();
+
+      // Must NOT alert — still within cooldown window
+      expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('does not alert before bootstrap grace period', async () => {
+      const agent = createMockAgent();
+      const api = createMockTelegramApi();
+      const checker = new FastChecker(agent, paths, '/tmp/framework', {
+        telegramApi: api,
+        chatId: '12345',
+      });
+
+      // bootstrappedAt set to 30s ago — still within 2 min grace
+      (checker as any).bootstrappedAt = Date.now() - 30 * 1000;
+
+      writeFileSync(join(paths.inbox, '1-1713400000000-from-sage-ab12c.json'), JSON.stringify({
+        id: '1713400000000-sage-ab12c',
+        from: 'sage',
+        to: 'test-agent',
+        priority: 'normal',
+        timestamp: new Date().toISOString(),
+        text: 'hello',
+        reply_to: null,
+      }));
+
+      await (checker as any).stuckPendingCheck();
+
+      expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  // BUG-079: inbox message ID validation in pollCycle
+  describe('pollCycle inbox ID validation (BUG-079)', () => {
+    it('drops inbox messages with invalid ID patterns without injecting them', async () => {
+      const agent = createMockAgent();
+      const checker = new FastChecker(agent, paths, '/tmp/framework');
+
+      // Simulate checkInbox returning a message with a tampered ID
+      const { checkInbox } = await import('../../../src/bus/message');
+      vi.mock('../../../src/bus/message', async (importOriginal) => {
+        const actual = await importOriginal<typeof import('../../../src/bus/message')>();
+        return {
+          ...actual,
+          checkInbox: vi.fn().mockReturnValue([
+            {
+              id: '../../../etc/passwd',
+              from: 'evil',
+              to: 'test-agent',
+              priority: 'normal',
+              timestamp: new Date().toISOString(),
+              text: 'injected content',
+              reply_to: null,
+            },
+          ]),
+          ackInbox: vi.fn(),
+        };
+      });
+
+      // pollCycle should not inject the message with the bad ID
+      await (checker as any).pollCycle();
+
+      // injectMessage is called on the agent — should NOT have been called
+      // with the tampered message content
+      const injectCalls = agent.injectMessage.mock.calls;
+      const injectedTexts = injectCalls.map((c: any[]) => c[0] as string).join('');
+      expect(injectedTexts).not.toContain('injected content');
+    });
+  });
 });

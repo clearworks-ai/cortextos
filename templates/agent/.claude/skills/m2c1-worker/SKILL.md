@@ -128,6 +128,29 @@ Check inbox:
 cortextos bus check-inbox
 ```
 
+
+## Stuck Detection (self-monitoring)
+
+You must self-monitor for looping behavior. After every tool call, check: is this the same tool call I just made, with the same arguments, multiple times in a row?
+
+If you detect the same tool call repeated 5 or more times consecutively (same tool name, same arguments):
+1. Stop immediately — do not make the call again
+2. Send a stuck alert to <your-agent-name>:
+   ```
+   cortextos bus send-message <your-agent-name> urgent 'STUCK ALERT: Detected repeated tool call loop. Tool: <tool-name>. Args: <args summary>. Repeated 5 times. Pausing for supervisor guidance.'
+   ```
+3. Wait for a bus message from <your-agent-name> before continuing. Check inbox:
+   ```
+   cortextos bus check-inbox
+   ```
+4. Do not resume until the supervisor responds with instructions.
+
+Common stuck patterns to watch for:
+- Repeated `Bash` calls with the same command that keeps failing
+- Repeated `Read` calls on the same file with no subsequent action
+- Repeated `Edit` calls that fail and are retried identically
+- Repeated `WebSearch` calls with the same query
+
 Set environment:
 ```
 export CTX_AGENT_NAME="<worker-name>"
@@ -138,10 +161,34 @@ export CTX_ROOT="$HOME/.cortextos/default"
 
 When you have questions during Phase 3 (Discovery), send them via send-message. Do NOT use AskUserQuestion.
 
+## Planning Phase (REQUIRED before any file writes)
+
+Before writing any code or creating any project files:
+
+1. Read BRAINDUMP.md thoroughly
+2. Write PLAN.md in the project root. Include:
+   - Architecture overview (what you are building, how it fits together)
+   - File list (every file you plan to create or modify, with one-line purpose)
+   - Task breakdown (ordered list of implementation steps)
+   - Risks and open questions
+3. Send PLAN.md content to <your-agent-name>:
+   ```
+   PLAN_CONTENT=$(cat PLAN.md)
+   cortextos bus send-message <your-agent-name> normal "PLAN READY FOR REVIEW
+
+$PLAN_CONTENT"
+   ```
+4. Wait for approval. Check inbox every 60 seconds:
+   ```
+   cortextos bus check-inbox
+   ```
+   Do NOT write any source files until you receive a message containing `PLAN_APPROVED`.
+5. Once approved, read .claude/skills/m2c1/orchestration-workflow.md and begin implementation.
+
 ## Start
 1. Read BRAINDUMP.md
-2. Read .claude/skills/m2c1/orchestration-workflow.md
-3. Begin Phase 0, then Phase 1
+2. Execute the Planning Phase above
+3. After PLAN_APPROVED, begin Phase 0, then Phase 1
 4. Message <your-agent-name> when PRD is ready
 5. Continue autonomously through all phases
 ```
@@ -208,6 +255,30 @@ Base your answers on:
 
 If you do not know the answer, make a reasonable decision and note it. Do not block the worker with "ask the user" unless it is truly a human-only decision.
 
+
+### Reviewing the Worker's Plan (REQUIRED before worker proceeds)
+
+The worker will send a `PLAN READY FOR REVIEW` message with the full PLAN.md content before writing any files. You must review it and respond.
+
+**Review checklist:**
+- Architecture makes sense for the requirements in BRAINDUMP.md
+- File list is complete — no obvious missing pieces
+- Task order is logical — dependencies resolved before dependents
+- No scope creep — worker isn't building more than asked
+- Open questions are addressed or explicitly deferred
+
+**To approve:**
+```bash
+cortextos bus send-message <worker-name> normal 'PLAN_APPROVED. Proceed with implementation.'
+```
+
+**To request changes:**
+```bash
+cortextos bus send-message <worker-name> normal 'PLAN_REJECTED. Revise: <specific feedback>. Resend when updated.'
+```
+
+The worker will not write any source files until it receives `PLAN_APPROVED`. Do not leave it waiting — review promptly.
+
 ### Handling Stuck States
 
 If the worker appears stuck (no bus messages, no new git commits > 15 minutes):
@@ -217,6 +288,35 @@ If the worker appears stuck (no bus messages, no new git commits > 15 minutes):
 3. Inject directly into the PTY if still unresponsive: `cortextos inject-worker <worker-name> "Continue with the M2C1 workflow. What phase are you on?"`
 4. Check worker status: `cortextos list-workers`
 5. If halted: `cortextos terminate-worker <worker-name>` then re-spawn
+
+
+### Handling Worker Stuck Alerts (worker-initiated)
+
+The worker self-monitors for repeated tool call loops and will send you a `STUCK ALERT` message proactively when it detects one. These arrive as urgent priority bus messages.
+
+**When you receive a STUCK ALERT:**
+
+1. Read the alert carefully — it includes the tool name and arguments that are looping
+2. Diagnose the cause:
+   - Permission error? The tool may need a different approach
+   - File not found? The path may be wrong — check it
+   - Infinite retry on a transient error? Tell worker to skip and continue
+   - Wrong approach entirely? Redirect with a different strategy
+
+```bash
+# If the approach is wrong — redirect:
+cortextos bus send-message <worker-name> normal 'Understood. Stop that approach. Instead: <alternative>. Continue from there.'
+
+# If it is a transient error — tell worker to skip:
+cortextos bus send-message <worker-name> normal 'Skip that step for now and continue to the next task. We will revisit.'
+
+# If you need to inspect first:
+cd $PROJECT_DIR && git log --oneline | head -5
+# Then respond with a specific directive
+cortextos bus send-message <worker-name> normal '<directive>'
+```
+
+**Do not send a generic 'continue' message.** The worker is paused because it is genuinely stuck — it needs a specific direction change, not permission to loop again.
 
 ---
 

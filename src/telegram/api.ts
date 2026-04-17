@@ -83,6 +83,9 @@ export function formatValidateError(result: Extract<ValidateCredentialsResult, {
 export class TelegramAPI {
   private baseUrl: string;
   private lastSendTime: Map<string, number> = new Map();
+  // Chat IDs already warned for the self_chat trap. Keeps the runtime
+  // diagnostic emitted at most once per chat_id per process lifetime.
+  private warnedSelfChat: Set<string> = new Set();
 
   constructor(token: string) {
     this.baseUrl = `https://api.telegram.org/bot${token}`;
@@ -206,6 +209,23 @@ export class TelegramAPI {
         // Retry with parse_mode omitted (plain text).
         return await this.post('sendMessage', basePayload);
       }
+      // self_chat safety net: a 403 "bots can't send messages to bots" at
+      // sendMessage time means CHAT_ID likely equals the bot's own user id
+      // (pasted from the BOT_TOKEN prefix during setup). Emit a one-time
+      // diagnostic per chat_id per process so operators see a clear pointer
+      // even when the agent was provisioned before the config-time probe
+      // (validateCredentials) landed. Does NOT change throw behavior.
+      if (/bots can'?t send messages to bots/i.test(msg)) {
+        const key = String(chatId);
+        if (!this.warnedSelfChat.has(key)) {
+          this.warnedSelfChat.add(key);
+          console.warn(
+            `[telegram] self_chat trap likely: chat_id=${key} resolved to another bot. ` +
+            `Check .env — CHAT_ID must be YOUR Telegram user id, not the BOT_TOKEN prefix. ` +
+            `Fix by sending /start to the bot from your own account and reading the chat id via getUpdates.`,
+          );
+        }
+      }
       throw err;
     }
   }
@@ -244,6 +264,7 @@ export class TelegramAPI {
       const response = await fetch(`${this.baseUrl}/sendPhoto`, {
         method: 'POST',
         body: formData,
+        signal: AbortSignal.timeout(60000),
       });
       const result = await response.json() as any;
       if (!result.ok) {
@@ -253,6 +274,9 @@ export class TelegramAPI {
     } catch (err) {
       if (err instanceof Error && err.message.startsWith('Telegram API error')) {
         throw err;
+      }
+      if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+        throw new Error(`Telegram API request timed out after 60s: sendPhoto`);
       }
       throw new Error(`Telegram API request failed: ${err}`);
     }
@@ -291,6 +315,7 @@ export class TelegramAPI {
       const response = await fetch(`${this.baseUrl}/sendDocument`, {
         method: 'POST',
         body: formData,
+        signal: AbortSignal.timeout(60000),
       });
       const result = await response.json() as any;
       if (!result.ok) {
@@ -300,6 +325,9 @@ export class TelegramAPI {
     } catch (err) {
       if (err instanceof Error && err.message.startsWith('Telegram API error')) {
         throw err;
+      }
+      if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+        throw new Error(`Telegram API request timed out after 60s: sendDocument`);
       }
       throw new Error(`Telegram API request failed: ${err}`);
     }
@@ -506,7 +534,7 @@ export class TelegramAPI {
    */
   async downloadFile(filePath: string): Promise<Buffer> {
     const url = `https://api.telegram.org/file/bot${this.getToken()}/${filePath}`;
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
     if (!response.ok) {
       throw new Error(`Failed to download file: ${response.status}`);
     }
@@ -530,6 +558,7 @@ export class TelegramAPI {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
+        signal: AbortSignal.timeout(15000),
       });
       const result = await response.json() as any;
       if (!result.ok) {
@@ -539,6 +568,12 @@ export class TelegramAPI {
     } catch (err) {
       if (err instanceof Error && err.message.startsWith('Telegram API error')) {
         throw err;
+      }
+      // AbortSignal.timeout surfaces as DOMException name=TimeoutError (or AbortError).
+      // Surface as a clean retryable error so the poller loop recovers next tick
+      // instead of silently hanging on a wedged TCP connection.
+      if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+        throw new Error(`Telegram API request timed out after 15s: ${method}`);
       }
       throw new Error(`Telegram API request failed: ${err}`);
     }

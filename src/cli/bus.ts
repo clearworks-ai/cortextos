@@ -21,7 +21,7 @@ import { resolvePaths } from '../utils/paths.js';
 import { resolveEnv } from '../utils/env.js';
 import { IPCClient } from '../daemon/ipc-server.js';
 import { TelegramAPI } from '../telegram/api.js';
-import { logOutboundMessage, cacheLastSent, logParseFallback } from '../telegram/logging.js';
+import { logOutboundMessage, cacheLastSent, logParseFallback, logNarrationFallback } from '../telegram/logging.js';
 import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext } from '../types/index.js';
 
 /**
@@ -942,9 +942,9 @@ busCommand
     }
 
     const api = new TelegramAPI(botToken);
+    let parseFallbackReason: string | null = null;
     try {
       let sentMessageId = 0;
-      let parseFallbackReason: string | null = null;
       if (opts.image) {
         const result = await api.sendPhoto(chatId, opts.image, message);
         sentMessageId = result?.result?.message_id ?? 0;
@@ -979,11 +979,29 @@ busCommand
       console.log('Message sent');
     } catch (err: any) {
       const errMsg = err instanceof Error ? err.message : String(err);
+      const env2 = resolveEnv();
       // BUG-067: if both Markdown and plain-text attempts failed, log failed_both
       if (parseFallbackReason !== null) {
-        const env = resolveEnv();
-        if (env.agentName && env.ctxRoot) {
-          logParseFallback(env.ctxRoot, env.agentName, chatId, message, parseFallbackReason, 'failed_both');
+        if (env2.agentName && env2.ctxRoot) {
+          logParseFallback(env2.ctxRoot, env2.agentName, chatId, message, parseFallbackReason, 'failed_both');
+        }
+      }
+      // BUG-066: log unreachable messages so fast-checker can replay on recovery.
+      // Network/timeout errors are transient — auth/config errors are not retryable.
+      const isNetworkError =
+        /timed out|request failed|ECONNREFUSED|ENOTFOUND|ECONNRESET|network/i.test(errMsg) &&
+        !/Telegram API error/i.test(errMsg);
+      if (isNetworkError && env2.agentName && env2.ctxRoot) {
+        logNarrationFallback(env2.ctxRoot, env2.agentName, chatId, message, errMsg);
+        // Write sentinel so fast-checker can inject a PTY alert
+        try {
+          const { writeFileSync, mkdirSync } = require('fs');
+          const { join } = require('path');
+          const stateDir = join(env2.ctxRoot, 'state', env2.agentName);
+          mkdirSync(stateDir, { recursive: true });
+          writeFileSync(join(stateDir, '.telegram-unreachable'), new Date().toISOString(), 'utf-8');
+        } catch {
+          // Non-critical
         }
       }
       console.error(`Failed to send: ${errMsg}`);

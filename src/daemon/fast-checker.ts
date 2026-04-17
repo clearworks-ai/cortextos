@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, existsSync, writeFileSync, unlinkSync, statSync, openSync, readSync, closeSync } from 'fs';
+import { readdirSync, readFileSync, existsSync, writeFileSync, unlinkSync, statSync, openSync, readSync, closeSync, mkdirSync } from 'fs';
 import { execFile } from 'child_process';
 import { join } from 'path';
 import { createHash } from 'crypto';
@@ -73,6 +73,10 @@ export class FastChecker {
   private readonly NARRATION_MIN_MESSAGES = 2;
   private readonly NARRATION_NUDGE_COOLDOWN_MS = 5 * 60 * 1000;
 
+  // BUG-066: Telegram unreachable fallback — alert agent, replay on recovery
+  private telegramUnreachableAlertedAt: number = 0;
+  private readonly TELEGRAM_UNREACHABLE_ALERT_COOLDOWN_MS = 10 * 60 * 1000;
+
   constructor(
     agent: AgentProcess,
     paths: BusPaths,
@@ -134,6 +138,7 @@ export class FastChecker {
         this.checkUrgentSignal();
         this.watchdogCheck();
         this.parseFallbackCheck();
+        await this.telegramUnreachableCheck();
         await this.pollCycle();
       } catch (err) {
         this.log(`Poll error: ${err}`);
@@ -1117,6 +1122,67 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       this.agent.injectMessage(nudge);
       this.narrationNudgeSentAt = now;
     }
+  }
+
+  /**
+   * BUG-066: Telegram unreachable fallback.
+   * If the agent wrote a .telegram-unreachable sentinel (set by bus send-telegram on
+   * network failure), inject a PTY alert so the agent knows messages weren't delivered.
+   * When Telegram recovers (we can reach getUpdates), replay any pending fallback
+   * entries and clear the sentinel.
+   */
+  async telegramUnreachableCheck(): Promise<void> {
+    if (!this.paths.stateDir) return;
+    const sentinelPath = join(this.paths.stateDir, '.telegram-unreachable');
+    if (!existsSync(sentinelPath)) return;
+
+    const now = Date.now();
+
+    // Try to reach Telegram — if telegramApi is available, check connectivity
+    if (this.telegramApi) {
+      let reachable = false;
+      try {
+        await this.telegramApi.getMe();
+        reachable = true;
+      } catch { /* still unreachable */ }
+
+      if (reachable) {
+        // Replay pending fallback entries
+        const fallbackPath = join(this.paths.logDir, 'narration-fallback.jsonl');
+        if (existsSync(fallbackPath)) {
+          try {
+            const lines = readFileSync(fallbackPath, 'utf-8').split('\n').filter(Boolean);
+            const pending = lines
+              .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+              .filter((e) => e && e.final_status === 'pending');
+
+            if (pending.length > 0) {
+              this.log(`TELEGRAM-RECOVERY: replaying ${pending.length} fallback message(s)`);
+              for (const entry of pending) {
+                try {
+                  await this.telegramApi.sendMessage(entry.chat_id, `[Recovered] ${entry.text}`);
+                } catch { /* best-effort — don't block on replay failure */ }
+              }
+              // Clear fallback log after replay attempt
+              try { unlinkSync(fallbackPath); } catch { /* ignore */ }
+            }
+          } catch { /* non-critical */ }
+        }
+
+        // Remove sentinel — connectivity restored
+        try { unlinkSync(sentinelPath); } catch { /* ignore */ }
+        this.log('TELEGRAM-RECOVERY: connectivity restored, sentinel cleared');
+        return;
+      }
+    }
+
+    // Still unreachable — inject PTY alert once per cooldown
+    if (now - this.telegramUnreachableAlertedAt < this.TELEGRAM_UNREACHABLE_ALERT_COOLDOWN_MS) return;
+
+    this.telegramUnreachableAlertedAt = now;
+    this.log('TELEGRAM-UNREACHABLE: Telegram unreachable — injecting alert to agent');
+    const alert = `=== SYSTEM ALERT ===\nTelegram is unreachable. Your recent send-telegram calls have failed and messages were queued in narration-fallback.jsonl. Do NOT keep trying to send — the daemon will replay queued messages automatically when connectivity is restored. Log notes internally until connectivity is confirmed.\n\n`;
+    this.agent.injectMessage(alert);
   }
 }
 

@@ -4,7 +4,7 @@
  * and last-sent cache (lines 111-113).
  */
 
-import { appendFileSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
+import { appendFileSync, readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'fs';
 import { join, dirname } from 'path';
 
 /**
@@ -133,6 +133,76 @@ export function cacheLastSent(
   const stateDir = join(ctxRoot, 'state', agentName);
   mkdirSync(stateDir, { recursive: true });
   writeFileSync(join(stateDir, `last-telegram-${chatId}.txt`), text, 'utf-8');
+}
+
+/**
+ * Log a message that failed to send because Telegram was unreachable (BUG-066).
+ * Path: {ctxRoot}/logs/{agentName}/narration-fallback.jsonl
+ *
+ * final_status:
+ *   "pending"  — not yet retried
+ *   "replayed" — successfully sent on recovery
+ */
+export function logNarrationFallback(
+  ctxRoot: string,
+  agentName: string,
+  chatId: string | number,
+  text: string,
+  errorMessage: string,
+): void {
+  try {
+    const logDir = join(ctxRoot, 'logs', agentName);
+    mkdirSync(logDir, { recursive: true });
+    const entry = JSON.stringify({
+      ts: new Date().toISOString(),
+      agent: agentName,
+      chat_id: String(chatId),
+      error_message: errorMessage,
+      final_status: 'pending',
+      text,
+    });
+    appendFileSync(join(logDir, 'narration-fallback.jsonl'), entry + '\n', 'utf-8');
+  } catch {
+    // Non-critical — never block on log write failures
+  }
+}
+
+export interface NarrationFallbackEntry {
+  ts: string;
+  agent: string;
+  chat_id: string;
+  error_message: string;
+  final_status: 'pending' | 'replayed';
+  text: string;
+}
+
+/**
+ * Read all pending narration fallback entries for an agent.
+ */
+export function readNarrationFallback(ctxRoot: string, agentName: string): NarrationFallbackEntry[] {
+  const filePath = join(ctxRoot, 'logs', agentName, 'narration-fallback.jsonl');
+  if (!existsSync(filePath)) return [];
+  try {
+    return readFileSync(filePath, 'utf-8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as NarrationFallbackEntry)
+      .filter((e) => e.final_status === 'pending');
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Clear all pending narration fallback entries (after successful replay).
+ */
+export function clearNarrationFallback(ctxRoot: string, agentName: string): void {
+  try {
+    const filePath = join(ctxRoot, 'logs', agentName, 'narration-fallback.jsonl');
+    if (existsSync(filePath)) unlinkSync(filePath);
+  } catch {
+    // Non-critical
+  }
 }
 
 /**

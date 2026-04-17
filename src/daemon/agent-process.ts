@@ -83,9 +83,8 @@ export class AgentProcess {
 
     // Resolve the git root once at construction time. Used by the watchdog for
     // commit-stability tracking and rollback. Null if not inside a git repo.
-    const agentDir = env.agentDir || env.workingDir;
-    if (agentDir) {
-      this.repoRoot = findGitRoot(agentDir);
+    if (env.agentDir) {
+      this.repoRoot = findGitRoot(env.agentDir);
     }
   }
 

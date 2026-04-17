@@ -1092,7 +1092,7 @@ busCommand
       process.exit(1);
     }
 
-    ensureKBDirs(env.instanceId, org);
+    ensureKBDirs(env.instanceId, env.frameworkRoot || process.cwd(), org);
 
     ingestKnowledgeBase(paths, {
       org,

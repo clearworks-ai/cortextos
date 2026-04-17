@@ -265,7 +265,6 @@ export class AgentManager {
       telegramApi,
       chatId,
       allowedUserId: allowedUserId ? parseInt(allowedUserId, 10) : undefined,
-      config,
     });
 
     // Send Telegram notification on crashes and session refreshes

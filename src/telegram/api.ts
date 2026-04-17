@@ -260,26 +260,11 @@ export class TelegramAPI {
       formData.append('reply_markup', JSON.stringify(replyMarkup));
     }
 
-    try {
-      const response = await fetch(`${this.baseUrl}/sendPhoto`, {
-        method: 'POST',
-        body: formData,
-        signal: AbortSignal.timeout(60000),
-      });
-      const result = await response.json() as any;
-      if (!result.ok) {
-        throw new Error(`Telegram API error: ${result.description || 'Unknown error'}`);
-      }
-      return result;
-    } catch (err) {
-      if (err instanceof Error && err.message.startsWith('Telegram API error')) {
-        throw err;
-      }
-      if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
-        throw new Error(`Telegram API request timed out after 60s: sendPhoto`);
-      }
-      throw new Error(`Telegram API request failed: ${err}`);
-    }
+    return this.withTimeout(
+      this.postMultipart('sendPhoto', formData),
+      60000,
+      'Telegram API request',
+    );
   }
 
   /**
@@ -311,26 +296,11 @@ export class TelegramAPI {
       formData.append('reply_markup', JSON.stringify(replyMarkup));
     }
 
-    try {
-      const response = await fetch(`${this.baseUrl}/sendDocument`, {
-        method: 'POST',
-        body: formData,
-        signal: AbortSignal.timeout(60000),
-      });
-      const result = await response.json() as any;
-      if (!result.ok) {
-        throw new Error(`Telegram API error: ${result.description || 'Unknown error'}`);
-      }
-      return result;
-    } catch (err) {
-      if (err instanceof Error && err.message.startsWith('Telegram API error')) {
-        throw err;
-      }
-      if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
-        throw new Error(`Telegram API request timed out after 60s: sendDocument`);
-      }
-      throw new Error(`Telegram API request failed: ${err}`);
-    }
+    return this.withTimeout(
+      this.postMultipart('sendDocument', formData),
+      60000,
+      'Telegram API request',
+    );
   }
 
   /**
@@ -380,6 +350,32 @@ export class TelegramAPI {
       return await Promise.race([promise, timeout]);
     } finally {
       if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Make a multipart/form-data POST request to the Telegram API.
+   */
+  private async postMultipart(method: string, body: FormData): Promise<any> {
+    try {
+      const response = await fetch(`${this.baseUrl}/${method}`, {
+        method: 'POST',
+        body,
+        signal: AbortSignal.timeout(60000),
+      });
+      const result = await response.json() as any;
+      if (!result.ok) {
+        throw new Error(`Telegram API error: ${result.description || 'Unknown error'}`);
+      }
+      return result;
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('Telegram API error')) {
+        throw err;
+      }
+      if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+        throw new Error(`Telegram API request timed out after 60s: ${method}`);
+      }
+      throw new Error(`Telegram API request failed: ${err}`);
     }
   }
 

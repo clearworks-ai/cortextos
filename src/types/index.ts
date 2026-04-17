@@ -207,6 +207,17 @@ export interface AgentConfig {
    * take longer to complete their first boot sequence.
    */
   bootstrap_grace_seconds?: number;
+  /**
+   * Narration watchdog silence window in minutes before the daemon injects
+   * a mandatory progress-update prompt when stdout is still active.
+   * Defaults to 2 minutes.
+   */
+  narration_silence_threshold_minutes?: number;
+  /**
+   * Minimum cooldown in minutes between narration watchdog injections.
+   * Defaults to 5 minutes.
+   */
+  narration_inject_cooldown_minutes?: number;
 }
 
 export interface CronEntry {

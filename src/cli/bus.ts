@@ -21,7 +21,7 @@ import { resolvePaths } from '../utils/paths.js';
 import { resolveEnv } from '../utils/env.js';
 import { IPCClient } from '../daemon/ipc-server.js';
 import { TelegramAPI } from '../telegram/api.js';
-import { logOutboundMessage, cacheLastSent, logParseFallback, logNarrationFallback } from '../telegram/logging.js';
+import { logOutboundMessage, cacheLastSent } from '../telegram/logging.js';
 import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext } from '../types/index.js';
 
 /**
@@ -942,9 +942,9 @@ busCommand
     }
 
     const api = new TelegramAPI(botToken);
-    let parseFallbackReason: string | null = null;
     try {
       let sentMessageId = 0;
+      let parseFallbackReason: string | null = null;
       if (opts.image) {
         const result = await api.sendPhoto(chatId, opts.image, message);
         sentMessageId = result?.result?.message_id ?? 0;
@@ -969,42 +969,12 @@ busCommand
           parseFallback: parseFallbackReason !== null,
           parseFallbackReason: parseFallbackReason ?? undefined,
         });
-        // BUG-067: durable parse-failure record for theta-wave metric tracking
-        if (parseFallbackReason !== null) {
-          logParseFallback(env.ctxRoot, env.agentName, chatId, message, parseFallbackReason, 'sent_plain');
-        }
         cacheLastSent(env.ctxRoot, env.agentName, chatId, message);
       }
 
       console.log('Message sent');
     } catch (err: any) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      const env2 = resolveEnv();
-      // BUG-067: if both Markdown and plain-text attempts failed, log failed_both
-      if (parseFallbackReason !== null) {
-        if (env2.agentName && env2.ctxRoot) {
-          logParseFallback(env2.ctxRoot, env2.agentName, chatId, message, parseFallbackReason, 'failed_both');
-        }
-      }
-      // BUG-066: log unreachable messages so fast-checker can replay on recovery.
-      // Network/timeout errors are transient — auth/config errors are not retryable.
-      const isNetworkError =
-        /timed out|request failed|ECONNREFUSED|ENOTFOUND|ECONNRESET|network/i.test(errMsg) &&
-        !/Telegram API error/i.test(errMsg);
-      if (isNetworkError && env2.agentName && env2.ctxRoot) {
-        logNarrationFallback(env2.ctxRoot, env2.agentName, chatId, message, errMsg);
-        // Write sentinel so fast-checker can inject a PTY alert
-        try {
-          const { writeFileSync, mkdirSync } = require('fs');
-          const { join } = require('path');
-          const stateDir = join(env2.ctxRoot, 'state', env2.agentName);
-          mkdirSync(stateDir, { recursive: true });
-          writeFileSync(join(stateDir, '.telegram-unreachable'), new Date().toISOString(), 'utf-8');
-        } catch {
-          // Non-critical
-        }
-      }
-      console.error(`Failed to send: ${errMsg}`);
+      console.error(`Failed to send: ${err.message || err}`);
       process.exit(1);
     }
   });
@@ -1606,52 +1576,6 @@ busCommand
     }
 
     console.log('soft-restart-all complete.');
-  });
-
-busCommand
-  .command('interrupt-agent')
-  .description('Send SIGINT to a running agent\'s PTY process (BUG-083: soft interrupt without full restart)')
-  .argument('<agent>', 'Agent name to interrupt')
-  .action(async (agent: string) => {
-    const { appendFileSync, mkdirSync } = require('fs');
-    const { join } = require('path');
-    const env = resolveEnv();
-
-    const ipc = new IPCClient(env.instanceId);
-    const daemonRunning = await ipc.isDaemonRunning();
-    if (!daemonRunning) {
-      console.error('ERROR: Node daemon is not running. Start it with: cortextos start');
-      process.exit(1);
-    }
-
-    const resp = await ipc.send({
-      type: 'interrupt-agent',
-      agent,
-      source: 'cortextos bus interrupt-agent',
-    });
-
-    if (resp.success) {
-      const { pid } = (resp.data as { agent: string; pid: number });
-      console.log(`Sent SIGINT to ${agent} (pid ${pid})`);
-
-      // Log the interrupt action to the agent's event log
-      const ctxRoot = require('path').join(require('os').homedir(), '.cortextos', env.instanceId);
-      const logDir = join(ctxRoot, 'logs', agent);
-      mkdirSync(logDir, { recursive: true });
-      const logEntry = JSON.stringify({
-        timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
-        action: 'interrupt-agent',
-        agent,
-        pid,
-        source: 'cortextos bus interrupt-agent',
-      });
-      try {
-        appendFileSync(join(logDir, 'activity.log'), logEntry + '\n');
-      } catch { /* non-fatal */ }
-    } else {
-      console.error(`ERROR: ${resp.error}`);
-      process.exit(1);
-    }
   });
 
 busCommand

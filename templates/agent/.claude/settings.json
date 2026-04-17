@@ -1,6 +1,5 @@
 {
   "permissions": {
-    "defaultMode": "bypassPermissions",
     "allow": [
       "Bash",
       "Read",
@@ -27,21 +26,12 @@
           {
             "type": "command",
             "command": "cortextos bus hook-permission-telegram",
-            "timeout": 120
+            "timeout": 1860
           }
         ]
       }
     ],
     "PreToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cortextos bus hook-loop-detector",
-            "timeout": 5
-          }
-        ]
-      },
       {
         "matcher": "AskUserQuestion",
         "hooks": [
@@ -49,17 +39,6 @@
             "type": "command",
             "command": "cortextos bus hook-ask-telegram",
             "timeout": 10
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cortextos bus hook-session-restore",
-            "timeout": 5
           }
         ]
       }
@@ -93,15 +72,6 @@
             "type": "command",
             "command": "cortextos bus hook-compact-telegram",
             "timeout": 10
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cortextos bus hook-extract-facts",
-            "timeout": 20
           }
         ]
       }

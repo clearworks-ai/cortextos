@@ -14,7 +14,7 @@
  *     broken watchdog loop results in at most one notification, not a buzz
  *     storm.
  */
-import { existsSync, readFileSync, writeFileSync, appendFileSync, unlinkSync, mkdirSync, statSync, chmodSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, appendFileSync, unlinkSync, mkdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
@@ -95,7 +95,6 @@ function shouldSuppressDedup(stateDir: string, endType: string): boolean {
   last[endType] = now;
   try {
     writeFileSync(dedupFile, JSON.stringify(last), 'utf-8');
-    try { chmodSync(dedupFile, 0o600); } catch { /* ignore on unsupported platforms */ }
   } catch { /* ignore */ }
   return false;
 }
@@ -163,7 +162,6 @@ async function main(): Promise<void> {
     }
     try {
       writeFileSync(countFile, `${today}:${crashCount}`, 'utf-8');
-      try { chmodSync(countFile, 0o600); } catch { /* ignore on unsupported platforms */ }
     } catch { /* ignore */ }
   }
 
@@ -178,9 +176,7 @@ async function main(): Promise<void> {
   const timestamp = new Date().toISOString();
   const logLine = `${timestamp} type=${endType} reason=${reason || 'none'} last_task=${lastTask}\n`;
   try {
-    const crashesLog = join(logDir, 'crashes.log');
-    appendFileSync(crashesLog, logLine);
-    try { chmodSync(crashesLog, 0o600); } catch { /* ignore on unsupported platforms */ }
+    appendFileSync(join(logDir, 'crashes.log'), logLine);
   } catch { /* ignore */ }
 
   // Decide whether to actually send to Telegram.

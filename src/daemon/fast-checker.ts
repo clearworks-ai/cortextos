@@ -1,28 +1,16 @@
-import { readdirSync, readFileSync, existsSync, writeFileSync, unlinkSync, statSync, openSync, readSync, closeSync, mkdirSync } from 'fs';
-import { execFile } from 'child_process';
-import { basename, join } from 'path';
+import { readdirSync, readFileSync, existsSync, writeFileSync, unlinkSync, statSync, openSync, readSync, closeSync } from 'fs';
+import { exec } from 'child_process';
+import { join } from 'path';
+import { tmpdir } from 'os';
 import { createHash } from 'crypto';
-import type { InboxMessage, BusPaths, TelegramMessage, TelegramCallbackQuery, AgentConfig } from '../types/index.js';
+import type { InboxMessage, BusPaths, TelegramMessage, TelegramCallbackQuery } from '../types/index.js';
 import { checkInbox, ackInbox } from '../bus/message.js';
-import { updateApproval } from '../bus/approval.js';
-import { detectDayNightMode } from '../bus/heartbeat.js';
 import { AgentProcess } from './agent-process.js';
 import type { TelegramAPI } from '../telegram/api.js';
-import { KEYS, isValidInboxMsgId } from '../pty/inject.js';
-import { atomicWriteSync } from '../utils/atomic.js';
+import { KEYS } from '../pty/inject.js';
 import { stripControlChars } from '../utils/validate.js';
 
 type LogFn = (msg: string) => void;
-
-interface OutboundMessageLogEntry {
-  timestamp?: string;
-}
-
-interface NarrationInjectState {
-  timestamp?: string;
-}
-
-export const NARRATION_INJECT_PROMPT = '\nPlease send a Telegram progress update about what you are currently doing. Format: italic, 1-2 sentences. This is a mandatory narration check.\n';
 
 /**
  * Fast message checker for a single agent.
@@ -41,38 +29,10 @@ export class FastChecker {
   private outboundLogSize: number = 0;
   // Track stdout log size to detect when agent is actively producing output
   private stdoutLogSize: number = -1;
-  // Frozen-stdout + context-exhaustion watchdog state
-  private bootstrappedAt: number = 0;
-  private lastHardRestartAt: number = 0;
-  private stdoutLastSize: number = 0;
-  private stdoutLastChangeAt: number = 0;
-  private watchdogTriggered: boolean = false;
-  // BUG-065: track last watchdog reason to detect repeated identical failures
-  private lastWatchdogReason: string = '';
-  // BUG-064: bootstrap grace is configurable via bootstrap_grace_seconds in
-  // the agent's config.json. Falls back to 2 minutes (the previous hard-coded
-  // value) when the field is absent. Set in the constructor from the supplied
-  // config option (readonly after construction so the hot-path watchdogCheck
-  // never touches the filesystem).
-  private readonly BOOTSTRAP_GRACE_MS: number;
-  private readonly HARD_RESTART_COOLDOWN_MS = 15 * 60 * 1000;
-  // BUG-061: max age for .pending-user-input marker before we ignore it
-  private readonly PENDING_USER_INPUT_MAX_AGE_MS = 30 * 60 * 1000;
-  // 3 min — TUI always emits ANSI codes while healthy; 3min silence = dead PTY
-  private readonly STDOUT_FROZEN_MS = 3 * 60 * 1000;
-  // 6 hours — idle agents (no active Telegram message being processed) produce no
-  // stdout naturally. Only restart if silent this long — cron work resets the clock.
-  private readonly IDLE_FROZEN_MS = 6 * 60 * 60 * 1000;
-  // "Continue / Exit and fix manually" dialog auto-dismiss
-  private dialogAutoResumeAt: number = 0;
-  private dialogAutoResumeCount: number = 0;
-  private readonly DIALOG_AUTO_RESUME_COOLDOWN_MS = 30 * 1000;
   private frameworkRoot: string;
   private telegramApi?: TelegramAPI;
   private chatId?: string;
   private allowedUserId?: number;
-  private readonly config?: AgentConfig;
-  private readonly instanceId: string;
 
   // External Telegram handler (set by daemon)
   private telegramMessages: Array<{ formatted: string; ackIds: string[] }> = [];
@@ -87,27 +47,31 @@ export class FastChecker {
   // Idle-session heartbeat watchdog
   private heartbeatTimer: NodeJS.Timeout | null = null;
 
-  // BUG-068: parse-failure watcher — detect failed_both entries and alert agent
-  private parseFallbackCheckedAt: number = 0;
-
-  private readonly NARRATION_SILENCE_THRESHOLD_MS: number;
-  private readonly NARRATION_INJECT_COOLDOWN_MS: number;
-
-  // BUG-066: Telegram unreachable fallback — alert agent, replay on recovery
-  private telegramUnreachableAlertedAt: number = 0;
-  private readonly TELEGRAM_UNREACHABLE_ALERT_COOLDOWN_MS = 10 * 60 * 1000;
-
-  // BUG-062: Stuck-with-pending detector — agent has unread inbox messages
-  // but has not sent a Telegram message in >4h
-  private stuckPendingAlertedAt: number = 0;
-  private readonly STUCK_PENDING_SILENCE_MS = 4 * 60 * 60 * 1000; // 4 hours
-  private readonly STUCK_PENDING_ALERT_COOLDOWN_MS = 60 * 60 * 1000; // re-alert at most once/hour
+  // Context-exhaustion + frozen-stdout watchdog state
+  private bootstrappedAt: number = 0;
+  private lastHardRestartAt: number = 0;
+  private stdoutLastSize: number = 0;
+  private stdoutLastChangeAt: number = 0;
+  private watchdogTriggered: boolean = false;
+  // Numeric-context ports (from old frank CRM fast-checker.sh)
+  private ctxAlert70Sent: boolean = false;
+  private ctxAlert85Sent: boolean = false;
+  private safetyNetArmed: boolean = false;
+  private readonly BOOTSTRAP_GRACE_MS = 10 * 60 * 1000;
+  private readonly HARD_RESTART_COOLDOWN_MS = 15 * 60 * 1000;
+  private readonly STDOUT_FROZEN_MS = 30 * 60 * 1000;
+  private readonly CTX_RESTART_PCT = 85;
+  private readonly CTX_WARN_PCT = 70;
+  private readonly CTX_EMERGENCY_PCT = 85;
+  private readonly ZOMBIE_TRANSCRIPT_STALE_MS = 15 * 60 * 1000;
+  private readonly ZOMBIE_CTX_MIN_PCT = 50;
+  private readonly BRIDGE_FRESH_MS = 5 * 60 * 1000;
 
   constructor(
     agent: AgentProcess,
     paths: BusPaths,
     frameworkRoot: string,
-    options: { pollInterval?: number; log?: LogFn; telegramApi?: TelegramAPI; chatId?: string; allowedUserId?: number; config?: AgentConfig } = {},
+    options: { pollInterval?: number; log?: LogFn; telegramApi?: TelegramAPI; chatId?: string; allowedUserId?: number } = {},
   ) {
     this.agent = agent;
     this.paths = paths;
@@ -117,30 +81,6 @@ export class FastChecker {
     this.telegramApi = options.telegramApi;
     this.chatId = options.chatId;
     this.allowedUserId = options.allowedUserId;
-    this.config = options.config;
-    this.instanceId = basename(paths.ctxRoot);
-
-    // BUG-064: derive bootstrap grace from agent config, fall back to 2 min
-    const DEFAULT_BOOTSTRAP_GRACE_S = 2 * 60;
-    const graceSeconds =
-      typeof options.config?.bootstrap_grace_seconds === 'number' && options.config.bootstrap_grace_seconds > 0
-        ? options.config.bootstrap_grace_seconds
-        : DEFAULT_BOOTSTRAP_GRACE_S;
-    this.BOOTSTRAP_GRACE_MS = graceSeconds * 1000;
-
-    const narrationSilenceThresholdMinutes =
-      typeof options.config?.narration_silence_threshold_minutes === 'number' &&
-      options.config.narration_silence_threshold_minutes > 0
-        ? options.config.narration_silence_threshold_minutes
-        : 2;
-    this.NARRATION_SILENCE_THRESHOLD_MS = narrationSilenceThresholdMinutes * 60 * 1000;
-
-    const narrationInjectCooldownMinutes =
-      typeof options.config?.narration_inject_cooldown_minutes === 'number' &&
-      options.config.narration_inject_cooldown_minutes > 0
-        ? options.config.narration_inject_cooldown_minutes
-        : 5;
-    this.NARRATION_INJECT_COOLDOWN_MS = narrationInjectCooldownMinutes * 60 * 1000;
 
     // Initialize persistent dedup
     this.dedupFilePath = join(paths.stateDir, '.message-dedup-hashes');
@@ -177,7 +117,7 @@ export class FastChecker {
     const agentName = this.agent.name;
     this.heartbeatTimer = setInterval(() => {
       const ts = new Date().toISOString();
-      execFile('cortextos', ['bus', 'update-heartbeat', `[watchdog] ${agentName} alive — idle session ${ts}`], (err) => {
+      exec(`cortextos bus update-heartbeat "[watchdog] ${agentName} alive — idle session ${ts}"`, (err) => {
         if (err) this.log(`Heartbeat watchdog error: ${err.message}`);
       });
     }, HEARTBEAT_INTERVAL_MS);
@@ -186,11 +126,6 @@ export class FastChecker {
       try {
         // Check for urgent signal file
         this.checkUrgentSignal();
-        this.watchdogCheck();
-        this.checkNarrationSilence(this.agent, this.config, this.instanceId);
-        this.parseFallbackCheck();
-        await this.telegramUnreachableCheck();
-        await this.stuckPendingCheck();
         await this.pollCycle();
       } catch (err) {
         this.log(`Poll error: ${err}`);
@@ -251,20 +186,7 @@ export class FastChecker {
     // Check agent inbox
     const inboxMessages = checkInbox(this.paths);
     for (const msg of inboxMessages) {
-      // BUG-079: Validate message ID before injecting. IDs that don't match the
-      // expected pattern ({epochMs}-{agent}-{rand5}) could indicate a tampered
-      // or corrupted message file — skip and log, but still ACK to prevent
-      // re-delivery loops.
-      if (!isValidInboxMsgId(msg.id)) {
-        this.log(`SECURITY: dropping inbox message with invalid ID pattern: ${msg.id.slice(0, 40)}`);
-        ackIds.push(msg.id);
-        continue;
-      }
-      // BUG-079: Strip control chars from message body before formatting for injection.
-      // The formatInboxMessage output goes into the PTY via injectMessage, which also
-      // strips, but we strip here too so the log line captures the sanitized text.
-      const sanitized: InboxMessage = { ...msg, text: stripControlChars(msg.text) };
-      messageBlock += this.formatInboxMessage(sanitized);
+      messageBlock += this.formatInboxMessage(msg);
       ackIds.push(msg.id);
     }
 
@@ -292,6 +214,214 @@ export class FastChecker {
     if (this.chatId && this.telegramApi && this.isAgentActive()) {
       await this.sendTyping(this.telegramApi, this.chatId);
     }
+
+    // Watchdog: detect ctx-exhaustion survey + frozen stdout
+    this.watchdogCheck();
+  }
+
+  /**
+   * Detect stuck agent and trigger hard-restart.
+   * Ported from CRM fast-checker.sh (FROZEN_RESTART + context-threshold logic).
+   *
+   * Signals:
+   *   1. Numeric context pct from bridge file (gsd-statusline). Graduated
+   *      warnings at 70%/85%, restart at 85% with delay scaled by severity,
+   *      post-restart verification + retry.
+   *   2. Transcript mtime zombie: transcript jsonl > 15min stale AND context
+   *      >= 50% = cooked after real work.
+   *   3. Claude Code's "How is Claude doing this session?" survey prompt.
+   *   4. stdout log unchanged for 30+ min while the agent is "active".
+   */
+  private watchdogCheck(): void {
+    if (this.watchdogTriggered) return;
+    const now = Date.now();
+    if (this.bootstrappedAt === 0 || now - this.bootstrappedAt < this.BOOTSTRAP_GRACE_MS) return;
+    if (this.lastHardRestartAt > 0 && now - this.lastHardRestartAt < this.HARD_RESTART_COOLDOWN_MS) return;
+
+    const stdoutPath = join(this.paths.logDir, 'stdout.log');
+    if (!existsSync(stdoutPath)) return;
+
+    let size: number;
+    try { size = statSync(stdoutPath).size; } catch { return; }
+
+    if (size !== this.stdoutLastSize) {
+      this.stdoutLastSize = size;
+      this.stdoutLastChangeAt = now;
+    }
+
+    // Signal 1: numeric context pct with graduated warnings + scaled grace.
+    const ctxPct = this.readContextPct();
+    if (ctxPct > 0) {
+      if (ctxPct >= this.CTX_WARN_PCT && !this.ctxAlert70Sent && this.telegramApi && this.chatId) {
+        this.ctxAlert70Sent = true;
+        this.log(`WATCHDOG: context at ${ctxPct}% — sending 70pct heads-up`);
+        this.telegramApi
+          .sendMessage(this.chatId, `Heads-up: context at ${ctxPct} percent (threshold ${this.CTX_RESTART_PCT}). Proactive restart will fire at ${this.CTX_RESTART_PCT}.`)
+          .catch(() => { /* non-critical */ });
+      }
+      if (ctxPct >= this.CTX_EMERGENCY_PCT && !this.ctxAlert85Sent && this.telegramApi && this.chatId) {
+        this.ctxAlert85Sent = true;
+        this.log(`WATCHDOG: context at ${ctxPct}% — sending 85pct emergency`);
+        this.telegramApi
+          .sendMessage(this.chatId, `Emergency: context at ${ctxPct} percent. Self-restart first, safety net will force in seconds if no action.`)
+          .catch(() => { /* non-critical */ });
+      }
+      if (ctxPct >= this.CTX_RESTART_PCT) {
+        const delay = this.safetyNetDelayMs(ctxPct);
+        this.log(`WATCHDOG: context ${ctxPct}% >= ${this.CTX_RESTART_PCT}% — arming safety net (delay=${delay}ms)`);
+        this.armSafetyNet(`context at ${ctxPct}%`, delay);
+        return;
+      }
+    }
+
+    // Signal 2: transcript mtime zombie check.
+    const zombie = this.checkTranscriptZombie();
+    if (zombie && ctxPct >= this.ZOMBIE_CTX_MIN_PCT) {
+      this.log(`WATCHDOG: transcript ${zombie.ageSec}s stale at ${ctxPct}% ctx — zombie, hard-restarting`);
+      this.triggerHardRestart(`zombie: transcript ${zombie.ageSec}s stale + ctx ${ctxPct}%`);
+      return;
+    }
+
+    // Signal 3: scan last 20KB of stdout for the session-survey prompt.
+    // Claude Code emits this when context is full ("How is Claude doing this session?").
+    try {
+      const tailBytes = Math.min(20000, size);
+      if (tailBytes > 0) {
+        const fd = openSync(stdoutPath, 'r');
+        const buf = Buffer.alloc(tailBytes);
+        readSync(fd, buf, 0, tailBytes, size - tailBytes);
+        closeSync(fd);
+        const tail = buf.toString('utf-8');
+        if (/How is Claude doing this session\?|Error during compaction: Conversation too long/.test(tail)) {
+          this.log('WATCHDOG: ctx-exhaustion survey prompt detected — hard-restarting');
+          this.triggerHardRestart('ctx exhaustion: session survey prompt in stdout');
+          return;
+        }
+      }
+    } catch { /* non-critical */ }
+
+    // Signal 4: stdout frozen for 30+ min while agent is active.
+    if (
+      this.lastMessageInjectedAt > 0 &&
+      now - this.stdoutLastChangeAt > this.STDOUT_FROZEN_MS &&
+      this.isAgentActive()
+    ) {
+      const stalledSec = Math.round((now - this.stdoutLastChangeAt) / 1000);
+      this.log(`WATCHDOG: stdout frozen for ${stalledSec}s while active — hard-restarting`);
+      this.triggerHardRestart(`frozen: stdout unchanged ${stalledSec}s while active`);
+    }
+  }
+
+  /**
+   * Read numeric context pct from gsd-statusline bridge file.
+   * Returns 0-100, or 0 if bridge missing/stale/invalid.
+   * Prefers raw remaining_percentage over used_pct (avoids autocompact inflation).
+   */
+  private readContextPct(): number {
+    const agentName = this.agent.name;
+    const candidates = [
+      join(tmpdir(), `claude-ctx-agent-${agentName}.json`),
+      `/tmp/claude-ctx-agent-${agentName}.json`,
+    ];
+    for (const bridgePath of candidates) {
+      if (!existsSync(bridgePath)) continue;
+      try {
+        const st = statSync(bridgePath);
+        if (Date.now() - st.mtimeMs > this.BRIDGE_FRESH_MS) continue;
+        const raw = JSON.parse(readFileSync(bridgePath, 'utf-8'));
+        if (typeof raw.remaining_percentage === 'number') {
+          return Math.max(0, Math.min(100, 100 - raw.remaining_percentage));
+        }
+        if (typeof raw.used_pct === 'number') {
+          return Math.max(0, Math.min(100, raw.used_pct));
+        }
+      } catch { /* non-critical */ }
+    }
+    return 0;
+  }
+
+  /**
+   * Check transcript jsonl mtime under ~/.claude/projects/<escaped-cwd>/.
+   * Returns age info if stale >15min AND session is >15min old, else null.
+   * Staleness alone is NOT a zombie — idle agents have stale transcripts by
+   * design. Caller gates on ctx pct.
+   */
+  private checkTranscriptZombie(): { ageSec: number; sessionAgeSec: number } | null {
+    const cwd = this.agent.getWorkingDirectory();
+    if (!cwd) return null;
+    const escaped = cwd.replace(/\//g, '-');
+    const transcriptDir = join(process.env.HOME || '', '.claude', 'projects', escaped);
+    if (!existsSync(transcriptDir)) return null;
+    let latest: { path: string; mtime: number } | null = null;
+    try {
+      for (const name of readdirSync(transcriptDir)) {
+        if (!name.endsWith('.jsonl')) continue;
+        const p = join(transcriptDir, name);
+        const st = statSync(p);
+        if (!latest || st.mtimeMs > latest.mtime) {
+          latest = { path: p, mtime: st.mtimeMs };
+        }
+      }
+    } catch { return null; }
+    if (!latest) return null;
+    const now = Date.now();
+    const ageMs = now - latest.mtime;
+    const sessionAgeMs = this.bootstrappedAt > 0 ? now - this.bootstrappedAt : 0;
+    if (ageMs < this.ZOMBIE_TRANSCRIPT_STALE_MS) return null;
+    if (sessionAgeMs < this.ZOMBIE_TRANSCRIPT_STALE_MS) return null;
+    return { ageSec: Math.round(ageMs / 1000), sessionAgeSec: Math.round(sessionAgeMs / 1000) };
+  }
+
+  /**
+   * Graduated safety net delay: tighter at higher ctx (agent too cooked to
+   * execute bash reliably past ~95%).
+   */
+  private safetyNetDelayMs(ctxPct: number): number {
+    if (ctxPct >= 95) return 20_000;
+    if (ctxPct >= 90) return 45_000;
+    return 120_000;
+  }
+
+  /**
+   * Arm the safety net: inject a self-restart instruction + start a delayed
+   * forced hard-restart. After the forced restart, verify the agent has
+   * bootstrapped again; if not, retry once.
+   */
+  private armSafetyNet(reason: string, delayMs: number): void {
+    if (this.safetyNetArmed) return;
+    this.safetyNetArmed = true;
+    this.watchdogTriggered = true;
+    this.lastHardRestartAt = Date.now();
+
+    const instruction = `SYSTEM: Context threshold reached (${reason}). Before restarting: 1) Write handoff files. 2) Notify Josh via Telegram. 3) Run: cortextos bus hard-restart --reason '${reason}'`;
+    this.agent.injectMessage(instruction);
+
+    setTimeout(() => {
+      this.log(`WATCHDOG: safety net firing forced hard-restart (${reason})`);
+      this.agent.hardRestartSelf(`forced: context threshold not acted on (${reason})`)
+        .catch(e => this.log(`hardRestartSelf failed: ${e}`));
+      // Verify after 90s; retry once if still not bootstrapped.
+      setTimeout(() => {
+        if (!this.agent.isBootstrapped()) {
+          this.log('WATCHDOG: post-restart verification FAILED — retrying restart once');
+          this.agent.hardRestartSelf(`retry: first restart did not bootstrap (${reason})`)
+            .catch(e => this.log(`hardRestartSelf retry failed: ${e}`));
+        } else {
+          this.log('WATCHDOG: post-restart verification PASSED');
+        }
+      }, 90_000);
+    }, delayMs);
+  }
+
+  private triggerHardRestart(reason: string): void {
+    this.watchdogTriggered = true;
+    this.lastHardRestartAt = Date.now();
+    if (this.telegramApi && this.chatId) {
+      this.telegramApi
+        .sendMessage(this.chatId, `Got stuck (${reason}). Hard-restarting now.`)
+        .catch(() => { /* non-critical */ });
+    }
+    this.agent.hardRestartSelf(reason).catch(e => this.log(`hardRestartSelf failed: ${e}`));
   }
 
   /**
@@ -480,96 +610,6 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
   }
 
   /**
-   * Handle a callback from the org's activity-channel bot.
-   *
-   * Runs alongside the agent's primary bot callback handler when the agent
-   * is the org's orchestrator (see agent-manager.ts for the wiring). Only
-   * appr_(allow|deny)_<approvalId> prefixes are accepted here — the
-   * activity-channel bot only ever posts approval buttons, so any other
-   * callback is rejected. The responding API must be the activity-channel
-   * API (not the agent's own bot) so answerCallbackQuery + editMessageText
-   * target the right message on the right bot.
-   */
-  async handleActivityCallback(query: TelegramCallbackQuery, activityApi: TelegramAPI): Promise<void> {
-    const data = stripControlChars(query.data || '');
-    const callbackQueryId = query.id;
-
-    // SECURITY: callbacks must come from the whitelisted user. Identical
-    // check to handleCallback — approval clicks are as sensitive as
-    // permission clicks and the same gate applies.
-    if (this.allowedUserId !== undefined) {
-      const fromUserId = query.from?.id;
-      if (fromUserId !== this.allowedUserId) {
-        this.log(`SECURITY: activity-channel callback from unauthorized user ${fromUserId} - rejecting`);
-        try { await activityApi.answerCallbackQuery(callbackQueryId, 'Not authorized'); } catch { /* ignore */ }
-        return;
-      }
-    }
-
-    const apprMatch = data.match(/^appr_(allow|deny)_(approval_\d+_[a-zA-Z0-9]+)$/);
-    if (!apprMatch) {
-      this.log(`activity-channel callback ignored (unknown prefix): ${data.slice(0, 40)}`);
-      try { await activityApi.answerCallbackQuery(callbackQueryId, 'Unknown button'); } catch { /* ignore */ }
-      return;
-    }
-
-    await this.routeApprovalCallback(apprMatch[1] as 'allow' | 'deny', apprMatch[2], query, activityApi);
-  }
-
-  /**
-   * Shared approval-callback resolution path. Called by both handleCallback
-   * (agent's own bot) and handleActivityCallback (activity-channel bot).
-   *
-   * Resolves the approval via updateApproval (which moves the file from
-   * pending/ to resolved/ and notifies the requesting agent via inbox),
-   * answers the Telegram callback so the spinner stops, and edits the
-   * original message to show who approved/denied for the audit trail.
-   *
-   * `api` is the TelegramAPI that owns the bot the callback came from —
-   * answerCallbackQuery and editMessageText must target the same bot.
-   */
-  private async routeApprovalCallback(
-    decision: 'allow' | 'deny',
-    approvalId: string,
-    query: TelegramCallbackQuery,
-    api: TelegramAPI | undefined,
-  ): Promise<void> {
-    const chatId = query.message?.chat?.id;
-    const messageId = query.message?.message_id;
-    const callbackQueryId = query.id;
-    const status = decision === 'allow' ? 'approved' : 'rejected';
-
-    // Build a friendly audit-trail suffix: "by Alice (@alice)" or just
-    // "by Alice" if no username. Falls back to the Telegram user id if
-    // both are missing (shouldn't happen in practice but guards edge).
-    const firstName = query.from?.first_name;
-    const username = query.from?.username;
-    const auditWho = firstName && username
-      ? `${firstName} (@${username})`
-      : firstName ?? (username ? `@${username}` : `user ${query.from?.id ?? 'unknown'}`);
-    const auditNote = `via Telegram activity channel by ${auditWho}`;
-
-    try {
-      updateApproval(this.paths, approvalId, status, auditNote);
-    } catch (err) {
-      this.log(`Approval callback: updateApproval failed for ${approvalId}: ${err}`);
-      if (api) {
-        try { await api.answerCallbackQuery(callbackQueryId, 'Approval not found or already resolved'); } catch { /* ignore */ }
-      }
-      return;
-    }
-
-    if (api) {
-      try { await api.answerCallbackQuery(callbackQueryId, decision === 'allow' ? 'Approved' : 'Denied'); } catch { /* ignore */ }
-      if (chatId && messageId) {
-        const label = decision === 'allow' ? `✅ Approved by ${auditWho}` : `❌ Denied by ${auditWho}`;
-        try { await api.editMessageText(chatId, messageId, label); } catch { /* ignore */ }
-      }
-    }
-    this.log(`Approval callback: ${decision} for ${approvalId} by ${auditWho}`);
-  }
-
-  /**
    * Handle a Telegram inline button callback query.
    * Routes to permission, restart, or AskUserQuestion handlers.
    */
@@ -587,17 +627,6 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
         this.log(`SECURITY: callback from unauthorized user ${fromUserId} - rejecting`);
         return;
       }
-    }
-
-    // Approval callbacks: appr_(allow|deny)_{approvalId}
-    // These originate from the org's activity channel bot (see
-    // handleActivityCallback) but may also arrive here if an operator
-    // ever routes an approval button through the agent's own bot. The
-    // prefix check is cheap and routing-agnostic.
-    const apprMatch = data.match(/^appr_(allow|deny)_(approval_\d+_[a-zA-Z0-9]+)$/);
-    if (apprMatch) {
-      await this.routeApprovalCallback(apprMatch[1] as 'allow' | 'deny', apprMatch[2], query, this.telegramApi);
-      return;
     }
 
     // Permission callbacks: perm_(allow|deny|continue)_{hexId}
@@ -952,311 +981,6 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     }
   }
 
-  private readPendingUserInputAgeMs(now: number): number | null {
-    const pendingInputPath = join(this.paths.stateDir, '.pending-user-input');
-    if (!existsSync(pendingInputPath)) return null;
-    try {
-      return now - statSync(pendingInputPath).mtimeMs;
-    } catch {
-      return null;
-    }
-  }
-
-  private hasFreshPendingUserInput(now: number): boolean {
-    const markerAgeMs = this.readPendingUserInputAgeMs(now);
-    return markerAgeMs !== null && markerAgeMs < this.PENDING_USER_INPUT_MAX_AGE_MS;
-  }
-
-  private readLastNonEmptyLine(filePath: string): string | null {
-    if (!existsSync(filePath)) return null;
-
-    let fd: number | null = null;
-    try {
-      const size = statSync(filePath).size;
-      if (size === 0) return null;
-
-      fd = openSync(filePath, 'r');
-      const chunkSize = 1024;
-      let position = size;
-      let tail = '';
-
-      while (position > 0) {
-        const bytesToRead = Math.min(chunkSize, position);
-        position -= bytesToRead;
-
-        const buffer = Buffer.alloc(bytesToRead);
-        readSync(fd, buffer, 0, bytesToRead, position);
-        tail = buffer.toString('utf-8') + tail;
-
-        const trimmedTail = tail.replace(/\n+$/, '');
-        if (!trimmedTail) continue;
-
-        const lastNewlineIndex = trimmedTail.lastIndexOf('\n');
-        if (lastNewlineIndex !== -1) {
-          return trimmedTail.slice(lastNewlineIndex + 1).replace(/\r$/, '');
-        }
-      }
-
-      const trimmedTail = tail.replace(/\n+$/, '');
-      return trimmedTail ? trimmedTail.replace(/\r$/, '') : null;
-    } catch {
-      return null;
-    } finally {
-      if (fd !== null) closeSync(fd);
-    }
-  }
-
-  private readLastOutboundTelegramTimestamp(agent: AgentProcess, instanceId: string): number {
-    const outboundPath = join(this.paths.ctxRoot, 'logs', agent.name, 'outbound-messages.jsonl');
-    void instanceId;
-
-    const lastLine = this.readLastNonEmptyLine(outboundPath);
-    if (!lastLine) return 0;
-
-    try {
-      const entry = JSON.parse(lastLine) as OutboundMessageLogEntry;
-      if (typeof entry.timestamp !== 'string') return 0;
-      const parsedTimestamp = new Date(entry.timestamp).getTime();
-      return Number.isFinite(parsedTimestamp) ? parsedTimestamp : 0;
-    } catch {
-      return 0;
-    }
-  }
-
-  private readLastNarrationInjectTimestamp(agent: AgentProcess, instanceId: string): number {
-    const injectStatePath = join(this.paths.ctxRoot, 'state', agent.name, 'last-narration-inject.json');
-    void instanceId;
-
-    if (!existsSync(injectStatePath)) return 0;
-
-    try {
-      const state = JSON.parse(readFileSync(injectStatePath, 'utf-8')) as NarrationInjectState;
-      if (typeof state.timestamp !== 'string') return 0;
-      const parsedTimestamp = new Date(state.timestamp).getTime();
-      return Number.isFinite(parsedTimestamp) ? parsedTimestamp : 0;
-    } catch {
-      return 0;
-    }
-  }
-
-  private writeLastNarrationInjectTimestamp(agent: AgentProcess, instanceId: string, timestamp: string): void {
-    const injectStatePath = join(this.paths.ctxRoot, 'state', agent.name, 'last-narration-inject.json');
-    void instanceId;
-    atomicWriteSync(injectStatePath, JSON.stringify({ timestamp }));
-  }
-
-  private isStdoutActive(agent: AgentProcess, instanceId: string): boolean {
-    const stdoutPath = join(this.paths.ctxRoot, 'logs', agent.name, 'stdout.log');
-    void instanceId;
-
-    try {
-      if (!existsSync(stdoutPath)) {
-        this.stdoutLogSize = 0;
-        return false;
-      }
-
-      const { size } = statSync(stdoutPath);
-      const previousSize = this.stdoutLogSize;
-      this.stdoutLogSize = size;
-      return previousSize >= 0 && size > previousSize;
-    } catch {
-      return false;
-    }
-  }
-
-  private isQuietHours(config: AgentConfig | undefined): boolean {
-    return detectDayNightMode(config?.timezone ?? 'UTC') === 'night';
-  }
-
-  private checkNarrationSilence(agent: AgentProcess, config: AgentConfig | undefined, instanceId: string): void {
-    if (this.bootstrappedAt === 0) return;
-
-    const now = Date.now();
-    const stdoutActive = this.isStdoutActive(agent, instanceId);
-    if (!stdoutActive) return;
-    if (this.hasFreshPendingUserInput(now)) return;
-    if (this.isQuietHours(config)) return;
-
-    const lastOutboundTimestamp = this.readLastOutboundTelegramTimestamp(agent, instanceId);
-    const silenceReferenceTimestamp = Math.max(lastOutboundTimestamp, this.bootstrappedAt);
-    if (now - silenceReferenceTimestamp <= this.NARRATION_SILENCE_THRESHOLD_MS) return;
-
-    const lastInjectTimestamp = this.readLastNarrationInjectTimestamp(agent, instanceId);
-    if (lastInjectTimestamp > 0 && now - lastInjectTimestamp <= this.NARRATION_INJECT_COOLDOWN_MS) return;
-
-    if (!agent.injectMessage(NARRATION_INJECT_PROMPT)) return;
-
-    const injectedAt = new Date(now).toISOString();
-    this.writeLastNarrationInjectTimestamp(agent, instanceId, injectedAt);
-    this.log(`NARRATION-WATCHDOG: injected narration check after ${Math.round((now - silenceReferenceTimestamp) / 1000)}s of Telegram silence`);
-
-    execFile(
-      'cortextos',
-      ['bus', 'log-event', 'action', 'narration_inject', 'info', '--agent', agent.name],
-      (err) => {
-        if (err) this.log(`NARRATION-WATCHDOG: log-event failed: ${err.message}`);
-      },
-    );
-  }
-
-  /**
-   * Detect frozen stdout or context-exhaustion and trigger a hard-restart.
-   * Two signals:
-   *   1. Claude Code's "How is Claude doing this session?" survey — ctx exhausted.
-   *   2. stdout unchanged for STDOUT_FROZEN_MS (active) or IDLE_FROZEN_MS (idle).
-   */
-  private watchdogCheck(): void {
-    const now = Date.now();
-    if (this.bootstrappedAt === 0 || now - this.bootstrappedAt < this.BOOTSTRAP_GRACE_MS) return;
-
-    // BUG-065: when in cooldown, check if the same failure class is being
-    // triggered again (indicating a stuck restart loop) and escalate.
-    if (this.watchdogTriggered) {
-      // Determine current failure signals so we can compare against lastWatchdogReason
-      const stdoutPath = join(this.paths.logDir, 'stdout.log');
-      if (existsSync(stdoutPath)) {
-        try {
-          const sz = statSync(stdoutPath).size;
-          const tailBytes = Math.min(20000, sz);
-          if (tailBytes > 0) {
-            const fd = openSync(stdoutPath, 'r');
-            const buf = Buffer.alloc(tailBytes);
-            readSync(fd, buf, 0, tailBytes, sz - tailBytes);
-            closeSync(fd);
-            const tail = buf.toString('utf-8');
-            if (/How is Claude doing this session\?/.test(tail)) {
-              this.watchdogRepeatCheck('ctx exhaustion: session survey prompt in stdout');
-            } else if (now - this.stdoutLastChangeAt > this.STDOUT_FROZEN_MS) {
-              const stalledSec = Math.round((now - this.stdoutLastChangeAt) / 1000);
-              this.watchdogRepeatCheck(`frozen: stdout unchanged ${stalledSec}s`);
-            }
-          }
-        } catch { /* non-critical */ }
-      }
-      return;
-    }
-
-    if (this.lastHardRestartAt > 0 && now - this.lastHardRestartAt < this.HARD_RESTART_COOLDOWN_MS) return;
-
-    const stdoutPath = join(this.paths.logDir, 'stdout.log');
-    if (!existsSync(stdoutPath)) return;
-
-    let size: number;
-    try { size = statSync(stdoutPath).size; } catch { return; }
-
-    if (size !== this.stdoutLastSize) {
-      this.stdoutLastSize = size;
-      this.stdoutLastChangeAt = now;
-    }
-
-    // Signal 1: ctx-exhaustion survey prompt in last 20KB of stdout
-    try {
-      const tailBytes = Math.min(20000, size);
-      if (tailBytes > 0) {
-        const fd = openSync(stdoutPath, 'r');
-        const buf = Buffer.alloc(tailBytes);
-        readSync(fd, buf, 0, tailBytes, size - tailBytes);
-        closeSync(fd);
-        if (/How is Claude doing this session\?/.test(buf.toString('utf-8'))) {
-          this.log('WATCHDOG: ctx-exhaustion survey detected — hard-restarting');
-          this.triggerHardRestart('ctx exhaustion: session survey prompt in stdout');
-          return;
-        }
-      }
-    } catch { /* non-critical */ }
-
-    // Signal 2: "Continue / Exit and fix manually" error-recovery dialog — auto-dismiss
-    try {
-      const dialogTailBytes = Math.min(4000, size);
-      if (dialogTailBytes > 0) {
-        const dfd = openSync(stdoutPath, 'r');
-        const dbuf = Buffer.alloc(dialogTailBytes);
-        readSync(dfd, dbuf, 0, dialogTailBytes, size - dialogTailBytes);
-        closeSync(dfd);
-        if (/Exit and fix manually/.test(dbuf.toString('utf-8'))) {
-          const nowD = Date.now();
-          if (nowD - this.dialogAutoResumeAt > this.DIALOG_AUTO_RESUME_COOLDOWN_MS) {
-            this.dialogAutoResumeAt = nowD;
-            this.dialogAutoResumeCount++;
-            if (this.dialogAutoResumeCount <= 3) {
-              this.log(`WATCHDOG: dialog auto-dismiss (attempt ${this.dialogAutoResumeCount}) — pressing Enter to continue`);
-              this.agent.write(KEYS.ENTER);
-              this.stdoutLastChangeAt = nowD;
-            } else {
-              this.log('WATCHDOG: dialog auto-dismiss exceeded 3 attempts — hard-restarting');
-              this.triggerHardRestart('dialog loop: "Exit and fix manually" repeated >3 times');
-            }
-          }
-          return;
-        }
-      }
-    } catch { /* non-critical */ }
-
-    // Signal 3: stdout frozen — hard restart.
-    // Active agents (processing a Telegram message): restart after STDOUT_FROZEN_MS (3 min).
-    // Idle agents (no active message): stdout is naturally silent. Use IDLE_FROZEN_MS (6h)
-    // so idle sessions survive overnight without looping. Cron work produces stdout and
-    // resets the clock, so any real freeze during a cron is still caught at 3 min.
-    const frozenThresholdMs = this.isAgentActive() ? this.STDOUT_FROZEN_MS : this.IDLE_FROZEN_MS;
-    if (now - this.stdoutLastChangeAt > frozenThresholdMs) {
-      const stalledSec = Math.round((now - this.stdoutLastChangeAt) / 1000);
-
-      // BUG-061: skip frozen restart if agent is waiting for an AskUserQuestion response.
-      // Check for .pending-user-input marker in the agent's state directory.
-      // If it exists and is <30 minutes old, the agent is legitimately blocked on
-      // user input — do NOT hard-restart or we'll kill the pending question.
-      const markerAgeMs = this.readPendingUserInputAgeMs(now);
-      if (markerAgeMs !== null) {
-        if (markerAgeMs < this.PENDING_USER_INPUT_MAX_AGE_MS) {
-          const markerAgeSec = Math.round(markerAgeMs / 1000);
-          this.log(`WATCHDOG: stdout frozen ${stalledSec}s but .pending-user-input is ${markerAgeSec}s old — skipping restart, waiting on user input`);
-          return;
-        }
-        // Marker is stale (>=30 min) — ignore it and proceed with restart
-        this.log(`WATCHDOG: .pending-user-input exists but is stale (${Math.round(markerAgeMs / 60000)}min old) — proceeding with restart`);
-      }
-
-      this.log(`WATCHDOG: stdout frozen ${stalledSec}s — hard-restarting`);
-      this.triggerHardRestart(`frozen: stdout unchanged ${stalledSec}s`);
-    }
-  }
-
-  private triggerHardRestart(reason: string): void {
-    this.watchdogTriggered = true;
-    this.lastHardRestartAt = Date.now();
-    this.lastWatchdogReason = reason;
-    if (this.telegramApi && this.chatId) {
-      this.telegramApi
-        .sendMessage(this.chatId, `Got stuck (${reason}). Hard-restarting now.`)
-        .catch(() => { /* non-critical */ });
-    }
-    this.agent.hardRestartSelf(reason).catch(e => this.log(`hardRestartSelf failed: ${e}`));
-    // Reset so the watchdog can fire again after cooldown
-    setTimeout(() => { this.watchdogTriggered = false; }, this.HARD_RESTART_COOLDOWN_MS);
-  }
-
-  /**
-   * BUG-065: Called at the top of watchdogCheck() when watchdogTriggered is true.
-   * If the same failure reason fires again within the cooldown window, escalate:
-   * log at ERROR severity and send a Telegram alert. Different reasons (e.g. a new
-   * ctx-exhaustion after a frozen-stdout) are normal and silently ignored as before.
-   */
-  private watchdogRepeatCheck(currentReason: string): void {
-    if (!this.lastWatchdogReason) return;
-    // Normalize: compare the type prefix only (before the colon) so minor
-    // variations like different stall durations ("frozen: stdout unchanged 620s"
-    // vs "frozen: stdout unchanged 660s") still count as the same failure class.
-    const typeOf = (r: string) => r.split(':')[0].trim();
-    if (typeOf(currentReason) === typeOf(this.lastWatchdogReason)) {
-      this.log(`WATCHDOG-ESCALATION: same failure class "${typeOf(currentReason)}" repeated within cooldown window — agent may be stuck in a restart loop`);
-      if (this.telegramApi && this.chatId) {
-        this.telegramApi
-          .sendMessage(this.chatId, `ALERT: ${this.agent.name} has failed with the same reason ("${typeOf(currentReason)}") again within the cooldown window. It may be stuck in a restart loop. Manual intervention may be needed.`)
-          .catch(() => { /* non-critical */ });
-      }
-    }
-  }
-
   /**
    * Check if the agent is actively working on a response (typing indicator).
    *
@@ -1314,179 +1038,6 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       return this.lastMessageInjectedAt > idleTs;
     } catch {
       return true; // Can't read flag — assume still active
-    }
-  }
-
-  /**
-   * BUG-068: Poll telegram-parse-failures.jsonl for failed_both entries since
-   * last check. On detection, inject a system alert to the PTY so the agent
-   * knows it is fully dark (not just format-degraded).
-   */
-  private parseFallbackCheck(): void {
-    if (this.bootstrappedAt === 0) return;
-
-    const failurePath = join(this.paths.logDir, 'telegram-parse-failures.jsonl');
-    if (!existsSync(failurePath)) return;
-
-    try {
-      const content = readFileSync(failurePath, 'utf-8');
-      const lines = content.trim().split('\n').filter(Boolean);
-      const now = Date.now();
-      let foundFailedBoth = false;
-      let lastError = '';
-
-      for (const line of lines) {
-        try {
-          const entry = JSON.parse(line) as { ts?: string; final_status?: string; error_message?: string };
-          const entryTs = entry.ts ? new Date(entry.ts).getTime() : 0;
-          if (entryTs > this.parseFallbackCheckedAt && entry.final_status === 'failed_both') {
-            foundFailedBoth = true;
-            lastError = entry.error_message ?? 'unknown error';
-          }
-        } catch { /* skip malformed lines */ }
-      }
-
-      this.parseFallbackCheckedAt = now;
-
-      if (foundFailedBoth) {
-        this.log('PARSE-FAILURE-WATCHER: failed_both detected — injecting alert to agent');
-        const alert = `=== SYSTEM ALERT ===\nYour last Telegram message failed to send (both Markdown and plain text attempts failed). Error: ${lastError}. Telegram may be unreachable. Use plain text only and check connectivity, or notify Josh via another channel if available.\n\n`;
-        this.agent.injectMessage(alert);
-      }
-    } catch { /* non-critical */ }
-  }
-
-  /**
-   * BUG-066: Telegram unreachable fallback.
-   * If the agent wrote a .telegram-unreachable sentinel (set by bus send-telegram on
-   * network failure), inject a PTY alert so the agent knows messages weren't delivered.
-   * When Telegram recovers (we can reach getUpdates), replay any pending fallback
-   * entries and clear the sentinel.
-   */
-  async telegramUnreachableCheck(): Promise<void> {
-    if (!this.paths.stateDir) return;
-    const sentinelPath = join(this.paths.stateDir, '.telegram-unreachable');
-    if (!existsSync(sentinelPath)) return;
-
-    const now = Date.now();
-
-    // Try to reach Telegram — if telegramApi is available, check connectivity
-    if (this.telegramApi) {
-      let reachable = false;
-      try {
-        await this.telegramApi.getMe();
-        reachable = true;
-      } catch { /* still unreachable */ }
-
-      if (reachable) {
-        // Replay pending fallback entries
-        const fallbackPath = join(this.paths.logDir, 'narration-fallback.jsonl');
-        if (existsSync(fallbackPath)) {
-          try {
-            const lines = readFileSync(fallbackPath, 'utf-8').split('\n').filter(Boolean);
-            const pending = lines
-              .map((l) => { try { return JSON.parse(l); } catch { return null; } })
-              .filter((e) => e && e.final_status === 'pending');
-
-            if (pending.length > 0) {
-              this.log(`TELEGRAM-RECOVERY: replaying ${pending.length} fallback message(s)`);
-              for (const entry of pending) {
-                try {
-                  await this.telegramApi.sendMessage(entry.chat_id, `[Recovered] ${entry.text}`);
-                } catch { /* best-effort — don't block on replay failure */ }
-              }
-              // Clear fallback log after replay attempt
-              try { unlinkSync(fallbackPath); } catch { /* ignore */ }
-            }
-          } catch { /* non-critical */ }
-        }
-
-        // Remove sentinel — connectivity restored
-        try { unlinkSync(sentinelPath); } catch { /* ignore */ }
-        this.log('TELEGRAM-RECOVERY: connectivity restored, sentinel cleared');
-        return;
-      }
-    }
-
-    // Still unreachable — inject PTY alert once per cooldown
-    if (now - this.telegramUnreachableAlertedAt < this.TELEGRAM_UNREACHABLE_ALERT_COOLDOWN_MS) return;
-
-    this.telegramUnreachableAlertedAt = now;
-    this.log('TELEGRAM-UNREACHABLE: Telegram unreachable — injecting alert to agent');
-    const alert = `=== SYSTEM ALERT ===\nTelegram is unreachable. Your recent send-telegram calls have failed and messages were queued in narration-fallback.jsonl. Do NOT keep trying to send — the daemon will replay queued messages automatically when connectivity is restored. Log notes internally until connectivity is confirmed.\n\n`;
-    this.agent.injectMessage(alert);
-  }
-
-  /**
-   * BUG-062: Stuck-with-pending detector.
-   *
-   * An agent is considered "stuck" when:
-   *   1. There are >0 unread inbox messages pending delivery, AND
-   *   2. The agent has not sent a Telegram message in >4h
-   *      (measured by outbound-messages.jsonl last-modified time)
-   *
-   * When detected: log a warning event and send a Telegram alert to the
-   * orchestrator (uses this.telegramApi + this.chatId, which for worker
-   * agents are wired to the orchestrator's bot for alerting).
-   *
-   * Alert is rate-limited to once per STUCK_PENDING_ALERT_COOLDOWN_MS.
-   */
-  async stuckPendingCheck(): Promise<void> {
-    if (this.bootstrappedAt === 0) return;
-    const now = Date.now();
-    if (now - this.bootstrappedAt < this.BOOTSTRAP_GRACE_MS) return;
-    if (now - this.stuckPendingAlertedAt < this.STUCK_PENDING_ALERT_COOLDOWN_MS) return;
-
-    // Count unread inbox messages (files in inbox dir, not yet moved to inflight)
-    let pendingCount = 0;
-    try {
-      const files = readdirSync(this.paths.inbox).filter(
-        (f) => f.endsWith('.json') && !f.startsWith('.'),
-      );
-      pendingCount = files.length;
-    } catch { /* inbox dir may not exist yet — treat as 0 */ }
-
-    if (pendingCount === 0) return;
-
-    // Check last outbound Telegram send time via outbound-messages.jsonl mtime
-    const outboundPath = join(this.paths.logDir, 'outbound-messages.jsonl');
-    let lastOutboundMs = 0;
-    try {
-      if (existsSync(outboundPath)) {
-        lastOutboundMs = statSync(outboundPath).mtimeMs;
-      }
-    } catch { /* non-critical */ }
-
-    const silentMs = lastOutboundMs > 0 ? now - lastOutboundMs : now - this.bootstrappedAt;
-    if (silentMs < this.STUCK_PENDING_SILENCE_MS) return;
-
-    // Agent is stuck: has pending inbox messages and hasn't sent Telegram in >4h
-    const silentHours = (silentMs / 1000 / 3600).toFixed(1);
-    this.stuckPendingAlertedAt = now;
-    this.log(
-      `STUCK-PENDING: ${pendingCount} unread inbox message(s), no Telegram output for ${silentHours}h — alerting orchestrator`,
-    );
-
-    // Log a warning event for fleet monitoring visibility
-    execFile(
-      'cortextos',
-      [
-        'bus', 'log-event', 'error', 'agent_stuck', 'warning',
-        '--meta', JSON.stringify({ agent: this.agent.name, pending_count: pendingCount, silent_hours: parseFloat(silentHours) }),
-      ],
-      (err) => { if (err) this.log(`STUCK-PENDING: log-event failed: ${err.message}`); },
-    );
-
-    // Send Telegram alert to orchestrator if configured
-    if (this.telegramApi && this.chatId) {
-      try {
-        await this.telegramApi.sendMessage(
-          this.chatId,
-          `ALERT: Agent ${this.agent.name} appears stuck. It has ${pendingCount} unread inbox message(s) but has not sent a Telegram message in ${silentHours}h. Check the agent or run a soft-restart.`,
-        );
-      } catch (err) {
-        this.log(`STUCK-PENDING: Telegram alert failed: ${err}`);
-      }
     }
   }
 }

@@ -27,7 +27,7 @@
           {
             "type": "command",
             "command": "cortextos bus hook-permission-telegram",
-            "timeout": 1860
+            "timeout": 120
           }
         ]
       }

@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, existsSync, writeFileSync, unlinkSync, statS
 import { execFile } from 'child_process';
 import { join } from 'path';
 import { createHash } from 'crypto';
-import type { InboxMessage, BusPaths, TelegramMessage, TelegramCallbackQuery } from '../types/index.js';
+import type { InboxMessage, BusPaths, TelegramMessage, TelegramCallbackQuery, AgentConfig } from '../types/index.js';
 import { checkInbox, ackInbox } from '../bus/message.js';
 import { updateApproval } from '../bus/approval.js';
 import { AgentProcess } from './agent-process.js';
@@ -37,7 +37,12 @@ export class FastChecker {
   private watchdogTriggered: boolean = false;
   // BUG-065: track last watchdog reason to detect repeated identical failures
   private lastWatchdogReason: string = '';
-  private readonly BOOTSTRAP_GRACE_MS = 2 * 60 * 1000;
+  // BUG-064: bootstrap grace is configurable via bootstrap_grace_seconds in
+  // the agent's config.json. Falls back to 2 minutes (the previous hard-coded
+  // value) when the field is absent. Set in the constructor from the supplied
+  // config option (readonly after construction so the hot-path watchdogCheck
+  // never touches the filesystem).
+  private readonly BOOTSTRAP_GRACE_MS: number;
   private readonly HARD_RESTART_COOLDOWN_MS = 15 * 60 * 1000;
   // BUG-061: max age for .pending-user-input marker before we ignore it
   private readonly PENDING_USER_INPUT_MAX_AGE_MS = 30 * 60 * 1000;
@@ -91,7 +96,7 @@ export class FastChecker {
     agent: AgentProcess,
     paths: BusPaths,
     frameworkRoot: string,
-    options: { pollInterval?: number; log?: LogFn; telegramApi?: TelegramAPI; chatId?: string; allowedUserId?: number } = {},
+    options: { pollInterval?: number; log?: LogFn; telegramApi?: TelegramAPI; chatId?: string; allowedUserId?: number; config?: AgentConfig } = {},
   ) {
     this.agent = agent;
     this.paths = paths;
@@ -101,6 +106,14 @@ export class FastChecker {
     this.telegramApi = options.telegramApi;
     this.chatId = options.chatId;
     this.allowedUserId = options.allowedUserId;
+
+    // BUG-064: derive bootstrap grace from agent config, fall back to 2 min
+    const DEFAULT_BOOTSTRAP_GRACE_S = 2 * 60;
+    const graceSeconds =
+      typeof options.config?.bootstrap_grace_seconds === 'number' && options.config.bootstrap_grace_seconds > 0
+        ? options.config.bootstrap_grace_seconds
+        : DEFAULT_BOOTSTRAP_GRACE_S;
+    this.BOOTSTRAP_GRACE_MS = graceSeconds * 1000;
 
     // Initialize persistent dedup
     this.dedupFilePath = join(paths.stateDir, '.message-dedup-hashes');

@@ -1120,6 +1120,72 @@ describe('FastChecker', () => {
     });
   });
 
+  // BUG-064: configurable bootstrap grace period
+  describe('BOOTSTRAP_GRACE_MS (BUG-064)', () => {
+    it('defaults to 120 000 ms (2 min) when no config is provided', () => {
+      const agent = createMockAgent();
+      const checker = new FastChecker(agent, paths, '/tmp/framework');
+      expect((checker as any).BOOTSTRAP_GRACE_MS).toBe(2 * 60 * 1000);
+    });
+
+    it('defaults to 120 000 ms when config is provided but bootstrap_grace_seconds is absent', () => {
+      const agent = createMockAgent();
+      const checker = new FastChecker(agent, paths, '/tmp/framework', {
+        config: { max_session_seconds: 3600 },
+      });
+      expect((checker as any).BOOTSTRAP_GRACE_MS).toBe(2 * 60 * 1000);
+    });
+
+    it('uses bootstrap_grace_seconds from config when set', () => {
+      const agent = createMockAgent();
+      const checker = new FastChecker(agent, paths, '/tmp/framework', {
+        config: { bootstrap_grace_seconds: 600 },
+      });
+      expect((checker as any).BOOTSTRAP_GRACE_MS).toBe(600 * 1000);
+    });
+
+    it('falls back to 2 min when bootstrap_grace_seconds is 0 (invalid)', () => {
+      const agent = createMockAgent();
+      const checker = new FastChecker(agent, paths, '/tmp/framework', {
+        config: { bootstrap_grace_seconds: 0 },
+      });
+      expect((checker as any).BOOTSTRAP_GRACE_MS).toBe(2 * 60 * 1000);
+    });
+
+    it('falls back to 2 min when bootstrap_grace_seconds is negative', () => {
+      const agent = createMockAgent();
+      const checker = new FastChecker(agent, paths, '/tmp/framework', {
+        config: { bootstrap_grace_seconds: -30 },
+      });
+      expect((checker as any).BOOTSTRAP_GRACE_MS).toBe(2 * 60 * 1000);
+    });
+
+    it('watchdogCheck respects extended grace period (e.g. 10 min)', () => {
+      const agent = createMockAgent();
+      agent.hardRestartSelf = vi.fn().mockResolvedValue(undefined);
+      const api = createMockTelegramApi();
+      const checker = new FastChecker(agent, paths, '/tmp/framework', {
+        telegramApi: api,
+        chatId: '12345',
+        config: { bootstrap_grace_seconds: 600 }, // 10 min
+      });
+
+      // Bootstrapped 5 min ago — within the 10 min grace, watchdog should be silent
+      (checker as any).bootstrappedAt = Date.now() - 5 * 60 * 1000;
+
+      const stdoutPath = join(paths.logDir, 'stdout.log');
+      writeFileSync(stdoutPath, 'some output\n');
+      (checker as any).stdoutLastSize = 12;
+      (checker as any).stdoutLastChangeAt = Date.now() - 11 * 60 * 1000;
+
+      (checker as any).watchdogCheck();
+
+      // Must NOT trigger — still inside extended grace window
+      expect(agent.hardRestartSelf).not.toHaveBeenCalled();
+      expect((checker as any).watchdogTriggered).toBe(false);
+    });
+  });
+
   // BUG-079: inbox message ID validation in pollCycle
   describe('pollCycle inbox ID validation (BUG-079)', () => {
     it('drops inbox messages with invalid ID patterns without injecting them', async () => {

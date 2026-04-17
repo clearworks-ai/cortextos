@@ -186,8 +186,66 @@ export class AgentProcess {
       this.notifyStatusChange();
     } catch (err) {
       this.log(`Failed to start: ${err}`);
+
+      // BUG-063 fix: replicate handleExit crash recovery on spawn failure.
+      //
+      // Previously, a pty.spawn() throw left the agent in 'crashed' state with
+      // no restart scheduled — the daemon would never attempt recovery. Now we
+      // mirror handleExit's behaviour: increment the crash counter, respect the
+      // daily crash limit, apply exponential backoff, and schedule a restart.
+      //
+      // Double-trigger guard: some PTY implementations emit an exit event even
+      // when spawn() throws. We bump lifecycleGeneration below so the onExit
+      // closure captured above finds myGeneration !== this.lifecycleGeneration
+      // and bails out without calling handleExit a second time.
+      this.pty = null;
+      // BUG-063: bump the generation counter so the onExit closure captured
+      // above will find `myGeneration !== this.lifecycleGeneration` and bail
+      // out early without calling handleExit. This is the authoritative guard
+      // against double-counting crashes when a PTY implementation emits an
+      // exit event even after spawn() throws.
+      this.lifecycleGeneration++;
+
+      // Mirror handleExit: increment first, then let resetCrashCountIfNewDay
+      // apply the day-boundary reset. Without the pre-increment, crashCount
+      // stays 0 when no .crash_count_today file exists (the file's existsSync
+      // guard skips the assignment) so the halt check below would never fire.
+      this.crashCount++;
+      const today = new Date().toISOString().split('T')[0];
+      this.resetCrashCountIfNewDay(today);
+
+      if (this.crashCount >= this.maxCrashesPerDay) {
+        this.log(`HALTED: exceeded ${this.maxCrashesPerDay} crashes today (spawn failure)`);
+        this.appendCrashToRestartsLog(-1, 0, 'HALTED');
+        this.status = 'halted';
+        this.notifyStatusChange();
+        return;
+      }
+
+      const stateDir2 = join(this.env.ctxRoot, 'state', this.name);
+      recordFailure(stateDir2, this.repoRoot);
+
+      if (this.repoRoot && shouldRollback(stateDir2, this.repoRoot)) {
+        this.log(`Watchdog: commit unstable after spawn failure — performing git rollback`);
+        const result = performRollback(stateDir2, this.repoRoot);
+        if (result.success) {
+          this.log(`Watchdog: rolled back to ${result.rolledBackTo.slice(0, 12)}${result.stashRef ? `, stash: ${result.stashRef}` : ''}`);
+        } else {
+          this.log(`Watchdog: rollback failed — ${result.reason}`);
+        }
+      }
+
+      const backoff = Math.min(5000 * Math.pow(2, this.crashCount - 1), 300000);
+      this.log(`Spawn failure crash recovery: restart in ${backoff / 1000}s (crash #${this.crashCount})`);
+      this.appendCrashToRestartsLog(-1, backoff, 'CRASH');
       this.status = 'crashed';
       this.notifyStatusChange();
+
+      setTimeout(() => {
+        if (this.status === 'crashed') {
+          this.start().catch(e => this.log(`Restart after spawn failure failed: ${e}`));
+        }
+      }, backoff);
     }
   }
 

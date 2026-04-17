@@ -393,3 +393,90 @@ describe('AgentProcess - BUG-048 fix (session timer re-reads config)', () => {
     expect(refreshSpy).not.toHaveBeenCalled();
   });
 });
+
+describe('AgentProcess - BUG-063 fix (spawn failure crash recovery)', () => {
+  beforeEach(() => {
+    // Restore default (non-throwing) spawn for each test
+    mockPty.spawn.mockResolvedValue(undefined);
+  });
+
+  it('enters crashed state and schedules restart when pty.spawn() throws', async () => {
+    mockPty.spawn.mockRejectedValueOnce(new Error('PTY spawn failed'));
+
+    vi.useFakeTimers();
+    try {
+      const ap = new AgentProcess('alice', mockEnv, {});
+      await ap.start();
+
+      // Spawn threw — agent must be in 'crashed' state, not 'starting'
+      expect(ap.getStatus().status).toBe('crashed');
+
+      // After the backoff timer fires the restart should be attempted
+      // (first crash → 5s backoff). Make spawn succeed this time.
+      mockPty.spawn.mockResolvedValue(undefined);
+      await vi.advanceTimersByTimeAsync(6000);
+
+      expect(ap.getStatus().status).toBe('running');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('writes a CRASH line to restarts.log when spawn throws', async () => {
+    mockPty.spawn.mockRejectedValueOnce(new Error('PTY spawn failed'));
+
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+
+    expect(ap.getStatus().status).toBe('crashed');
+    // appendFileSync called exactly once with a CRASH entry
+    expect(fsMocks.appendFileSync).toHaveBeenCalledTimes(1);
+    const [logPath, logLine] = fsMocks.appendFileSync.mock.calls[0];
+    expect(String(logPath)).toContain('/logs/alice/restarts.log');
+    expect(String(logLine)).toMatch(/\] CRASH: exit_code=-1/);
+    expect(String(logLine).endsWith('\n')).toBe(true);
+  });
+
+  it('halts (no restart) when crash limit is reached on spawn failure', async () => {
+    mockPty.spawn.mockRejectedValue(new Error('PTY spawn failed'));
+
+    const ap = new AgentProcess('alice', mockEnv, { max_crashes_per_day: 1 });
+
+    vi.useFakeTimers();
+    try {
+      await ap.start();
+      // First spawn failure → crashed (count = 1, limit = 1) → halted
+      expect(ap.getStatus().status).toBe('halted');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does NOT double-trigger restart if onExit fires after spawn throws', async () => {
+    // Some PTY implementations emit an exit event even when spawn throws.
+    // The fix nulls out this.pty before the restart timer fires, so the
+    // onExit closure finds a different lifecycleGeneration and bails early.
+    mockPty.spawn.mockRejectedValueOnce(new Error('PTY spawn failed'));
+
+    vi.useFakeTimers();
+    try {
+      const ap = new AgentProcess('alice', mockEnv, {});
+      await ap.start();
+
+      expect(ap.getStatus().status).toBe('crashed');
+      const crashCountBefore = ap.getStatus().crashCount;
+
+      // Simulate a belated onExit from the PTY that failed to spawn.
+      // capturedOnExit may or may not be set depending on timing — fire it
+      // only if the mock recorded it (pty may already be null).
+      if (capturedOnExit) {
+        capturedOnExit(1, 0);
+      }
+
+      // crashCount must not have incremented a second time
+      expect(ap.getStatus().crashCount).toBe(crashCountBefore);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

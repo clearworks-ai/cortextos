@@ -17,7 +17,7 @@
  * Cleared automatically when it exceeds HISTORY_SIZE entries (sliding window).
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { createHash } from 'crypto';
@@ -128,7 +128,9 @@ export function loadState(stateDir: string): LoopDetectorState {
 function saveState(stateDir: string, state: LoopDetectorState): void {
   try {
     mkdirSync(stateDir, { recursive: true });
-    writeFileSync(statePath(stateDir), JSON.stringify(state, null, 2) + '\n', 'utf-8');
+    const p = statePath(stateDir);
+    writeFileSync(p, JSON.stringify(state, null, 2) + '\n', 'utf-8');
+    try { chmodSync(p, 0o600); } catch { /* ignore on unsupported platforms */ }
   } catch {
     // Best-effort — never throw from a hook
   }

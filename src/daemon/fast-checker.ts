@@ -1,16 +1,28 @@
 import { readdirSync, readFileSync, existsSync, writeFileSync, unlinkSync, statSync, openSync, readSync, closeSync, mkdirSync } from 'fs';
 import { execFile } from 'child_process';
-import { join } from 'path';
+import { basename, join } from 'path';
 import { createHash } from 'crypto';
 import type { InboxMessage, BusPaths, TelegramMessage, TelegramCallbackQuery, AgentConfig } from '../types/index.js';
 import { checkInbox, ackInbox } from '../bus/message.js';
 import { updateApproval } from '../bus/approval.js';
+import { detectDayNightMode } from '../bus/heartbeat.js';
 import { AgentProcess } from './agent-process.js';
 import type { TelegramAPI } from '../telegram/api.js';
 import { KEYS, isValidInboxMsgId } from '../pty/inject.js';
+import { atomicWriteSync } from '../utils/atomic.js';
 import { stripControlChars } from '../utils/validate.js';
 
 type LogFn = (msg: string) => void;
+
+interface OutboundMessageLogEntry {
+  timestamp?: string;
+}
+
+interface NarrationInjectState {
+  timestamp?: string;
+}
+
+export const NARRATION_INJECT_PROMPT = '\nPlease send a Telegram progress update about what you are currently doing. Format: italic, 1-2 sentences. This is a mandatory narration check.\n';
 
 /**
  * Fast message checker for a single agent.
@@ -46,8 +58,11 @@ export class FastChecker {
   private readonly HARD_RESTART_COOLDOWN_MS = 15 * 60 * 1000;
   // BUG-061: max age for .pending-user-input marker before we ignore it
   private readonly PENDING_USER_INPUT_MAX_AGE_MS = 30 * 60 * 1000;
-  // 10 min — halved from original 30 min so freezes are caught faster
-  private readonly STDOUT_FROZEN_MS = 10 * 60 * 1000;
+  // 3 min — TUI always emits ANSI codes while healthy; 3min silence = dead PTY
+  private readonly STDOUT_FROZEN_MS = 3 * 60 * 1000;
+  // 6 hours — idle agents (no active Telegram message being processed) produce no
+  // stdout naturally. Only restart if silent this long — cron work resets the clock.
+  private readonly IDLE_FROZEN_MS = 6 * 60 * 60 * 1000;
   // "Continue / Exit and fix manually" dialog auto-dismiss
   private dialogAutoResumeAt: number = 0;
   private dialogAutoResumeCount: number = 0;
@@ -56,6 +71,8 @@ export class FastChecker {
   private telegramApi?: TelegramAPI;
   private chatId?: string;
   private allowedUserId?: number;
+  private readonly config?: AgentConfig;
+  private readonly instanceId: string;
 
   // External Telegram handler (set by daemon)
   private telegramMessages: Array<{ formatted: string; ackIds: string[] }> = [];
@@ -73,14 +90,8 @@ export class FastChecker {
   // BUG-068: parse-failure watcher — detect failed_both entries and alert agent
   private parseFallbackCheckedAt: number = 0;
 
-  // BUG-050: narration enforcement — nudge agent if silent >5 min after activity
-  private lastNarrationSentAt: number = 0;
-  private outboundLogSizeAtLastNarration: number = -1;
-  private messagesInjectedSinceNarration: number = 0;
-  private narrationNudgeSentAt: number = 0;
-  private readonly NARRATION_SILENCE_MS = 5 * 60 * 1000;
-  private readonly NARRATION_MIN_MESSAGES = 2;
-  private readonly NARRATION_NUDGE_COOLDOWN_MS = 5 * 60 * 1000;
+  private readonly NARRATION_SILENCE_THRESHOLD_MS: number;
+  private readonly NARRATION_INJECT_COOLDOWN_MS: number;
 
   // BUG-066: Telegram unreachable fallback — alert agent, replay on recovery
   private telegramUnreachableAlertedAt: number = 0;
@@ -106,6 +117,8 @@ export class FastChecker {
     this.telegramApi = options.telegramApi;
     this.chatId = options.chatId;
     this.allowedUserId = options.allowedUserId;
+    this.config = options.config;
+    this.instanceId = basename(paths.ctxRoot);
 
     // BUG-064: derive bootstrap grace from agent config, fall back to 2 min
     const DEFAULT_BOOTSTRAP_GRACE_S = 2 * 60;
@@ -114,6 +127,20 @@ export class FastChecker {
         ? options.config.bootstrap_grace_seconds
         : DEFAULT_BOOTSTRAP_GRACE_S;
     this.BOOTSTRAP_GRACE_MS = graceSeconds * 1000;
+
+    const narrationSilenceThresholdMinutes =
+      typeof options.config?.narration_silence_threshold_minutes === 'number' &&
+      options.config.narration_silence_threshold_minutes > 0
+        ? options.config.narration_silence_threshold_minutes
+        : 2;
+    this.NARRATION_SILENCE_THRESHOLD_MS = narrationSilenceThresholdMinutes * 60 * 1000;
+
+    const narrationInjectCooldownMinutes =
+      typeof options.config?.narration_inject_cooldown_minutes === 'number' &&
+      options.config.narration_inject_cooldown_minutes > 0
+        ? options.config.narration_inject_cooldown_minutes
+        : 5;
+    this.NARRATION_INJECT_COOLDOWN_MS = narrationInjectCooldownMinutes * 60 * 1000;
 
     // Initialize persistent dedup
     this.dedupFilePath = join(paths.stateDir, '.message-dedup-hashes');
@@ -160,6 +187,7 @@ export class FastChecker {
         // Check for urgent signal file
         this.checkUrgentSignal();
         this.watchdogCheck();
+        this.checkNarrationSilence(this.agent, this.config, this.instanceId);
         this.parseFallbackCheck();
         await this.telegramUnreachableCheck();
         await this.stuckPendingCheck();
@@ -255,34 +283,10 @@ export class FastChecker {
         if (hasTelegramMessage) {
           this.lastMessageInjectedAt = Date.now();
         }
-        // BUG-050: count injected messages for narration enforcement
-        this.messagesInjectedSinceNarration++;
         // Cooldown after injection
         await sleep(5000);
       }
     }
-
-    // BUG-050: detect when agent sends a Telegram message (outbound log grows)
-    // and reset narration silence window
-    const outboundPath = join(this.paths.logDir, 'outbound-messages.jsonl');
-    try {
-      if (existsSync(outboundPath)) {
-        const { size } = statSync(outboundPath);
-        if (this.outboundLogSizeAtLastNarration === -1) {
-          // First check: seed baseline, don't trigger yet
-          this.outboundLogSizeAtLastNarration = size;
-          this.lastNarrationSentAt = Date.now();
-        } else if (size > this.outboundLogSizeAtLastNarration) {
-          // New outbound message — agent narrated; reset silence window
-          this.outboundLogSizeAtLastNarration = size;
-          this.lastNarrationSentAt = Date.now();
-          this.messagesInjectedSinceNarration = 0;
-        }
-      }
-    } catch { /* non-critical */ }
-
-    // BUG-050: narration enforcement nudge
-    this.narrationCheck();
 
     // Typing indicator: send while Claude is actively working
     if (this.chatId && this.telegramApi && this.isAgentActive()) {
@@ -948,11 +952,158 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     }
   }
 
+  private readPendingUserInputAgeMs(now: number): number | null {
+    const pendingInputPath = join(this.paths.stateDir, '.pending-user-input');
+    if (!existsSync(pendingInputPath)) return null;
+    try {
+      return now - statSync(pendingInputPath).mtimeMs;
+    } catch {
+      return null;
+    }
+  }
+
+  private hasFreshPendingUserInput(now: number): boolean {
+    const markerAgeMs = this.readPendingUserInputAgeMs(now);
+    return markerAgeMs !== null && markerAgeMs < this.PENDING_USER_INPUT_MAX_AGE_MS;
+  }
+
+  private readLastNonEmptyLine(filePath: string): string | null {
+    if (!existsSync(filePath)) return null;
+
+    let fd: number | null = null;
+    try {
+      const size = statSync(filePath).size;
+      if (size === 0) return null;
+
+      fd = openSync(filePath, 'r');
+      const chunkSize = 1024;
+      let position = size;
+      let tail = '';
+
+      while (position > 0) {
+        const bytesToRead = Math.min(chunkSize, position);
+        position -= bytesToRead;
+
+        const buffer = Buffer.alloc(bytesToRead);
+        readSync(fd, buffer, 0, bytesToRead, position);
+        tail = buffer.toString('utf-8') + tail;
+
+        const trimmedTail = tail.replace(/\n+$/, '');
+        if (!trimmedTail) continue;
+
+        const lastNewlineIndex = trimmedTail.lastIndexOf('\n');
+        if (lastNewlineIndex !== -1) {
+          return trimmedTail.slice(lastNewlineIndex + 1).replace(/\r$/, '');
+        }
+      }
+
+      const trimmedTail = tail.replace(/\n+$/, '');
+      return trimmedTail ? trimmedTail.replace(/\r$/, '') : null;
+    } catch {
+      return null;
+    } finally {
+      if (fd !== null) closeSync(fd);
+    }
+  }
+
+  private readLastOutboundTelegramTimestamp(agent: AgentProcess, instanceId: string): number {
+    const outboundPath = join(this.paths.ctxRoot, 'logs', agent.name, 'outbound-messages.jsonl');
+    void instanceId;
+
+    const lastLine = this.readLastNonEmptyLine(outboundPath);
+    if (!lastLine) return 0;
+
+    try {
+      const entry = JSON.parse(lastLine) as OutboundMessageLogEntry;
+      if (typeof entry.timestamp !== 'string') return 0;
+      const parsedTimestamp = new Date(entry.timestamp).getTime();
+      return Number.isFinite(parsedTimestamp) ? parsedTimestamp : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  private readLastNarrationInjectTimestamp(agent: AgentProcess, instanceId: string): number {
+    const injectStatePath = join(this.paths.ctxRoot, 'state', agent.name, 'last-narration-inject.json');
+    void instanceId;
+
+    if (!existsSync(injectStatePath)) return 0;
+
+    try {
+      const state = JSON.parse(readFileSync(injectStatePath, 'utf-8')) as NarrationInjectState;
+      if (typeof state.timestamp !== 'string') return 0;
+      const parsedTimestamp = new Date(state.timestamp).getTime();
+      return Number.isFinite(parsedTimestamp) ? parsedTimestamp : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  private writeLastNarrationInjectTimestamp(agent: AgentProcess, instanceId: string, timestamp: string): void {
+    const injectStatePath = join(this.paths.ctxRoot, 'state', agent.name, 'last-narration-inject.json');
+    void instanceId;
+    atomicWriteSync(injectStatePath, JSON.stringify({ timestamp }));
+  }
+
+  private isStdoutActive(agent: AgentProcess, instanceId: string): boolean {
+    const stdoutPath = join(this.paths.ctxRoot, 'logs', agent.name, 'stdout.log');
+    void instanceId;
+
+    try {
+      if (!existsSync(stdoutPath)) {
+        this.stdoutLogSize = 0;
+        return false;
+      }
+
+      const { size } = statSync(stdoutPath);
+      const previousSize = this.stdoutLogSize;
+      this.stdoutLogSize = size;
+      return previousSize >= 0 && size > previousSize;
+    } catch {
+      return false;
+    }
+  }
+
+  private isQuietHours(config: AgentConfig | undefined): boolean {
+    return detectDayNightMode(config?.timezone ?? 'UTC') === 'night';
+  }
+
+  private checkNarrationSilence(agent: AgentProcess, config: AgentConfig | undefined, instanceId: string): void {
+    if (this.bootstrappedAt === 0) return;
+
+    const now = Date.now();
+    const stdoutActive = this.isStdoutActive(agent, instanceId);
+    if (!stdoutActive) return;
+    if (this.hasFreshPendingUserInput(now)) return;
+    if (this.isQuietHours(config)) return;
+
+    const lastOutboundTimestamp = this.readLastOutboundTelegramTimestamp(agent, instanceId);
+    const silenceReferenceTimestamp = Math.max(lastOutboundTimestamp, this.bootstrappedAt);
+    if (now - silenceReferenceTimestamp <= this.NARRATION_SILENCE_THRESHOLD_MS) return;
+
+    const lastInjectTimestamp = this.readLastNarrationInjectTimestamp(agent, instanceId);
+    if (lastInjectTimestamp > 0 && now - lastInjectTimestamp <= this.NARRATION_INJECT_COOLDOWN_MS) return;
+
+    if (!agent.injectMessage(NARRATION_INJECT_PROMPT)) return;
+
+    const injectedAt = new Date(now).toISOString();
+    this.writeLastNarrationInjectTimestamp(agent, instanceId, injectedAt);
+    this.log(`NARRATION-WATCHDOG: injected narration check after ${Math.round((now - silenceReferenceTimestamp) / 1000)}s of Telegram silence`);
+
+    execFile(
+      'cortextos',
+      ['bus', 'log-event', 'action', 'narration_inject', 'info', '--agent', agent.name],
+      (err) => {
+        if (err) this.log(`NARRATION-WATCHDOG: log-event failed: ${err.message}`);
+      },
+    );
+  }
+
   /**
    * Detect frozen stdout or context-exhaustion and trigger a hard-restart.
    * Two signals:
    *   1. Claude Code's "How is Claude doing this session?" survey — ctx exhausted.
-   *   2. stdout unchanged for STDOUT_FROZEN_MS while agent is active.
+   *   2. stdout unchanged for STDOUT_FROZEN_MS (active) or IDLE_FROZEN_MS (idle).
    */
   private watchdogCheck(): void {
     const now = Date.now();
@@ -1041,30 +1192,28 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       }
     } catch { /* non-critical */ }
 
-    // Signal 3: stdout frozen for STDOUT_FROZEN_MS — hard restart.
-    // A healthy PTY always produces TUI ANSI codes; 10 min of silence = dead PTY.
-    // Do NOT gate on lastMessageInjectedAt or isAgentActive() — agents doing
-    // autonomous cron work with no recent message injection are equally at risk.
-    if (now - this.stdoutLastChangeAt > this.STDOUT_FROZEN_MS) {
+    // Signal 3: stdout frozen — hard restart.
+    // Active agents (processing a Telegram message): restart after STDOUT_FROZEN_MS (3 min).
+    // Idle agents (no active message): stdout is naturally silent. Use IDLE_FROZEN_MS (6h)
+    // so idle sessions survive overnight without looping. Cron work produces stdout and
+    // resets the clock, so any real freeze during a cron is still caught at 3 min.
+    const frozenThresholdMs = this.isAgentActive() ? this.STDOUT_FROZEN_MS : this.IDLE_FROZEN_MS;
+    if (now - this.stdoutLastChangeAt > frozenThresholdMs) {
       const stalledSec = Math.round((now - this.stdoutLastChangeAt) / 1000);
 
       // BUG-061: skip frozen restart if agent is waiting for an AskUserQuestion response.
       // Check for .pending-user-input marker in the agent's state directory.
       // If it exists and is <30 minutes old, the agent is legitimately blocked on
       // user input — do NOT hard-restart or we'll kill the pending question.
-      const pendingInputPath = join(this.paths.stateDir, '.pending-user-input');
-      if (existsSync(pendingInputPath)) {
-        try {
-          const markerStat = statSync(pendingInputPath);
-          const markerAgeMs = now - markerStat.mtimeMs;
-          if (markerAgeMs < this.PENDING_USER_INPUT_MAX_AGE_MS) {
-            const markerAgeSec = Math.round(markerAgeMs / 1000);
-            this.log(`WATCHDOG: stdout frozen ${stalledSec}s but .pending-user-input is ${markerAgeSec}s old — skipping restart, waiting on user input`);
-            return;
-          }
-          // Marker is stale (>=30 min) — ignore it and proceed with restart
-          this.log(`WATCHDOG: .pending-user-input exists but is stale (${Math.round(markerAgeMs / 60000)}min old) — proceeding with restart`);
-        } catch { /* non-critical — proceed with restart if stat fails */ }
+      const markerAgeMs = this.readPendingUserInputAgeMs(now);
+      if (markerAgeMs !== null) {
+        if (markerAgeMs < this.PENDING_USER_INPUT_MAX_AGE_MS) {
+          const markerAgeSec = Math.round(markerAgeMs / 1000);
+          this.log(`WATCHDOG: stdout frozen ${stalledSec}s but .pending-user-input is ${markerAgeSec}s old — skipping restart, waiting on user input`);
+          return;
+        }
+        // Marker is stale (>=30 min) — ignore it and proceed with restart
+        this.log(`WATCHDOG: .pending-user-input exists but is stale (${Math.round(markerAgeMs / 60000)}min old) — proceeding with restart`);
       }
 
       this.log(`WATCHDOG: stdout frozen ${stalledSec}s — hard-restarting`);
@@ -1205,30 +1354,6 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
         this.agent.injectMessage(alert);
       }
     } catch { /* non-critical */ }
-  }
-
-  /**
-   * BUG-050: Narration enforcement. If the agent has processed >=2 messages
-   * since it last sent a Telegram update AND has been silent for >5 minutes,
-   * inject a nudge. Skipped during bootstrap grace and nudge cooldown.
-   */
-  private narrationCheck(): void {
-    if (this.bootstrappedAt === 0) return;
-    const now = Date.now();
-    if (now - this.bootstrappedAt < this.BOOTSTRAP_GRACE_MS) return;
-    if (this.lastNarrationSentAt === 0) return;
-    if (now - this.narrationNudgeSentAt < this.NARRATION_NUDGE_COOLDOWN_MS) return;
-
-    const silentMs = now - this.lastNarrationSentAt;
-    if (
-      silentMs > this.NARRATION_SILENCE_MS &&
-      this.messagesInjectedSinceNarration >= this.NARRATION_MIN_MESSAGES
-    ) {
-      this.log(`NARRATION-WATCHDOG: silent ${Math.round(silentMs / 1000)}s after ${this.messagesInjectedSinceNarration} messages — nudging`);
-      const nudge = `=== SYSTEM ===\nYou have been silent for 5+ minutes while processing messages. Send a brief Telegram progress update now via: cortextos bus send-telegram ${this.chatId ?? '<chat_id>'} "_<what you are working on>_"\n\n`;
-      this.agent.injectMessage(nudge);
-      this.narrationNudgeSentAt = now;
-    }
   }
 
   /**

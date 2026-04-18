@@ -70,6 +70,15 @@ export class AgentProcess {
   // if a second rate-limit exit fires before the first timer elapses (preventing
   // two overlapping timers from racing and triggering a premature restart).
   private rateLimitTimer: ReturnType<typeof setTimeout> | null = null;
+  // Fleet watchdog: boot-freeze detector (transcript growth polling)
+  private bootFreezeTimer: ReturnType<typeof setInterval> | null = null;
+  // Fleet watchdog: context threshold monitor
+  private contextMonitorTimer: ReturnType<typeof setInterval> | null = null;
+  // Fleet watchdog: restart-loop ring buffer (last 10 restarts)
+  private restartHistory: Array<{ timestamp: number; reason: string }> = [];
+  // Fleet watchdog: escalation callbacks registered by daemon
+  private onRestartLoopCallback: ((name: string, count: number, reason: string) => void) | null = null;
+  private onContextAlertCallback: ((name: string, transcriptPath: string, sizeMb: number, limitMb: number) => void) | null = null;
 
   constructor(name: string, env: CtxEnv, config: AgentConfig, log?: LogFn) {
     this.name = name;
@@ -183,6 +192,10 @@ export class AgentProcess {
       // Start watchdog health timer — marks commit healthy after MIN_HEALTHY_SECONDS
       this.startHealthTimer();
 
+      // Fleet watchdog: start boot-freeze detector and context monitor
+      this.startBootFreezeDetector();
+      this.startContextMonitor();
+
       this.notifyStatusChange();
     } catch (err) {
       this.log(`Failed to start: ${err}`);
@@ -262,6 +275,8 @@ export class AgentProcess {
     this.log('Stopping...');
     this.clearSessionTimer();
     this.clearHealthTimer();
+    this.clearBootFreezeDetector();
+    this.clearContextMonitor();
 
     // Capture and null out pty BEFORE any awaits so handleExit() during graceful
     // shutdown doesn't race with us and trigger crash recovery or a double-kill.
@@ -384,6 +399,20 @@ export class AgentProcess {
    */
   onStatusChanged(handler: (status: AgentStatus) => void): void {
     this.onStatusChange = handler;
+  }
+
+  /**
+   * Register restart-loop escalation handler (called when >3 restarts same reason in 15 min).
+   */
+  setRestartLoopHandler(handler: (name: string, count: number, reason: string) => void): void {
+    this.onRestartLoopCallback = handler;
+  }
+
+  /**
+   * Register context threshold alert handler (called at 80% of max_continue_transcript_mb).
+   */
+  setContextAlertHandler(handler: (name: string, transcriptPath: string, sizeMb: number, limitMb: number) => void): void {
+    this.onContextAlertCallback = handler;
   }
 
   /**
@@ -511,6 +540,29 @@ export class AgentProcess {
       } else {
         this.log(`Watchdog: rollback failed — ${result.reason}`);
       }
+    }
+
+    // Restart-loop detection: track this crash and check if we're in a loop.
+    // Prune history to last 10 entries, keeping only restarts within the last 15 min.
+    const crashReason = exitCode === 0 ? 'clean-exit' : 'crash';
+    const now = Date.now();
+    this.restartHistory.push({ timestamp: now, reason: crashReason });
+    if (this.restartHistory.length > 10) this.restartHistory.shift();
+
+    const LOOP_WINDOW_MS = 15 * 60 * 1000;
+    const LOOP_THRESHOLD = 3;
+    const recentCrashes = this.restartHistory.filter(
+      r => r.reason === crashReason && now - r.timestamp < LOOP_WINDOW_MS,
+    );
+
+    if (recentCrashes.length > LOOP_THRESHOLD) {
+      const msg = `restart loop: ${recentCrashes.length}x "${crashReason}" in ${Math.round(LOOP_WINDOW_MS / 60000)}min — halting auto-restart`;
+      this.log(`RESTART LOOP DETECTED: ${msg}`);
+      this.appendCrashToRestartsLog(exitCode, 0, 'HALTED');
+      this.status = 'halted';
+      this.notifyStatusChange();
+      this.onRestartLoopCallback?.(this.name, recentCrashes.length, crashReason);
+      return;
     }
 
     // Exponential backoff restart
@@ -1048,6 +1100,148 @@ export class AgentProcess {
     this.log(`Hard-restart initiated: ${reason}`);
     await this.stop();
     await this.start();
+  }
+
+  // ── Fleet Watchdog: Boot-freeze detector ─────────────────────────────────
+  //
+  // Polls the active transcript file every 2 min during boot. If size is
+  // unchanged for 5+ consecutive minutes (3 polls) → kill -9 + restart.
+  // Clears automatically when the agent becomes bootstrapped or after 15 min.
+
+  private startBootFreezeDetector(): void {
+    const POLL_MS = 2 * 60 * 1000;
+    const FREEZE_POLLS = 3;  // 3 × 2min = 6min without growth = frozen
+    const MAX_BOOT_MS = 15 * 60 * 1000;
+    const startedAt = Date.now();
+    const generation = this.lifecycleGeneration;
+    let lastSize = -1;
+    let unchangedPolls = 0;
+
+    this.bootFreezeTimer = setInterval(() => {
+      if (generation !== this.lifecycleGeneration || this.status !== 'running') {
+        this.clearBootFreezeDetector();
+        return;
+      }
+
+      // Stop monitoring after 15 min or once bootstrapped
+      if (Date.now() - startedAt > MAX_BOOT_MS || this.isBootstrapped()) {
+        this.clearBootFreezeDetector();
+        return;
+      }
+
+      const transcriptPath = this.getNewestTranscriptPath();
+      if (!transcriptPath) return;
+
+      try {
+        const { size } = statSync(transcriptPath);
+        if (size === lastSize) {
+          unchangedPolls++;
+          this.log(`Boot freeze detector: transcript unchanged (${unchangedPolls}/${FREEZE_POLLS} polls, ${(size / 1024).toFixed(0)}KB)`);
+          if (unchangedPolls >= FREEZE_POLLS) {
+            this.clearBootFreezeDetector();
+            const elapsed = Math.round((Date.now() - startedAt) / 60000);
+            this.log(`BOOT FREEZE: transcript static for ${elapsed}min — forcing hard restart`);
+            this.hardRestartSelf(`boot-freeze: transcript static ${elapsed}min`).catch(e =>
+              this.log(`Hard restart after boot freeze failed: ${e}`),
+            );
+          }
+        } else {
+          unchangedPolls = 0;
+          lastSize = size;
+        }
+      } catch { /* stat errors: file not yet created — ignore */ }
+    }, POLL_MS);
+  }
+
+  private clearBootFreezeDetector(): void {
+    if (this.bootFreezeTimer) {
+      clearInterval(this.bootFreezeTimer);
+      this.bootFreezeTimer = null;
+    }
+  }
+
+  // ── Fleet Watchdog: Context threshold monitor ─────────────────────────────
+  //
+  // Polls transcript sizes every 5 min. At 80% of max_continue_transcript_mb,
+  // archives the largest transcript (renames to .archived) so the next boot
+  // uses --continue without hitting BUG-086, then calls the alert callback.
+
+  private startContextMonitor(): void {
+    const POLL_MS = 5 * 60 * 1000;
+    const generation = this.lifecycleGeneration;
+
+    this.contextMonitorTimer = setInterval(() => {
+      if (generation !== this.lifecycleGeneration || this.status !== 'running') {
+        this.clearContextMonitor();
+        return;
+      }
+
+      const thresholdMb: number =
+        typeof this.config.max_continue_transcript_mb === 'number'
+          ? this.config.max_continue_transcript_mb
+          : 5;
+      if (thresholdMb <= 0) return;
+
+      const alertBytes = thresholdMb * 1024 * 1024 * 0.8;
+      const convDir = this.getConvDir();
+      if (!convDir) return;
+
+      try {
+        const fs = require('fs') as typeof import('fs');
+        const files = fs.readdirSync(convDir).filter((f: string) => f.endsWith('.jsonl'));
+        for (const file of files) {
+          const fullPath = join(convDir, file);
+          try {
+            const { size } = fs.statSync(fullPath);
+            if (size >= alertBytes) {
+              const sizeMb = size / 1024 / 1024;
+              this.log(`Context alert: ${file} is ${sizeMb.toFixed(1)}MB (${Math.round(sizeMb / thresholdMb * 100)}% of ${thresholdMb}MB limit) — archiving`);
+              try {
+                fs.renameSync(fullPath, fullPath + '.archived');
+                this.onContextAlertCallback?.(this.name, fullPath, sizeMb, thresholdMb);
+              } catch (e) {
+                this.log(`Context alert: archive failed: ${e}`);
+              }
+            }
+          } catch { /* ignore stat errors */ }
+        }
+      } catch { /* ignore readdir errors */ }
+    }, POLL_MS);
+  }
+
+  private clearContextMonitor(): void {
+    if (this.contextMonitorTimer) {
+      clearInterval(this.contextMonitorTimer);
+      this.contextMonitorTimer = null;
+    }
+  }
+
+  // ── Fleet Watchdog: Helpers ───────────────────────────────────────────────
+
+  private getConvDir(): string | null {
+    const launchDir = this.config.working_directory || this.env.agentDir || this.env.workingDir;
+    if (!launchDir) return null;
+    return join(homedir(), '.claude', 'projects', launchDir.split(sep).join('-'));
+  }
+
+  private getNewestTranscriptPath(): string | null {
+    const convDir = this.getConvDir();
+    if (!convDir) return null;
+    try {
+      const fs = require('fs') as typeof import('fs');
+      const files = fs.readdirSync(convDir)
+        .filter((f: string) => f.endsWith('.jsonl'))
+        .map((f: string) => {
+          const fullPath = join(convDir, f);
+          try { return { path: fullPath, mtime: fs.statSync(fullPath).mtimeMs }; }
+          catch { return null; }
+        })
+        .filter(Boolean) as Array<{ path: string; mtime: number }>;
+      if (files.length === 0) return null;
+      return files.sort((a, b) => b.mtime - a.mtime)[0].path;
+    } catch {
+      return null;
+    }
   }
 }
 

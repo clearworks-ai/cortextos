@@ -286,6 +286,24 @@ export class AgentManager {
       });
     }
 
+    // Fleet watchdog: restart-loop and context-alert escalation
+    if (telegramApi && chatId) {
+      const tgApi = telegramApi;
+      const tgChatId = chatId;
+      agentProcess.setRestartLoopHandler((agentName, count, reason) => {
+        tgApi.sendMessage(
+          tgChatId,
+          `🔴 ${agentName} restart loop: ${count}x "${reason}" in 15min — auto-restart halted. Fix and run: cortextos start ${agentName}`,
+        ).catch(() => {});
+      });
+      agentProcess.setContextAlertHandler((agentName, _transcriptPath, sizeMb, limitMb) => {
+        tgApi.sendMessage(
+          tgChatId,
+          `⚠️ ${agentName} context at ${Math.round(sizeMb / limitMb * 100)}% (${sizeMb.toFixed(1)}MB/${limitMb}MB) — transcript archived, continuing fresh`,
+        ).catch(() => {});
+      });
+    }
+
     this.agents.set(name, { process: agentProcess, checker });
 
     // Start agent

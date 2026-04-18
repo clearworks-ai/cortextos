@@ -55,6 +55,8 @@ export class FastChecker {
   private ctxHandoffDeadlineAt: number = 0; // timestamp after which force-restart fires
   private ctxCircuitRestarts: number[] = []; // timestamps of recent context-triggered restarts
   private ctxCircuitBrokenAt: number | null = null; // when circuit tripped (null = healthy)
+  // Persisted to disk so --continue restarts don't reset the circuit breaker
+  private ctxCircuitFile: string = '';
 
   constructor(
     agent: AgentProcess,
@@ -74,6 +76,10 @@ export class FastChecker {
     // Initialize persistent dedup
     this.dedupFilePath = join(paths.stateDir, '.message-dedup-hashes');
     this.loadDedupHashes();
+
+    // Load persisted circuit breaker state so --continue restarts don't reset it
+    this.ctxCircuitFile = join(paths.stateDir, '.ctx-circuit.json');
+    this.loadCtxCircuit();
   }
 
   /**
@@ -890,6 +896,7 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       if (now - this.ctxCircuitBrokenAt >= 30 * 60_000) {
         this.ctxCircuitBrokenAt = null;
         this.ctxCircuitRestarts = [];
+        this.saveCtxCircuit();
         this.log('Context circuit breaker reset after 30min pause');
       } else {
         return; // still paused
@@ -968,10 +975,11 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
   private forceContextRestart(reason: string): void {
     const now = Date.now();
 
-    // Update and check circuit breaker window
+    // Update and check circuit breaker window (persisted to disk — survives --continue restarts)
     this.ctxCircuitRestarts = this.ctxCircuitRestarts.filter(t => now - t < 15 * 60_000);
     if (this.ctxCircuitRestarts.length >= 3) {
       this.ctxCircuitBrokenAt = now;
+      this.saveCtxCircuit();
       const msg = `Context circuit breaker TRIPPED for ${this.agent.name}: 3 restarts in 15min. Watchdog paused 30min. Check logs/${this.agent.name}/restarts.log for details.`;
       this.log(msg);
       if (this.telegramApi && this.chatId) {
@@ -980,6 +988,7 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       return;
     }
     this.ctxCircuitRestarts.push(now);
+    this.saveCtxCircuit();
 
     // Reset per-session context state for the new session
     this.ctxHandoffFiredAt = 0;
@@ -1046,6 +1055,37 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       writeFileSync(this.dedupFilePath, hashes.join('\n') + '\n', 'utf-8');
     } catch {
       // Non-critical - dedup will still work in memory
+    }
+  }
+
+  /**
+   * Load circuit breaker state from disk.
+   * Persisting this across --continue restarts is critical: without it,
+   * the in-memory ctxCircuitRestarts array resets on every restart, making
+   * the circuit breaker unable to count restarts and stop a restart loop.
+   */
+  private loadCtxCircuit(): void {
+    try {
+      if (!existsSync(this.ctxCircuitFile)) return;
+      const data = JSON.parse(readFileSync(this.ctxCircuitFile, 'utf-8'));
+      this.ctxCircuitRestarts = Array.isArray(data.restarts) ? data.restarts : [];
+      this.ctxCircuitBrokenAt = typeof data.brokenAt === 'number' ? data.brokenAt : null;
+    } catch {
+      // Start fresh on error
+    }
+  }
+
+  /**
+   * Persist circuit breaker state to disk after every update.
+   */
+  private saveCtxCircuit(): void {
+    try {
+      writeFileSync(this.ctxCircuitFile, JSON.stringify({
+        restarts: this.ctxCircuitRestarts,
+        brokenAt: this.ctxCircuitBrokenAt,
+      }), 'utf-8');
+    } catch {
+      // Non-critical
     }
   }
 

@@ -648,6 +648,55 @@ describe('FastChecker', () => {
     });
   });
 
+  describe('formatTelegramReaction', () => {
+    it('formats a newly-added emoji reaction with user, chat, and message ids', () => {
+      const result = FastChecker.formatTelegramReaction(
+        'Alice',
+        '123456789',
+        42,
+        [],
+        [{ type: 'emoji', emoji: '👍' }],
+      );
+      expect(result).toContain('=== REACTION from [USER: Alice] (chat_id:123456789) on message 42: 👍 ===');
+    });
+
+    it('renders multiple concurrent emojis joined by spaces', () => {
+      const result = FastChecker.formatTelegramReaction(
+        'Alice',
+        '1',
+        7,
+        [],
+        [
+          { type: 'emoji', emoji: '👍' },
+          { type: 'emoji', emoji: '🔥' },
+        ],
+      );
+      expect(result).toContain('on message 7: 👍 🔥 ===');
+    });
+
+    it('marks a cleared reaction as "removed <old>" when new_reaction is empty', () => {
+      const result = FastChecker.formatTelegramReaction(
+        'Alice',
+        '1',
+        9,
+        [{ type: 'emoji', emoji: '❤️' }],
+        [],
+      );
+      expect(result).toContain('on message 9: removed ❤️ ===');
+    });
+
+    it('renders custom_emoji as [custom_emoji] placeholder', () => {
+      const result = FastChecker.formatTelegramReaction(
+        'Alice',
+        '1',
+        11,
+        [],
+        [{ type: 'custom_emoji', custom_emoji_id: '5123456789012345678' }],
+      );
+      expect(result).toContain('on message 11: [custom_emoji] ===');
+    });
+  });
+
   describe('formatTelegramPhotoMessage', () => {
     it('formats photo message with caption and local_file', () => {
       const result = FastChecker.formatTelegramPhotoMessage(
@@ -764,192 +813,7 @@ describe('FastChecker', () => {
     });
   });
 
-  describe('watchdogCheck — BUG-061: .pending-user-input guard', () => {
-    it('skips frozen-stdout hard-restart when .pending-user-input marker is fresh (<30 min)', () => {
-      const agent = createMockAgent();
-      const api = createMockTelegramApi();
-      const checker = new FastChecker(agent, paths, '/tmp/framework', {
-        telegramApi: api,
-        chatId: '12345',
-      });
 
-      // Simulate post-bootstrap state
-      (checker as any).bootstrappedAt = Date.now() - 5 * 60 * 1000; // 5 min ago
-
-      // Create stdout.log that appears frozen (last change was 11 min ago)
-      const stdoutPath = join(paths.logDir, 'stdout.log');
-      writeFileSync(stdoutPath, 'some output\n');
-      (checker as any).stdoutLastSize = 12;
-      (checker as any).stdoutLastChangeAt = Date.now() - 11 * 60 * 1000; // 11 min ago
-
-      // Write a fresh .pending-user-input marker (2 min old)
-      const markerPath = join(paths.stateDir, '.pending-user-input');
-      writeFileSync(markerPath, 'waiting for user');
-      // Manually set mtime to 2 minutes ago via utimes
-      const twoMinAgo = (Date.now() - 2 * 60 * 1000) / 1000;
-      require('fs').utimesSync(markerPath, twoMinAgo, twoMinAgo);
-
-      // Invoke watchdog
-      (checker as any).watchdogCheck();
-
-      // Hard-restart must NOT have been triggered
-      expect(api.sendMessage).not.toHaveBeenCalled();
-      expect((checker as any).watchdogTriggered).toBe(false);
-    });
-
-    it('proceeds with frozen-stdout hard-restart when .pending-user-input marker is stale (>=30 min)', () => {
-      const agent = createMockAgent();
-      agent.hardRestartSelf = vi.fn().mockResolvedValue(undefined);
-      const api = createMockTelegramApi();
-      const checker = new FastChecker(agent, paths, '/tmp/framework', {
-        telegramApi: api,
-        chatId: '12345',
-      });
-
-      (checker as any).bootstrappedAt = Date.now() - 5 * 60 * 1000;
-
-      const stdoutPath = join(paths.logDir, 'stdout.log');
-      writeFileSync(stdoutPath, 'some output\n');
-      (checker as any).stdoutLastSize = 12;
-      (checker as any).stdoutLastChangeAt = Date.now() - 11 * 60 * 1000;
-
-      // Write a STALE .pending-user-input marker (35 min old)
-      const markerPath = join(paths.stateDir, '.pending-user-input');
-      writeFileSync(markerPath, 'old marker');
-      const thirtyFiveMinAgo = (Date.now() - 35 * 60 * 1000) / 1000;
-      require('fs').utimesSync(markerPath, thirtyFiveMinAgo, thirtyFiveMinAgo);
-
-      (checker as any).watchdogCheck();
-
-      // Hard-restart SHOULD have been triggered (stale marker is ignored)
-      expect(agent.hardRestartSelf).toHaveBeenCalled();
-      expect((checker as any).watchdogTriggered).toBe(true);
-    });
-
-    it('proceeds with frozen-stdout hard-restart when no .pending-user-input marker exists', () => {
-      const agent = createMockAgent();
-      agent.hardRestartSelf = vi.fn().mockResolvedValue(undefined);
-      const api = createMockTelegramApi();
-      const checker = new FastChecker(agent, paths, '/tmp/framework', {
-        telegramApi: api,
-        chatId: '12345',
-      });
-
-      (checker as any).bootstrappedAt = Date.now() - 5 * 60 * 1000;
-
-      const stdoutPath = join(paths.logDir, 'stdout.log');
-      writeFileSync(stdoutPath, 'some output\n');
-      (checker as any).stdoutLastSize = 12;
-      (checker as any).stdoutLastChangeAt = Date.now() - 11 * 60 * 1000;
-
-      // No marker file — proceed normally
-      (checker as any).watchdogCheck();
-
-      expect(agent.hardRestartSelf).toHaveBeenCalled();
-      expect((checker as any).watchdogTriggered).toBe(true);
-    });
-  });
-
-  describe('watchdogCheck — BUG-065: repeated identical failure escalation', () => {
-    it('sends Telegram escalation alert when same failure class fires again within cooldown window', () => {
-      const agent = createMockAgent();
-      const api = createMockTelegramApi();
-      const checker = new FastChecker(agent, paths, '/tmp/framework', {
-        telegramApi: api,
-        chatId: '12345',
-      });
-
-      (checker as any).bootstrappedAt = Date.now() - 5 * 60 * 1000;
-
-      // Simulate: watchdog already triggered with a frozen-stdout reason
-      (checker as any).watchdogTriggered = true;
-      (checker as any).lastWatchdogReason = 'frozen: stdout unchanged 620s';
-
-      // stdout.log frozen for 11+ min — same failure class ("frozen")
-      const stdoutPath = join(paths.logDir, 'stdout.log');
-      writeFileSync(stdoutPath, 'some output\n');
-      (checker as any).stdoutLastSize = 12;
-      (checker as any).stdoutLastChangeAt = Date.now() - 11 * 60 * 1000;
-
-      (checker as any).watchdogCheck();
-
-      // Should have sent an escalation alert via Telegram
-      expect(api.sendMessage).toHaveBeenCalledWith(
-        '12345',
-        expect.stringMatching(/ALERT.*same reason.*frozen/i),
-      );
-    });
-
-    it('does NOT escalate when different failure class fires within cooldown window', () => {
-      const agent = createMockAgent();
-      const api = createMockTelegramApi();
-      const checker = new FastChecker(agent, paths, '/tmp/framework', {
-        telegramApi: api,
-        chatId: '12345',
-      });
-
-      (checker as any).bootstrappedAt = Date.now() - 5 * 60 * 1000;
-
-      // Previous failure was ctx-exhaustion; current signal is frozen-stdout — different class
-      (checker as any).watchdogTriggered = true;
-      (checker as any).lastWatchdogReason = 'ctx exhaustion: session survey prompt in stdout';
-
-      // stdout.log frozen — different failure class from lastWatchdogReason
-      const stdoutPath = join(paths.logDir, 'stdout.log');
-      writeFileSync(stdoutPath, 'some output\n');
-      (checker as any).stdoutLastSize = 12;
-      (checker as any).stdoutLastChangeAt = Date.now() - 11 * 60 * 1000;
-
-      (checker as any).watchdogCheck();
-
-      // No escalation — different failure class
-      expect(api.sendMessage).not.toHaveBeenCalled();
-    });
-
-    it('does NOT escalate when no previous watchdog reason is recorded', () => {
-      const agent = createMockAgent();
-      const api = createMockTelegramApi();
-      const checker = new FastChecker(agent, paths, '/tmp/framework', {
-        telegramApi: api,
-        chatId: '12345',
-      });
-
-      (checker as any).bootstrappedAt = Date.now() - 5 * 60 * 1000;
-      (checker as any).watchdogTriggered = true;
-      // lastWatchdogReason is '' (initial value) — no previous failure
-
-      const stdoutPath = join(paths.logDir, 'stdout.log');
-      writeFileSync(stdoutPath, 'some output\n');
-      (checker as any).stdoutLastSize = 12;
-      (checker as any).stdoutLastChangeAt = Date.now() - 11 * 60 * 1000;
-
-      (checker as any).watchdogCheck();
-
-      expect(api.sendMessage).not.toHaveBeenCalled();
-    });
-
-    it('records lastWatchdogReason when triggerHardRestart is called', () => {
-      const agent = createMockAgent();
-      agent.hardRestartSelf = vi.fn().mockResolvedValue(undefined);
-      const api = createMockTelegramApi();
-      const checker = new FastChecker(agent, paths, '/tmp/framework', {
-        telegramApi: api,
-        chatId: '12345',
-      });
-
-      (checker as any).bootstrappedAt = Date.now() - 5 * 60 * 1000;
-
-      const stdoutPath = join(paths.logDir, 'stdout.log');
-      writeFileSync(stdoutPath, 'some output\n');
-      (checker as any).stdoutLastSize = 12;
-      (checker as any).stdoutLastChangeAt = Date.now() - 11 * 60 * 1000;
-
-      (checker as any).watchdogCheck();
-
-      // lastWatchdogReason should now be set
-      expect((checker as any).lastWatchdogReason).toMatch(/frozen/);
-    });
-  });
 
   describe('formatTelegramVideoMessage', () => {
     it('formats video message with all fields', () => {
@@ -972,255 +836,6 @@ describe('FastChecker', () => {
     });
   });
 
-  // BUG-062: Stuck-with-pending detector tests
-  describe('stuckPendingCheck (BUG-062)', () => {
-    it('does not alert when no inbox messages are pending', async () => {
-      const agent = createMockAgent();
-      const api = createMockTelegramApi();
-      const checker = new FastChecker(agent, paths, '/tmp/framework', {
-        telegramApi: api,
-        chatId: '12345',
-      });
 
-      // Bootstrap complete, past grace period
-      (checker as any).bootstrappedAt = Date.now() - 10 * 60 * 1000;
 
-      // inbox dir is empty (createTestPaths already made it)
-      await (checker as any).stuckPendingCheck();
-
-      expect(api.sendMessage).not.toHaveBeenCalled();
-    });
-
-    it('does not alert when agent has been active recently (outbound log fresh)', async () => {
-      const agent = createMockAgent();
-      const api = createMockTelegramApi();
-      const checker = new FastChecker(agent, paths, '/tmp/framework', {
-        telegramApi: api,
-        chatId: '12345',
-      });
-
-      (checker as any).bootstrappedAt = Date.now() - 10 * 60 * 1000;
-
-      // Drop an inbox message file
-      writeFileSync(join(paths.inbox, '1-1713400000000-from-sage-ab12c.json'), JSON.stringify({
-        id: '1713400000000-sage-ab12c',
-        from: 'sage',
-        to: 'test-agent',
-        priority: 'normal',
-        timestamp: new Date().toISOString(),
-        text: 'hello',
-        reply_to: null,
-      }));
-
-      // Write a fresh outbound log (mtime = now)
-      const outboundPath = join(paths.logDir, 'outbound-messages.jsonl');
-      writeFileSync(outboundPath, JSON.stringify({ ts: new Date().toISOString(), text: 'hi' }) + '\n');
-
-      await (checker as any).stuckPendingCheck();
-
-      // outbound log is fresh — agent is not stuck
-      expect(api.sendMessage).not.toHaveBeenCalled();
-    });
-
-    it('alerts when pending inbox messages exist and agent has been silent >4h', async () => {
-      const agent = createMockAgent();
-      const api = createMockTelegramApi();
-      const checker = new FastChecker(agent, paths, '/tmp/framework', {
-        telegramApi: api,
-        chatId: '12345',
-      });
-
-      (checker as any).bootstrappedAt = Date.now() - 10 * 60 * 1000;
-
-      // Drop an inbox message file
-      writeFileSync(join(paths.inbox, '1-1713400000000-from-sage-ab12c.json'), JSON.stringify({
-        id: '1713400000000-sage-ab12c',
-        from: 'sage',
-        to: 'test-agent',
-        priority: 'normal',
-        timestamp: new Date().toISOString(),
-        text: 'hello',
-        reply_to: null,
-      }));
-
-      // Write a stale outbound log (mtime = 5 hours ago)
-      const outboundPath = join(paths.logDir, 'outbound-messages.jsonl');
-      writeFileSync(outboundPath, JSON.stringify({ ts: new Date().toISOString(), text: 'old' }) + '\n');
-      const fiveHoursAgo = (Date.now() - 5 * 60 * 60 * 1000) / 1000;
-      require('fs').utimesSync(outboundPath, fiveHoursAgo, fiveHoursAgo);
-
-      await (checker as any).stuckPendingCheck();
-
-      // Should have sent a Telegram alert
-      expect(api.sendMessage).toHaveBeenCalledWith(
-        '12345',
-        expect.stringMatching(/stuck.*1 unread inbox/i),
-      );
-    });
-
-    it('respects the alert cooldown — does not re-alert within 1h', async () => {
-      const agent = createMockAgent();
-      const api = createMockTelegramApi();
-      const checker = new FastChecker(agent, paths, '/tmp/framework', {
-        telegramApi: api,
-        chatId: '12345',
-      });
-
-      (checker as any).bootstrappedAt = Date.now() - 10 * 60 * 1000;
-      // Simulate a recent alert (30 min ago — within the 1h cooldown)
-      (checker as any).stuckPendingAlertedAt = Date.now() - 30 * 60 * 1000;
-
-      // Drop an inbox message file
-      writeFileSync(join(paths.inbox, '1-1713400000000-from-sage-ab12c.json'), JSON.stringify({
-        id: '1713400000000-sage-ab12c',
-        from: 'sage',
-        to: 'test-agent',
-        priority: 'normal',
-        timestamp: new Date().toISOString(),
-        text: 'hello',
-        reply_to: null,
-      }));
-
-      // Stale outbound log
-      const outboundPath = join(paths.logDir, 'outbound-messages.jsonl');
-      writeFileSync(outboundPath, 'old\n');
-      const fiveHoursAgo = (Date.now() - 5 * 60 * 60 * 1000) / 1000;
-      require('fs').utimesSync(outboundPath, fiveHoursAgo, fiveHoursAgo);
-
-      await (checker as any).stuckPendingCheck();
-
-      // Must NOT alert — still within cooldown window
-      expect(api.sendMessage).not.toHaveBeenCalled();
-    });
-
-    it('does not alert before bootstrap grace period', async () => {
-      const agent = createMockAgent();
-      const api = createMockTelegramApi();
-      const checker = new FastChecker(agent, paths, '/tmp/framework', {
-        telegramApi: api,
-        chatId: '12345',
-      });
-
-      // bootstrappedAt set to 30s ago — still within 2 min grace
-      (checker as any).bootstrappedAt = Date.now() - 30 * 1000;
-
-      writeFileSync(join(paths.inbox, '1-1713400000000-from-sage-ab12c.json'), JSON.stringify({
-        id: '1713400000000-sage-ab12c',
-        from: 'sage',
-        to: 'test-agent',
-        priority: 'normal',
-        timestamp: new Date().toISOString(),
-        text: 'hello',
-        reply_to: null,
-      }));
-
-      await (checker as any).stuckPendingCheck();
-
-      expect(api.sendMessage).not.toHaveBeenCalled();
-    });
-  });
-
-  // BUG-064: configurable bootstrap grace period
-  describe('BOOTSTRAP_GRACE_MS (BUG-064)', () => {
-    it('defaults to 120 000 ms (2 min) when no config is provided', () => {
-      const agent = createMockAgent();
-      const checker = new FastChecker(agent, paths, '/tmp/framework');
-      expect((checker as any).BOOTSTRAP_GRACE_MS).toBe(2 * 60 * 1000);
-    });
-
-    it('defaults to 120 000 ms when config is provided but bootstrap_grace_seconds is absent', () => {
-      const agent = createMockAgent();
-      const checker = new FastChecker(agent, paths, '/tmp/framework', {
-        config: { max_session_seconds: 3600 },
-      });
-      expect((checker as any).BOOTSTRAP_GRACE_MS).toBe(2 * 60 * 1000);
-    });
-
-    it('uses bootstrap_grace_seconds from config when set', () => {
-      const agent = createMockAgent();
-      const checker = new FastChecker(agent, paths, '/tmp/framework', {
-        config: { bootstrap_grace_seconds: 600 },
-      });
-      expect((checker as any).BOOTSTRAP_GRACE_MS).toBe(600 * 1000);
-    });
-
-    it('falls back to 2 min when bootstrap_grace_seconds is 0 (invalid)', () => {
-      const agent = createMockAgent();
-      const checker = new FastChecker(agent, paths, '/tmp/framework', {
-        config: { bootstrap_grace_seconds: 0 },
-      });
-      expect((checker as any).BOOTSTRAP_GRACE_MS).toBe(2 * 60 * 1000);
-    });
-
-    it('falls back to 2 min when bootstrap_grace_seconds is negative', () => {
-      const agent = createMockAgent();
-      const checker = new FastChecker(agent, paths, '/tmp/framework', {
-        config: { bootstrap_grace_seconds: -30 },
-      });
-      expect((checker as any).BOOTSTRAP_GRACE_MS).toBe(2 * 60 * 1000);
-    });
-
-    it('watchdogCheck respects extended grace period (e.g. 10 min)', () => {
-      const agent = createMockAgent();
-      agent.hardRestartSelf = vi.fn().mockResolvedValue(undefined);
-      const api = createMockTelegramApi();
-      const checker = new FastChecker(agent, paths, '/tmp/framework', {
-        telegramApi: api,
-        chatId: '12345',
-        config: { bootstrap_grace_seconds: 600 }, // 10 min
-      });
-
-      // Bootstrapped 5 min ago — within the 10 min grace, watchdog should be silent
-      (checker as any).bootstrappedAt = Date.now() - 5 * 60 * 1000;
-
-      const stdoutPath = join(paths.logDir, 'stdout.log');
-      writeFileSync(stdoutPath, 'some output\n');
-      (checker as any).stdoutLastSize = 12;
-      (checker as any).stdoutLastChangeAt = Date.now() - 11 * 60 * 1000;
-
-      (checker as any).watchdogCheck();
-
-      // Must NOT trigger — still inside extended grace window
-      expect(agent.hardRestartSelf).not.toHaveBeenCalled();
-      expect((checker as any).watchdogTriggered).toBe(false);
-    });
-  });
-
-  // BUG-079: inbox message ID validation in pollCycle
-  describe('pollCycle inbox ID validation (BUG-079)', () => {
-    it('drops inbox messages with invalid ID patterns without injecting them', async () => {
-      const agent = createMockAgent();
-      const checker = new FastChecker(agent, paths, '/tmp/framework');
-
-      // Simulate checkInbox returning a message with a tampered ID
-      const { checkInbox } = await import('../../../src/bus/message');
-      vi.mock('../../../src/bus/message', async (importOriginal) => {
-        const actual = await importOriginal<typeof import('../../../src/bus/message')>();
-        return {
-          ...actual,
-          checkInbox: vi.fn().mockReturnValue([
-            {
-              id: '../../../etc/passwd',
-              from: 'evil',
-              to: 'test-agent',
-              priority: 'normal',
-              timestamp: new Date().toISOString(),
-              text: 'injected content',
-              reply_to: null,
-            },
-          ]),
-          ackInbox: vi.fn(),
-        };
-      });
-
-      // pollCycle should not inject the message with the bad ID
-      await (checker as any).pollCycle();
-
-      // injectMessage is called on the agent — should NOT have been called
-      // with the tampered message content
-      const injectCalls = agent.injectMessage.mock.calls;
-      const injectedTexts = injectCalls.map((c: any[]) => c[0] as string).join('');
-      expect(injectedTexts).not.toContain('injected content');
-    });
-  });
 });

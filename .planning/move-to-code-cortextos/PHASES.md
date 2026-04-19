@@ -1,12 +1,14 @@
 # PHASES — Move plan (execute only on Josh go-ahead)
 
-## Pre-flight gate
+## Pre-flight gate (updated 2026-04-18)
 
-- [ ] PR #65 (watchdog + 3 stability ports) merged to main.
-- [ ] Auditos bug sweep 2/3/4/5/6/7 complete + CLI --instance bug fix either shipped or parked.
-- [ ] `git status` clean at `~/cortextos/`.
-- [ ] Fleet quiet: no agent actively mid-task (check dashboard Activity feed).
+- [ ] `merge/upstream-main-apr17` merged to main (current branch — must land first).
+- [ ] `git status` clean at `~/cortextos/` on main.
+- [ ] Fleet quiet: no agent actively mid-task (check dashboard Activity feed + `cortextos status --instance cortextos1`).
 - [ ] Josh available in chat (in case of rollback).
+- [x] ~~PR #65 (watchdog + 3 stability ports)~~ — superseded; all stability fixes in BUG-050 through BUG-086 are already merged.
+- [x] ~~Auditos bug sweep~~ — complete as of 2026-04-16 audit.
+- [x] ~~CLI --instance bug~~ — shipped in upstream merge (cortextos1 instance now working).
 
 ## Phase 1 — Freeze + snapshot (2 min)
 
@@ -39,12 +41,12 @@
 
 ## Phase 5 — Verify fleet (5 min)
 
-1. `cortextos status --instance cortextos1` — all 4 agents should reach `running` within 60s
+1. `cortextos status --instance cortextos1` — all 8 agents (auditos, frank2, hunter, larry, maven, muse, sage, sre) should reach `running` within 60s
 2. Tail each agent stdout log, watch for bootstrap completion
 3. Send Telegram test ping to frank2 bot (Josh self), await reply
 4. Send agent-bus message to auditos, await ACK
 5. Open dashboard localhost:3000, verify activity feed updating
-6. Check `~/.claude/projects/` for NEW transcript dirs under the new escaped path
+6. Check `~/.claude/projects/` for NEW transcript dirs under new escaped path (`-Users-joshweiss-code-cortextos-...`)
 
 ## Phase 6 — Cleanup (1 min)
 

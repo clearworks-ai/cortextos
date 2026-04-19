@@ -420,11 +420,7 @@ export class TelegramAPI {
       if (/Too Many Requests|429/i.test(msg)) {
         return { ok: false, reason: 'rate_limited', detail: msg };
       }
-      // Any other error at the getMe step is a network-level failure
-      // (fetch threw, DNS died, etc.) rather than a credential problem.
       if (/Telegram API error/.test(msg)) {
-        // The API replied but with an unrecognized error shape. Treat as
-        // bad_token conservatively — it's the most common cause.
         return { ok: false, reason: 'bad_token', detail: msg };
       }
       return { ok: false, reason: 'network_error', detail: msg };
@@ -433,16 +429,10 @@ export class TelegramAPI {
     const botId: number | undefined = me?.result?.id;
     const botUsername: string = me?.result?.username ?? '(unknown)';
 
-    // Step 2: the self_chat check. If CHAT_ID matches the bot's own user id,
-    // no further probing is needed — the config is broken no matter what
-    // getChat would return. This catches the self-chat trap before any additional
-    // API calls.
     if (botId !== undefined && String(botId) === chatIdStr) {
       return { ok: false, reason: 'self_chat', detail: chatIdStr };
     }
 
-    // Step 3: getChat — confirms the chat is reachable by this bot and
-    // lets us inspect type + is_bot.
     let chat: any;
     try {
       chat = await this.withTimeout(this.getChat(chatIdStr), TIMEOUT_MS, 'Telegram API request');
@@ -479,6 +469,14 @@ export class TelegramAPI {
       chatType,
       chatTitle,
     };
+  }
+
+  async getUpdates(offset: number, timeout: number = 1): Promise<any> {
+    return this.post('getUpdates', {
+      offset,
+      timeout,
+      allowed_updates: ['message', 'callback_query', 'message_reaction'],
+    });
   }
 
   /**

@@ -21,7 +21,7 @@ import { resolvePaths } from '../utils/paths.js';
 import { resolveEnv } from '../utils/env.js';
 import { IPCClient } from '../daemon/ipc-server.js';
 import { TelegramAPI } from '../telegram/api.js';
-import { logOutboundMessage, cacheLastSent, logParseFallback, logNarrationFallback } from '../telegram/logging.js';
+import { logOutboundMessage, cacheLastSent } from '../telegram/logging.js';
 import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext } from '../types/index.js';
 
 /**
@@ -111,6 +111,9 @@ busCommand
     }
 
     const msgId = sendMessage(paths, env.agentName, to, priority as Priority, text, effectiveReplyTo);
+    try {
+      logEvent(paths, env.agentName, env.org, 'message', 'agent_message_sent', 'info', JSON.stringify({ to, priority, msg_id: msgId, reply_to: effectiveReplyTo ?? null }));
+    } catch { /* non-fatal */ }
     console.log(msgId);
   });
 
@@ -130,6 +133,9 @@ busCommand
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
     ackInbox(paths, id);
+    try {
+      logEvent(paths, env.agentName, env.org, 'message', 'inbox_ack', 'info', JSON.stringify({ msg_id: id }));
+    } catch { /* non-fatal */ }
     console.log(`ACK'd ${id}`);
   });
 
@@ -457,6 +463,14 @@ busCommand
       currentTask: opts.task,
       displayName,
     });
+    // Auto-emit a heartbeat event so the activity feed surfaces any live agent
+    // even if the agent itself forgets to call log-event. This makes the
+    // dashboard "agents" list derive from heartbeats, not just explicit events.
+    try {
+      logEvent(paths, env.agentName, env.org, 'heartbeat', 'heartbeat', 'info', JSON.stringify({ status, task: opts.task ?? '' }));
+    } catch {
+      // Non-fatal: heartbeat write already succeeded
+    }
     console.log(`Heartbeat updated: ${env.agentName}`);
   });
 
@@ -937,14 +951,14 @@ busCommand
     }
 
     if (!botToken) {
-      console.error('Error: BOT_TOKEN not set. Set it in your agent .env file or as an environment variable.');
+      console.error('Error: BOT_TOKEN not configured. Set it in your agent .env file or as an environment variable to enable Telegram.');
       process.exit(1);
     }
 
     const api = new TelegramAPI(botToken);
-    let parseFallbackReason: string | null = null;
     try {
       let sentMessageId = 0;
+      let parseFallbackReason: string | null = null;
       if (opts.image) {
         const result = await api.sendPhoto(chatId, opts.image, message);
         sentMessageId = result?.result?.message_id ?? 0;
@@ -969,42 +983,19 @@ busCommand
           parseFallback: parseFallbackReason !== null,
           parseFallbackReason: parseFallbackReason ?? undefined,
         });
-        // BUG-067: durable parse-failure record for theta-wave metric tracking
-        if (parseFallbackReason !== null) {
-          logParseFallback(env.ctxRoot, env.agentName, chatId, message, parseFallbackReason, 'sent_plain');
-        }
         cacheLastSent(env.ctxRoot, env.agentName, chatId, message);
+        // Auto-emit activity event so dashboard sees every Telegram send,
+        // even from agents that never call log-event directly.
+        try {
+          const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+          const preview = message.length > 120 ? message.slice(0, 120) + '…' : message;
+          logEvent(paths, env.agentName, env.org, 'message', 'telegram_sent', 'info', JSON.stringify({ chat_id: chatId, message_id: sentMessageId, preview }));
+        } catch { /* non-fatal */ }
       }
 
       console.log('Message sent');
     } catch (err: any) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      const env2 = resolveEnv();
-      // BUG-067: if both Markdown and plain-text attempts failed, log failed_both
-      if (parseFallbackReason !== null) {
-        if (env2.agentName && env2.ctxRoot) {
-          logParseFallback(env2.ctxRoot, env2.agentName, chatId, message, parseFallbackReason, 'failed_both');
-        }
-      }
-      // BUG-066: log unreachable messages so fast-checker can replay on recovery.
-      // Network/timeout errors are transient — auth/config errors are not retryable.
-      const isNetworkError =
-        /timed out|request failed|ECONNREFUSED|ENOTFOUND|ECONNRESET|network/i.test(errMsg) &&
-        !/Telegram API error/i.test(errMsg);
-      if (isNetworkError && env2.agentName && env2.ctxRoot) {
-        logNarrationFallback(env2.ctxRoot, env2.agentName, chatId, message, errMsg);
-        // Write sentinel so fast-checker can inject a PTY alert
-        try {
-          const { writeFileSync, mkdirSync } = require('fs');
-          const { join } = require('path');
-          const stateDir = join(env2.ctxRoot, 'state', env2.agentName);
-          mkdirSync(stateDir, { recursive: true });
-          writeFileSync(join(stateDir, '.telegram-unreachable'), new Date().toISOString(), 'utf-8');
-        } catch {
-          // Non-critical
-        }
-      }
-      console.error(`Failed to send: ${errMsg}`);
+      console.error(`Failed to send: ${err.message || err}`);
       process.exit(1);
     }
   });
@@ -1122,7 +1113,7 @@ busCommand
       process.exit(1);
     }
 
-    ensureKBDirs(env.instanceId, org);
+    ensureKBDirs(env.instanceId, env.frameworkRoot || process.cwd(), org);
 
     ingestKnowledgeBase(paths, {
       org,
@@ -1244,7 +1235,10 @@ busCommand
       }
     }
     if (!botToken) botToken = process.env.BOT_TOKEN || '';
-    if (!botToken) { console.error('Error: BOT_TOKEN not set'); process.exit(1); }
+    if (!botToken) {
+      console.error('Error: BOT_TOKEN not configured. Set it in your agent .env file or as an environment variable to enable Telegram.');
+      process.exit(1);
+    }
 
     const api = new TelegramAPI(botToken);
     let markup: object | undefined;
@@ -1280,7 +1274,10 @@ busCommand
       }
     }
     if (!botToken) botToken = process.env.BOT_TOKEN || '';
-    if (!botToken) { console.error('Error: BOT_TOKEN not set'); process.exit(1); }
+    if (!botToken) {
+      console.error('Error: BOT_TOKEN not configured. Set it in your agent .env file or as an environment variable to enable Telegram.');
+      process.exit(1);
+    }
 
     const api = new TelegramAPI(botToken);
     try {
@@ -1606,52 +1603,6 @@ busCommand
     }
 
     console.log('soft-restart-all complete.');
-  });
-
-busCommand
-  .command('interrupt-agent')
-  .description('Send SIGINT to a running agent\'s PTY process (BUG-083: soft interrupt without full restart)')
-  .argument('<agent>', 'Agent name to interrupt')
-  .action(async (agent: string) => {
-    const { appendFileSync, mkdirSync } = require('fs');
-    const { join } = require('path');
-    const env = resolveEnv();
-
-    const ipc = new IPCClient(env.instanceId);
-    const daemonRunning = await ipc.isDaemonRunning();
-    if (!daemonRunning) {
-      console.error('ERROR: Node daemon is not running. Start it with: cortextos start');
-      process.exit(1);
-    }
-
-    const resp = await ipc.send({
-      type: 'interrupt-agent',
-      agent,
-      source: 'cortextos bus interrupt-agent',
-    });
-
-    if (resp.success) {
-      const { pid } = (resp.data as { agent: string; pid: number });
-      console.log(`Sent SIGINT to ${agent} (pid ${pid})`);
-
-      // Log the interrupt action to the agent's event log
-      const ctxRoot = require('path').join(require('os').homedir(), '.cortextos', env.instanceId);
-      const logDir = join(ctxRoot, 'logs', agent);
-      mkdirSync(logDir, { recursive: true });
-      const logEntry = JSON.stringify({
-        timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
-        action: 'interrupt-agent',
-        agent,
-        pid,
-        source: 'cortextos bus interrupt-agent',
-      });
-      try {
-        appendFileSync(join(logDir, 'activity.log'), logEntry + '\n');
-      } catch { /* non-fatal */ }
-    } else {
-      console.error(`ERROR: ${resp.error}`);
-      process.exit(1);
-    }
   });
 
 busCommand

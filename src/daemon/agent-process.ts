@@ -53,6 +53,9 @@ export class AgentProcess {
   // from an old PTY can race past stopRequested and trigger crash recovery on
   // the new agent.
   private lifecycleGeneration: number = 0;
+  // Guard: only one cron verification waiter in-flight per agent at a time.
+  // Rapid --continue restarts must not stack duplicate waiters. (Issue #182)
+  private cronVerificationPending: boolean = false;
   // BUG-011 fix: stop() awaits this promise (resolved by the onExit handler in start())
   // to guarantee the PTY exit has fired before stopping=false is reset. Without
   // this, the exit handler can fire after stopping=false and trigger spurious
@@ -92,9 +95,8 @@ export class AgentProcess {
 
     // Resolve the git root once at construction time. Used by the watchdog for
     // commit-stability tracking and rollback. Null if not inside a git repo.
-    const agentDir = env.agentDir || env.workingDir;
-    if (agentDir) {
-      this.repoRoot = findGitRoot(agentDir);
+    if (env.agentDir) {
+      this.repoRoot = findGitRoot(env.agentDir);
     }
   }
 
@@ -465,6 +467,29 @@ export class AgentProcess {
       return;
     }
 
+    // When the cortextos daemon is shut down by PM2, SIGTERM propagates to
+    // the whole process group and reaches each PTY's Claude Code child
+    // BEFORE the daemon's stopAll() loop has a chance to call stopAgent() on
+    // it. Those children exit cleanly (code 0) but arrive at handleExit with
+    // stopRequested=false, which used to classify the exit as a crash and
+    // inflate .crash_count_today by one per agent, per PM2 restart.
+    //
+    // agent-manager.ts:stopAll() already writes a `.daemon-stop` marker in
+    // every agent's state dir at the START of its shutdown loop for an
+    // unrelated reason (SessionEnd crash-alert hook). We reuse that marker
+    // here as the authoritative "the daemon is going down" signal. If the
+    // marker exists AND is recent (written within the last 60s), any PTY
+    // exit is a shutdown casualty, not a real crash — swallow it.
+    //
+    // The 60s window guards against a stale marker from a previous shutdown
+    // that wasn't cleaned up: we do NOT want an old marker to silently mask
+    // a genuine crash days later. handleExit does NOT delete the marker —
+    // cleanup stays with agent-manager / hook-crash-alert per the existing
+    // separation of concerns.
+    if (this.isDaemonShuttingDown()) {
+      return;
+    }
+
     // BUG-040 fix: check stopRequested instead of (only) stopping. The
     // stopping flag is cleared inside stop() after a 15s timeout window —
     // which means a slow PTY shutdown can fire handleExit AFTER stopping is
@@ -734,14 +759,13 @@ export class AgentProcess {
       ? ' RATE-LIMIT RECOVERY: Your previous session was paused by the daemon due to an Anthropic rate-limit or overload response. You have been restarted after the configured recovery window. Resume normal operations — this was not a crash.'
       : '';
     const deliverablesBlock = this.buildDeliverablesBlock();
-    return `You are starting a new session. Current UTC time: ${nowUtc}. Read AGENTS.md and all bootstrap files listed there. Then restore your crons from config.json: for each entry with type "recurring" (or no type field), call /loop {interval} {prompt}; for each entry with type "once", compare fire_at against the current UTC time above — if fire_at is still in the future recreate the CronCreate, if fire_at is in the past delete that entry from config.json. Run CronList first to avoid duplicates.${reminderBlock}${deliverablesBlock} After setting up crons, send a Telegram message to the user saying you are back online.${onboardingAppend}${recoveryBlock}${rateLimitBlock}`;
+    return `You are starting a new session. Current UTC time: ${nowUtc}. Read AGENTS.md and all bootstrap files listed there. Then restore your crons from config.json: for each entry with type "recurring" (or no type field), call /loop {interval} {prompt}; for each entry with type "once", compare fire_at against the current UTC time above — if fire_at is still in the future recreate the CronCreate, if fire_at is in the past delete that entry from config.json. CRITICAL DEDUP: Always call CronList BEFORE creating any cron. For each config.json entry, search the CronList output for its prompt text — if the prompt already appears, SKIP that cron entirely. Only call /loop or CronCreate for entries whose prompt text is NOT already listed. This prevents rapid --continue restarts from accumulating duplicate schedules.${reminderBlock}${deliverablesBlock} After setting up crons, send a Telegram message to the user saying you are back online.${onboardingAppend}`;
   }
 
   private buildContinuePrompt(recoveryNote: string | null): string {
     const stateDir = join(this.env.ctxRoot, 'state', this.name);
     const nowUtc = new Date().toISOString();
     const reminderBlock = this.buildReminderBlock();
-    // Bug-2 fix: inject recovery note in continue mode too.
     const recoveryBlock = recoveryNote
       ? ` WATCHDOG RECOVERY: The daemon rolled back your git repository due to repeated crashes. Before doing anything else, read this recovery note and investigate the root cause:\n\n${recoveryNote}\n\nAfter reviewing, write your findings to memory and notify the operator.`
       : '';
@@ -749,7 +773,7 @@ export class AgentProcess {
       ? ' RATE-LIMIT RECOVERY: Your previous session was paused by the daemon due to an Anthropic rate-limit or overload response. You have been restarted after the configured recovery window. Resume normal operations — this was not a crash.'
       : '';
     const deliverablesBlock = this.buildDeliverablesBlock();
-    return `SESSION CONTINUATION: Your CLI process was restarted with --continue to reload configs. Current UTC time: ${nowUtc}. Your full conversation history is preserved. Re-read AGENTS.md and ALL bootstrap files listed there. Restore your crons from config.json: recurring entries use /loop, once entries use CronCreate only if fire_at is still in the future (delete expired ones from config.json). Run CronList first — no duplicates.${reminderBlock}${deliverablesBlock} Check inbox. Resume normal operations. After restoring crons and checking inbox, send a Telegram message to the user saying you are back online.${recoveryBlock}${rateLimitBlock}`;
+    return `SESSION CONTINUATION: Your CLI process was restarted with --continue to reload configs. Current UTC time: ${nowUtc}. Your full conversation history is preserved. Re-read AGENTS.md and ALL bootstrap files listed there. Restore your crons from config.json ONLY if missing. CRITICAL DEDUP: Call CronList FIRST. For each config.json entry, search the CronList output for its prompt text — if the prompt already appears, SKIP that cron. Only call /loop (recurring) or CronCreate (once, if fire_at is in the future) for entries whose prompt text is NOT already listed. Rapid --continue restarts must not accumulate duplicates.${reminderBlock}${deliverablesBlock} Check inbox. Resume normal operations. After restoring crons and checking inbox, send a Telegram message to the user saying you are back online.`;
   }
 
   /**
@@ -854,6 +878,15 @@ export class AgentProcess {
     }
   }
 
+  /**
+   * Check whether the daemon is currently in its shutdown sequence.
+   *
+   * Returns true iff a `.daemon-stop` marker exists in this agent's state
+   * dir AND was written within the last 60 seconds. The marker is written
+   * by AgentManager.stopAll() before it begins iterating stopAgent() calls.
+   * A stale marker older than 60s is treated as leftover from a prior
+   * shutdown and ignored — real crashes must not be masked indefinitely.
+   */
   private isDaemonShuttingDown(): boolean {
     const marker = join(this.env.ctxRoot, 'state', this.name, '.daemon-stop');
     try {
@@ -865,6 +898,16 @@ export class AgentProcess {
     }
   }
 
+  /**
+   * Append an unplanned-exit entry to restarts.log. Complements the planned
+   * SELF-RESTART / HARD-RESTART entries written by src/bus/system.ts so that
+   * a single file gives the complete restart history for an agent.
+   *
+   * Format matches bus/system.ts: `[ISO] <KIND>: <details>`. appendFileSync
+   * uses write(2) with O_APPEND on Linux, which is atomic for writes under
+   * PIPE_BUF (~4KB) — each CRASH line fits comfortably. All errors are
+   * swallowed: logging must never break crash recovery.
+   */
   private appendCrashToRestartsLog(
     exitCode: number,
     backoffMs: number,
@@ -926,16 +969,24 @@ export class AgentProcess {
     if (!crons || crons.length === 0) return;
 
     const recurringNames = crons
-      .filter(c => c.type !== 'once')
+      .filter(c => c.type !== 'once' && c.type !== 'disabled')
       .map(c => c.name);
     if (recurringNames.length === 0) return;
+
+    // Dedup: only one waiter in-flight per agent. Rapid --continue restarts
+    // would otherwise stack multiple concurrent waiters. (Issue #182)
+    if (this.cronVerificationPending) {
+      this.log('Cron verification already pending — skipping duplicate');
+      return;
+    }
 
     const generation = this.lifecycleGeneration;
 
     // Run in background — don't block startup
-    this.verifyCronsAfterIdle(recurringNames, generation).catch(err => {
-      this.log(`Cron verification failed (non-fatal): ${err}`);
-    });
+    this.cronVerificationPending = true;
+    this.verifyCronsAfterIdle(recurringNames, generation)
+      .catch(err => { this.log(`Cron verification failed (non-fatal): ${err}`); })
+      .finally(() => { this.cronVerificationPending = false; });
   }
 
   /**
@@ -951,13 +1002,14 @@ export class AgentProcess {
 
     // Only monitor recurring crons with a parseable interval (skip cron expressions)
     const monitorable = crons.filter(
-      c => c.type !== 'once' && c.interval && !isNaN(parseDurationMs(c.interval)),
+      c => c.type !== 'once' && c.type !== 'disabled' && c.interval && !isNaN(parseDurationMs(c.interval)),
     );
     if (monitorable.length === 0) return;
 
     const generation = this.lifecycleGeneration;
+    const loopStartedAt = Date.now();
 
-    this.runGapDetectionLoop(monitorable, generation).catch(err => {
+    this.runGapDetectionLoop(monitorable, generation, loopStartedAt).catch(err => {
       this.log(`Cron gap detection failed (non-fatal): ${err}`);
     });
   }
@@ -965,6 +1017,7 @@ export class AgentProcess {
   private async runGapDetectionLoop(
     crons: Array<{ name: string; interval?: string }>,
     generation: number,
+    loopStartedAt: number,
   ): Promise<void> {
     const GAP_POLL_MS = 10 * 60 * 1000;   // poll every 10 minutes
     const GAP_MULTIPLIER = 2.0;            // nudge when gap > 2x expected interval
@@ -984,14 +1037,17 @@ export class AgentProcess {
         const intervalMs = parseDurationMs(cronDef.interval!);
 
         const record = state.crons.find(r => r.name === cronDef.name);
+        let lastFireMs: number;
         if (!record) {
-          // No fire record yet — cron may not have fired once. Skip to avoid
-          // false positives on freshly started agents.
-          continue;
+          // No fire record yet (cold start or daemon restart before first cron fire).
+          // Treat the loop start time as the implicit last fire. This means gap
+          // detection will nudge if the cron hasn't fired within 2x its interval
+          // AFTER the daemon restarted — preventing dead zones on cold starts.
+          lastFireMs = loopStartedAt;
+        } else {
+          lastFireMs = Date.parse(record.last_fire);
+          if (isNaN(lastFireMs)) continue;
         }
-
-        const lastFireMs = Date.parse(record.last_fire);
-        if (isNaN(lastFireMs)) continue;
 
         const gapMs = now - lastFireMs;
         const threshold = intervalMs * GAP_MULTIPLIER;
@@ -1004,6 +1060,11 @@ export class AgentProcess {
           this.log(`Gap nudge: ${cronDef.name} silent ${gapMin}min (threshold: ${Math.round(threshold / 60_000)}min)`);
           if (this.pty && this.status === 'running') {
             injectMessage((data) => this.pty!.write(data), nudge);
+            // Stagger: wait between nudges so the agent can process each one
+            // before the next arrives. Without this, N simultaneous stale crons
+            // fire N back-to-back injections, spiking context and triggering
+            // ctx-watchdog restarts. (Issue #182)
+            await sleep(30_000);
           }
         }
       }
@@ -1028,9 +1089,10 @@ export class AgentProcess {
       }
     } catch { /* ignore */ }
 
-    // Wait up to 10 minutes for the agent to finish its startup turn.
-    // Poll every 15s. Bail if the agent stopped or a new lifecycle started.
-    const maxWaitMs = 10 * 60 * 1000;
+    // Wait up to 30 minutes for the agent to finish its startup turn.
+    // 10 min was too short — agents busy processing gap nudge bursts would
+    // never go idle in time and the verification would silently drop. (Issue #182)
+    const maxWaitMs = 30 * 60 * 1000;
     const pollMs = 15_000;
     const startTime = Date.now();
     let foundIdle = false;

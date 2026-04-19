@@ -381,6 +381,7 @@ export interface CtxEnv {
   frameworkRoot: string;
   agentName: string;
   agentDir: string;
+  workingDir?: string;
   org: string;
   projectRoot: string;
   timezone?: string;

@@ -304,17 +304,6 @@ export class TelegramAPI {
   }
 
   /**
-   * Get updates via long polling.
-   */
-  async getUpdates(offset: number, timeout: number = 1): Promise<any> {
-    return this.post('getUpdates', {
-      offset,
-      timeout,
-      allowed_updates: ['message', 'callback_query'],
-    });
-  }
-
-  /**
    * Get info about the bot itself (getMe). Throws on Telegram API error.
    * Primarily used by validateCredentials() to confirm the BOT_TOKEN is
    * valid and to look up the bot's own user id for the self_chat check.

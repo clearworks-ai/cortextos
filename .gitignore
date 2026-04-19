@@ -56,3 +56,15 @@ BRAINDUMP*.md
 AGENTS.md
 dashboard/screenshots/
 dashboard/test-*.py
+.gstack/
+
+# cortextOS security: auto-added sensitive file exclusions
+*.env
+secrets.env
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+credentials.json
+service-account*.json

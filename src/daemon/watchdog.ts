@@ -34,6 +34,7 @@ import {
 } from 'fs';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
+import { atomicWriteSync } from '../utils/atomic.js';
 
 // Number of failures on the same commit before triggering a rollback.
 export const ROLLBACK_THRESHOLD = 3;
@@ -367,4 +368,125 @@ export function consumeRecoveryNote(stateDir: string): string | null {
   const note = readRecoveryNote(stateDir);
   if (note) deleteRecoveryNote(stateDir);
   return note;
+}
+
+// ---------------------------------------------------------------------------
+// Clean-exit flag (daemon-idle-flag)
+// ---------------------------------------------------------------------------
+// Durable marker written when handleExit classifies a PTY exit as clean (not
+// a crash). The flag persists across daemon restarts, letting external
+// tooling — bus watchdog CLI, Frank2 fleet health, post-mortem inspection —
+// distinguish "agent intentionally stopped" from "agent crashed" even after
+// the in-memory state (stopRequested, .daemon-stop marker) is gone.
+//
+// Writers: AgentProcess.handleExit() short-circuit branches.
+// Reader: AgentProcess.start() — consumes once per lifecycle for boot log.
+//
+// Per Sage audit 2026-04-20: kept as a standalone file (not consolidated
+// into state.json) because atomic-write semantics are per-file; a shared
+// state.json would open read-modify-write races during crash windows.
+
+export type CleanExitReason =
+  | 'intentional-stop'    // stop() was called (operator or programmatic)
+  | 'daemon-shutdown'     // PM2/daemon-going-down cascade
+  | 'rate-limit-pause';   // Anthropic rate-limit signature detected
+
+export interface CleanExitRecord {
+  exit_code: number;
+  reason: CleanExitReason;
+  ts: number;
+  commit?: string;
+}
+
+function cleanExitPath(stateDir: string): string {
+  return join(stateDir, 'clean_exit.flag');
+}
+
+/**
+ * Atomically write a clean-exit marker. Called from handleExit() short-circuit
+ * branches. Best-effort — never throws (watchdog must not surface errors
+ * from inside an already-failing exit path).
+ *
+ * @param stateDir  Agent's state directory ({ctxRoot}/state/{agentName}).
+ * @param exitCode  The PTY exit code (may be non-zero for rate-limit cases).
+ * @param reason    Classification tag for external tooling.
+ * @param repoRoot  Git repo root (optional) — if provided, current HEAD
+ *                  is recorded alongside the flag for post-mortem context.
+ */
+export function recordCleanExit(
+  stateDir: string,
+  exitCode: number,
+  reason: CleanExitReason,
+  repoRoot: string | null = null,
+): void {
+  const record: CleanExitRecord = {
+    exit_code: exitCode,
+    reason,
+    ts: Math.floor(Date.now() / 1000),
+  };
+  if (repoRoot) {
+    const commit = getCurrentCommit(repoRoot);
+    if (commit) record.commit = commit;
+  }
+  try {
+    atomicWriteSync(cleanExitPath(stateDir), JSON.stringify(record));
+  } catch {
+    // Best-effort — never throw from the watchdog
+  }
+}
+
+/**
+ * Read the clean-exit flag without deleting it. Returns { clean: true, ... }
+ * if a valid flag exists; { clean: false } otherwise.
+ *
+ * A corrupt or partial-write flag returns clean:false rather than throwing.
+ * Silently claiming "everything was fine" from an unreadable marker is worse
+ * than ignoring it and letting the watchdog run normally.
+ */
+export function readCleanExit(stateDir: string): {
+  clean: boolean;
+  reason: CleanExitReason | null;
+  ts: number | null;
+  exit_code: number | null;
+} {
+  const path = cleanExitPath(stateDir);
+  if (!existsSync(path)) {
+    return { clean: false, reason: null, ts: null, exit_code: null };
+  }
+  try {
+    const raw = readFileSync(path, 'utf-8');
+    const parsed = JSON.parse(raw) as Partial<CleanExitRecord>;
+    if (
+      typeof parsed.reason === 'string' &&
+      typeof parsed.ts === 'number' &&
+      typeof parsed.exit_code === 'number'
+    ) {
+      return {
+        clean: true,
+        reason: parsed.reason as CleanExitReason,
+        ts: parsed.ts,
+        exit_code: parsed.exit_code,
+      };
+    }
+  } catch {
+    // Corrupt flag — fall through to clean:false
+  }
+  return { clean: false, reason: null, ts: null, exit_code: null };
+}
+
+/**
+ * Delete the clean-exit flag. Called from AgentProcess.start() after the
+ * flag has been read, so it surfaces only once per lifecycle.
+ *
+ * Edge case: if start() deletes the flag but the boot itself fails before
+ * the agent runs, the clean marker is gone and no crash has occurred yet.
+ * Low risk — the watchdog 3-failure threshold absorbs this rare case.
+ */
+export function deleteCleanExit(stateDir: string): void {
+  const path = cleanExitPath(stateDir);
+  try {
+    unlinkSync(path);
+  } catch {
+    // Best-effort — ENOENT is common and safe
+  }
 }

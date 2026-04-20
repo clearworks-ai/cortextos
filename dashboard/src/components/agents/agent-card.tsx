@@ -7,7 +7,7 @@ import { HealthDot } from '@/components/shared/health-dot';
 import { OrgBadge } from '@/components/shared/org-badge';
 import { AgentAvatar } from '@/components/shared/agent-avatar';
 import { AgentActions } from './agent-actions';
-import { IconChecklist } from '@tabler/icons-react';
+import { IconChecklist, IconDatabase } from '@tabler/icons-react';
 import type { HealthStatus } from '@/lib/types';
 
 export interface AgentCardData {
@@ -20,6 +20,10 @@ export interface AgentCardData {
   health: HealthStatus;
   currentTask?: string;
   tasksToday: number;
+  /** stdout.log size in bytes */
+  stdoutBytes?: number;
+  /** Rotate threshold in bytes (default 50 MB) */
+  stdoutCapBytes?: number;
 }
 
 interface AgentCardProps {
@@ -85,13 +89,38 @@ export function AgentCard({ agent }: AgentCardProps) {
             </div>
           )}
 
-          {/* Footer: tasks count */}
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <IconChecklist size={13} />
-            <span>
+          {/* Footer: tasks count + log size */}
+          <div className="flex items-center justify-between gap-1.5 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1.5">
+              <IconChecklist size={13} />
               {agent.tasksToday} task{agent.tasksToday !== 1 ? 's' : ''} today
             </span>
+            {agent.stdoutBytes !== undefined && (
+              <span className="flex items-center gap-1">
+                <IconDatabase size={11} />
+                {(agent.stdoutBytes / 1_048_576).toFixed(1)}MB
+              </span>
+            )}
           </div>
+
+          {/* Transcript usage bar */}
+          {agent.stdoutBytes !== undefined && agent.stdoutCapBytes !== undefined && (
+            (() => {
+              const pct = Math.min(100, (agent.stdoutBytes / agent.stdoutCapBytes) * 100);
+              const color = pct > 90 ? 'bg-destructive' : pct > 70 ? 'bg-yellow-500' : 'bg-primary/40';
+              return (
+                <div className="space-y-0.5">
+                  <div className="flex justify-between text-[10px] text-muted-foreground/60">
+                    <span>Log</span>
+                    <span>{pct.toFixed(0)}%</span>
+                  </div>
+                  <div className="h-1 w-full rounded-full bg-muted/40">
+                    <div className={`h-1 rounded-full transition-all ${color}`} style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+              );
+            })()
+          )}
         </CardContent>
       </Card>
     </Link>

@@ -286,7 +286,11 @@ export function evaluateExperiment(
     experiment.hypothesis,
     experiment.completed_at,
   ].join('\t');
-  appendFileSync(tsvPath, tsvLine + '\n', 'utf-8');
+  try {
+    appendFileSync(tsvPath, tsvLine + '\n', 'utf-8');
+  } catch (err) {
+    console.warn(`experiment ${experiment.id}: results.tsv write failed: ${(err as Error).message}`);
+  }
 
   // Append to learnings.md
   const learningsPath = join(expDir, 'learnings.md');
@@ -303,7 +307,11 @@ export function evaluateExperiment(
   ]
     .filter(Boolean)
     .join('\n');
-  appendFileSync(learningsPath, learningEntry + '\n', 'utf-8');
+  try {
+    appendFileSync(learningsPath, learningEntry + '\n', 'utf-8');
+  } catch (err) {
+    console.warn(`experiment ${experiment.id}: learnings.md write failed: ${(err as Error).message}`);
+  }
 
   // Remove active.json
   const activePath = join(expDir, 'active.json');

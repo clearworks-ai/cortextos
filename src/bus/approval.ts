@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'fs';
+import { readdirSync, readFileSync, existsSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import type { Approval, ApprovalCategory, ApprovalStatus, BusPaths } from '../types/index.js';
 import { atomicWriteSync, ensureDir } from '../utils/atomic.js';
@@ -178,14 +178,26 @@ export function updateApproval(
     approval.resolved_at = approval.updated_at;
     approval.resolved_by = note || null;
 
-    // Move to resolved/ directory (matches bash version)
+    // Move to resolved/ directory (matches bash version).
+    //
+    // Crash-safety: atomicWriteSync lands the resolved copy via rename, then
+    // we unlink the pending copy. If the process dies between the two, a
+    // retry finds the resolved copy already present, skips the write, and
+    // just unlinks pending. resolved/ is authoritative — if unlink fails
+    // after a successful write, we don't throw; next retry will clean up.
     const destDir = join(paths.approvalDir, 'resolved');
     ensureDir(destDir);
-    atomicWriteSync(join(destDir, `${approvalId}.json`), JSON.stringify(approval));
-
-    // Remove from pending
-    const { unlinkSync } = require('fs');
-    unlinkSync(filePath);
+    const destPath = join(destDir, `${approvalId}.json`);
+    if (!existsSync(destPath)) {
+      atomicWriteSync(destPath, JSON.stringify(approval));
+    }
+    try {
+      unlinkSync(filePath);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        console.warn(`approval ${approvalId} resolved but pending unlink failed: ${(err as Error).message}`);
+      }
+    }
 
     // Notify requesting agent via inbox
     if (approval.requesting_agent) {

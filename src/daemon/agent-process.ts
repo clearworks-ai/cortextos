@@ -18,6 +18,9 @@ import {
   performRollback,
   readRecoveryNote,
   deleteRecoveryNote,
+  recordCleanExit,
+  readCleanExit,
+  deleteCleanExit,
   MIN_HEALTHY_SECONDS,
 } from './watchdog.js';
 
@@ -131,6 +134,18 @@ export class AgentProcess {
     const stateDir = join(this.env.ctxRoot, 'state', this.name);
     const recoveryNote = readRecoveryNote(stateDir);
     const hadRateLimit = this.hasRateLimitMarker(stateDir);
+
+    // Consume any clean-exit flag from the previous lifecycle so external
+    // tooling (bus watchdog CLI, Frank2 fleet health) sees it only once.
+    // Edge case: if the flag is consumed here and the boot below fails
+    // before the agent actually runs, the "clean" marker is gone but no
+    // crash has occurred. Rely on the 3-failure watchdog threshold to
+    // absorb this rare case — see watchdog.ts recordCleanExit docstring.
+    const prevCleanExit = readCleanExit(stateDir);
+    if (prevCleanExit.clean) {
+      this.log(`Previous exit was clean (reason=${prevCleanExit.reason}, exit_code=${prevCleanExit.exit_code})`);
+      deleteCleanExit(stateDir);
+    }
     const prompt = mode === 'fresh'
       ? this.buildStartupPrompt(recoveryNote)
       : this.buildContinuePrompt(recoveryNote);
@@ -469,28 +484,8 @@ export class AgentProcess {
     this.clearSessionTimer();
     this.clearHealthTimer();
 
-    // When the cortextos daemon is shut down by PM2, SIGTERM propagates to
-    // the whole process group and reaches each PTY's Claude Code child
-    // BEFORE the daemon's stopAll() loop has a chance to call stopAgent() on
-    // it. Those children exit cleanly (code 0) but arrive at handleExit with
-    // stopRequested=false, which used to classify the exit as a crash and
-    // inflate .crash_count_today by one per agent, per PM2 restart.
-    //
-    // agent-manager.ts:stopAll() already writes a `.daemon-stop` marker in
-    // every agent's state dir at the START of its shutdown loop for an
-    // unrelated reason (SessionEnd crash-alert hook). We reuse that marker
-    // here as the authoritative "the daemon is going down" signal. If the
-    // marker exists AND is recent (written within the last 60s), any PTY
-    // exit is a shutdown casualty, not a real crash — swallow it.
-    //
-    // The 60s window guards against a stale marker from a previous shutdown
-    // that wasn't cleaned up: we do NOT want an old marker to silently mask
-    // a genuine crash days later. handleExit does NOT delete the marker —
-    // cleanup stays with agent-manager / hook-crash-alert per the existing
-    // separation of concerns.
-    if (this.isDaemonShuttingDown()) {
-      return;
-    }
+    // Resolve stateDir up-front so clean-exit branches can record the marker.
+    const stateDir = join(this.env.ctxRoot, 'state', this.name);
 
     // When the cortextos daemon is shut down by PM2, SIGTERM propagates to
     // the whole process group and reaches each PTY's Claude Code child
@@ -512,6 +507,7 @@ export class AgentProcess {
     // cleanup stays with agent-manager / hook-crash-alert per the existing
     // separation of concerns.
     if (this.isDaemonShuttingDown()) {
+      recordCleanExit(stateDir, exitCode, 'daemon-shutdown', this.repoRoot);
       return;
     }
 
@@ -529,10 +525,9 @@ export class AgentProcess {
     // awaiting. Either flag short-circuits crash recovery.
     if (this.stopRequested || this.stopping) {
       this.stopRequested = false;
+      recordCleanExit(stateDir, exitCode, 'intentional-stop', this.repoRoot);
       return;
     }
-
-    const stateDir = join(this.env.ctxRoot, 'state', this.name);
 
     // Rate-limit detection: if the PTY output contains Anthropic rate-limit or
     // overload signatures, treat this as a planned pause rather than a crash.
@@ -562,6 +557,7 @@ export class AgentProcess {
           this.start().catch(err => this.log(`Rate-limit restart failed: ${err}`));
         }
       }, pauseSeconds * 1000);
+      recordCleanExit(stateDir, exitCode, 'rate-limit-pause', this.repoRoot);
       return;
     }
 

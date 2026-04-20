@@ -13,6 +13,7 @@ import { AgentEffectiveness } from '@/components/analytics/agent-effectiveness';
 import { CostTracking } from '@/components/analytics/cost-tracking';
 import { GoalProgress } from '@/components/analytics/goal-progress';
 import { FleetHealth } from '@/components/analytics/fleet-health';
+import { PlanUsageLive } from '@/components/analytics/plan-usage-live';
 import { getFleetHealth, getLatestSnapshot, getPlanUsage, getUsageHistory } from '@/lib/data/reports';
 
 export default async function AnalyticsPage({
@@ -57,6 +58,9 @@ export default async function AnalyticsPage({
           {org ? `Org: ${org}` : 'All organizations'} - Performance metrics and cost tracking.
         </p>
       </div>
+
+      {/* Live Claude plan usage — 5h / 7d windows */}
+      <PlanUsageLive />
 
       {/* Fleet Health */}
       <FleetHealth data={fleetHealth} />

@@ -774,7 +774,32 @@ export function compactTasks(
 
     if (!dryRun) {
       try {
-        appendFileSync(archivePath, JSON.stringify(entry) + '\n', { encoding: 'utf-8', mode: 0o600 });
+        // Idempotency: if a prior run crashed after JSONL append but before
+        // unlink, task.id is already in the archive. Re-appending would create
+        // a duplicate entry, so skip append and just retry the unlink.
+        let alreadyInArchive = false;
+        if (existsSync(archivePath)) {
+          const existing = readFileSync(archivePath, 'utf-8');
+          if (existing.includes(`"id":"${task.id}"`)) {
+            for (const line of existing.split('\n')) {
+              if (!line.trim()) continue;
+              try {
+                if (JSON.parse(line).id === task.id) { alreadyInArchive = true; break; }
+              } catch { /* skip malformed line */ }
+            }
+          }
+        }
+
+        if (!alreadyInArchive) {
+          // Atomic read-modify-write: temp-file + rename. Monthly scoping keeps
+          // the archive bounded so O(n) rewrite cost is acceptable.
+          const existing = existsSync(archivePath) ? readFileSync(archivePath, 'utf-8') : '';
+          const sep = existing.length > 0 && !existing.endsWith('\n') ? '\n' : '';
+          atomicWriteSync(archivePath, existing + sep + JSON.stringify(entry) + '\n');
+        }
+
+        // Archive is now the authoritative copy. If unlink fails, next run
+        // sees id already in JSONL, skips append, and retries the unlink.
         unlinkSync(join(taskDir, `${task.id}.json`));
       } catch (err) {
         report.skipped.push({ id: task.id, reason: `archive write failed: ${err}` });

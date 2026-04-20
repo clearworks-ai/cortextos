@@ -12,6 +12,10 @@ import {
   IconAlertCircle,
   IconLoader2,
   IconChevronDown,
+  IconBrain,
+  IconCalendar,
+  IconMail,
+  IconUsers,
 } from '@tabler/icons-react';
 import { KnowledgeBaseView } from './kb-view';
 
@@ -27,6 +31,27 @@ interface SearchResult {
 interface Collection {
   name: string;
   count: number;
+}
+
+interface ClearpathResult {
+  id: number;
+  extractionId: number;
+  meetingTitle: string;
+  meetingDate: string;
+  promptKey: string;
+  promptLabel: string;
+  result: string;
+  similarity?: number;
+  dataSource?: string;
+}
+
+interface ClearpathStats {
+  totalExtractions: number;
+  coveragePercent: number;
+  emailCoveragePercent: number;
+  omiCoveragePercent: number;
+  mostActiveType: string | null;
+  trend: 'up' | 'down' | 'stable';
 }
 
 interface KnowledgeBaseClientProps {
@@ -60,6 +85,16 @@ export function KnowledgeBaseClient({ org, markdownContent, filePath }: Knowledg
   const [totalDocs, setTotalDocs] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Clearpath Intelligence state
+  const [cpQuery, setCpQuery] = useState('');
+  const [cpResults, setCpResults] = useState<ClearpathResult[]>([]);
+  const [cpSearching, setCpSearching] = useState(false);
+  const [cpSearched, setCpSearched] = useState(false);
+  const [cpError, setCpError] = useState('');
+  const [cpStats, setCpStats] = useState<ClearpathStats | null>(null);
+  const [cpStatsLoading, setCpStatsLoading] = useState(true);
+  const cpInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     if (!org) { setCollectionsLoading(false); return; }
     fetch(`/api/kb/collections?org=${encodeURIComponent(org)}`)
@@ -72,6 +107,39 @@ export function KnowledgeBaseClient({ org, markdownContent, filePath }: Knowledg
       .catch(() => {})
       .finally(() => setCollectionsLoading(false));
   }, [org]);
+
+  useEffect(() => {
+    if (!org) { setCpStatsLoading(false); return; }
+    fetch(`/api/kb/clearpath/stats?org=${encodeURIComponent(org)}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data) setCpStats(data as ClearpathStats); })
+      .catch(() => {})
+      .finally(() => setCpStatsLoading(false));
+  }, [org]);
+
+  const handleClearpathSearch = async () => {
+    if (!cpQuery.trim()) return;
+    setCpSearching(true);
+    setCpSearched(true);
+    setCpError('');
+    try {
+      const params = new URLSearchParams({ q: cpQuery, org, limit: '20' });
+      const res = await fetch(`/api/kb/clearpath/search?${params}`);
+      if (res.ok) {
+        const data = await res.json();
+        setCpResults(data.results || data || []);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setCpError(data.error || `Search failed (${res.status})`);
+        setCpResults([]);
+      }
+    } catch {
+      setCpError('Network error — could not reach Clearpath API');
+      setCpResults([]);
+    } finally {
+      setCpSearching(false);
+    }
+  };
 
   const handleSearch = async () => {
     if (!query.trim()) return;
@@ -134,11 +202,20 @@ export function KnowledgeBaseClient({ org, markdownContent, filePath }: Knowledg
   };
 
   return (
-    <Tabs defaultValue="search">
+    <Tabs defaultValue="intelligence">
       <TabsList variant="line">
+        <TabsTrigger value="intelligence">
+          <IconBrain size={14} className="mr-1.5" />
+          Intelligence
+          {!cpStatsLoading && cpStats && (
+            <span className="ml-1.5 rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[10px] font-medium">
+              {cpStats.totalExtractions.toLocaleString()}
+            </span>
+          )}
+        </TabsTrigger>
         <TabsTrigger value="search">
           <IconSearch size={14} className="mr-1.5" />
-          Search
+          Agent KB
         </TabsTrigger>
         <TabsTrigger value="browse">
           <IconBook2 size={14} className="mr-1.5" />
@@ -155,7 +232,149 @@ export function KnowledgeBaseClient({ org, markdownContent, filePath }: Knowledg
         </TabsTrigger>
       </TabsList>
 
-      {/* Search Tab */}
+      {/* Clearpath Intelligence Tab */}
+      <TabsContent value="intelligence" className="space-y-3 mt-3">
+        {/* Stats bar */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {cpStatsLoading ? (
+            Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-14 rounded-lg bg-muted/30 animate-pulse" />
+            ))
+          ) : cpStats ? (
+            <>
+              <Card>
+                <CardContent className="py-2.5 px-3">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Total Records</p>
+                  <p className="text-lg font-semibold tabular-nums">{cpStats.totalExtractions.toLocaleString()}</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="py-2.5 px-3 flex items-start gap-2">
+                  <IconCalendar size={14} className="mt-1 text-muted-foreground shrink-0" />
+                  <div>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Meeting Coverage</p>
+                    <p className="text-lg font-semibold tabular-nums">{cpStats.coveragePercent ?? 0}%</p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="py-2.5 px-3 flex items-start gap-2">
+                  <IconMail size={14} className="mt-1 text-muted-foreground shrink-0" />
+                  <div>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Email Coverage</p>
+                    <p className="text-lg font-semibold tabular-nums">{cpStats.emailCoveragePercent ?? 0}%</p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="py-2.5 px-3 flex items-start gap-2">
+                  <IconUsers size={14} className="mt-1 text-muted-foreground shrink-0" />
+                  <div>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Top Category</p>
+                    <p className="text-sm font-medium truncate">{cpStats.mostActiveType ?? '—'}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          ) : (
+            <div className="col-span-4">
+              <Card className="border-amber-200/50">
+                <CardContent className="py-3 flex items-center gap-2 text-sm text-amber-600">
+                  <IconAlertCircle size={15} />
+                  Clearpath Intelligence not configured for this org
+                </CardContent>
+              </Card>
+            </div>
+          )}
+        </div>
+
+        {/* Search row */}
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <IconSearch size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            <input
+              ref={cpInputRef}
+              type="text"
+              value={cpQuery}
+              onChange={(e) => setCpQuery(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleClearpathSearch()}
+              placeholder="Search meetings, emails, decisions, follow-ups..."
+              className="w-full rounded-md border bg-background pl-9 pr-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring/30"
+              autoFocus
+            />
+          </div>
+          <button
+            onClick={handleClearpathSearch}
+            disabled={cpSearching || !cpQuery.trim()}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-opacity whitespace-nowrap"
+          >
+            {cpSearching ? (
+              <span className="flex items-center gap-1.5">
+                <IconLoader2 size={13} className="animate-spin" />
+                Searching
+              </span>
+            ) : 'Search'}
+          </button>
+        </div>
+
+        {cpError && (
+          <Card className="border-destructive/30">
+            <CardContent className="py-3 flex items-center gap-2 text-sm text-destructive">
+              <IconAlertCircle size={15} />
+              {cpError}
+            </CardContent>
+          </Card>
+        )}
+
+        {cpSearched && !cpError && (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              {cpResults.length === 0 ? 'No results' : `${cpResults.length} result${cpResults.length !== 1 ? 's' : ''}`}
+            </p>
+            {cpResults.map((r, i) => (
+              <Card key={i} className="hover:bg-muted/20 transition-colors">
+                <CardContent className="py-3 space-y-1.5">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Badge variant="secondary" className="text-[10px]">{r.promptLabel || r.promptKey}</Badge>
+                    {r.dataSource && (
+                      <Badge variant="outline" className="text-[10px]">{r.dataSource}</Badge>
+                    )}
+                    {r.similarity != null && (
+                      <span className="text-[10px] text-muted-foreground ml-auto tabular-nums">
+                        {(r.similarity * 100).toFixed(0)}% match
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm leading-relaxed line-clamp-4">{r.result}</p>
+                  {(r.meetingTitle || r.meetingDate) && (
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                      <IconCalendar size={11} />
+                      {r.meetingTitle}
+                      {r.meetingDate && ` · ${new Date(r.meetingDate).toLocaleDateString()}`}
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+
+        {!cpSearched && !cpError && (
+          <Card className="border-dashed">
+            <CardContent className="flex flex-col items-center justify-center py-10 text-center">
+              <div className="rounded-full bg-muted p-3 mb-3">
+                <IconBrain size={22} className="text-muted-foreground/50" />
+              </div>
+              <h3 className="text-sm font-medium mb-1">Search Clearpath Intelligence</h3>
+              <p className="text-xs text-muted-foreground max-w-sm">
+                Semantic search across {cpStats ? cpStats.totalExtractions.toLocaleString() : '—'} extracted insights from meetings, emails, and conversations.
+              </p>
+            </CardContent>
+          </Card>
+        )}
+      </TabsContent>
+
+      {/* Agent KB Search Tab */}
       <TabsContent value="search" className="space-y-3 mt-3">
         <div className="flex items-center justify-between">
           <KBStatus />

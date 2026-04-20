@@ -164,12 +164,19 @@ describe('watchdog clean-exit flag', () => {
     // in isolation. The short-circuit lives in handleExit(), not here. Verify
     // that recordFailure works the same whether a clean-exit flag is present
     // or not — no masking, no interference.
-    const fakeRepoRoot = null; // recordFailure early-returns when repoRoot is null
+    //
+    // KNOWN TEST GAP (per Sage audit 2026-04-20, non-blocking): null repoRoot
+    // makes recordFailure early-return before reaching the clean-exit logic,
+    // so this test does not actually exercise the decoupling under a real
+    // failure path. It only confirms the API surface is independent. A
+    // future test with a temp git repo would exercise the full path; held
+    // for v2. Comment here so future readers are not misled.
+    const fakeRepoRoot = null;
     recordCleanExit(stateDir, 0, 'intentional-stop', null);
     recordFailure(stateDir, fakeRepoRoot);
 
-    // With null repoRoot recordFailure is a no-op — the clean-exit flag is
-    // unaffected. This is the decoupling Sage asked for.
+    // Clean-exit flag unaffected regardless. Decoupling holds at the
+    // surface level — separate files, separate entry points.
     expect(readCleanExit(stateDir).clean).toBe(true);
   });
 });

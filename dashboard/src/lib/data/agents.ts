@@ -137,11 +137,24 @@ export async function discoverAgents(org?: string): Promise<AgentSummary[]> {
         currentTask = hb?.current_task ?? undefined;
       }
 
+      // Read stdout.log size for transcript usage bar
+      let stdoutBytes: number | undefined;
+      let stdoutCapBytes: number | undefined;
+      try {
+        const logPath = path.join(CTX_ROOT, 'logs', agent.name, 'stdout.log');
+        const stat = fsSync.statSync(logPath);
+        stdoutBytes = stat.size;
+        // 50 MB rotate cap (see pty manager)
+        stdoutCapBytes = 50 * 1_048_576;
+      } catch { /* log may not exist */ }
+
       const summary: AgentSummary & {
         systemName: string;
         emoji: string;
         role: string;
         tasksToday: number;
+        stdoutBytes?: number;
+        stdoutCapBytes?: number;
       } = {
         systemName: agent.name,
         name: identity.name,
@@ -152,6 +165,8 @@ export async function discoverAgents(org?: string): Promise<AgentSummary[]> {
         emoji: identity.emoji,
         role: identity.role,
         tasksToday,
+        stdoutBytes,
+        stdoutCapBytes,
       };
 
       return summary;

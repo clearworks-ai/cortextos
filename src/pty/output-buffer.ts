@@ -13,6 +13,12 @@ async function loadStripAnsi() {
 
 const MAX_LOG_BYTES = 50 * 1024 * 1024; // 50 MB — rotate before OS file-cache pressure builds
 
+// Freeze detector (2026-04-20): anything smaller than this threshold counts
+// as a "heartbeat" push (dots, cursor redraws, single-char echoes) and must
+// not reset the substantive-output timestamp. Without this, a terminal
+// heartbeat would quietly keep clearing the frozen-permission flag.
+const SUBSTANTIVE_OUTPUT_THRESHOLD = 50;
+
 /**
  * Ring buffer for PTY output. Replaces tmux capture-pane.
  * Stores raw output chunks and provides search/retrieval with ANSI stripping.
@@ -22,6 +28,8 @@ export class OutputBuffer {
   private maxChunks: number;
   private logPath: string | null;
   private bootstrapPattern: string;
+  private lastPushTs: number = Date.now();
+  private lastSubstantivePushTs: number = Date.now();
 
   constructor(maxChunks: number = 1000, logPath?: string, bootstrapPattern?: string) {
     this.maxChunks = maxChunks;
@@ -46,6 +54,12 @@ export class OutputBuffer {
     this.chunks.push(safe);
     if (this.chunks.length > this.maxChunks) {
       this.chunks.shift();
+    }
+
+    const now = Date.now();
+    this.lastPushTs = now;
+    if (safe.length > SUBSTANTIVE_OUTPUT_THRESHOLD) {
+      this.lastSubstantivePushTs = now;
     }
 
     // Stream to log file (replaces tmux pipe-pane)
@@ -155,9 +169,39 @@ export class OutputBuffer {
   }
 
   /**
+   * Check whether recent PTY output contains a numbered-option permission
+   * prompt signature (❯ 1. Yes / ❯ 1. Allow / ❯ 2. Deny / etc.). Used by the
+   * freeze detector to distinguish a stuck native permission dialog from
+   * normal idle output. Full excerpt extraction lives in freeze-detector.ts.
+   */
+  hasPermissionPromptSignature(): boolean {
+    const text = this.chunks.slice(-200).join('').replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+    return /❯\s*1\.\s*(Yes|No|Allow)\b|❯\s*2\.\s*(No|Deny)\b/.test(text);
+  }
+
+  /**
+   * Timestamp (ms since epoch) of the most recent push of any size.
+   */
+  getLastPushTs(): number {
+    return this.lastPushTs;
+  }
+
+  /**
+   * Timestamp (ms since epoch) of the most recent push larger than the
+   * substantive-output threshold (50 chars). Heartbeat dots and small
+   * cursor redraws do not bump this value — see SUBSTANTIVE_OUTPUT_THRESHOLD.
+   */
+  getLastSubstantivePushTs(): number {
+    return this.lastSubstantivePushTs;
+  }
+
+  /**
    * Clear the buffer.
    */
   clear(): void {
     this.chunks = [];
+    const now = Date.now();
+    this.lastPushTs = now;
+    this.lastSubstantivePushTs = now;
   }
 }

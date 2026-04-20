@@ -23,6 +23,12 @@ import {
   deleteCleanExit,
   MIN_HEALTHY_SECONDS,
 } from './watchdog.js';
+import {
+  detectFrozenPermission,
+  writeFrozenFlag,
+  clearFrozenFlag,
+  type FrozenState,
+} from './freeze-detector.js';
 
 type LogFn = (msg: string) => void;
 
@@ -81,6 +87,10 @@ export class AgentProcess {
   private bootFreezeTimer: ReturnType<typeof setInterval> | null = null;
   // Fleet watchdog: context threshold monitor
   private contextMonitorTimer: ReturnType<typeof setInterval> | null = null;
+  // Fleet watchdog: frozen-permission detector (polls PTY output for stuck
+  // native permission prompts that bypassed hook-permission-telegram).
+  private freezeDetectionTimer: ReturnType<typeof setInterval> | null = null;
+  private freezeAlertSent: boolean = false;
   // Fleet watchdog: restart-loop ring buffer (last 10 restarts)
   private restartHistory: Array<{ timestamp: number; reason: string }> = [];
   // Fleet watchdog: escalation callbacks registered by daemon
@@ -215,6 +225,7 @@ export class AgentProcess {
       // Fleet watchdog: start boot-freeze detector and context monitor
       this.startBootFreezeDetector();
       this.startContextMonitor();
+      this.startFreezeDetector();
 
       this.notifyStatusChange();
     } catch (err) {
@@ -297,6 +308,7 @@ export class AgentProcess {
     this.clearHealthTimer();
     this.clearBootFreezeDetector();
     this.clearContextMonitor();
+    this.clearFreezeDetector();
 
     // Capture and null out pty BEFORE any awaits so handleExit() during graceful
     // shutdown doesn't race with us and trigger crash recovery or a double-kill.
@@ -483,9 +495,16 @@ export class AgentProcess {
     this.pty = null;
     this.clearSessionTimer();
     this.clearHealthTimer();
+    this.clearBootFreezeDetector();
+    this.clearContextMonitor();
+    this.clearFreezeDetector();
 
     // Resolve stateDir up-front so clean-exit branches can record the marker.
     const stateDir = join(this.env.ctxRoot, 'state', this.name);
+    // Clear any frozen-permission flag on exit — regardless of exit reason,
+    // a fresh PTY will have its own fresh output buffer on the next boot,
+    // so a stale flag from the previous lifecycle should not linger.
+    clearFrozenFlag(this.env.ctxRoot, this.name);
 
     // When the cortextos daemon is shut down by PM2, SIGTERM propagates to
     // the whole process group and reaches each PTY's Claude Code child
@@ -1340,6 +1359,74 @@ export class AgentProcess {
       clearInterval(this.contextMonitorTimer);
       this.contextMonitorTimer = null;
     }
+  }
+
+  // ── Fleet Watchdog: Frozen-permission detector ────────────────────────────
+  //
+  // Polls every 60s after bootstrap. If a numbered-option permission prompt
+  // signature is present in the PTY buffer AND no substantive output has
+  // arrived for `freeze_detection_seconds` (default 180s), the agent is
+  // classified as frozen — Telegram alert + flag file written. Alert fires
+  // once per detection episode (reset when substantive output resumes or
+  // on process exit). Alert-only for v1; auto-recovery is v2.
+
+  private startFreezeDetector(): void {
+    if (this.config.freeze_detection_enabled === false) return;
+    const POLL_MS = 60 * 1000;
+    const thresholdSec = this.config.freeze_detection_seconds ?? 180;
+    const generation = this.lifecycleGeneration;
+
+    this.freezeDetectionTimer = setInterval(() => {
+      if (generation !== this.lifecycleGeneration || this.status !== 'running') {
+        this.clearFreezeDetector();
+        return;
+      }
+      const buffer = this.pty?.getOutputBuffer();
+      if (!buffer) return;
+      // Fast-path: skip signature scan when no permission-prompt pattern
+      // is anywhere in the recent buffer.
+      if (!buffer.hasPermissionPromptSignature()) {
+        if (this.freezeAlertSent) {
+          clearFrozenFlag(this.env.ctxRoot, this.name);
+          this.freezeAlertSent = false;
+        }
+        return;
+      }
+      const frozen = detectFrozenPermission({
+        agentName: this.name,
+        recentBuffer: buffer.getRecent(),
+        lastSubstantiveOutputTs: buffer.getLastSubstantivePushTs(),
+        nowTs: Date.now(),
+        thresholdSec,
+      });
+      if (!frozen) {
+        // Signature present but output still fresh — do NOT alert yet.
+        // If a prior alert had fired and output has since resumed, the
+        // fast-path branch above is where we'd clear it; don't clear here
+        // because stale output + present signature means the freeze is
+        // still real, we're just under the threshold.
+        return;
+      }
+      if (this.freezeAlertSent) return;
+      this.handleFrozenDetection(frozen);
+    }, POLL_MS);
+  }
+
+  private clearFreezeDetector(): void {
+    if (this.freezeDetectionTimer) {
+      clearInterval(this.freezeDetectionTimer);
+      this.freezeDetectionTimer = null;
+    }
+    this.freezeAlertSent = false;
+  }
+
+  private handleFrozenDetection(state: FrozenState): void {
+    writeFrozenFlag(this.env.ctxRoot, state);
+    this.freezeAlertSent = true;
+    const truncated = state.prompt_excerpt.length > 500
+      ? state.prompt_excerpt.slice(0, 500) + '…'
+      : state.prompt_excerpt;
+    this.log(`FROZEN PERMISSION DETECTED — excerpt: ${truncated}`);
   }
 
   // ── Fleet Watchdog: Helpers ───────────────────────────────────────────────

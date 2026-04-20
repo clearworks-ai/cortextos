@@ -4,13 +4,24 @@
 import { db } from '@/lib/db';
 import type { Task, TaskFilters } from '@/lib/types';
 
+// Noise task title prefixes hidden from all dashboard views
+const NOISE_TASK_PREFIXES = [
+  'Cron: heartbeat',
+  'Cron: keepalive',
+  'Cron: passive-heartbeat',
+];
+const NOISE_EXCLUSION_SQL = NOISE_TASK_PREFIXES
+  .map(() => "title NOT LIKE ?")
+  .join(' AND ');
+const NOISE_EXCLUSION_PARAMS = NOISE_TASK_PREFIXES.map((p) => `${p}%`);
+
 /**
  * Get tasks with optional filters.
  * Returns newest first by default.
  */
 export function getTasks(filters?: TaskFilters): Task[] {
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
+  const conditions: string[] = [NOISE_EXCLUSION_SQL];
+  const params: (string | number)[] = [...NOISE_EXCLUSION_PARAMS];
 
   if (filters?.org) {
     conditions.push('org = ?');
@@ -106,8 +117,8 @@ export function getTasksCompletedToday(org?: string): Task[] {
   todayStart.setUTCHours(0, 0, 0, 0);
   const todayISO = todayStart.toISOString();
 
-  const conditions: string[] = ['completed_at >= ?'];
-  const params: (string | number)[] = [todayISO];
+  const conditions: string[] = ['completed_at >= ?', NOISE_EXCLUSION_SQL];
+  const params: (string | number)[] = [todayISO, ...NOISE_EXCLUSION_PARAMS];
 
   if (org) {
     conditions.push('org = ?');
@@ -144,8 +155,8 @@ export function getInProgressCount(org?: string): number {
  * Get count of tasks matching optional org/status.
  */
 export function getTaskCount(org?: string, status?: string): number {
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
+  const conditions: string[] = [NOISE_EXCLUSION_SQL];
+  const params: (string | number)[] = [...NOISE_EXCLUSION_PARAMS];
 
   if (org) {
     conditions.push('org = ?');

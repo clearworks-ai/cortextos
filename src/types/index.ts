@@ -229,6 +229,17 @@ export interface AgentConfig {
    * continuity, and exit handling.
    */
   runtime?: 'claude-code' | 'hermes';
+  /**
+   * Seconds of PTY silence (no substantive output) after a permission-prompt
+   * signature appears before the agent is flagged as frozen. Default: 180.
+   */
+  freeze_detection_seconds?: number;
+  /**
+   * Toggle the freeze-detection polling loop. Defaults to true.
+   * Set false for agents running with --dangerously-skip-permissions where
+   * prompts should never appear.
+   */
+  freeze_detection_enabled?: boolean;
 }
 
 export interface CronEntry {

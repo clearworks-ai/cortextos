@@ -16,6 +16,7 @@ import { createApproval, updateApproval } from '../bus/approval.js';
 import { createReminder, listReminders, ackReminder, pruneReminders } from '../bus/reminders.js';
 import { updateCronFire } from '../bus/cron-state.js';
 import { queryKnowledgeBase, ingestKnowledgeBase, ensureKBDirs } from '../bus/knowledge-base.js';
+import { listFrozenAgents } from '../daemon/freeze-detector.js';
 import { checkUsageApi, refreshOAuthToken, rotateOAuth, loadAccounts, ALERT_5H, ALERT_7D } from '../bus/oauth.js';
 import { resolvePaths } from '../utils/paths.js';
 import { resolveEnv } from '../utils/env.js';
@@ -499,6 +500,28 @@ busCommand
       const label = hb.display_name ? `${hb.display_name} (${hb.agent})` : hb.agent;
       console.log(`${label} (${hb.org}) — ${hb.status}${staleFlag} — last seen ${hb.last_heartbeat}`);
       if (hb.current_task) console.log(`  task: ${hb.current_task}`);
+    }
+  });
+
+busCommand
+  .command('list-frozen-agents')
+  .description('List agents flagged by the freeze-detector (stuck native permission dialog).')
+  .option('--format <fmt>', 'Output format: json or text', 'text')
+  .action((opts: { format?: string }) => {
+    const env = resolveEnv();
+    const frozen = listFrozenAgents(env.ctxRoot);
+    if (opts.format === 'json') {
+      console.log(JSON.stringify(frozen, null, 2));
+      return;
+    }
+    if (frozen.length === 0) {
+      console.log('No frozen agents.');
+      return;
+    }
+    for (const f of frozen) {
+      const when = new Date(f.detected_at * 1000).toISOString();
+      console.log(`${f.agent_name} — frozen since ${when}`);
+      console.log(`  excerpt: ${f.prompt_excerpt.slice(0, 200).replace(/\n/g, ' ')}`);
     }
   });
 

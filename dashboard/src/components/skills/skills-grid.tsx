@@ -8,8 +8,10 @@ interface SkillInfo {
   slug: string;
   name: string;
   description: string;
+  triggers: string[];
   installed: boolean;
   installedFor: string[];
+  source: 'catalog' | 'agent';
 }
 
 interface SkillsGridProps {

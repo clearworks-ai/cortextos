@@ -1,0 +1,50 @@
+{
+  "agent_name": "[AGENT_NAME]",
+  "model": "claude-opus-4-7",
+  "enabled": true,
+  "startup_delay": 0,
+  "max_session_seconds": 255600,
+  "max_crashes_per_day": 10,
+  "working_directory": "",
+  "timezone": "America/Los_Angeles",
+  "day_mode_start": "08:00",
+  "day_mode_end": "18:00",
+  "communication_style": "casual",
+  "approval_rules": {
+    "always_ask": [
+      "external-comms",
+      "deployment",
+      "data-deletion",
+      "financial",
+      "upstream-merge",
+      "schema-migration-breaking"
+    ],
+    "never_ask": [
+      "repo-health-check",
+      "health-check",
+      "status-report",
+      "test-run"
+    ]
+  },
+  "crons": [
+    {
+      "name": "heartbeat",
+      "type": "recurring",
+      "interval": "4h",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: heartbeat\" --desc \"Scheduled heartbeat\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; Read HEARTBEAT.md and follow its instructions. Update heartbeat, check inbox, work on highest priority task. cortextos bus complete-task $TASK_ID --result \"Heartbeat complete\" 2>/dev/null"
+    },
+    {
+      "name": "verify-gate",
+      "type": "recurring",
+      "interval": "2h",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: verify-gate\" --desc \"CI verify gate check\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; Run the repo's verify/test suite. SILENT-OK if all green (log via cortextos bus log-event action verify_gate_ok info). If any failures: (1) cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID 'Verify FAILED: <summary>. Routing to larry.' (2) cortextos bus send-message larry normal 'Verify gate failed on [REPO_NAME]: <details>. Please investigate.' (3) create a task for larry. Do NOT attempt to fix yourself unless trivial. cortextos bus complete-task $TASK_ID --result \"Gate check done\" 2>/dev/null"
+    }
+  ],
+  "ecosystem": {
+    "local_version_control": {
+      "enabled": true
+    }
+  },
+  "auto_resume": true,
+  "max_continue_transcript_mb": 5
+}

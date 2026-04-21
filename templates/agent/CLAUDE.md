@@ -47,6 +47,32 @@ TARGET: Every significant piece of work (>10 minutes) = at least 1 task created.
 
 ---
 
+## Task-Type Routing
+
+Before acting on any incoming task, classify it:
+
+**TRIVIAL** — <10 line config tweak, typo, status read, test run
+→ Handle inline in this session.
+
+**RESEARCH / TRIAGE** — log analysis, web search, audit, data extraction
+→ Delegate via Agent tool (Haiku): `knox` (research) | `trace` (debugging) | `sentinel` (compliance).
+
+**PLANNING / ARCHITECTURE** — new feature spec, refactor plan, multi-file design, schema migration
+→ Delegate via Agent tool: `architect` (Opus).
+→ Output is a written plan. Surface to Josh via Telegram for approval before any implementation.
+
+**CODE IMPLEMENTATION** — actual code writing, refactor execution, bug fix commits
+→ NOT in your scope. Route via frank2:
+  `cortextos bus send-message frank2 normal 'Code task — dispatch to [larry|auditos2]: <description>'`
+→ Repo agents (larry, auditos2) own Codex handoffs via the `codex-handoff` skill. You do not run Codex yourself.
+
+**ESCALATION / CROSS-AGENT COORDINATION** — anything touching another agent's domain
+→ Route via frank2: `cortextos bus send-message frank2 normal '<issue>'`.
+
+Why this routing exists: Opus is expensive and reserved for planning/architecture. Sonnet handles daily ops. Codex handles code implementation (with Claude-Sonnet review). Keep your model tier focused on its strength.
+
+---
+
 ## Mandatory Memory Protocol
 
 You have THREE memory layers. All are mandatory.

@@ -2,12 +2,13 @@
  * hook-extract-facts.ts — PreCompact hook.
  *
  * Captures the session summary produced by Claude Code at compaction time
- * and stores it as a structured fact entry in memory/facts/YYYY-MM-DD.jsonl.
+ * and appends it to the agent's canonical daily checkpoint markdown file at
+ * ${CTX_FRAMEWORK_ROOT}/orgs/${CTX_ORG}/agents/${CTX_AGENT_NAME}/memory/YYYY-MM-DD.md
  *
- * This gives agents persistent, token-free cross-session memory:
- * - Facts are written at compaction time (not just end-of-day)
- * - On next session start, agents recall recent facts via `cortextos bus recall-facts`
- * - Zero live-context tokens consumed — facts are indexed files, not conversation history
+ * Folded into the daily checkpoint (2026-05-01) — was previously writing to a
+ * separate `state/<agent>/memory/facts/<date>.jsonl`. One file per session day,
+ * not two. Daily checkpoint is the single source of mid-session and end-session
+ * recall.
  *
  * Registered in settings.json under "PreCompact". Fires and returns immediately
  * — never blocks compaction.
@@ -15,6 +16,7 @@
 
 import { readFileSync, appendFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
+import { homedir } from 'os';
 import { loadEnv, readStdin } from './index.js';
 
 interface PreCompactPayload {
@@ -22,16 +24,6 @@ interface PreCompactPayload {
   summary?: string;
   transcript?: string;
   turns?: Array<{ role: string; content: string }>;
-}
-
-interface FactEntry {
-  ts: string;              // ISO 8601
-  session_id: string;
-  agent: string;
-  org: string;
-  source: 'precompact';
-  summary: string;         // The compaction summary text
-  keywords: string[];      // Extracted topic keywords for lightweight filtering
 }
 
 /**
@@ -69,14 +61,24 @@ export function extractKeywords(text: string): string[] {
     .map(([word]) => word);
 }
 
+/**
+ * Resolve the agent's canonical memory directory:
+ *   ${CTX_FRAMEWORK_ROOT}/orgs/${CTX_ORG}/agents/${CTX_AGENT_NAME}/memory
+ * Falls back to runtime state dir if framework env is missing.
+ */
+function resolveMemoryDir(env: { agentName: string; ctxRoot: string }): string {
+  const fwRoot = process.env.CTX_FRAMEWORK_ROOT;
+  const org = process.env.CTX_ORG;
+  if (fwRoot && org) {
+    return join(fwRoot, 'orgs', org, 'agents', env.agentName, 'memory');
+  }
+  return join(env.ctxRoot, 'state', env.agentName, 'memory');
+}
+
 async function main(): Promise<void> {
   const env = loadEnv();
 
   try {
-    // Read PreCompact payload from stdin with a 10s timeout — if Claude Code
-    // does not close stdin, readStdin() hangs and hits the settings.json
-    // 15s timeout, which aborts compaction. Race against a timer so we always
-    // exit cleanly with whatever data arrived.
     const raw = await Promise.race([
       readStdin(),
       new Promise<string>(resolve => setTimeout(() => resolve(''), 10_000)),
@@ -87,45 +89,43 @@ async function main(): Promise<void> {
       try {
         payload = JSON.parse(raw);
       } catch {
-        // If not JSON, treat raw text as the summary directly
         payload = { summary: raw.trim() };
       }
     }
 
-    // Extract the summary text — could be in summary, transcript, or turns
     let summaryText = payload.summary || '';
     if (!summaryText && payload.turns && payload.turns.length > 0) {
-      // Last assistant turn as fallback
       const lastAssistant = [...payload.turns].reverse().find(t => t.role === 'assistant');
       if (lastAssistant) summaryText = lastAssistant.content;
     }
 
-    // No usable content — exit silently, don't block compaction
     if (!summaryText || summaryText.trim().length < 20) return;
 
     const now = new Date();
-    const dateStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
-    const ts = now.toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const dateStr = now.toISOString().slice(0, 10);
+    const timeStr = now.toISOString().slice(11, 19) + ' UTC';
+    const sessionId = payload.session_id || `session-${Date.now()}`;
+    const keywords = extractKeywords(summaryText);
+    const summary = summaryText.slice(0, 8000);
 
-    const org = process.env.CTX_ORG || '';
-    const factsDir = join(env.ctxRoot, 'state', env.agentName, 'memory', 'facts');
-
-    if (!existsSync(factsDir)) {
-      mkdirSync(factsDir, { recursive: true });
+    const memoryDir = resolveMemoryDir(env);
+    if (!existsSync(memoryDir)) {
+      mkdirSync(memoryDir, { recursive: true });
     }
 
-    const entry: FactEntry = {
-      ts,
-      session_id: payload.session_id || `session-${Date.now()}`,
-      agent: env.agentName,
-      org,
-      source: 'precompact',
-      summary: summaryText.slice(0, 8000), // Cap at 8k chars
-      keywords: extractKeywords(summaryText),
-    };
+    const checkpointFile = join(memoryDir, `${dateStr}.md`);
 
-    const factsFile = join(factsDir, `${dateStr}.jsonl`);
-    appendFileSync(factsFile, JSON.stringify(entry) + '\n', 'utf-8');
+    const block = [
+      '',
+      `## Compact-time checkpoint — ${timeStr}`,
+      `- session: ${sessionId}`,
+      keywords.length > 0 ? `- keywords: ${keywords.slice(0, 10).join(', ')}` : '',
+      '',
+      summary,
+      '',
+    ].filter(line => line !== undefined).join('\n');
+
+    appendFileSync(checkpointFile, block, 'utf-8');
 
   } catch {
     // Never fail — compaction must not be blocked

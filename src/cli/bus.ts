@@ -506,7 +506,7 @@ busCommand
 
 busCommand
   .command('recall-facts')
-  .description('Recall recent session facts extracted at compaction time (cross-session memory)')
+  .description('Recall recent session checkpoints from daily memory files (cross-session memory)')
   .option('--days <n>', 'How many days back to scan', '3')
   .option('--format <fmt>', 'Output format: text or json', 'text')
   .option('--agent <name>', 'Agent name (defaults to CTX_AGENT_NAME)')
@@ -514,21 +514,39 @@ busCommand
     const env = resolveEnv();
     const agentName = opts.agent || env.agentName;
     const daysBack = Math.max(1, Math.min(30, parseInt(opts.days, 10) || 3));
-    const factsDir = join(env.ctxRoot, 'state', agentName, 'memory', 'facts');
+
+    const fwRoot = process.env.CTX_FRAMEWORK_ROOT;
+    const org = process.env.CTX_ORG;
+    const memoryDir = (fwRoot && org)
+      ? join(fwRoot, 'orgs', org, 'agents', agentName, 'memory')
+      : join(env.ctxRoot, 'state', agentName, 'memory');
 
     const entries: Array<{ ts: string; session_id: string; summary: string; keywords: string[] }> = [];
 
     for (let d = 0; d < daysBack; d++) {
       const date = new Date(Date.now() - d * 24 * 60 * 60 * 1000);
       const dateStr = date.toISOString().slice(0, 10);
-      const factsFile = join(factsDir, `${dateStr}.jsonl`);
-      if (!existsSync(factsFile)) continue;
+      const checkpointFile = join(memoryDir, `${dateStr}.md`);
+      if (!existsSync(checkpointFile)) continue;
       try {
-        const lines = readFileSync(factsFile, 'utf-8').split('\n').filter(l => l.trim());
-        for (const line of lines) {
-          try {
-            entries.push(JSON.parse(line));
-          } catch { /* skip corrupt lines */ }
+        const content = readFileSync(checkpointFile, 'utf-8');
+        // Parse markdown sections written by hook-extract-facts.ts
+        // Format: ## Compact-time checkpoint — HH:MM:SS UTC\n- session: id\n- keywords: ...\n\n<summary>
+        const sections = content.split(/\n## (?=Compact-time checkpoint|Session )/);
+        for (const section of sections) {
+          if (!section.trim()) continue;
+          const tsMatch = section.match(/^(?:Compact-time checkpoint|Session [^\n]*?)\s*[—–-]\s*([^\n]+)/);
+          const sessionMatch = section.match(/[-*]\s*session[:\s]+([^\n]+)/i);
+          const keywordsMatch = section.match(/[-*]\s*keywords[:\s]+([^\n]+)/i);
+          const bodyStart = section.indexOf('\n\n');
+          const summary = bodyStart >= 0 ? section.slice(bodyStart + 2).trim() : '';
+          if (!summary) continue;
+          entries.push({
+            ts: `${dateStr}T${(tsMatch?.[1] || '').replace(' UTC', '').trim()}Z`,
+            session_id: sessionMatch?.[1]?.trim() || `session-${dateStr}`,
+            summary,
+            keywords: keywordsMatch?.[1]?.split(',').map(k => k.trim()).filter(Boolean) || [],
+          });
         }
       } catch { /* skip unreadable files */ }
     }

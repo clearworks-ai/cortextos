@@ -211,11 +211,14 @@ export function migrateCronsForAgent(
     return { agentName, status: 'skipped-already-migrated' };
   }
 
-  // Read config.json — no-op on missing file
+  // Read config.json — no-op on missing file.
+  // Codex M7 fix (2026-05-01): do NOT write the migration marker when config.json
+  // is missing. If the path is wrong transiently (e.g. frameworkRoot misconfigured
+  // during a particular boot), writing the marker would lock the agent into "no crons"
+  // forever. Without the marker, next boot retries.
   if (!existsSync(configJsonPath)) {
-    log(`No config.json found for "${agentName}" at ${configJsonPath} — writing empty crons.json + marker`);
+    log(`No config.json found for "${agentName}" at ${configJsonPath} — writing empty crons.json (NO MARKER, will retry next boot)`);
     writeCrons(agentName, []);
-    writeMarker(ctxRoot, agentName);
     return { agentName, status: 'no-config' };
   }
 
@@ -246,9 +249,11 @@ export function migrateCronsForAgent(
   }
 
   if (configCrons.length === 0) {
-    log(`No crons array in config.json for "${agentName}" — writing empty crons.json + marker`);
+    // Codex M7 fix (2026-05-01): do NOT write the migration marker when config.json
+    // has no crons array. Operator may add crons later; without the marker, the next
+    // boot will see them.
+    log(`No crons array in config.json for "${agentName}" — writing empty crons.json (NO MARKER, will retry next boot)`);
     writeCrons(agentName, []);
-    writeMarker(ctxRoot, agentName);
     return { agentName, status: 'no-crons' };
   }
 
@@ -265,6 +270,25 @@ export function migrateCronsForAgent(
       skipped.push(entry.name);
       log(`  Skipped cron for "${agentName}": ${result.skip}`);
     }
+  }
+
+  // Codex M7 fix (2026-05-01): if crons.json already contains more entries than
+  // we're about to write, the operator may have added crons via the bus CLI that
+  // aren't in config.json. Refuse to overwrite (unless --force) — log loudly so
+  // they can investigate.
+  try {
+    const existingCrons = readCrons(agentName);
+    if (existingCrons.length > converted.length && !options.force) {
+      log(
+        `WARNING: crons.json for "${agentName}" already has ${existingCrons.length} entries; ` +
+        `config.json migration would write only ${converted.length}. Refusing to shrink ` +
+        `(use --force to override). Marker will be written so we don't retry endlessly.`
+      );
+      writeMarker(ctxRoot, agentName);
+      return { agentName, status: 'skipped-already-migrated' };
+    }
+  } catch {
+    // readCrons may throw if crons.json doesn't exist yet — fall through to write
   }
 
   // Write crons.json atomically and set marker

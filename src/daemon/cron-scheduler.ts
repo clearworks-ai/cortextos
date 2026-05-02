@@ -287,7 +287,16 @@ export class CronScheduler {
       return;
     }
     this.loadCrons(/* isReload */ false);
-    this.tickHandle = setInterval(() => void this.tick(), CronScheduler.TICK_INTERVAL_MS);
+    this.tickHandle = setInterval(() => {
+      this.tick().catch((err) => {
+        this.logger(
+          `[cron-scheduler] WARNING: tick() crashed for "${this.agentName}": ` +
+          `${err instanceof Error ? err.message : String(err)}. ` +
+          `Scheduler continues; firing flag for any in-flight cron may be stuck — ` +
+          `next tick will skip stuck entries.`
+        );
+      });
+    }, CronScheduler.TICK_INTERVAL_MS);
     this.logger(`[cron-scheduler] started for agent "${this.agentName}" with ${this.scheduled.size} cron(s)`);
   }
 
@@ -440,6 +449,7 @@ export class CronScheduler {
       }
 
       sc.firing = true;
+      try {
       const cron = sc.definition;
       this.logger(`[cron-scheduler] firing cron "${name}" (was due ${new Date(sc.nextFireAt).toISOString()})`);
 
@@ -494,7 +504,13 @@ export class CronScheduler {
           continue;
         }
       }
-      sc.firing = false;
+      } finally {
+        // Codex C1 fix (2026-05-01): always clear firing flag, even if fireWithRetry
+        // or any code in this iteration throws. Without this, an unhandled exception
+        // leaves sc.firing=true permanently and the cron silently never fires again.
+        // Safe even after `this.scheduled.delete(name)` because sc is a local reference.
+        sc.firing = false;
+      }
     }
   }
 }

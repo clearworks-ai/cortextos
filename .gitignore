@@ -54,3 +54,4 @@ AGENTS.md
 dashboard/screenshots/
 dashboard/test-*.py
 .gstack/
+graphify-out/

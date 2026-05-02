@@ -45,3 +45,24 @@ If you catch yourself almost skipping something important that isn't in the tabl
 | Trigger | Red Flag Thought | Required Action |
 |---------|-----------------|-----------------|
 | [situation] | "[what you almost told yourself]" | [what you must do instead] |
+
+
+---
+
+## Bash Hang Prevention (added 2026-05-02 after Larry-stuck-12-hours incident)
+
+**Never write Bash commands that can hang indefinitely.** This is the #1 cause of agents going silent — claude blocks on the Bash tool waiting for the command to complete, while cron prompts and Telegram messages queue up behind it. From outside, you appear "frozen" or "typing forever." From inside, you are genuinely stuck.
+
+| Trigger | Red Flag Thought | Required Action |
+|---------|------------------|-----------------|
+| Writing `until <cond>; do <body>; done` | "It will eventually succeed" | NEVER unbounded. Add a max-iteration counter: `for i in {1..30}; do <body>; <cond> && break; sleep N; done` |
+| Writing `while true; do ... done` | "I will just sleep between attempts" | Always cap. `for i in {1..N}` instead of `while true`. |
+| Calling `curl` to wait for a remote condition | "It will return when ready" | Always set `--max-time 30` (or appropriate cap). Never let curl hang. |
+| Polling an endpoint until it returns success | "Just sleep and retry forever" | Cap iterations AND total wall-clock. After 5-10 minutes max, give up and report status. |
+| Long-running external job (build, deploy, extraction) | "I will tail logs / poll until done" | Spawn the job, return the task_id, and exit the turn. Let a separate cron poll status. Do NOT block your own session waiting. |
+| `tail -f`, `watch`, `inotifywait -m` | "I need to see the next event" | Never invoke these from a Bash tool call. Use one-shot reads instead. |
+| Need to wait for AuditOS Phase 1 / similar long task | "I will wait here and check periodically" | Hand off to a cron. Phase 1 takes 20+ min — way longer than a single tool call should hold the session. Schedule a check-back via `cortextos bus create-reminder` or similar. |
+
+**Why this is non-negotiable:** Every Bash tool call blocks claude until it returns. While blocked, no other input can be processed — your inbox queues, your crons queue, the user gets silence on Telegram. A single unbounded loop turns a healthy agent into a brick.
+
+**If you find yourself reaching for an unbounded loop:** stop, set a hard ceiling, and accept that "the job might not be done when you check" is the correct answer — with a follow-up scheduled.

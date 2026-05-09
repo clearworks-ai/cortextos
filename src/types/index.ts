@@ -175,12 +175,26 @@ export interface AgentConfig {
   /** Context window % at which to inject handoff prompt and hard-restart. Default: 80. */
   ctx_handoff_threshold?: number;
   /**
+   * Fallback context window cap (tokens) for codex-app-server agents when the
+   * server's `thread/tokenUsage/updated` event reports `modelContextWindow=null`.
+   * Defaults to 256000 when unset. Only applied to the codex-app-server runtime.
+   */
+  codex_context_cap?: number;
+  /**
    * Agent runtime. Defaults to 'claude-code' when absent.
    * 'hermes' selects the HermesPTY spawn path (Python persistent REPL,
    * NousResearch/hermes-agent) with Hermes-specific bootstrap, session
    * continuity, and exit handling.
    */
-  runtime?: 'claude-code' | 'hermes';
+  runtime?: 'claude-code' | 'hermes' | 'codex-app-server';
+  /**
+   * Whether this agent runs a Telegram poller. Defaults to true when absent
+   * (preserves existing behaviour). Set to false on specialist agents that
+   * should not own a Telegram bot — only the designated orchestrator agent
+   * should poll. Requires BOT_TOKEN + CHAT_ID to already be unset or the
+   * poller will be skipped regardless.
+   */
+  telegram_polling?: boolean;
 }
 
 export interface CronEntry {
@@ -327,6 +341,16 @@ export interface CronDefinition {
    * @example "2026-04-28T13:00:01.042Z"
    */
   last_fired_at?: string;
+
+  /**
+   * ISO 8601 UTC timestamp set by the scheduler IMMEDIATELY before it awaits
+   * the onFire dispatch — i.e. before the agent has acked. On daemon crash
+   * mid-fire, this lets `loadCrons` recompute `referenceMs` from the attempt
+   * timestamp instead of the stale `last_fired_at`, preventing a double-fire
+   * via the catch-up gate. Tradeoff: a fire whose dispatch genuinely failed
+   * pre-crash will be skipped one window — preferable to guaranteed re-fire.
+   */
+  last_fire_attempted_at?: string;
 
   /**
    * Total number of times this cron has successfully fired.

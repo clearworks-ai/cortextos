@@ -16,9 +16,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockReadCrons  = vi.fn();
 const mockUpdateCron = vi.fn();
+// readCronsWithStatus is what cron-scheduler actually calls (post-iter-9).
+// By default it mirrors mockReadCrons with corrupt:false so existing tests
+// keep working.  Tests that need to assert the corruption path can override
+// with mockReadCronsWithStatus.mockReturnValueOnce({ crons: [...], corrupt: true }).
+const mockReadCronsWithStatus = vi.fn();
 
 vi.mock('../../../src/bus/crons.js', () => ({
   readCrons:  (...args: unknown[]) => mockReadCrons(...args),
+  readCronsWithStatus: (...args: unknown[]) => mockReadCronsWithStatus(...args),
   updateCron: (...args: unknown[]) => mockUpdateCron(...args),
 }));
 
@@ -180,6 +186,13 @@ describe('CronScheduler', () => {
     fired  = [];
     mockReadCrons.mockReset();
     mockUpdateCron.mockReset();
+    mockReadCronsWithStatus.mockReset();
+    // Default: readCronsWithStatus reflects whatever readCrons returns
+    // and reports the file as healthy (corrupt: false).
+    mockReadCronsWithStatus.mockImplementation((agent: string) => ({
+      crons: mockReadCrons(agent) ?? [],
+      corrupt: false,
+    }));
 
     scheduler = new CronScheduler({
       agentName: 'test-agent',
@@ -290,8 +303,21 @@ describe('CronScheduler', () => {
     // Scheduler must NOT crash — the log should contain a give-up message
     expect(retryLogs.some(l => l.includes('giving up'))).toBe(true);
 
-    // No updateCron call because all attempts failed
-    expect(mockUpdateCron).not.toHaveBeenCalled();
+    // updateCron is called exactly once with last_fire_attempted_at (iter 11
+    // pre-fire persist), but NEVER with last_fired_at because all attempts
+    // failed.  This matches the iter 11 invariant: attempted_at is recorded
+    // even on failed dispatches so a crash mid-fire cannot double-fire.
+    expect(mockUpdateCron).toHaveBeenCalledTimes(1);
+    expect(mockUpdateCron).toHaveBeenCalledWith(
+      'test-agent',
+      'test-cron',
+      expect.objectContaining({ last_fire_attempted_at: expect.any(String) })
+    );
+    expect(mockUpdateCron).not.toHaveBeenCalledWith(
+      'test-agent',
+      'test-cron',
+      expect.objectContaining({ last_fired_at: expect.any(String) })
+    );
 
     retryScheduler.stop();
   });
@@ -317,7 +343,19 @@ describe('CronScheduler', () => {
     await vi.advanceTimersByTimeAsync(60_000 + TICK + 1_000 + 500);
 
     expect(flakyFire).toHaveBeenCalledTimes(2);
-    expect(mockUpdateCron).toHaveBeenCalledTimes(1);
+    // 2 updateCron calls: 1 pre-fire attempted_at (iter 11) + 1 post-success
+    // last_fired_at/fire_count.
+    expect(mockUpdateCron).toHaveBeenCalledTimes(2);
+    expect(mockUpdateCron).toHaveBeenCalledWith(
+      'test-agent',
+      'test-cron',
+      expect.objectContaining({ last_fire_attempted_at: expect.any(String) })
+    );
+    expect(mockUpdateCron).toHaveBeenCalledWith(
+      'test-agent',
+      'test-cron',
+      expect.objectContaining({ last_fired_at: expect.any(String), fire_count: expect.any(Number) })
+    );
 
     retryScheduler.stop();
   });
@@ -380,6 +418,271 @@ describe('CronScheduler', () => {
     const afterReload = scheduler.getNextFireTimes().find(e => e.name === 'changing');
     // 12h window is bigger — nextFireAt should be different (further out)
     expect(afterReload!.nextFireAt).not.toBe(beforeReload!.nextFireAt);
+  });
+
+  // -------------------------------------------------------------------------
+  // reload() during in-flight fire — race condition probe
+  //
+  // If reload() runs while a fire's onFire is awaiting, the old ScheduledCron
+  // reference held by tick() becomes orphaned (the new map holds a fresh
+  // object with firing=false default).  If the cron's definition changed
+  // (e.g. schedule shortened), the fresh ScheduledCron computes nextFireAt
+  // from the stale last_fired_at in crons.json — which has not yet been
+  // updated because the in-flight fire's persist call hasn't run.  Result:
+  // the next tick can re-fire the same logical event.
+  // -------------------------------------------------------------------------
+
+  // -------------------------------------------------------------------------
+  // Iter 8 audit: remove-cron during in-flight fire — orphan / re-fire probe
+  //
+  // BUG DISCOVERED (iter 9 candidate): the empty-result fallback at
+  // cron-scheduler.ts loadCrons() (~line 426) reverts to lastGoodSchedule when
+  // a reload yields an empty result. This catches transient corruption (intent)
+  // BUT also catches legitimate empty-by-removal (regression): if the user
+  // removes the LAST cron via `bus remove-cron`, crons.json is now empty,
+  // reload sees [] from readCrons(), and the fallback restores the just-removed
+  // cron from lastGoodSchedule. The cron continues to fire after removal
+  // until either (a) the daemon restarts, or (b) another non-empty reload
+  // happens.
+  //
+  // Fix sketch (iter 9): distinguish "legitimate empty" (file exists + parses
+  // to []) from "catastrophic corruption" (both primary and .bak unparseable)
+  // in readCrons / a sibling function. Only retain lastGoodSchedule on the
+  // latter. Tests below pin both current behavior and the desired post-fix
+  // behavior.
+  // -------------------------------------------------------------------------
+
+  it('remove-cron mid-fire: in-flight fire injects exactly once (no double-fire) — passes', async () => {
+    let resolveFire: (() => void) | undefined;
+    const slowFire = vi.fn().mockImplementation(() => new Promise<void>((res) => { resolveFire = res; }));
+
+    const auditScheduler = new CronScheduler({
+      agentName: 'test-agent',
+      onFire: slowFire,
+      logger: (msg) => logs.push(msg),
+    });
+
+    // Two crons so the post-removal state is legitimately non-empty (avoiding
+    // the empty-result fallback bug in this assertion).
+    const tenMinAgo = new Date(Date.now() - 10 * 60_000).toISOString();
+    mockReadCrons.mockReturnValue([
+      makeCron({ name: 'doomed', schedule: '10m', last_fired_at: tenMinAgo, fire_count: 1 }),
+      makeCron({ name: 'survivor', schedule: '24h', last_fired_at: new Date(Date.now() - 1_000).toISOString() }),
+    ]);
+
+    auditScheduler.start();
+
+    // Tick 1: 'doomed' fires catch-up, awaits slowFire
+    await vi.advanceTimersByTimeAsync(TICK);
+    expect(slowFire).toHaveBeenCalledTimes(1);
+
+    // Mid-fire: simulate remove-cron of 'doomed' — crons.json now only has survivor
+    mockReadCrons.mockReturnValue([
+      makeCron({ name: 'survivor', schedule: '24h', last_fired_at: new Date(Date.now() - 1_000).toISOString() }),
+    ]);
+    auditScheduler.reload();
+
+    // Schedule no longer contains 'doomed'
+    const namesAfter = auditScheduler.getNextFireTimes().map(e => e.name);
+    expect(namesAfter).not.toContain('doomed');
+    expect(namesAfter).toContain('survivor');
+
+    // Resolve the in-flight fire
+    resolveFire!();
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Advance multiple ticks — must NOT re-fire 'doomed'
+    await vi.advanceTimersByTimeAsync(5 * TICK);
+
+    expect(slowFire).toHaveBeenCalledTimes(1);
+    auditScheduler.stop();
+  });
+
+  // -------------------------------------------------------------------------
+  // Iter 9 fix: empty-result fallback only triggers on actual corruption.
+  // The previous gate (`nextScheduled.size === 0 && lastGoodSchedule.size > 0`)
+  // could not distinguish "user removed the last cron" from "file unreadable",
+  // so it restored the just-removed cron from lastGoodSchedule and kept firing
+  // it.  Post-iter-9, readCronsWithStatus carries a `corrupt` flag and the
+  // scheduler only applies the fallback when corrupt === true.
+  // -------------------------------------------------------------------------
+
+  it('remove-cron of LAST cron clears the schedule (legitimate empty, not corruption)', async () => {
+    // Start with one cron and let it fire so lastGoodSchedule is populated.
+    mockReadCrons.mockReturnValue([
+      makeCron({ name: 'last-cron', schedule: '1m', last_fired_at: new Date(Date.now() - 30_000).toISOString() }),
+    ]);
+    scheduler.start();
+
+    // Fire once to confirm the schedule is live.
+    await vi.advanceTimersByTimeAsync(60_000 + TICK);
+    expect(fired.length).toBeGreaterThanOrEqual(1);
+    expect(scheduler.getNextFireTimes().length).toBe(1);
+
+    const firesBeforeRemove = fired.length;
+
+    // User removes the last cron — crons.json is now an empty (but valid) array.
+    // Critically: corrupt === false (the file exists and parses cleanly).
+    mockReadCronsWithStatus.mockReturnValue({ crons: [], corrupt: false });
+    scheduler.reload();
+
+    // Schedule must be EMPTY — not retained from lastGoodSchedule.
+    expect(scheduler.getNextFireTimes()).toEqual([]);
+    // No "retaining last-good schedule" warning — that path is corruption-only.
+    expect(logs.find(l => l.includes('retaining last-good schedule'))).toBeUndefined();
+
+    // Advance multiple ticks — the removed cron must NOT fire again.
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(fired.length).toBe(firesBeforeRemove);
+  });
+
+  it('reload with corrupt: true retains last-good schedule (corruption path preserved)', async () => {
+    // Build a healthy schedule first so lastGoodSchedule is populated.
+    mockReadCrons.mockReturnValue([makeCron({ name: 'health', schedule: '6h' })]);
+    scheduler.start();
+    expect(scheduler.getNextFireTimes().length).toBe(1);
+
+    // Now both primary and .bak go bad — readCronsWithStatus reports
+    // corrupt: true with crons: [].  Fallback should kick in.
+    mockReadCronsWithStatus.mockReturnValue({ crons: [], corrupt: true });
+    scheduler.reload();
+
+    // Schedule retained from lastGoodSchedule (size unchanged).
+    expect(scheduler.getNextFireTimes().length).toBe(1);
+    expect(scheduler.getNextFireTimes().map(e => e.name)).toContain('health');
+    expect(logs.find(l => l.includes('retaining last-good schedule'))).toBeDefined();
+  });
+
+  it('reload() during in-flight fire with changed schedule does not cause double-fire', async () => {
+    // Slow onFire we can resolve manually
+    let resolveFire: (() => void) | undefined;
+    const slowFire = vi.fn().mockImplementation(() => new Promise<void>((res) => { resolveFire = res; }));
+
+    const raceLogs: string[] = [];
+    const raceScheduler = new CronScheduler({
+      agentName: 'test-agent',
+      onFire: slowFire,
+      logger: (msg) => raceLogs.push(msg),
+    });
+
+    // Start with a cron that fires immediately (catch-up)
+    const tenMinAgo = new Date(Date.now() - 10 * 60_000).toISOString();
+    mockReadCrons.mockReturnValue([
+      makeCron({ name: 'racy', schedule: '10m', last_fired_at: tenMinAgo, fire_count: 1 }),
+    ]);
+
+    raceScheduler.start();
+
+    // First tick: catch-up fires, awaits our slow Promise
+    await vi.advanceTimersByTimeAsync(TICK);
+    expect(slowFire).toHaveBeenCalledTimes(1);
+
+    // Mid-fire: reload with a SHORTER schedule (changeKey differs).
+    // crons.json's last_fired_at is still the stale 10-min-ago value
+    // because the in-flight fire's persist hasn't run yet.
+    mockReadCrons.mockReturnValue([
+      makeCron({ name: 'racy', schedule: '1m', last_fired_at: tenMinAgo, fire_count: 1 }),
+    ]);
+    raceScheduler.reload();
+
+    // Resolve the in-flight fire so the original tick completes
+    resolveFire!();
+    await vi.advanceTimersByTimeAsync(0); // flush microtasks
+
+    // Advance one more tick. The bug: new ScheduledCron's catch-up
+    // (referenceMs = stale last_fired_at + 1m schedule = past) re-fires
+    // the same logical event.
+    await vi.advanceTimersByTimeAsync(TICK);
+
+    // Should be exactly 1 fire — the original. Bug repro: we'd see 2.
+    expect(slowFire).toHaveBeenCalledTimes(1);
+
+    raceScheduler.stop();
+  });
+
+  // -------------------------------------------------------------------------
+  // Iter 10 audit / iter 11 fix: daemon-crash mid-fire MUST NOT double-fire
+  //
+  // BUG (iter 10 audit): if the daemon crashes between sc.firing=true and
+  // the post-success updateCron persist, nothing on disk records that the
+  // fire happened. On restart, loadCrons computes referenceMs from the
+  // STALE crons.json.last_fired_at and cron-state.json.last_fire. The
+  // catch-up gate sees nextFireAt in the past and fires AGAIN — same
+  // logical scheduled tick, two prompt injections.
+  //
+  // FIX (iter 11): persist `last_fire_attempted_at` to crons.json BEFORE
+  // awaiting onFire, and include it in loadCrons's `candidates` for
+  // referenceMs. Crash mid-fire → restart sees attempted_at = "now" →
+  // referenceMs is current → nextFireAt is in the future → no catch-up
+  // fire. Tradeoff: a fire whose dispatch genuinely failed before the
+  // current process crashed will be skipped one window — acceptable,
+  // because the alternative (double-fire on every crash) is worse.
+  // -------------------------------------------------------------------------
+
+  it('iter 11: daemon crash mid-fire does NOT double-fire on restart (last_fire_attempted_at persisted before onFire)', async () => {
+    const oneHourAgo = new Date(Date.now() - 60 * 60_000).toISOString();
+
+    // Mutable disk-state mock: the cron starts with last_fired_at=1h ago
+    // and no attempted_at.  When the scheduler calls updateCron, we apply
+    // the patch to this object so subsequent reads see the in-progress
+    // attempt — same semantics as the real atomicWriteSync persist.
+    let diskCron = makeCron({
+      name: 'daily-job',
+      schedule: '1h',
+      last_fired_at: oneHourAgo,
+      fire_count: 5,
+    });
+    mockReadCrons.mockImplementation(() => [diskCron]);
+    mockUpdateCron.mockImplementation((_agent: string, _name: string, patch: Partial<CronDefinition>) => {
+      diskCron = { ...diskCron, ...patch };
+    });
+
+    // Slow onFire we never resolve — simulates "fire began, agent received
+    // the prompt, daemon crashed before completion."
+    const slowFire = vi.fn().mockImplementation(() => new Promise<void>(() => { /* never resolves */ }));
+
+    const scheduler1 = new CronScheduler({
+      agentName: 'test-agent',
+      onFire: slowFire,
+      logger: (m) => logs.push(m),
+    });
+
+    scheduler1.start();
+    await vi.advanceTimersByTimeAsync(TICK);
+    expect(slowFire).toHaveBeenCalledTimes(1);
+    // Iter 11 invariant: updateCron MUST be called with last_fire_attempted_at
+    // BEFORE the slow onFire resolves (i.e. before the post-success persist).
+    expect(mockUpdateCron).toHaveBeenCalledWith(
+      'test-agent',
+      'daily-job',
+      expect.objectContaining({ last_fire_attempted_at: expect.any(String) })
+    );
+    expect(diskCron.last_fire_attempted_at).toBeDefined();
+    // The post-success persist (last_fired_at, fire_count) must NOT have
+    // run — the fire is still in flight.
+    expect(diskCron.last_fired_at).toBe(oneHourAgo);
+    expect(diskCron.fire_count).toBe(5);
+
+    // Simulate the crash: stop scheduler 1 without resolving the in-flight
+    // fire.  Disk state now has last_fire_attempted_at ≈ now but stale
+    // last_fired_at.
+    scheduler1.stop();
+
+    // Restart: build a fresh scheduler with the same mocked disk state.
+    const scheduler2 = new CronScheduler({
+      agentName: 'test-agent',
+      onFire: slowFire,
+      logger: (m) => logs.push(m),
+    });
+    scheduler2.start();
+    await vi.advanceTimersByTimeAsync(TICK);
+
+    // FIXED BEHAVIOR: scheduler 2's loadCrons sees attempted_at ≈ now in
+    // the referenceMs candidates → nextFireAt = now + 1h → not in past →
+    // no catch-up → onFire is NOT called a second time.
+    expect(slowFire).toHaveBeenCalledTimes(1);
+
+    scheduler2.stop();
   });
 
   // -------------------------------------------------------------------------

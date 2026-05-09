@@ -27,6 +27,7 @@ export default async function AgentsPage({
       tasksToday: (ext.tasksToday as number) ?? 0,
       stdoutBytes: ext.stdoutBytes as number | undefined,
       stdoutCapBytes: ext.stdoutCapBytes as number | undefined,
+      runtime: a.runtime,
     };
   });
 

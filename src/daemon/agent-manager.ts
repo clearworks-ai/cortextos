@@ -11,7 +11,7 @@ import { TelegramAPI } from '../telegram/api.js';
 import { TelegramPoller } from '../telegram/poller.js';
 import { resolvePaths } from '../utils/paths.js';
 import { resolveEnv } from '../utils/env.js';
-import { logInboundMessage, cacheLastSent, logOutboundMessage, buildRecentHistory } from '../telegram/logging.js';
+import { recordInboundTelegram, cacheLastSent, logOutboundMessage, buildRecentHistory } from '../telegram/logging.js';
 import { collectTelegramCommands, registerTelegramCommands } from '../bus/metrics.js';
 import { stripControlChars } from '../utils/validate.js';
 import { processMediaMessage } from '../telegram/media.js';
@@ -243,6 +243,12 @@ export class AgentManager {
     }
 
     const agentProcess = new AgentProcess(name, env, config, log);
+    // Issue #330: pass the Telegram handle into AgentProcess so CodexAppServerPTY
+    // can emit sendChatAction directly from the JSONL stream. Has no effect for
+    // claude-code / hermes runtimes — those still use fast-checker.
+    if (telegramApi && chatId) {
+      agentProcess.setTelegramHandle(telegramApi, chatId);
+    }
     const checker = new FastChecker(agentProcess, paths, this.frameworkRoot, {
       log,
       telegramApi,
@@ -303,8 +309,10 @@ export class AgentManager {
       }).catch(() => { /* non-fatal */ });
     }
 
-    // Start Telegram poller if credentials are available
-    if (telegramApi && chatId) {
+    // Start Telegram poller if credentials are available and not explicitly disabled.
+    // Set telegram_polling: false in config.json to prevent a specialist agent from
+    // running its own poller (only the designated orchestrator agent should poll).
+    if (telegramApi && chatId && config.telegram_polling !== false) {
       const stateDir = join(this.ctxRoot, 'state', name);
       const poller = new TelegramPoller(telegramApi, stateDir);
 
@@ -324,15 +332,14 @@ export class AgentManager {
         const effectiveChatId = msgChatId ?? chatId ?? '';
         const stateDir = join(this.ctxRoot, 'state', name);
 
-        // Log inbound message to JSONL
-        logInboundMessage(this.ctxRoot, name, {
-          message_id: msg.message_id,
-          from: msg.from?.id,
-          from_name: from,
-          chat_id: msgChatId,
-          text: stripControlChars(msg.text || msg.caption || ''),
-          timestamp: new Date().toISOString(),
-        });
+        // Persist the inbound message to JSONL AND emit a
+        // `message/telegram_received` bus event in one helper so
+        // experiment cycles and dashboards can count inbound traffic.
+        // Without the event, Rubi's v3 fleet measurement found 0
+        // inbound messages on a window where Eros replied to multiple
+        // agents — the JSONL had the data but it never reached the
+        // event log.
+        recordInboundTelegram(paths, this.ctxRoot, name, resolvedOrg, from, msg, log);
 
         // Check for media messages (photo, document, voice, audio, video, video_note)
         const isMedia = !!(msg.photo || msg.document || msg.voice || msg.audio || msg.video || msg.video_note);
@@ -775,9 +782,16 @@ export class AgentManager {
    *
    * Called by the IPC server after a `bus add-cron` / `bus remove-cron` write so
    * the daemon-level scheduler picks up the new definition without waiting for
-   * the next 30 s tick.  Returns true if the agent is known and a scheduler
-   * is running for it; false if the agent is not running (caller can retry or
-   * wait for the next daemon boot scan).
+   * the next 30 s tick.  Returns true on a successful reload (or no-op for
+   * Hermes agents, which manage their own crons natively); false if the agent
+   * is not running at all.
+   *
+   * Iter 7 fix: previously this returned `true` for any registered agent even
+   * when no scheduler existed in `cronSchedulers`, silently dropping reload
+   * requests during the start-window gap between `this.agents.set(name, ...)`
+   * and `startAgentCronScheduler(name)` (across the `await agentProcess.start()`
+   * yield in `startAgent`). Now: for non-Hermes agents that lack a scheduler we
+   * lazy-wire one so the just-written crons.json is read immediately.
    */
   reloadCrons(agentName: string): boolean {
     const scheduler = this.cronSchedulers.get(agentName);
@@ -786,8 +800,23 @@ export class AgentManager {
       console.log(`[agent-manager] Cron scheduler reloaded for ${agentName}`);
       return true;
     }
-    // Agent known but no scheduler yet (e.g. Hermes runtime or no crons.json)
-    return this.agents.has(agentName);
+
+    const entry = this.agents.get(agentName);
+    if (!entry) return false;
+
+    // Hermes manages its own crons natively — no daemon scheduler exists by
+    // design. The reload IS a no-op; report success so the caller does not
+    // retry forever.
+    if (entry.process['config']?.runtime === 'hermes') {
+      return true;
+    }
+
+    // Non-Hermes agent registered but no scheduler: this is the start-window
+    // gap. Lazy-wire the scheduler now; its start() reads crons.json which
+    // already contains the new entry the caller just wrote.
+    this.startAgentCronScheduler(agentName);
+    console.log(`[agent-manager] Cron scheduler lazy-created for ${agentName} (start-window reload)`);
+    return this.cronSchedulers.has(agentName);
   }
 
   /**

@@ -9,6 +9,18 @@ const NOISE_TASK_PREFIXES = [
   'Cron: heartbeat',
   'Cron: keepalive',
   'Cron: passive-heartbeat',
+  'Cron: comms-check',
+  'Cron: transcript-scanner',
+  'Cron: check-approvals',
+  'Cron: todoist-health-check',
+  'Cron: morning-brief',
+  'Cron: evening-wrap',
+  'Cron: midday-sync',
+  'Cron: milestone-check',
+  'Cron: client-health',
+  'Cron: sage-theta-wave',
+  'Cron: pre-meeting-brief',
+  'Cron: news-intelligence',
 ];
 const NOISE_EXCLUSION_SQL = NOISE_TASK_PREFIXES
   .map(() => "title NOT LIKE ?")

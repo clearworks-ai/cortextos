@@ -14,11 +14,12 @@
  * Write always goes through atomicWriteSync (mkdir + tmp rename).
  */
 
-import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { existsSync, readFileSync, mkdirSync } from 'fs';
+import { join, dirname } from 'path';
 import type { CronDefinition, CronExecutionLogEntry } from '../types/index.js';
 import { CRONS_DIRECTORY, CRONS_FILENAME, cronExecutionLogPathFor } from './crons-schema.js';
 import { atomicWriteSync } from '../utils/atomic.js';
+import { withFileLockSync } from '../utils/lock.js';
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -40,6 +41,23 @@ interface CronsFile {
 function cronsFilePath(agentName: string): string {
   const ctxRoot = process.env.CTX_ROOT ?? process.cwd();
   return join(ctxRoot, CRONS_DIRECTORY, agentName, CRONS_FILENAME);
+}
+
+/**
+ * Per-agent lock directory for the read-modify-write helpers below.
+ *
+ * `acquireLock` (utils/lock.ts) creates a `.lock.d` mkdir inside this
+ * dir, so the dir itself must exist.  We mkdir-recursive on first use
+ * — same idempotent path that atomicWriteSync uses.
+ *
+ * Using the agent's directory (parent of crons.json) means different
+ * agents don't block each other; only writers to the SAME agent's
+ * crons.json serialize.
+ */
+function lockDirFor(agentName: string): string {
+  const dir = dirname(cronsFilePath(agentName));
+  mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,26 +92,51 @@ function parseCronsRaw(raw: string, agentName: string, label: string): CronDefin
 }
 
 /**
- * Read all cron definitions for an agent from disk.
+ * Result of {@link readCronsWithStatus}.
+ *
+ * `corrupt` distinguishes two empty-`crons` cases that callers must treat
+ * differently:
+ *
+ *   - `corrupt: false` — the file does not exist OR it parsed cleanly to an
+ *     empty array.  This is the legitimate "no crons registered" state and
+ *     callers should honor it (e.g. clear in-memory schedule).
+ *
+ *   - `corrupt: true` — the primary file is unparseable AND the `.bak`
+ *     fallback also failed (or is missing).  The empty `crons` array here
+ *     is a degraded sentinel, not a real schedule.  Callers that maintain
+ *     a last-good in-memory snapshot (e.g. cron-scheduler) should retain
+ *     it instead of zeroing out.
+ *
+ * NEVER use `crons.length === 0` alone as a corruption signal — a freshly
+ * removed last-cron also produces `[]`.
+ */
+export interface CronsReadResult {
+  crons: CronDefinition[];
+  corrupt: boolean;
+}
+
+/**
+ * Read all cron definitions for an agent from disk, with a corruption flag.
  *
  * On parse failure the function automatically falls back to the `.bak` file
  * written by the most recent `writeCrons()` call.  This provides single-step
  * automatic recovery from transient corruption without requiring operator
  * intervention.
  *
- * @returns Array of CronDefinition objects.  Returns [] when both the primary
- *          file and the backup are absent or unparseable — never throws.
+ * Use this in preference to {@link readCrons} when the caller needs to
+ * distinguish "legitimately empty" from "catastrophic corruption" (see
+ * {@link CronsReadResult}).
  */
-export function readCrons(agentName: string): CronDefinition[] {
+export function readCronsWithStatus(agentName: string): CronsReadResult {
   const filePath = cronsFilePath(agentName);
   if (!existsSync(filePath)) {
-    return [];
+    return { crons: [], corrupt: false };
   }
   try {
     const raw = readFileSync(filePath, 'utf-8');
     const crons = parseCronsRaw(raw, agentName, 'crons.json');
     if (crons !== null) {
-      return crons;
+      return { crons, corrupt: false };
     }
   } catch (err) {
     process.stderr.write(
@@ -112,7 +155,7 @@ export function readCrons(agentName: string): CronDefinition[] {
       const bakRaw = readFileSync(bakPath, 'utf-8');
       const bakCrons = parseCronsRaw(bakRaw, agentName, 'crons.json.bak');
       if (bakCrons !== null) {
-        return bakCrons;
+        return { crons: bakCrons, corrupt: false };
       }
     } catch (err) {
       process.stderr.write(
@@ -122,7 +165,25 @@ export function readCrons(agentName: string): CronDefinition[] {
     }
   }
 
-  return [];
+  // Primary failed AND .bak failed-or-missing — catastrophic.
+  return { crons: [], corrupt: true };
+}
+
+/**
+ * Read all cron definitions for an agent from disk.
+ *
+ * On parse failure the function automatically falls back to the `.bak` file
+ * written by the most recent `writeCrons()` call.  This provides single-step
+ * automatic recovery from transient corruption without requiring operator
+ * intervention.
+ *
+ * @returns Array of CronDefinition objects.  Returns [] when both the primary
+ *          file and the backup are absent or unparseable — never throws.
+ *          NOTE: this loses the corrupt-vs-legitimately-empty distinction —
+ *          use {@link readCronsWithStatus} when that matters.
+ */
+export function readCrons(agentName: string): CronDefinition[] {
+  return readCronsWithStatus(agentName).crons;
 }
 
 /**
@@ -148,12 +209,14 @@ export function writeCrons(agentName: string, crons: CronDefinition[]): void {
  * @throws {Error} if a cron with the same name already exists for the agent.
  */
 export function addCron(agentName: string, cron: CronDefinition): void {
-  const existing = readCrons(agentName);
-  const collision = existing.find(c => c.name === cron.name);
-  if (collision !== undefined) {
-    throw new Error(`cron "${cron.name}" already exists for agent "${agentName}"`);
-  }
-  writeCrons(agentName, [...existing, cron]);
+  withFileLockSync(lockDirFor(agentName), () => {
+    const existing = readCrons(agentName);
+    const collision = existing.find(c => c.name === cron.name);
+    if (collision !== undefined) {
+      throw new Error(`cron "${cron.name}" already exists for agent "${agentName}"`);
+    }
+    writeCrons(agentName, [...existing, cron]);
+  });
 }
 
 /**
@@ -163,14 +226,16 @@ export function addCron(agentName: string, cron: CronDefinition): void {
  *          Never throws (idempotent).
  */
 export function removeCron(agentName: string, name: string): boolean {
-  const existing = readCrons(agentName);
-  const idx = existing.findIndex(c => c.name === name);
-  if (idx === -1) {
-    return false;
-  }
-  const updated = [...existing.slice(0, idx), ...existing.slice(idx + 1)];
-  writeCrons(agentName, updated);
-  return true;
+  return withFileLockSync(lockDirFor(agentName), () => {
+    const existing = readCrons(agentName);
+    const idx = existing.findIndex(c => c.name === name);
+    if (idx === -1) {
+      return false;
+    }
+    const updated = [...existing.slice(0, idx), ...existing.slice(idx + 1)];
+    writeCrons(agentName, updated);
+    return true;
+  });
 }
 
 /**
@@ -187,16 +252,18 @@ export function updateCron(
   name: string,
   patch: Partial<CronDefinition>
 ): boolean {
-  const existing = readCrons(agentName);
-  const idx = existing.findIndex(c => c.name === name);
-  if (idx === -1) {
-    return false;
-  }
-  const updated = existing.map((c, i) =>
-    i === idx ? { ...c, ...patch, name: c.name } : c
-  );
-  writeCrons(agentName, updated);
-  return true;
+  return withFileLockSync(lockDirFor(agentName), () => {
+    const existing = readCrons(agentName);
+    const idx = existing.findIndex(c => c.name === name);
+    if (idx === -1) {
+      return false;
+    }
+    const updated = existing.map((c, i) =>
+      i === idx ? { ...c, ...patch, name: c.name } : c
+    );
+    writeCrons(agentName, updated);
+    return true;
+  });
 }
 
 /**

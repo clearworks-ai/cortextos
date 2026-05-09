@@ -28,7 +28,7 @@
 import { homedir } from 'os';
 import { join } from 'path';
 import { parseDurationMs, readCronState } from '../bus/cron-state.js';
-import { readCrons, updateCron } from '../bus/crons.js';
+import { readCronsWithStatus, updateCron } from '../bus/crons.js';
 import type { CronDefinition } from '../types/index.js';
 import { appendExecutionLog } from './cron-execution-log.js';
 
@@ -340,7 +340,7 @@ export class CronScheduler {
 
   private loadCrons(isReload: boolean): void {
     const now = Date.now();
-    const defs = readCrons(this.agentName);
+    const { crons: defs, corrupt } = readCronsWithStatus(this.agentName);
     const nextScheduled = new Map<string, ScheduledCron>();
 
     // Read cron-state.json so catch-up sees fires recorded by `bus update-cron-fire`
@@ -377,13 +377,31 @@ export class CronScheduler {
         continue;
       }
 
+      // RELOAD-WHILE-FIRING GUARD: if the cron is mid-fire, preserve the
+      // existing entry as-is until the fire completes.  A fresh ScheduledCron
+      // built from stale crons.json (last_fired_at not yet persisted) would
+      // catch-up-fire on the next tick and double-fire the same logical event.
+      // The next reload (manual or after fire completes) will pick up the
+      // new schedule cleanly.
+      if (isReload && existing !== undefined && existing.firing === true) {
+        this.logger(
+          `[cron-scheduler] reload deferred for "${def.name}" — fire in progress; ` +
+          `new schedule will apply on next reload after fire completes`
+        );
+        nextScheduled.set(def.name, existing);
+        continue;
+      }
+
       // New or modified cron — compute fresh nextFireAt.
-      // Base: take the most recent of crons.json.last_fired_at and
-      // cron-state.json.last_fire (either may be more current depending on
-      // which write path recorded the fire). Fall back to now.
+      // Base: take the most recent of crons.json.last_fired_at,
+      // crons.json.last_fire_attempted_at (set pre-onFire to detect crash
+      // mid-fire — iter 11), and cron-state.json.last_fire (either may be
+      // more current depending on which write path recorded the fire).
+      // Fall back to now.
       const stateFire = stateLastFireByName.get(def.name);
       const candidates: number[] = [];
       if (def.last_fired_at) candidates.push(new Date(def.last_fired_at).getTime());
+      if (def.last_fire_attempted_at) candidates.push(new Date(def.last_fire_attempted_at).getTime());
       if (stateFire) candidates.push(new Date(stateFire).getTime());
       const referenceMs = candidates.length > 0 ? Math.max(...candidates) : now;
 
@@ -409,15 +427,24 @@ export class CronScheduler {
       nextScheduled.set(def.name, { definition: def, nextFireAt, changeKey: key });
     }
 
-    // LAST-GOOD-SCHEDULE FALLBACK
-    // If this is a reload and the result is empty (all-zero defs, parse failure,
-    // or external corruption), retain the previous in-memory schedule instead of
-    // silently dropping all cron definitions.  This prevents transient corruption
-    // from halting cron execution on a running scheduler.
+    // LAST-GOOD-SCHEDULE FALLBACK (corruption-only)
+    // If this is a reload AND readCronsWithStatus reported `corrupt: true`
+    // (primary file unparseable AND .bak fallback failed/missing), retain
+    // the previous in-memory schedule instead of silently dropping all cron
+    // definitions.  This prevents transient corruption from halting cron
+    // execution on a running scheduler.
     //
-    // We do NOT apply this fallback on initial start() — an empty file on startup
-    // is normal (no crons registered yet) and should produce an empty schedule.
-    if (isReload && nextScheduled.size === 0 && this.lastGoodSchedule.size > 0) {
+    // CRITICAL: we ONLY apply this fallback when `corrupt === true`.  An empty
+    // result with `corrupt === false` is a legitimate empty file — produced
+    // by `bus remove-cron` on the last cron, or a freshly initialized agent —
+    // and the schedule MUST be cleared.  Earlier versions of this method
+    // gated only on `nextScheduled.size === 0`, which restored the just-removed
+    // cron from `lastGoodSchedule` and kept firing it after removal until the
+    // daemon restarted (iter 9 regression).
+    //
+    // We do NOT apply this fallback on initial start() — an empty/missing file
+    // on startup is normal and should produce an empty schedule.
+    if (isReload && corrupt && nextScheduled.size === 0 && this.lastGoodSchedule.size > 0) {
       this.logger(
         `[cron-scheduler] WARNING: reload produced empty schedule for agent "${this.agentName}" — ` +
         `retaining last-good schedule (${this.lastGoodSchedule.size} cron(s)) until file is repaired`
@@ -452,6 +479,23 @@ export class CronScheduler {
       try {
       const cron = sc.definition;
       this.logger(`[cron-scheduler] firing cron "${name}" (was due ${new Date(sc.nextFireAt).toISOString()})`);
+
+      // Persist last_fire_attempted_at to disk BEFORE awaiting the dispatch.
+      // If the daemon crashes between this point and the post-success
+      // updateCron below, loadCrons() on restart will see this attempt
+      // timestamp in the referenceMs candidates and avoid re-firing the
+      // same slot via the catch-up gate. (See iter 10/11 audit.)
+      const attemptIso = new Date(now).toISOString();
+      try {
+        updateCron(this.agentName, name, { last_fire_attempted_at: attemptIso });
+        sc.definition = { ...cron, last_fire_attempted_at: attemptIso };
+      } catch (err) {
+        this.logger(
+          `[cron-scheduler] WARNING: failed to persist last_fire_attempted_at for "${name}" — ` +
+          `${err instanceof Error ? err.message : String(err)}. ` +
+          `Continuing dispatch; crash mid-fire could double-fire on restart.`
+        );
+      }
 
       const success = await fireWithRetry(cron, this.agentName, this.onFire, this.logger);
 

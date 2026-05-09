@@ -742,6 +742,7 @@ busCommand
         'other',
         `Experiment ID: ${id}\nMetric: ${metric}\nHypothesis: ${hypothesis}`,
         env.frameworkRoot,
+        env.agentDir,
       );
       console.log(`approval_required: ${approvalId}`);
     }
@@ -970,6 +971,10 @@ busCommand
   .option('--file <path>', 'Send a document/file with caption (any file type)')
   .option('--plain-text', 'Skip Telegram Markdown parsing entirely. Use this when the message contains unescaped _, *, backtick, or [ that would otherwise trip the Markdown parser. Without this flag, sendMessage still retries once with parse_mode disabled on a parse-entity error — so it is purely an opt-in to save the retry roundtrip.', false)
   .action(async (chatId: string, message: string, opts: { image?: string; file?: string; plainText?: boolean }) => {
+    // Codex agents emit literal '\n'/'\t' inside single-quoted bash where bash
+    // does not expand escapes, so they arrive at argv as 2-char literals and
+    // Telegram renders them as visible text. Normalize before send + log.
+    message = message.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
     // Resolve bot token: agent .env first, then process.env
     const env = resolveEnv();
     let botToken = '';
@@ -1055,7 +1060,7 @@ busCommand
     // orgDir resolves to where activity-channel.env actually lives (the
     // framework repo path, NOT the runtime state path — see
     // src/bus/approval.ts:postApprovalToActivityChannel for the history).
-    const id = await createApproval(paths, env.agentName, env.org, title, category as ApprovalCategory, context || '', env.frameworkRoot);
+    const id = await createApproval(paths, env.agentName, env.org, title, category as ApprovalCategory, context || '', env.frameworkRoot, env.agentDir);
     console.log(id);
   });
 
@@ -1647,6 +1652,8 @@ busCommand
   .argument('<reply>', 'Reply text')
   .argument('[msg-id]', 'Inbox message ID to ACK')
   .action((agent: string, reply: string, msgId?: string) => {
+    // Same literal '\n'/'\t' normalize as send-telegram (codex agent fix).
+    reply = reply.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
     const { mkdirSync, appendFileSync } = require('fs');
     const { join } = require('path');
     const env = resolveEnv();
@@ -2243,6 +2250,144 @@ busCommand
       console.log(`  No config.json      : ${noConfig}`);
       console.log(`  No crons in config  : ${noCrons}`);
     }
+  });
+
+// ---------------------------------------------------------------------------
+// upgrade-cron-teaching — Subtask 2.4: scan agent workspace for stale
+// CronCreate / /loop / config.json cron-registration teaching that predates
+// the external-persistent-crons migration.  Scan-only by default; --apply
+// performs only the safe literal substitutions known not to depend on
+// surrounding context.
+// ---------------------------------------------------------------------------
+
+busCommand
+  .command('upgrade-cron-teaching')
+  .description('Scan agent workspace files for stale CronCreate/loop/config.json cron teaching')
+  .argument('[agent]', 'Agent name to scan (omit to scan all agents under orgs/)')
+  .option('--apply', 'Perform safe literal substitutions in place (does not rewrite CronCreate references)')
+  .option('--json', 'Emit JSON instead of human-readable text')
+  .action(async (
+    agentArg: string | undefined,
+    opts: { apply?: boolean; json?: boolean },
+  ) => {
+    const { scanAgentDir, groupMatchesByFile } =
+      await import('../utils/cron-teaching-scanner.js');
+    const env = resolveEnv();
+    const frameworkRoot = env.frameworkRoot || process.cwd();
+
+    const { existsSync: fsExists, readdirSync: fsReaddir } =
+      require('fs') as typeof import('fs');
+
+    // Resolve agent name to its absolute workspace dir (orgs/*/agents/AGENT).
+    function resolveAgentDir(agent: string): string | undefined {
+      const orgsDir = join(frameworkRoot, 'orgs');
+      if (!fsExists(orgsDir)) return undefined;
+      try {
+        for (const entry of fsReaddir(orgsDir, { withFileTypes: true })) {
+          if (!entry.isDirectory()) continue;
+          const candidate = join(orgsDir, entry.name, 'agents', agent);
+          if (fsExists(candidate)) return candidate;
+        }
+      } catch {
+        // ignore scan errors
+      }
+      return undefined;
+    }
+
+    // List every agent dir under orgs/ORG/agents/.
+    function listAllAgents(): { agent: string; dir: string }[] {
+      const orgsDir = join(frameworkRoot, 'orgs');
+      const out: { agent: string; dir: string }[] = [];
+      if (!fsExists(orgsDir)) return out;
+      try {
+        for (const orgEntry of fsReaddir(orgsDir, { withFileTypes: true })) {
+          if (!orgEntry.isDirectory()) continue;
+          const agentsRoot = join(orgsDir, orgEntry.name, 'agents');
+          if (!fsExists(agentsRoot)) continue;
+          for (const a of fsReaddir(agentsRoot, { withFileTypes: true })) {
+            if (a.isDirectory() && !a.name.startsWith('.')) {
+              out.push({ agent: a.name, dir: join(agentsRoot, a.name) });
+            }
+          }
+        }
+      } catch {
+        // ignore scan errors
+      }
+      return out;
+    }
+
+    type Report = {
+      agent: string;
+      result: ReturnType<typeof scanAgentDir>;
+    };
+
+    const reports: Report[] = [];
+    if (agentArg) {
+      try { validateAgentName(agentArg); } catch (err) { console.error(String(err)); process.exit(1); }
+      const dir = resolveAgentDir(agentArg);
+      if (!dir) {
+        console.error(`Error: agent '${agentArg}' not found under ${join(frameworkRoot, 'orgs')}/*/agents/`);
+        process.exit(1);
+      }
+      reports.push({ agent: agentArg, result: scanAgentDir(dir, { apply: opts.apply }) });
+    } else {
+      for (const { agent, dir } of listAllAgents()) {
+        reports.push({ agent, result: scanAgentDir(dir, { apply: opts.apply }) });
+      }
+    }
+
+    if (opts.json) {
+      console.log(JSON.stringify(
+        reports.map((r) => ({
+          agent: r.agent,
+          agentDir: r.result.agentDir,
+          scannedFiles: r.result.scannedFiles,
+          skippedSentinelFiles: r.result.skippedSentinelFiles,
+          appliedSubstitutions: r.result.appliedSubstitutions,
+          matches: r.result.matches,
+        })),
+        null,
+        2,
+      ));
+      const totalMatches = reports.reduce((sum, r) => sum + r.result.matches.length, 0);
+      process.exit(totalMatches === 0 ? 0 : 1);
+    }
+
+    let totalMatches = 0;
+    let totalApplied = 0;
+    for (const { agent, result } of reports) {
+      totalMatches += result.matches.length;
+      totalApplied += result.appliedSubstitutions;
+
+      if (result.matches.length === 0 && result.appliedSubstitutions === 0) {
+        console.log(`✓ ${agent}: no stale cron-teaching references (${result.scannedFiles.length} files scanned)`);
+        continue;
+      }
+
+      console.log(`\n${agent}: ${result.matches.length} stale reference(s) in ${result.scannedFiles.length} files`);
+      if (result.skippedSentinelFiles.length > 0) {
+        console.log(`  (skipped ${result.skippedSentinelFiles.length} sentinel-marked file(s): ${result.skippedSentinelFiles.map((f) => f.replace(result.agentDir + '/', '')).join(', ')})`);
+      }
+      const grouped = groupMatchesByFile(result.matches);
+      for (const [file, matches] of grouped) {
+        const rel = file.replace(result.agentDir + '/', '');
+        console.log(`\n  ${rel}`);
+        for (const m of matches) {
+          console.log(`    L${m.line} [${m.pattern}]: ${m.excerpt}`);
+          console.log(`      → ${m.suggestion}`);
+        }
+      }
+      if (result.appliedSubstitutions > 0) {
+        console.log(`\n  Applied ${result.appliedSubstitutions} safe substitution(s) in place.`);
+      }
+    }
+
+    console.log(`\nSummary: ${totalMatches} stale reference(s) across ${reports.length} agent(s)` +
+      (opts.apply ? `, ${totalApplied} substitution(s) applied.` : '.'));
+    if (totalMatches > 0 && !opts.apply) {
+      console.log(`Run with --apply to substitute the safe-rewritable patterns. CronCreate / /loop references must be updated manually.`);
+    }
+    process.exit(totalMatches === 0 ? 0 : 1);
   });
 
 busCommand

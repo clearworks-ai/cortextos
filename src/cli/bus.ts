@@ -24,6 +24,7 @@ import { resolveEnv } from '../utils/env.js';
 import { IPCClient } from '../daemon/ipc-server.js';
 import { TelegramAPI } from '../telegram/api.js';
 import { logOutboundMessage, cacheLastSent } from '../telegram/logging.js';
+import { appendToBuffer } from '../daemon/conversation-buffer.js';
 import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext, CronDefinition } from '../types/index.js';
 
 /**
@@ -966,11 +967,12 @@ busCommand
   .command('send-telegram')
   .description('Send a message to a Telegram chat')
   .argument('<chat-id>', 'Telegram chat ID')
-  .argument('<message>', 'Message text (supports Telegram Markdown unless --plain-text is set)')
+  .argument('<message>', 'Message text (supports Telegram Markdown unless --plain-text is set). With --streaming, this becomes the initial placeholder; tokens read newline-delimited from stdin are appended into the same Telegram message via editMessageText.')
   .option('--image <path>', 'Send a photo with caption')
   .option('--file <path>', 'Send a document/file with caption (any file type)')
   .option('--plain-text', 'Skip Telegram Markdown parsing entirely. Use this when the message contains unescaped _, *, backtick, or [ that would otherwise trip the Markdown parser. Without this flag, sendMessage still retries once with parse_mode disabled on a parse-entity error — so it is purely an opt-in to save the retry roundtrip.', false)
-  .action(async (chatId: string, message: string, opts: { image?: string; file?: string; plainText?: boolean }) => {
+  .option('--streaming', 'Stream the reply into ONE Telegram message: <message> is the initial placeholder, then newline-delimited tokens from stdin are appended via editMessageText (≤1 edit/sec, identical-content guard, final edit applies markdown→HTML). Closes the stream when stdin ends. Spec: Item 1 of .planning/larry-ux-parity-spec.md.', false)
+  .action(async (chatId: string, message: string, opts: { image?: string; file?: string; plainText?: boolean; streaming?: boolean }) => {
     // Codex agents emit literal '\n'/'\t' inside single-quoted bash where bash
     // does not expand escapes, so they arrive at argv as 2-char literals and
     // Telegram renders them as visible text. Normalize before send + log.
@@ -1004,7 +1006,46 @@ busCommand
     const api = new TelegramAPI(botToken);
     try {
       let sentMessageId = 0;
-      if (opts.image) {
+      // Streaming branch: tokens arrive newline-delimited on stdin, are
+      // batched into editMessageText updates against the initial message.
+      // Image / file uploads are mutually exclusive with --streaming because
+      // there is no streaming photo/document variant in the Telegram API.
+      if (opts.streaming) {
+        if (opts.image || opts.file) {
+          console.error('Error: --streaming is incompatible with --image / --file (Telegram API has no streaming media variant).');
+          process.exit(1);
+        }
+        const { TelegramStreamer } = await import('../daemon/telegram-streamer.js');
+        const streamer = new TelegramStreamer(api, chatId, {
+          finalParseMode: opts.plainText ? null : 'HTML',
+          log: (m) => console.error(`[telegram-streamer] ${m}`),
+        });
+        await streamer.start(message);
+        sentMessageId = streamer.getMessageId() ?? 0;
+
+        // Read newline-delimited tokens from stdin until EOF, append each
+        // raw line (with its terminating newline) to the streamer. We use
+        // a chunk-then-split approach so partial lines are buffered across
+        // chunk boundaries — critical when the producer writes a single
+        // long line in multiple write() calls.
+        process.stdin.setEncoding('utf-8');
+        let carry = '';
+        for await (const chunk of process.stdin as AsyncIterable<string>) {
+          const data = carry + chunk;
+          const lastNl = data.lastIndexOf('\n');
+          if (lastNl === -1) {
+            carry = data;
+            continue;
+          }
+          const complete = data.slice(0, lastNl + 1);
+          carry = data.slice(lastNl + 1);
+          if (complete) streamer.append(complete);
+        }
+        if (carry) streamer.append(carry);
+        await streamer.finalize();
+        // Re-fetch the final accumulated text for logging below.
+        message = streamer.getAccumulated();
+      } else if (opts.image) {
         const result = await api.sendPhoto(chatId, opts.image, message);
         sentMessageId = result?.result?.message_id ?? 0;
       } else if (opts.file) {
@@ -1024,6 +1065,16 @@ busCommand
           parseMode: opts.plainText ? 'none' : 'html',
         });
         cacheLastSent(env.ctxRoot, env.agentName, chatId, message);
+        // Append outbound to the rolling conversation buffer so post-restart
+        // sessions see the literal recent exchange, not just the handoff doc
+        // summary. Spec: Item 2 of .planning/larry-ux-parity-spec.md.
+        appendToBuffer(env.ctxRoot, env.agentName, {
+          ts: new Date().toISOString(),
+          sender: env.agentName,
+          via: 'telegram',
+          content: message,
+          chat_id: String(chatId),
+        });
         // Auto-emit activity event so dashboard sees every Telegram send,
         // even from agents that never call log-event directly.
         try {
@@ -2419,6 +2470,11 @@ busCommand
   .command('hook-idle-flag')
   .description('Stop hook: writes last_idle.flag timestamp so fast-checker knows agent finished its turn')
   .action(() => runHook('hook-idle-flag'));
+
+busCommand
+  .command('hook-tool-result-router')
+  .description('PostToolUse hook: route tool call + result preview to dispatch-events + Telegram (Item 4)')
+  .action(() => runHook('hook-tool-result-router'));
 
 // --- OAuth token rotation commands ---
 

@@ -54,7 +54,13 @@ function parsePostToolPayload(input: string): HookPayload {
 function isTrivial(toolName: string, toolInput: any): boolean {
   if (toolName === 'Bash') {
     const cmd = String(toolInput?.command || '');
-    if (/cortextos\s+bus\s+(update-heartbeat|log-event|update-cron-fire)/.test(cmd)) {
+    // Suppress: housekeeping, comm pass-throughs (sending a message = duplicate notification),
+    // and task tracking (already visible via task list / dashboard).
+    if (/cortextos\s+bus\s+(update-heartbeat|log-event|update-cron-fire|send-telegram|send-message|reply-telegram|reply-telegram-photo|ack-inbox|check-inbox|create-task|update-task|complete-task|update-cron-state)/.test(cmd)) {
+      return true;
+    }
+    // Suppress: piped variants and `node dist/cli.js bus ...` invocations of the same commands.
+    if (/(node\s+\S*cli\.js|cortextos)\s+bus\s+(send-telegram|send-message|reply-telegram|ack-inbox|create-task|update-task|complete-task)/.test(cmd)) {
       return true;
     }
   }
@@ -62,6 +68,8 @@ function isTrivial(toolName: string, toolInput: any): boolean {
     const path = String(toolInput?.file_path || '');
     if (/state\/current-mission\.txt$/.test(path)) return true;
     if (/MEMORY[^/]*\.md$/i.test(path)) return true;
+    if (/conversation-buffer\.jsonl$/.test(path)) return true;
+    if (/HEARTBEAT\.md$/i.test(path)) return true;
   }
   return false;
 }

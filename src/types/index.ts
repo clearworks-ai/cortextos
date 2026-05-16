@@ -118,6 +118,7 @@ export type ApprovalCategory =
   | 'financial'
   | 'deployment'
   | 'data-deletion'
+  | 'scope-validation'
   | 'other';
 
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected';

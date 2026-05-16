@@ -1,25 +1,28 @@
 /**
  * hook-tool-result-router.ts — PostToolUse hook.
  *
- * Forwards tool call + result preview to two destinations:
- *   1. dispatch-events stream (via logEvent → analytics/events/{agent}/{date}.jsonl)
- *      so the dashboard activity feed can render full output.
- *   2. Telegram (preview only, capped at ~1500 chars) so the user sees what
- *      Larry/Frank2/Codexer just ran within ~5s of execution.
+ * Emits a single-line terminal-style status per tool call to Telegram,
+ * plus the full payload to the dispatch-events stream (analytics/events/
+ * {agent}/{date}.jsonl) for the dashboard activity feed.
+ *
+ * Telegram format (one line, ≤~80 chars where possible, no output dumps):
+ *   🔨 Bash · npm test · pass (12s)
+ *   📖 Read · server/services/phase-engine.ts:1-200
+ *   ✏️ Edit · server/services/infer-rag.ts:310 (1 change)
+ *   📝 Write · reports/foo.md (250 lines)
+ *   🤖 Agent · architect · V1 vs V2 review · started
+ *   ✅ Agent · architect · V1 vs V2 review · done (184s)
  *
  * Trivial / high-noise tool calls are suppressed (bus heartbeat, log-event,
  * cron-fire, memory/state reads). The hook never blocks execution — it always
  * exits 0 within its 10s settings.json timeout regardless of failures.
- *
- * Implements Item 4 of .planning/larry-ux-parity-spec.md.
  */
 
 import { readStdin, loadEnv } from './index.js';
 import { logEvent } from '../bus/event.js';
 import { resolvePaths } from '../utils/paths.js';
 
-const TELEGRAM_MAX = 1500;
-const PREVIEW_MAX = 500;
+const TELEGRAM_MAX = 200; // single-line wrap-safe cap
 
 interface HookPayload {
   tool_name: string;
@@ -75,109 +78,192 @@ function isTrivial(toolName: string, toolInput: any): boolean {
 }
 
 /**
- * Pull a short human-readable description from tool_input. Mirrors the
- * style of formatToolSummary in index.ts but kept inline so the hook
- * stays self-contained and one-line per tool.
+ * Shorten a file path for display. Keeps the last 3 path segments so the user
+ * can identify the file without seeing the full repo prefix.
  */
-function describeTool(toolName: string, toolInput: any): string {
+function shortPath(p: string): string {
+  if (!p) return '';
+  const parts = p.split('/').filter(Boolean);
+  if (parts.length <= 3) return p.replace(/^\/?/, '');
+  return parts.slice(-3).join('/');
+}
+
+/**
+ * Squash a Bash command into a short, human-readable description. Tries to
+ * pull out the meaningful verb (npm test, git push, bash bin/foo.sh, etc.)
+ * and trims aggressively.
+ */
+function describeBash(cmd: string): string {
+  const flat = cmd.replace(/\s+/g, ' ').trim();
+  // Drop common noise prefixes
+  const stripped = flat
+    .replace(/^cd\s+\S+\s*&&\s*/, '')
+    .replace(/^\s*\(\s*/, '')
+    .replace(/\s*\)\s*$/, '');
+  return stripped.length > 60 ? stripped.slice(0, 57) + '...' : stripped;
+}
+
+/**
+ * Format a single-line summary line for the tool. The activity feed gets the
+ * full payload separately; this is purely the human-facing Telegram line.
+ */
+function formatToolLine(
+  toolName: string,
+  toolInput: any,
+  result: any,
+): string {
   switch (toolName) {
     case 'Bash': {
-      const cmd = String(toolInput?.command || '').replace(/\s+/g, ' ').trim();
-      return cmd.slice(0, 200);
+      const cmd = String(toolInput?.command || '');
+      const desc = describeBash(cmd);
+      const status = bashStatus(result);
+      return `🔨 Bash · ${desc} · ${status}`;
     }
-    case 'Read':
-    case 'Edit':
-    case 'Write':
-    case 'NotebookEdit': {
-      const path = String(toolInput?.file_path || toolInput?.notebook_path || '');
-      return path;
-    }
-    case 'Glob':
-      return String(toolInput?.pattern || '');
-    case 'Grep':
-      return String(toolInput?.pattern || '');
-    case 'WebFetch':
-    case 'WebSearch':
-      return String(toolInput?.url || toolInput?.query || '');
-    case 'Task':
-    case 'Agent':
-      return String(toolInput?.description || toolInput?.subagent_type || '');
-    default:
-      return JSON.stringify(toolInput).slice(0, 200);
-  }
-}
-
-/**
- * Extract a textual preview of the tool result. PostToolUse payloads vary by
- * tool — Bash gives stdout/stderr, Edit gives a diff or oldString/newString,
- * Read gives file content, etc. Returns { preview, totalLines }.
- */
-function previewResult(toolName: string, result: any): { preview: string; totalLines: number } {
-  if (result == null) return { preview: '', totalLines: 0 };
-
-  let text = '';
-  if (typeof result === 'string') {
-    text = result;
-  } else if (typeof result === 'object') {
-    // Bash
-    const stdout = typeof result.stdout === 'string' ? result.stdout : '';
-    const stderr = typeof result.stderr === 'string' ? result.stderr : '';
-    if (stdout || stderr) {
-      text = stdout + (stderr ? `\n[stderr]\n${stderr}` : '');
-    } else if (typeof result.output === 'string') {
-      text = result.output;
-    } else if (typeof result.content === 'string') {
-      text = result.content;
-    } else if (Array.isArray(result.content)) {
-      text = result.content
-        .map((c: any) => (typeof c?.text === 'string' ? c.text : ''))
-        .join('\n');
-    } else if (typeof result.diff === 'string') {
-      text = result.diff;
-    } else {
-      try {
-        text = JSON.stringify(result);
-      } catch {
-        text = String(result);
+    case 'Read': {
+      const path = shortPath(String(toolInput?.file_path || ''));
+      const offset = toolInput?.offset;
+      const limit = toolInput?.limit;
+      if (typeof offset === 'number' || typeof limit === 'number') {
+        const start = typeof offset === 'number' ? offset : 1;
+        const end = typeof limit === 'number' ? start + limit - 1 : '';
+        return `📖 Read · ${path}:${start}${end !== '' ? '-' + end : ''}`;
       }
+      return `📖 Read · ${path}`;
     }
-  } else {
-    text = String(result);
+    case 'Edit': {
+      const path = shortPath(String(toolInput?.file_path || ''));
+      const replaceAll = toolInput?.replace_all === true;
+      const changes = replaceAll ? 'all' : '1';
+      const lineHint = lineNumberFromEdit(toolInput);
+      const where = lineHint ? `${path}:${lineHint}` : path;
+      return `✏️ Edit · ${where} (${changes} change${changes === '1' ? '' : 's'})`;
+    }
+    case 'Write': {
+      const path = shortPath(String(toolInput?.file_path || ''));
+      const content = String(toolInput?.content || '');
+      const lines = content ? content.split('\n').length : 0;
+      return `📝 Write · ${path} (${lines} lines)`;
+    }
+    case 'NotebookEdit': {
+      const path = shortPath(String(toolInput?.notebook_path || ''));
+      return `📓 NotebookEdit · ${path}`;
+    }
+    case 'Glob': {
+      const pattern = String(toolInput?.pattern || '').slice(0, 60);
+      const matchCount = countLines(result);
+      return `🔍 Glob · ${pattern}${matchCount ? ` (${matchCount} matches)` : ''}`;
+    }
+    case 'Grep': {
+      const pattern = String(toolInput?.pattern || '').slice(0, 60);
+      const matchCount = countLines(result);
+      return `🔍 Grep · ${pattern}${matchCount ? ` (${matchCount} matches)` : ''}`;
+    }
+    case 'WebFetch': {
+      const url = String(toolInput?.url || '').slice(0, 80);
+      return `🌐 WebFetch · ${url}`;
+    }
+    case 'WebSearch': {
+      const query = String(toolInput?.query || '').slice(0, 80);
+      return `🌐 WebSearch · ${query}`;
+    }
+    case 'Task':
+    case 'Agent': {
+      const subtype = String(toolInput?.subagent_type || 'agent');
+      const desc = String(toolInput?.description || '').slice(0, 60);
+      // Agent calls in PostToolUse are "done" — the result is already back.
+      const duration = agentDuration(result);
+      const tail = duration ? `done (${duration})` : 'done';
+      return `✅ Agent · ${subtype} · ${desc} · ${tail}`;
+    }
+    default:
+      return `⚙️ ${toolName}`;
   }
-
-  const totalLines = text ? text.split('\n').length : 0;
-  const preview = text.length > PREVIEW_MAX ? text.slice(0, PREVIEW_MAX) : text;
-  return { preview, totalLines };
 }
 
 /**
- * Build the Telegram-bound message. Caps total length at TELEGRAM_MAX.
+ * Best-effort: extract a line-number hint from an Edit call by looking at the
+ * old_string for any line-number markers Claude Code prepends in its diffs.
+ * Returns empty string if not found — the formatter falls back to the path.
  */
-function buildTelegramMessage(
-  agentName: string,
-  toolName: string,
-  description: string,
-  preview: string,
-  totalLines: number,
-  textLength: number,
-): string {
-  const header = `🔧 ${agentName} ran ${toolName}: ${description}`.slice(0, 400);
-  const truncatedNote =
-    textLength > preview.length
-      ? `\n... see dashboard for full output (${totalLines} lines)`
-      : '';
+function lineNumberFromEdit(toolInput: any): string {
+  const old = String(toolInput?.old_string || '');
+  // Claude Code never injects line numbers into old_string itself, so we have
+  // no reliable hint without re-reading the file. Leave blank.
+  void old;
+  return '';
+}
 
-  let body = preview ? `output (first ${PREVIEW_MAX} chars):\n${preview}${truncatedNote}` : '';
+/**
+ * Render a Bash status: `pass`, `fail`, `pass (12s)`, `fail (3 lines stderr)`.
+ * Duration comes from result.duration_ms when present.
+ */
+function bashStatus(result: any): string {
+  if (result == null) return 'done';
+  const exitCode =
+    typeof result?.exit_code === 'number'
+      ? result.exit_code
+      : typeof result?.exitCode === 'number'
+        ? result.exitCode
+        : typeof result?.code === 'number'
+          ? result.code
+          : null;
+  const stderr = typeof result?.stderr === 'string' ? result.stderr : '';
+  const durationMs =
+    typeof result?.duration_ms === 'number'
+      ? result.duration_ms
+      : typeof result?.durationMs === 'number'
+        ? result.durationMs
+        : null;
 
-  let full = body ? `${header}\n${body}` : header;
-  if (full.length > TELEGRAM_MAX) {
-    const remaining = TELEGRAM_MAX - header.length - 64; // leave room for tail note
-    const trimmedPreview = preview.slice(0, Math.max(0, remaining));
-    body = `output (truncated):\n${trimmedPreview}\n... see dashboard for full output (${totalLines} lines)`;
-    full = `${header}\n${body}`;
-    if (full.length > TELEGRAM_MAX) full = full.slice(0, TELEGRAM_MAX);
-  }
-  return full;
+  const ok = exitCode == null ? !/error|failed|fatal/i.test(stderr) : exitCode === 0;
+  const durTag = durationMs != null ? ` (${formatDuration(durationMs)})` : '';
+  if (ok) return `pass${durTag}`;
+  const stderrLines = stderr ? stderr.split('\n').filter((l: string) => l.trim()).length : 0;
+  if (stderrLines > 0) return `fail (${stderrLines} lines stderr)${durTag}`;
+  return `fail${durTag}`;
+}
+
+/**
+ * Render duration from milliseconds to short human form: 12s, 3m, 1h.
+ */
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.round(m / 60);
+  return `${h}h`;
+}
+
+/**
+ * Best-effort: extract agent duration. Claude Code's Task tool result shape
+ * is opaque, so we look for any duration field on the response and otherwise
+ * return empty.
+ */
+function agentDuration(result: any): string {
+  if (result == null) return '';
+  const ms =
+    typeof result?.duration_ms === 'number'
+      ? result.duration_ms
+      : typeof result?.totalDurationMs === 'number'
+        ? result.totalDurationMs
+        : null;
+  return ms != null ? formatDuration(ms) : '';
+}
+
+/**
+ * Count lines in a textual result (for Grep/Glob match summaries).
+ */
+function countLines(result: any): number {
+  if (result == null) return 0;
+  let text = '';
+  if (typeof result === 'string') text = result;
+  else if (typeof result?.content === 'string') text = result.content;
+  else if (typeof result?.output === 'string') text = result.output;
+  else if (typeof result?.stdout === 'string') text = result.stdout;
+  if (!text) return 0;
+  return text.split('\n').filter((l) => l.trim()).length;
 }
 
 async function main(): Promise<void> {
@@ -193,52 +279,26 @@ async function main(): Promise<void> {
   const org = process.env.CTX_ORG || '';
 
   const result = payload.tool_response ?? payload.tool_result;
-  const { preview, totalLines } = previewResult(tool_name, result);
-  const description = describeTool(tool_name, tool_input);
+  const line = formatToolLine(tool_name, tool_input, result);
 
-  // Compute full text length so the "truncated" note is accurate.
-  let textLength = 0;
-  try {
-    if (result != null) {
-      if (typeof result === 'string') textLength = result.length;
-      else if (typeof result === 'object') {
-        const stdout = typeof (result as any).stdout === 'string' ? (result as any).stdout : '';
-        const stderr = typeof (result as any).stderr === 'string' ? (result as any).stderr : '';
-        if (stdout || stderr) textLength = stdout.length + stderr.length;
-        else if (typeof (result as any).output === 'string') textLength = (result as any).output.length;
-        else if (typeof (result as any).content === 'string') textLength = (result as any).content.length;
-        else textLength = JSON.stringify(result).length;
-      }
-    }
-  } catch {
-    textLength = preview.length;
-  }
-
-  // 1. Activity feed (best-effort; never blocks).
+  // 1. Activity feed (best-effort; never blocks). Keep the full payload here
+  //    so the dashboard can render output dumps — Telegram never sees them.
   try {
     const paths = resolvePaths(agentName, env.ctxRoot.split('/').pop() || 'default', org);
     logEvent(paths, agentName, org, 'agent_activity', 'tool_result', 'info', {
       tool: tool_name,
-      description,
-      preview,
-      total_lines: totalLines,
-      total_chars: textLength,
+      summary: line,
+      tool_input: tool_input,
+      tool_result: result,
     });
   } catch {
     // Activity feed is best-effort.
   }
 
-  // 2. Telegram (best-effort; never blocks).
+  // 2. Telegram (best-effort; never blocks). One line, agent name prefix.
   if (!env.botToken || !env.chatId) return;
 
-  const message = buildTelegramMessage(
-    agentName,
-    tool_name,
-    description,
-    preview,
-    totalLines,
-    textLength,
-  );
+  const message = `[${agentName}] ${line}`.slice(0, TELEGRAM_MAX);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 5000);

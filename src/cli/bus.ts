@@ -2796,3 +2796,143 @@ function sleepMs(ms: number): Promise<void> {
 function pct(v: number): string {
   return `${Math.round(v * 100)}%`;
 }
+
+// ---------------------------------------------------------------------------
+// Block I: hotfix-dispatch / retro-complete
+//
+// `hotfix-dispatch` bypasses the scope-validation dispatch gate for
+// prod-down emergencies. It writes /tmp/hotfix-pending-<ts>.json which the
+// retro-lock hook (~/.claude/hooks/retro-lock.js) reads to block subsequent
+// normal `send-message` dispatches until `retro-complete <id>` flips the
+// retro_complete flag (typically after /retro writes the retro doc).
+//
+// Auth model: anyone can call hotfix as long as `--reason` is non-empty.
+// The gate is identification, not authorization.
+// ---------------------------------------------------------------------------
+
+busCommand
+  .command('hotfix-dispatch')
+  .description('Emergency dispatch that bypasses the scope-validation gate. Activates a retro-lock that blocks normal dispatches until `cortextos bus retro-complete <id>` is run.')
+  .argument('<agent>', 'Target agent')
+  .argument('<task>', 'Task / message text to dispatch')
+  .requiredOption('--reason <reason>', 'Non-empty reason / identifier for the hotfix (required)')
+  .option('--priority <priority>', 'Message priority (urgent, high, normal, low)', 'urgent')
+  .action((agent: string, task: string, opts: { reason: string; priority: string }) => {
+    const reason = String(opts.reason || '').trim();
+    if (!reason) {
+      console.error('hotfix-dispatch requires a non-empty --reason.');
+      process.exit(1);
+    }
+
+    const validPriorities: Priority[] = ['urgent', 'high', 'normal', 'low'];
+    if (!validPriorities.includes(opts.priority as Priority)) {
+      console.error(`Invalid priority '${opts.priority}'. Must be one of: ${validPriorities.join(', ')}`);
+      process.exit(1);
+    }
+
+    try {
+      validateAgentName(agent);
+    } catch (err) {
+      console.error(String(err));
+      process.exit(1);
+    }
+
+    const { writeFileSync, mkdirSync } = require('fs');
+    const ts = Date.now();
+    const hotfixId = String(ts);
+    const pendingPath = `/tmp/hotfix-pending-${hotfixId}.json`;
+    const payload = {
+      hotfix_id: hotfixId,
+      agent,
+      task,
+      reason,
+      priority: opts.priority,
+      ts: new Date(ts).toISOString(),
+      retro_complete: false,
+    };
+
+    try {
+      mkdirSync('/tmp', { recursive: true });
+      writeFileSync(pendingPath, JSON.stringify(payload, null, 2), 'utf-8');
+    } catch (err) {
+      console.error(`Failed to write hotfix pending file ${pendingPath}: ${String(err)}`);
+      process.exit(1);
+    }
+
+    const env = resolveEnv();
+    const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    const msgId = sendMessage(paths, env.agentName, agent, opts.priority as Priority, task);
+
+    try {
+      logEvent(
+        paths,
+        env.agentName,
+        env.org,
+        'message',
+        'hotfix_dispatch',
+        'warn',
+        JSON.stringify({ to: agent, hotfix_id: hotfixId, reason, msg_id: msgId, pending_file: pendingPath })
+      );
+    } catch { /* non-fatal */ }
+
+    console.log(JSON.stringify({
+      ok: true,
+      hotfix_id: hotfixId,
+      pending_file: pendingPath,
+      msg_id: msgId,
+      retro_clear_cmd: `cortextos bus retro-complete ${hotfixId}`,
+    }));
+  });
+
+busCommand
+  .command('retro-complete')
+  .description('Clear the retro-lock for a hotfix dispatch by flipping retro_complete=true on /tmp/hotfix-pending-<id>.json.')
+  .argument('<hotfix-id>', 'Hotfix id (timestamp portion of /tmp/hotfix-pending-<id>.json)')
+  .action((hotfixId: string) => {
+    const id = String(hotfixId || '').trim();
+    if (!id || !/^[A-Za-z0-9_-]+$/.test(id)) {
+      console.error(`Invalid hotfix-id '${hotfixId}'. Expected alphanumeric / underscore / dash.`);
+      process.exit(1);
+    }
+
+    const { existsSync, readFileSync, writeFileSync } = require('fs');
+    const pendingPath = `/tmp/hotfix-pending-${id}.json`;
+    if (!existsSync(pendingPath)) {
+      console.error(`No pending hotfix file at ${pendingPath}.`);
+      process.exit(1);
+    }
+
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(readFileSync(pendingPath, 'utf-8'));
+    } catch (err) {
+      console.error(`Failed to parse ${pendingPath}: ${String(err)}`);
+      process.exit(1);
+    }
+
+    payload.retro_complete = true;
+    payload.retro_completed_at = new Date().toISOString();
+
+    try {
+      writeFileSync(pendingPath, JSON.stringify(payload, null, 2), 'utf-8');
+    } catch (err) {
+      console.error(`Failed to write ${pendingPath}: ${String(err)}`);
+      process.exit(1);
+    }
+
+    try {
+      const env = resolveEnv();
+      const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+      logEvent(
+        paths,
+        env.agentName,
+        env.org,
+        'message',
+        'hotfix_retro_complete',
+        'info',
+        JSON.stringify({ hotfix_id: id, pending_file: pendingPath })
+      );
+    } catch { /* non-fatal */ }
+
+    console.log(JSON.stringify({ ok: true, hotfix_id: id, pending_file: pendingPath, retro_complete: true }));
+  });

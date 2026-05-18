@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   IconSearch,
   IconDatabase,
@@ -18,6 +19,8 @@ import {
   IconUsers,
 } from '@tabler/icons-react';
 import { KnowledgeBaseView } from './kb-view';
+import { FolderTree, type TreeNode } from '@/components/wiki/folder-tree';
+import { WikiRenderer } from '@/components/wiki/wiki-renderer';
 
 interface SearchResult {
   content: string;
@@ -52,6 +55,11 @@ interface ClearpathStats {
   omiCoveragePercent: number;
   mostActiveType: string | null;
   trend: 'up' | 'down' | 'stable';
+}
+
+interface VaultFileResponse {
+  content: string;
+  mtimeMs: number;
 }
 
 interface KnowledgeBaseClientProps {
@@ -220,6 +228,14 @@ export function KnowledgeBaseClient({ org, markdownContent, filePath }: Knowledg
         <TabsTrigger value="browse">
           <IconBook2 size={14} className="mr-1.5" />
           Knowledge File
+        </TabsTrigger>
+        <TabsTrigger value="raw">
+          <IconFileText size={14} className="mr-1.5" />
+          Raw
+        </TabsTrigger>
+        <TabsTrigger value="outputs">
+          <IconDatabase size={14} className="mr-1.5" />
+          Outputs
         </TabsTrigger>
         <TabsTrigger value="collections">
           <IconDatabase size={14} className="mr-1.5" />
@@ -533,6 +549,28 @@ export function KnowledgeBaseClient({ org, markdownContent, filePath }: Knowledg
         />
       </TabsContent>
 
+      <TabsContent value="raw" className="mt-3">
+        <VaultBrowserTab
+          org={org}
+          treePath="/api/raw-vault/tree"
+          filePath="/api/raw-vault/file"
+          storageKey={`raw-vault:${org}:expanded`}
+          emptyMessage="Raw vault is empty."
+          introMessage="Browse markdown content from the org raw vault."
+        />
+      </TabsContent>
+
+      <TabsContent value="outputs" className="mt-3">
+        <VaultBrowserTab
+          org={org}
+          treePath="/api/outputs-vault/tree"
+          filePath="/api/outputs-vault/file"
+          storageKey={`outputs-vault:${org}:expanded`}
+          emptyMessage="Outputs vault is empty."
+          introMessage="Browse generated markdown outputs for this org."
+        />
+      </TabsContent>
+
       {/* Collections Tab */}
       <TabsContent value="collections" className="mt-3">
         {collectionsLoading ? (
@@ -591,5 +629,191 @@ export function KnowledgeBaseClient({ org, markdownContent, filePath }: Knowledg
         )}
       </TabsContent>
     </Tabs>
+  );
+}
+
+interface VaultBrowserTabProps {
+  org: string;
+  treePath: string;
+  filePath: string;
+  storageKey: string;
+  emptyMessage: string;
+  introMessage: string;
+}
+
+function VaultBrowserTab({
+  org,
+  treePath,
+  filePath,
+  storageKey,
+  emptyMessage,
+  introMessage,
+}: VaultBrowserTabProps) {
+  const [tree, setTree] = useState<TreeNode[] | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [content, setContent] = useState<VaultFileResponse | null>(null);
+  const [treeError, setTreeError] = useState<string | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [loadingFile, setLoadingFile] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadTree() {
+      try {
+        const res = await fetch(`${treePath}?org=${encodeURIComponent(org)}`);
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          if (cancelled) return;
+          setTree([]);
+          setTreeError(data.error ?? `Tree load failed (${res.status})`);
+          return;
+        }
+
+        const data = (await res.json()) as { root?: TreeNode[] };
+        if (cancelled) return;
+        setTree(data.root ?? []);
+        setTreeError(null);
+      } catch (error) {
+        if (cancelled) return;
+        setTree([]);
+        setTreeError(error instanceof Error ? error.message : String(error));
+      }
+    }
+
+    setSelected(null);
+    setContent(null);
+    setFileError(null);
+    setTree(null);
+    loadTree();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [org, treePath]);
+
+  useEffect(() => {
+    if (!selected) {
+      setContent(null);
+      setFileError(null);
+      return;
+    }
+
+    let cancelled = false;
+    async function loadFile() {
+      setLoadingFile(true);
+      setFileError(null);
+      try {
+        const params = new URLSearchParams({
+          org,
+          path: selected ?? '',
+        });
+        const res = await fetch(`${filePath}?${params.toString()}`);
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          if (cancelled) return;
+          setContent(null);
+          setFileError(data.error ?? `File load failed (${res.status})`);
+          return;
+        }
+
+        const data = (await res.json()) as VaultFileResponse;
+        if (cancelled) return;
+        setContent(data);
+      } catch (error) {
+        if (cancelled) return;
+        setContent(null);
+        setFileError(error instanceof Error ? error.message : String(error));
+      } finally {
+        if (!cancelled) setLoadingFile(false);
+      }
+    }
+
+    loadFile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [filePath, org, selected]);
+
+  const treePane = (() => {
+    if (treeError) {
+      return (
+        <div className="p-4 text-sm text-destructive">
+          {treeError}
+        </div>
+      );
+    }
+    if (tree === null) {
+      return (
+        <div className="space-y-2 p-4">
+          {[1, 2, 3, 4].map((item) => (
+            <div key={item} className="h-6 rounded bg-muted/30 animate-pulse" />
+          ))}
+        </div>
+      );
+    }
+    if (tree.length === 0) {
+      return (
+        <div className="p-4 text-sm text-muted-foreground text-center">
+          {emptyMessage}
+        </div>
+      );
+    }
+    return (
+      <div className="p-2">
+        <FolderTree
+          nodes={tree}
+          selected={selected}
+          onSelectFile={setSelected}
+          storageKey={storageKey}
+        />
+      </div>
+    );
+  })();
+
+  const filePane = (() => {
+    if (fileError) {
+      return (
+        <div className="p-4 text-sm text-destructive">
+          {fileError}
+        </div>
+      );
+    }
+    if (loadingFile) {
+      return (
+        <div className="space-y-2 p-4">
+          {[1, 2, 3, 4, 5].map((item) => (
+            <div key={item} className="h-4 rounded bg-muted/30 animate-pulse" />
+          ))}
+        </div>
+      );
+    }
+    if (!content || !selected) {
+      return (
+        <div className="p-6 text-sm text-muted-foreground">
+          {introMessage}
+        </div>
+      );
+    }
+    return (
+      <div className="p-4 prose prose-sm max-w-none dark:prose-invert">
+        <WikiRenderer text={content.content} onWikilink={() => {}} />
+      </div>
+    );
+  })();
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-[minmax(240px,320px)_1fr] gap-4 min-h-[28rem]">
+      <Card className="overflow-hidden">
+        <ScrollArea className="h-[28rem]">
+          {treePane}
+        </ScrollArea>
+      </Card>
+      <Card className="overflow-hidden">
+        <ScrollArea className="h-[28rem]">
+          {filePane}
+        </ScrollArea>
+      </Card>
+    </div>
   );
 }

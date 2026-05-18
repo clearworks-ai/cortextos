@@ -24,24 +24,51 @@ export type ParaDir = (typeof PARA_DIRS)[number];
 const VAULT_FALLBACK = process.env.CTX_VAULT_PATH
   ?? path.join(os.homedir(), 'storage', 'Documents', 'Github', 'sondres-orchestrator', 'vault');
 
+const TOP_LEVEL_SKIP = new Set(['node_modules', 'graphify-out', 'cc']);
+
+function getKnowledgePath(org: string): string {
+  return path.join(CTX_FRAMEWORK_ROOT, 'orgs', org, 'knowledge.md');
+}
+
+function readKnowledgeFile(org: string): string | null {
+  const knowledgePath = getKnowledgePath(org);
+  if (!fs.existsSync(knowledgePath)) return null;
+  try {
+    return fs.readFileSync(knowledgePath, 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+function parseConfiguredRoot(
+  content: string | null,
+  pattern: RegExp,
+): string | null {
+  if (!content) return null;
+  const match = content.match(pattern);
+  if (!match) return null;
+  const candidate = match[1].replace(/\/$/, '');
+  if (!fs.existsSync(candidate) || !fs.statSync(candidate).isDirectory()) return null;
+  return candidate;
+}
+
+function resolveContainedPath(root: string, relPath: string): string | null {
+  if (path.isAbsolute(relPath)) return null;
+  const cleaned = relPath.replace(/^\/+/, '');
+  if (cleaned.includes('..')) return null;
+  const resolvedRoot = path.resolve(root);
+  const abs = path.resolve(resolvedRoot, cleaned);
+  if (!abs.startsWith(resolvedRoot + path.sep)) return null;
+  return abs;
+}
+
 export function getVaultRoot(org: string): string | null {
   // 1. Try parsing orgs/<org>/knowledge.md for an "Obsidian vault" path entry
-  const knowledgePath = path.join(CTX_FRAMEWORK_ROOT, 'orgs', org, 'knowledge.md');
-  if (fs.existsSync(knowledgePath)) {
-    try {
-      const content = fs.readFileSync(knowledgePath, 'utf-8');
-      // Match a code path like `/root/.../vault/` after "Obsidian vault" mentions
-      const match = content.match(
-        /Obsidian vault[^\n]*?`([^`]+vault\/?)`/i,
-      );
-      if (match) {
-        const p = match[1].replace(/\/$/, '');
-        if (fs.existsSync(p) && fs.statSync(p).isDirectory()) return p;
-      }
-    } catch {
-      /* ignore */
-    }
-  }
+  const configured = parseConfiguredRoot(
+    readKnowledgeFile(org),
+    /^Obsidian vault[^\n]*?`([^`]+)`/im,
+  );
+  if (configured) return configured;
 
   // 2. Fallback to the known sondre-hq vault location
   if (fs.existsSync(VAULT_FALLBACK) && fs.statSync(VAULT_FALLBACK).isDirectory()) {
@@ -49,6 +76,32 @@ export function getVaultRoot(org: string): string | null {
   }
 
   return null;
+}
+
+export function getVaultTopLevelAllowList(org: string): string[] | null {
+  const content = readKnowledgeFile(org);
+  if (!content) return null;
+  const match = content.match(/^Vault top-level:\s*(.+)$/im);
+  if (!match) return null;
+  const items = match[1]
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return items.length > 0 ? items : null;
+}
+
+export function getRawVaultRoot(org: string): string | null {
+  return parseConfiguredRoot(
+    readKnowledgeFile(org),
+    /^Raw vault[^\n]*?`([^`]+)`/im,
+  );
+}
+
+export function getOutputsVaultRoot(org: string): string | null {
+  return parseConfiguredRoot(
+    readKnowledgeFile(org),
+    /^Outputs vault[^\n]*?`([^`]+)`/im,
+  );
 }
 
 export type Frontmatter = {
@@ -114,38 +167,46 @@ export function firstMeaningfulLine(body: string, max = 160): string {
 
 /**
  * Resolves a relative vault path safely. Refuses anything outside the vault
- * root or outside the PARA dirs.
+ * root.
  */
 export function resolveVaultPath(
   vaultRoot: string,
   relPath: string,
 ): string | null {
-  // Strip leading slashes; we want a relative path inside the vault
-  const cleaned = relPath.replace(/^\/+/, '');
-  // Reject any traversal attempts up front
-  if (cleaned.includes('..')) return null;
-  // Must start with one of the PARA dir names
-  const top = cleaned.split('/')[0];
-  if (!PARA_DIRS.includes(top as ParaDir)) return null;
+  return resolveContainedPath(vaultRoot, relPath);
+}
 
-  const abs = path.resolve(vaultRoot, cleaned);
-  // Defense in depth — confirm resolved path is inside the vault root
-  if (!abs.startsWith(path.resolve(vaultRoot) + path.sep)) return null;
-  return abs;
+export function resolveRawVaultPath(
+  rawRoot: string,
+  relPath: string,
+): string | null {
+  return resolveContainedPath(rawRoot, relPath);
+}
+
+export function resolveOutputsVaultPath(
+  outputsRoot: string,
+  relPath: string,
+): string | null {
+  return resolveContainedPath(outputsRoot, relPath);
 }
 
 /**
- * Walk all PARA dirs and collect every .md file. Used by search.
+ * Walk the org's configured top-level dirs and collect every .md file. Used by search.
  */
-export function listAllNotes(vaultRoot: string): Array<{
+export function listAllNotes(vaultRoot: string, org?: string): Array<{
   relPath: string;
   absPath: string;
   mtimeMs: number;
 }> {
   const out: Array<{ relPath: string; absPath: string; mtimeMs: number }> = [];
-  for (const dir of PARA_DIRS) {
-    const abs = path.join(vaultRoot, dir);
-    if (!fs.existsSync(abs)) continue;
+  const allowList = org ? getVaultTopLevelAllowList(org) : null;
+  const entries = fs.readdirSync(vaultRoot, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name.startsWith('.')) continue;
+    if (TOP_LEVEL_SKIP.has(entry.name)) continue;
+    if (allowList && !allowList.includes(entry.name)) continue;
+    const abs = path.join(vaultRoot, entry.name);
     walk(abs, vaultRoot, out);
   }
   return out;

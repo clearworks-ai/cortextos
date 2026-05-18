@@ -1,9 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import { NextRequest } from 'next/server';
-import { getVaultRoot, PARA_DIRS } from '@/lib/vault';
+import { getOrgs } from '@/lib/config';
+import { getVaultRoot, getVaultTopLevelAllowList } from '@/lib/vault';
 
 export const dynamic = 'force-dynamic';
+
+const SKIP = new Set(['node_modules', 'graphify-out', 'cc']);
 
 type TreeNode =
   | {
@@ -21,26 +24,32 @@ type TreeNode =
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
-  const org = url.searchParams.get('org') ?? 'sondre-hq';
+  const org = url.searchParams.get('org') ?? getOrgs()[0] ?? 'sondre-hq';
 
   const vaultRoot = getVaultRoot(org);
   if (!vaultRoot) {
     return Response.json({ error: `Vault not found for org "${org}"` }, { status: 404 });
   }
 
+  const allowList = getVaultTopLevelAllowList(org);
+  const entries = fs.readdirSync(vaultRoot, { withFileTypes: true });
   const root: TreeNode[] = [];
-  for (const dir of PARA_DIRS) {
-    const abs = path.join(vaultRoot, dir);
-    if (!fs.existsSync(abs)) continue;
-    if (!fs.statSync(abs).isDirectory()) continue;
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name.startsWith('.')) continue;
+    if (SKIP.has(entry.name)) continue;
+    if (allowList && !allowList.includes(entry.name)) continue;
+    const abs = path.join(vaultRoot, entry.name);
 
     root.push({
       kind: 'dir',
-      name: dir,
-      relPath: dir,
-      children: walkDir(abs, vaultRoot, /* sortByMtime */ dir === '00-inbox'),
+      name: entry.name,
+      relPath: entry.name,
+      children: walkDir(abs, vaultRoot, /* sortByMtime */ entry.name === '00-inbox'),
     });
   }
+
+  root.sort((a, b) => a.name.localeCompare(b.name));
 
   return Response.json({ vaultRoot, root });
 }

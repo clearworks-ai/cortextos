@@ -211,6 +211,7 @@ function readAgentListFromFilesystem(org?: string): AgentListItem[] {
   }
 
   return Array.from(agentMap.entries())
+    .filter(([, config]) => config.enabled !== false)
     .filter(([, config]) => !org || config.org === org)
     .map(([name, config]) => {
       const state = readAgentState(name);

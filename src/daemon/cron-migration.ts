@@ -6,8 +6,10 @@
  *
  * ## Idempotency
  * A zero-byte marker file at `{CTX_ROOT}/.cortextOS/state/agents/{agent}/.crons-migrated`
- * signals that migration already ran.  The migration is skipped entirely when the
- * marker exists, unless `force: true` is passed (which deletes the marker first).
+ * signals that the full one-shot migration already ran. On subsequent boots the
+ * marker path performs an append-only additive sync: config.json crons whose names
+ * are absent from crons.json are appended, while existing crons.json entries always
+ * win. Passing `force: true` still deletes the marker and re-runs the full migration.
  *
  * ## One-shot crons
  * CronDefinition supports interval-based and cron-expression schedules only —
@@ -27,7 +29,7 @@
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'fs';
 import { dirname, join } from 'path';
 import type { CronDefinition, CronEntry } from '../types/index.js';
-import { readCrons, writeCrons } from '../bus/crons.js';
+import { addCron, readCrons, writeCrons } from '../bus/crons.js';
 import { CRONS_DIRECTORY } from '../bus/crons-schema.js';
 import { scanAgentDir } from '../utils/cron-teaching-scanner.js';
 
@@ -252,12 +254,112 @@ export interface MigrationOptions {
 export interface MigrationResult {
   /** Agent name processed. */
   agentName: string;
-  /** Disposition: skipped-already-migrated | no-config | no-crons | migrated */
-  status: 'skipped-already-migrated' | 'no-config' | 'no-crons' | 'migrated';
-  /** Number of crons written to crons.json (only set when status === "migrated"). */
+  /** Disposition: skipped-already-migrated | no-config | no-crons | migrated | synced */
+  status: 'skipped-already-migrated' | 'no-config' | 'no-crons' | 'migrated' | 'synced';
+  /** Number of crons written to crons.json (set when status === "migrated" | "synced"). */
   cronsMigrated?: number;
   /** Names of crons that were skipped (one-shots, missing fields, etc.). */
   cronsSkipped?: string[];
+}
+
+function extractConfigCrons(rawConfig: unknown): CronEntry[] {
+  if (
+    rawConfig !== null &&
+    typeof rawConfig === 'object' &&
+    'crons' in rawConfig &&
+    Array.isArray((rawConfig as { crons?: unknown }).crons)
+  ) {
+    return (rawConfig as { crons: CronEntry[] }).crons;
+  }
+  return [];
+}
+
+function runAdditiveSync(
+  agentName: string,
+  configJsonPath: string,
+  log: (msg: string) => void,
+): MigrationResult {
+  if (!existsSync(configJsonPath)) {
+    log(
+      `Skipping additive sync for "${agentName}" — config.json missing at ${configJsonPath}; preserving existing crons.json`,
+    );
+    return { agentName, status: 'skipped-already-migrated' };
+  }
+
+  let rawConfig: unknown;
+  try {
+    rawConfig = JSON.parse(readFileSync(configJsonPath, 'utf-8'));
+  } catch (err) {
+    log(
+      `WARNING: failed to parse config.json for "${agentName}" during additive sync — preserving existing crons.json. ` +
+        `Error: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return { agentName, status: 'skipped-already-migrated' };
+  }
+
+  const configCrons = extractConfigCrons(rawConfig);
+  if (configCrons.length === 0) {
+    log(`Additive sync for "${agentName}" found no config crons — preserving existing crons.json`);
+    return {
+      agentName,
+      status: 'synced',
+      cronsMigrated: 0,
+      cronsSkipped: [],
+    };
+  }
+
+  const existingNames = new Set(readCrons(agentName).map((cron) => cron.name));
+  const skipped: string[] = [];
+  let appended = 0;
+
+  for (const entry of configCrons) {
+    const result = convertEntry(entry, agentName);
+    if ('skip' in result) {
+      skipped.push(entry.name);
+      log(`  Skipped cron for "${agentName}": ${result.skip}`);
+      continue;
+    }
+
+    if (existingNames.has(result.cron.name)) {
+      skipped.push(entry.name);
+      log(`  additive-sync: config cron "${result.cron.name}" already registered for "${agentName}" — config copy ignored`);
+      continue;
+    }
+
+    const cron: CronDefinition = {
+      ...result.cron,
+      metadata: {
+        ...result.cron.metadata,
+        additive_sync: true,
+      },
+    };
+
+    try {
+      addCron(agentName, cron);
+      existingNames.add(cron.name);
+      appended += 1;
+      log(`additive-sync: appended "${cron.name}" for "${agentName}"`);
+    } catch (err) {
+      if (
+        err instanceof Error &&
+        err.message.includes(`cron "${cron.name}" already exists for agent "${agentName}"`)
+      ) {
+        skipped.push(entry.name);
+        existingNames.add(cron.name);
+        log(`  additive-sync: config cron "${cron.name}" already registered for "${agentName}" — config copy ignored`);
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  log(`Additive sync complete for "${agentName}": ${appended} appended, ${skipped.length} skipped`);
+  return {
+    agentName,
+    status: 'synced',
+    cronsMigrated: appended,
+    cronsSkipped: skipped,
+  };
 }
 
 /**
@@ -312,10 +414,11 @@ function runMigrationCore(
     log(`Force flag set — cleared migration marker for "${agentName}"`);
   }
 
-  // Idempotency check: already migrated → skip
+  // Marker exists: full migration already ran. Perform append-only additive
+  // sync so config.json cron additions start working on the next daemon boot
+  // without disturbing existing crons.json entries.
   if (isMigrated(ctxRoot, agentName)) {
-    log(`Skipping migration for "${agentName}" — already migrated`);
-    return { agentName, status: 'skipped-already-migrated' };
+    return runAdditiveSync(agentName, configJsonPath, log);
   }
 
   // Read config.json — no-op on missing file.
@@ -345,15 +448,7 @@ function runMigrationCore(
   }
 
   // Extract crons array — treat missing / empty as "no crons"
-  const configCrons: CronEntry[] = [];
-  if (
-    rawConfig !== null &&
-    typeof rawConfig === 'object' &&
-    'crons' in rawConfig &&
-    Array.isArray((rawConfig as { crons?: unknown }).crons)
-  ) {
-    configCrons.push(...((rawConfig as { crons: CronEntry[] }).crons));
-  }
+  const configCrons = extractConfigCrons(rawConfig);
 
   if (configCrons.length === 0) {
     // Codex M7 fix (2026-05-01): do NOT write the migration marker when config.json

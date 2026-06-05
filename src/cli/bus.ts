@@ -2332,12 +2332,19 @@ busCommand
             (result.cronsSkipped?.length ? `, ${result.cronsSkipped.length} skipped (${result.cronsSkipped.join(', ')})` : '')
           );
           break;
+        case 'synced':
+          console.log(
+            `Synced ${agentArg}: ${result.cronsMigrated} cron(s) appended` +
+            (result.cronsSkipped?.length ? `, ${result.cronsSkipped.length} skipped (${result.cronsSkipped.join(', ')})` : '')
+          );
+          break;
       }
     } else {
       // All-agents migration
       const summary = migrateAll(frameworkRoot, ctxRoot, migOpts);
 
       const migrated = summary.results.filter(r => r.status === 'migrated').length;
+      const synced = summary.results.filter(r => r.status === 'synced').length;
       const skippedAlready = summary.results.filter(r => r.status === 'skipped-already-migrated').length;
       const noConfig = summary.results.filter(r => r.status === 'no-config').length;
       const noCrons = summary.results.filter(r => r.status === 'no-crons').length;
@@ -2345,6 +2352,7 @@ busCommand
       console.log(`\nMigration summary:`);
       console.log(`  Agents processed    : ${summary.processed}`);
       console.log(`  Agents migrated     : ${migrated} (${summary.totalCronsMigrated} crons)`);
+      console.log(`  Agents synced       : ${synced}`);
       console.log(`  Already migrated    : ${skippedAlready}`);
       console.log(`  No config.json      : ${noConfig}`);
       console.log(`  No crons in config  : ${noCrons}`);

@@ -660,12 +660,13 @@ describe('Scenario 5: Idempotent re-migration', () => {
       cronCountsAfterFirst[fixture.name] = readCrons(fixture.name).length;
     }
 
-    // Second migration pass (without force — should be skipped)
+    // Second migration pass (without force — should additive-sync with zero appends)
     const secondPassLogs: string[] = [];
     for (const fixture of AGENT_FIXTURES) {
       const configPath = join(tmpFrameworkRoot, 'orgs', 'lifeos', 'agents', fixture.name, 'config.json');
       const result = migrateCronsForAgent(fixture.name, configPath, tmpCtxRoot, { log: (msg) => secondPassLogs.push(msg) });
-      expect(result.status, `${fixture.name}: second pass should be skipped`).toBe('skipped-already-migrated');
+      expect(result.status, `${fixture.name}: second pass should be synced`).toBe('synced');
+      expect(result.cronsMigrated, `${fixture.name}: no new crons should append on 2nd pass`).toBe(0);
     }
 
     // Cron counts unchanged — no duplicates
@@ -683,12 +684,12 @@ describe('Scenario 5: Idempotent re-migration', () => {
         .toBe(mtimesAfterFirst[fixture.name]);
     }
 
-    // All 5 second-pass log messages mention "already migrated" or "Skipping"
-    expect(secondPassLogs.some(l => l.includes('already migrated') || l.includes('Skipping')))
+    // Second-pass logs should mention the additive-sync collision no-op
+    expect(secondPassLogs.some(l => l.includes('already registered') || l.includes('additive-sync')))
       .toBe(true);
   });
 
-  it('migrateAllAgents() also skips already-migrated agents in second pass', () => {
+  it('migrateAllAgents() additive-syncs already-migrated agents in second pass', () => {
     for (const fixture of AGENT_FIXTURES) {
       writeAgentConfig(fixture);
     }
@@ -699,9 +700,9 @@ describe('Scenario 5: Idempotent re-migration', () => {
 
     // Second pass via all-agents
     const second = migrateAllAgents(tmpFrameworkRoot, tmpCtxRoot, { log: () => {} });
-    expect(second.totalCronsMigrated).toBe(0); // all skipped
+    expect(second.totalCronsMigrated).toBe(0); // all synced with zero appends
     for (const r of second.results) {
-      expect(r.status, `${r.agentName}: skipped on 2nd all-agents pass`).toBe('skipped-already-migrated');
+      expect(r.status, `${r.agentName}: synced on 2nd all-agents pass`).toBe('synced');
     }
 
     // Still exactly 18 crons total on disk (no duplicates)

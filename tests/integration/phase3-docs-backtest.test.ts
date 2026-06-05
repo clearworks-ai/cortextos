@@ -390,9 +390,10 @@ describe('Scenario 2: Existing user upgrade (CRONS_MIGRATION_GUIDE.md)', () => {
     const r1 = migrateCronsForAgent(agent, configJsonPath, tmpRoot, { log: () => {} });
     expect(r1.status).toBe('migrated');
 
-    // Second run — must be skipped (doc says marker prevents re-runs)
+    // Second run — marker path additive-syncs without duplicating the cron
     const r2 = migrateCronsForAgent(agent, configJsonPath, tmpRoot, { log: () => {} });
-    expect(r2.status).toBe('skipped-already-migrated');
+    expect(r2.status).toBe('synced');
+    expect(r2.cronsMigrated).toBe(0);
 
     // crons.json unchanged (still has exactly 1 cron)
     expect(readCrons(agent)).toHaveLength(1);
@@ -713,7 +714,7 @@ describe('Scenario 4: Support troubleshooting missing crons', () => {
     // But isMigrated returns true (stale marker fools it)
     expect(isMigrated(tmpRoot, agent)).toBe(true);
 
-    // Without force: migration skipped (stale marker blocks it)
+    // Without force: marker path additive-syncs the missing crons.json state
     const agentDir = join(tmpRoot, 'orgs', 'lifeos', 'agents', agent);
     mkdirSync(agentDir, { recursive: true });
     const configJsonPath = join(agentDir, 'config.json');
@@ -722,7 +723,8 @@ describe('Scenario 4: Support troubleshooting missing crons', () => {
     }), 'utf-8');
 
     const r1 = migrateCronsForAgent(agent, configJsonPath, tmpRoot, { log: () => {} });
-    expect(r1.status).toBe('skipped-already-migrated');
+    expect(r1.status).toBe('synced');
+    expect(r1.cronsMigrated).toBe(1);
 
     // With --force: marker removed, migration runs, crons.json created
     const r2 = migrateCronsForAgent(agent, configJsonPath, tmpRoot, { force: true, log: () => {} });

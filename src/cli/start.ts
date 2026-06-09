@@ -15,6 +15,17 @@ function commandExists(cmd: string): boolean {
   return result.status === 0;
 }
 
+export async function requireDaemonOfflineForBootstrap(ipc: IPCClient): Promise<boolean> {
+  const availability = await ipc.probeAvailability('cortextos start probe');
+  if (availability === 'running') return false;
+  if (availability === 'offline') return true;
+
+  console.error('Daemon appears to be running but is not responding to IPC health checks.');
+  console.error('Refusing to auto-restart it from `cortextos start`, because that would bounce the entire fleet.');
+  console.error('Use `cortextos status` or inspect `~/.pm2/logs/cortextos-daemon-*.log`, then restart explicitly if needed.');
+  process.exit(1);
+}
+
 export const startCommand = new Command('start')
   .argument('[agent]', 'Specific agent to start (starts all if omitted)')
   .option('--instance <id>', 'Instance ID', 'default')
@@ -22,9 +33,9 @@ export const startCommand = new Command('start')
   .description('Start the cortextOS daemon and agents')
   .action(async (agent: string | undefined, options: { instance: string; foreground?: boolean }) => {
     const ipc = new IPCClient(options.instance);
-    const daemonRunning = await ipc.isDaemonRunning();
+    const shouldBootstrapDaemon = await requireDaemonOfflineForBootstrap(ipc);
 
-    if (!daemonRunning) {
+    if (shouldBootstrapDaemon) {
       const projectRoot = process.cwd();
       const daemonScript = join(projectRoot, 'dist', 'daemon.js');
 

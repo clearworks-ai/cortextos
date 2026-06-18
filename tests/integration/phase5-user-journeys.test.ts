@@ -499,7 +499,7 @@ describe('Journey 2: Existing user upgrade (cron-migration + zero-downtime)', ()
     expect(elapsedMs).toBeLessThan(TWO_MINS);
   });
 
-  it('J2-5: repeated migration calls are idempotent (marker prevents double-run)', () => {
+  it('J2-5: repeated migration calls are idempotent (marker path additive-syncs without duplicates)', () => {
     const agent = 'idempotent-agent';
     ensureAgentDir(agent);
 
@@ -515,9 +515,10 @@ describe('Journey 2: Existing user upgrade (cron-migration + zero-downtime)', ()
     expect(r1.status).toBe('migrated');
     expect(r1.cronsMigrated).toBe(1);
 
-    // Second migration must be skipped
+    // Second migration must additive-sync without duplicating the cron
     const r2 = migrateCronsForAgent(agent, configPath, tmpRoot);
-    expect(r2.status).toBe('skipped-already-migrated');
+    expect(r2.status).toBe('synced');
+    expect(r2.cronsMigrated).toBe(0);
 
     // crons.json must still have exactly 1 cron (not doubled)
     const disk = readCronsJson(agent);

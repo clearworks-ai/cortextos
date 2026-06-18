@@ -453,9 +453,11 @@ export class AgentManager {
       // Start agent
       await agentProcess.start();
 
-    // Subtask 2.2: Auto-migrate crons from config.json → crons.json before
-    // starting the scheduler, so the scheduler always has a populated crons.json
-    // to read from.  The migration is idempotent (marker file prevents re-runs).
+    // Subtask 2.2 / additive-sync follow-up: auto-migrate crons from
+    // config.json → crons.json before starting the scheduler, so the scheduler
+    // always has a populated crons.json to read from. The first boot does a
+    // full migration; later boots run append-only additive sync for newly added
+    // config.json cron names while leaving existing crons.json entries intact.
     const configJsonPath = join(agentDir, 'config.json');
     migrateCronsForAgent(name, configJsonPath, this.ctxRoot, {
       log: (msg) => log(`[migration] ${msg}`),

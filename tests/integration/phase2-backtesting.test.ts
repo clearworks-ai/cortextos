@@ -460,9 +460,10 @@ describe('Scenario 2: Mixed deployment — 3 pre-migrated + 2 unmigrated', () =>
 
     // ---- Assert migration outcomes ----
 
-    // First 3 should be skipped (already migrated)
+    // First 3 should additive-sync with zero appends (already migrated)
     for (const r of results.slice(0, 3)) {
-      expect(r.status, `${r.agentName} should be skipped`).toBe('skipped-already-migrated');
+      expect(r.status, `${r.agentName} should be synced`).toBe('synced');
+      expect(r.cronsMigrated, `${r.agentName} should append no new crons`).toBe(0);
     }
 
     // Last 2 should be newly migrated
@@ -491,11 +492,11 @@ describe('Scenario 2: Mixed deployment — 3 pre-migrated + 2 unmigrated', () =>
       expect(raw!.crons.length, `${f.name} cron count matches fixture`).toBe(f.crons.length);
     }
 
-    // At least one log message mentions "already migrated" or "Skipping" for the pre-migrated agents
+    // At least one log message mentions the additive-sync collision no-op
     const skippedMsgs = migrationLogs.filter(l =>
-      l.includes('already migrated') || l.includes('Skipping'),
+      l.includes('already registered') || l.includes('additive-sync'),
     );
-    expect(skippedMsgs.length, 'at least 3 skip messages in logs').toBeGreaterThanOrEqual(3);
+    expect(skippedMsgs.length, 'at least 3 additive-sync messages in logs').toBeGreaterThanOrEqual(3);
 
     // ---- Boot all 5 schedulers, advance 24h ----
     const eventLog: FireEvent[] = [];

@@ -265,7 +265,10 @@ async function main(): Promise<void> {
   const instanceId = process.env.CTX_INSTANCE_ID || 'default';
   if (!agentName) return;
   // Worker PTYs are ephemeral; their exit is normal completion, never a crash.
-  if (process.env.CTX_WORKER) return;
+  // CTX_WORKER is set by the daemon (post-#25 build). The name-suffix check is a
+  // fallback so the skip also works BEFORE the daemon is reloaded: worker names are
+  // "<base>-<unix-seconds>" (e.g. comms-check-1782229983), which no real agent uses.
+  if (process.env.CTX_WORKER || /-\d{10,}$/.test(agentName)) return;
 
   const ctxRoot = join(homedir(), '.cortextos', instanceId);
   const stateDir = join(ctxRoot, 'state', agentName);

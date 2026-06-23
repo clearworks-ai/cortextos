@@ -77,6 +77,9 @@ export class AgentPTY {
       CRM_AGENT_NAME: this.env.agentName,
       CRM_TEMPLATE_ROOT: this.env.frameworkRoot,
     };
+    if (this.env.worker) {
+      ptyEnv['CTX_WORKER'] = '1';
+    }
 
     // Source org-level shared secrets (orgs/{org}/secrets.env).
     // These are shared across all agents in the org: OPENAI_KEY, APIFY_TOKEN, GEMINI_API_KEY, etc.

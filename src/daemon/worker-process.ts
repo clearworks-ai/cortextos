@@ -16,6 +16,8 @@ import { injectMessage } from '../pty/inject.js';
  * - Status is exposed for IPC list-workers queries
  */
 export class WorkerProcess {
+  private static readonly MAX_WORKER_LIFETIME_MS = 10 * 60_000;
+
   readonly name: string;
   readonly dir: string;
   readonly parent: string | undefined;
@@ -26,6 +28,7 @@ export class WorkerProcess {
   private exitCode: number | undefined;
   private onDoneCallback: ((name: string, exitCode: number) => void) | null = null;
   private log: (msg: string) => void;
+  private maxLifetimeTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     name: string,
@@ -55,6 +58,7 @@ export class WorkerProcess {
     this.pty = new AgentPTY(env, config, logPath);
 
     this.pty.onExit((code) => {
+      this.clearMaxLifetimeTimer();
       this.exitCode = code;
       this.status = code === 0 ? 'completed' : 'failed';
       this.log(`Exited with code ${code} → ${this.status}`);
@@ -67,12 +71,20 @@ export class WorkerProcess {
     await this.pty.spawn('fresh', prompt);
     this.status = 'running';
     this.log(`Running (pid: ${this.pty.getPid()}, dir: ${this.dir})`);
+    this.maxLifetimeTimer = setTimeout(() => {
+      if (!this.isFinished()) {
+        this.log(`Max lifetime (${WorkerProcess.MAX_WORKER_LIFETIME_MS}ms) exceeded — reaping`);
+        void this.terminate();
+      }
+    }, WorkerProcess.MAX_WORKER_LIFETIME_MS);
+    this.maxLifetimeTimer.unref?.();
   }
 
   /**
    * Terminate the worker session.
    */
   async terminate(): Promise<void> {
+    this.clearMaxLifetimeTimer();
     if (!this.pty) return;
     this.log('Terminating...');
     try {
@@ -118,6 +130,13 @@ export class WorkerProcess {
    */
   onDone(cb: (name: string, exitCode: number) => void): void {
     this.onDoneCallback = cb;
+  }
+
+  private clearMaxLifetimeTimer(): void {
+    if (this.maxLifetimeTimer) {
+      clearTimeout(this.maxLifetimeTimer);
+      this.maxLifetimeTimer = null;
+    }
   }
 }
 

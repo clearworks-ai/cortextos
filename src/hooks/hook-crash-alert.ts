@@ -264,6 +264,8 @@ async function main(): Promise<void> {
   const agentName = process.env.CTX_AGENT_NAME;
   const instanceId = process.env.CTX_INSTANCE_ID || 'default';
   if (!agentName) return;
+  // Worker PTYs are ephemeral; their exit is normal completion, never a crash.
+  if (process.env.CTX_WORKER) return;
 
   const ctxRoot = join(homedir(), '.cortextos', instanceId);
   const stateDir = join(ctxRoot, 'state', agentName);

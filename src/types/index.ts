@@ -624,6 +624,8 @@ export interface CtxEnv {
   projectRoot: string;
   timezone?: string;
   orchestrator?: string;
+  /** True only for ephemeral worker PTYs spawned by spawnWorker. */
+  worker?: boolean;
 }
 
 // Bus Path Types

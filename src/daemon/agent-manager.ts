@@ -1059,6 +1059,7 @@ export class AgentManager {
       agentDir: dir,
       org: this.org,
       projectRoot: this.frameworkRoot,
+      worker: true,
     };
 
     const config = model ? { model } : {};

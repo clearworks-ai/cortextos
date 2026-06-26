@@ -1,5 +1,6 @@
 import { appendFileSync, closeSync, existsSync, openSync, readFileSync, readSync, statSync, unlinkSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { join, sep } from 'path';
+import { homedir } from 'os';
 import type { AgentConfig, AgentStatus, CtxEnv } from '../types/index.js';
 import { AgentPTY } from '../pty/agent-pty.js';
 import { CodexAppServerPTY } from '../pty/codex-app-server-pty.js';
@@ -11,7 +12,6 @@ import { ensureDir } from '../utils/atomic.js';
 import { writeCortextosEnv } from '../utils/env.js';
 import { getOverdueReminders } from '../bus/reminders.js';
 import { resolvePaths } from '../utils/paths.js';
-import { findClaudeSessionFile, getDeterministicAgentSessionId } from '../utils/agent-session-isolation.js';
 
 type LogFn = (msg: string) => void;
 
@@ -751,28 +751,21 @@ export class AgentProcess {
   }
 
   private shouldContinue(): boolean {
-    const stateDir = join(this.env.ctxRoot, 'state', this.name);
-
-    // Check for force-fresh marker (all runtimes honor it).
-    const forceFreshPath = join(stateDir, '.force-fresh');
-    if (existsSync(forceFreshPath)) {
-      try {
-        unlinkSync(forceFreshPath);
-      } catch { /* ignore */ }
-      return false;
-    }
-
-    // A handoff restart must stay fresh even if a racing start already
-    // consumed .force-fresh and a resumable session file still exists.
-    if (existsSync(join(stateDir, '.handoff-doc-path'))) {
-      return false;
-    }
-
     // Hermes: session continuity is determined by whether the SQLite DB exists.
     // HERMES_HOME env var overrides the default ~/.hermes path.
     if (this.config.runtime === 'hermes') {
       const hermesHome = process.env['HERMES_HOME'];
       return hermesDbExists(hermesHome);
+    }
+
+    // Check for force-fresh marker (all runtimes honor it).
+    const forceFreshPath = join(this.env.ctxRoot, 'state', this.name, '.force-fresh');
+    if (existsSync(forceFreshPath)) {
+      try {
+        const { unlinkSync } = require('fs');
+        unlinkSync(forceFreshPath);
+      } catch { /* ignore */ }
+      return false;
     }
 
     // codex-app-server: session continuity is tracked by the adapter's own
@@ -792,11 +785,30 @@ export class AgentProcess {
       return existsSync(threadStatePath);
     }
 
-    // Default (Claude runtime): resume ONLY the deterministic per-agent session.
-    // This intentionally ignores cwd-scoped project history so two agents can
-    // never share a "brain" by pointing at the same working_directory.
-    const sessionId = getDeterministicAgentSessionId(this.name, this.env.org);
-    return findClaudeSessionFile(sessionId) !== null;
+    // Default (Claude runtime): existing conversation = JSONL files present in the
+    // agent's cwd-scoped Claude projects dir. Upstream-aligned (reverted fork-only
+    // #20 deterministic-session-id): each agent runs from its own working directory,
+    // so the cwd already isolates sessions — no fixed session id, no --session-id
+    // collision on force-fresh handoffs.
+    const launchDir = this.config.working_directory || this.env.agentDir;
+    if (!launchDir) return false;
+
+    // Claude projects dir uses the absolute path with all separators replaced by dashes
+    // e.g. /Users/foo/agents/boss -> -Users-foo-agents-boss (leading sep becomes -)
+    // Use homedir() for cross-platform compatibility (HOME is not set on Windows).
+    const convDir = join(
+      homedir(),
+      '.claude',
+      'projects',
+      launchDir.split(sep).join('-'),
+    );
+
+    try {
+      const files = require('fs').readdirSync(convDir);
+      return files.some((f: string) => f.endsWith('.jsonl'));
+    } catch {
+      return false;
+    }
   }
 
   private buildStartupPrompt(): string {

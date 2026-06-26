@@ -3,7 +3,6 @@ import { existsSync, readFileSync, readdirSync } from 'fs';
 import { platform } from 'os';
 import type { AgentConfig, CtxEnv } from '../types/index.js';
 import { OutputBuffer } from './output-buffer.js';
-import { getDeterministicAgentSessionId } from '../utils/agent-session-isolation.js';
 
 // node-pty types
 interface IPty {
@@ -227,12 +226,14 @@ export class AgentPTY {
    */
   protected buildClaudeArgs(mode: 'fresh' | 'continue', prompt: string): string[] {
     const args: string[] = [];
-    const sessionId = getDeterministicAgentSessionId(this.env.agentName, this.env.org);
 
+    // Upstream-aligned session handling: `--continue` resumes this agent's own
+    // cwd-scoped session, fresh starts get a brand-new session id from Claude
+    // Code itself. We deliberately do NOT pass a fixed --session-id (reverted
+    // fork-only #20): a fixed id collides with the existing .jsonl on every
+    // force-fresh handoff ("Session ID already in use") and HALTs the agent.
     if (mode === 'continue') {
-      args.push('--resume', sessionId);
-    } else {
-      args.push('--session-id', sessionId);
+      args.push('--continue');
     }
 
     // Skip Claude Code's permission system by default (back-compat: agents have

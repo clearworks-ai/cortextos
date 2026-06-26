@@ -1,5 +1,5 @@
-import { readFileSync, existsSync, writeFileSync } from 'fs';
-import { join, basename, resolve as resolvePath, sep } from 'path';
+import { readFileSync, existsSync, writeFileSync, realpathSync } from 'fs';
+import { join, basename, dirname, resolve as resolvePath, sep } from 'path';
 import { homedir } from 'os';
 import type { CtxEnv } from '../types/index.js';
 import { ensureDir } from './atomic.js';
@@ -93,9 +93,27 @@ export function resolveEnv(overrides?: Partial<CtxEnv>): CtxEnv {
   // agent shell while only CTX_FRAMEWORK_ROOT was overridden — agentDir then silently
   // points at the live install. Equality check on projectRoot vs frameworkRoot catches
   // the same divergence on the projectRoot axis.
+  // realpath-aware resolution: a path reached through a symlink (e.g.
+  // ~/cortextos -> ~/code/cortextos) is the same install, not a leak.
+  // For not-yet-created paths, canonicalize the deepest existing ancestor
+  // and re-append the remainder so both sides compare consistently.
+  const toCanonical = (p: string): string => {
+    let base = resolvePath(p);
+    let suffix = '';
+    while (true) {
+      try {
+        return suffix ? join(realpathSync(base), suffix) : realpathSync(base);
+      } catch {
+        const parent = dirname(base);
+        if (parent === base) return suffix ? join(base, suffix) : base;
+        suffix = suffix ? join(basename(base), suffix) : basename(base);
+        base = parent;
+      }
+    }
+  };
   if (agentDir && frameworkRoot) {
-    const fwRootResolved = resolvePath(frameworkRoot);
-    const agentDirResolved = resolvePath(agentDir);
+    const fwRootResolved = toCanonical(frameworkRoot);
+    const agentDirResolved = toCanonical(agentDir);
     if (agentDirResolved !== fwRootResolved && !agentDirResolved.startsWith(fwRootResolved + sep)) {
       throw new Error(
         `Resolved CTX_AGENT_DIR '${agentDir}' is not under CTX_FRAMEWORK_ROOT '${frameworkRoot}'. ` +
@@ -105,7 +123,7 @@ export function resolveEnv(overrides?: Partial<CtxEnv>): CtxEnv {
       );
     }
   }
-  if (projectRoot && frameworkRoot && resolvePath(projectRoot) !== resolvePath(frameworkRoot)) {
+  if (projectRoot && frameworkRoot && toCanonical(projectRoot) !== toCanonical(frameworkRoot)) {
     throw new Error(
       `CTX_PROJECT_ROOT '${projectRoot}' must equal CTX_FRAMEWORK_ROOT '${frameworkRoot}'. ` +
       `A divergence indicates a sandbox/live environment leak — likely one of the two was ` +

@@ -1,5 +1,4 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
-import { getDeterministicAgentSessionId } from '../../../src/utils/agent-session-isolation.js';
 
 // --- node-pty is native; stub it so constructing/spawning AgentPTY never touches it.
 let onDataHandler: ((data: string) => void) | null = null;
@@ -99,27 +98,27 @@ describe('AgentPTY --dangerously-skip-permissions toggle', () => {
 });
 
 describe('AgentPTY session isolation', () => {
-  it('fresh mode pins a deterministic --session-id', () => {
+  it('fresh mode passes NO session flag (Claude mints a new session id)', () => {
     const pty = new AgentPTY(env, {});
     const args = (pty as unknown as { buildClaudeArgs(m: 'fresh' | 'continue', p: string): string[] })
       .buildClaudeArgs('fresh', 'hello');
 
-    const sessionId = getDeterministicAgentSessionId(env.agentName, env.org);
-    expect(args).toContain('--session-id');
-    expect(args).toContain(sessionId);
-    expect(args).not.toContain('--continue');
+    // Upstream-aligned (reverted fork-only #20): a fresh start must NOT pin a fixed
+    // --session-id — that collides with the existing .jsonl on every force-fresh
+    // handoff ("Session ID already in use"). No session flag = brand-new session.
+    expect(args).not.toContain('--session-id');
     expect(args).not.toContain('--resume');
+    expect(args).not.toContain('--continue');
   });
 
-  it('continue mode resumes the deterministic per-agent session ID', () => {
+  it('continue mode uses --continue (cwd-scoped resume, no fixed id)', () => {
     const pty = new AgentPTY(env, {});
     const args = (pty as unknown as { buildClaudeArgs(m: 'fresh' | 'continue', p: string): string[] })
       .buildClaudeArgs('continue', 'hello');
 
-    const sessionId = getDeterministicAgentSessionId(env.agentName, env.org);
-    expect(args).toContain('--resume');
-    expect(args).toContain(sessionId);
-    expect(args).not.toContain('--continue');
+    expect(args).toContain('--continue');
+    expect(args).not.toContain('--session-id');
+    expect(args).not.toContain('--resume');
   });
 
   it('fast-fails when a Settings Warning modal appears', async () => {

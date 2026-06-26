@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, symlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { detectDayNightMode } from '../src/bus/heartbeat.js';
@@ -212,6 +212,21 @@ describe('Sprint 7: Environment & Config Completeness', () => {
         projectRoot: '/Users/cortextos/cortextos',
         agentName: 'bar',
       })).toThrow(/must equal CTX_FRAMEWORK_ROOT/);
+    });
+
+    it('TC-E symlink: agentDir reached through a symlink to frameworkRoot resolves without throwing', () => {
+      const fwRoot = join(testDir, 'real-install');
+      const agentDirReal = join(fwRoot, 'orgs', 'testorg', 'agents', 'foo');
+      mkdirSync(agentDirReal, { recursive: true });
+      const symlinkRoot = join(testDir, 'symlinked-install');
+      symlinkSync(fwRoot, symlinkRoot);
+      // agentDir via symlink, frameworkRoot via real path — same install, not a leak
+      expect(() => resolveEnv({
+        frameworkRoot: fwRoot,
+        projectRoot: symlinkRoot,
+        agentDir: join(symlinkRoot, 'orgs', 'testorg', 'agents', 'foo'),
+        agentName: 'foo',
+      })).not.toThrow();
     });
 
     it('TC-D back-compat: happy-path frameworkRoot=projectRoot with derived agentDir resolves', () => {

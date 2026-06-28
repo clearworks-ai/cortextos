@@ -821,7 +821,7 @@ export class AgentProcess {
     // before cron restoration, before heartbeat, before anything else. Placing this instruction
     // immediately after the handoffBlock in the prompt ensures it is not buried.
     const handoffUxOverride = isHandoffRestart
-      ? ' HANDOFF UX: This is a context handoff restart — your memory is intact via the handoff doc. CRITICAL: After reading the handoff document, your VERY FIRST tool call MUST be a Bash call running: cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID \'back — [what you were just working on]\' — replace the brackets with one brief plain-English sentence about your current state. Do this BEFORE running heartbeat, BEFORE any other tool call. No cron IDs, no status report, no cold-boot phrasing. Do NOT send "Booting up... one moment" (skip AGENTS.md step 1 entirely).'
+      ? ' HANDOFF UX: This is a context handoff restart — your memory is intact via the handoff doc AND the recent conversation turns injected above (those are more current than the handoff doc). CRITICAL: After reading the handoff document, your VERY FIRST tool call MUST be a Bash call running: cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID \'back — [what you were just working on]\' — use the RECENT CONVERSATION block above (not the handoff doc) to determine what was last discussed. Replace the brackets with one brief plain-English sentence. Do this BEFORE running heartbeat, BEFORE any other tool call. No cron IDs, no status report, no cold-boot phrasing. Do NOT send "Booting up... one moment" (skip AGENTS.md step 1 entirely).'
       : '';
     const onlineMessage = isHandoffRestart
       ? ''
@@ -891,7 +891,32 @@ export class AgentProcess {
       const docPath = readFileSync(markerPath, 'utf-8').trim();
       unlinkSync(markerPath);
       if (!docPath || !existsSync(docPath)) return '';
-      return ` CONTEXT HANDOFF: Before restoring crons or checking inbox, read the handoff document at ${docPath} to resume your prior session state.`;
+      // Inject the tail of the conversation buffer so the "back — ..." Telegram
+      // message reflects the most recent exchange, not the stale handoff snapshot.
+      // The handoff doc is written at ~80% context; anything said in the last 20%
+      // (e.g. a user report arriving just before restart) would otherwise be lost.
+      const bufferPath = join(this.env.ctxRoot, 'state', this.name, 'conversation-buffer.jsonl');
+      let bufferBlock = '';
+      if (existsSync(bufferPath)) {
+        try {
+          const lines = readFileSync(bufferPath, 'utf-8').trim().split('\n').filter(Boolean);
+          const tail = lines.slice(-10);
+          if (tail.length > 0) {
+            const formatted = tail.map(line => {
+              try {
+                const entry = JSON.parse(line) as { ts: string; sender: string; content: string };
+                return `[${entry.ts}] ${entry.sender}: ${entry.content.slice(0, 200)}`;
+              } catch {
+                return line.slice(0, 200);
+              }
+            }).join('\n');
+            bufferBlock = ` RECENT CONVERSATION (last ${tail.length} turns — more current than the handoff doc):\n${formatted}\n`;
+          }
+        } catch {
+          // buffer read failure is non-fatal
+        }
+      }
+      return `${bufferBlock} CONTEXT HANDOFF: Before restoring crons or checking inbox, read the handoff document at ${docPath} to resume your prior session state.`;
     } catch {
       return '';
     }

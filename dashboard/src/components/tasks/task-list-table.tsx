@@ -17,7 +17,13 @@ type SortField = 'title' | 'status' | 'priority' | 'assignee' | 'org' | 'created
 type SortDir = 'asc' | 'desc';
 
 const PRIORITY_ORDER: Record<string, number> = { critical: 0, urgent: 0, high: 1, normal: 2, low: 3 };
-const STATUS_ORDER = { blocked: 0, in_progress: 1, pending: 2, completed: 3 };
+const STATUS_ORDER: Record<Task['status'], number> = {
+  blocked: 0,
+  in_progress: 1,
+  waiting: 2,
+  pending: 3,
+  completed: 4,
+};
 
 interface TaskListTableProps {
   tasks: Task[];

@@ -100,6 +100,19 @@ describe('Task Management', () => {
       const content = JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8'));
       expect(content.status).toBe('in_progress');
     });
+
+    it('round-trips waiting status', () => {
+      const taskId = createTask(paths, 'paul', 'acme', 'Waiting task');
+      updateTask(paths, taskId, 'waiting');
+
+      const content = JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8'));
+      expect(content.status).toBe('waiting');
+
+      const waiting = listTasks(paths, { status: 'waiting' });
+      expect(waiting).toHaveLength(1);
+      expect(waiting[0].id).toBe(taskId);
+      expect(waiting[0].status).toBe('waiting');
+    });
   });
 
   describe('completeTask', () => {

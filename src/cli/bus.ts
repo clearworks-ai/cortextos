@@ -181,9 +181,9 @@ busCommand
 busCommand
   .command('update-task')
   .argument('<id>', 'Task ID')
-  .argument('<status>', 'New status (pending, in_progress, completed, blocked, cancelled)')
+  .argument('<status>', 'New status (pending, in_progress, completed, blocked, cancelled, waiting)')
   .action((id: string, status: string) => {
-    const validStatuses: TaskStatus[] = ['pending', 'in_progress', 'completed', 'blocked', 'cancelled'];
+    const validStatuses: TaskStatus[] = ['pending', 'in_progress', 'completed', 'blocked', 'cancelled', 'waiting'];
     if (!validStatuses.includes(status as TaskStatus)) {
       console.error(`Invalid status '${status}'. Must be one of: ${validStatuses.join(', ')}`);
       process.exit(1);
@@ -374,7 +374,7 @@ busCommand
     }
 
     const PRIORITY_ICON: Record<string, string> = { urgent: '🔴', high: '🟠', normal: '🔵', low: '⚪' };
-    const STATUS_ICON: Record<string, string> = { pending: '○', in_progress: '●', blocked: '◑', completed: '✓', done: '✓', cancelled: '✗' };
+    const STATUS_ICON: Record<string, string> = { pending: '○', in_progress: '●', waiting: '⏸', blocked: '◑', completed: '✓', done: '✓', cancelled: '✗' };
 
     console.log(`\n  Tasks (${tasks.length})\n`);
     const header = '  Status  Pri  ID                        Assignee         Title';

@@ -1,9 +1,9 @@
-import { readdirSync, readFileSync, existsSync, writeFileSync, unlinkSync, statSync } from 'fs';
+import { readdirSync, readFileSync, existsSync, writeFileSync, unlinkSync, statSync, mkdirSync } from 'fs';
 import { execFile } from 'child_process';
 import { join } from 'path';
 import { createHash } from 'crypto';
 import { hardRestart } from '../bus/system.js';
-import type { InboxMessage, BusPaths, TelegramMessage, TelegramCallbackQuery } from '../types/index.js';
+import type { InboxMessage, BusPaths, TelegramMessage, TelegramCallbackQuery, ConversationBufferEntry } from '../types/index.js';
 import { checkInbox, ackInbox } from '../bus/message.js';
 import { updateApproval } from '../bus/approval.js';
 import { readCronState } from '../bus/cron-state.js';
@@ -11,8 +11,98 @@ import { AgentProcess } from './agent-process.js';
 import type { TelegramAPI } from '../telegram/api.js';
 import { KEYS } from '../pty/inject.js';
 import { stripControlChars, sanitizeForPtyInjection, wrapFenceSafe } from '../utils/validate.js';
+import { loadBuffer } from './conversation-buffer.js';
 
 type LogFn = (msg: string) => void;
+
+const MAX_MISSION_CHARS = 600;
+
+function truncateMissionText(text: string, maxChars: number = MAX_MISSION_CHARS): string {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+}
+
+export function deriveMissionFromTrailingInbound(
+  entries: ConversationBufferEntry[],
+  agentName: string,
+  maxChars: number = MAX_MISSION_CHARS,
+): string {
+  const trailingInbound: string[] = [];
+
+  for (let idx = entries.length - 1; idx >= 0; idx -= 1) {
+    const entry = entries[idx];
+    const isInboundTelegram = entry.sender !== agentName && entry.via === 'telegram';
+    if (!isInboundTelegram) {
+      break;
+    }
+
+    const trimmedContent = entry.content.trim();
+    if (trimmedContent) {
+      trailingInbound.push(trimmedContent);
+    }
+  }
+
+  if (trailingInbound.length === 0) {
+    return '';
+  }
+
+  return truncateMissionText(trailingInbound.reverse().join('\n\n'), maxChars);
+}
+
+function ensureMissionAnchorFromBuffer(agentDir: string, ctxRoot: string, agentName: string): void {
+  try {
+    const missionPath = join(agentDir, 'state', 'current-mission.txt');
+    if (existsSync(missionPath)) {
+      return;
+    }
+
+    const mission = deriveMissionFromTrailingInbound(loadBuffer(ctxRoot, agentName), agentName);
+    if (!mission) {
+      return;
+    }
+
+    mkdirSync(join(agentDir, 'state'), { recursive: true });
+    writeFileSync(missionPath, mission, 'utf-8');
+  } catch {
+    // Buffer/mission recovery is best-effort and must never block restart handling.
+  }
+}
+
+function findFreshRecentHandoffDoc(
+  handoffsDir: string,
+  cutoffMs: number,
+  ctxHandoffFiredAt: number,
+): string | null {
+  if (!existsSync(handoffsDir)) {
+    return null;
+  }
+
+  const recent = readdirSync(handoffsDir)
+    .filter((fileName) => fileName.startsWith('handoff-') && fileName.endsWith('.md'))
+    .map((fileName) => {
+      const fullPath = join(handoffsDir, fileName);
+      return {
+        fullPath,
+        mtimeMs: statSync(fullPath).mtimeMs,
+      };
+    })
+    .filter(({ mtimeMs }) => {
+      if (mtimeMs < cutoffMs) {
+        return false;
+      }
+      if (ctxHandoffFiredAt > 0 && mtimeMs < ctxHandoffFiredAt) {
+        return false;
+      }
+      return true;
+    })
+    .sort((left, right) => right.mtimeMs - left.mtimeMs);
+
+  return recent[0]?.fullPath ?? null;
+}
 
 /**
  * Fast message checker for a single agent.
@@ -1327,6 +1417,11 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
         ).catch((err) => this.log(`Emergency-restart Telegram alert failed: ${err}`));
       }
 
+      ensureMissionAnchorFromBuffer(
+        this.agent.getAgentDir(),
+        this.agent.getCtxRoot(),
+        this.agent.name,
+      );
       this.ctxHandoffFiredAt = now;
       this.ctxHandoffDeadlineAt = now + 5 * 60_000; // 5min grace for agent to cooperate
       // Reset context_status.json so the new session doesn't re-trigger immediately
@@ -1335,7 +1430,7 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
         writeFileSync(statusPath, JSON.stringify({ used_percentage: 0, exceeds_200k_tokens: false, written_at: new Date().toISOString() }));
       } catch { /* non-fatal */ }
       const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + 'Z';
-      const handoffPrompt = `[CONTEXT HANDOFF REQUIRED] Context is at ${Math.round(effectivePct)}%. Write a handoff document to memory/handoffs/handoff-${ts}.md with these sections: ## Current Tasks, ## Next Actions, ## Active Crons, ## Key Context, ## Files Modified This Session. Then run: cortextos bus hard-restart --reason "context handoff at ${Math.round(effectivePct)}%" --handoff-doc <absolute path to the handoff doc you just wrote>. Do this NOW before the context window is exhausted.`;
+      const handoffPrompt = `[CONTEXT HANDOFF REQUIRED] Context is at ${Math.round(effectivePct)}%. Write a handoff document to memory/handoffs/handoff-${ts}.md that begins with ## LIVE PRIORITY quoting the newest inbound user message(s) verbatim, ABOVE all stale task state. Then include these sections in order: ## Current Tasks, ## Next Actions, ## Active Crons, ## Key Context, ## Files Modified This Session. Before calling hard-restart, write or refresh state/current-mission.txt with the LIVE PRIORITY. Then run: cortextos bus hard-restart --reason "context handoff at ${Math.round(effectivePct)}%" --handoff-doc <absolute path to the handoff doc you just wrote>. Do this NOW before the context window is exhausted.`;
       this.agent.injectMessage(handoffPrompt);
       this.log(`Handoff prompt injected at ${Math.round(effectivePct)}%`);
       // Pre-arm .force-fresh so the next restart is always a clean fresh session.
@@ -1371,24 +1466,27 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     this.ctxCircuitRestarts.push(now);
     this.saveCtxCircuit();
 
+    ensureMissionAnchorFromBuffer(
+      this.agent.getAgentDir(),
+      this.agent.getCtxRoot(),
+      this.agent.name,
+    );
+
     // If the agent wrote a handoff doc in the last 15 minutes but didn't get to call
     // hard-restart --handoff-doc (e.g. Tier 3 force-restart cut it short), pick it up
     // so the new session still receives handoff context.
     try {
       const handoffsDir = join(this.agent.getAgentDir(), 'memory', 'handoffs');
-      if (existsSync(handoffsDir)) {
-        const cutoff = now - 15 * 60_000;
-        const recent = readdirSync(handoffsDir)
-          .filter(f => f.startsWith('handoff-') && f.endsWith('.md'))
-          .map(f => ({ f, mtime: statSync(join(handoffsDir, f)).mtimeMs }))
-          .filter(({ mtime }) => mtime >= cutoff)
-          .sort((a, b) => b.mtime - a.mtime);
-        if (recent.length > 0) {
-          const docPath = join(handoffsDir, recent[0].f);
-          const markerPath = join(this.paths.stateDir, '.handoff-doc-path');
-          writeFileSync(markerPath, docPath, 'utf-8');
-          this.log(`Tier 3 restart: found recent handoff doc, writing marker → ${docPath}`);
-        }
+      const cutoff = now - 15 * 60_000;
+      const docPath = findFreshRecentHandoffDoc(
+        handoffsDir,
+        cutoff,
+        this.ctxHandoffFiredAt,
+      );
+      if (docPath) {
+        const markerPath = join(this.paths.stateDir, '.handoff-doc-path');
+        writeFileSync(markerPath, docPath, 'utf-8');
+        this.log(`Tier 3 restart: found recent handoff doc, writing marker → ${docPath}`);
       }
     } catch { /* non-fatal — proceed without handoff context */ }
 

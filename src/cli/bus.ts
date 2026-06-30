@@ -25,7 +25,7 @@ import { IPCClient } from '../daemon/ipc-server.js';
 import { TelegramAPI } from '../telegram/api.js';
 import { logOutboundMessage, cacheLastSent } from '../telegram/logging.js';
 import { appendToBuffer } from '../daemon/conversation-buffer.js';
-import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext, CronDefinition } from '../types/index.js';
+import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext, CronDefinition, ConversationBufferEntry } from '../types/index.js';
 
 /**
  * Check if the org requires deliverables and the task has none attached.
@@ -64,6 +64,39 @@ function checkDeliverableRequirement(taskId: string, frameworkRoot: string, org:
   }
 
   return null;
+}
+
+function readConversationEntries(path: string): ConversationBufferEntry[] {
+  if (!existsSync(path)) return [];
+
+  try {
+    const raw = readFileSync(path, 'utf-8');
+    if (!raw.trim()) return [];
+
+    const entries: ConversationBufferEntry[] = [];
+    for (const line of raw.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        entries.push(JSON.parse(trimmed) as ConversationBufferEntry);
+      } catch {
+        // Skip malformed lines.
+      }
+    }
+    return entries;
+  } catch {
+    return [];
+  }
+}
+
+function loadConversationHistory(ctxRoot: string, agentName: string): ConversationBufferEntry[] {
+  const stateDir = join(ctxRoot, 'state', agentName);
+  const archivePath = join(stateDir, 'conversation-buffer-archive.jsonl');
+  const bufferPath = join(stateDir, 'conversation-buffer.jsonl');
+  return [
+    ...readConversationEntries(archivePath),
+    ...readConversationEntries(bufferPath),
+  ];
 }
 
 export const busCommand = new Command('bus')
@@ -588,6 +621,43 @@ busCommand
         console.log(`  Keywords: ${e.keywords.slice(0, 8).join(', ')}`);
       }
       console.log();
+    }
+  });
+
+busCommand
+  .command('recall-conversation')
+  .alias('search-transcripts')
+  .description('Search recent conversation buffer + archive entries for an agent, scoped by pattern/date/limit')
+  .option('--agent <name>', 'Agent name (defaults to CTX_AGENT_NAME)')
+  .option('--grep <pattern>', 'Case-insensitive substring to match against sender/content')
+  .option('--days <n>', 'Only include entries from the last N days')
+  .option('--limit <n>', 'Maximum number of matches to print (default 50, max 200)')
+  .action((opts: { agent?: string; grep?: string; days?: string; limit?: string }) => {
+    const env = resolveEnv();
+    const agentName = opts.agent || env.agentName;
+    const limit = Math.max(1, Math.min(200, parseInt(opts.limit ?? '50', 10) || 50));
+    const grepNeedle = opts.grep?.toLowerCase().trim() || '';
+    const daysBack = opts.days ? Math.max(1, Math.min(365, parseInt(opts.days, 10) || 1)) : null;
+    const cutoffMs = daysBack === null ? null : Date.now() - (daysBack * 24 * 60 * 60_000);
+
+    const matches = loadConversationHistory(env.ctxRoot, agentName)
+      .filter((entry) => {
+        const entryTime = Date.parse(entry.ts);
+        if (cutoffMs !== null && Number.isFinite(entryTime) && entryTime < cutoffMs) {
+          return false;
+        }
+        if (!grepNeedle) return true;
+        return `${entry.sender}\n${entry.content}`.toLowerCase().includes(grepNeedle);
+      })
+      .slice(-limit);
+
+    if (matches.length === 0) {
+      console.log('No conversation matches found.');
+      return;
+    }
+
+    for (const entry of matches) {
+      console.log(`${entry.ts} ${entry.sender}: ${entry.content.replace(/\s+/g, ' ').trim()}`);
     }
   });
 

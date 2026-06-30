@@ -48,6 +48,7 @@ const fsMocks = {
   writeFileSync: vi.fn(),
   appendFileSync: vi.fn(),
   statSync: vi.fn(),
+  unlinkSync: vi.fn(),
 };
 
 vi.mock('fs', async () => {
@@ -76,6 +77,7 @@ vi.mock('fs', async () => {
     get writeFileSync() { return fsMocks.writeFileSync; },
     get appendFileSync() { return fsMocks.appendFileSync; },
     get statSync() { return fsMocks.statSync; },
+    get unlinkSync() { return fsMocks.unlinkSync; },
   };
 });
 
@@ -105,6 +107,7 @@ beforeEach(() => {
   fsMocks.writeFileSync.mockReset();
   fsMocks.appendFileSync.mockReset();
   fsMocks.statSync.mockReset();
+  fsMocks.unlinkSync.mockReset();
 });
 
 describe('AgentProcess - BUG-011 fix (stop awaits PTY exit)', () => {
@@ -464,5 +467,151 @@ describe('AgentProcess - onboarding marker (do not auto-write .onboarded on hear
     const prompt = mockPty.spawn.mock.calls[0]?.[1] ?? '';
     expect(prompt).not.toContain('FIRST BOOT');
     expect(prompt).not.toContain('complete the onboarding protocol');
+  });
+});
+
+describe('AgentProcess - resume context blocks', () => {
+  const missionPath = `${mockEnv.agentDir}/state/current-mission.txt`;
+  const bufferPath = `${mockEnv.ctxRoot}/state/alice/conversation-buffer.jsonl`;
+  const handoffMarkerPath = `${mockEnv.ctxRoot}/state/alice/.handoff-doc-path`;
+  const handoffDocPath = '/tmp/handoff-live-tail.md';
+
+  it('buildResumeContextBlocks reads mission from agentDir and live tail from ctxRoot buffer', () => {
+    fsMocks.existsSync.mockImplementation((path: string) =>
+      path === missionPath || path === bufferPath,
+    );
+    fsMocks.readFileSync.mockImplementation((path: string) => {
+      if (path === missionPath) {
+        return 'Keep following Josh newest request first';
+      }
+      if (path === bufferPath) {
+        return [
+          JSON.stringify({
+            ts: '2026-06-30T00:00:00.000Z',
+            sender: 'alice',
+            via: 'telegram',
+            content: 'Old outbound note',
+          }),
+          JSON.stringify({
+            ts: '2026-06-30T00:01:00.000Z',
+            sender: 'pd88',
+            via: 'telegram',
+            content: 'Newest inbound request from Josh that should outrank the handoff doc',
+          }),
+        ].join('\n');
+      }
+      return '';
+    });
+    fsMocks.statSync.mockImplementation((path: string) => {
+      if (path === missionPath) {
+        return { mtimeMs: Date.now() - 5 * 60_000 } as { mtimeMs: number };
+      }
+      return { mtimeMs: Date.now() } as { mtimeMs: number };
+    });
+
+    const ap = new AgentProcess('alice', mockEnv, {});
+    const blocks = (
+      ap as unknown as {
+        buildResumeContextBlocks: () => { missionBlock: string; liveTailBlock: string };
+      }
+    ).buildResumeContextBlocks();
+
+    expect(blocks.missionBlock).toContain('MISSION ANCHOR');
+    expect(blocks.missionBlock).toContain('Keep following Josh newest request first');
+    expect(blocks.liveTailBlock).toContain('VERBATIM LIVE TAIL');
+    expect(blocks.liveTailBlock).toContain('2026-06-30T00:01:00.000Z pd88: Newest inbound request from Josh');
+  });
+
+  it('buildResumeContextBlocks emits no live tail block when the buffer is absent', () => {
+    fsMocks.existsSync.mockImplementation((path: string) => path === missionPath);
+    fsMocks.readFileSync.mockImplementation((path: string) => {
+      if (path === missionPath) {
+        return 'Mission only';
+      }
+      return '';
+    });
+    fsMocks.statSync.mockImplementation(() => ({ mtimeMs: Date.now() }) as { mtimeMs: number });
+
+    const ap = new AgentProcess('alice', mockEnv, {});
+    const blocks = (
+      ap as unknown as {
+        buildResumeContextBlocks: () => { missionBlock: string; liveTailBlock: string };
+      }
+    ).buildResumeContextBlocks();
+
+    expect(blocks.missionBlock).toContain('MISSION ANCHOR');
+    expect(blocks.liveTailBlock).toBe('');
+  });
+
+  it('buildStartupPrompt orders mission before handoff and live tail after handoff', () => {
+    fsMocks.existsSync.mockImplementation((path: string) =>
+      path === missionPath
+      || path === bufferPath
+      || path === handoffMarkerPath
+      || path === handoffDocPath,
+    );
+    fsMocks.readFileSync.mockImplementation((path: string) => {
+      if (path === missionPath) {
+        return 'Mission anchor content';
+      }
+      if (path === bufferPath) {
+        return JSON.stringify({
+          ts: '2026-06-30T00:02:00.000Z',
+          sender: 'pd88',
+          via: 'telegram',
+          content: 'Freshest inbound instruction',
+        });
+      }
+      if (path === handoffMarkerPath) {
+        return handoffDocPath;
+      }
+      return '';
+    });
+    fsMocks.statSync.mockImplementation(() => ({ mtimeMs: Date.now() }) as { mtimeMs: number });
+
+    const ap = new AgentProcess('alice', mockEnv, {});
+    const prompt = (
+      ap as unknown as { buildStartupPrompt: () => string }
+    ).buildStartupPrompt();
+
+    const missionIndex = prompt.indexOf('MISSION ANCHOR');
+    const handoffIndex = prompt.indexOf('CONTEXT HANDOFF');
+    const liveTailIndex = prompt.indexOf('VERBATIM LIVE TAIL');
+    expect(missionIndex).toBeGreaterThan(-1);
+    expect(handoffIndex).toBeGreaterThan(-1);
+    expect(liveTailIndex).toBeGreaterThan(-1);
+    expect(missionIndex).toBeLessThan(handoffIndex);
+    expect(handoffIndex).toBeLessThan(liveTailIndex);
+  });
+
+  it('buildContinuePrompt includes the same live tail block for --continue restarts', () => {
+    fsMocks.existsSync.mockImplementation((path: string) =>
+      path === missionPath || path === bufferPath,
+    );
+    fsMocks.readFileSync.mockImplementation((path: string) => {
+      if (path === missionPath) {
+        return 'Continue mission';
+      }
+      if (path === bufferPath) {
+        return JSON.stringify({
+          ts: '2026-06-30T00:03:00.000Z',
+          sender: 'pd88',
+          via: 'telegram',
+          content: 'Newest live message for continue path',
+        });
+      }
+      return '';
+    });
+    fsMocks.statSync.mockImplementation(() => ({ mtimeMs: Date.now() }) as { mtimeMs: number });
+
+    const ap = new AgentProcess('alice', mockEnv, {});
+    const prompt = (
+      ap as unknown as { buildContinuePrompt: () => string }
+    ).buildContinuePrompt();
+
+    expect(prompt).toContain('SESSION CONTINUATION');
+    expect(prompt).toContain('MISSION ANCHOR');
+    expect(prompt).toContain('VERBATIM LIVE TAIL');
+    expect(prompt).toContain('Newest live message for continue path');
   });
 });

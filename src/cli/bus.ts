@@ -24,6 +24,7 @@ import { resolveEnv } from '../utils/env.js';
 import { IPCClient } from '../daemon/ipc-server.js';
 import { TelegramAPI } from '../telegram/api.js';
 import { logOutboundMessage, cacheLastSent } from '../telegram/logging.js';
+import { checkAndRecord } from '../telegram/dedup.js';
 import { appendToBuffer } from '../daemon/conversation-buffer.js';
 import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext, CronDefinition, ConversationBufferEntry } from '../types/index.js';
 
@@ -1056,8 +1057,10 @@ busCommand
   .option('--image <path>', 'Send a photo with caption')
   .option('--file <path>', 'Send a document/file with caption (any file type)')
   .option('--plain-text', 'Skip Telegram Markdown parsing entirely. Use this when the message contains unescaped _, *, backtick, or [ that would otherwise trip the Markdown parser. Without this flag, sendMessage still retries once with parse_mode disabled on a parse-entity error — so it is purely an opt-in to save the retry roundtrip.', false)
+  .option('--no-dedup', 'Bypass duplicate-content suppression for this send (always deliver).')
+  .option('--dedup-window <seconds>', 'Suppression window in seconds (default 21600 = 6h, or env CTX_TELEGRAM_DEDUP_WINDOW_SEC).')
   .option('--streaming', 'Stream the reply into ONE Telegram message: <message> is the initial placeholder, then newline-delimited tokens from stdin are appended via editMessageText (≤1 edit/sec, identical-content guard, final edit applies markdown→HTML). Closes the stream when stdin ends. Spec: Item 1 of .planning/larry-ux-parity-spec.md.', false)
-  .action(async (chatId: string, message: string, opts: { image?: string; file?: string; plainText?: boolean; streaming?: boolean }) => {
+  .action(async (chatId: string, message: string, opts: { dedup?: boolean; dedupWindow?: string; image?: string; file?: string; plainText?: boolean; streaming?: boolean }) => {
     // Codex agents emit literal '\n'/'\t' inside single-quoted bash where bash
     // does not expand escapes, so they arrive at argv as 2-char literals and
     // Telegram renders them as visible text. Normalize before send + log.
@@ -1086,6 +1089,26 @@ busCommand
     if (!botToken) {
       console.error('Error: BOT_TOKEN not configured. Set it in your agent .env file or as an environment variable to enable Telegram.');
       process.exit(1);
+    }
+
+    const dedupEnabled = opts.dedup !== false && !opts.streaming && !!env.ctxRoot;
+    if (dedupEnabled) {
+      const parsedWindow = Number(opts.dedupWindow ?? process.env.CTX_TELEGRAM_DEDUP_WINDOW_SEC ?? 21600);
+      const windowSec = Number.isFinite(parsedWindow) && parsedWindow > 0 ? parsedWindow : 21600;
+      const { duplicate, ageSec } = checkAndRecord(env.ctxRoot!, chatId, message, windowSec);
+      if (duplicate) {
+        const mins = Math.round((ageSec ?? 0) / 60);
+        console.log(`Message suppressed (duplicate sent ${mins}m ago, within ${Math.round(windowSec / 60)}m window)`);
+        try {
+          if (env.agentName) {
+            const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+            logEvent(paths, env.agentName, env.org, 'message', 'telegram_suppressed', 'info', JSON.stringify({ chat_id: chatId, age_sec: ageSec }));
+          }
+        } catch {
+          // Non-fatal: suppression still succeeds even if event logging fails.
+        }
+        return;
+      }
     }
 
     const api = new TelegramAPI(botToken);

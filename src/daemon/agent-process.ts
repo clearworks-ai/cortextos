@@ -12,6 +12,7 @@ import { ensureDir } from '../utils/atomic.js';
 import { writeCortextosEnv } from '../utils/env.js';
 import { getOverdueReminders } from '../bus/reminders.js';
 import { resolvePaths } from '../utils/paths.js';
+import { loadBuffer } from './conversation-buffer.js';
 
 type LogFn = (msg: string) => void;
 
@@ -500,6 +501,13 @@ export class AgentProcess {
   }
 
   /**
+   * Get the runtime ctx root for this agent instance.
+   */
+  getCtxRoot(): string {
+    return this.env.ctxRoot;
+  }
+
+  /**
    * Get the current agent config (live reference — fields may be updated in-place).
    */
   getConfig(): AgentConfig {
@@ -822,27 +830,86 @@ export class AgentProcess {
     const reminderBlock = this.buildReminderBlock();
     const deliverablesBlock = this.buildDeliverablesBlock();
     const handoffBlock = this.consumeHandoffBlock();
+    const { missionBlock, liveTailBlock } = this.buildResumeContextBlocks();
     const isHandoffRestart = handoffBlock.length > 0;
     this.lastSpawnWasHandoff = isHandoffRestart;
     // HANDOFF UX: the pickup message MUST be the first action after reading the handoff doc —
     // before cron restoration, before heartbeat, before anything else. Placing this instruction
     // immediately after the handoffBlock in the prompt ensures it is not buried.
     const handoffUxOverride = isHandoffRestart
-      ? ' HANDOFF UX: This is a context handoff restart — your memory is intact via the handoff doc. CRITICAL: After reading the handoff document, your VERY FIRST tool call MUST be a Bash call running: cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID \'back — [what you were just working on]\' — replace the brackets with one brief plain-English sentence about your current state. Do this BEFORE running heartbeat, BEFORE any other tool call. No cron IDs, no status report, no cold-boot phrasing. Do NOT send "Booting up... one moment" (skip AGENTS.md step 1 entirely).'
+      ? ' HANDOFF UX: This is a context handoff restart — your memory is intact via the handoff document, but the VERBATIM LIVE TAIL below is more authoritative than the doc. If the handoff document conflicts with the newest inbound message, the newest inbound message wins. CRITICAL: After reading the handoff document and the live tail, your VERY FIRST tool call MUST be a Bash call running: cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID \'back — [what you were just working on]\' — replace the brackets with one brief plain-English sentence about your current state derived from the handoff doc plus the newest inbound message, with the newest inbound message winning. Do this BEFORE running heartbeat, BEFORE any other tool call. No cron IDs, no status report, no cold-boot phrasing. Do NOT send "Booting up... one moment" (skip AGENTS.md step 1 entirely).'
       : '';
     const onlineMessage = isHandoffRestart
       ? ''
       : ' Send a Telegram message to the user saying you are back online.';
-    return `You are starting a new session. Current UTC time: ${nowUtc}. Read AGENTS.md and all bootstrap files listed there. External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${reminderBlock}${deliverablesBlock}${handoffBlock}${handoffUxOverride}${onlineMessage}${onboardingAppend}`;
+    return `You are starting a new session. Current UTC time: ${nowUtc}. Read AGENTS.md and all bootstrap files listed there. External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${reminderBlock}${deliverablesBlock}${missionBlock}${handoffBlock}${liveTailBlock}${handoffUxOverride}${onlineMessage}${onboardingAppend}`;
   }
 
   private buildContinuePrompt(): string {
     const nowUtc = new Date().toISOString();
     const reminderBlock = this.buildReminderBlock();
     const deliverablesBlock = this.buildDeliverablesBlock();
+    const { missionBlock, liveTailBlock } = this.buildResumeContextBlocks();
     // Session refresh (--continue) is never a handoff restart.
     this.lastSpawnWasHandoff = false;
-    return `SESSION CONTINUATION: Your CLI process was restarted with --continue to reload configs. Current UTC time: ${nowUtc}. Your full conversation history is preserved. Re-read AGENTS.md and ALL bootstrap files listed there. External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${reminderBlock}${deliverablesBlock} Check inbox. Resume normal operations. After checking inbox, send a Telegram message to the user saying you are back online.`;
+    return `SESSION CONTINUATION: Your CLI process was restarted with --continue to reload configs. Current UTC time: ${nowUtc}. Your full conversation history is preserved. Re-read AGENTS.md and ALL bootstrap files listed there. External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${reminderBlock}${deliverablesBlock}${missionBlock}${liveTailBlock} Check inbox. Resume normal operations. After checking inbox, send a Telegram message to the user saying you are back online.`;
+  }
+
+  private buildResumeContextBlocks(): { missionBlock: string; liveTailBlock: string } {
+    let missionBlock = '';
+    let liveTailBlock = '';
+
+    try {
+      const missionPath = join(this.env.agentDir, 'state', 'current-mission.txt');
+      if (existsSync(missionPath)) {
+        const missionRaw = readFileSync(missionPath, 'utf-8').trim();
+        if (missionRaw) {
+          const missionText = this.normalizePromptText(missionRaw, 600);
+          const missionMtimeMs = statSync(missionPath).mtimeMs;
+          const writtenAt = new Date(missionMtimeMs).toISOString();
+          const age = this.formatAge(missionMtimeMs);
+          missionBlock = ` MISSION ANCHOR (written ${writtenAt}; age ${age}): ${missionText}. Verify against the live tail below before acting; if older than 2h treat it as possibly stale.`;
+        }
+      }
+    } catch {
+      missionBlock = '';
+    }
+
+    try {
+      const entries = loadBuffer(this.env.ctxRoot, this.name);
+      if (entries.length > 0) {
+        const liveTailLines = entries
+          .map((entry) => `${entry.ts} ${entry.sender}: ${this.normalizePromptText(entry.content, 200)}`)
+          .join('\n');
+        liveTailBlock = ` VERBATIM LIVE TAIL (your most recent messages — the NEWEST inbound message is AUTHORITATIVE; if the handoff doc conflicts with it, the newest message wins):\n${liveTailLines}`;
+      }
+    } catch {
+      liveTailBlock = '';
+    }
+
+    return { missionBlock, liveTailBlock };
+  }
+
+  private normalizePromptText(text: string, maxChars: number): string {
+    const normalized = text.replace(/\s+/g, ' ').trim();
+    if (normalized.length <= maxChars) return normalized;
+    return `${normalized.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+  }
+
+  private formatAge(mtimeMs: number): string {
+    const ageMs = Math.max(0, Date.now() - mtimeMs);
+    const ageMinutes = Math.floor(ageMs / 60_000);
+    if (ageMinutes < 60) {
+      return `${ageMinutes}m ago`;
+    }
+
+    const ageHours = Math.floor(ageMinutes / 60);
+    if (ageHours < 48) {
+      return `${ageHours}h ago`;
+    }
+
+    const ageDays = Math.floor(ageHours / 24);
+    return `${ageDays}d ago`;
   }
 
   /**

@@ -43,6 +43,13 @@ DOC_EXTS = {".pdf", ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls"}
 TEXT_EXTS = {".txt", ".md", ".csv", ".json", ".py", ".js", ".ts", ".go",
              ".rs", ".java", ".cpp", ".c", ".sh", ".yaml", ".yml", ".toml",
              ".html", ".css", ".sql", ".rb", ".swift", ".kt", ".r", ".lua"}
+# Directory names whose entire subtree is excluded from ingest.
+IGNORE_DIR_PARTS = {
+    ".trash", ".obsidian", ".git", ".cache", ".venv", "__pycache__",
+    "node_modules", ".next", ".turbo", "dist", "build",
+}
+# File extensions never worth embedding (diagram XML, lockfiles, etc.).
+IGNORE_FILE_EXTS = {".drawio", ".lock", ".log", ".tmp"}
 
 # Defaults
 DEFAULT_TEXT_CHUNK_SIZE = 1500
@@ -55,6 +62,17 @@ DEFAULT_EMBEDDING_DIMENSIONS = 768
 DEFAULT_SIMILARITY_THRESHOLD = 0.0  # return everything by default, let caller filter
 DEFAULT_MAX_TOKENS = 0  # 0 = unlimited
 DEFAULT_PREVIEW_CHARS = 300
+DEFAULT_RECENCY_WEIGHT = 0.3
+RECENCY_HALF_LIFE_DAYS = {
+    "decision": 30,
+    "note": 30,
+    "reference": 90,
+    "media": 90,
+    "other": 90,
+    "policy": 365,
+}
+DEFAULT_HALF_LIFE_DAYS = 90
+NEUTRAL_DECAY = 0.5
 
 # Pricing (per 1M tokens)
 EMBEDDING_PRICE_PER_M = 0.20
@@ -493,6 +511,75 @@ def file_id(path, chunk_idx=None):
         return f"{h}_chunk{chunk_idx}"
     return h
 
+
+def _is_ignored(path: Path) -> bool:
+    """True if any path component is an ignored dir, or the file ext is ignored."""
+    if any(part.lower() in IGNORE_DIR_PARTS for part in path.parts):
+        return True
+    if path.suffix.lower() in IGNORE_FILE_EXTS:
+        return True
+    return False
+
+
+def _source_created_at(file_path: Path) -> str:
+    """ISO timestamp of the source file mtime, or '' if unavailable."""
+    try:
+        return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(file_path.stat().st_mtime))
+    except OSError:
+        return ""
+
+
+def _classify_doc_type(file_path: Path) -> str:
+    """Coarse document class used to pick a recency half-life."""
+    path_text = str(file_path).lower()
+    if "/daily/" in path_text or "/sessions/" in path_text:
+        return "note"
+    if "/decisions/" in path_text or "decision" in path_text:
+        return "decision"
+    if "/wiki/" in path_text:
+        return "reference"
+    if any(key in path_text for key in ("policy", "/sop", "reference/", "definition", "glossary")):
+        return "policy"
+    if file_path.suffix.lower() in (IMAGE_EXTS | VIDEO_EXTS | AUDIO_EXTS):
+        return "media"
+    return "other"
+
+
+def _recency_decay(created_at: str, doc_type: str, now: float = None) -> float:
+    """0.5^(age_days / half_life), or NEUTRAL_DECAY when metadata is missing."""
+    if not created_at:
+        return NEUTRAL_DECAY
+    try:
+        created_ts = time.mktime(time.strptime(created_at, "%Y-%m-%dT%H:%M:%S"))
+    except (ValueError, OverflowError):
+        return NEUTRAL_DECAY
+    current_time = time.time() if now is None else now
+    age_days = max(0.0, (current_time - created_ts) / 86400.0)
+    half_life = RECENCY_HALF_LIFE_DAYS.get(doc_type, DEFAULT_HALF_LIFE_DAYS)
+    return 0.5 ** (age_days / half_life)
+
+
+def _apply_recency_rerank(results, *, enabled=True, weight=DEFAULT_RECENCY_WEIGHT, now=None):
+    """Rescore post-threshold results with recency, or return them unchanged."""
+    if not enabled:
+        return results
+
+    reranked = []
+    for result in results:
+        metadata = result.get("metadata") or {}
+        recency = _recency_decay(
+            metadata.get("created_at", ""),
+            metadata.get("doc_type", "other"),
+            now=now,
+        )
+        reranked.append({
+            **result,
+            "recency": recency,
+            "final_score": (1 - weight) * result["similarity"] + weight * recency,
+        })
+    reranked.sort(key=lambda result: result["final_score"], reverse=True)
+    return reranked
+
 # ---------------------------------------------------------------------------
 # Ingest logic
 # ---------------------------------------------------------------------------
@@ -536,6 +623,8 @@ def ingest_text_file(client, config, collection, file_path):
                 "total_chunks": len(chunks),
                 "filename": file_path.name,
                 "file_ext": file_path.suffix.lower(),
+                "created_at": _source_created_at(file_path),
+                "doc_type": _classify_doc_type(file_path),
                 "ingested_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
             }],
         )
@@ -573,6 +662,8 @@ def ingest_image(client, config, collection, file_path):
             "filename": file_path.name,
             "file_ext": file_path.suffix.lower(),
             "mime_type": mime,
+            "created_at": _source_created_at(file_path),
+            "doc_type": _classify_doc_type(file_path),
             "ingested_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         }],
     )
@@ -691,6 +782,8 @@ def ingest_video(client, config, collection, file_path):
                 "filename": file_path.name,
                 "file_ext": file_path.suffix.lower(),
                 "duration_seconds": duration,
+                "created_at": _source_created_at(file_path),
+                "doc_type": _classify_doc_type(file_path),
                 "ingested_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
             }],
         )
@@ -733,6 +826,8 @@ def ingest_audio(client, config, collection, file_path):
                 "filename": file_path.name,
                 "file_ext": file_path.suffix.lower(),
                 "duration_seconds": duration,
+                "created_at": _source_created_at(file_path),
+                "doc_type": _classify_doc_type(file_path),
                 "ingested_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
             }],
         )
@@ -781,6 +876,8 @@ def ingest_audio(client, config, collection, file_path):
                     "chunk_path": chunk["path"],
                     "filename": file_path.name,
                     "file_ext": file_path.suffix.lower(),
+                    "created_at": _source_created_at(file_path),
+                    "doc_type": _classify_doc_type(file_path),
                     "ingested_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                 }],
             )
@@ -862,6 +959,8 @@ def ingest_pdf(client, config, collection, file_path):
                 "page_number": i + 1,
                 "filename": file_path.name,
                 "file_ext": ".pdf",
+                "created_at": _source_created_at(file_path),
+                "doc_type": _classify_doc_type(file_path),
                 "ingested_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
             }],
         )
@@ -997,6 +1096,8 @@ def ingest_office_doc(client, config, collection, file_path):
             "total_chunks": len(sections),
             "filename": file_path.name,
             "file_ext": ext,
+            "created_at": _source_created_at(file_path),
+            "doc_type": _classify_doc_type(file_path),
             "ingested_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         }
         if type_name == "slides":
@@ -1088,8 +1189,10 @@ def cmd_ingest(args):
         for path_str in args.paths:
             p = Path(path_str).resolve()
             if p.is_dir():
-                files = sorted(f for f in p.rglob("*") if f.is_file() and not f.name.startswith("."))
-                print(f"Ingesting directory: {p} ({len(files)} files)")
+                all_files = sorted(f for f in p.rglob("*") if f.is_file() and not f.name.startswith("."))
+                files = [f for f in all_files if not _is_ignored(f)]
+                filtered_out = len(all_files) - len(files)
+                print(f"Ingesting directory: {p} ({len(files)} files, {filtered_out} skipped by ignore-filter)")
                 for f in files:
                     print(f"  Processing: {f.relative_to(p)}")
                     try:
@@ -1223,6 +1326,12 @@ def cmd_query(args):
 
     # Deduplicate near-identical results (same file in multiple lesson folders)
     filtered = deduplicate_results(filtered)
+
+    filtered = _apply_recency_rerank(
+        filtered,
+        enabled=not getattr(args, "no_recency", False),
+        weight=config.get("recency_weight", DEFAULT_RECENCY_WEIGHT),
+    )
 
     # Trim to requested top_k after dedup
     final_k = args.top_k or 5
@@ -1530,6 +1639,8 @@ def main():
     p_query.add_argument("--type", help="Filter by content type: image, video, text, pdf, audio")
     p_query.add_argument("--json", "-j", action="store_true", help="Output as JSON (for agent consumption)")
     p_query.add_argument("--full", "-f", action="store_true", help="Show full content (not truncated)")
+    p_query.add_argument("--no-recency", action="store_true",
+                         help="Disable recency reranking and preserve pure similarity ordering")
 
     # status
     p_status = sub.add_parser("status", help="Show knowledge base status")

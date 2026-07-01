@@ -21,7 +21,13 @@ def _iso_local(ts):
 def test_is_ignored_by_dir_part_and_ext():
     assert mmrag._is_ignored(Path("/tmp/.trash/old.md")) is True
     assert mmrag._is_ignored(Path("/tmp/node_modules/pkg/index.js")) is True
+    assert mmrag._is_ignored(Path("/tmp/archive/old.md")) is True
+    assert mmrag._is_ignored(Path("/tmp/.claude/worktrees/dup.md")) is True
+    assert mmrag._is_ignored(Path("/tmp/contacts-backup/person.md")) is True
+    assert mmrag._is_ignored(Path("/tmp/.venv-synth/lib/python3.14/site-packages/httpx/_urls.py")) is True
+    assert mmrag._is_ignored(Path("/tmp/.venv-synth/lib/python3.14/site-packages/pkg-1.0.dist-info/METADATA")) is True
     assert mmrag._is_ignored(Path("/tmp/diagram.drawio")) is True
+    assert mmrag._is_ignored(Path("/tmp/contact.vcf")) is True
     assert mmrag._is_ignored(Path("/tmp/pic.png")) is False
 
 

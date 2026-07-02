@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, writeFileSync, unlinkSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { handoffGraceMs } from '../../../src/daemon/fast-checker.js';
 
 /**
  * Unit tests for the context monitor logic in fast-checker.ts.
@@ -106,6 +107,101 @@ describe('context monitor tier selection', () => {
   });
 });
 
+// --- Handoff grace window (fresh-session false-100% loop guard) ---
+
+describe('handoff grace window', () => {
+  const WARN = 70;
+  const HANDOFF = 80;
+  const HANDOFF_GRACE_MS = 120_000;
+
+  // Mirrors fast-checker tier selection with the grace guard added: a session
+  // younger than HANDOFF_GRACE_MS suppresses warning + handoff so a transient
+  // false-high reading on a fresh session cannot trigger a handoff→restart loop.
+  function selectTierWithGrace(
+    pct: number | null,
+    exceeds: boolean,
+    warningFiredAt: number,
+    handoffFiredAt: number,
+    now: number,
+    sessionStartedAt: number,
+  ) {
+    const effectivePct = pct !== null ? pct : (exceeds ? 101 : null);
+    if (effectivePct === null) return 'none';
+    const withinGrace = sessionStartedAt > 0 && now - sessionStartedAt < HANDOFF_GRACE_MS;
+    if (effectivePct >= HANDOFF && handoffFiredAt === 0 && !withinGrace) return 'handoff';
+    if (effectivePct >= WARN && !withinGrace && now - warningFiredAt > 15 * 60_000) return 'warning';
+    return 'none';
+  }
+
+  it('100% within grace of a fresh session does NOT fire handoff (breaks false-100% loop)', () => {
+    const now = Date.now();
+    const sessionStartedAt = now - 30_000; // 30s into session, inside 2min grace
+    expect(selectTierWithGrace(100, false, 0, 0, now, sessionStartedAt)).toBe('none');
+  });
+
+  it('exceeds_200k within grace does NOT fire handoff', () => {
+    const now = Date.now();
+    const sessionStartedAt = now - 10_000;
+    expect(selectTierWithGrace(null, true, 0, 0, now, sessionStartedAt)).toBe('none');
+  });
+
+  it('100% after grace expires DOES fire handoff (genuine sustained overflow still acts)', () => {
+    const now = Date.now();
+    const sessionStartedAt = now - 3 * 60_000; // 3min old, past 2min grace
+    expect(selectTierWithGrace(100, false, 0, 0, now, sessionStartedAt)).toBe('handoff');
+  });
+
+  it('warning within grace is also suppressed', () => {
+    const now = Date.now();
+    const sessionStartedAt = now - 30_000;
+    expect(selectTierWithGrace(75, false, 0, 0, now, sessionStartedAt)).toBe('none');
+  });
+
+  it('unset sessionStartedAt (0) imposes no grace — preserves prior behavior', () => {
+    const now = Date.now();
+    expect(selectTierWithGrace(80, false, 0, 0, now, 0)).toBe('handoff');
+  });
+});
+
+// --- Runtime-aware grace window (laggy codex/opencode prompt-cache spike) ---
+
+describe('handoffGraceMs runtime-aware grace window', () => {
+  it('codex-app-server gets the extended 10min grace', () => {
+    expect(handoffGraceMs('codex-app-server')).toBe(600_000);
+  });
+
+  it('opencode gets the extended 10min grace', () => {
+    expect(handoffGraceMs('opencode')).toBe(600_000);
+  });
+
+  it('claude-code keeps the 2min grace', () => {
+    expect(handoffGraceMs('claude-code')).toBe(120_000);
+  });
+
+  it('hermes keeps the 2min grace', () => {
+    expect(handoffGraceMs('hermes')).toBe(120_000);
+  });
+
+  it('undefined runtime keeps the 2min grace', () => {
+    expect(handoffGraceMs(undefined)).toBe(120_000);
+  });
+
+  it('a spurious 100% spike at T+5min within codex extended grace is suppressed, but a claude session past its 2min grace fires', () => {
+    const now = Date.now();
+    const sessionStartedAt = now - 5 * 60_000; // 5min into session
+
+    // codex: 5min < 10min grace -> still within grace -> suppressed
+    const codexWithinGrace =
+      sessionStartedAt > 0 && now - sessionStartedAt < handoffGraceMs('codex-app-server');
+    expect(codexWithinGrace).toBe(true);
+
+    // claude: 5min > 2min grace -> past grace -> a genuine high reading would act
+    const claudeWithinGrace =
+      sessionStartedAt > 0 && now - sessionStartedAt < handoffGraceMs('claude-code');
+    expect(claudeWithinGrace).toBe(false);
+  });
+});
+
 // --- Warning deduplication ---
 
 describe('warning deduplication', () => {
@@ -166,7 +262,7 @@ describe('context monitor circuit breaker', () => {
 // --- Overflow-banner backstop self-referential guard ---
 
 describe('overflow-banner backstop corroboration guard', () => {
-  // Mirrors the hard overflow backstop in fast-checker.ts (~line 977). The PTY
+  // Mirrors the hard overflow backstop in fast-checker.ts (~line 1021). The PTY
   // banner regex is a backstop that force-restarts when Claude's live context-
   // overflow banner appears in an agent's terminal. Without the
   // ctxCorroboratesOverflow gate, the regex matched those banner phrases as benign

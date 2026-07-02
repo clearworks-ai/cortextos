@@ -66,7 +66,9 @@ describe('context handoff fleet lease', () => {
 
   it('limits actual FastChecker handoff prompts when six agents cross at once', async () => {
     const agents = ['agent-a', 'agent-b', 'agent-c', 'agent-d', 'agent-e', 'agent-f'];
-    const records = agents.map((agentName) => createChecker(agentName));
+    // pct must cross the default 60% handoff threshold (this test predates the
+    // 40% -> 60% default change and relied on createChecker's 50% default).
+    const records = agents.map((agentName) => createChecker(agentName, { pct: 70 }));
 
     await Promise.all(records.map((record) =>
       (record.checker as any).checkContextStatus()));
@@ -205,9 +207,7 @@ describe('context handoff fleet lease', () => {
     mkdirSync(agentDir, { recursive: true });
     writeFileSync(join(agentDir, 'config.json'), JSON.stringify({}), 'utf-8');
     const status: Record<string, unknown> = {
-      // Default crosses the handoff threshold (default-ON at 60%) so the herd test
-      // fires handoffs without each call having to pass an explicit pct.
-      used_percentage: opts.pct ?? 70,
+      used_percentage: opts.pct ?? 50,
       exceeds_200k_tokens: false,
       written_at: new Date().toISOString(),
     };

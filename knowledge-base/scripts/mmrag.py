@@ -17,12 +17,15 @@ Usage:
 """
 
 import argparse
+import contextlib
 import difflib
 import hashlib
 import json
 import mimetypes
 import os
+import socket
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -81,6 +84,16 @@ def _env_float(name, default):
         return default
 
 
+def _env_int(name, default):
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 RECENCY_TIE_BAND = _env_float("MMRAG_RECENCY_TIE_BAND", 0.05)
 RECENCY_MAX_LIFT = _env_float("MMRAG_RECENCY_MAX_LIFT", 0.05)
 AUTHORITATIVE_SIM = _env_float("MMRAG_AUTHORITATIVE_SIM", 0.7)
@@ -108,6 +121,10 @@ DEFAULT_RECONCILE_ROOTS = (
     Path.home() / "code" / "knowledge-sync" / "wiki",
     Path.home() / "code" / "knowledge-sync" / "raw",
 )
+REBUILD_MIN_COUNT_RATIO = 0.25
+REBUILD_MAX_SIZE_FACTOR = 20
+REBUILD_MAX_FAILED_RATIO = 0.20
+REBUILD_WARN_BYTES_PER_CHUNK = 5 * 1024 * 1024
 
 # Pricing (per 1M tokens)
 EMBEDDING_PRICE_PER_M = 0.20
@@ -118,6 +135,8 @@ FLASH_OUTPUT_PRICE_PER_M = 0.60
 # Module-level so a fault-injection test client can reference the same set.
 TRANSIENT_HTTP_CODES = {429, 500, 503}
 TRANSIENT_STATUS_NAMES = {"UNAVAILABLE", "RESOURCE_EXHAUSTED"}
+DEFAULT_GEMINI_TIMEOUT_MS = 120000
+MMRAG_GEMINI_TIMEOUT_MS = _env_int("MMRAG_GEMINI_TIMEOUT_MS", DEFAULT_GEMINI_TIMEOUT_MS)
 
 USAGE_FILE = MMRAG_DIR / "usage.json"
 
@@ -258,18 +277,71 @@ def _load_factory(dotted_path):
 def get_genai_client(api_key):
     """Construct a Gemini client.
 
-    Default returns google.genai.Client(api_key=api_key) — byte-identical to
-    the prior behavior. To inject a fake client (e.g. for testing the retry
-    loop in ingest_pdf), set the env-var MMRAG_GEMINI_CLIENT_FACTORY to a
-    dotted import path of a callable taking (api_key) and returning an object
-    with .models.generate_content / .models.embed_content compatible shape.
-    See knowledge-base/scripts/_test_clients/fault_injection.py for a reference.
+    Default returns google.genai.Client(api_key=api_key, http_options=...) with
+    a bounded request timeout. To inject a fake client (e.g. for testing the
+    retry loop), set the env-var MMRAG_GEMINI_CLIENT_FACTORY to a dotted import
+    path of a callable taking (api_key) and returning an object with
+    .models.generate_content / .models.embed_content compatible shape. See
+    knowledge-base/scripts/_test_clients/fault_injection.py for a reference.
     """
     factory_path = os.environ.get("MMRAG_GEMINI_CLIENT_FACTORY")
     if factory_path:
         return _load_factory(factory_path)(api_key)
     from google import genai
-    return genai.Client(api_key=api_key)
+    from google.genai import types
+    return genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(timeout=MMRAG_GEMINI_TIMEOUT_MS),
+    )
+
+
+def _transient_timeout_exceptions():
+    exception_types = [TimeoutError, socket.timeout]
+    try:
+        import httpx
+    except ImportError:
+        httpx = None
+    if httpx is not None:
+        exception_types.extend([httpx.TimeoutException, httpx.TransportError])
+    return tuple(dict.fromkeys(exception_types))
+
+
+def _retry_api_call(fn, *, backoffs=(5, 15, 45)):
+    """Retry transient API and timeout/transport failures with bounded backoff."""
+    from google.genai import errors as _genai_errors
+
+    transient_timeout_errors = _transient_timeout_exceptions()
+    last_err = None
+    for attempt, backoff in enumerate(backoffs, start=1):
+        try:
+            return fn()
+        except _genai_errors.APIError as e:
+            last_err = e
+            is_transient = (e.code in TRANSIENT_HTTP_CODES) or (e.status in TRANSIENT_STATUS_NAMES)
+            if not is_transient:
+                raise
+            if attempt < len(backoffs):
+                print(
+                    f"    Transient error (HTTP {e.code} {e.status or ''}); retrying in {backoff}s "
+                    f"(attempt {attempt}/{len(backoffs)})"
+                )
+                time.sleep(backoff)
+            else:
+                print(f"    Exhausted retries on transient error: HTTP {e.code} {e.status or ''}")
+        except transient_timeout_errors as e:
+            last_err = e
+            if attempt < len(backoffs):
+                print(
+                    f"    Transient error (timeout/transport: {type(e).__name__}); retrying in {backoff}s "
+                    f"(attempt {attempt}/{len(backoffs)})"
+                )
+                time.sleep(backoff)
+            else:
+                print(
+                    f"    Exhausted retries on transient error: timeout/transport {type(e).__name__}"
+                )
+
+    raise last_err if last_err else RuntimeError("retry loop completed without response or error")
 
 
 def _retry_generate_content(client, *, model, contents, backoffs=(5, 15, 45)):
@@ -282,33 +354,23 @@ def _retry_generate_content(client, *, model, contents, backoffs=(5, 15, 45)):
     backoffs is a tuple of sleep seconds between attempts. len(backoffs) is the
     attempt count. Tests pass (0, 0, 0) to skip sleeps.
     """
-    from google.genai import errors as _genai_errors
-    last_err = None
-    for attempt, backoff in enumerate(backoffs, start=1):
-        try:
-            return client.models.generate_content(model=model, contents=contents)
-        except _genai_errors.APIError as e:
-            last_err = e
-            is_transient = (e.code in TRANSIENT_HTTP_CODES) or (e.status in TRANSIENT_STATUS_NAMES)
-            if not is_transient:
-                raise
-            if attempt < len(backoffs):
-                print(f"    Transient error (HTTP {e.code} {e.status or ''}); retrying in {backoff}s (attempt {attempt}/{len(backoffs)})")
-                time.sleep(backoff)
-            else:
-                print(f"    Exhausted retries on transient error: HTTP {e.code} {e.status or ''}")
-    raise last_err if last_err else RuntimeError("retry loop completed without response or error")
+    return _retry_api_call(
+        lambda: client.models.generate_content(model=model, contents=contents),
+        backoffs=backoffs,
+    )
 
 
 def embed_content(client, config, content, task_type="RETRIEVAL_DOCUMENT"):
     """Embed content using Gemini Embedding 2. Content can be text string or list of Parts."""
     from google.genai import types
-    result = client.models.embed_content(
-        model=config.get("embedding_model", "gemini-embedding-2-preview"),
-        contents=content,
-        config=types.EmbedContentConfig(
-            output_dimensionality=config.get("embedding_dimensions", DEFAULT_EMBEDDING_DIMENSIONS),
-            task_type=task_type,
+    result = _retry_api_call(
+        lambda: client.models.embed_content(
+            model=config.get("embedding_model", "gemini-embedding-2-preview"),
+            contents=content,
+            config=types.EmbedContentConfig(
+                output_dimensionality=config.get("embedding_dimensions", DEFAULT_EMBEDDING_DIMENSIONS),
+                task_type=task_type,
+            ),
         ),
     )
     if _tracker:
@@ -384,18 +446,93 @@ def describe_media(client, config, file_path, media_type="video"):
 # ---------------------------------------------------------------------------
 # ChromaDB
 # ---------------------------------------------------------------------------
-def get_chroma_collection(collection_name="default"):
-    import chromadb
-    client = chromadb.PersistentClient(path=str(CHROMADB_DIR))
+def get_chroma_collection(collection_name="default", *, chroma_dir=None, chroma_client=None):
+    client = chroma_client or get_chroma_client(chroma_dir=chroma_dir)
     return client.get_or_create_collection(
         name=collection_name,
         metadata={"hnsw:space": "cosine"},
     )
 
 
-def get_chroma_client():
+def get_chroma_client(chroma_dir=None):
     import chromadb
-    return chromadb.PersistentClient(path=str(CHROMADB_DIR))
+    return chromadb.PersistentClient(path=str(chroma_dir or CHROMADB_DIR))
+
+
+def _get_existing_collection(chroma_client, collection_name):
+    for item in chroma_client.list_collections():
+        name = item.name if hasattr(item, "name") else item
+        if name == collection_name:
+            return chroma_client.get_collection(name)
+    return None
+
+
+def _close_chroma_client(chroma_client):
+    if chroma_client is None:
+        return
+
+    close = getattr(chroma_client, "close", None)
+    if callable(close):
+        try:
+            close()
+            return
+        except Exception as exc:
+            print(f"  ERROR closing chroma client: {type(exc).__name__}: {exc}")
+
+    system = getattr(chroma_client, "_system", None)
+    stop = getattr(system, "stop", None)
+    if callable(stop):
+        try:
+            stop()
+        except Exception as exc:
+            print(f"  ERROR stopping chroma system: {type(exc).__name__}: {exc}")
+
+
+def _directory_size_bytes(path):
+    path = Path(path)
+    if not path.exists():
+        return 0
+
+    total = 0
+    for candidate in path.rglob("*"):
+        if candidate.is_file():
+            try:
+                total += candidate.stat().st_size
+            except OSError:
+                continue
+    return total
+
+
+def _sibling_work_dir(base_dir: Path, kind: str) -> Path:
+    base_dir = Path(base_dir)
+    parent = base_dir.parent
+    stem = base_dir.name
+    counter = 0
+    timestamp = int(time.time())
+    while True:
+        candidate = parent / f"{stem}.{kind}-{timestamp}-{os.getpid()}-{counter}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
+@contextlib.contextmanager
+def _temporary_rebuild_signal_handlers():
+    handled_signals = (signal.SIGINT, signal.SIGTERM)
+    previous = {}
+
+    def _handler(signum, _frame):
+        raise RuntimeError(f"rebuild interrupted by signal {signum}")
+
+    for signum in handled_signals:
+        previous[signum] = signal.getsignal(signum)
+        signal.signal(signum, _handler)
+
+    try:
+        yield
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
 
 # ---------------------------------------------------------------------------
 # Text chunking
@@ -1091,6 +1228,162 @@ def _reconcile_collection(client, config, collection, roots, *, dry_run=False):
     }
 
 
+def _build_collection_from_disk(client, config, collection, roots):
+    """Populate a fresh collection from disk with per-file isolation."""
+    disk_state = _scan_disk_state(roots)
+    failed_paths = []
+    new_chunks = 0
+
+    for source in sorted(disk_state):
+        file_path = disk_state[source]["path"]
+        try:
+            new_chunks += ingest_file(client, config, collection, file_path)
+        except Exception as exc:
+            error_message = " ".join(str(exc).split()) or "<no message>"
+            print(f"  SKIP (error): {file_path} — {type(exc).__name__}: {error_message}")
+            failed_paths.append(str(file_path))
+
+    total_files_indexed_after = collection.count()
+    return {
+        "new_files": len(disk_state),
+        "new_chunks": new_chunks,
+        "failed_files": len(failed_paths),
+        "failed_paths": failed_paths,
+        "total_files_on_disk": len(disk_state),
+        "total_files_indexed_after": total_files_indexed_after,
+    }
+
+
+def _rebuild_collection(
+    client,
+    config,
+    collection_name,
+    roots,
+    *,
+    dry_run=False,
+    allow_shrink=False,
+    force=False,
+    chroma_dir=None,
+):
+    """Build a fresh collection in a temp dir and swap it into place on success."""
+    live_dir = Path(chroma_dir or CHROMADB_DIR)
+    temp_dir = _sibling_work_dir(live_dir, "rebuild")
+    report = {
+        "mode": "rebuild",
+        "collection": collection_name,
+        "dry_run": dry_run,
+        "roots": [str(Path(root)) for root in roots],
+        "live_dir": str(live_dir),
+        "temp_dir": str(temp_dir),
+        "backup_dir": None,
+        "swap_succeeded": False,
+        "swap_aborted": False,
+        "abort_reasons": [],
+        "failed_files": 0,
+        "failed_paths": [],
+    }
+
+    live_client = None
+    temp_client = None
+    moved_backup_dir = None
+
+    try:
+        with _temporary_rebuild_signal_handlers():
+            live_count = 0
+            if live_dir.exists():
+                live_client = get_chroma_client(chroma_dir=live_dir)
+                existing_collection = _get_existing_collection(live_client, collection_name)
+                if existing_collection is not None:
+                    live_count = existing_collection.count()
+            live_size = _directory_size_bytes(live_dir)
+            report["live_count_before"] = live_count
+            report["live_dir_size_before"] = live_size
+
+            temp_dir.mkdir(parents=True, exist_ok=False)
+            temp_client = get_chroma_client(chroma_dir=temp_dir)
+            temp_collection = get_chroma_collection(collection_name, chroma_client=temp_client)
+            build_report = _build_collection_from_disk(client, config, temp_collection, roots)
+            report.update(build_report)
+
+            temp_count = temp_collection.count()
+            temp_size = _directory_size_bytes(temp_dir)
+            report["temp_count"] = temp_count
+            report["temp_dir_size"] = temp_size
+
+            bytes_per_chunk = (temp_size / temp_count) if temp_count else 0
+            report["bytes_per_chunk"] = bytes_per_chunk
+            if temp_count and bytes_per_chunk > REBUILD_WARN_BYTES_PER_CHUNK:
+                print(
+                    f"  WARNING rebuild temp dir is unusually large: {temp_size} bytes / {temp_count} chunks "
+                    f"({bytes_per_chunk:.0f} bytes per chunk)"
+                )
+
+            if temp_count <= 0:
+                report["abort_reasons"].append("Temp collection is empty; refusing to swap an empty rebuild.")
+            if live_count and temp_count < (live_count * REBUILD_MIN_COUNT_RATIO) and not allow_shrink:
+                report["abort_reasons"].append(
+                    f"Temp count {temp_count} is below {REBUILD_MIN_COUNT_RATIO:.0%} of live count {live_count}; "
+                    "re-run with --allow-shrink to force."
+                )
+            if live_size and temp_size > (live_size * REBUILD_MAX_SIZE_FACTOR):
+                report["abort_reasons"].append(
+                    f"Temp dir size {temp_size} exceeds {REBUILD_MAX_SIZE_FACTOR}x live dir size {live_size}; "
+                    "aborting runaway swap."
+                )
+            if report["total_files_on_disk"]:
+                failed_ratio = report["failed_files"] / report["total_files_on_disk"]
+                report["failed_ratio"] = failed_ratio
+                if failed_ratio > REBUILD_MAX_FAILED_RATIO and not force:
+                    report["abort_reasons"].append(
+                        f"Failed files ratio {failed_ratio:.0%} exceeds {REBUILD_MAX_FAILED_RATIO:.0%}; "
+                        "re-run with --force to swap anyway."
+                    )
+            else:
+                report["failed_ratio"] = 0.0
+
+            _close_chroma_client(temp_client)
+            temp_client = None
+            _close_chroma_client(live_client)
+            live_client = None
+
+            if dry_run:
+                report["swap_aborted"] = True
+                report["abort_reasons"].append("Dry run completed; temp rebuild left in place and live store untouched.")
+                return report
+
+            if report["abort_reasons"]:
+                report["swap_aborted"] = True
+                return report
+
+            if live_dir.exists():
+                moved_backup_dir = _sibling_work_dir(live_dir, "old")
+                print(f"  Swapping live Chroma dir -> {moved_backup_dir}")
+                shutil.move(str(live_dir), str(moved_backup_dir))
+                report["backup_dir"] = str(moved_backup_dir)
+
+            print(f"  Promoting rebuild dir -> {live_dir}")
+            shutil.move(str(temp_dir), str(live_dir))
+            report["swap_succeeded"] = True
+            report["live_count_after"] = temp_count
+            report["live_dir_size_after"] = _directory_size_bytes(live_dir)
+            return report
+    except Exception as exc:
+        if moved_backup_dir and moved_backup_dir.exists() and not live_dir.exists():
+            try:
+                shutil.move(str(moved_backup_dir), str(live_dir))
+            except Exception as rollback_exc:
+                print(
+                    f"  ERROR rollback after rebuild failure: {type(rollback_exc).__name__}: {rollback_exc}"
+                )
+        print(f"  ERROR rebuild aborted before swap: {type(exc).__name__}: {exc}")
+        report["swap_aborted"] = True
+        report["abort_reasons"].append(f"{type(exc).__name__}: {exc}")
+        return report
+    finally:
+        _close_chroma_client(temp_client)
+        _close_chroma_client(live_client)
+
+
 def _emit_report(report, *, json_out=False):
     """Print reconcile or purge results in JSON or readable text form."""
     if json_out:
@@ -1106,6 +1399,36 @@ def _emit_report(report, *, json_out=False):
         print(f"Kept chunks: {report['kept_chunks']}")
         for reason, counts in report["reasons"].items():
             print(f"  {reason}: {counts['files']} files, {counts['chunks']} chunks")
+        return
+
+    if report.get("mode") == "rebuild":
+        print("Rebuild summary")
+        print("=" * 40)
+        print(f"Collection: {report['collection']}")
+        print(f"Dry run: {'yes' if report['dry_run'] else 'no'}")
+        print(f"Files on disk: {report['total_files_on_disk']}")
+        print(f"Chunks built: {report['new_chunks']}")
+        print(f"Failed (skipped on error): {report.get('failed_files', 0)}")
+        print(f"Live count before: {report.get('live_count_before', 0)}")
+        print(f"Temp count: {report.get('temp_count', 0)}")
+        print(f"Live dir size before: {report.get('live_dir_size_before', 0)}")
+        print(f"Temp dir size: {report.get('temp_dir_size', 0)}")
+        if report.get("swap_succeeded"):
+            print("Swap: success")
+            print(f"Backup dir: {report.get('backup_dir')}")
+            print(f"Live count after: {report.get('live_count_after', 0)}")
+            print(f"Live dir size after: {report.get('live_dir_size_after', 0)}")
+        else:
+            print("Swap: aborted")
+            for reason in report.get("abort_reasons", []):
+                print(f"  - {reason}")
+            print(f"Temp dir preserved: {report.get('temp_dir')}")
+        if report.get("failed_paths"):
+            print()
+            print("Failed paths")
+            print("=" * 40)
+            for failed_path in report["failed_paths"]:
+                print(f"  {failed_path}")
         return
 
     print("Reconcile summary")
@@ -1861,6 +2184,10 @@ def cmd_reconcile(args):
         print("ERROR: Pass --dry-run, --yes, or --json to run reconcile.")
         return
 
+    if args.rebuild and args.purge_ignored:
+        print("ERROR: --rebuild cannot be combined with --purge-ignored.")
+        return
+
     if args.purge_ignored:
         if args.collection:
             collections = [get_chroma_collection(args.collection)]
@@ -1900,8 +2227,21 @@ def cmd_reconcile(args):
     config = load_config()
     client = get_genai_client(get_api_key(config))
     collection_name = args.collection or DEFAULT_RECONCILE_COLLECTION
-    collection = get_chroma_collection(collection_name)
     roots = _parse_reconcile_roots(args.roots)
+    if args.rebuild:
+        report = _rebuild_collection(
+            client,
+            config,
+            collection_name,
+            roots,
+            dry_run=args.dry_run,
+            allow_shrink=args.allow_shrink,
+            force=args.force,
+        )
+        _emit_report(report, json_out=args.json)
+        return
+
+    collection = get_chroma_collection(collection_name)
     report = _reconcile_collection(client, config, collection, roots, dry_run=args.dry_run)
     report["orphan_reap"] = _reap_orphan_collections(dry_run=args.dry_run)
     report["reindex"] = _reindex_indexes(DEFAULT_WIKI_ROOT, dry_run=args.dry_run)
@@ -2758,6 +3098,12 @@ def main():
     p_reconcile.add_argument("--dry-run", action="store_true", help="Show what would change without mutating the collection")
     p_reconcile.add_argument("--json", "-j", action="store_true", help="Output reconcile results as JSON")
     p_reconcile.add_argument("--yes", action="store_true", help="Confirm destructive reconcile changes")
+    p_reconcile.add_argument("--rebuild", action="store_true",
+                             help="Build the collection from scratch in a temp Chroma dir and swap it in only on success")
+    p_reconcile.add_argument("--allow-shrink", action="store_true",
+                             help="Allow rebuild swap even when the rebuilt collection is far smaller than live")
+    p_reconcile.add_argument("--force", action="store_true",
+                             help="Allow rebuild swap even when too many files failed during the rebuild")
     p_reconcile.add_argument("--purge-ignored", action="store_true",
                              help="Only purge indexed chunks whose sources are ignored or missing from disk")
     p_reconcile.add_argument("--reap-orphans", action="store_true",

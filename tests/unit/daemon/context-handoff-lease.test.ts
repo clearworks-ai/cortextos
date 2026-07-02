@@ -223,6 +223,7 @@ describe('context handoff fleet lease', () => {
       injectMessage,
       getConfig: () => ({}),
       getAgentDir: () => agentDir,
+      getCtxRoot: () => ctxRoot,
       getOutputBuffer: () => ({ getRecent: () => '' }),
       sessionRefresh: () => Promise.resolve(),
     } as any;

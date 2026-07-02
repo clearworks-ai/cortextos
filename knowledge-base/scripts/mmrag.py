@@ -22,6 +22,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import socket
 import shutil
 import subprocess
 import sys
@@ -81,6 +82,16 @@ def _env_float(name, default):
         return default
 
 
+def _env_int(name, default):
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 RECENCY_TIE_BAND = _env_float("MMRAG_RECENCY_TIE_BAND", 0.05)
 RECENCY_MAX_LIFT = _env_float("MMRAG_RECENCY_MAX_LIFT", 0.05)
 AUTHORITATIVE_SIM = _env_float("MMRAG_AUTHORITATIVE_SIM", 0.7)
@@ -118,6 +129,8 @@ FLASH_OUTPUT_PRICE_PER_M = 0.60
 # Module-level so a fault-injection test client can reference the same set.
 TRANSIENT_HTTP_CODES = {429, 500, 503}
 TRANSIENT_STATUS_NAMES = {"UNAVAILABLE", "RESOURCE_EXHAUSTED"}
+DEFAULT_GEMINI_TIMEOUT_MS = 120000
+MMRAG_GEMINI_TIMEOUT_MS = _env_int("MMRAG_GEMINI_TIMEOUT_MS", DEFAULT_GEMINI_TIMEOUT_MS)
 
 USAGE_FILE = MMRAG_DIR / "usage.json"
 
@@ -258,18 +271,71 @@ def _load_factory(dotted_path):
 def get_genai_client(api_key):
     """Construct a Gemini client.
 
-    Default returns google.genai.Client(api_key=api_key) — byte-identical to
-    the prior behavior. To inject a fake client (e.g. for testing the retry
-    loop in ingest_pdf), set the env-var MMRAG_GEMINI_CLIENT_FACTORY to a
-    dotted import path of a callable taking (api_key) and returning an object
-    with .models.generate_content / .models.embed_content compatible shape.
-    See knowledge-base/scripts/_test_clients/fault_injection.py for a reference.
+    Default returns google.genai.Client(api_key=api_key, http_options=...) with
+    a bounded request timeout. To inject a fake client (e.g. for testing the
+    retry loop), set the env-var MMRAG_GEMINI_CLIENT_FACTORY to a dotted import
+    path of a callable taking (api_key) and returning an object with
+    .models.generate_content / .models.embed_content compatible shape. See
+    knowledge-base/scripts/_test_clients/fault_injection.py for a reference.
     """
     factory_path = os.environ.get("MMRAG_GEMINI_CLIENT_FACTORY")
     if factory_path:
         return _load_factory(factory_path)(api_key)
     from google import genai
-    return genai.Client(api_key=api_key)
+    from google.genai import types
+    return genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(timeout=MMRAG_GEMINI_TIMEOUT_MS),
+    )
+
+
+def _transient_timeout_exceptions():
+    exception_types = [TimeoutError, socket.timeout]
+    try:
+        import httpx
+    except ImportError:
+        httpx = None
+    if httpx is not None:
+        exception_types.extend([httpx.TimeoutException, httpx.TransportError])
+    return tuple(dict.fromkeys(exception_types))
+
+
+def _retry_api_call(fn, *, backoffs=(5, 15, 45)):
+    """Retry transient API and timeout/transport failures with bounded backoff."""
+    from google.genai import errors as _genai_errors
+
+    transient_timeout_errors = _transient_timeout_exceptions()
+    last_err = None
+    for attempt, backoff in enumerate(backoffs, start=1):
+        try:
+            return fn()
+        except _genai_errors.APIError as e:
+            last_err = e
+            is_transient = (e.code in TRANSIENT_HTTP_CODES) or (e.status in TRANSIENT_STATUS_NAMES)
+            if not is_transient:
+                raise
+            if attempt < len(backoffs):
+                print(
+                    f"    Transient error (HTTP {e.code} {e.status or ''}); retrying in {backoff}s "
+                    f"(attempt {attempt}/{len(backoffs)})"
+                )
+                time.sleep(backoff)
+            else:
+                print(f"    Exhausted retries on transient error: HTTP {e.code} {e.status or ''}")
+        except transient_timeout_errors as e:
+            last_err = e
+            if attempt < len(backoffs):
+                print(
+                    f"    Transient error (timeout/transport: {type(e).__name__}); retrying in {backoff}s "
+                    f"(attempt {attempt}/{len(backoffs)})"
+                )
+                time.sleep(backoff)
+            else:
+                print(
+                    f"    Exhausted retries on transient error: timeout/transport {type(e).__name__}"
+                )
+
+    raise last_err if last_err else RuntimeError("retry loop completed without response or error")
 
 
 def _retry_generate_content(client, *, model, contents, backoffs=(5, 15, 45)):
@@ -282,33 +348,23 @@ def _retry_generate_content(client, *, model, contents, backoffs=(5, 15, 45)):
     backoffs is a tuple of sleep seconds between attempts. len(backoffs) is the
     attempt count. Tests pass (0, 0, 0) to skip sleeps.
     """
-    from google.genai import errors as _genai_errors
-    last_err = None
-    for attempt, backoff in enumerate(backoffs, start=1):
-        try:
-            return client.models.generate_content(model=model, contents=contents)
-        except _genai_errors.APIError as e:
-            last_err = e
-            is_transient = (e.code in TRANSIENT_HTTP_CODES) or (e.status in TRANSIENT_STATUS_NAMES)
-            if not is_transient:
-                raise
-            if attempt < len(backoffs):
-                print(f"    Transient error (HTTP {e.code} {e.status or ''}); retrying in {backoff}s (attempt {attempt}/{len(backoffs)})")
-                time.sleep(backoff)
-            else:
-                print(f"    Exhausted retries on transient error: HTTP {e.code} {e.status or ''}")
-    raise last_err if last_err else RuntimeError("retry loop completed without response or error")
+    return _retry_api_call(
+        lambda: client.models.generate_content(model=model, contents=contents),
+        backoffs=backoffs,
+    )
 
 
 def embed_content(client, config, content, task_type="RETRIEVAL_DOCUMENT"):
     """Embed content using Gemini Embedding 2. Content can be text string or list of Parts."""
     from google.genai import types
-    result = client.models.embed_content(
-        model=config.get("embedding_model", "gemini-embedding-2-preview"),
-        contents=content,
-        config=types.EmbedContentConfig(
-            output_dimensionality=config.get("embedding_dimensions", DEFAULT_EMBEDDING_DIMENSIONS),
-            task_type=task_type,
+    result = _retry_api_call(
+        lambda: client.models.embed_content(
+            model=config.get("embedding_model", "gemini-embedding-2-preview"),
+            contents=content,
+            config=types.EmbedContentConfig(
+                output_dimensionality=config.get("embedding_dimensions", DEFAULT_EMBEDDING_DIMENSIONS),
+                task_type=task_type,
+            ),
         ),
     )
     if _tracker:

@@ -26,6 +26,7 @@ import os
 import socket
 import shutil
 import signal
+import sqlite3
 import subprocess
 import sys
 import time
@@ -137,6 +138,7 @@ TRANSIENT_HTTP_CODES = {429, 500, 503}
 TRANSIENT_STATUS_NAMES = {"UNAVAILABLE", "RESOURCE_EXHAUSTED"}
 DEFAULT_GEMINI_TIMEOUT_MS = 120000
 MMRAG_GEMINI_TIMEOUT_MS = _env_int("MMRAG_GEMINI_TIMEOUT_MS", DEFAULT_GEMINI_TIMEOUT_MS)
+DEFAULT_EMBED_CACHE_FILENAME = "embedding-cache.sqlite"
 
 USAGE_FILE = MMRAG_DIR / "usage.json"
 
@@ -363,19 +365,25 @@ def _retry_generate_content(client, *, model, contents, backoffs=(5, 15, 45)):
 def embed_content(client, config, content, task_type="RETRIEVAL_DOCUMENT"):
     """Embed content using Gemini Embedding 2. Content can be text string or list of Parts."""
     from google.genai import types
+    signature = _embed_cache_signature(config, content, task_type)
+    cache_hit, cached_embedding = _load_cached_embedding(signature["content_key"])
+    if cache_hit:
+        return cached_embedding
     result = _retry_api_call(
         lambda: client.models.embed_content(
-            model=config.get("embedding_model", "gemini-embedding-2-preview"),
+            model=signature["model"],
             contents=content,
             config=types.EmbedContentConfig(
-                output_dimensionality=config.get("embedding_dimensions", DEFAULT_EMBEDDING_DIMENSIONS),
+                output_dimensionality=signature["output_dimensionality"],
                 task_type=task_type,
             ),
         ),
     )
     if _tracker:
         _tracker.track_embedding(content)
-    return result.embeddings[0].values
+    values = result.embeddings[0].values
+    _store_cached_embedding(signature, values)
+    return values
 
 
 def embed_multimodal(client, config, description_text, media_bytes, mime_type):
@@ -457,6 +465,387 @@ def get_chroma_collection(collection_name="default", *, chroma_dir=None, chroma_
 def get_chroma_client(chroma_dir=None):
     import chromadb
     return chromadb.PersistentClient(path=str(chroma_dir or CHROMADB_DIR))
+
+
+def _embed_cache_enabled():
+    return os.environ.get("MMRAG_EMBED_CACHE", "1").strip() != "0"
+
+
+def _embed_cache_path():
+    override = os.environ.get("MMRAG_EMBED_CACHE_PATH", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    return (MMRAG_DIR / DEFAULT_EMBED_CACHE_FILENAME).resolve()
+
+
+def _open_embed_cache():
+    if not _embed_cache_enabled():
+        return None
+
+    cache_path = _embed_cache_path()
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(cache_path))
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS embedding_cache (
+            content_key TEXT PRIMARY KEY,
+            model TEXT NOT NULL,
+            output_dimensionality INTEGER NOT NULL,
+            task_type TEXT NOT NULL,
+            embedding_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS reconcile_checkpoints (
+            run_key TEXT PRIMARY KEY,
+            state_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    return conn
+
+
+def _warn_embed_cache(action: str, exc: Exception):
+    print(f"  WARNING embed cache {action} failed: {type(exc).__name__}: {exc}")
+
+
+def _canonicalize_embed_value(value):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Path):
+        return {"__path__": str(value)}
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return {"__bytes__": bytes(value).hex()}
+    if isinstance(value, dict):
+        return {
+            str(key): _canonicalize_embed_value(value[key])
+            for key in sorted(value, key=lambda item: str(item))
+        }
+    if isinstance(value, (list, tuple)):
+        return [_canonicalize_embed_value(item) for item in value]
+
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        try:
+            dumped = model_dump(mode="python", exclude_none=True)
+        except TypeError:
+            dumped = model_dump()
+        return {
+            "__type__": type(value).__name__,
+            "value": _canonicalize_embed_value(dumped),
+        }
+
+    inline_data = getattr(value, "inline_data", None)
+    if inline_data is not None:
+        return {
+            "__type__": type(value).__name__,
+            "inline_data": _canonicalize_embed_value(inline_data),
+            "text": _canonicalize_embed_value(getattr(value, "text", None)),
+        }
+
+    data = getattr(value, "data", None)
+    mime_type = getattr(value, "mime_type", None)
+    text = getattr(value, "text", None)
+    if data is not None or mime_type is not None or text is not None:
+        return {
+            "__type__": type(value).__name__,
+            "data": _canonicalize_embed_value(data),
+            "mime_type": _canonicalize_embed_value(mime_type),
+            "text": _canonicalize_embed_value(text),
+        }
+
+    attrs = getattr(value, "__dict__", None)
+    if isinstance(attrs, dict) and attrs:
+        return {
+            "__type__": type(value).__name__,
+            "attrs": _canonicalize_embed_value(
+                {
+                    key: attr
+                    for key, attr in attrs.items()
+                    if not key.startswith("_") and not callable(attr)
+                }
+            ),
+        }
+
+    return {
+        "__type__": type(value).__name__,
+        "value": str(value),
+    }
+
+
+def _canonical_embed_bytes(content):
+    if isinstance(content, str):
+        return content.encode("utf-8")
+    canonical = _canonicalize_embed_value(content)
+    return json.dumps(
+        canonical,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+
+def _embed_cache_signature(config, content, task_type):
+    model = config.get("embedding_model", "gemini-embedding-2-preview")
+    output_dimensionality = config.get("embedding_dimensions", DEFAULT_EMBEDDING_DIMENSIONS)
+    content_hash = hashlib.sha256(_canonical_embed_bytes(content)).hexdigest()
+    return {
+        "content_key": f"{content_hash}|{model}|{output_dimensionality}|{task_type}",
+        "model": model,
+        "output_dimensionality": output_dimensionality,
+        "task_type": task_type,
+    }
+
+
+def _load_cached_embedding(content_key):
+    if not _embed_cache_enabled():
+        return False, None
+    conn = None
+    try:
+        conn = _open_embed_cache()
+        if conn is None:
+            return False, None
+        row = conn.execute(
+            "SELECT embedding_json FROM embedding_cache WHERE content_key = ?",
+            (content_key,),
+        ).fetchone()
+        if row is None:
+            return False, None
+        return True, [float(value) for value in json.loads(row[0])]
+    except Exception as exc:
+        _warn_embed_cache("read", exc)
+        return False, None
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _store_cached_embedding(signature, embedding):
+    if not _embed_cache_enabled():
+        return False
+    conn = None
+    try:
+        conn = _open_embed_cache()
+        if conn is None:
+            return False
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO embedding_cache (
+                content_key, model, output_dimensionality, task_type, embedding_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                signature["content_key"],
+                signature["model"],
+                signature["output_dimensionality"],
+                signature["task_type"],
+                json.dumps([float(value) for value in embedding]),
+                time.strftime("%Y-%m-%dT%H:%M:%S"),
+            ),
+        )
+        conn.commit()
+        return True
+    except Exception as exc:
+        _warn_embed_cache("write", exc)
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _checkpoint_run_key(mode, collection_name, roots, *, live_dir=None):
+    payload = {
+        "mode": mode,
+        "collection": collection_name,
+        "roots": [str(Path(root).expanduser().resolve()) for root in roots],
+    }
+    if live_dir is not None:
+        payload["live_dir"] = str(Path(live_dir).expanduser().resolve())
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _default_checkpoint_state(run_key, mode, collection_name, roots, *, target_dir=None):
+    return {
+        "run_key": run_key,
+        "mode": mode,
+        "collection": collection_name,
+        "roots": [str(Path(root).expanduser().resolve()) for root in roots],
+        "target_dir": str(Path(target_dir).resolve()) if target_dir else None,
+        "completed_files": {},
+    }
+
+
+def _load_checkpoint_state(run_key, default_state, *, fresh=False):
+    if fresh or not _embed_cache_enabled():
+        return dict(default_state), False
+    conn = None
+    try:
+        conn = _open_embed_cache()
+        if conn is None:
+            return dict(default_state), False
+        row = conn.execute(
+            "SELECT state_json FROM reconcile_checkpoints WHERE run_key = ?",
+            (run_key,),
+        ).fetchone()
+        if row is None:
+            return dict(default_state), False
+        loaded = json.loads(row[0])
+        if not isinstance(loaded, dict):
+            return dict(default_state), False
+        merged = dict(default_state)
+        merged.update(loaded)
+        completed_files = merged.get("completed_files")
+        merged["completed_files"] = completed_files if isinstance(completed_files, dict) else {}
+        return merged, True
+    except Exception as exc:
+        _warn_embed_cache("checkpoint-read", exc)
+        return dict(default_state), False
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _save_checkpoint_state(state):
+    if not _embed_cache_enabled():
+        return False
+    conn = None
+    try:
+        conn = _open_embed_cache()
+        if conn is None:
+            return False
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO reconcile_checkpoints (run_key, state_json, updated_at)
+            VALUES (?, ?, ?)
+            """,
+            (
+                state["run_key"],
+                json.dumps(state, sort_keys=True),
+                time.strftime("%Y-%m-%dT%H:%M:%S"),
+            ),
+        )
+        conn.commit()
+        return True
+    except Exception as exc:
+        _warn_embed_cache("checkpoint-write", exc)
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _clear_checkpoint_state(run_key):
+    if not _embed_cache_enabled():
+        return False
+    conn = None
+    try:
+        conn = _open_embed_cache()
+        if conn is None:
+            return False
+        conn.execute("DELETE FROM reconcile_checkpoints WHERE run_key = ?", (run_key,))
+        conn.commit()
+        return True
+    except Exception as exc:
+        _warn_embed_cache("checkpoint-clear", exc)
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _checkpoint_skips_file(state, source, content_hash):
+    completed_files = (state or {}).get("completed_files") or {}
+    return completed_files.get(source) == content_hash
+
+
+def _checkpoint_mark_complete(state, source, content_hash):
+    if state is None:
+        return
+    state.setdefault("completed_files", {})[source] = content_hash
+    _save_checkpoint_state(state)
+
+
+def _backfill_embed_cache_from_collection(collection, config):
+    report = {
+        "attempted": 0,
+        "backfilled": 0,
+        "lazy_fallback": False,
+    }
+    if collection is None or not _embed_cache_enabled():
+        return report
+
+    conn = None
+    try:
+        conn = _open_embed_cache()
+        if conn is None:
+            return report
+        offset = 0
+        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+
+        while True:
+            page = collection.get(
+                include=["documents", "embeddings"],
+                limit=GET_BATCH_SIZE,
+                offset=offset,
+            )
+            page_ids = page.get("ids") or []
+            if not page_ids:
+                break
+
+            page_documents = page.get("documents") or []
+            page_embeddings = page.get("embeddings")
+            if page_embeddings is None:
+                page_embeddings = []
+            rows = []
+            for idx, _doc_id in enumerate(page_ids):
+                document = page_documents[idx] if idx < len(page_documents) else None
+                embedding = page_embeddings[idx] if idx < len(page_embeddings) else None
+                if document is None or embedding is None:
+                    continue
+                signature = _embed_cache_signature(config, document, "RETRIEVAL_DOCUMENT")
+                rows.append(
+                    (
+                        signature["content_key"],
+                        signature["model"],
+                        signature["output_dimensionality"],
+                        signature["task_type"],
+                        json.dumps([float(value) for value in embedding]),
+                        now,
+                    )
+                )
+
+            if rows:
+                report["attempted"] += len(rows)
+                before = conn.total_changes
+                conn.executemany(
+                    """
+                    INSERT OR IGNORE INTO embedding_cache (
+                        content_key, model, output_dimensionality, task_type, embedding_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    rows,
+                )
+                conn.commit()
+                report["backfilled"] += conn.total_changes - before
+
+            if len(page_ids) < GET_BATCH_SIZE:
+                break
+            offset += GET_BATCH_SIZE
+
+        return report
+    except Exception as exc:
+        _warn_embed_cache("backfill", exc)
+        report["lazy_fallback"] = True
+        return report
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def _get_existing_collection(chroma_client, collection_name):
@@ -1010,24 +1399,31 @@ def _collect_index_state(collection):
     return state
 
 
-def _get_all_metadatas(collection):
-    """Fetch ids and metadatas in bounded pages to avoid large Chroma SQL variable limits."""
-    ids = []
-    metadatas = []
+def _get_all_collection_rows(collection, include):
+    """Fetch ids and requested fields in bounded pages to avoid large Chroma SQL variable limits."""
+    rows = {"ids": []}
+    for field in include:
+        rows[field] = []
     offset = 0
 
     while True:
-        page = collection.get(include=["metadatas"], limit=GET_BATCH_SIZE, offset=offset)
+        page = collection.get(include=list(include), limit=GET_BATCH_SIZE, offset=offset)
         page_ids = page.get("ids") or []
         if not page_ids:
             break
-        ids.extend(page_ids)
-        metadatas.extend(page.get("metadatas") or [])
+        rows["ids"].extend(page_ids)
+        for field in include:
+            rows[field].extend(page.get(field) or [])
         if len(page_ids) < GET_BATCH_SIZE:
             break
         offset += GET_BATCH_SIZE
 
-    return {"ids": ids, "metadatas": metadatas}
+    return rows
+
+
+def _get_all_metadatas(collection):
+    """Fetch ids and metadatas in bounded pages to avoid large Chroma SQL variable limits."""
+    return _get_all_collection_rows(collection, include=["metadatas"])
 
 
 def _delete_ids_in_batches(collection, ids, *, label="chunk batch"):
@@ -1126,10 +1522,30 @@ def _scan_disk_state(roots):
     return state
 
 
-def _reconcile_collection(client, config, collection, roots, *, dry_run=False):
+def _reconcile_collection(client, config, collection, roots, *, dry_run=False, fresh=False):
     """Make a collection mirror the current disk state for the supplied roots."""
     disk_state = _scan_disk_state(roots)
     index_state = _collect_index_state(collection)
+    checkpoint_state = None
+    resumed_files = 0
+
+    if not dry_run:
+        run_key = _checkpoint_run_key(
+            "reconcile",
+            getattr(collection, "name", "unknown"),
+            roots,
+        )
+        checkpoint_state, _ = _load_checkpoint_state(
+            run_key,
+            _default_checkpoint_state(
+                run_key,
+                "reconcile",
+                getattr(collection, "name", "unknown"),
+                roots,
+            ),
+            fresh=fresh,
+        )
+        _save_checkpoint_state(checkpoint_state)
 
     new_sources = []
     changed_sources = []
@@ -1196,9 +1612,14 @@ def _reconcile_collection(client, config, collection, roots, *, dry_run=False):
     new_chunks = 0
     if not dry_run:
         for source in sorted(new_sources + successful_changed_sources):
+            file_hash = disk_state[source]["content_hash"]
+            if _checkpoint_skips_file(checkpoint_state, source, file_hash):
+                resumed_files += 1
+                continue
             file_path = disk_state[source]["path"]
             try:
                 new_chunks += ingest_file(client, config, collection, file_path)
+                _checkpoint_mark_complete(checkpoint_state, source, file_hash)
             except Exception as exc:
                 error_message = " ".join(str(exc).split()) or "<no message>"
                 print(f"  SKIP (error): {file_path} — {type(exc).__name__}: {error_message}")
@@ -1208,6 +1629,8 @@ def _reconcile_collection(client, config, collection, roots, *, dry_run=False):
     total_files_indexed_after = len(index_state) - len(removed_sources) - len(ignored_sources) + len(new_sources)
     if not dry_run:
         total_files_indexed_after = len(_collect_index_state(collection))
+        if checkpoint_state is not None and not failed_paths and delete_failures["files"] == 0:
+            _clear_checkpoint_state(checkpoint_state["run_key"])
 
     return {
         "collection": getattr(collection, "name", "unknown"),
@@ -1224,20 +1647,27 @@ def _reconcile_collection(client, config, collection, roots, *, dry_run=False):
         "delete_failures": delete_failures,
         "failed_files": len(failed_paths),
         "failed_paths": failed_paths,
+        "resumed_files": resumed_files,
         "roots": [str(Path(root)) for root in roots],
     }
 
 
-def _build_collection_from_disk(client, config, collection, roots):
+def _build_collection_from_disk(client, config, collection, roots, *, checkpoint_state=None):
     """Populate a fresh collection from disk with per-file isolation."""
     disk_state = _scan_disk_state(roots)
     failed_paths = []
     new_chunks = 0
+    resumed_files = 0
 
     for source in sorted(disk_state):
+        file_hash = disk_state[source]["content_hash"]
+        if _checkpoint_skips_file(checkpoint_state, source, file_hash):
+            resumed_files += 1
+            continue
         file_path = disk_state[source]["path"]
         try:
             new_chunks += ingest_file(client, config, collection, file_path)
+            _checkpoint_mark_complete(checkpoint_state, source, file_hash)
         except Exception as exc:
             error_message = " ".join(str(exc).split()) or "<no message>"
             print(f"  SKIP (error): {file_path} — {type(exc).__name__}: {error_message}")
@@ -1249,6 +1679,7 @@ def _build_collection_from_disk(client, config, collection, roots):
         "new_chunks": new_chunks,
         "failed_files": len(failed_paths),
         "failed_paths": failed_paths,
+        "resumed_files": resumed_files,
         "total_files_on_disk": len(disk_state),
         "total_files_indexed_after": total_files_indexed_after,
     }
@@ -1263,6 +1694,7 @@ def _rebuild_collection(
     dry_run=False,
     allow_shrink=False,
     force=False,
+    fresh=False,
     chroma_dir=None,
 ):
     """Build a fresh collection in a temp dir and swap it into place on success."""
@@ -1286,10 +1718,12 @@ def _rebuild_collection(
     live_client = None
     temp_client = None
     moved_backup_dir = None
+    checkpoint_state = None
 
     try:
         with _temporary_rebuild_signal_handlers():
             live_count = 0
+            existing_collection = None
             if live_dir.exists():
                 live_client = get_chroma_client(chroma_dir=live_dir)
                 existing_collection = _get_existing_collection(live_client, collection_name)
@@ -1299,10 +1733,48 @@ def _rebuild_collection(
             report["live_count_before"] = live_count
             report["live_dir_size_before"] = live_size
 
-            temp_dir.mkdir(parents=True, exist_ok=False)
+            if not dry_run:
+                run_key = _checkpoint_run_key(
+                    "rebuild",
+                    collection_name,
+                    roots,
+                    live_dir=live_dir,
+                )
+                checkpoint_state, _ = _load_checkpoint_state(
+                    run_key,
+                    _default_checkpoint_state(run_key, "rebuild", collection_name, roots),
+                    fresh=fresh,
+                )
+                checkpoint_dir = checkpoint_state.get("target_dir")
+                if checkpoint_dir and Path(checkpoint_dir).exists():
+                    temp_dir = Path(checkpoint_dir)
+                    report["temp_dir"] = str(temp_dir)
+                    report["checkpoint_resumed"] = True
+                else:
+                    if checkpoint_dir:
+                        checkpoint_state["completed_files"] = {}
+                    checkpoint_state["target_dir"] = str(temp_dir)
+                    _save_checkpoint_state(checkpoint_state)
+                    report["checkpoint_resumed"] = False
+
+            temp_dir.mkdir(parents=True, exist_ok=bool(report.get("checkpoint_resumed")))
             temp_client = get_chroma_client(chroma_dir=temp_dir)
             temp_collection = get_chroma_collection(collection_name, chroma_client=temp_client)
-            build_report = _build_collection_from_disk(client, config, temp_collection, roots)
+            if checkpoint_state is not None and checkpoint_state.get("completed_files") and temp_collection.count() == 0:
+                checkpoint_state["completed_files"] = {}
+                _save_checkpoint_state(checkpoint_state)
+            report["cache_backfill"] = (
+                {"attempted": 0, "backfilled": 0, "lazy_fallback": False}
+                if dry_run
+                else _backfill_embed_cache_from_collection(existing_collection, config)
+            )
+            build_report = _build_collection_from_disk(
+                client,
+                config,
+                temp_collection,
+                roots,
+                checkpoint_state=checkpoint_state,
+            )
             report.update(build_report)
 
             temp_count = temp_collection.count()
@@ -1366,6 +1838,8 @@ def _rebuild_collection(
             report["swap_succeeded"] = True
             report["live_count_after"] = temp_count
             report["live_dir_size_after"] = _directory_size_bytes(live_dir)
+            if checkpoint_state is not None:
+                _clear_checkpoint_state(checkpoint_state["run_key"])
             return report
     except Exception as exc:
         if moved_backup_dir and moved_backup_dir.exists() and not live_dir.exists():
@@ -1408,7 +1882,14 @@ def _emit_report(report, *, json_out=False):
         print(f"Dry run: {'yes' if report['dry_run'] else 'no'}")
         print(f"Files on disk: {report['total_files_on_disk']}")
         print(f"Chunks built: {report['new_chunks']}")
+        print(f"Resumed files skipped: {report.get('resumed_files', 0)}")
         print(f"Failed (skipped on error): {report.get('failed_files', 0)}")
+        cache_backfill = report.get("cache_backfill") or {}
+        if cache_backfill:
+            print(
+                f"Cache backfill: {cache_backfill.get('backfilled', 0)} inserted "
+                f"from {cache_backfill.get('attempted', 0)} live chunks"
+            )
         print(f"Live count before: {report.get('live_count_before', 0)}")
         print(f"Temp count: {report.get('temp_count', 0)}")
         print(f"Live dir size before: {report.get('live_dir_size_before', 0)}")
@@ -1440,6 +1921,7 @@ def _emit_report(report, *, json_out=False):
     print(f"Removed files: {report['removed_files']}")
     print(f"Ignored files: {report['ignored_files']}")
     print(f"Unchanged files: {report['unchanged_files']}")
+    print(f"Resumed files skipped: {report.get('resumed_files', 0)}")
     print(f"Failed (skipped on error): {report.get('failed_files', 0)}")
     print(f"Purged chunks: {report['purged_chunks']}")
     print(f"New chunks: {report['new_chunks']}")
@@ -2237,12 +2719,20 @@ def cmd_reconcile(args):
             dry_run=args.dry_run,
             allow_shrink=args.allow_shrink,
             force=args.force,
+            fresh=args.fresh,
         )
         _emit_report(report, json_out=args.json)
         return
 
     collection = get_chroma_collection(collection_name)
-    report = _reconcile_collection(client, config, collection, roots, dry_run=args.dry_run)
+    report = _reconcile_collection(
+        client,
+        config,
+        collection,
+        roots,
+        dry_run=args.dry_run,
+        fresh=args.fresh,
+    )
     report["orphan_reap"] = _reap_orphan_collections(dry_run=args.dry_run)
     report["reindex"] = _reindex_indexes(DEFAULT_WIKI_ROOT, dry_run=args.dry_run)
     _emit_report(report, json_out=args.json)
@@ -3100,6 +3590,8 @@ def main():
     p_reconcile.add_argument("--yes", action="store_true", help="Confirm destructive reconcile changes")
     p_reconcile.add_argument("--rebuild", action="store_true",
                              help="Build the collection from scratch in a temp Chroma dir and swap it in only on success")
+    p_reconcile.add_argument("--fresh", action="store_true",
+                             help="Ignore any resumable checkpoint and start this reconcile or rebuild from scratch")
     p_reconcile.add_argument("--allow-shrink", action="store_true",
                              help="Allow rebuild swap even when the rebuilt collection is far smaller than live")
     p_reconcile.add_argument("--force", action="store_true",

@@ -95,6 +95,7 @@ RECENCY_HALF_LIFE_DAYS = {
 DEFAULT_HALF_LIFE_DAYS = 90
 NEUTRAL_DECAY = 0.5
 DELETE_BATCH_SIZE = 500
+GET_BATCH_SIZE = 5000
 DEFAULT_TOP_DOCS = 5
 MAX_FULL_DOC_BYTES = 200 * 1024
 AUTO_INDEX_BEGIN = "<!-- BEGIN AUTO-INDEX (managed by mmrag reindex — do not edit below) -->"
@@ -856,7 +857,7 @@ def _iter_reconcile_files(roots):
 
 def _collect_index_state(collection):
     """Group indexed chunks by source path, with their ids and recorded content hashes."""
-    all_data = collection.get(include=["metadatas"])
+    all_data = _get_all_metadatas(collection)
     ids = all_data.get("ids") or []
     metadatas = all_data.get("metadatas") or []
     state = {}
@@ -870,6 +871,26 @@ def _collect_index_state(collection):
         entry["hashes"].add((metadata or {}).get("content_hash", ""))
         entry["chunk_count"] += 1
     return state
+
+
+def _get_all_metadatas(collection):
+    """Fetch ids and metadatas in bounded pages to avoid large Chroma SQL variable limits."""
+    ids = []
+    metadatas = []
+    offset = 0
+
+    while True:
+        page = collection.get(include=["metadatas"], limit=GET_BATCH_SIZE, offset=offset)
+        page_ids = page.get("ids") or []
+        if not page_ids:
+            break
+        ids.extend(page_ids)
+        metadatas.extend(page.get("metadatas") or [])
+        if len(page_ids) < GET_BATCH_SIZE:
+            break
+        offset += GET_BATCH_SIZE
+
+    return {"ids": ids, "metadatas": metadatas}
 
 
 def _delete_ids_in_batches(collection, ids, *, label="chunk batch"):
@@ -1005,6 +1026,7 @@ def _reconcile_collection(client, config, collection, roots, *, dry_run=False):
     successful_ignored_sources = []
     purged_chunks = 0
     delete_failures = {"files": 0, "chunks": 0, "batches": 0}
+    failed_paths = []
     delete_outcomes = {}
     delete_sources = changed_sources + removed_sources + ignored_sources
     for source in delete_sources:
@@ -1037,7 +1059,14 @@ def _reconcile_collection(client, config, collection, roots, *, dry_run=False):
     new_chunks = 0
     if not dry_run:
         for source in sorted(new_sources + successful_changed_sources):
-            new_chunks += ingest_file(client, config, collection, disk_state[source]["path"])
+            file_path = disk_state[source]["path"]
+            try:
+                new_chunks += ingest_file(client, config, collection, file_path)
+            except Exception as exc:
+                error_message = " ".join(str(exc).split()) or "<no message>"
+                print(f"  SKIP (error): {file_path} — {type(exc).__name__}: {error_message}")
+                failed_paths.append(str(file_path))
+                continue
 
     total_files_indexed_after = len(index_state) - len(removed_sources) - len(ignored_sources) + len(new_sources)
     if not dry_run:
@@ -1056,6 +1085,8 @@ def _reconcile_collection(client, config, collection, roots, *, dry_run=False):
         "total_files_on_disk": len(disk_state),
         "total_files_indexed_after": total_files_indexed_after,
         "delete_failures": delete_failures,
+        "failed_files": len(failed_paths),
+        "failed_paths": failed_paths,
         "roots": [str(Path(root)) for root in roots],
     }
 
@@ -1086,6 +1117,7 @@ def _emit_report(report, *, json_out=False):
     print(f"Removed files: {report['removed_files']}")
     print(f"Ignored files: {report['ignored_files']}")
     print(f"Unchanged files: {report['unchanged_files']}")
+    print(f"Failed (skipped on error): {report.get('failed_files', 0)}")
     print(f"Purged chunks: {report['purged_chunks']}")
     print(f"New chunks: {report['new_chunks']}")
     print(f"Files on disk: {report['total_files_on_disk']}")
@@ -1115,6 +1147,12 @@ def _emit_report(report, *, json_out=False):
         if reindex_report["dry_run"] and reindex_report["diffs"]:
             for diff_text in reindex_report["diffs"]:
                 print(diff_text, end="" if diff_text.endswith("\n") else "\n")
+    if report.get("failed_paths"):
+        print()
+        print("Failed paths")
+        print("=" * 40)
+        for failed_path in report["failed_paths"]:
+            print(f"  {failed_path}")
 
 
 def _recency_decay(created_at: str, doc_type: str, now: float = None) -> float:
@@ -1472,6 +1510,9 @@ def ingest_audio(client, config, collection, file_path):
 def ingest_pdf(client, config, collection, file_path):
     """Ingest a PDF page-by-page using Gemini to extract content including visual elements."""
     file_path = Path(file_path)
+    if os.path.getsize(file_path) == 0:
+        print(f"  SKIP (empty): {file_path}")
+        return 0
     from google.genai import types
     common_metadata = _common_source_metadata(file_path)
 
@@ -1710,8 +1751,13 @@ def ingest_file(client, config, collection, file_path):
     if parts & skip_dirs:
         return 0
 
+    size_bytes = os.path.getsize(file_path)
+    if size_bytes == 0:
+        print(f"  SKIP (empty): {file_path}")
+        return 0
+
     # Skip text files > 10MB (likely generated/binary)
-    size_mb = file_path.stat().st_size / (1024 * 1024)
+    size_mb = size_bytes / (1024 * 1024)
     if ext in TEXT_EXTS and size_mb > 10:
         print(f"  SKIP (too large: {size_mb:.0f}MB): {file_path}")
         return 0
@@ -2547,7 +2593,7 @@ def cmd_status(args):
     print(f"  Embedding dims: {config.get('embedding_dimensions', DEFAULT_EMBEDDING_DIMENSIONS)}")
 
     if count > 0:
-        all_data = collection.get(include=["metadatas"])
+        all_data = _get_all_metadatas(collection)
         types_map = {}
         sources = set()
         for meta in all_data["metadatas"]:
@@ -2571,7 +2617,7 @@ def cmd_list(args):
         print("No data found.")
         return
 
-    all_data = collection.get(include=["metadatas"])
+    all_data = _get_all_metadatas(collection)
     if not all_data["ids"]:
         print("No documents in collection.")
         return
@@ -2613,7 +2659,7 @@ def cmd_delete(args):
     collection = get_chroma_collection(collection_name)
 
     source_path = str(Path(args.path).resolve())
-    all_data = collection.get(include=["metadatas"])
+    all_data = _get_all_metadatas(collection)
 
     ids_to_delete = []
     for i, meta in enumerate(all_data["metadatas"]):

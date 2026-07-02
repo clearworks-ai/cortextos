@@ -22,11 +22,14 @@ class FakeCollection:
     def count(self):
         return len(self.records)
 
-    def get(self, ids=None, include=None):
+    def get(self, ids=None, include=None, limit=None, offset=None):
         if ids is None:
             keys = list(self.records.keys())
         else:
             keys = [doc_id for doc_id in ids if doc_id in self.records]
+        start = offset or 0
+        end = None if limit is None else start + limit
+        keys = keys[start:end]
         return {
             "ids": keys,
             "metadatas": [self.records[key]["metadata"] for key in keys],
@@ -325,3 +328,106 @@ def test_reconcile_skips_reingest_when_a_delete_batch_fails(tmp_path, monkeypatc
     assert report["delete_failures"]["files"] == 1
     assert ingest_calls == []
     assert report["total_files_indexed_after"] == 1
+
+
+def test_reconcile_continues_past_raising_file(tmp_path, monkeypatch, capsys):
+    root = tmp_path / "root"
+    root.mkdir()
+    good = root / "good.md"
+    bad = root / "bad.md"
+    good.write_text("good", encoding="utf-8")
+    bad.write_text("bad", encoding="utf-8")
+
+    collection = FakeCollection()
+
+    def fake_ingest(client, config, collection, file_path):
+        file_path = Path(file_path)
+        if file_path == bad:
+            raise RuntimeError("temporary upstream failure")
+        return _fake_ingest_file(client, config, collection, file_path)
+
+    monkeypatch.setattr(mmrag, "ingest_file", fake_ingest)
+
+    report = mmrag._reconcile_collection(None, {}, collection, [root], dry_run=False)
+    mmrag._emit_report(report)
+    captured = capsys.readouterr().out
+
+    assert report["failed_files"] == 1
+    assert report["failed_paths"] == [str(bad.resolve())]
+    assert report["new_chunks"] == 1
+    assert collection.count() == 1
+    assert str(good.resolve()) in mmrag._collect_index_state(collection)
+    assert "SKIP (error):" in captured
+    assert "RuntimeError: temporary upstream failure" in captured
+    assert "Failed (skipped on error): 1" in captured
+    assert str(bad.resolve()) in captured
+
+
+def test_zero_byte_pdf_skipped_before_extractor(tmp_path, monkeypatch, capsys):
+    empty_pdf = tmp_path / "empty.pdf"
+    empty_pdf.write_bytes(b"")
+    collection = FakeCollection()
+    extractor_calls = []
+
+    monkeypatch.setattr(
+        mmrag,
+        "_retry_generate_content",
+        lambda *args, **kwargs: extractor_calls.append((args, kwargs)),
+    )
+
+    count = mmrag.ingest_pdf(None, {}, collection, empty_pdf)
+    captured = capsys.readouterr().out
+
+    assert count == 0
+    assert extractor_calls == []
+    assert "SKIP (empty)" in captured
+
+
+def test_get_all_metadatas_pages_short_final_and_exact_multiple():
+    class PagedCollection:
+        def __init__(self, total_records):
+            self.calls = []
+            self.total_records = total_records
+            self.records = [
+                {
+                    "id": f"doc-{idx}",
+                    "metadata": {"source": f"/tmp/source-{idx}.md", "chunk_index": idx},
+                }
+                for idx in range(total_records)
+            ]
+
+        def get(self, ids=None, include=None, limit=None, offset=None):
+            self.calls.append({"include": include, "limit": limit, "offset": offset})
+            start = offset or 0
+            end = start + (limit or len(self.records))
+            page = self.records[start:end]
+            return {
+                "ids": [record["id"] for record in page],
+                "metadatas": [record["metadata"] for record in page],
+            }
+
+    short_final_total = (mmrag.GET_BATCH_SIZE * 2) + 123
+    short_final = PagedCollection(short_final_total)
+    short_result = mmrag._get_all_metadatas(short_final)
+
+    assert len(short_result["ids"]) == short_final_total
+    assert short_result["ids"][0] == "doc-0"
+    assert short_result["ids"][-1] == f"doc-{short_final_total - 1}"
+    assert short_result["metadatas"][-1]["chunk_index"] == short_final_total - 1
+    assert [call["offset"] for call in short_final.calls] == [
+        0,
+        mmrag.GET_BATCH_SIZE,
+        mmrag.GET_BATCH_SIZE * 2,
+    ]
+
+    exact_total = mmrag.GET_BATCH_SIZE * 2
+    exact_multiple = PagedCollection(exact_total)
+    exact_result = mmrag._get_all_metadatas(exact_multiple)
+
+    assert len(exact_result["ids"]) == exact_total
+    assert exact_result["ids"][-1] == f"doc-{exact_total - 1}"
+    assert [call["offset"] for call in exact_multiple.calls] == [
+        0,
+        mmrag.GET_BATCH_SIZE,
+        mmrag.GET_BATCH_SIZE * 2,
+    ]

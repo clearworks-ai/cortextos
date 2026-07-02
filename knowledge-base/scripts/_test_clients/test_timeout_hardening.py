@@ -86,6 +86,7 @@ def _get_scripted_client(monkeypatch, generate_spec, embed_spec):
     monkeypatch.setenv("MMRAG_GEMINI_CLIENT_FACTORY", "_test_clients.test_timeout_hardening:make_client")
     monkeypatch.setenv("MMRAG_TEST_GENERATE_SCRIPT", generate_spec)
     monkeypatch.setenv("MMRAG_TEST_EMBED_SCRIPT", embed_spec)
+    monkeypatch.setenv("MMRAG_EMBED_CACHE", "0")
     return mmrag.get_genai_client("fake-key")
 
 

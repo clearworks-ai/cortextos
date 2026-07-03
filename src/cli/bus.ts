@@ -28,6 +28,7 @@ import { logOutboundMessage, cacheLastSent } from '../telegram/logging.js';
 import { checkAndRecord } from '../telegram/dedup.js';
 import { appendToBuffer } from '../daemon/conversation-buffer.js';
 import { findBannedCronPrompts } from '../utils/cron-prompt-validator.js';
+import { evaluateCiAlert, gatherCiAlertContext } from '../utils/ci-alert-gate.js';
 import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext, CronDefinition, ConversationBufferEntry } from '../types/index.js';
 
 /**
@@ -2293,6 +2294,23 @@ busCommand
       );
     }
     console.log('');
+  });
+
+busCommand
+  .command('ci-alert-gate')
+  .description('Deterministically decide whether a GitHub CI failure should be surfaced (SURFACE/SKIP)')
+  .requiredOption('--repo <owner/repo>', 'GitHub repo, e.g. clearworks-ai/cortextos')
+  .requiredOption('--branch <branch>', 'Branch the failing run is on')
+  .option('--head-sha <sha>', 'Head SHA from the failing run/email (enables the behind-main gate)')
+  .option('--json', 'Emit { surface, reason } as JSON instead of SURFACE/SKIP')
+  .action((opts: { repo: string; branch: string; headSha?: string; json?: boolean }) => {
+    const ctx = gatherCiAlertContext(opts.repo, opts.branch, { headSha: opts.headSha });
+    const result = evaluateCiAlert(ctx);
+    if (opts.json) {
+      console.log(JSON.stringify(result));
+      return;
+    }
+    console.log(result.surface ? 'SURFACE' : 'SKIP');
   });
 
 busCommand

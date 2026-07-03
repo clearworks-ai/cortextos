@@ -37,6 +37,20 @@ vi.mock('../../../src/utils/org.js', () => ({
   normalizeOrgName: (_root: string, org: string) => org,
 }));
 
+// Mock the receipt WRITER only (so no real files land under $HOME during
+// these fs-mocked tests) while keeping the real parser — the success-path
+// tests exercise parseMmragReceiptLine end-to-end through ingest.
+const writeKBIngestReceiptMock = vi.fn();
+vi.mock('../../../src/bus/kb-receipts.js', async () => {
+  const actual = await vi.importActual<typeof import('../../../src/bus/kb-receipts.js')>(
+    '../../../src/bus/kb-receipts.js',
+  );
+  return {
+    ...actual,
+    writeKBIngestReceipt: (...args: unknown[]) => writeKBIngestReceiptMock(...args),
+  };
+});
+
 const { queryKnowledgeBase, ingestKnowledgeBase } = await import('../../../src/bus/knowledge-base.js');
 
 // Minimal BusPaths stub — knowledge-base.ts doesn't actually USE the paths
@@ -65,28 +79,53 @@ let warnLog: string[] = [];
 let originalWarn: typeof console.warn;
 let logLog: string[] = [];
 let originalLog: typeof console.log;
+let errorLog: string[] = [];
+let originalError: typeof console.error;
+let stdoutWrites: string[] = [];
+let stdoutSpy: { mockRestore(): void };
+let stderrWrites: string[] = [];
+let stderrSpy: { mockRestore(): void };
 
 beforeEach(() => {
   fsMocks.existsSync.mockReset();
   fsMocks.readFileSync.mockReset().mockReturnValue('');
   fsMocks.mkdirSync.mockReset();
   execFileSyncMock.mockReset();
+  writeKBIngestReceiptMock.mockReset();
 
   warnLog = [];
   logLog = [];
+  errorLog = [];
+  stdoutWrites = [];
   originalWarn = console.warn;
   originalLog = console.log;
+  originalError = console.error;
   console.warn = (...args: unknown[]) => {
     warnLog.push(args.map((a) => String(a)).join(' '));
   };
   console.log = (...args: unknown[]) => {
     logLog.push(args.map((a) => String(a)).join(' '));
   };
+  console.error = (...args: unknown[]) => {
+    errorLog.push(args.map((a) => String(a)).join(' '));
+  };
+  stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: unknown) => {
+    stdoutWrites.push(String(chunk));
+    return true;
+  }) as typeof process.stdout.write);
+  stderrWrites = [];
+  stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(((chunk: unknown) => {
+    stderrWrites.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write);
 });
 
 afterEach(() => {
   console.warn = originalWarn;
   console.log = originalLog;
+  console.error = originalError;
+  stdoutSpy.mockRestore();
+  stderrSpy.mockRestore();
 });
 
 /**
@@ -194,5 +233,130 @@ describe('kb warn messages — UX invariants', () => {
     const specificOrgWarns = warnLog.filter((m) => m.includes('SpecificOrg'));
     expect(specificOrgWarns.length).toBeGreaterThanOrEqual(2);
     expect(specificOrgWarns.every((m) => /run setup/i.test(m))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fail-loud ingest receipts (WS5b) — kills the exit-0-on-ETIMEDOUT class
+// ---------------------------------------------------------------------------
+
+function lastWrittenReceipt(): Record<string, unknown> {
+  expect(writeKBIngestReceiptMock).toHaveBeenCalled();
+  const call = writeKBIngestReceiptMock.mock.calls.at(-1) as unknown[];
+  return call[2] as Record<string, unknown>;
+}
+
+describe('ingestKnowledgeBase — receipts', () => {
+  it('success with MMRAG_INGEST_RECEIPT line: receipt has exact parsed counts, status ok, exit_code 0', () => {
+    mockConfiguredKb();
+    execFileSyncMock.mockReturnValue(
+      'Ingesting file 1...\n' +
+      'MMRAG_INGEST_RECEIPT {"added":3,"updated":1,"skipped":2,"errored":0}\n',
+    );
+
+    const receipt = ingestKnowledgeBase(['/some/file.md'], baseOptions);
+
+    expect(writeKBIngestReceiptMock).toHaveBeenCalledTimes(1);
+    const [instanceId, org, written] = writeKBIngestReceiptMock.mock.calls[0] as [
+      string, string, Record<string, unknown>,
+    ];
+    expect(instanceId).toBe('test');
+    expect(org).toBe('TestOrg');
+    expect(written).toMatchObject({
+      collection: 'shared-TestOrg',
+      added: 3,
+      updated: 1,
+      skipped: 2,
+      errored: 0,
+      exit_code: 0,
+      status: 'ok',
+    });
+    expect(typeof written.run_at).toBe('string');
+    expect(typeof written.duration_ms).toBe('number');
+    // Return value is the same receipt
+    expect(receipt).toMatchObject({ added: 3, updated: 1, errored: 0, status: 'ok' });
+    // Captured stdout is echoed back so operator UX is preserved
+    expect(stdoutWrites.join('')).toContain('Ingesting file 1...');
+  });
+
+  it('success WITHOUT a receipt line: counts are null, status ok, no throw', () => {
+    mockConfiguredKb();
+    execFileSyncMock.mockReturnValue('plain output, no receipt line\n');
+
+    expect(() => ingestKnowledgeBase(['/some/file.md'], baseOptions)).not.toThrow();
+
+    const written = lastWrittenReceipt();
+    expect(written).toMatchObject({
+      added: null,
+      updated: null,
+      skipped: null,
+      errored: null,
+      exit_code: 0,
+      status: 'ok',
+    });
+  });
+
+  it('child killed by timeout (ETIMEDOUT/signal/status null): receipt status timeout AND re-throw', () => {
+    mockConfiguredKb();
+    const timeoutErr = Object.assign(new Error('spawnSync python3 ETIMEDOUT'), {
+      code: 'ETIMEDOUT',
+      signal: 'SIGTERM',
+      status: null,
+      stdout: 'partial output before the kill\n',
+      stderr: '',
+    });
+    execFileSyncMock.mockImplementation(() => { throw timeoutErr; });
+
+    expect(() => ingestKnowledgeBase(['/some/file.md'], baseOptions)).toThrow(/ETIMEDOUT/);
+
+    const written = lastWrittenReceipt();
+    expect(written).toMatchObject({
+      status: 'timeout',
+      added: null,
+      errored: null,
+    });
+    expect(String(written.error)).toContain('ETIMEDOUT');
+    // Partial child output is still echoed
+    expect(stdoutWrites.join('')).toContain('partial output before the kill');
+  });
+
+  it('child exits non-zero: receipt status error with the REAL exit code AND re-throw', () => {
+    mockConfiguredKb();
+    const exitErr = Object.assign(new Error('Command failed: python3 mmrag.py ingest'), {
+      status: 2,
+      signal: null,
+      stdout: '',
+      stderr: 'Traceback: boom\n',
+    });
+    execFileSyncMock.mockImplementation(() => { throw exitErr; });
+
+    expect(() => ingestKnowledgeBase(['/some/file.md'], baseOptions)).toThrow(/Command failed/);
+
+    const written = lastWrittenReceipt();
+    expect(written).toMatchObject({ status: 'error', exit_code: 2 });
+    // Captured child stderr is echoed to the parent's stderr
+    expect(stderrWrites.join('')).toContain('Traceback: boom');
+  });
+
+  it('errored>0: receipt is written AND the call throws (can never exit 0) with a loud stderr line', () => {
+    mockConfiguredKb();
+    execFileSyncMock.mockReturnValue(
+      'MMRAG_INGEST_RECEIPT {"added":5,"updated":0,"skipped":1,"errored":2}\n',
+    );
+
+    expect(() => ingestKnowledgeBase(['/some/file.md'], baseOptions)).toThrow(/2 errored file/);
+
+    // Receipt was written BEFORE the throw, with the real counts on it
+    const written = lastWrittenReceipt();
+    expect(written).toMatchObject({ added: 5, errored: 2, exit_code: 0 });
+    // Loud operator-facing escalation line
+    expect(errorLog.some((m) => m.includes('INGEST COMPLETED WITH ERRORS') && m.includes('2'))).toBe(true);
+  });
+
+  it('missing config early-return writes NO receipt (skip, not a run)', () => {
+    mockMissingKbConfig();
+    const result = ingestKnowledgeBase(['/some/file.md'], baseOptions);
+    expect(result).toBeUndefined();
+    expect(writeKBIngestReceiptMock).not.toHaveBeenCalled();
   });
 });

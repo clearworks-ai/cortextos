@@ -113,15 +113,17 @@ for path in "${PATHS[@]}"; do
   echo "  Source: $path"
 done
 
-"$VENV_DIR/bin/python3" "$MMRAG_PY" ingest "${PATHS[@]}" \
+# NOTE: under `set -euo pipefail` a bare `exit_code=$?` after the call is dead
+# code — a non-zero exit would abort the script before ever reaching it. The
+# `if !` form disables errexit for the command so the child's REAL exit code
+# is captured and propagated explicitly.
+if ! "$VENV_DIR/bin/python3" "$MMRAG_PY" ingest "${PATHS[@]}" \
   --collection "$COLLECTION" \
-  ${FORCE}
-
-exit_code=$?
-if [[ $exit_code -eq 0 ]]; then
-  echo ""
-  echo "Ingest complete → collection: $COLLECTION"
-else
-  echo "Ingest failed (exit $exit_code)"
-  exit $exit_code
+  ${FORCE}; then
+  exit_code=$?
+  echo "Ingest failed (exit $exit_code)" >&2
+  exit "$exit_code"
 fi
+
+echo ""
+echo "Ingest complete → collection: $COLLECTION"

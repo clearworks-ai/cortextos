@@ -4,6 +4,11 @@ import { join } from 'path';
 import { homedir } from 'os';
 import type { BusPaths } from '../types/index.js';
 import { normalizeOrgName } from '../utils/org.js';
+import {
+  parseMmragReceiptLine,
+  writeKBIngestReceipt,
+  type KBIngestReceipt,
+} from './kb-receipts.js';
 
 /**
  * Knowledge base integration — calls mmrag.py directly (cross-platform,
@@ -240,6 +245,19 @@ export function queryKnowledgeBase(
 
 /**
  * Ingest files into the knowledge base.
+ *
+ * Fail-loud contract (kills the false-success class from the live incident
+ * where the cron logged exit 0 for 7/7 runs while ETIMEDOUT was killing
+ * mmrag.py):
+ *   - every run that reaches the child writes a KBIngestReceipt
+ *     (state/kb/last-ingest-receipt.json + ingest-receipts.jsonl);
+ *   - child failure/timeout → receipt written FIRST, then the error is
+ *     re-thrown so the CLI exits non-zero;
+ *   - a completed run with errored>0 also throws — errored>0 must never
+ *     silently pass.
+ *
+ * Returns the receipt on success, or undefined when the KB is not configured
+ * for the org (the pre-existing warn-and-skip early return, kept as-is).
  */
 export function ingestKnowledgeBase(
   paths: string[],
@@ -251,7 +269,7 @@ export function ingestKnowledgeBase(
     frameworkRoot: string;
     instanceId: string;
   },
-): void {
+): KBIngestReceipt | undefined {
   const { agent, scope = 'shared', force, frameworkRoot, instanceId } = options;
   // Normalize once (see queryKnowledgeBase for rationale).
   const org = normalizeOrgName(frameworkRoot, options.org);
@@ -316,14 +334,93 @@ export function ingestKnowledgeBase(
       : KB_INGEST_TIMEOUT_DEFAULT_MS,
   );
 
-  execFileSync(pythonPath, args, {
-    encoding: 'utf-8',
-    timeout: ingestTimeoutMs,
-    env,
-    stdio: 'inherit',
-  });
+  // Capture stdout instead of stdio:'inherit' so the MMRAG_INGEST_RECEIPT
+  // line can be parsed after the run. stderr still streams live to the
+  // parent's stderr (execFileSync default when stdio is unspecified), and
+  // captured stdout is echoed below so operator UX is preserved.
+  const startedAt = Date.now();
+  const runAt = new Date(startedAt).toISOString();
+  let stdout: string;
+  try {
+    stdout = execFileSync(pythonPath, args, {
+      encoding: 'utf-8',
+      timeout: ingestTimeoutMs,
+      env,
+      maxBuffer: 32 * 1024 * 1024,
+    });
+  } catch (err) {
+    const e = err as {
+      stdout?: string;
+      stderr?: string;
+      signal?: string | null;
+      status?: number | null;
+      code?: string;
+      message?: string;
+    };
+    // Echo whatever the child managed to produce before dying.
+    if (e.stdout) process.stdout.write(String(e.stdout));
+    if (e.stderr) process.stderr.write(String(e.stderr));
+
+    // Child killed by the timeout (or another signal): execFileSync reports
+    // signal set, code ETIMEDOUT, and status null — there is no real exit
+    // code. Everything else is a genuine non-zero child exit.
+    const timedOut =
+      e.code === 'ETIMEDOUT' ||
+      (typeof e.message === 'string' && e.message.includes('ETIMEDOUT')) ||
+      (e.signal !== undefined && e.signal !== null) ||
+      e.status === null;
+
+    // Write the receipt FIRST, then re-throw so the CLI exits non-zero.
+    // Never swallow — a swallowed throw here is exactly the exit-0-on-failure
+    // bug this receipt exists to kill.
+    writeKBIngestReceipt(instanceId, org, {
+      run_at: runAt,
+      collection,
+      added: null,
+      updated: null,
+      skipped: null,
+      errored: null,
+      duration_ms: Date.now() - startedAt,
+      exit_code: typeof e.status === 'number' ? e.status : -1,
+      status: timedOut ? 'timeout' : 'error',
+      error: e.message || String(err),
+    });
+    throw err;
+  }
+
+  if (stdout) process.stdout.write(stdout);
+
+  const counts = parseMmragReceiptLine(stdout);
+  const erroredCount = counts?.errored ?? null;
+  const receipt: KBIngestReceipt = {
+    run_at: runAt,
+    collection,
+    added: counts?.added ?? null,
+    updated: counts?.updated ?? null,
+    skipped: counts?.skipped ?? null,
+    errored: erroredCount,
+    duration_ms: Date.now() - startedAt,
+    exit_code: 0,
+    status: erroredCount !== null && erroredCount > 0 ? 'error' : 'ok',
+    ...(erroredCount !== null && erroredCount > 0
+      ? { error: `${erroredCount} file(s) failed during ingest` }
+      : {}),
+  };
+  writeKBIngestReceipt(instanceId, org, receipt);
+
+  // errored>0 must never silently pass: receipt is already on disk, now be
+  // loud AND make the process exit non-zero.
+  if (erroredCount !== null && erroredCount > 0) {
+    console.error(
+      `[kb] INGEST COMPLETED WITH ERRORS: ${erroredCount} file(s) failed — see receipt`,
+    );
+    throw new Error(
+      `kb-ingest completed with ${erroredCount} errored file(s) — see state/kb/last-ingest-receipt.json`,
+    );
+  }
 
   console.log(`\nIngest complete → collection: ${collection}`);
+  return receipt;
 }
 
 /**

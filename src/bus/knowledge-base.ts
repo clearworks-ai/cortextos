@@ -362,13 +362,14 @@ export function ingestKnowledgeBase(
     if (e.stderr) process.stderr.write(String(e.stderr));
 
     // Child killed by the timeout (or another signal): execFileSync reports
-    // signal set, code ETIMEDOUT, and status null — there is no real exit
-    // code. Everything else is a genuine non-zero child exit.
+    // code ETIMEDOUT and/or a signal, with status null. Require an actual
+    // timeout/signal indicator — a bare null status is NOT enough, because
+    // spawn failures like ENOENT (missing python interpreter) also produce
+    // status null with no signal and must be recorded as status 'error'.
     const timedOut =
       e.code === 'ETIMEDOUT' ||
       (typeof e.message === 'string' && e.message.includes('ETIMEDOUT')) ||
-      (e.signal !== undefined && e.signal !== null) ||
-      e.status === null;
+      (e.signal !== undefined && e.signal !== null);
 
     // Write the receipt FIRST, then re-throw so the CLI exits non-zero.
     // Never swallow — a swallowed throw here is exactly the exit-0-on-failure

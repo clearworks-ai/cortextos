@@ -320,6 +320,29 @@ describe('ingestKnowledgeBase — receipts', () => {
     expect(stdoutWrites.join('')).toContain('partial output before the kill');
   });
 
+  it('spawn failure (ENOENT, status null, no signal): receipt status error — NOT timeout — AND re-throw', () => {
+    mockConfiguredKb();
+    const spawnErr = Object.assign(new Error('spawnSync python3 ENOENT'), {
+      code: 'ENOENT',
+      signal: null,
+      status: null,
+      stdout: '',
+      stderr: '',
+    });
+    execFileSyncMock.mockImplementation(() => { throw spawnErr; });
+
+    expect(() => ingestKnowledgeBase(['/some/file.md'], baseOptions)).toThrow(/ENOENT/);
+
+    const written = lastWrittenReceipt();
+    expect(written).toMatchObject({
+      status: 'error',
+      exit_code: -1,
+      added: null,
+      errored: null,
+    });
+    expect(String(written.error)).toContain('ENOENT');
+  });
+
   it('child exits non-zero: receipt status error with the REAL exit code AND re-throw', () => {
     mockConfiguredKb();
     const exitErr = Object.assign(new Error('Command failed: python3 mmrag.py ingest'), {

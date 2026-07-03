@@ -449,6 +449,52 @@ class RunStdoutContractTests(unittest.TestCase):
         self.assertFalse(any("briefs.example" in url for url in calls))
         self.assertFalse(printed["_watermark_exists"])
 
+    def test_dry_run_succeeds_with_ingest_env_unset(self) -> None:
+        # SKILL DEGRADED path: BRIEFS_INGEST_URL / TASKS_INGEST_TOKEN missing →
+        # --dry-run must still run extract-only (exit 0, items printed, no POST).
+        calls: list[str] = []
+        degraded_env = {
+            "FIREFLIES_API_KEY": "ff-test",
+            "ANTHROPIC_API_KEY": "an-test",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            watermark_path = Path(tmp) / "watermark.json"
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, degraded_env, clear=True):
+                self.assertNotIn("BRIEFS_INGEST_URL", os.environ)
+                self.assertNotIn("TASKS_INGEST_TOKEN", os.environ)
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run(
+                        limit=5,
+                        dry_run=True,
+                        watermark_path=watermark_path,
+                        urlopen=self.make_urlopen([self.make_transcript()], calls),
+                    )
+            self.assertEqual(exit_code, 0)
+            self.assertFalse(watermark_path.exists())
+
+        printed = json.loads(stdout.getvalue())
+        self.assertTrue(printed["dry_run"])
+        self.assertEqual(len(printed["items"]), 2)
+        self.assert_items_shape(printed["items"])
+        self.assertFalse(any("briefs.example" in url for url in calls))
+
+    def test_non_dry_run_still_requires_ingest_env(self) -> None:
+        degraded_env = {
+            "FIREFLIES_API_KEY": "ff-test",
+            "ANTHROPIC_API_KEY": "an-test",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            watermark_path = Path(tmp) / "watermark.json"
+            with unittest.mock.patch.dict(os.environ, degraded_env, clear=True):
+                with self.assertRaises(ValueError):
+                    MODULE.run(
+                        limit=5,
+                        dry_run=False,
+                        watermark_path=watermark_path,
+                        urlopen=self.make_urlopen([self.make_transcript()], []),
+                    )
+
     def test_noop_print_includes_items_array(self) -> None:
         calls: list[str] = []
 

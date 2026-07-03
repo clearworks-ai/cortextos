@@ -97,7 +97,6 @@ Example: [{{"action":"Send proposal to client","owner":"John","dueDate":"2026-02
 
 TRANSCRIPT:
 {transcript}"""
-FIRST_PERSON_RE = re.compile(r"\b(i will|i'll|i am going to|i'm going to|let me)\b", re.IGNORECASE)
 PUNCT_RE = re.compile(r"[^\w\s-]+", re.UNICODE)
 SPACE_RE = re.compile(r"\s+")
 TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -497,10 +496,6 @@ def best_support_sentence(action: str, josh_sentences: list[str]) -> str | None:
     return best_text
 
 
-def has_first_person_commitment(text: str) -> bool:
-    return bool(FIRST_PERSON_RE.search(text))
-
-
 def resolve_due_date(raw_due: str, meeting_day: date) -> str | None:
     due = collapse_ws(raw_due)
     if not due:
@@ -736,8 +731,14 @@ def run(
 ) -> int:
     fireflies_api_key = require_env("FIREFLIES_API_KEY")
     anthropic_api_key = require_env("ANTHROPIC_API_KEY")
-    ingest_url = require_env("BRIEFS_INGEST_URL")
-    ingest_token = require_env("TASKS_INGEST_TOKEN")
+    # Ingest env is only required on the actual POST path. The SKILL's DEGRADED
+    # fallback deliberately invokes --dry-run precisely when these are missing,
+    # so dry-run must not fail on them.
+    ingest_url = ""
+    ingest_token = ""
+    if not dry_run:
+        ingest_url = require_env("BRIEFS_INGEST_URL")
+        ingest_token = require_env("TASKS_INGEST_TOKEN")
 
     watermark_timestamp, watermark_meeting_id = load_watermark(watermark_path)
     recent = fetch_recent_transcripts(fireflies_api_key, limit=limit, urlopen=urlopen)

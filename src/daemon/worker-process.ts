@@ -1,7 +1,9 @@
 import { join } from 'path';
 import { mkdirSync } from 'fs';
+import { spawnSync } from 'child_process';
 import type { CtxEnv, WorkerStatus, WorkerStatusValue } from '../types/index.js';
 import { AgentPTY } from '../pty/agent-pty.js';
+import { OpencodePTY } from '../pty/opencode-pty.js';
 import { injectMessage } from '../pty/inject.js';
 
 /**
@@ -43,7 +45,7 @@ export class WorkerProcess {
   /**
    * Spawn the worker Claude Code session with the given task prompt.
    */
-  async spawn(env: CtxEnv, prompt: string, config: { model?: string } = {}): Promise<void> {
+  async spawn(env: CtxEnv, prompt: string, config: { model?: string; runtime?: string } = {}): Promise<void> {
     // Ensure bus dirs exist so the worker can use cortextos bus commands
     try {
       mkdirSync(join(env.ctxRoot, 'inbox', this.name), { recursive: true });
@@ -52,7 +54,27 @@ export class WorkerProcess {
     } catch { /* ignore */ }
 
     const logPath = join(env.ctxRoot, 'logs', this.name, 'stdout.log');
-    this.pty = new AgentPTY(env, config, logPath);
+    if (config.runtime === 'opencode') {
+      // Fail fast if the opencode binary isn't resolvable — otherwise the PTY
+      // spawn dies silently and the worker just shows up as 'failed'.
+      const which = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['opencode'], { stdio: 'ignore' });
+      if (which.error || which.status !== 0) {
+        throw new Error(
+          `Cannot spawn worker "${this.name}" with runtime 'opencode': the 'opencode' binary is not on PATH. `
+          + `Install OpenCode (https://opencode.ai) or omit --runtime to use the default claude runtime.`,
+        );
+      }
+      // OpencodePTY auto-detects OPENROUTER_API_KEY; warn (don't fail) when it
+      // is absent — opencode may be configured via another provider/auth path.
+      if (!process.env.OPENROUTER_API_KEY) {
+        this.log(`Warning: OPENROUTER_API_KEY is not set — opencode worker "${this.name}" may lack OpenRouter access unless opencode is configured another way`);
+      }
+      this.pty = new OpencodePTY(env, { model: config.model, runtime: 'opencode' }, logPath);
+    } else {
+      // Default runtime (undefined or 'claude') — identical to legacy behavior.
+      const claudeConfig = config.model !== undefined ? { model: config.model } : {};
+      this.pty = new AgentPTY(env, claudeConfig, logPath);
+    }
 
     this.pty.onExit((code) => {
       this.exitCode = code;

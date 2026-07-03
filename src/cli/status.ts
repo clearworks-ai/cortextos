@@ -4,12 +4,15 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { IPCClient } from '../daemon/ipc-server.js';
 import type { AgentStatus, Heartbeat } from '../types/index.js';
+import { resolveActiveInstance } from '../utils/active-instance.js';
 
 export const statusCommand = new Command('status')
   .option('--instance <id>', 'Instance ID')
   .description('Show agent health and status')
   .action(async (options: { instance?: string }) => {
-    const instanceId = options.instance || process.env.CTX_INSTANCE_ID || 'default';
+    // WS7: bare `cortextos status` must hit the LIVE instance (marker file,
+    // then 'cortextos1') instead of the dead literal 'default'.
+    const instanceId = options.instance || process.env.CTX_INSTANCE_ID || resolveActiveInstance();
     const ipc = new IPCClient(instanceId);
     const daemonRunning = await ipc.isDaemonRunning();
 

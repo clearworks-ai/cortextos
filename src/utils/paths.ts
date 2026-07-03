@@ -2,6 +2,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import type { BusPaths } from '../types/index.js';
 import { validateInstanceId } from './validate.js';
+import { resolveActiveInstance } from './active-instance.js';
 
 /**
  * Resolve all bus paths for an agent.
@@ -25,11 +26,15 @@ import { validateInstanceId } from './validate.js';
  */
 export function resolvePaths(
   agentName: string,
-  instanceId: string = 'default',
+  instanceId?: string,
   org?: string,
 ): BusPaths {
-  validateInstanceId(instanceId);
-  const ctxRoot = join(homedir(), '.cortextos', instanceId);
+  // WS7: the default instance is resolved lazily from the ACTIVE_INSTANCE
+  // marker (falling back to 'cortextos1'), not the dead literal 'default'.
+  // Explicit instanceId arguments always win.
+  const id = instanceId ?? resolveActiveInstance();
+  validateInstanceId(id);
+  const ctxRoot = join(homedir(), '.cortextos', id);
 
   // Org-scoped paths for tasks, approvals, analytics
   const orgBase = org ? join(ctxRoot, 'orgs', org) : ctxRoot;
@@ -52,10 +57,12 @@ export function resolvePaths(
  * Get the IPC socket path for daemon communication.
  * Unix domain socket on macOS/Linux, named pipe on Windows.
  */
-export function getIpcPath(instanceId: string = 'default'): string {
-  validateInstanceId(instanceId);
+export function getIpcPath(instanceId?: string): string {
+  // WS7: same lazy default as resolvePaths — marker file, then 'cortextos1'.
+  const id = instanceId ?? resolveActiveInstance();
+  validateInstanceId(id);
   if (process.platform === 'win32') {
-    return `\\\\.\\pipe\\cortextos-${instanceId}`;
+    return `\\\\.\\pipe\\cortextos-${id}`;
   }
-  return join(homedir(), '.cortextos', instanceId, 'daemon.sock');
+  return join(homedir(), '.cortextos', id, 'daemon.sock');
 }

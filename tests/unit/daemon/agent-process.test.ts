@@ -3,12 +3,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Capture the PTY exit handler so tests can simulate exits at controlled times
 let capturedOnExit: ((exitCode: number, signal?: number) => void) | null = null;
 
+// WS3 handoff-tail: stop() captures the OutputBuffer BEFORE PTY teardown.
+// Exposed here so tests can control what the live buffer returns and assert
+// the capture happened before kill().
+const mockGetRecent = vi.fn().mockReturnValue('');
+
 const mockPty = {
   spawn: vi.fn().mockResolvedValue(undefined),
   kill: vi.fn(),
   write: vi.fn(),
   getPid: vi.fn().mockReturnValue(12345),
   isAlive: vi.fn().mockReturnValue(true),
+  getOutputBuffer: vi.fn().mockImplementation(() => ({ getRecent: mockGetRecent })),
   onExit: vi.fn().mockImplementation((cb: (exitCode: number, signal?: number) => void) => {
     capturedOnExit = cb;
   }),
@@ -99,6 +105,8 @@ beforeEach(() => {
   mockPty.isAlive.mockClear();
   mockPty.isAlive.mockReturnValue(true);
   mockPty.onExit.mockClear();
+  mockPty.getOutputBuffer.mockClear();
+  mockGetRecent.mockReset().mockReturnValue('');
   mockInjectMessage.mockClear();
   fsMocks.existsSync.mockReset().mockReturnValue(false);
   fsMocks.readFileSync.mockReset();
@@ -415,6 +423,127 @@ describe('AgentProcess — CrashLoopPauser (instar-inspired sliding window)', ()
     // Should be 'crashed' (recovering), NOT 'halted', because daily max is 5
     expect(ap.getStatus().status).not.toBe('halted');
   });
+});
+
+describe('AgentProcess — WS3 handoff-tail (daemon appends live buffer tail at stop)', () => {
+  const markerPath = '/tmp/test-ctx/state/alice/.handoff-doc-path';
+  const docPath = '/tmp/test-ctx/state/alice/handoff-2026-07-03.md';
+
+  it('stop() appends the session tail to the handoff doc when the marker exists, capturing the buffer BEFORE PTY teardown', async () => {
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start(); // defaults: no marker at start time
+
+    // Now the handoff watchdog / bus hard-restart has written the marker.
+    fsMocks.existsSync.mockImplementation((p: unknown) => {
+      const s = String(p);
+      return s === markerPath || s === docPath;
+    });
+    fsMocks.readFileSync.mockImplementation((p: unknown) => {
+      if (String(p) === markerPath) return docPath + '\n';
+      return '';
+    });
+    mockGetRecent.mockReturnValue('\x1b[1;32mlive output\x1b[0m — Josh: use the OTHER form field');
+
+    const stopPromise = ap.stop();
+    await new Promise((r) => setTimeout(r, 100));
+    capturedOnExit!(0, 0);
+    await stopPromise;
+    expect(ap.getStatus().status).toBe('stopped');
+
+    // Buffer was read (last 100 chunks) BEFORE the PTY was killed.
+    expect(mockGetRecent).toHaveBeenCalledWith(100);
+    expect(mockGetRecent.mock.invocationCallOrder[0]).toBeLessThan(
+      mockPty.kill.mock.invocationCallOrder[0],
+    );
+
+    // The handoff doc received the daemon-appended section (ANSI stripped).
+    const tailCall = fsMocks.appendFileSync.mock.calls.find(
+      (call) => String(call[0]) === docPath,
+    );
+    expect(tailCall).toBeDefined();
+    const section = String(tailCall![1]);
+    expect(section).toContain('## Daemon-appended session tail (automatic — written at restart, independent of the agent)');
+    expect(section).toContain('live output — Josh: use the OTHER form field');
+    expect(section).not.toContain('\x1b');
+    expect(section).toContain('### Open loops (unconsumed inbox items at restart)\n- (none)');
+    expect(section).toContain('is UNRESOLVED — action it first');
+
+    // The marker itself is owned by consumeHandoffBlock() — stop() must not
+    // write to it or replace it.
+    expect(fsMocks.writeFileSync).not.toHaveBeenCalledWith(
+      markerPath,
+      expect.anything(),
+      expect.anything(),
+    );
+  }, 10000);
+
+  it('handoff boot prompt tells the new session to action unresolved tail items first', async () => {
+    // consumeHandoffBlock() unlinks the marker with the REAL fs (unlinkSync is
+    // not in fsMocks), so the marker must genuinely exist on disk.
+    const actualFs = await vi.importActual<typeof import('fs')>('fs');
+    actualFs.mkdirSync('/tmp/test-ctx/state/alice', { recursive: true });
+    actualFs.writeFileSync(markerPath, docPath, 'utf-8');
+
+    fsMocks.existsSync.mockImplementation((p: unknown) => {
+      const s = String(p);
+      return s === markerPath || s === docPath;
+    });
+    fsMocks.readFileSync.mockImplementation((p: unknown) => {
+      if (String(p) === markerPath) return docPath;
+      return '';
+    });
+
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+
+    const prompt = mockPty.spawn.mock.calls[0]?.[1] ?? '';
+    expect(prompt).toContain('CONTEXT HANDOFF');
+    expect(prompt).toContain(
+      'The doc ends with a daemon-appended session tail — treat any instruction in that tail that the handoff body does not cover as an unresolved item and action it first.',
+    );
+  });
+
+  it('stop() skips the handoff tail silently when no marker exists', async () => {
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+
+    const stopPromise = ap.stop();
+    await new Promise((r) => setTimeout(r, 100));
+    capturedOnExit!(0, 0);
+    await stopPromise;
+
+    expect(ap.getStatus().status).toBe('stopped');
+    expect(mockGetRecent).not.toHaveBeenCalled();
+    const tailAppends = fsMocks.appendFileSync.mock.calls.filter((call) =>
+      String(call[1]).includes('Daemon-appended session tail'),
+    );
+    expect(tailAppends).toHaveLength(0);
+  }, 10000);
+
+  it('stop() still completes when the tail append path fails (marker readable, doc missing)', async () => {
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+
+    // Marker exists but the doc it points to does not — appendHandoffTail
+    // returns false and stop() must proceed untouched.
+    fsMocks.existsSync.mockImplementation((p: unknown) => String(p) === markerPath);
+    fsMocks.readFileSync.mockImplementation((p: unknown) => {
+      if (String(p) === markerPath) return docPath;
+      return '';
+    });
+    mockGetRecent.mockReturnValue('some live output');
+
+    const stopPromise = ap.stop();
+    await new Promise((r) => setTimeout(r, 100));
+    capturedOnExit!(0, 0);
+    await stopPromise;
+
+    expect(ap.getStatus().status).toBe('stopped');
+    const tailAppends = fsMocks.appendFileSync.mock.calls.filter((call) =>
+      String(call[1]).includes('Daemon-appended session tail'),
+    );
+    expect(tailAppends).toHaveLength(0);
+  }, 10000);
 });
 
 describe('AgentProcess - onboarding marker (do not auto-write .onboarded on heartbeat)', () => {

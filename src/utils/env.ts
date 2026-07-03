@@ -5,6 +5,7 @@ import type { CtxEnv } from '../types/index.js';
 import { ensureDir } from './atomic.js';
 import { validateAgentName, validateOrgName } from './validate.js';
 import { stripBom } from './strip-bom.js';
+import { resolveActiveInstance } from './active-instance.js';
 
 /**
  * Resolve the cortextOS environment context.
@@ -20,11 +21,14 @@ export function resolveEnv(overrides?: Partial<CtxEnv>): CtxEnv {
     envFile = parseEnvFile(cortextosEnvPath);
   }
 
+  // WS7: final fallback is the ACTIVE_INSTANCE marker (then 'cortextos1'),
+  // not the dead literal 'default'. Precedence is unchanged above the
+  // fallback: overrides > CTX_INSTANCE_ID env > .cortextos-env file > marker.
   const instanceId =
     overrides?.instanceId ||
     process.env.CTX_INSTANCE_ID ||
     envFile.CTX_INSTANCE_ID ||
-    'default';
+    resolveActiveInstance();
 
   const ctxRoot =
     overrides?.ctxRoot ||

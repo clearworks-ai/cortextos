@@ -66,6 +66,41 @@ FLASH_OUTPUT_PRICE_PER_M = 0.60
 TRANSIENT_HTTP_CODES = {429, 500, 503}
 TRANSIENT_STATUS_NAMES = {"UNAVAILABLE", "RESOURCE_EXHAUSTED"}
 
+# Client-side request timeout for every Gemini call (spec 09). google-genai
+# HttpOptions.timeout is in MILLISECONDS. Verified against google-genai 1.72.0
+# (the version installed in knowledge-base/venv; requirements.txt pins
+# google-genai>=1.0.0): types.HttpOptions(timeout=1000) is accepted.
+DEFAULT_GEMINI_TIMEOUT_MS = 120000
+
+
+def _env_int(name, default):
+    """Read an int env var; fall back to default on missing/invalid values."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        print(f"  WARNING: env {name}={raw!r} is not an int; using default {default}")
+        return default
+
+
+def _default_backoffs():
+    """Retry backoff schedule (seconds between attempts; len = attempt count).
+
+    Env-tunable via MMRAG_RETRY_BACKOFFS as a comma-separated list of seconds
+    (tests set "0,0,0" to run instantly). Defaults to (5, 15, 45).
+    """
+    raw = os.environ.get("MMRAG_RETRY_BACKOFFS")
+    if raw:
+        try:
+            parsed = tuple(float(x) for x in raw.split(",") if x.strip())
+            if parsed:
+                return parsed
+        except ValueError:
+            print(f"  WARNING: env MMRAG_RETRY_BACKOFFS={raw!r} is invalid; using default (5, 15, 45)")
+    return (5, 15, 45)
+
 USAGE_FILE = MMRAG_DIR / "usage.json"
 
 # ---------------------------------------------------------------------------
@@ -216,24 +251,53 @@ def get_genai_client(api_key):
     if factory_path:
         return _load_factory(factory_path)(api_key)
     from google import genai
-    return genai.Client(api_key=api_key)
+    from google.genai import types
+    # Spec 09 fix A: client-level request timeout so no Gemini call can block
+    # forever on a hung socket. HttpOptions.timeout is in milliseconds.
+    timeout_ms = _env_int("MMRAG_GEMINI_TIMEOUT_MS", DEFAULT_GEMINI_TIMEOUT_MS)
+    return genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=timeout_ms))
 
 
-def _retry_generate_content(client, *, model, contents, backoffs=(5, 15, 45)):
-    """Call client.models.generate_content with bounded retries on transient APIErrors.
+def _transient_timeout_types():
+    """Exception types treated as transient timeout/transport failures.
 
-    Retries on HTTP code in TRANSIENT_HTTP_CODES or status name in
-    TRANSIENT_STATUS_NAMES; re-raises immediately on any other APIError (auth,
-    malformed request, etc.); re-raises last_err after all attempts exhausted.
+    httpx is imported lazily and guarded so a missing httpx doesn't crash —
+    builtin TimeoutError and socket.timeout are always in the set.
+    (On Python 3.10+ socket.timeout is an alias of TimeoutError; keeping both
+    is harmless and explicit.)
+    """
+    import socket
+    type_list = [TimeoutError, socket.timeout]
+    try:
+        import httpx
+        type_list.extend([httpx.TimeoutException, httpx.TransportError])
+    except ImportError:
+        pass
+    return tuple(type_list)
 
-    backoffs is a tuple of sleep seconds between attempts. len(backoffs) is the
-    attempt count. Tests pass (0, 0, 0) to skip sleeps.
+
+def _retry_api_call(fn, *, backoffs=None):
+    """Call fn() with bounded retries on transient failures (spec 09).
+
+    Transient = APIError with HTTP code in TRANSIENT_HTTP_CODES or status name
+    in TRANSIENT_STATUS_NAMES, OR a timeout/transport exception
+    (httpx.TimeoutException, httpx.TransportError, builtin TimeoutError,
+    socket.timeout). Non-transient APIErrors (auth, malformed request, etc.)
+    re-raise immediately; the last transient error re-raises after all
+    attempts are exhausted.
+
+    backoffs is a tuple of sleep seconds between attempts. len(backoffs) is
+    the attempt count. None resolves to _default_backoffs() at call time;
+    tests pass (0, 0, 0) to skip sleeps.
     """
     from google.genai import errors as _genai_errors
+    if backoffs is None:
+        backoffs = _default_backoffs()
+    timeout_types = _transient_timeout_types()
     last_err = None
     for attempt, backoff in enumerate(backoffs, start=1):
         try:
-            return client.models.generate_content(model=model, contents=contents)
+            return fn()
         except _genai_errors.APIError as e:
             last_err = e
             is_transient = (e.code in TRANSIENT_HTTP_CODES) or (e.status in TRANSIENT_STATUS_NAMES)
@@ -244,19 +308,46 @@ def _retry_generate_content(client, *, model, contents, backoffs=(5, 15, 45)):
                 time.sleep(backoff)
             else:
                 print(f"    Exhausted retries on transient error: HTTP {e.code} {e.status or ''}")
+        except timeout_types as e:
+            last_err = e
+            if attempt < len(backoffs):
+                print(f"    Transient error (timeout/transport: {type(e).__name__}); retrying in {backoff}s (attempt {attempt}/{len(backoffs)})")
+                time.sleep(backoff)
+            else:
+                print(f"    Exhausted retries on transient error: timeout/transport {type(e).__name__}")
     raise last_err if last_err else RuntimeError("retry loop completed without response or error")
 
 
-def embed_content(client, config, content, task_type="RETRIEVAL_DOCUMENT"):
-    """Embed content using Gemini Embedding 2. Content can be text string or list of Parts."""
+def _retry_generate_content(client, *, model, contents, backoffs=None):
+    """Call client.models.generate_content with bounded retries on transient
+    APIErrors and timeout/transport errors. See _retry_api_call for the
+    transient classification and backoff semantics.
+    """
+    return _retry_api_call(
+        lambda: client.models.generate_content(model=model, contents=contents),
+        backoffs=backoffs,
+    )
+
+
+def embed_content(client, config, content, task_type="RETRIEVAL_DOCUMENT", backoffs=None):
+    """Embed content using Gemini Embedding 2. Content can be text string or list of Parts.
+
+    Spec 09 fix C: the embed call gets the same bounded transient-retry
+    treatment as generate_content (it previously had no retry at all). On
+    exhaustion the last error raises so the per-file isolation in the ingest
+    loop turns it into a SKIP + errored count.
+    """
     from google.genai import types
-    result = client.models.embed_content(
-        model=config.get("embedding_model", "gemini-embedding-2-preview"),
-        contents=content,
-        config=types.EmbedContentConfig(
-            output_dimensionality=config.get("embedding_dimensions", DEFAULT_EMBEDDING_DIMENSIONS),
-            task_type=task_type,
+    result = _retry_api_call(
+        lambda: client.models.embed_content(
+            model=config.get("embedding_model", "gemini-embedding-2-preview"),
+            contents=content,
+            config=types.EmbedContentConfig(
+                output_dimensionality=config.get("embedding_dimensions", DEFAULT_EMBEDDING_DIMENSIONS),
+                task_type=task_type,
+            ),
         ),
+        backoffs=backoffs,
     )
     if _tracker:
         _tracker.track_embedding(content)
@@ -1069,6 +1160,7 @@ def ingest_file(client, config, collection, file_path):
 # ---------------------------------------------------------------------------
 def cmd_ingest(args):
     global args_force, _tracker
+    started_at = time.monotonic()
     args_force = getattr(args, 'force', False)
     _tracker = UsageTracker("ingest")
 
@@ -1081,8 +1173,34 @@ def cmd_ingest(args):
         print(f"Force mode: will re-ingest existing files")
 
     total = 0
+    added = 0
+    updated = 0
     skipped = 0
     errors = 0
+
+    def _process_one(file_path):
+        """Ingest one file with per-file error isolation (spec 08 behavior):
+        any exception is logged as a SKIP, counted as errored, and never
+        re-raised — one bad file can no longer kill the whole run.
+        Returns the chunk count (0 on skip/error)."""
+        nonlocal total, added, updated, skipped, errors
+        try:
+            count = ingest_file(client, config, collection, file_path)
+        except Exception as e:
+            print(f"  SKIP (error): {file_path} — {type(e).__name__}: {e}")
+            errors += 1
+            return 0
+        total += count
+        if count > 0:
+            # This legacy mmrag has no per-file add-vs-update detection;
+            # --force re-ingests overwrite in place, so count those as updated.
+            if args_force:
+                updated += 1
+            else:
+                added += 1
+        else:
+            skipped += 1
+        return count
 
     try:
         for path_str in args.paths:
@@ -1092,26 +1210,14 @@ def cmd_ingest(args):
                 print(f"Ingesting directory: {p} ({len(files)} files)")
                 for f in files:
                     print(f"  Processing: {f.relative_to(p)}")
-                    try:
-                        count = ingest_file(client, config, collection, f)
-                        total += count
-                        if count > 0:
-                            print(f"    Added {count} chunk(s)")
-                        elif count == 0:
-                            skipped += 1
-                    except Exception as e:
-                        print(f"    ERROR: {e}")
-                        errors += 1
+                    count = _process_one(f)
+                    if count > 0:
+                        print(f"    Added {count} chunk(s)")
             elif p.is_file():
                 print(f"Ingesting: {p.name}")
-                try:
-                    count = ingest_file(client, config, collection, p)
-                    total += count
-                    if count > 0:
-                        print(f"  Added {count} chunk(s)")
-                except Exception as e:
-                    print(f"  ERROR: {e}")
-                    errors += 1
+                count = _process_one(p)
+                if count > 0:
+                    print(f"  Added {count} chunk(s)")
             else:
                 print(f"NOT FOUND: {p}")
     finally:
@@ -1123,6 +1229,18 @@ def cmd_ingest(args):
     if errors:
         print(f"  Errors: {errors}")
     print(_tracker.summary_line())
+
+    # Machine-readable receipt — MUST stay the last stdout line. The TS
+    # wrapper parses it and escalates on errored > 0; the process still
+    # exits 0 when the run completed (errors are per-file, not fatal).
+    receipt = {
+        "added": added,
+        "updated": updated,
+        "skipped": skipped,
+        "errored": errors,
+        "duration_ms": int((time.monotonic() - started_at) * 1000),
+    }
+    print(f"MMRAG_INGEST_RECEIPT {json.dumps(receipt)}")
 
 
 def deduplicate_results(results, similarity_ratio=0.85):

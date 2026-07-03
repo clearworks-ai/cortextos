@@ -55,6 +55,9 @@ const originalCtxRoot = process.env.CTX_ROOT;
 const originalFrameworkRoot = process.env.CTX_FRAMEWORK_ROOT;
 const originalAgentName = process.env.CTX_AGENT_NAME;
 const originalInstanceId = process.env.CTX_INSTANCE_ID;
+const originalAgentDir = process.env.CTX_AGENT_DIR;
+const originalProjectRoot = process.env.CTX_PROJECT_ROOT;
+const originalOrg = process.env.CTX_ORG;
 
 /** The agent whose crons.json we write in the test setup */
 const TEST_AGENT = 'boris';
@@ -73,13 +76,17 @@ function readCronsFile(): CronDefinition[] {
   return JSON.parse(raw).crons as CronDefinition[];
 }
 
-/** Write a crons.json with an initial set of cron definitions */
-function seedCrons(crons: CronDefinition[]): void {
-  const dir = join(tmpRoot, '.cortextOS', 'state', 'agents', TEST_AGENT);
+function seedCronsForAgent(agentName: string, crons: CronDefinition[]): void {
+  const dir = join(tmpRoot, '.cortextOS', 'state', 'agents', agentName);
   mkdirSync(dir, { recursive: true });
   const envelope = { updated_at: new Date().toISOString(), crons };
   const { writeFileSync } = require('fs');
   writeFileSync(join(dir, 'crons.json'), JSON.stringify(envelope, null, 2), 'utf-8');
+}
+
+/** Write a crons.json with an initial set of cron definitions */
+function seedCrons(crons: CronDefinition[]): void {
+  seedCronsForAgent(TEST_AGENT, crons);
 }
 
 function makeCron(name: string, overrides: Partial<CronDefinition> = {}): CronDefinition {
@@ -105,6 +112,9 @@ beforeEach(() => {
   process.env.CTX_FRAMEWORK_ROOT = frameworkRoot;
   process.env.CTX_AGENT_NAME = TEST_AGENT;
   process.env.CTX_INSTANCE_ID = 'default';
+  process.env.CTX_AGENT_DIR = join(frameworkRoot, 'orgs', 'lifeos', 'agents', TEST_AGENT);
+  process.env.CTX_PROJECT_ROOT = frameworkRoot;
+  process.env.CTX_ORG = 'lifeos';
 });
 
 afterEach(() => {
@@ -120,6 +130,15 @@ afterEach(() => {
 
   if (originalInstanceId !== undefined) process.env.CTX_INSTANCE_ID = originalInstanceId;
   else delete process.env.CTX_INSTANCE_ID;
+
+  if (originalAgentDir !== undefined) process.env.CTX_AGENT_DIR = originalAgentDir;
+  else delete process.env.CTX_AGENT_DIR;
+
+  if (originalProjectRoot !== undefined) process.env.CTX_PROJECT_ROOT = originalProjectRoot;
+  else delete process.env.CTX_PROJECT_ROOT;
+
+  if (originalOrg !== undefined) process.env.CTX_ORG = originalOrg;
+  else delete process.env.CTX_ORG;
 
   try { rmSync(tmpRoot, { recursive: true }); } catch { /* ignore */ }
   try { rmSync(frameworkRoot, { recursive: true }); } catch { /* ignore */ }
@@ -198,6 +217,34 @@ describe('bus add-cron', () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
     const errOut = errSpy.mock.calls.flat().join(' ');
     expect(errOut).toContain('already exists');
+  });
+
+  it('error: banned prompt → exits 1 with descriptive validator message', async () => {
+    const exitSpy = mockExit();
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await expect(
+      busCommand.parseAsync([
+        'node',
+        'bus',
+        'add-cron',
+        TEST_AGENT,
+        'human-tasks-check',
+        '6h',
+        'Send',
+        'the',
+        'full',
+        'HUMAN',
+        'task',
+        'list',
+        'via',
+        'Telegram.',
+      ])
+    ).rejects.toThrow('__PROCESS_EXIT_1__');
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errSpy.mock.calls.flat().join(' ')).toContain('full-human-task-list-telegram');
   });
 
   it('error: invalid agent name → exits 1', async () => {
@@ -431,6 +478,66 @@ describe('bus update-cron', () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
     const errOut = errSpy.mock.calls.flat().join(' ');
     expect(errOut).toContain('not found');
+  });
+
+  it('error: banned prompt on update → exits 1 with descriptive validator message', async () => {
+    const exitSpy = mockExit();
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await expect(
+      busCommand.parseAsync([
+        'node',
+        'bus',
+        'update-cron',
+        TEST_AGENT,
+        'heartbeat',
+        '--prompt',
+        'Send the complete human task list via Telegram.',
+      ])
+    ).rejects.toThrow('__PROCESS_EXIT_1__');
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errSpy.mock.calls.flat().join(' ')).toContain('heartbeat');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reconcile-crons
+// ---------------------------------------------------------------------------
+
+describe('bus reconcile-crons', () => {
+  it('prints CLEAN when no live cron prompts are banned', async () => {
+    seedCrons([makeCron('heartbeat')]);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await busCommand.parseAsync(['node', 'bus', 'reconcile-crons']);
+
+    expect(logSpy).toHaveBeenCalledWith('CLEAN');
+  });
+
+  it('reports agent, cron, and pattern for live offenders', async () => {
+    mkdirSync(join(frameworkRoot, 'orgs', 'lifeos', 'agents', 'paul'), { recursive: true });
+    seedCrons([makeCron('heartbeat')]);
+    seedCronsForAgent(
+      'paul',
+      [
+        makeCron('human-tasks-check', {
+          prompt: 'Send the full HUMAN task list via Telegram.',
+        }),
+      ]
+    );
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await busCommand.parseAsync(['node', 'bus', 'reconcile-crons']);
+
+    const output = logSpy.mock.calls.flat().join('\n');
+    expect(output).toContain('paul');
+    expect(output).toContain('human-tasks-check');
+    expect(output).toContain('full-human-task-list-telegram');
   });
 });
 

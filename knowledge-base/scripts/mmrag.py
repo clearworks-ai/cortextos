@@ -258,6 +258,32 @@ def get_genai_client(api_key):
     return genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=timeout_ms))
 
 
+class _SdkAbsentAPIError(Exception):
+    """Placeholder for google.genai.errors.APIError when the real SDK is not
+    importable under an injected fake client (MMRAG_GEMINI_CLIENT_FACTORY).
+    Never raised by anything — it exists only so the `except` clause in
+    _retry_api_call stays well-formed without the SDK on the path."""
+
+
+class _FallbackEmbedContentConfig:
+    """Stand-in for google.genai types.EmbedContentConfig when the real SDK is
+    not importable under an injected fake client (MMRAG_GEMINI_CLIENT_FACTORY).
+    Carries the same fields; fake clients ignore or introspect it."""
+
+    def __init__(self, output_dimensionality=None, task_type=None):
+        self.output_dimensionality = output_dimensionality
+        self.task_type = task_type
+
+
+def _fake_client_injected():
+    """True when MMRAG_GEMINI_CLIENT_FACTORY points at an injected fake client.
+
+    In that mode the real google.genai SDK is optional: the fault-injection
+    test path must run without the SDK installed. Without a factory the SDK is
+    required and import failures propagate loudly."""
+    return bool(os.environ.get("MMRAG_GEMINI_CLIENT_FACTORY"))
+
+
 def _transient_timeout_types():
     """Exception types treated as transient timeout/transport failures.
 
@@ -290,7 +316,16 @@ def _retry_api_call(fn, *, backoffs=None):
     the attempt count. None resolves to _default_backoffs() at call time;
     tests pass (0, 0, 0) to skip sleeps.
     """
-    from google.genai import errors as _genai_errors
+    # Lazy + guarded SDK import: with an injected fake client the real
+    # google.genai does not need to be importable (fault-injection design
+    # goal); without a factory a missing SDK still fails loudly.
+    try:
+        from google.genai import errors as _genai_errors
+        _api_error_type = _genai_errors.APIError
+    except ImportError:
+        if not _fake_client_injected():
+            raise
+        _api_error_type = _SdkAbsentAPIError
     if backoffs is None:
         backoffs = _default_backoffs()
     timeout_types = _transient_timeout_types()
@@ -298,7 +333,7 @@ def _retry_api_call(fn, *, backoffs=None):
     for attempt, backoff in enumerate(backoffs, start=1):
         try:
             return fn()
-        except _genai_errors.APIError as e:
+        except _api_error_type as e:
             last_err = e
             is_transient = (e.code in TRANSIENT_HTTP_CODES) or (e.status in TRANSIENT_STATUS_NAMES)
             if not is_transient:
@@ -337,12 +372,21 @@ def embed_content(client, config, content, task_type="RETRIEVAL_DOCUMENT", backo
     exhaustion the last error raises so the per-file isolation in the ingest
     loop turns it into a SKIP + errored count.
     """
-    from google.genai import types
+    # Lazy + guarded SDK import: injected fake clients (fault-injection tests)
+    # must not require the real google.genai package. Fallback carries the
+    # same fields; production without a factory still fails loudly.
+    try:
+        from google.genai import types
+        _embed_config_cls = types.EmbedContentConfig
+    except ImportError:
+        if not _fake_client_injected():
+            raise
+        _embed_config_cls = _FallbackEmbedContentConfig
     result = _retry_api_call(
         lambda: client.models.embed_content(
             model=config.get("embedding_model", "gemini-embedding-2-preview"),
             contents=content,
-            config=types.EmbedContentConfig(
+            config=_embed_config_cls(
                 output_dimensionality=config.get("embedding_dimensions", DEFAULT_EMBEDDING_DIMENSIONS),
                 task_type=task_type,
             ),

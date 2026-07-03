@@ -8,6 +8,12 @@ Exits 0 on all-pass, 1 on any failure. Zero external calls: the Gemini client
 is a fake injected via MMRAG_GEMINI_CLIENT_FACTORY, the chroma layer is an
 in-memory stub, and all paths are tempdirs.
 
+SDK-free by construction: this test BLOCKS `google.genai` imports for the
+whole process (sys.modules poisoning below), so it passes even in a bare
+environment without google-genai installed. If any mmrag code path touched
+by the injected-fake ingest run tries to import the real SDK, the import
+raises and the assertions fail loudly.
+
 Scenario: ingest a tempdir containing
   - good.txt   -> embeds fine            -> added
   - boom.txt   -> embed raises timeout   -> SKIP (error) + errored
@@ -40,6 +46,13 @@ if not os.environ.get("_MMRAG_RECEIPT_TEST_SANDBOX"):
     os.environ["MMRAG_CONFIG"] = os.path.join(_TMP, "config.json")
     os.environ["MMRAG_CHROMADB_DIR"] = os.path.join(_TMP, "chromadb")
     os.environ["_MMRAG_RECEIPT_TEST_SANDBOX"] = "1"
+
+# Prove the injected-fake path is SDK-free: poison google.genai in sys.modules
+# so any attempted import raises ImportError. Deliberately NOT blocking the
+# bare `google` namespace package (protobuf and friends live there). setdefault
+# keeps this idempotent across the factory loader's re-import of this module.
+for _blocked in ("google.genai", "google.genai.types", "google.genai.errors"):
+    sys.modules.setdefault(_blocked, None)
 
 import mmrag
 

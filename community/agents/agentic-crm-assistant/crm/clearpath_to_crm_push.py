@@ -136,6 +136,12 @@ def run_push(
             would_create.append(slugify(data["name"]))
         if not dry_run:
             upsert_contact(data, contacts_path)
+            # Refresh the in-memory list from disk so two Clearpath rows that
+            # resolve to the same not-yet-persisted contact (slug-only match,
+            # no clearpath_id/email hit) dedup against the freshly created
+            # entry instead of creating duplicates — same index-refresh
+            # pattern as _ingest_common.ingest_people().
+            contacts = load_contacts(contacts_path).get("contacts", [])
 
     return {
         "dry_run": dry_run,

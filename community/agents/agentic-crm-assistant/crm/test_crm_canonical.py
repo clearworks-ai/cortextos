@@ -397,6 +397,24 @@ def test_clearpath_push_scaffold_dry_run():
         payload = json.loads(contacts_path.read_text())
         _check("no duplicate contacts after re-push", len(payload["contacts"]) == 2)
 
+    # Regression: two rows resolving to the same not-yet-persisted contact
+    # (same slug, no clearpath_id/email match) must dedup WITHIN one
+    # --execute run — run_push refreshes contacts from disk after each upsert.
+    with tempfile.TemporaryDirectory() as tmp:
+        contacts_path = Path(tmp) / "contacts.json"
+        rows = [
+            (7, "Dana Same", None, "Acme", None),
+            (8, "Dana Same", None, "Acme", None),
+        ]
+        clearpath_push.run_push(FakeConn(rows), contacts_path, dry_run=False)
+        payload = json.loads(contacts_path.read_text())
+        slugs = [c["id"] for c in payload["contacts"]]
+        _check(
+            "intra-run slug collision dedups in execute mode",
+            slugs.count("dana-same") == 1 and len(payload["contacts"]) == 1,
+            detail=repr(slugs),
+        )
+
 
 def test_checked_in_data_untouched():
     print("\n[test 8] checked-in crm data files untouched by importing modules")

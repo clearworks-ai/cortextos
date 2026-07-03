@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { spawnSync, execFileSync } from 'child_process';
+import { spawnSync, execFileSync, execSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { sendMessage, checkInbox, ackInbox } from '../bus/message.js';
@@ -24,6 +24,8 @@ import { resolveEnv, resolveTargetAgentDir } from '../utils/env.js';
 import { IPCClient } from '../daemon/ipc-server.js';
 import { TelegramAPI } from '../telegram/api.js';
 import { logOutboundMessage, cacheLastSent } from '../telegram/logging.js';
+import { validateOutboundTelegram } from '../utils/send-telegram-validator.js';
+import { writeVerifyReceipt, VERIFY_RECEIPT_KINDS, type VerifyReceiptKind } from '../utils/verify-receipts.js';
 import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext, CronDefinition } from '../types/index.js';
 
 /**
@@ -977,8 +979,23 @@ busCommand
     // does not expand escapes, so they arrive at argv as 2-char literals and
     // Telegram renders them as visible text. Normalize before send + log.
     message = message.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
-    // Resolve bot token: agent .env first, then process.env
+
     const env = resolveEnv();
+
+    // Deterministic fail-closed outbound validation at the choke point
+    // (claim-gate, task-list dump, URL allowlist, stop-means-stop). Runs
+    // BEFORE bot-token resolution so a blocked message can never reach
+    // Telegram. See src/utils/send-telegram-validator.ts.
+    if (env.agentName && env.ctxRoot) {
+      try {
+        validateOutboundTelegram(env.ctxRoot, env.agentName, message);
+      } catch (err: any) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    }
+
+    // Resolve bot token: agent .env first, then process.env
     let botToken = '';
 
     // 1. Check agent .env (most specific)
@@ -1040,6 +1057,48 @@ busCommand
       console.error(`Failed to send: ${err.message || err}`);
       process.exit(1);
     }
+  });
+
+busCommand
+  .command('verify-receipt')
+  .description('Run a verification command and record a verify-receipt on success (consumed by the send-telegram claim gate)')
+  .requiredOption('--kind <kind>', 'Receipt kind: deploy | url | log | generic')
+  .requiredOption('--target <target>', 'URL, artifact path, or claim subject being verified')
+  .requiredOption('--command <command>', 'Shell command that proves the claim; the receipt is written only if it exits 0')
+  .action((opts: { kind: string; target: string; command: string }) => {
+    if (!(VERIFY_RECEIPT_KINDS as readonly string[]).includes(opts.kind)) {
+      console.error(`Error: invalid --kind '${opts.kind}'. Must be one of: ${VERIFY_RECEIPT_KINDS.join(', ')}.`);
+      process.exit(1);
+    }
+
+    const env = resolveEnv();
+    if (!env.agentName || !env.ctxRoot) {
+      console.error('Error: CTX_AGENT_NAME / CTX_ROOT not resolved — cannot record a verify-receipt.');
+      process.exit(1);
+    }
+
+    let output = '';
+    try {
+      output = execSync(opts.command, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (err: any) {
+      // Non-zero exit: the verification FAILED. Do NOT write a receipt —
+      // a failed check must never become proof for a claim.
+      console.error(`verify-receipt: command failed (exit ${err?.status ?? 'unknown'}) — receipt NOT written.`);
+      const stdout = err?.stdout ? String(err.stdout).trim() : '';
+      const stderr = err?.stderr ? String(err.stderr).trim() : '';
+      if (stdout) console.error(stdout.slice(0, 2048));
+      if (stderr) console.error(stderr.slice(0, 2048));
+      process.exit(1);
+    }
+
+    const filePath = writeVerifyReceipt(env.ctxRoot, env.agentName, {
+      kind: opts.kind as VerifyReceiptKind,
+      target: opts.target,
+      command: opts.command,
+      output,
+      created_at: new Date().toISOString(),
+    });
+    console.log(`Verify-receipt recorded: ${filePath}`);
   });
 
 busCommand

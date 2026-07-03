@@ -11,6 +11,7 @@ import type { TelegramAPI } from '../telegram/api.js';
 import { ensureDir } from '../utils/atomic.js';
 import { writeCortextosEnv } from '../utils/env.js';
 import { getOverdueReminders } from '../bus/reminders.js';
+import { appendHandoffTail, collectOpenLoops } from './handoff-tail.js';
 import { resolvePaths } from '../utils/paths.js';
 
 type LogFn = (msg: string) => void;
@@ -209,6 +210,30 @@ export class AgentProcess {
     this.stopRequested = true;
     this.log('Stopping...');
     this.clearSessionTimer();
+
+    // WS3 — handoff-tail fidelity: if this stop is part of a handoff restart
+    // (a .handoff-doc-path marker exists), the daemon appends the live PTY
+    // buffer tail + unconsumed inbox open-loops to the handoff doc NOW, while
+    // the OutputBuffer is still reachable (this.pty is nulled just below).
+    // The marker's lifecycle belongs to consumeHandoffBlock() — never unlink
+    // or move it here. Never blocks or fails the stop sequence.
+    try {
+      const handoffMarkerPath = join(this.env.ctxRoot, 'state', this.name, '.handoff-doc-path');
+      if (existsSync(handoffMarkerPath)) {
+        const handoffDocPath = readFileSync(handoffMarkerPath, 'utf-8').trim();
+        // Capture the buffer BEFORE any PTY teardown — the OutputBuffer lives
+        // on the PTY, which is nulled during stop().
+        const tail = this.pty?.getOutputBuffer()?.getRecent(100) ?? '';
+        appendHandoffTail({
+          docPath: handoffDocPath,
+          bufferTail: tail,
+          openLoops: collectOpenLoops(this.env.ctxRoot, this.name),
+          log: (m) => this.log(m),
+        });
+      }
+    } catch (err) {
+      this.log(`handoff-tail append failed (non-fatal): ${err}`);
+    }
 
     // Capture and null out pty BEFORE any awaits so handleExit() during graceful
     // shutdown doesn't race with us and trigger crash recovery or a double-kill.
@@ -808,7 +833,7 @@ export class AgentProcess {
       const docPath = readFileSync(markerPath, 'utf-8').trim();
       unlinkSync(markerPath);
       if (!docPath || !existsSync(docPath)) return '';
-      return ` CONTEXT HANDOFF: Before restoring crons or checking inbox, read the handoff document at ${docPath} to resume your prior session state.`;
+      return ` CONTEXT HANDOFF: Before restoring crons or checking inbox, read the handoff document at ${docPath} to resume your prior session state. The doc ends with a daemon-appended session tail — treat any instruction in that tail that the handoff body does not cover as an unresolved item and action it first.`;
     } catch {
       return '';
     }

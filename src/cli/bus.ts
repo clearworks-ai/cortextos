@@ -19,6 +19,10 @@ import { addCron, removeCron, readCrons, updateCron as updateCronDef, getCronByN
 import { nextFireFromCron } from '../daemon/cron-scheduler.js';
 import { queryKnowledgeBase, ingestKnowledgeBase, ensureKBDirs } from '../bus/knowledge-base.js';
 import { checkUsageApi, refreshOAuthToken, rotateOAuth, loadAccounts, ALERT_5H, ALERT_7D } from '../bus/oauth.js';
+import { appendLedgerEntry, readLedger, correlate } from '../bus/activity-ledger.js';
+import type { ActivityLedgerEntry } from '../bus/activity-ledger.js';
+import { installCronSeeds } from '../bus/cron-seeds.js';
+import { randomString } from '../utils/random.js';
 import { resolvePaths } from '../utils/paths.js';
 import { resolveEnv, resolveTargetAgentDir } from '../utils/env.js';
 import { IPCClient } from '../daemon/ipc-server.js';
@@ -2795,3 +2799,102 @@ function sleepMs(ms: number): Promise<void> {
 function pct(v: number): string {
   return `${Math.round(v * 100)}%`;
 }
+
+// ---------------------------------------------------------------------------
+// WS10 — activity ledger (did-vs-claimed) + cron seed installer
+// ---------------------------------------------------------------------------
+
+/** Resolve CTX_ROOT for ledger paths — same convention as src/bus/crons.ts. */
+function ledgerCtxRoot(): string {
+  return process.env.CTX_ROOT ?? process.cwd();
+}
+
+busCommand
+  .command('ledger-append')
+  .description('Append a claimed action (and optional verification evidence) to the activity ledger')
+  .argument('<agent>', 'Agent making the claim')
+  .argument('<claimed_action>', 'What the agent claims it did')
+  .option('--command <c>', 'Verification command that was run')
+  .option('--output <o>', 'Excerpt of the verification command output')
+  .option('--verified', 'Mark the claim as verified (requires --command)')
+  .option('--correlation-id <id>', 'Correlation id linking related entries (generated when omitted)')
+  .action((agent: string, claimedAction: string, opts: { command?: string; output?: string; verified?: boolean; correlationId?: string }) => {
+    try { validateAgentName(agent); } catch (err) { console.error(String(err)); process.exit(1); }
+
+    if (opts.verified && !opts.command) {
+      console.error('Error: --verified requires --command (a claim cannot be verified without evidence)');
+      process.exit(1);
+    }
+
+    const now = new Date().toISOString();
+    const entry: ActivityLedgerEntry = {
+      ts: now,
+      agent,
+      claimed_action: claimedAction,
+      verification: opts.command
+        ? { command: opts.command, output_excerpt: opts.output ?? '', checked_at: now }
+        : null,
+      verified: opts.verified ?? false,
+      correlation_id: opts.correlationId ?? `corr_${Date.now()}_${randomString(8)}`,
+    };
+
+    try {
+      appendLedgerEntry(ledgerCtxRoot(), entry);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+    console.log(`Ledger entry appended (correlation_id: ${entry.correlation_id}, verified: ${entry.verified})`);
+  });
+
+busCommand
+  .command('ledger-report')
+  .description('Machine-readable did-vs-claimed report: claims without backing verification')
+  .option('--agent <a>', 'Only report entries for this agent')
+  .option('--json', 'Output raw JSON')
+  .action((opts: { agent?: string; json?: boolean }) => {
+    const ctxRoot = ledgerCtxRoot();
+
+    let report;
+    if (opts.agent) {
+      try { validateAgentName(opts.agent); } catch (err) { console.error(String(err)); process.exit(1); }
+      const entries = readLedger(ctxRoot, { agent: opts.agent });
+      const claimedUnverified = entries.filter(e => e.verified === false || e.verification === null);
+      report = { claimed_unverified: claimedUnverified, verified: entries.length - claimedUnverified.length };
+    } else {
+      report = correlate(ctxRoot);
+    }
+
+    if (opts.json) {
+      console.log(JSON.stringify(report, null, 2));
+      return;
+    }
+
+    console.log(`Verified claims: ${report.verified}`);
+    console.log(`Claimed but unverified: ${report.claimed_unverified.length}`);
+    for (const e of report.claimed_unverified) {
+      console.log(`  [${e.ts}] ${e.agent}: ${e.claimed_action} (correlation_id: ${e.correlation_id})`);
+    }
+  });
+
+busCommand
+  .command('install-cron-seeds')
+  .description('Idempotently install the WS10 seed crons (wiki-republish, graphify-reindex) — seeds ship disabled')
+  .requiredOption('--agent <name>', 'Agent to install the seed crons for')
+  .action((opts: { agent: string }) => {
+    try { validateAgentName(opts.agent); } catch (err) { console.error(String(err)); process.exit(1); }
+
+    let result;
+    try {
+      result = installCronSeeds(opts.agent);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+
+    console.log(`Installed: ${result.installed.length > 0 ? result.installed.join(', ') : '(none)'}`);
+    console.log(`Skipped (already exist): ${result.skipped.length > 0 ? result.skipped.join(', ') : '(none)'}`);
+    if (result.installed.length > 0) {
+      console.log('Note: seeds are installed with enabled=false — enable deliberately via update-cron.');
+    }
+  });

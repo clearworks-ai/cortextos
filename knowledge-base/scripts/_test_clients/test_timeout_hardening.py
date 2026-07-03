@@ -6,7 +6,13 @@ Run from knowledge-base/scripts:
 
 Exits 0 on all-pass, 1 on any failure. Zero external calls: fake clients only
 (MMRAG_GEMINI_CLIENT_FACTORY / direct construction), tempdirs only, and the
-chroma layer is replaced with an in-memory stub. Scenarios:
+chroma layer is replaced with an in-memory stub.
+
+NOTE: unlike test_ingest_receipt (which is SDK-free by construction), this
+suite REQUIRES google-genai to be importable (run it with the knowledge-base
+venv python): scenario 3 exercises the real google.genai.errors.APIError
+subclass via fault_injection, and scenario 5 constructs a real genai.Client
+with HttpOptions(timeout=...). Neither makes a network call. Scenarios:
 
   1. hang->timeout is bounded: a client that raises TimeoutError on every call
      makes _retry_generate_content AND embed_content retry exactly

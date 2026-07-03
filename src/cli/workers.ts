@@ -10,14 +10,20 @@ export const spawnWorkerCommand = new Command('spawn-worker')
   .requiredOption('--prompt <text>', 'Task prompt to inject at session start')
   .option('--parent <agent>', 'Parent agent name (for bus reply routing)')
   .option('--model <model>', 'Claude model to use (defaults to org default)')
-  .action(async (name: string, opts: { dir: string; prompt: string; parent?: string; model?: string }) => {
+  .option('--runtime <runtime>', "Worker runtime: 'claude' (default) or 'opencode' (OpenRouter-backed via OpencodePTY)")
+  .action(async (name: string, opts: { dir: string; prompt: string; parent?: string; model?: string; runtime?: string }) => {
+    if (opts.runtime !== undefined && opts.runtime !== 'claude' && opts.runtime !== 'opencode') {
+      console.error(`Error: invalid --runtime "${opts.runtime}" — must be 'claude' or 'opencode'`);
+      process.exit(1);
+    }
+
     const env = resolveEnv();
     const client = new IPCClient(env.instanceId);
     const dir = resolve(opts.dir);
 
     const response = await client.send({
       type: 'spawn-worker',
-      data: { name, dir, prompt: opts.prompt, parent: opts.parent, model: opts.model },
+      data: { name, dir, prompt: opts.prompt, parent: opts.parent, model: opts.model, runtime: opts.runtime },
     });
 
     if (response.success) {

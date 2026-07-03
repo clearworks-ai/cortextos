@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Capture PTY exit handler so tests can simulate worker exit
 let capturedOnExit: ((code: number) => void) | null = null;
 let capturedPtyConfig: unknown = null;
+let agentPtyCtorCalls = 0;
 const mockPty = {
   spawn: vi.fn().mockResolvedValue(undefined),
   kill: vi.fn(),
@@ -13,12 +14,43 @@ const mockPty = {
   }),
 };
 
+// Separate mock for the opencode runtime path (WS8) — mirrors
+// tests/unit/daemon/agent-process-opencode.test.ts
+let capturedOpencodeArgs: { env: unknown; config: unknown; logPath: unknown } | null = null;
+const mockOpencodePty = {
+  spawn: vi.fn().mockResolvedValue(undefined),
+  kill: vi.fn(),
+  write: vi.fn(),
+  getPid: vi.fn().mockReturnValue(13579),
+  onExit: vi.fn().mockImplementation((cb: (code: number) => void) => {
+    capturedOnExit = cb;
+  }),
+};
+
 vi.mock('../../../src/pty/agent-pty.js', () => ({
   AgentPTY: function AgentPTY(_env: unknown, config: unknown) {
+    agentPtyCtorCalls++;
     capturedPtyConfig = config;
     return mockPty;
   },
 }));
+
+vi.mock('../../../src/pty/opencode-pty.js', () => ({
+  OpencodePTY: function OpencodePTY(env: unknown, config: unknown, logPath: unknown) {
+    capturedOpencodeArgs = { env, config, logPath };
+    return mockOpencodePty;
+  },
+}));
+
+// Mock the opencode-binary which-check so no real binary is needed
+const mockSpawnSync = vi.fn();
+vi.mock('child_process', async () => {
+  const actual = await vi.importActual<typeof import('child_process')>('child_process');
+  return {
+    ...actual,
+    spawnSync: (...args: unknown[]) => mockSpawnSync(...args),
+  };
+});
 
 const mockInjectMessage = vi.fn();
 vi.mock('../../../src/pty/inject.js', () => ({
@@ -45,10 +77,16 @@ const mockEnv = {
 beforeEach(() => {
   capturedOnExit = null;
   capturedPtyConfig = null;
+  capturedOpencodeArgs = null;
+  agentPtyCtorCalls = 0;
   mockPty.spawn.mockClear();
   mockPty.kill.mockClear();
   mockPty.write.mockClear();
+  mockOpencodePty.spawn.mockClear();
+  mockOpencodePty.kill.mockClear();
+  mockOpencodePty.write.mockClear();
   mockInjectMessage.mockClear();
+  mockSpawnSync.mockReset().mockReturnValue({ status: 0 });
 });
 
 describe('WorkerProcess', () => {
@@ -160,6 +198,87 @@ describe('WorkerProcess', () => {
       const w = new WorkerProcess('w-model-explicit', '/tmp/proj', undefined);
       await w.spawn(mockEnv, 'task', { model: 'claude-opus-4-7' });
       expect(capturedPtyConfig).toEqual({ model: 'claude-opus-4-7' });
+    });
+  });
+
+  describe('runtime config (WS8)', () => {
+    const originalOpenrouterKey = process.env.OPENROUTER_API_KEY;
+
+    afterEach(() => {
+      if (originalOpenrouterKey !== undefined) {
+        process.env.OPENROUTER_API_KEY = originalOpenrouterKey;
+      } else {
+        delete process.env.OPENROUTER_API_KEY;
+      }
+    });
+
+    it('default spawn constructs AgentPTY with the same args as before (no OpencodePTY, no which-check)', async () => {
+      const w = new WorkerProcess('w-rt-default', '/tmp/proj', undefined);
+      await w.spawn(mockEnv, 'task');
+      expect(agentPtyCtorCalls).toBe(1);
+      expect(capturedPtyConfig).toEqual({});
+      expect(capturedOpencodeArgs).toBeNull();
+      expect(mockSpawnSync).not.toHaveBeenCalled();
+      expect(mockPty.spawn).toHaveBeenCalledWith('fresh', 'task');
+    });
+
+    it("runtime:'claude' behaves identically to the default AgentPTY path", async () => {
+      const w = new WorkerProcess('w-rt-claude', '/tmp/proj', undefined);
+      await w.spawn(mockEnv, 'task', { model: 'claude-opus-4-7', runtime: 'claude' });
+      expect(agentPtyCtorCalls).toBe(1);
+      expect(capturedPtyConfig).toEqual({ model: 'claude-opus-4-7' });
+      expect(capturedOpencodeArgs).toBeNull();
+      expect(mockSpawnSync).not.toHaveBeenCalled();
+    });
+
+    it("runtime:'opencode' constructs OpencodePTY (not AgentPTY) with env/config/logPath threaded through", async () => {
+      process.env.OPENROUTER_API_KEY = 'sk-or-test';
+      const w = new WorkerProcess('w-rt-opencode', '/tmp/proj', undefined);
+      await w.spawn(mockEnv, 'task', { model: 'openrouter/qwen/qwen3-coder', runtime: 'opencode' });
+
+      expect(agentPtyCtorCalls).toBe(0);
+      expect(capturedOpencodeArgs).not.toBeNull();
+      expect(capturedOpencodeArgs!.env).toBe(mockEnv);
+      expect(capturedOpencodeArgs!.config).toEqual({ model: 'openrouter/qwen/qwen3-coder', runtime: 'opencode' });
+      expect(capturedOpencodeArgs!.logPath).toBe('/tmp/test-ctx/logs/w-rt-opencode/stdout.log');
+      expect(mockOpencodePty.spawn).toHaveBeenCalledWith('fresh', 'task');
+      expect(w.getStatus().status).toBe('running');
+      expect(w.getStatus().pid).toBe(13579);
+    });
+
+    it("runtime:'opencode' passes {model, runtime} config through intact without a model too", async () => {
+      process.env.OPENROUTER_API_KEY = 'sk-or-test';
+      const w = new WorkerProcess('w-rt-nomodel', '/tmp/proj', undefined);
+      await w.spawn(mockEnv, 'task', { runtime: 'opencode' });
+      expect(capturedOpencodeArgs!.config).toEqual({ runtime: 'opencode' });
+    });
+
+    it("rejects with a clear error when the opencode binary is not on PATH", async () => {
+      process.env.OPENROUTER_API_KEY = 'sk-or-test';
+      mockSpawnSync.mockReturnValue({ status: 1 });
+      const w = new WorkerProcess('w-rt-nobinary', '/tmp/proj', undefined);
+      await expect(w.spawn(mockEnv, 'task', { runtime: 'opencode' }))
+        .rejects.toThrow(/'opencode' binary is not on PATH/);
+      expect(capturedOpencodeArgs).toBeNull();
+      expect(agentPtyCtorCalls).toBe(0);
+    });
+
+    it('warns (does not fail) when OPENROUTER_API_KEY is missing', async () => {
+      delete process.env.OPENROUTER_API_KEY;
+      const logSpy = vi.fn();
+      const w = new WorkerProcess('w-rt-nokey', '/tmp/proj', undefined, logSpy);
+      await w.spawn(mockEnv, 'task', { runtime: 'opencode' });
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('OPENROUTER_API_KEY is not set'));
+      expect(capturedOpencodeArgs).not.toBeNull();
+    });
+
+    it('does not warn about OPENROUTER_API_KEY when it is set', async () => {
+      process.env.OPENROUTER_API_KEY = 'sk-or-test';
+      const logSpy = vi.fn();
+      const w = new WorkerProcess('w-rt-key', '/tmp/proj', undefined, logSpy);
+      await w.spawn(mockEnv, 'task', { runtime: 'opencode' });
+      const warnings = logSpy.mock.calls.filter((c) => String(c[0]).includes('OPENROUTER_API_KEY'));
+      expect(warnings).toHaveLength(0);
     });
   });
 

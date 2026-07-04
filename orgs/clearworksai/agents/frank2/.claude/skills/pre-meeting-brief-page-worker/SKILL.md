@@ -53,7 +53,7 @@ cat /tmp/pmb-candidates.json
 
 Each candidate already contains `externalAttendees` plus CRM context (matches, engagements with stage + open commitments, recent interactions). Do NOT re-run the scan.
 
-If the file is missing or `candidates` is empty: complete the task, self-terminate (Step 8 bash, skipping the mark), output DONE — send NOTHING.
+If the file is missing or `candidates` is empty: complete the task, self-terminate (Step 8 bash, skipping the mark), output DONE — send NOTHING. (An orphaned in-flight claim — a worker that died before clearing it — self-expires after 90 min via the in-flight TTL; do not manually clean claim files.)
 
 ---
 
@@ -121,17 +121,18 @@ cortextos bus send-telegram 6690120787 '📋 Pre-meeting brief — <title> at <l
 
 - Single-quote the literal text (dollar-sign bash-expansion rule) and append `"$URL"` as shown.
 - NEVER paste brief content into Telegram — the link is the deliverable.
-- On publish/verify failure: send NOTHING to Josh. Instead log the failure and leave the event UNMARKED so the next fire retries:
+- On publish/verify failure: send NOTHING to Josh. Instead log the failure, then leave the event UNMARKED and CLEAR its in-flight claim so the next fire retries:
 
 ```bash
 cortextos bus log-event error premeeting_brief_publish_failed warn 2>/dev/null
+cortextos bus meeting-brief-clear-inflight <eventId> --state-file /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/state/pre-meeting-brief-surfaced.txt
 ```
 
 ---
 
 ## Step 8 — Mark, complete, self-terminate (Bash)
 
-Only after a VERIFIED send (Step 6 CODE=200 and Step 7 message sent):
+Only after a VERIFIED send (Step 6 CODE=200 and Step 7 message sent). Note: `meeting-brief-mark` also releases the event's in-flight claim automatically — no extra command needed on the success path.
 
 ```bash
 cortextos bus meeting-brief-mark <eventId> --state-file /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/state/pre-meeting-brief-surfaced.txt

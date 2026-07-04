@@ -68,6 +68,21 @@ describe('frank2 config.json — pre-meeting-brief cron consolidation', () => {
     expect(prompt).not.toContain('send-telegram');
   });
 
+  it('claims each candidate in-flight BEFORE spawning the worker', () => {
+    const crons = loadCrons();
+    const page = crons.find((c) => c.name === 'pre-meeting-brief-page');
+    const prompt = page?.prompt ?? '';
+
+    // Claim-before-spawn: a second cron fire's claim exits nonzero, so it can
+    // never spawn a duplicate worker for the same event.
+    expect(prompt).toContain('meeting-brief-claim');
+    expect(prompt.indexOf('meeting-brief-claim')).toBeLessThan(
+      prompt.indexOf('spawn-worker')
+    );
+    // Delivery still belongs to the worker skill, never the cron prompt.
+    expect(prompt).not.toContain('send-telegram');
+  });
+
   it('passes the banned-cron-prompt validator for the new entry', () => {
     const crons = loadCrons();
     const page = crons.find((c) => c.name === 'pre-meeting-brief-page');

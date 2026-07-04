@@ -1,0 +1,220 @@
+{
+  "agent_name": "frank2",
+  "enabled": true,
+  "startup_delay": 0,
+  "max_session_seconds": 255600,
+  "max_crashes_per_day": 10,
+  "ctx_warning_threshold": 70,
+  "ctx_handoff_threshold": 80,
+  "working_directory": "",
+  "timezone": "America/Los_Angeles",
+  "day_mode_start": "09:00",
+  "day_mode_end": "18:00",
+  "communication_style": "casual",
+  "approval_rules": {
+    "always_ask": [
+      "external-comms",
+      "financial",
+      "deployment",
+      "data-deletion"
+    ],
+    "never_ask": []
+  },
+  "crons": [
+    {
+      "name": "heartbeat",
+      "type": "recurring",
+      "interval": "4h",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: heartbeat\" --desc \"Fleet heartbeat check: inbox, agent health, memory update\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire heartbeat --interval 4h 2>/dev/null; Read HEARTBEAT.md and follow its instructions. Update your heartbeat with cortextos bus update-heartbeat 'online'. Check inbox: cortextos bus check-inbox. Review agent fleet health: cortextos bus read-all-heartbeats — any agent silent >5h, attempt restart via cortextos start <name> and alert Josh via Telegram 6690120787 if restart fails. ⛔ HUNTER IS PERMANENTLY OFF — DO NOT RESTART IT EVER, FOR ANY REASON, EVEN IF SILENT FOR DAYS. KB SYNC: Copy MEMORY.md to knowledge-sync vault (active memory store): cp \"$(pwd)/MEMORY.md\" ~/code/knowledge-sync/raw/areas/clearworks/agent-memory-frank2.md. EVENT LOGGING: For every significant decision made this cycle, run: cortextos bus log-event action decision_made info --meta '{\"agent\":\"frank2\",\"decision\":\"<what>\"}'. For any completed approval this cycle: cortextos bus log-event action approval_resolved info --meta '{\"approval_id\":\"<id>\",\"decision\":\"<approved|rejected>\"}'. Log: cortextos bus log-event action cron_completed info --meta '{\"cron\":\"heartbeat\",\"agent\":\"frank2\"}'. SILENT-OK: If fleet healthy, no inbox messages, and no decisions to log, your entire response must be literally 'OK' — no prose, no heartbeat recap, no agent list."
+    },
+    {
+      "name": "check-approvals",
+      "type": "recurring",
+      "interval": "2h",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: check-approvals\" --desc \"Check pending approvals\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire check-approvals --interval 2h 2>/dev/null; Check pending approvals ONLY — do NOT dump the full HUMAN task list (dashboard shows it). (1) cortextos bus list-approvals --format json — any approval pending >1h → send Telegram reminder to 6690120787 with just the approval item. (2) For any [HUMAN] task classified as CRM/outreach that arrived in the inbox: route to crm agent and close it. (Hunter is permanently shut down — do NOT route to hunter.) ACK inbox messages. Log via cortextos bus log-event. SILENT-OK if zero approvals pending — no Telegram, no task list, nothing."
+    },
+    {
+      "name": "comms-check",
+      "type": "recurring",
+      "interval": "15m",
+      "prompt": "cortextos bus update-cron-fire comms-check --interval 15m 2>/dev/null; cortextos spawn-worker \"comms-check-$(date +%s)\" --dir \"$(pwd)\" --parent frank2 --prompt \"Read .claude/skills/comms-check-worker/SKILL.md and execute it exactly. You are a short-lived worker — no bootstrapping, no heartbeat, no prose. Do the task, act on findings, output DONE.\" 2>&1 && echo \"Worker spawned\" || echo \"Spawn failed\""
+    },
+    {
+      "name": "fleet-reconcile",
+      "type": "recurring",
+      "interval": "15m",
+      "prompt": "cortextos bus update-cron-fire fleet-reconcile --interval 15m 2>/dev/null; cortextos spawn-worker \"fleet-reconcile-$(date +%s)\" --dir \"$(pwd)\" --parent frank2 --model claude-haiku-4-5-20251001 --prompt \"Read .claude/skills/fleet-reconcile-worker/SKILL.md and execute it exactly. You are a short-lived worker — no bootstrapping, no heartbeat, no prose. Do the task, act on findings, output DONE.\" 2>&1 && echo \"Worker spawned\" || echo \"Spawn failed\""
+    },
+    {
+      "name": "daily-trending-repos",
+      "type": "recurring",
+      "cron": "30 16 * * 1-5",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: daily-trending-repos\" --desc \"Daily GitHub trending scan: top patterns, steal-or-skip digest, morning-brief teaser\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire daily-trending-repos --interval 24h 2>/dev/null; 📈 DAILY TRENDING REPOS — cat /tmp/frank-now.json for date ground truth.\n\nFETCH (Bash — use the script, not inline regex): python3 /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/scripts/trending-fetch.py 2>&1; COUNT=$(python3 -c \"import json; d=json.load(open('/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/memory/trending-picks.json')); print(len(d.get('picks',[])))\" 2>/dev/null || echo 0); echo \"TRENDING_COUNT=$COUNT\"\n\nIf COUNT=0 after the script ran, the script already tried HTML scrape + weekly period + GitHub API fallback. If ALL failed, complete the task with result 'All trending sources failed — no repos available' and send Telegram to 6690120787: '📈 GitHub Trending — fetch failed despite all fallbacks (HTML + API). Needs investigation.' Then stop.\n\nIf COUNT > 0, read memory/trending-picks.json for the repo list.\n\nBOUNDARIES (mandatory):\n- Analyze the top 5 only. Repos 6-10 are summary-only one-liners.\n- Total wall-clock budget: 1500 seconds. If the budget is hit, finish the repos already analyzed and mark the remaining analyzed set as summary-only.\n- Per repo, if `opensrc path <author>/<name>` fails, file count exceeds 50000, or repo size exceeds 200MB, mark that repo summary-only (or analysis failed) and continue.\n- Do not let one repo failure blank the digest.\n\nFOR EACH OF THE TOP 5 REPOS:\n1. Use spec `<author>/<name>` and run the same 4-stage pipeline defined in `~/.claude/skills/codebase-reference/SKILL.md`. Reuse that skill's logic; do not invent a second opensrc+graphify pipeline here.\n2. Keep graph work out of frank2's cwd: pull the source with `opensrc path`, copy it to a scratch directory under `/tmp/frank-trending/<date>/<repo>/`, and run graphify AST fast-path there only. Do NOT use `--mode deep`.\n3. Read `GRAPH_REPORT.md`, god nodes, surprising connections, and any targeted query/explain output needed to extract 2-3 patterns worth stealing.\n4. Produce a verdict for that repo: `STEAL <why>` or `SKIP <why>`, mapped explicitly to Express 5 / Drizzle / React Query / cortextOS bus. Cite real source-backed patterns only.\n5. After extracting notes, remove the scratch directory so `graphify-out/` does not accumulate daily.\n\nAFTER THE TOP 5:\n- Summarize repos 6-10 as one-liners only: repo, stars, currentPeriodStars, description.\n- Update `memory/trending-picks.json` — set `one_line_steal_reason` for each STEAL pick to the actual verdict. Keep format: `{date, picks:[{repo, url, one_line_steal_reason, stars, stars_today, language, description}]}`.\n\nFinish by completing the task with a result that states how many repos were deeply analyzed, how many were summary-only, and how many STEAL picks were written to trending-picks.json. Do NOT send any Telegram message — the daily-ops-dashboard cron handles publishing and notifying Josh."
+    },
+    {
+      "name": "morning-brief",
+      "type": "recurring",
+      "cron": "3 8 * * 1-5",
+      "prompt": "bash /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/scripts/morning-brief.sh"
+    },
+    {
+      "name": "midday-blockers",
+      "type": "recurring",
+      "cron": "30 14 * * 1-5",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: midday-blockers\" --desc \"Midday blockers check: stale threads, stuck tasks, unprepped meetings\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire midday-blockers --interval 24h 2>/dev/null; MIDDAY BLOCKERS CHECK (2:30 PM conditional) — cat /tmp/frank-now.json. Check these three conditions:\n\n1. cortextos bus check-inbox — any thread stale >3 days involving an active client or deal?\n2. cortextos bus list-tasks --status in_progress — any task in_progress for >6h with no update?\n3. gws calendar +agenda --tomorrow --format json — any calendar event with no prep note?\n\nIF AT LEAST ONE is true: send Telegram to 6690120787 with ONLY the blocker(s). Max 3 bullets. No preamble. No 'everything else looks good'. Log via cortextos bus log-event action briefing_sent info --meta '{\"type\":\"midday_blockers\"}'.\n\nIF NONE are true: log COMMS_OK via cortextos bus log-event, send NO Telegram. Your entire response must be literally 'OK'."
+    },
+    {
+      "name": "evening-wrap",
+      "type": "recurring",
+      "cron": "2 17 * * 1-5",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: evening-wrap\" --desc \"Evening wrap: wins, comms summary, overnight plan, tomorrow priorities\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire evening-wrap --interval 24h 2>/dev/null; 🌙 EVENING WRAP — cat /tmp/frank-now.json. Pull fresh Gmail (Bash: gws gmail +triage --query 'is:unread newer_than:1d' --format json), Calendar tomorrow (Bash: gws calendar +agenda --tomorrow --format json), git log today across ~/code/clearpath, ~/code/lifecycle-killer, ~/code/nonprofit-hub. Read daily note + active tasks. cortextos bus read-all-heartbeats.\n\nProduce overnight work plan for each agent (what they should tackle while Josh sleeps — internal building only, nighttime guardrails apply). Dispatch via cortextos bus send-message <agent> normal '<task>'.\n\nDASHBOARD PUBLISH — rebuild dashboard and send URL (never send standalone text pages):\n1. Write the complete wrap to /tmp/evening-wrap-content.md using ## headers and • bullets (Larry will add this as a dashboard tab).\n2. set -a; source /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/.env 2>/dev/null; set +a\n3. URL=$(cd /Users/joshweiss/code/briefs && git pull origin main -q 2>/dev/null; BRIEFS_API_KEY=$BRIEFS_API_KEY BRIEFS_BASE_URL=${BRIEFS_BASE_URL:-https://briefs-production-b399.up.railway.app} PYTHONPATH=/Users/joshweiss/code/briefs python3 publisher/build_dashboard.py 2>/dev/null | tail -1)\n4. [[ \"$URL\" == http* ]] && cortextos bus send-telegram 6690120787 \"🌙 Evening Wrap — $(date +'%a %b %-d'): $URL\" || cortextos bus send-telegram 6690120787 '⚠️ Evening wrap dashboard build failed'\n5. Log via cortextos bus log-event action briefing_sent info --meta '{\"type\":\"evening_wrap\"}'."
+    },
+    {
+      "name": "pre-meeting-brief",
+      "type": "recurring",
+      "enabled": false,
+      "cron": "0 17 * * 1-5",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: pre-meeting-brief\" --desc \"Pre-meeting prep for tomorrow calendar events\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire pre-meeting-brief --interval 24h 2>/dev/null; 📋 PRE-MEETING BRIEF — cat /tmp/frank-now.json. Use upcoming_7d to determine tomorrow's ISO date (and Monday's if today is Friday) — NEVER guess.\n\n1. (Bash) gws calendar +agenda --tomorrow --format json for tomorrow's events (and Monday's: gws calendar +agenda --days 3 --format json | filter by Monday date if Friday).\n2. For EACH meeting, use Clearpath Meeting Assist: POST clearpath-production-c86d.up.railway.app/api/briefings/generate with meeting details, attendees, context (flexAuth + API key from env). Do NOT manually assemble.\n3. Also pull: Clearpath CRM intelligence on attendees, knowledge-sync client/project files, Gmail recent threads with attendees.\n\nFor each meeting, Telegram to 6690120787:\n\n📋 *Meeting Prep — [title]*\n*When:* [time]\n*With:* [attendees + role/relationship]\n*Context:* [recent discussions, open items]\n*Prep:* [what Josh should review/prepare]\n*Goal:* [outcome to push for]\n\nNo meetings tomorrow? Skip silently — do NOT send 'no meetings' message."
+    },
+    {
+      "name": "weekly-review",
+      "type": "recurring",
+      "cron": "3 18 * * 5",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: weekly-review\" --desc \"Weekly review: wins, metrics, failures, money, lessons\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire weekly-review --interval 7d 2>/dev/null; 📊 WEEKLY REVIEW — Dispatch Sonnet subagent to pull comprehensive weekly data: all daily notes (~/code/knowledge-sync/daily/ Mon-Fri this week), session files (~/code/knowledge-sync/cc/sessions/ this week), git log --oneline -30 across ~/code/clearpath + lifecycle-killer + nonprofit-hub, Gmail threads this week, Calendar events completed, Todoist completed tasks, cortextos bus read-all-heartbeats (fleet performance).\n\nFollow .claude/skills/weekly-review/SKILL.md if it has custom metrics.\n\nDASHBOARD PUBLISH — rebuild dashboard and send URL (never send standalone text pages):\n1. Write the full review to /tmp/weekly-review-content.md using ## headers and • bullets (Larry will add this as a dashboard tab).\n2. set -a; source /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/.env 2>/dev/null; set +a\n3. URL=$(cd /Users/joshweiss/code/briefs && git pull origin main -q 2>/dev/null; BRIEFS_API_KEY=$BRIEFS_API_KEY BRIEFS_BASE_URL=${BRIEFS_BASE_URL:-https://briefs-production-b399.up.railway.app} PYTHONPATH=/Users/joshweiss/code/briefs python3 publisher/build_dashboard.py 2>/dev/null | tail -1)\n4. [[ \"$URL\" == http* ]] && cortextos bus send-telegram 6690120787 \"📊 Weekly Review — $(date +'%b %-d'): $URL\" || cortextos bus send-telegram 6690120787 '⚠️ Weekly review dashboard build failed'\n5. Log via cortextos bus log-event action weekly_review_sent info."
+    },
+    {
+      "name": "weekly-prep",
+      "type": "recurring",
+      "cron": "7 14 * * 6",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: weekly-prep\" --desc \"Weekly prep: north star, calendar, financials, relationships\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire weekly-prep --interval 7d 2>/dev/null; 🗺️ WEEKLY PREP — Dispatch Sonnet subagent to pull next week's Calendar events, active tasks + deadlines, pipeline status, financial state (invoices, AR), cortextos bus list-agents for fleet roster.\n\nDASHBOARD PUBLISH — rebuild dashboard and send URL (never send standalone text pages):\n1. Write the prep to /tmp/weekly-prep-content.md using ## headers and • bullets (Larry will add this as a dashboard tab).\n2. set -a; source /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/.env 2>/dev/null; set +a\n3. URL=$(cd /Users/joshweiss/code/briefs && git pull origin main -q 2>/dev/null; BRIEFS_API_KEY=$BRIEFS_API_KEY BRIEFS_BASE_URL=${BRIEFS_BASE_URL:-https://briefs-production-b399.up.railway.app} PYTHONPATH=/Users/joshweiss/code/briefs python3 publisher/build_dashboard.py 2>/dev/null | tail -1)\n4. [[ \"$URL\" == http* ]] && cortextos bus send-telegram 6690120787 \"🗺️ Weekly Prep — $(date +'%b %-d'): $URL\" || cortextos bus send-telegram 6690120787 '⚠️ Weekly prep dashboard build failed'\n5. Log via cortextos bus log-event action weekly_prep_sent info."
+    },
+    {
+      "name": "weekly-synthesis",
+      "type": "recurring",
+      "cron": "3 16 * * 5",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: weekly-synthesis\" --desc \"Weekly synthesis: extract durable knowledge from daily notes\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire weekly-synthesis --interval 7d 2>/dev/null; WEEKLY SYNTHESIS — Dispatch Sonnet subagent to read this week's daily notes (~/code/knowledge-sync/daily/YYYY-MM-DD.md Mon-Fri), session files (~/code/knowledge-sync/cc/sessions/), git log --oneline -20 across ~/code/clearpath + lifecycle-killer + nonprofit-hub. Produce a synthesis document.\n\nWrite to ~/code/knowledge-sync/cc/synthesis/week-of-YYYY-MM-DD.md. Extract any durable facts as memory files via cortextos bus kb-ingest where appropriate. Do NOT send Telegram — internal synthesis."
+    },
+    {
+      "name": "weekly-cleanup",
+      "type": "recurring",
+      "cron": "3 10 * * 0",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: weekly-cleanup\" --desc \"Weekly cleanup: stale task review and Todoist sync\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire weekly-cleanup --interval 7d 2>/dev/null; WEEKLY CLEANUP — Dispatch Sonnet subagent to: (1) read ~/code/knowledge-sync/tasks/clearworks/active.md + tasks/personal/active.md. (2) Flag stale items (>7 days no update, no waiting-on). (3) Check milestones approaching this week. (4) Query Todoist API for status sync — Todoist is authoritative. Subagent returns findings + recommended edits.\n\nYOU apply the edits and send summary to Telegram 6690120787. Under 10 bullets."
+    },
+    {
+      "name": "outreach-check",
+      "type": "recurring",
+      "cron": "2 10 * * 1,3,5",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: outreach-check\" --desc \"Outreach check: sales prospects needing follow-up\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire outreach-check --interval 48h 2>/dev/null; OUTREACH CHECK — Dispatch Haiku subagent to: (1) Read ~/code/knowledge-sync/tasks/clearworks/active.md SALES section only — ignore Client Delivery. (2) Cross-reference: list client folders with 'ls ~/code/knowledge-sync/areas/clearworks/clients/'. If a deal name matches an existing client folder, it's an active project NOT a prospect — skip. (3) Gmail search for recent responses from each prospect (last 7 days). (4) cortextos bus check-inbox. Only flag TRUE sales prospects that are stale or need action.\n\nTelegram to 6690120787. Under 5 bullets. Route any actionable leads to CRM agent via cortextos bus send-message crm normal '<lead details>'. Hunter is permanently shut down (2026-06-27)."
+    },
+    {
+      "name": "client-health",
+      "type": "recurring",
+      "cron": "4 9 * * 3",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: client-health\" --desc \"Client health check: stale contacts and deliverables\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire client-health --interval 7d 2>/dev/null; CLIENT HEALTH — Dispatch Haiku subagent to scan ~/code/knowledge-sync/areas/clearworks/clients/ and ~/code/knowledge-sync/tasks/clearworks/active.md Client Delivery section. Flag >14 days no contact, stalled deliverables, overdue items.\n\nTelegram to 6690120787. Route remediation to COMPASS agent via cortextos bus send-message compass normal '<client + action>' if COMPASS exists."
+    },
+    {
+      "name": "pipeline-review",
+      "type": "recurring",
+      "cron": "3 15 * * 4",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: pipeline-review\" --desc \"Pipeline review: deal stages, next actions, revenue at risk\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire pipeline-review --interval 7d 2>/dev/null; PIPELINE REVIEW — Dispatch Sonnet subagent for full sales pipeline analysis. Read ~/code/knowledge-sync/tasks/clearworks/active.md Sales section. Summarize: active deals by stage, next actions, revenue at risk, wins.\n\nTelegram to 6690120787. Route stage-advancement tasks to CRM agent via cortextos bus send-message crm normal '<deal + next action>'. Hunter is permanently shut down (2026-06-27)."
+    },
+    {
+      "name": "forgot-anything",
+      "type": "recurring",
+      "cron": "7 11 * * 5",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: forgot-anything\" --desc \"Dropped threads check: anything missed this week\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire forgot-anything --interval 7d 2>/dev/null; FORGOT ANYTHING — Dispatch Sonnet subagent to scan the week for dropped threads. Read daily notes (Mon-Fri this week), check ~/code/knowledge-sync/tasks/clearworks/active.md + tasks/personal/active.md for stale items, cortextos bus check-inbox.\n\nTelegram to 6690120787 with findings. If nothing dropped, say so."
+    },
+    {
+      "name": "human-tasks-check",
+      "type": "recurring",
+      "interval": "4h",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: human-tasks-check\" --desc \"Human tasks health: review open Josh action items\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire human-tasks-check --interval 4h 2>/dev/null; HUMAN TASKS CHECK — SILENT-ONLY, no Telegram, ever. Josh's dashboard already shows the [HUMAN] task list; this cron exists purely to keep the count logged, not to ping him. list-tasks has NO --project flag — query via JSON: HUMAN_TASKS=$(cortextos bus list-tasks --status pending --format json 2>/dev/null | python3 -c \"import json,sys;d=json.load(sys.stdin);ts=d if isinstance(d,list) else d.get('tasks',[]);print(chr(10).join(t.get('created_at','')+' | '+t.get('title','') for t in ts if '[HUMAN]' in t.get('title','')))\"); COUNT=$(echo \"$HUMAN_TASKS\" | grep -c '|'). Log via cortextos bus log-event action human_tasks_reviewed info --meta '{\"count\":'$COUNT'}' — do NOT send Telegram under any circumstance from this cron, even for old/stale items (this was sending unsolicited full-list dumps, confirmed by Josh as unwanted 2026-07-02). The ONLY way the full list should ever reach Josh is when he explicitly asks for it in a live message. cortextos bus complete-task $TASK_ID --result 'Human tasks reviewed silently, count logged' 2>/dev/null"
+    },
+    {
+      "name": "nightly-fleet-analysis",
+      "type": "recurring",
+      "cron": "3 2 * * *",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: nightly-fleet-analysis\" --desc \"Nightly fleet analysis: agent logs, crashes, workarounds\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire nightly-fleet-analysis --interval 24h 2>/dev/null; NIGHTLY FLEET ANALYSIS — cat /tmp/frank-now.json for date ground truth. Dispatch a Sonnet subagent to read all agent logs and detect frustration, bugs, workarounds, crashes from last 24h.\n\nSubagent reads for EACH agent (frank2, maven, auditos, sage, muse, larry, sre) — hunter is permanently shut down, skip it:\n- ~/.cortextos/cortextos1/logs/<agent>/restarts.log\n- ~/.cortextos/cortextos1/logs/<agent>/stdout.log (tail -200, look for: hook errors, frozen points, kb-query hangs)\n- <agent>/memory/$(date -u +%Y-%m-%d).md\n\nAlso reads:\n- ~/.cortextos/cortextos1/logs/crashes.log\n- ~/code/knowledge-sync/daily/$(date +%Y-%m-%d).md\n\nDetection patterns:\n- CRASH LOOP: WATCHDOG-HARD-RESTART >2x same agent 24h → root cause + fix\n- HOOK ERRORS: PreToolUse hook error in stdout → identify hook, disable if broken\n- WORKAROUNDS: ⚠️ warnings in AGENTS.md → attempt to fix underlying bug\n- FRUSTRATION signals in memory (sloppy, broken, bad work, can't trust) → surface in morning brief\n- SILENT AGENTS: heartbeat not updated >5h → investigate + restart\n\nSubagent returns: [{agent, issue_type, severity, root_cause, recommended_fix, auto_fixable}]\n\nYOU (frank2) then:\n- CRITICAL auto-fixable → implement immediately (patch config/AGENTS.md, restart)\n- CRITICAL non-auto-fixable → create approval + Telegram to 6690120787\n- HIGH auto-fixable → implement + log\n- HIGH non-auto-fixable → Telegram alert with specific ask\n- MEDIUM/LOW → write to nightly log only, no Telegram\n\nWrite to memory/$(date -u +%Y-%m-%d).md. Log: cortextos bus log-event action nightly_analysis_complete info. Send Telegram ONLY if CRITICAL or HIGH found."
+    },
+    {
+      "name": "meeting-commitments",
+      "type": "recurring",
+      "interval": "2h",
+      "prompt": "cortextos bus update-cron-fire meeting-commitments --interval 2h 2>/dev/null; cortextos spawn-worker \"meeting-commitments-$(date +%s)\" --dir \"$(pwd)\" --parent frank2 --model claude-haiku-4-5-20251001 --prompt \"Read .claude/skills/meeting-commitments-worker/SKILL.md and execute it exactly. You are a short-lived worker — no bootstrapping, no heartbeat, no prose. Do the task and output DONE.\" 2>&1 && echo \"Worker spawned\" || echo \"Spawn failed\""
+    },
+    {
+      "name": "ff-extractor",
+      "type": "recurring",
+      "cron": "0 */4 * * *",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: ff-extractor\" --desc \"Extract Fireflies meeting commitments to briefs board\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire ff-extractor --interval 4h 2>/dev/null; source .env && python3 scripts/ff-extractor.py 2>&1; cortextos bus complete-task $TASK_ID --result \"ff-extractor ran\" 2>/dev/null"
+    },
+    {
+      "name": "transcript-scanner",
+      "type": "recurring",
+      "interval": "2h",
+      "prompt": "cortextos bus update-cron-fire transcript-scanner --interval 2h 2>/dev/null; cortextos spawn-worker \"transcript-scanner-$(date +%s)\" --dir \"$(pwd)\" --parent frank2 --model claude-haiku-4-5-20251001 --prompt \"Read .claude/skills/transcript-scanner-worker/SKILL.md and execute it exactly. You are a short-lived worker — no bootstrapping, no heartbeat, no prose. Do the task and output DONE.\" 2>&1 && echo \"Worker spawned\" || echo \"Spawn failed\""
+    },
+    {
+      "name": "daily-improvement-dispatch",
+      "type": "recurring",
+      "cron": "0 10 * * 1-5",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: daily-improvement-dispatch\" --desc \"Dispatch daily improvement prompts to all agents\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire daily-improvement-dispatch --interval 24h 2>/dev/null; DAILY IMPROVEMENT DISPATCH — cat /tmp/frank-now.json. Active agents to prompt: larry, muse, maven, ophir, crm, scout (NOT sage/sre/auditos/hunter — disabled or shut down). For each agent: (1) Read heartbeat.json directly from ~/.cortextos/cortextos1/state/<agent>/heartbeat.json — use last_heartbeat field. Do NOT use read-all-heartbeats (lags). (2) Read their goals.json from ~/code/cortextos/orgs/clearworksai/agents/<agent>/goals.json (or orgs/personal/agents/<agent>/goals.json for personal agents). (3) CHECK COMPLETED WORK — CRITICAL: personal agents (maven, ophir, scout) store tasks in ~/.cortextos/cortextos1/orgs/personal/tasks/ with NO agent field — cortextos bus list-tasks will NOT find them. For personal agents, run this Bash to get today's work: TODAY=$(date -u +%Y-%m-%d); python3 -c \"import json,glob,os; d='$HOME/.cortextos/cortextos1/orgs/personal/tasks/'; today='$TODAY'; tasks=[json.load(open(f)) for f in glob.glob(d+'*.json')]; done=[t for t in tasks if t.get('status')=='completed' and today in t.get('created_at','')]; print(len(done),'tasks today'); [print(t['title'][:60]) for t in done]\" For clearworksai agents, use: cortextos bus list-tasks --status completed --agent <agent> --format json (filter by created_at date in Python). (4) ONLY send an improvement prompt if there is a genuine gap — i.e., a goal NOT covered by today's completed work. If their tasks already address their goals, do NOT send a redundant prompt. Send via: cortextos bus send-message <agent> normal 'Daily improvement: [specific gap based on goals NOT covered by recent tasks]'. OPHIR HARD RULE: Never mention heartbeat staleness, timing intervals, or financial metrics to Josh in the prompt to ophir. Only reference ophir's actual goals: inbox latency, Monarch MCP uptime, on-demand analysis quality. MUSE HARD RULE: Never ask muse to add unselected seeds to the queue. The correct flow is generate options → Josh picks → muse creates seeds. Queue being thin between selection cycles is by design. Log via cortextos bus log-event action daily_improvement_dispatched info --meta '{\"agents_prompted\":N}'. cortextos bus complete-task $TASK_ID --result 'Dispatched improvement prompts' 2>/dev/null"
+    },
+    {
+      "name": "theta-wave",
+      "type": "recurring",
+      "cron": "0 16 * * 5",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: theta-wave\" --desc \"Weekly system improvement cycle: scan fleet, evaluate experiments, propose improvements\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire theta-wave --interval 7d 2>/dev/null; Read .claude/skills/theta-wave/SKILL.md and execute the full theta wave cycle. Steps: (1) cortextos bus read-all-heartbeats, (2) cortextos bus list-experiments --json, (3) evaluate each active experiment, (4) dispatch a Sonnet subagent to run the analyst role: scan fleet logs, score system effectiveness 1-10, propose top 3 improvements, research 1 external finding, (5) YOU review the analysis critically — challenge assumptions, push for root causes, bring goal alignment, (6) for agreed actions: immediate changes implement now, needs-approval items create approval, future experiments queue via cortextos bus create-experiment, (7) OS-MAP UPDATE — After evaluation, update state/os-map.md with outcomes: mark accepted experiments as 🤖 (built), mark rejected/repeatedly-declined proposals as 🚫 with a note, mark in-progress as 👥. This keeps the map reflecting reality not a wishlist. Never propose a 🚫 item again from os-capability-scan., (8) send Telegram to 6690120787 with brief week-in-review: score, top finding, agreed actions, os-map changes. Log: cortextos bus log-event action theta_wave_complete info --meta '{\"proposed\":X,\"approved\":Y}'. cortextos bus complete-task $TASK_ID --result \"Theta wave complete\" 2>/dev/null"
+    },
+    {
+      "name": "daily-ops-dashboard",
+      "type": "recurring",
+      "cron": "5 15 * * *",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: daily-ops-dashboard\" --desc \"Rebuild and publish 6-tab ops dashboard\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire daily-ops-dashboard --interval 24h 2>/dev/null; DAILY OPS DASHBOARD — Build and publish the 6-tab ops dashboard from PR #3. Run: set -a; source /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/.env 2>/dev/null; set +a; cd /Users/joshweiss/code/briefs && git pull origin main -q && BRIEFS_API_KEY=$BRIEFS_API_KEY BRIEFS_BASE_URL=${BRIEFS_BASE_URL:-https://briefs-production-b399.up.railway.app} PYTHONPATH=/Users/joshweiss/code/briefs python3 publisher/build_dashboard.py 2>&1. Capture the URL output (last line starting with https://). If URL is present: cortextos bus send-telegram 6690120787 '📊 Ops Dashboard updated: https://briefs.clearworks.ai' and log cortextos bus log-event action briefing_sent info --meta '{\"type\":\"ops_dashboard\"}'. If the build fails: cortextos bus send-telegram 6690120787 '⚠️ Ops dashboard build failed — check briefs repo'. cortextos bus complete-task $TASK_ID --result 'Dashboard published: https://briefs.clearworks.ai' 2>/dev/null"
+    },
+    {
+      "name": "milestone-check",
+      "type": "recurring",
+      "cron": "5 8 * * 1-5",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: milestone-check\" --desc \"Milestone check: personal deadlines and recurring items due\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire milestone-check --interval 24h 2>/dev/null; MILESTONE CHECK — cat /tmp/frank-now.json for today's date/day. Dispatch Haiku subagent to read ~/code/knowledge-sync/tasks/personal/active.md recurring section + milestones. Check if anything due today or tomorrow: George topical (Mon), Havasupai prep, batch cook (Sun+Wed), meeting deadlines.\n\nTelegram to 6690120787 ONLY if something is actually due. Otherwise skip silently."
+    },
+    {
+      "name": "todoist-health-check",
+      "type": "recurring",
+      "interval": "4h",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: todoist-health-check\" --desc \"Todoist health: overdue tasks, no-due-date items, wrong projects\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire todoist-health-check --interval 4h 2>/dev/null; TODOIST HEALTH CHECK — Query Todoist API (use /api/v1/tasks with Bearer $TODOIST_TOKEN — REST v2 /rest/v2/tasks is 410 Gone) for all open tasks. Auth header: 'Authorization: Bearer $TODOIST_TOKEN'. Projects: Clearworks=6f7vp9GfP7xXhVfj, Josh Personal=6fCVMRhWm3pPhr5p, Logic TCG=6fCVMQxCj2CRpgV8, Frank CoS=6gG222cVh8qc5JCV. Check for: (1) overdue >3 days, (2) no due date open >14 days, (3) wrong project (personal in Clearworks etc).\n\nIssues found → Telegram 6690120787 with summary. Clean → log silently via cortextos bus log-event."
+    },
+    {
+      "name": "os-capability-scan",
+      "type": "recurring",
+      "enabled": false,
+      "cron": "30 9 * * 1-5",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: os-capability-scan\" --desc \"Daily OS scan: find 3 new flows Frank can automate\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire os-capability-scan --interval 24h 2>/dev/null; OS CAPABILITY SCAN — Read state/os-map.md. SKIP any flow marked 🚫 (permanently rejected — do not propose). Find flows marked 🔜 TBD or 🧑 Josh-only that could realistically be automated or agent-assisted given current capabilities (GWS, Fireflies, Clearpath Intel, Todoist, Telegram, browser-harness, skill-creator). Cross-reference with cortextos bus list-skills --format text for what's already installed. Pick the TOP 3 flows ranked by effort-to-impact ratio. Propose all 3 to Josh via Telegram 6690120787 as a numbered list: 'Capability options:\\n1. [Flow] — [one sentence]\\n2. [Flow] — [one sentence]\\n3. [Flow] — [one sentence]\\nPick one to build.' If Josh picks one, invoke skill-creator to build it. Log via cortextos bus log-event action os_scan_complete info. cortextos bus complete-task $TASK_ID --result 'OS scan complete — 3 options proposed' 2>/dev/null"
+    },
+    {
+      "name": "session-archaeology",
+      "type": "recurring",
+      "cron": "0 17 * * 0",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: session-archaeology\" --desc \"Weekly session archaeology: synthesize sessions into session-archaeology file\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire session-archaeology --interval 7d 2>/dev/null; SESSION ARCHAEOLOGY — Read the past 7 days of session files from ~/code/knowledge-sync/cc/sessions/ (files matching YYYY-MM-DD_*.md). Also read daily notes ~/code/knowledge-sync/daily/YYYY-MM-DD.md for the same period. Synthesize into a brief report: key decisions made, work shipped, patterns observed, lessons learned. Write output to /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/memory/session-archaeology-$(date +%Y-%m-%d).md. Then run: cd /Users/joshweiss/code/briefs && git pull origin main -q && BRIEFS_API_KEY=$BRIEFS_API_KEY BRIEFS_BASE_URL=${BRIEFS_BASE_URL:-https://briefs-production-b399.up.railway.app} PYTHONPATH=/Users/joshweiss/code/briefs python3 publisher/build_dashboard.py 2>/dev/null | tail -1 to refresh the dashboard. cortextos bus complete-task $TASK_ID --result 'Session archaeology written and dashboard refreshed' 2>/dev/null"
+    },
+    {
+      "name": "daily-wiki-prep",
+      "type": "recurring",
+      "cron": "7 2 * * *",
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: daily-wiki-prep\" --desc \"Nightly wiki synthesis: convert raw knowledge-sync docs to wiki articles\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire daily-wiki-prep --interval 24h 2>/dev/null; NIGHTLY WIKI SYNTHESIS — Run as Bash: cd /Users/joshweiss/code/knowledge-sync && python3 scripts/wiki-synthesis.py --max-files 50 --source-path raw/areas/clearworks 2>&1 | tail -20. Then write the new-article list for the morning brief: cd /Users/joshweiss/code/knowledge-sync && git add wiki/ && git diff --cached --name-only --diff-filter=A | grep '^wiki/.*\\.md' > /tmp/wiki-new-articles.txt; git diff --cached --quiet || git commit -m 'chore(wiki): nightly synthesis run'. VERIFY the cron actually worked: if the synthesis script errored (non-zero exit or 0 files when raw backlog is non-empty), send Telegram 6690120787 with the error — silent failure on this cron is NOT acceptable (failed 3 nights May-Jun 2026, Josh escalated). Log: cortextos bus log-event task wiki_prep_complete info --meta '{\"new_articles\":\"see /tmp/wiki-new-articles.txt\"}'; cortextos bus complete-task $TASK_ID --result 'Nightly wiki synthesis complete' 2>/dev/null. SILENT-OK: no Telegram on success."
+    },
+    {
+      "name": "pre-meeting-brief-page",
+      "type": "recurring",
+      "cron": "*/15 7-19 * * 1-5",
+      "enabled": true,
+      "prompt": "cortextos bus update-cron-fire pre-meeting-brief-page --interval 15m 2>/dev/null; 📋 PRE-MEETING BRIEF PAGE — cheap scan first, spawn a worker ONLY if an external meeting is 30-75 min out.\n1. (Bash) gws calendar +agenda --format json > /tmp/pmb-events.json 2>/dev/null || echo '[]' > /tmp/pmb-events.json\n2. (Bash) cortextos bus meeting-brief-scan --events-file /tmp/pmb-events.json --crm-dir /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm/crm --state-file /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/state/pre-meeting-brief-surfaced.txt --claims-dir /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/state/pre-meeting-brief-claims --json > /tmp/pmb-candidates.json 2>/dev/null || echo '{\"candidates\":[]}' > /tmp/pmb-candidates.json\n3. (Bash) COUNT=$(python3 -c \"import json;print(len(json.load(open('/tmp/pmb-candidates.json')).get('candidates',[])))\" 2>/dev/null || echo 0)\n4. If COUNT is 0: stop silently — no task, no worker, no Telegram, no 'no meetings' message.\n5. If COUNT > 0: cortextos spawn-worker \"pre-meeting-brief-$(date +%s)\" --dir \"$(pwd)\" --parent frank2 --model claude-sonnet-4-5 --prompt \"Read .claude/skills/pre-meeting-brief-page-worker/SKILL.md and execute it exactly. You are a short-lived worker — no bootstrapping, no heartbeat, no prose. Do the task and output DONE.\""
+    }
+  ],
+  "ecosystem": {
+    "local_version_control": {
+      "enabled": true
+    }
+  },
+  "model": "claude-sonnet-5"
+}

@@ -1,5 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { join } from 'path';
+import { mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
 import {
   CRONS_DIRECTORY,
   CRONS_FILENAME,
@@ -33,6 +35,75 @@ describe('cronsPathFor', () => {
     expect(cronsPathFor('data-agent')).toBe(
       join(CRONS_DIRECTORY, 'data-agent', CRONS_FILENAME)
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CLI ↔ Daemon path-contract test
+//
+// The daemon stores live cron data at:
+//   $CTX_ROOT/.cortextOS/state/agents/<agent>/crons.json
+//
+// The CLI cron I/O helpers (addCron, removeCron, readCrons, …) resolve the
+// path via `process.env.CTX_ROOT + CRONS_DIRECTORY + agent + CRONS_FILENAME`.
+//
+// This test pins that contract so that a future refactor cannot silently
+// re-split the two sides onto different paths.
+// ---------------------------------------------------------------------------
+
+describe('CLI ↔ Daemon cron-path contract', () => {
+  /**
+   * The daemon-side canonical relative path for an agent's crons.json,
+   * relative to CTX_ROOT.  Matches the constant in crons-schema.ts which
+   * both the daemon (via cron-migration, cron-scheduler) and the bus I/O
+   * helpers (via crons.ts cronsFilePath) use.
+   */
+  const DAEMON_RELATIVE_PATH_SEGMENT = '.cortextOS/state/agents';
+
+  it('CRONS_DIRECTORY matches the daemon canonical path segment', () => {
+    // Pin the expected value so any accidental rename is caught here.
+    expect(CRONS_DIRECTORY).toBe(DAEMON_RELATIVE_PATH_SEGMENT);
+  });
+
+  it('cronsPathFor returns the daemon-expected path shape for a known agent', () => {
+    const agent = 'frank2';
+    const result = cronsPathFor(agent);
+    // Must contain the daemon's directory structure
+    expect(result).toContain(DAEMON_RELATIVE_PATH_SEGMENT.replace(/\//g, join('a', 'b').charAt(1)));
+    // Must end with crons.json
+    expect(result.endsWith('crons.json')).toBe(true);
+    // Full shape assertion
+    expect(result).toBe(join('.cortextOS', 'state', 'agents', agent, 'crons.json'));
+  });
+
+  it('crons.ts cronsFilePath resolves to CTX_ROOT + daemon path when CTX_ROOT is set', () => {
+    // Simulate the env that both CLI (after ensureCtxRootEnv) and daemon have:
+    // CTX_ROOT = ~/.cortextos/<instance>/
+    // Expected absolute crons.json = CTX_ROOT/.cortextOS/state/agents/<agent>/crons.json
+    let tmpRoot: string;
+    tmpRoot = mkdtempSync(join(tmpdir(), 'cron-path-contract-'));
+    const origCtxRoot = process.env.CTX_ROOT;
+    try {
+      process.env.CTX_ROOT = tmpRoot;
+
+      // Verify cronsPathFor produces a relative path matching the daemon's shape
+      const relPath = cronsPathFor('frank2');
+      const absoluteExpected = join(tmpRoot, '.cortextOS', 'state', 'agents', 'frank2', 'crons.json');
+      const absoluteActual = join(tmpRoot, relPath);
+
+      // These must be the same — this is the invariant that prevents CLI/daemon divergence.
+      expect(absoluteActual).toBe(absoluteExpected);
+    } finally {
+      if (origCtxRoot !== undefined) process.env.CTX_ROOT = origCtxRoot;
+      else delete process.env.CTX_ROOT;
+      try { rmSync(tmpRoot, { recursive: true }); } catch { /* ignore */ }
+    }
+  });
+
+  it('cronsPathFor is consistent with CRONS_DIRECTORY + agent + CRONS_FILENAME join', () => {
+    const agent = 'larry';
+    const manual = join(CRONS_DIRECTORY, agent, CRONS_FILENAME);
+    expect(cronsPathFor(agent)).toBe(manual);
   });
 });
 

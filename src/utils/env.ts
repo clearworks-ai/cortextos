@@ -5,13 +5,14 @@ import type { CtxEnv } from '../types/index.js';
 import { ensureDir } from './atomic.js';
 import { validateAgentName, validateOrgName } from './validate.js';
 import { stripBom } from './strip-bom.js';
+import { resolveActiveInstance } from './resolve-active-instance.js';
 
 /**
  * Resolve the cortextOS environment context.
  * Equivalent of bash _ctx-env.sh - reads from env vars, .cortextos-env, .env files.
  */
 export function resolveEnv(overrides?: Partial<CtxEnv>): CtxEnv {
-  // Priority: overrides > env vars > .cortextos-env file > defaults
+  // Priority: overrides > env vars > .cortextos-env file > ACTIVE_INSTANCE marker > 'default'
 
   // Try reading .cortextos-env from cwd
   let envFile: Record<string, string> = {};
@@ -20,11 +21,16 @@ export function resolveEnv(overrides?: Partial<CtxEnv>): CtxEnv {
     envFile = parseEnvFile(cortextosEnvPath);
   }
 
+  // Instance resolution mirrors resolveInstanceId() in cli/resolve-instance-id.ts:
+  // explicit override > CTX_INSTANCE_ID env var > .cortextos-env > ACTIVE_INSTANCE
+  // marker > 'default'. This ensures bare CLI invocations (no --instance flag, no
+  // CTX_INSTANCE_ID env) resolve to the same instance the daemon is actually running
+  // on, rather than always defaulting to 'default'.
   const instanceId =
     overrides?.instanceId ||
     process.env.CTX_INSTANCE_ID ||
     envFile.CTX_INSTANCE_ID ||
-    'default';
+    resolveActiveInstance('default');
 
   const ctxRoot =
     overrides?.ctxRoot ||

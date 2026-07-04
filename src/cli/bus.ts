@@ -111,6 +111,23 @@ function loadConversationHistory(ctxRoot: string, agentName: string): Conversati
   ];
 }
 
+/**
+ * Ensure process.env.CTX_ROOT is set to env.ctxRoot before calling any cron
+ * I/O helper (addCron, removeCron, readCrons, updateCronDef, getCronByName,
+ * getExecutionLog, …).  Those helpers resolve the crons.json path via
+ * `process.env.CTX_ROOT ?? process.cwd()` at call time, so if CTX_ROOT is
+ * absent they silently write to the wrong directory (cwd, not the live
+ * instance root).
+ *
+ * Idempotent: if CTX_ROOT is already set (e.g. the daemon set it in its own
+ * process environment) this is a no-op.
+ */
+function ensureCtxRootEnv(env: ReturnType<typeof resolveEnv>): void {
+  if (!process.env.CTX_ROOT && env.ctxRoot) {
+    process.env.CTX_ROOT = env.ctxRoot;
+  }
+}
+
 export const busCommand = new Command('bus')
   .description('Bus commands for agent messaging, tasks, and events');
 
@@ -2282,6 +2299,8 @@ busCommand
     try { validateAgentName(agent); } catch (err) { console.error(String(err)); process.exit(1); }
 
     const env = resolveEnv();
+    // Ensure CTX_ROOT is wired so cron I/O helpers find the live instance path.
+    ensureCtxRootEnv(env);
 
     // Validate agent exists in framework
     if (!agentExistsInFramework(agent, env.frameworkRoot)) {
@@ -2322,13 +2341,16 @@ busCommand
   .action(async (agent: string, name: string) => {
     try { validateAgentName(agent); } catch (err) { console.error(String(err)); process.exit(1); }
 
+    const env = resolveEnv();
+    // Ensure CTX_ROOT is wired so cron I/O helpers find the live instance path.
+    ensureCtxRootEnv(env);
+
     const removed = removeCron(agent, name);
     if (!removed) {
       console.error(`Error: cron '${name}' not found for agent '${agent}'.`);
       process.exit(1);
     }
 
-    const env = resolveEnv();
     await signalCronReload(agent, env.instanceId);
     console.log(`Removed cron '${name}' from ${agent}`);
   });
@@ -2341,6 +2363,10 @@ busCommand
   .action((agent: string, opts: { json?: boolean }) => {
     try { validateAgentName(agent); } catch (err) { console.error(String(err)); process.exit(1); }
 
+    const env = resolveEnv();
+    // Ensure CTX_ROOT is wired so cron I/O helpers find the live instance path.
+    ensureCtxRootEnv(env);
+
     const crons = readCrons(agent);
 
     // BUG 1 fix: merge cron-state.json's `last_fire` records into the displayed
@@ -2348,7 +2374,6 @@ busCommand
     //   - crons.json `last_fired_at` (via cron-scheduler.updateCron)
     //   - cron-state.json `last_fire` (via bus update-cron-fire from agent skills)
     // For a single source of truth in the CLI, take the most recent of the two.
-    const env = resolveEnv();
     const paths = resolvePaths(agent, env.instanceId, env.org);
     const stateRecords = readCronState(paths.stateDir).crons;
     const fireByName = new Map<string, string>();
@@ -2423,6 +2448,8 @@ busCommand
   .option('--json', 'Emit raw JSON instead of a formatted table')
   .action((opts: { json?: boolean }) => {
     const env = resolveEnv();
+    // Ensure CTX_ROOT is wired so cron I/O helpers find the live instance path.
+    ensureCtxRootEnv(env);
     const agents = listAgents(env.ctxRoot)
       .map(agent => agent.name)
       .sort((left, right) => left.localeCompare(right));
@@ -2554,6 +2581,10 @@ busCommand
       patch.description = opts.desc;
     }
 
+    const env = resolveEnv();
+    // Ensure CTX_ROOT is wired so cron I/O helpers find the live instance path.
+    ensureCtxRootEnv(env);
+
     let ok: boolean;
     try {
       ok = updateCronDef(agent, name, patch);
@@ -2566,7 +2597,6 @@ busCommand
       process.exit(1);
     }
 
-    const env = resolveEnv();
     await signalCronReload(agent, env.instanceId);
     console.log(`Updated cron '${name}' for ${agent}`);
   });
@@ -2579,13 +2609,16 @@ busCommand
   .action(async (agent: string, name: string) => {
     try { validateAgentName(agent); } catch (err) { console.error(String(err)); process.exit(1); }
 
+    const env = resolveEnv();
+    // Ensure CTX_ROOT is wired so cron I/O helpers find the live instance path.
+    ensureCtxRootEnv(env);
+
     const cron = getCronByName(agent, name);
     if (!cron) {
       console.error(`Error: cron '${name}' not found for agent '${agent}'.`);
       process.exit(1);
     }
 
-    const env = resolveEnv();
     const ipc = new IPCClient(env.instanceId);
 
     const daemonRunning = await ipc.isDaemonRunning();
@@ -2624,6 +2657,9 @@ busCommand
       console.error(`Error: --limit must be a non-negative integer, got '${opts.limit}'.`);
       process.exit(1);
     }
+
+    // Ensure CTX_ROOT is wired so cron I/O helpers find the live instance path.
+    ensureCtxRootEnv(resolveEnv());
 
     const entries = getExecutionLog(agent, name, limit);
 

@@ -18,6 +18,8 @@ import { updateCronFire, parseDurationMs, readCronState } from '../bus/cron-stat
 import { addCron, removeCron, readCrons, updateCron as updateCronDef, getCronByName, getExecutionLog } from '../bus/crons.js';
 import { nextFireFromCron } from '../daemon/cron-scheduler.js';
 import { queryKnowledgeBase, ingestKnowledgeBase, ensureKBDirs } from '../bus/knowledge-base.js';
+import { parseCalendarEvents, selectUpcomingExternalMeetings, readSurfacedIds, markSurfaced, lookupCrmContext, renderBriefMarkdown } from '../bus/meeting-brief.js';
+import type { BriefData, CrmContext } from '../bus/meeting-brief.js';
 import { checkUsageApi, refreshOAuthToken, rotateOAuth, loadAccounts, ALERT_5H, ALERT_7D } from '../bus/oauth.js';
 import { resolvePaths } from '../utils/paths.js';
 import { resolveEnv } from '../utils/env.js';
@@ -1287,6 +1289,90 @@ busCommand
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
     updateApproval(paths, id, status as ApprovalStatus, note);
     console.log(`Approval ${id} -> ${status}`);
+  });
+
+// ---------------------------------------------------------------------------
+// Pre-meeting brief commands (src/bus/meeting-brief.ts)
+// Scan and mark are deliberately separate: a failed publish leaves the event
+// unmarked so the next 15-min cron fire retries it.
+// ---------------------------------------------------------------------------
+
+const DEFAULT_BRIEF_STATE_FILE = join(process.cwd(), 'state', 'pre-meeting-brief-surfaced.txt');
+
+busCommand
+  .command('meeting-brief-scan')
+  .description('Find upcoming external meetings that need a pre-meeting brief (does NOT mark them surfaced)')
+  .requiredOption('--events-file <path>', 'JSON file with calendar events (gws calendar +agenda --format json output)')
+  .option('--now <iso>', 'Reference time as ISO timestamp (default: now)')
+  .option('--min-lead <n>', 'Minimum lead time in minutes', '30')
+  .option('--max-lead <n>', 'Maximum lead time in minutes', '75')
+  .option('--internal-domains <csv>', 'Comma-separated internal domains and exact emails', 'clearworks.ai,weissjosh0@gmail.com')
+  .option('--state-file <path>', 'Surfaced-ids state file', DEFAULT_BRIEF_STATE_FILE)
+  .option('--crm-dir <path>', 'CRM data dir (contacts.json/pipeline.json/interactions.jsonl); enriches candidates when set')
+  .option('--json', 'Output raw JSON')
+  .action((opts: { eventsFile: string; now?: string; minLead?: string; maxLead?: string; internalDomains?: string; stateFile?: string; crmDir?: string; json?: boolean }) => {
+    let raw: string;
+    try {
+      raw = readFileSync(opts.eventsFile, 'utf-8');
+    } catch (err) {
+      console.error(`ERROR: cannot read events file ${opts.eventsFile}: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+
+    const nowMs = opts.now ? Date.parse(opts.now) : Date.now();
+    if (Number.isNaN(nowMs)) {
+      console.error(`ERROR: --now is not a parseable ISO timestamp: ${opts.now}`);
+      process.exit(1);
+    }
+
+    const internalDomains = (opts.internalDomains ?? 'clearworks.ai,weissjosh0@gmail.com')
+      .split(',')
+      .map(d => d.trim())
+      .filter(d => d.length > 0);
+
+    const events = parseCalendarEvents(raw);
+    const surfaced = readSurfacedIds(opts.stateFile ?? DEFAULT_BRIEF_STATE_FILE);
+    const selected = selectUpcomingExternalMeetings(
+      events,
+      nowMs,
+      { minLeadMin: parseInt(opts.minLead ?? '30', 10), maxLeadMin: parseInt(opts.maxLead ?? '75', 10) },
+      internalDomains,
+      surfaced,
+    );
+
+    const candidates = selected.map(candidate => {
+      const crm: CrmContext | null = opts.crmDir
+        ? lookupCrmContext(opts.crmDir, candidate.externalAttendees)
+        : null;
+      return { ...candidate, crm };
+    });
+
+    console.log(JSON.stringify({ candidates }, null, opts.json ? 2 : 0));
+  });
+
+busCommand
+  .command('meeting-brief-render')
+  .description('Render a pre-meeting brief markdown from a BriefData JSON file')
+  .requiredOption('--data-file <path>', 'JSON file containing BriefData')
+  .action((opts: { dataFile: string }) => {
+    let data: BriefData;
+    try {
+      data = JSON.parse(readFileSync(opts.dataFile, 'utf-8')) as BriefData;
+    } catch (err) {
+      console.error(`ERROR: cannot parse brief data from ${opts.dataFile}: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+    console.log(renderBriefMarkdown(data));
+  });
+
+busCommand
+  .command('meeting-brief-mark')
+  .description('Mark a calendar event as surfaced (call AFTER a successful publish so failures retry)')
+  .argument('<eventId>', 'Calendar event id to mark as surfaced')
+  .option('--state-file <path>', 'Surfaced-ids state file', DEFAULT_BRIEF_STATE_FILE)
+  .action((eventId: string, opts: { stateFile?: string }) => {
+    markSurfaced(opts.stateFile ?? DEFAULT_BRIEF_STATE_FILE, eventId);
+    console.log(`Marked ${eventId}`);
   });
 
 // ---------------------------------------------------------------------------

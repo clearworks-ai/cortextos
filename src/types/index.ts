@@ -175,6 +175,14 @@ export interface AgentConfig {
   dangerously_skip_permissions?: boolean;
   working_directory?: string;
   enabled?: boolean;
+  /**
+   * Credential/env keys this agent declares it needs present in its resolved
+   * environment (agent `.env` + process env). Read-only introspection: the
+   * fleet-reconcile check (see src/bus/reconcile.ts) flags any declared key
+   * that is absent as `missing_env` drift. Absent/empty = no declared env
+   * requirements, so the agent is never flagged for env drift.
+   */
+  required_env?: string[];
   crons?: CronEntry[];
   timezone?: string;
   day_mode_start?: string;

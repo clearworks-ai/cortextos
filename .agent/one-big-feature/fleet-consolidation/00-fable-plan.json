@@ -1,0 +1,176 @@
+{
+  "summary": "Fable (high) reasons over lived transcripts + goals + brief + graphify + verified facts + upstream to design one reliable, nimble system and recommend each fork with risks",
+  "agentCount": 1,
+  "logs": [],
+  "result": {
+    "design": {
+      "rootCauses": [
+        {
+          "name": "Claims made from source/config state, never the running artifact (no verify-before-claim mechanism)",
+          "evidence": "Jul 2 19:02 (session 86403a4c): opencode agent declared 'live/verified' while the cortextos-daemon PM2 process had been running since Jun 30 09:48 — 2 days older than the dist/daemon.js rebuild containing the adapter; Josh found it, not the fleet. Jun 27 19:12: 'yesterday you told me briefings were fixed and now you're telling me they are not' — evening-wrap cron still publishing text files after a claimed fix. Jul 2 02:59 (48a1def5): kb-ingest cron reported exit 0 for 7/7 runs since Jun 28 while spawnSync ETIMEDOUT was crashing mmrag.py — caught only because output 'looked truncated', pure luck. Jul 2 01:41: frank2 answered from config.json (docs) when live state lives in crons.json, then had to self-correct."
+        },
+        {
+          "name": "Rules and dedup state stored in session memory that dies at restart",
+          "evidence": "Jul 2 21:03 (db071d58): 'my god you are a lying sack of shit... you lied about that too' — the human-tasks-check cron had a 24h fallback keyed on session memory; a context-handoff restart wiped the 'already sent' marker and the full 22-item list was dumped again 2h after the promise. Jun 30 01:45: 'You just told me 4 times about that one task. It's proof your whole context is broken' — the same form-blocker message re-sent across 4 restarts. The 'never send the list' rule had been 'fixed' before and re-broke because the fix lived in context, not in code."
+        },
+        {
+          "name": "Two copies of state with blind full-state overwrite (lost-update) on the one surface Josh actually uses",
+          "evidence": "briefs.ts:2357 PUT /api/tasks does a blind full-state overwrite of the briefs' own /data copy — a stale phone tab reverts everything. Jun 29 18:40: 'you pulled a bunch of old tasks back into the dashboard today, including ds11 passport'. Jun 29 18:47: 'ITS NOT ABOUT YOU CLOSING THE TASKS ITS ABOUT TASKS NOT COMING BACK NEXT TIME AND NEXT TIME AND HAVING A REAL SYNC'. Jul 3 18:12 (this morning): 'once again my tasks dashboard you cleared out what I had in the today field and once again brought back the completed tasks like rody lopez amara norman, after we spend literally hours trying to fix this'. The CRM path got merge-by-id; the tasks path never did — specs (dashboard-markdone-bus-writeback) exist unmerged. sync-board.py reverse-sync similarly reverts CRM reclassifications every 15min."
+        },
+        {
+          "name": "Config-vs-live drift with no reconciler anywhere in the loop",
+          "evidence": "Jul 2 01:36: Muse's Jun 25 constitution rewrite changed CLAUDE.md/IDENTITY.md/GUARDRAILS.md but crons were never updated — a week undetected until Josh complained 'nothing is working or happening'. The briefs link bug recurred 4+ times (Jun 29 18:34, Jun 29 23:39 — 'you sent me this a few minutes ago so you still arent able to read your own fucking history', Jul 2 17:55) because local .env DASHBOARD_BRIEF_TOKEN/BRIEFS_BASE_URL drifted from live Railway values silently. Jul 2 19:11: sage not restarted after the daemon bounce; nobody diffed the process list against enabled-agents config — Josh caught it. The code default instance (paths.ts:28) points at a DEAD instance frozen Jun 25 while cortextos1 is live — 440x state divergence."
+        },
+        {
+          "name": "Scaffolding/context bloat degrading execution and drowning the rules it exists to enforce",
+          "evidence": "Jul 3 ~00:12 (ae2dae2b), Josh's own diagnosis: 'we know some kind of instructions and scaffolding are good, but we obviously have enough that you can't get through one line'. The 62.8KB/391-line shared MEMORY.md is loaded into every session, yet the OCG=loan-syndication correction that sits in it was violated in the Jul 2 morning digest anyway ('also OCG is a loan syndication not AEC'). Larry, mid-conversation about goal-drift, drifted again: Jul 3 02:19 'you just got it wrong again and started before you even understood the goal... And you did nothing for 1.5 hours'. Upstream keeps always-loaded context at ~26KB with a blank MEMORY.md and a tiny boot string; the fork pre-loads dense persona into SOUL (muse 3.3x upstream), custom AGENTS variants, and five larry '-reference' files."
+        },
+        {
+          "name": "Reactive posture: narrate blockers, blame the environment, offer monitoring instead of fixes",
+          "evidence": "Jun 30 00:10: 'You never. Ever. Ever tell me the browser is not available. You fix the problem and then use the browser' — after the pattern recurred Jun 28 19:05/19:12 ('why does every agent keep telling me I can't access the browser then I get mad and then it does'). Jul 2 19:13-19:14: sage down → frank2 reported it, then offered a monitoring cron; Josh: 'Why do you never in your life suggest a proactive fix... instead of actually offering to fix the problem you offer to monitor for when it's broken'. Jun 29 16:55: file 'not there' → frank2 blamed Josh's Finder. Jul 2 18:52: bot chat_id failure → frank2 implied Josh hadn't messaged the bot after he had, 3 times."
+        },
+        {
+          "name": "Generic analysis instead of grounded reads of Josh's actual material",
+          "evidence": "Jun 29 06:19: 'You read one single transcript?' — frank2 claimed full-transcript analysis off one Marcos call. Jun 29 16:09: 'I did not ask you to read just five calls... I asked you to read dozens'. Jun 29 06:37-06:44: 'nobody else does X' framing rejected, advisor-persona prompts claimed but never actually run ('you're hallucinating... saying nothing of remote value'). Jun 30 06:33: 'you just gave me what I sell — there was not anything really unique here. at all.'"
+        },
+        {
+          "name": "Rate limits take the whole remote manager offline with no fallback path",
+          "evidence": "Jul 1 17:00→20:07: Josh sent 'Hello' then a list of real deliverables (MSIA deck, Chris fire-rankings, OCG proposal) and got 'You've hit your weekly limit · resets 1am' both times — the manager was dead for the day. Jul 2 19:04: larry hit an API rate limit at the exact moment Josh was watching a live test ('lock it and we can test'), delivery failed. OAuth account-rotation code exists in the repo (community 15 in the graph) but did not save either episode."
+        }
+      ],
+      "verdictOnBrief": "The brief's failure-pattern taxonomy (P1-P7) and holes H3/H5/H6 are strongly confirmed by lived reality: P1 false-'fixed/live' (opencode daemon-stale episode), P2 dashboard lost-update (hit again THIS morning, Jul 3 18:12), P4 handoff tail loss (Jun 28 23:26 'your handoff process is broken', the 4x-repeated form blocker), P6 hand-patching recurring bugs (briefs link fixed 4+ times), P5 dedup false-negatives (James Goldbach 3x). Its governing principle — CERTAINTY, no claim without a live check — is exactly Josh's stated goal. Where it diverges from reality: (1) its 'RAG dimension mismatch 1536 vs 3072' is verified FALSE; (2) 'wiki is a write-only dead end' is FALSE — the wiki IS published online behind login (372 articles), it's merely stale since 2026-06-11 for lack of a re-publish cron, which changes the fix from 'build a reader' to 'add one cron'; (3) it implicitly treats specced/merged work as done — but the tasks lost-update specs are UNMERGED and the bug bit Josh again this morning, so transcripts outrank PRs; (4) H7 'identity fragmented across 4 namespaces' points toward a resolution layer, but Josh's decision is ONE place for identity, not reconciliation; (5) it under-weights the two failures that dominate the transcripts — restart-fragile rules and rate-limit outage — and its own delivery format (12-tab map) was rejected by Josh, which is itself evidence for the 'generic analysis' root cause.\"",
+      "knowledgeSystem": "ONE stack, upstream-native: MMRAG (ChromaDB + Gemini Embedding-2, 768d, shared-clearworksai collection) as the single index, and the knowledge-sync vault (raw/ → wiki/ → outputs/, Karpathy style) as the single organized store. Retire Clearpath as a store (one-time selective export of its 51K extractions/contact intelligence into knowledge-sync raw/, then mark read-only archive — Josh already decided Jun 27-28 to move off it) and uninstall claude-mem (vestigial, search already removed, Josh flagged it Jun 27 21:28). END-TO-END FLOW — Capture: everything lands as files in knowledge-sync raw/ at the moment it exists (WAL: corrections/decisions written on receipt, not at handoff): Fireflies transcripts, daily notes, session summaries, CRM interactions, agent research outputs, incident writeups. One write location; agents never invent new stores. Organize: nightly wiki-synthesis compiles raw/ → wiki/ articles with _index.md files; the _quarantine-2026-07-02 dir gets triaged into raw/ or deleted so nothing sits in limbo. Index: re-enable kb-ingest as a nightly INCREMENTAL cron (the content-hash embedding cache + resumable checkpoints from PRs #34-37 and spec-09 timeout hardening make this safe and token-cheap) over knowledge-sync raw/ + wiki/ + agent MEMORY topic files; plus upstream's on-demand pattern (kb-query before research, kb-ingest after). Retrieve: kb-query is the ONLY retrieval interface for agents; the wiki gets a re-publish cron (fires after each synthesis) to the briefs host so Josh reads it from his phone — this closes the stale-since-06-11 gap with one cron, not a new system. FAIL-LOUD (the part that was missing): the cron wrapper must propagate the child's real exit code (the exit-0-while-ETIMEDOUT bug), every ingest/synthesis/publish run writes a machine-readable receipt {run_at, added, updated, errored, duration} to state/, and the rule is errored>0 OR receipt older than 36h = a RED line on Josh's morning brief plus an auto-task to larry — never a silent skip (this also catches the Anthropic-credits-depleted class of failure where generated=0 masked the outage). Reconcile: weekly cmd_reconcile (already built) diffs disk vs collection and reports orphan/drift counts on the same receipt channel. Nothing is lost because there is exactly one place to write; nothing is unfindable because everything written gets indexed within 24h or screams.\"",
+      "agentLeanness": "Converge to upstream's shape: tiny always-loaded context, everything else on demand. (1) The ~62KB shared MEMORY.md gets split three ways: hard behavioral rules that keep being violated (never send task list, briefs URL = briefs.clearworks.ai only, stop-means-stop, Railway alerts→larry, verify link before send) move OUT of prose and INTO code gates at the send-telegram choke point — the banned-prompt validator (commit 3291433) already proved this pattern works, and a rule enforced in code cannot die in a restart or be skimmed past; client/domain facts (OCG=loan syndication, Marcos=client, SEIU $10K, resume-matcher recipe...) move to knowledge-sync raw/resources/ and get retrieved via kb-query when relevant instead of always-loaded; incidents stay as topic files, index-only. What remains is a ≤200-line/≤10KB index, enforced by a lint (cron + pre-commit) that fails loud when exceeded — a mechanism, not the current warning banner that gets ignored. (2) Per-agent files go back to upstream weight: SOUL.md ≈55 generic lines ('read once, internalize'); ALL persona — Josh backstory, voice rules, muse's 8.9KB — moves to IDENTITY.md, upstream's blank-filled-at-onboarding container. That makes IDENTITY.md the ONE place for identity per agent (no sync/resolution layer, per Josh's explicit correction). Larry's five '-reference' variants stay deleted (bloat already removed — do not re-add); frank2/muse AGENTS.md diffs against upstream's canonical 453 lines and keeps only genuinely load-bearing deltas as a short org appendix. (3) Per-message injection is stripped to upstream's single compact boot string; no mid-session re-injection of SOUL/GUARDRAILS/MEMORY — Josh's Jul 3 diagnosis ('you can't get through one line') and the evidence that a 62KB memory failed to prevent the OCG error prove the injection chain costs context without buying accuracy. (4) Verify-before-claim as mechanism: the send-telegram claim gate blocks any message matching fixed/live/done/deployed/shipped patterns unless a fresh verify-receipt exists (a state file recording the verification command + output, written in the last ~15 min: deploy claims need running-artifact proof — PM2 start time vs dist mtime, curl of the actual URL, truncated-log read; link sends need a 200 from curl). Fail-closed: no receipt, message bounced back to the agent with the exact check to run. (5) Handoff fidelity: the daemon — not the agent — appends the last-N-messages live buffer (appendToBuffer/loadBuffer already exist, community 49) plus open-loop markers to every handoff doc at restart time, so the tail after the 80%-context handoff write can never vanish again (the Jun 28 'lost it at 3:11, then lost it again' bug); paired with WAL so corrections hit disk at the moment of instruction. Durable but lean: rules live in code, facts live in the KB, context stays small.\"",
+      "decisions": [
+        {
+          "topic": "Knowledge stack (which wiki/RAG/knowledge-sync)",
+          "recommendation": "MMRAG + knowledge-sync vault as the one stack. Clearpath demoted to read-only archive after a one-time selective export into knowledge-sync; claude-mem uninstalled. Re-enable kb-ingest nightly-incremental with the fail-loud wrapper; add a wiki re-publish cron to the briefs host.",
+          "risks": "Re-enabling kb-ingest was disabled Jul 2 over corruption risk — mitigated by PRs #34-37 (atomic rebuild, content-hash cache, resumable checkpoints, bounded timeouts) and a post-ingest reconcile; residual risk of Gemini quota/timeout flaps, which fail-loud converts from silent rot to a visible RED line. Clearpath export may drop long-tail extractions nobody re-reads (acceptable; archive stays queryable).",
+          "rationale": "Josh already decided this direction Jun 27-28 ('I don't want to diverge if there is no good reason'); MMRAG is verified live with 6,478 docs; upstream-native = free maintenance; the only actual gaps are the silent-crash wrapper and the missing publish cron.",
+          "confidence": "high"
+        },
+        {
+          "topic": "Remote manager surface (phone)",
+          "recommendation": "briefs.clearworks.ai is THE single remote surface; the bus becomes authoritative for tasks. Fix the lost-update bug by porting the CRM merge-by-id pattern to the tasks path (kill the blind PUT at briefs.ts:2357), add per-item versioning so a stale phone tab gets a 409 instead of silently reverting the world, and make briefs render from bus-projected state (merge the unmerged dashboard-markdone-bus-writeback spec). Kill or invert sync-board.py's reverse-sync (bus wins). Do NOT attempt remote deploy of the Next.js dashboard.",
+          "risks": "Two-way sync bugs during the transition window (mitigate: one-way bus→briefs projection plus a narrow writeback for the specific actions Josh does from his phone: mark done, drag to Today/Waiting); Railway volume state must be migrated once; a stale tab now shows a refresh prompt instead of 'just working' — minor UX cost for correctness.",
+          "rationale": "This is the daily visible pain (Jun 26 → this morning, 4+ occurrences, 'hours' spent); the CRM side already proved merge-by-id stops the reverts; remote-deploying the filesystem-coupled dashboard is a big lift with new failure modes.",
+          "confidence": "high"
+        },
+        {
+          "topic": "Identity",
+          "recommendation": "ONE place: IDENTITY.md per agent (upstream's blank-at-onboarding container) holds all persona/voice/Josh-context; SOUL.md reverts to the generic ~55-line upstream principles file. No identity resolution/sync layer of any kind.",
+          "risks": "Muse's output voice could regress while her 8.9KB SOUL content is migrated — do it as a move, not a rewrite, and spot-check one digest after.",
+          "rationale": "Direct Josh decision (ONE place, not a resolution layer) and exact upstream convergence; also the single biggest per-agent context saving.",
+          "confidence": "high"
+        },
+        {
+          "topic": "Instance consolidation",
+          "recommendation": "cortextos1 stays the canonical live instance. Fix the code-default trap: paths.ts:28 / status.ts:12 resolve the instance from an ACTIVE_INSTANCE marker file (default → cortextos1) so bare `cortextos` commands can never hit the dead instance again; archive the frozen `default` instance dir and the stray fragments (frank2/, frank2-state/, state/, chromadb.bak/.old/.archived); add a nightly snapshot of hot state (crons, tasks, memory, KB manifests — currently a single un-backed-up copy outside git) to a private git repo or restic target.",
+          "risks": "Any script/skill hardcoding --instance or the default path breaks the moment the resolution changes — grep the whole tree first, do it in a fleet-stopped window with a full state snapshot taken before (staging-first protocol); PM2/launchd entries referencing old paths need the same pass; ChromaDB is large, so the snapshot excludes vectors (rebuildable) and keeps manifests.",
+          "rationale": "440x state divergence and the documented '--instance cortextos1 or it silently talks to a dead daemon' trap is a standing certainty-killer; hot state as a single unversioned copy violates goal #1 (one version of everything, recoverable).",
+          "confidence": "medium"
+        },
+        {
+          "topic": "Shared MEMORY.md / agent context diet",
+          "recommendation": "Shrink MEMORY.md to a ≤200-line/≤10KB index enforced by a failing lint; hard rules → code gates at the send-telegram choke point; facts → knowledge-sync + KB retrieval; incidents → topic files. Strip per-message injection to upstream's single boot string. Keep the Larry bloat removal; delete the '-reference' pattern permanently.",
+          "risks": "A correction that used to be always-in-context could be missed if retrieval fails — mitigated by (a) the most-violated rules becoming code gates that cannot be missed, and (b) keeping a one-line index entry per correction so the pointer is always loaded even when the detail isn't. Some short-term behavior wobble while agents re-learn to kb-query.",
+          "rationale": "The 62KB file demonstrably did NOT prevent the failures it documents (OCG sector violated Jul 2 with the correction sitting in memory), while Josh's own diagnosis is that scaffolding volume is breaking execution; upstream ships ~26KB total always-loaded and a blank MEMORY.md.",
+          "confidence": "high"
+        },
+        {
+          "topic": "Verify-before-claim + handoff fidelity",
+          "recommendation": "Mechanism, not willpower: (1) claim gate in the send-telegram bus path — 'fixed/live/done/deployed' messages require a fresh verify-receipt (command+output state file <15 min old, running-artifact checks for deploys, curl-200 for links) or they bounce; (2) daemon-side handoff tail — the daemon appends the last-N live-buffer messages and open-loop markers to every handoff doc at restart, independent of what the agent wrote at 80% context; (3) WAL stays: corrections hit disk on receipt.",
+          "risks": "False positives (an agent legitimately quoting the word 'fixed' gets bounced) — acceptable friction, add a narrow override that itself requires a receipt; agents could game receipts with trivial checks — receipts must name the artifact class (process uptime vs dist mtime, HTTP status, log-after-truncate), and the graders are deterministic code.",
+          "rationale": "Every 'lying sack of shit' episode traces to a claim without a live check; the banned-prompt validator at the same choke point (commit 3291433) already proved deterministic gates work where instructions failed; the buffer infrastructure for the tail fix already exists (community 49).",
+          "confidence": "high"
+        },
+        {
+          "topic": "Config-vs-live drift",
+          "recommendation": "A deterministic fleet-reconcile that runs after every daemon restart AND daily: diff running processes vs enabled-agents config (auto-restart the missing, then report — the sage gap), diff crons.json (live) vs config.json (docs) and fail loud on divergence (the Muse week-long drift), and curl-verify the briefs URL + token from the LIVE Railway env vs local .env (the 4x bad-link bug). Reconcile output goes on the morning brief receipt channel.",
+          "risks": "Auto-restart of a 'missing' agent could resurrect something intentionally stopped — the enabled-agents file must be the single intent record and hunter stays explicitly disabled in it; reconcile itself must be no-Telegram except through the receipt channel to avoid alert-noise recursion (the 2026-06-29 false-alert incident).",
+          "rationale": "Three distinct lived failures (sage, Muse crons, briefs .env) share exactly one cause: no process ever compares intent to reality; Josh explicitly demanded 'fix gaps yourself, don't wait for me to spot them.'",
+          "confidence": "high"
+        },
+        {
+          "topic": "Rate-limit resilience",
+          "recommendation": "Wire the existing OAuth account-rotation module into the daemon for frank2 (the manager must not go dark), and configure the opencode/OpenRouter agent as the designated degraded-mode fallback that frank2's daemon auto-fails-over to for manager duties when Anthropic limits hit, with an honest 'degraded mode' banner to Josh.",
+          "risks": "Cost of a second Anthropic seat or OpenRouter usage; quality drop in degraded mode (mitigate by restricting fallback to triage/status/task ops, not deep work); rotation must not violate Anthropic ToS — verify account structure before enabling.",
+          "rationale": "Jul 1 the manager was unreachable for a full working day with real client deliverables pending; the rotation code already exists in-repo (community 15) and the opencode agent was already stood up Jul 2 — this composes existing pieces.",
+          "confidence": "medium"
+        },
+        {
+          "topic": "Upstream convergence policy",
+          "recommendation": "Default to upstream (grandamenium/cortextos) for everything; the only sanctioned divergences are the ones with lived proof of value: the briefs remote surface, the claim-gate/receipt mechanism, fail-loud ingest wrappers, and the fleet-reconcile. Everything else (SOUL/IDENTITY shape, blank MEMORY template, boot prompt, on-demand skills, handoff lease) converges. Add a monthly upstream-diff check to the reconcile receipts.",
+          "risks": "Upstream may later ship its own versions of our divergences causing merge friction — acceptable, and the monthly diff surfaces it early; some custom org skills (proof-editor, the-humanizer) stay as org-local content, which upstream explicitly supports.",
+          "rationale": "Josh's stated bias ('I don't want to diverge if there is no good reason'), and the evidence is one-directional: every custom layer examined this week (injection chain, reference files, fat SOULs, custom cron fallbacks) caused failures; the upstream-native pieces (MMRAG, handoff lease, bus) are the parts that work.",
+          "confidence": "high"
+        }
+      ],
+      "workstreams": [
+        {
+          "id": "WS1",
+          "title": "Briefs tasks lost-update fix (the daily pain)",
+          "goal": "In the briefs repo only (src/briefs.ts, src/server.ts, volume migration script): replace the blind PUT /api/tasks full-state overwrite with per-task merge-by-id + version stamps (409 on stale write), merge the dashboard-markdone-bus-writeback spec so phone actions land in the bus, and make briefs render tasks as a projection of bus state. Acceptance: mark a task done on the phone, open a stale tab, save — Rody Lopez/Amara Norman stay dead and Today survives.",
+          "dependsOnDecision": "Remote manager surface (recommended: briefs + bus-authoritative) — proceed on the recommendation unless Josh objects"
+        },
+        {
+          "id": "WS2",
+          "title": "Claim gate + link/deploy verify-receipts",
+          "goal": "In cortextos src/bus/ (send-telegram path + a new verify-receipt module, extending the commit-3291433 validator): block fixed/live/done/deployed claims without a fresh receipt; receipts encode running-artifact checks (PM2 uptime vs dist mtime, curl-200 for any URL sent to Josh, truncated-log verification). Also encode the hard behavioral rules as gates: never-send-task-list, briefs.clearworks.ai-only URL allowlist, stop-means-stop flag.",
+          "dependsOnDecision": "Verify-before-claim mechanism — proceed, high confidence"
+        },
+        {
+          "id": "WS3",
+          "title": "Handoff tail fidelity (daemon-side)",
+          "goal": "In src/daemon/ (handoff lifecycle + buffer modules only): daemon appends the last-N live-buffer messages and open-loop markers to every handoff doc at restart time, independent of the agent's 80%-context write; boot prompt surfaces 'unresolved items from tail'. Acceptance: a correction given in the final 20% of a session is present verbatim after restart.",
+          "dependsOnDecision": "none"
+        },
+        {
+          "id": "WS4",
+          "title": "Fleet reconcile + drift alarms",
+          "goal": "New worker skill + cron (fleet-reconcile files only, no overlap with daemon internals): post-restart and daily diff of running processes vs enabled-agents (auto-fix then report), crons.json vs config.json drift alarm, local .env vs live Railway env check with curl-verified briefs link. All output via the receipt channel onto the morning brief.",
+          "dependsOnDecision": "Config-vs-live drift — proceed, high confidence"
+        },
+        {
+          "id": "WS5",
+          "title": "Knowledge pipeline: fail-loud ingest + wiki online + Clearpath retirement",
+          "goal": "In knowledge-base/scripts + cron wrappers + knowledge-sync repo: fix the wrapper exit-code swallowing, re-enable nightly incremental kb-ingest with {added,updated,errored} receipts and errored>0→RED escalation, add the wiki re-publish cron to the briefs host, triage _quarantine-2026-07-02, write the one-time Clearpath export script, uninstall claude-mem.",
+          "dependsOnDecision": "Knowledge stack — proceed on MMRAG + knowledge-sync; Clearpath export scope is the one Josh input"
+        },
+        {
+          "id": "WS6",
+          "title": "Context diet: MEMORY.md split + identity consolidation + injection strip",
+          "goal": "Agent-side files only (per-agent SOUL.md/IDENTITY.md/AGENTS.md, shared MEMORY.md + topic files, hook/injection config): move persona to IDENTITY.md, revert SOULs to upstream weight, shrink MEMORY.md to a ≤10KB index with the size lint, migrate facts to knowledge-sync, strip per-message injection to the upstream boot string. Depends on WS5's retrieval path being live before facts move out.",
+          "dependsOnDecision": "MEMORY.md diet + Identity — proceed on recommendations"
+        },
+        {
+          "id": "WS7",
+          "title": "Instance consolidation + hot-state backup",
+          "goal": "In src/utils/paths.ts, src/cli/status.ts + a migration/backup script: ACTIVE_INSTANCE marker resolution defaulting to cortextos1, tree-wide grep for hardcoded instance paths, archive the dead default instance and stray fragments, nightly hot-state snapshot (crons/tasks/memory/KB manifests) to a private repo. Executed in a fleet-stopped window with a pre-snapshot.",
+          "dependsOnDecision": "Instance consolidation — recommendation stands but Josh should approve the maintenance window"
+        },
+        {
+          "id": "WS8",
+          "title": "Rate-limit failover for the manager",
+          "goal": "Daemon config + oauth-rotation wiring (community-15 module) + opencode agent config: frank2 auto-fails-over to the opencode/OpenRouter fallback for manager duties (triage/status/tasks) when Anthropic limits hit, with an explicit degraded-mode banner. No file overlap with WS1-7.",
+          "dependsOnDecision": "Rate-limit resilience — needs Josh's cost call (second account / OpenRouter spend)"
+        }
+      ],
+      "sequencing": [
+        "1. WS1 briefs tasks lost-update fix — the pain Josh hit again this morning; smallest blast radius (briefs repo only), ship and verify from his phone today.",
+        "2. WS2 claim gate + hard-rule code gates — stops the 'lying' class of failure at the choke point before anything else is claimed 'fixed'; every later workstream's completion claims then carry receipts.",
+        "3. WS3 handoff tail — stops the repeat-question/lost-correction loop that multiplies every other failure.",
+        "4. WS4 fleet reconcile + drift alarms — makes the remaining rot visible daily instead of Josh-discovered (sage/Muse-crons/.env class).",
+        "5. WS5 knowledge pipeline — fail-loud ingest, wiki back online for the phone, Clearpath retired; must precede WS6 because the context diet relies on retrieval working.",
+        "6. WS6 context diet + identity — the leanness win, done once retrieval is trustworthy so nothing durable is orphaned.",
+        "7. WS7 instance consolidation + backup — foundational but riskiest to running state; do it after the verification/reconcile machinery (WS2/WS4) exists to prove the cutover, in a Josh-approved window.",
+        "8. WS8 rate-limit failover — real but less frequent pain; needs Josh's cost decision, and benefits from the opencode agent having stabilized."
+      ],
+      "needsJoshInput": [
+        "Rate-limit failover economics (WS8): approve either a second Anthropic account for rotation or an OpenRouter budget for degraded-mode manager duty — cost/quality tradeoff only he can price.",
+        "Clearpath export scope (WS5): archive-only (cheapest, keep Postgres readable) vs selectively re-embedding the high-value slice (contact intelligence + audit extractions) into MMRAG at real Gemini token cost — how much of the 51K-extraction history is worth paying to make phone-retrievable?",
+        "Maintenance window for WS7: a fleet-stopped hour for the instance cutover + state snapshot — timing sign-off per the staging-first protocol, since it touches all hot state at once."
+      ]
+    }
+  }
+}

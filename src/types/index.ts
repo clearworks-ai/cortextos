@@ -166,6 +166,20 @@ export interface AgentConfig {
   crash_window?: { seconds: number; max_crashes?: number };
   model?: string;
   /**
+   * Opt-in to fleet-level failover degrade. When true and state/fleet-degrade.json
+   * indicates Anthropic is DEPLETED, the daemon will substitute the cheap failover
+   * runtime (opencode) and the appropriate model from the degrade_map for THIS spawn.
+   * Default absent = do NOT degrade (conservative). larry should never set this true —
+   * a degraded orchestrator is worse than a paused one.
+   */
+  degrade_ok?: boolean;
+  /**
+   * Which row of the degrade_map to use on failover. 'reasoning' → glm-5.2 (judgment
+   * agents like frank2/muse); 'mechanical' → glm-4.7-flash (bulk/monitoring work).
+   * Only consulted when degrade_ok is true and the degrade marker is active.
+   */
+  degrade_tier?: 'reasoning' | 'mechanical';
+  /**
    * Whether to launch Claude Code with `--dangerously-skip-permissions`.
    * Defaults to true (back-compat: agents run unattended). Set to false to keep
    * Claude Code's permission system engaged so the PermissionRequest hook

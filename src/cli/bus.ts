@@ -33,7 +33,7 @@ import { logOutboundMessage, cacheLastSent } from '../telegram/logging.js';
 import { checkAndRecord } from '../telegram/dedup.js';
 import { appendToBuffer } from '../daemon/conversation-buffer.js';
 import { findBannedCronPrompts } from '../utils/cron-prompt-validator.js';
-import { recordVerificationReceipt, emitClaimWithoutReceiptWarning } from '../utils/verification-receipt.js';
+import { recordVerificationReceipt, emitClaimWithoutReceiptWarning, evaluateClaimGate } from '../utils/verification-receipt.js';
 import { evaluateCiAlert, gatherCiAlertContext } from '../utils/ci-alert-gate.js';
 import { checkAndRecordSourceEvent, isValidSourceKey } from '../utils/event-dedup.js';
 import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext, CronDefinition, ConversationBufferEntry } from '../types/index.js';
@@ -1074,7 +1074,8 @@ busCommand
   .option('--no-dedup', 'Bypass duplicate-content suppression for this send (always deliver).')
   .option('--dedup-window <seconds>', 'Suppression window in seconds (default 21600 = 6h, or env CTX_TELEGRAM_DEDUP_WINDOW_SEC).')
   .option('--streaming', 'Stream the reply into ONE Telegram message: <message> is the initial placeholder, then newline-delimited tokens from stdin are appended via editMessageText (≤1 edit/sec, identical-content guard, final edit applies markdown→HTML). Closes the stream when stdin ends. Spec: Item 1 of .planning/larry-ux-parity-spec.md.', false)
-  .action(async (chatId: string, message: string, opts: { dedup?: boolean; dedupWindow?: string; image?: string; file?: string; plainText?: boolean; streaming?: boolean }) => {
+  .option('--confirm-claim', 'Assert that the agent has verified the completion claim in this message off-ledger (no receipt recorded). Bypasses the require-confirm hold for deploy/merge claims when CTX_CLAIM_GATE=enforce. Has NO effect on block-rung claims (external-send); those require a real receipt or state/claim-gate-override.json.', false)
+  .action(async (chatId: string, message: string, opts: { dedup?: boolean; dedupWindow?: string; image?: string; file?: string; plainText?: boolean; streaming?: boolean; confirmClaim?: boolean }) => {
     // Codex agents emit literal '\n'/'\t' inside single-quoted bash where bash
     // does not expand escapes, so they arrive at argv as 2-char literals and
     // Telegram renders them as visible text. Normalize before send + log.
@@ -1122,6 +1123,74 @@ busCommand
           // Non-fatal: suppression still succeeds even if event logging fails.
         }
         return;
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // PRE-SEND CLAIM GATE (WS2 Tier 2). Runs before the send so it can hold
+    // high-stakes unverified claims when CTX_CLAIM_GATE=enforce. Default mode
+    // is 'warn' — identical to previous behaviour, no send is ever blocked.
+    // Scoped to owner-facing sends only (chatId === agent .env CHAT_ID).
+    // Fail-open: any error inside evaluateClaimGate returns 'allow'.
+    // -----------------------------------------------------------------------
+    const gateEnv = resolveEnv();
+    if (gateEnv.agentName && gateEnv.ctxRoot) {
+      try {
+        // Determine if this is an owner-facing chat by reading CHAT_ID from
+        // the agent .env (same pattern as BOT_TOKEN above, ~bus.ts:1087).
+        let ownerChatId = '';
+        if (gateEnv.agentDir) {
+          const { readFileSync: _rf, existsSync: _ex } = require('fs');
+          const { join: _j } = require('path');
+          const _envPath = _j(gateEnv.agentDir, '.env');
+          if (_ex(_envPath)) {
+            const _envContent = _rf(_envPath, 'utf-8');
+            const _chatMatch = (_envContent as string).match(/^CHAT_ID=(.+)$/m);
+            if (_chatMatch && _chatMatch[1]) ownerChatId = _chatMatch[1].trim();
+          }
+        }
+        const isOwnerChat = !!ownerChatId && chatId === ownerChatId;
+
+        const rawGateMode = (process.env.CTX_CLAIM_GATE ?? 'warn').toLowerCase();
+        const gateMode: 'off' | 'warn' | 'enforce' =
+          rawGateMode === 'off' ? 'off'
+          : rawGateMode === 'enforce' ? 'enforce'
+          : 'warn'; // default = 'warn' = today's behavior
+
+        const gatePaths = resolvePaths(gateEnv.agentName, gateEnv.instanceId, gateEnv.org);
+        const decision = evaluateClaimGate({
+          ctxRoot: gateEnv.ctxRoot,
+          agent: gateEnv.agentName,
+          org: gateEnv.org,
+          paths: gatePaths,
+          text: message,
+          isOwnerChat,
+          confirmFlag: opts.confirmClaim === true,
+          gateMode,
+        });
+
+        if (decision.action === 'hold') {
+          // Log the block event (non-fatal if logging fails)
+          try {
+            logEvent(gatePaths, gateEnv.agentName, gateEnv.org, 'message', 'claim_blocked', 'warning', {
+              cls: decision.cls,
+              rung: decision.rung,
+              chat_id: String(chatId),
+              snippet: message.slice(0, 200),
+            });
+          } catch { /* non-fatal */ }
+          // Emit a clear, actionable error to stderr and exit non-zero.
+          // Exit code 2 distinguishes a gate hold from a generic send failure.
+          process.stderr.write(
+            `[claim-gate] HOLD (${decision.rung}): ${decision.reason}\n`
+          );
+          process.exit(2);
+        }
+        // For 'warn' decision the post-send emitClaimWithoutReceiptWarning
+        // (below) already handles the telemetry — nothing more to do here.
+        // For 'allow' decision proceed unconditionally.
+      } catch {
+        // Fail-open: gate error must never block the send.
       }
     }
 

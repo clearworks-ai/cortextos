@@ -587,3 +587,26 @@ describe('disk round-trip via readCrons()', () => {
     expect(wk!.enabled).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// banned prompt guard
+// ---------------------------------------------------------------------------
+
+describe('migration prompt guard', () => {
+  it('rejects migrateCronsForAgent when config.json contains a banned prompt', () => {
+    const agentDir = join(tmpFrameworkRoot, 'orgs', 'testorg', 'agents', 'nu');
+    writeConfigJson(agentDir, [
+      {
+        name: 'human-tasks-check',
+        interval: '6h',
+        prompt: 'Send the full HUMAN task list via Telegram.',
+      },
+    ]);
+    const configPath = join(agentDir, 'config.json');
+
+    expect(() => migrateCronsForAgent('nu', configPath, tmpCtxRoot, { force: true })).toThrow(
+      /full-human-task-list-telegram/
+    );
+    expect(rawCronsJson(tmpCtxRoot, 'nu')).toBeNull();
+  });
+});

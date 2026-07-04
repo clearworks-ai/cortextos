@@ -414,6 +414,63 @@ describe('updateCron', () => {
     // New name does not exist
     expect(getCronByName('boris', 'new-name')).toBeUndefined();
   });
+
+  it('rejects a banned prompt when patching an existing cron', async () => {
+    const { addCron, updateCron } = await importCrons();
+    addCron('boris', makeHeartbeat());
+
+    expect(() =>
+      updateCron('boris', 'heartbeat', {
+        prompt: 'Send the all human task list via Telegram.',
+      })
+    ).toThrow(/full-human-task-list-telegram/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// banned prompt guard
+// ---------------------------------------------------------------------------
+
+describe('banned prompt guard', () => {
+  it('writeCrons rejects the banned Telegram human-task-list prompt', async () => {
+    const { writeCrons } = await importCrons();
+
+    expect(() =>
+      writeCrons('boris', [
+        makeHeartbeat({
+          name: 'human-tasks-check',
+          prompt: 'Send the full HUMAN task list via Telegram.',
+        }),
+      ])
+    ).toThrow(/full-human-task-list-telegram/);
+  });
+
+  it('writeCrons catches case-insensitive and newline variants of the banned prompt', async () => {
+    const { writeCrons } = await importCrons();
+
+    expect(() =>
+      writeCrons('boris', [
+        makeHeartbeat({
+          name: 'human-tasks-check',
+          prompt: 'SEND\n the entire\n human task list\n via Telegram now.',
+        }),
+      ])
+    ).toThrow(/human-tasks-check/);
+  });
+
+  it('addCron propagates the validator error end-to-end', async () => {
+    const { addCron } = await importCrons();
+
+    expect(() =>
+      addCron(
+        'boris',
+        makeHeartbeat({
+          name: 'human-tasks-check',
+          prompt: 'Please send the complete HUMAN task list via Telegram.',
+        })
+      )
+    ).toThrow(/blocked to prevent a known Telegram-spam recurrence/);
+  });
 });
 
 // ---------------------------------------------------------------------------

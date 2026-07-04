@@ -20,6 +20,7 @@ import type { CronDefinition, CronExecutionLogEntry } from '../types/index.js';
 import { CRONS_DIRECTORY, CRONS_FILENAME, cronExecutionLogPathFor } from './crons-schema.js';
 import { atomicWriteSync } from '../utils/atomic.js';
 import { withFileLockSync } from '../utils/lock.js';
+import { validateCronsPrompt } from '../utils/cron-prompt-validator.js';
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -195,6 +196,7 @@ export function readCrons(agentName: string): CronDefinition[] {
  * automatic recovery in `readCrons()` on parse failure.
  */
 export function writeCrons(agentName: string, crons: CronDefinition[]): void {
+  validateCronsPrompt(crons);
   const filePath = cronsFilePath(agentName);
   const envelope: CronsFile = {
     updated_at: new Date().toISOString(),

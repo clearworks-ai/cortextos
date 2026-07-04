@@ -16,6 +16,7 @@ import { createApproval, updateApproval } from '../bus/approval.js';
 import { createReminder, listReminders, ackReminder, pruneReminders } from '../bus/reminders.js';
 import { updateCronFire, parseDurationMs, readCronState } from '../bus/cron-state.js';
 import { addCron, removeCron, readCrons, updateCron as updateCronDef, getCronByName, getExecutionLog } from '../bus/crons.js';
+import { listAgents } from '../bus/agents.js';
 import { nextFireFromCron } from '../daemon/cron-scheduler.js';
 import { queryKnowledgeBase, ingestKnowledgeBase, ensureKBDirs } from '../bus/knowledge-base.js';
 import { checkUsageApi, refreshOAuthToken, rotateOAuth, loadAccounts, ALERT_5H, ALERT_7D } from '../bus/oauth.js';
@@ -26,6 +27,7 @@ import { TelegramAPI } from '../telegram/api.js';
 import { logOutboundMessage, cacheLastSent } from '../telegram/logging.js';
 import { checkAndRecord } from '../telegram/dedup.js';
 import { appendToBuffer } from '../daemon/conversation-buffer.js';
+import { findBannedCronPrompts } from '../utils/cron-prompt-validator.js';
 import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext, CronDefinition, ConversationBufferEntry } from '../types/index.js';
 
 /**
@@ -2241,6 +2243,59 @@ busCommand
   });
 
 busCommand
+  .command('reconcile-crons')
+  .description('Sweep all live crons for banned prompts without modifying anything')
+  .option('--json', 'Emit raw JSON instead of a formatted table')
+  .action((opts: { json?: boolean }) => {
+    const env = resolveEnv();
+    const agents = listAgents(env.ctxRoot)
+      .map(agent => agent.name)
+      .sort((left, right) => left.localeCompare(right));
+
+    const findings = agents
+      .flatMap(agent =>
+        findBannedCronPrompts(readCrons(agent)).map(match => ({
+          agent,
+          cron: match.name,
+          patternId: match.patternId,
+        }))
+      )
+      .sort((left, right) => {
+        const agentCmp = left.agent.localeCompare(right.agent);
+        if (agentCmp !== 0) return agentCmp;
+        const cronCmp = left.cron.localeCompare(right.cron);
+        if (cronCmp !== 0) return cronCmp;
+        return left.patternId.localeCompare(right.patternId);
+      });
+
+    if (opts.json) {
+      console.log(JSON.stringify(findings, null, 2));
+      return;
+    }
+
+    if (findings.length === 0) {
+      console.log('CLEAN');
+      return;
+    }
+
+    const agentWidth = Math.max('Agent'.length, ...findings.map(item => item.agent.length));
+    const cronWidth = Math.max('Cron'.length, ...findings.map(item => item.cron.length));
+    const patternWidth = Math.max('Pattern'.length, ...findings.map(item => item.patternId.length));
+    const pad = (value: string, width: number) => value.padEnd(width);
+    const divider = '-'.repeat(agentWidth + cronWidth + patternWidth + 10);
+
+    console.log('\nBanned cron prompts detected\n');
+    console.log(`  ${pad('Agent', agentWidth)}  ${pad('Cron', cronWidth)}  ${pad('Pattern', patternWidth)}`);
+    console.log(`  ${divider}`);
+    for (const finding of findings) {
+      console.log(
+        `  ${pad(finding.agent, agentWidth)}  ${pad(finding.cron, cronWidth)}  ${pad(finding.patternId, patternWidth)}`
+      );
+    }
+    console.log('');
+  });
+
+busCommand
   .command('update-cron')
   .description('Update fields of an existing persistent cron')
   .argument('<agent>', 'Agent name')
@@ -2278,7 +2333,13 @@ busCommand
       patch.description = opts.desc;
     }
 
-    const ok = updateCronDef(agent, name, patch);
+    let ok: boolean;
+    try {
+      ok = updateCronDef(agent, name, patch);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
     if (!ok) {
       console.error(`Error: cron '${name}' not found for agent '${agent}'.`);
       process.exit(1);

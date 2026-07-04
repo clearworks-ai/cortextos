@@ -17,6 +17,87 @@ import { loadBuffer } from './conversation-buffer.js';
 
 type LogFn = (msg: string) => void;
 
+// ---------------------------------------------------------------------------
+// WS8 Layer A — fleet-degrade marker support
+// ---------------------------------------------------------------------------
+
+/**
+ * Shape of state/fleet-degrade.json written by credential-preflight.py on
+ * a debounced Anthropic DEPLETED / sustained RATE_LIMITED event.
+ */
+interface FleetDegradeMarker {
+  anthropic?: string;
+  since?: string;
+  degrade_map?: {
+    reasoning?: string;
+    mechanical?: string;
+  };
+  failover_runtime?: string;
+}
+
+/**
+ * Read the fleet-degrade marker from the larry agent's state directory.
+ * Returns null when the marker is absent, unreadable, or malformed — the
+ * default (no-degrade) path is ALWAYS safe: this function never throws.
+ *
+ * @param frameworkRoot  The cortextos framework root (env.frameworkRoot).
+ */
+function readFleetDegradeMarker(frameworkRoot: string): FleetDegradeMarker | null {
+  try {
+    const markerPath = join(
+      frameworkRoot,
+      'orgs', 'clearworksai', 'agents', 'larry', 'state', 'fleet-degrade.json',
+    );
+    if (!existsSync(markerPath)) return null;
+    const raw = readFileSync(markerPath, 'utf-8');
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    return parsed as FleetDegradeMarker;
+  } catch {
+    // Malformed / unreadable marker — conservative: do not degrade.
+    return null;
+  }
+}
+
+/**
+ * If the fleet-degrade marker is active AND this agent has opted in
+ * (degrade_ok:true), return an override config slice with the failover
+ * runtime and model substituted. Otherwise return null (no change).
+ *
+ * Called once per start() BEFORE the PTY is constructed so the spawn
+ * picks up the degraded runtime/model automatically.
+ */
+function computeDegradeOverride(
+  frameworkRoot: string,
+  config: AgentConfig,
+  log: LogFn,
+): { runtime: 'opencode'; model: string } | null {
+  // Guard: only agents that explicitly opt in are eligible.
+  if (!config.degrade_ok) return null;
+
+  // Guard: only claude-code agents can be degraded (non-Anthropic runtimes
+  // are already off Anthropic and don't need failover).
+  if (config.runtime && config.runtime !== 'claude-code') return null;
+
+  const marker = readFleetDegradeMarker(frameworkRoot);
+  if (!marker) return null;
+
+  // Marker must signal Anthropic depletion.
+  if (marker.anthropic !== 'DEPLETED') return null;
+
+  // Resolve the cheap model from the degrade_map using the agent's tier.
+  const tier = config.degrade_tier ?? 'mechanical';
+  const cheapModel = marker.degrade_map?.[tier];
+  if (!cheapModel) {
+    log(`[degrade] marker present but no degrade_map.${tier} — skipping failover`);
+    return null;
+  }
+
+  const failoverRuntime = (marker.failover_runtime ?? 'opencode') as 'opencode';
+  log(`[degrade] Anthropic DEPLETED — degrading to ${failoverRuntime} / ${cheapModel} (tier: ${tier})`);
+  return { runtime: failoverRuntime, model: cheapModel };
+}
+
 /**
  * Manages a single agent's lifecycle.
  * Replaces agent-wrapper.sh for one agent.
@@ -139,13 +220,24 @@ export class AgentProcess {
     const logPath = join(this.env.ctxRoot, 'logs', this.name, 'stdout.log');
     ensureDir(join(this.env.ctxRoot, 'logs', this.name));
     this.log(`Log path: ${logPath}`);
-    this.pty = this.config.runtime === 'hermes'
-      ? new HermesPTY(this.env, this.config, logPath)
-      : this.config.runtime === 'opencode'
-        ? new OpencodePTY(this.env, this.config, logPath)
-        : this.config.runtime === 'codex-app-server'
-          ? new CodexAppServerPTY(this.env, this.config, logPath)
-          : new AgentPTY(this.env, this.config, logPath);
+
+    // WS8 Layer A — fleet-degrade failover: if the fleet-degrade marker is
+    // active and this agent has degrade_ok:true, substitute the cheap
+    // failover runtime + model for THIS spawn only. The config object is
+    // never mutated; only the effective PTY construction is overridden.
+    // All reads are guarded so a malformed/absent marker is a no-op.
+    const degradeOverride = computeDegradeOverride(this.env.frameworkRoot, this.config, this.log);
+    const effectiveConfig: AgentConfig = degradeOverride
+      ? { ...this.config, runtime: degradeOverride.runtime, model: degradeOverride.model }
+      : this.config;
+
+    this.pty = effectiveConfig.runtime === 'hermes'
+      ? new HermesPTY(this.env, effectiveConfig, logPath)
+      : effectiveConfig.runtime === 'opencode'
+        ? new OpencodePTY(this.env, effectiveConfig, logPath)
+        : effectiveConfig.runtime === 'codex-app-server'
+          ? new CodexAppServerPTY(this.env, effectiveConfig, logPath)
+          : new AgentPTY(this.env, effectiveConfig, logPath);
 
     // Issue #330: re-wire the Telegram handle on every start() (session refresh
     // creates a fresh CodexAppServerPTY). Only CodexAppServerPTY uses this — Claude / Hermes

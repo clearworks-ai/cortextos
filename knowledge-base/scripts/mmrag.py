@@ -1362,6 +1362,66 @@ def _reindex_indexes(root: Path, *, dry_run=False):
     return report
 
 
+def _check_wiki_index_drift(wiki_root: Path) -> dict:
+    """Walk a wiki root and detect on-disk *.md files absent from their dir's _index.md.
+
+    Returns a dict:
+        {
+            "wiki_root": str,
+            "indexed": N,       # total files listed in all _index.md files
+            "on_disk": M,       # total non-underscore *.md files on disk
+            "missing_from_index": [...],   # relative paths of on-disk files NOT in any index
+        }
+
+    Does NOT modify anything — report only.
+    """
+    wiki_root = Path(wiki_root).expanduser().resolve()
+    total_indexed = 0
+    total_on_disk = 0
+    missing: list[str] = []
+
+    for directory in _iter_wiki_directories(wiki_root):
+        index_path = directory / "_index.md"
+
+        # Collect on-disk non-underscore *.md files in this directory (not recursive)
+        on_disk_files = sorted(
+            p for p in directory.iterdir()
+            if p.is_file()
+            and p.suffix.lower() == ".md"
+            and not p.name.startswith("_")
+            and not _is_ignored(p)
+        )
+        total_on_disk += len(on_disk_files)
+
+        # Parse which stems are referenced in _index.md
+        indexed_stems: set[str] = set()
+        if index_path.exists():
+            try:
+                text, _ = _read_text_file(index_path)
+            except Exception:
+                text = ""
+            # Match wiki-link targets: [[stem|...]] or [[stem]]
+            import re as _re
+            for match in _re.finditer(r"\[\[([^\]|]+)", text):
+                target = match.group(1).strip()
+                # target may be "subdir/slug" or just "slug"
+                stem = target.split("/")[-1]
+                indexed_stems.add(stem)
+        total_indexed += len(indexed_stems)
+
+        for p in on_disk_files:
+            if p.stem not in indexed_stems:
+                rel = str(p.relative_to(wiki_root))
+                missing.append(rel)
+
+    return {
+        "wiki_root": str(wiki_root),
+        "indexed": total_indexed,
+        "on_disk": total_on_disk,
+        "missing_from_index": sorted(missing),
+    }
+
+
 def _iter_reconcile_files(roots):
     """Yield canonical disk files that the reconciler should mirror into the index."""
     files = {}
@@ -1952,6 +2012,18 @@ def _emit_report(report, *, json_out=False):
         if reindex_report["dry_run"] and reindex_report["diffs"]:
             for diff_text in reindex_report["diffs"]:
                 print(diff_text, end="" if diff_text.endswith("\n") else "\n")
+    if report.get("index_drift"):
+        drift = report["index_drift"]
+        print()
+        print("Index drift check")
+        print("=" * 40)
+        print(f"Wiki root: {drift['wiki_root']}")
+        print(f"Indexed (referenced in _index.md files): {drift['indexed']}")
+        print(f"On disk (non-underscore *.md): {drift['on_disk']}")
+        missing = drift.get("missing_from_index", [])
+        print(f"Missing from index: {len(missing)}")
+        for path in missing:
+            print(f"  {path}")
     if report.get("failed_paths"):
         print()
         print("Failed paths")
@@ -2653,12 +2725,26 @@ def cmd_ingest(args):
     finally:
         _tracker.persist()
 
-    print(f"\nDone! Ingested {total} new chunk(s) into '{collection_name}'")
-    if skipped:
-        print(f"  Skipped: {skipped} (already existed or empty)")
-    if errors:
-        print(f"  Errors: {errors}")
-    print(_tracker.summary_line())
+    use_json = getattr(args, "json", False)
+    fail_on_error = getattr(args, "fail_on_error", False)
+
+    if use_json:
+        print(json.dumps({
+            "collection": collection_name,
+            "generated": total,
+            "skipped": skipped,
+            "errored": errors,
+        }))
+    else:
+        print(f"\nDone! Ingested {total} new chunk(s) into '{collection_name}'")
+        if skipped:
+            print(f"  Skipped: {skipped} (already existed or empty)")
+        if errors:
+            print(f"  Errors: {errors}")
+        print(_tracker.summary_line())
+
+    if errors > 0 and fail_on_error:
+        sys.exit(1)
 
 
 def cmd_reconcile(args):
@@ -2735,6 +2821,11 @@ def cmd_reconcile(args):
     )
     report["orphan_reap"] = _reap_orphan_collections(dry_run=args.dry_run)
     report["reindex"] = _reindex_indexes(DEFAULT_WIKI_ROOT, dry_run=args.dry_run)
+
+    index_check_root = getattr(args, "index_check", None)
+    if index_check_root:
+        report["index_drift"] = _check_wiki_index_drift(Path(index_check_root))
+
     _emit_report(report, json_out=args.json)
 
 
@@ -2889,6 +2980,18 @@ def _search_query_results(client, config, collection, question, *, top_k=5, thre
         weight=config.get("recency_weight", DEFAULT_RECENCY_WEIGHT),
     )
     return filtered, threshold
+
+
+def _prefer_source_rerank(results):
+    """Demote chunks whose metadata type == 'summary' to rank below non-summary chunks.
+
+    Used by --prefer-source in cmd_query. Stable-sorts: non-summary first (preserving
+    their original score order), summary chunks after (also preserving their order).
+    Default is OFF so existing callers see no behavior change.
+    """
+    non_summary = [r for r in results if r.get("metadata", {}).get("type") != "summary"]
+    summaries = [r for r in results if r.get("metadata", {}).get("type") == "summary"]
+    return non_summary + summaries
 
 
 def _apply_token_budget(results, max_tokens):
@@ -3239,6 +3342,11 @@ def cmd_query(args):
         type_filter=args.type,
         no_recency=getattr(args, "no_recency", False),
     )
+
+    # --prefer-source: demote summary chunks so raw source docs rank higher
+    if getattr(args, "prefer_source", False):
+        chunk_candidates = _prefer_source_rerank(chunk_candidates)
+
     document_limit = getattr(args, "top_docs", None) or (args.top_k or DEFAULT_TOP_DOCS)
     document_results = _group_parent_documents(chunk_candidates, top_docs=document_limit)
 
@@ -3336,6 +3444,56 @@ def cmd_query(args):
                 print("No results above similarity threshold.")
 
     _tracker.persist()
+
+
+def cmd_verify_retrieval(args):
+    """Run a real query and assert that the expected source file appears in the results.
+
+    Exit 0 if the expected source is found, exit 1 if not (also prints which sources
+    were actually returned).
+    """
+    config = load_config()
+    client = get_genai_client(get_api_key(config))
+    collection_name = args.collection or config.get("default_collection", "default")
+    collection = get_chroma_collection(collection_name)
+
+    if collection.count() == 0:
+        print("Knowledge base is empty. Ingest some files first.")
+        sys.exit(1)
+
+    expect_source = str(Path(args.expect_source).resolve())
+
+    chunk_candidates, _ = _search_query_results(
+        client,
+        config,
+        collection,
+        args.query,
+        top_k=args.top_k or 10,
+        threshold=None,
+    )
+    document_results = _group_parent_documents(chunk_candidates)
+
+    # Collect returned source paths — both from chunk metadata and document groups
+    returned_sources: set[str] = set()
+    for chunk in chunk_candidates:
+        src = _metadata_source(chunk.get("metadata"))
+        if src:
+            returned_sources.add(str(Path(src).resolve()))
+    for doc in document_results:
+        abs_path = doc.get("abs_path") or doc.get("source_file")
+        if abs_path:
+            returned_sources.add(str(Path(abs_path).resolve()))
+
+    if expect_source in returned_sources:
+        print(f"PASS: '{args.expect_source}' found in query results for collection '{collection_name}'")
+        sys.exit(0)
+    else:
+        print(f"FAIL: '{args.expect_source}' NOT found in query results for collection '{collection_name}'")
+        print(f"Query: {args.query!r}")
+        print(f"Sources actually returned ({len(returned_sources)}):")
+        for src in sorted(returned_sources):
+            print(f"  {src}")
+        sys.exit(1)
 
 
 def cmd_usage(args):
@@ -3539,6 +3697,19 @@ def main():
     p_ingest.add_argument("paths", nargs="+", help="File or directory paths to ingest")
     p_ingest.add_argument("--collection", "-c", help="Collection name (default: 'default')")
     p_ingest.add_argument("--force", action="store_true", help="Re-ingest files even if already in the KB")
+    p_ingest.add_argument(
+        "--fail-on-error",
+        action="store_true",
+        default=False,
+        help="Exit with code 1 if any file errors during ingest (default: off — preserves existing caller behavior)",
+    )
+    p_ingest.add_argument(
+        "--json",
+        "-j",
+        action="store_true",
+        default=False,
+        help="Print a single JSON line with generated/skipped/errored counts instead of the human summary",
+    )
 
     # query
     p_query = sub.add_parser("query", help="Query the knowledge base")
@@ -3558,6 +3729,15 @@ def main():
                          help=f"Max number of parent documents to return in --docs mode (default: {DEFAULT_TOP_DOCS})")
     p_query.add_argument("--no-recency", action="store_true",
                          help="Disable recency reranking and preserve pure similarity ordering")
+    p_query.add_argument(
+        "--prefer-source",
+        action="store_true",
+        default=False,
+        help=(
+            "Boost raw source documents above derived summary chunks "
+            "(chunks whose metadata type == 'summary' rank lower). Default OFF."
+        ),
+    )
 
     # status
     p_status = sub.add_parser("status", help="Show knowledge base status")
@@ -3600,6 +3780,16 @@ def main():
                              help="Only purge indexed chunks whose sources are ignored or missing from disk")
     p_reconcile.add_argument("--reap-orphans", action="store_true",
                              help="Also delete empty orphaned agent-* collections during reconcile")
+    p_reconcile.add_argument(
+        "--index-check",
+        metavar="WIKI_ROOT",
+        default=None,
+        help=(
+            "Walk WIKI_ROOT and flag any non-underscore *.md file absent from its "
+            "directory's _index.md. Report only — nothing is deleted. "
+            "Results appear as 'index_drift' in the JSON report."
+        ),
+    )
 
     # reindex-indexes
     p_reindex = sub.add_parser("reindex-indexes", help="Refresh managed _index.md sections under the wiki root")
@@ -3618,6 +3808,27 @@ def main():
     p_deliver.add_argument("--yes", action="store_true",
                            help="Force delivery even when query resolution is low-confidence or ambiguous")
     p_deliver.add_argument("--json", "-j", action="store_true", help="Output delivery results as JSON")
+
+    # verify-retrieval
+    p_verify = sub.add_parser(
+        "verify-retrieval",
+        help="Assert that a query returns an expected source file (regression guard)",
+    )
+    p_verify.add_argument("--collection", "-c", help="Collection name")
+    p_verify.add_argument("--query", required=True, help="Query to run against the collection")
+    p_verify.add_argument(
+        "--expect-source",
+        required=True,
+        metavar="PATH",
+        help="Source file path expected to appear in the query results (exit 1 if absent)",
+    )
+    p_verify.add_argument(
+        "--top-k",
+        "-k",
+        type=int,
+        default=10,
+        help="How many results to retrieve when checking (default: 10)",
+    )
 
     # usage
     p_usage = sub.add_parser("usage", help="Show token usage and cost summary")
@@ -3641,6 +3852,7 @@ def main():
         "reconcile": cmd_reconcile,
         "reindex-indexes": cmd_reindex_indexes,
         "deliver": cmd_deliver,
+        "verify-retrieval": cmd_verify_retrieval,
         "usage": cmd_usage,
     }
 

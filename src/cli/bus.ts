@@ -1,6 +1,6 @@
 import { Command } from 'commander';
-import { spawnSync, execFileSync } from 'child_process';
-import { existsSync, readFileSync } from 'fs';
+import { spawnSync, execFileSync, execSync } from 'child_process';
+import { existsSync, readFileSync, readdirSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { sendMessage, checkInbox, ackInbox } from '../bus/message.js';
@@ -26,6 +26,7 @@ import { runScopeGuard } from '../bus/scope-guard.js';
 import { checkUsageApi, refreshOAuthToken, rotateOAuth, loadAccounts, ALERT_5H, ALERT_7D } from '../bus/oauth.js';
 import { resolvePaths } from '../utils/paths.js';
 import { lintMemory, formatLintReport, DEFAULT_MEMORY_BUDGET } from '../utils/memory-lint.js';
+import { extractClaims, verifyClaims, formatCorrectnessReport } from '../utils/memory-correctness.js';
 import { resolveEnv } from '../utils/env.js';
 import { IPCClient } from '../daemon/ipc-server.js';
 import { TelegramAPI } from '../telegram/api.js';
@@ -38,6 +39,7 @@ import { evaluateCiAlert, gatherCiAlertContext } from '../utils/ci-alert-gate.js
 import { checkAndRecordSourceEvent, isValidSourceKey } from '../utils/event-dedup.js';
 import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext, CronDefinition, ConversationBufferEntry } from '../types/index.js';
 import { fleetReconcileCommand } from './bus-reconcile.js';
+import { activityLedgerCommand } from './bus-activity-ledger.js';
 
 /**
  * Check if the org requires deliverables and the task has none attached.
@@ -133,6 +135,9 @@ export const busCommand = new Command('bus')
 
 // WS4: fleet drift detection (read-only). Registered as a subcommand of `bus`.
 busCommand.addCommand(fleetReconcileCommand);
+
+// WS10 R6: did-vs-claimed activity ledger (read-only, warn-only).
+busCommand.addCommand(activityLedgerCommand);
 
 busCommand
   .command('send-message')
@@ -3346,6 +3351,72 @@ busCommand
     console.log(formatLintReport(result));
     if (!result.ok) {
       process.exit(1);
+    }
+  });
+
+// WS10 R8: memory-correctness — verify file/symbol/wikilink claims in MEMORY.md.
+busCommand
+  .command('memory-correctness')
+  .description('Verify file/symbol/wikilink claims in a MEMORY.md against the real repo. Report-only by default; --strict exits non-zero on unresolved file or wikilink claims.')
+  .option('--file <path>', 'Path to the memory index file (default: this project\'s Claude memory MEMORY.md)')
+  .option('--strict', 'Exit non-zero when any file or wikilink claim is unresolved')
+  .option('--json', 'Emit the full claim-results list as JSON')
+  .action((opts: { file?: string; strict?: boolean; json?: boolean }) => {
+    const file = opts.file ?? defaultMemoryPath();
+    if (!existsSync(file)) {
+      console.error(`memory-correctness: file not found: ${file}`);
+      process.exit(1);
+    }
+
+    const content = readFileSync(file, 'utf-8');
+    const claims = extractClaims(content);
+
+    if (claims.length === 0) {
+      console.log(`memory-correctness: no claims found in ${file}`);
+      return;
+    }
+
+    const repoRoot = process.env.CTX_FRAMEWORK_ROOT || process.cwd();
+    const resolver = {
+      fileExists(p: string): boolean {
+        if (p.includes('..')) return false;
+        return existsSync(join(repoRoot, p));
+      },
+      symbolExists(name: string): boolean {
+        try {
+          const bare = name.replace(/\(\)$/, '').replace(/^--/, '');
+          if (!bare || bare.length < 3) return false;
+          const srcDir = join(repoRoot, 'src');
+          if (!existsSync(srcDir)) return false;
+          execSync(`grep -rl "${bare}" "${srcDir}"`, { stdio: 'pipe', timeout: 5_000 });
+          return true;
+        } catch { return false; }
+      },
+      memoryExists(slug: string): boolean {
+        const memDir = join(homedir(), '.claude', 'projects', process.cwd().replace(/\//g, '-'), 'memory');
+        if (!existsSync(memDir)) return false;
+        try {
+          return readdirSync(memDir).some(f => f.replace(/\.md$/, '').toLowerCase() === slug.toLowerCase());
+        } catch { return false; }
+      },
+    };
+
+    const results = verifyClaims(claims, resolver);
+
+    if (opts.json) {
+      console.log(JSON.stringify(results, null, 2));
+      return;
+    }
+
+    console.log(formatCorrectnessReport(results, file));
+
+    if (opts.strict) {
+      const hardFails = results.filter(
+        r => r.verdict === 'unresolved' && (r.claim.kind === 'file' || r.claim.kind === 'wikilink'),
+      );
+      if (hardFails.length > 0) {
+        process.exit(1);
+      }
     }
   });
 

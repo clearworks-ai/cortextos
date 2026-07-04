@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { spawnSync, execFileSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
+import { homedir } from 'os';
 import { join } from 'path';
 import { sendMessage, checkInbox, ackInbox } from '../bus/message.js';
 import { validateAgentName, validateTaskId } from '../utils/validate.js';
@@ -24,6 +25,7 @@ import type { BriefData, CrmContext } from '../bus/meeting-brief.js';
 import { runScopeGuard } from '../bus/scope-guard.js';
 import { checkUsageApi, refreshOAuthToken, rotateOAuth, loadAccounts, ALERT_5H, ALERT_7D } from '../bus/oauth.js';
 import { resolvePaths } from '../utils/paths.js';
+import { lintMemory, formatLintReport, DEFAULT_MEMORY_BUDGET } from '../utils/memory-lint.js';
 import { resolveEnv } from '../utils/env.js';
 import { IPCClient } from '../daemon/ipc-server.js';
 import { TelegramAPI } from '../telegram/api.js';
@@ -3224,6 +3226,46 @@ busCommand
 
     // Non-zero exit on stray files so this can be a CI/pre-merge gate.
     if (!report.ok) process.exit(1);
+  });
+
+/**
+ * Resolve the default path to the shared fleet MEMORY.md index.
+ *
+ * It lives outside the repo, in Claude's per-project memory dir under the home
+ * directory. The dir name is the project path with slashes replaced by dashes.
+ */
+function defaultMemoryPath(): string {
+  const projectDirName = process.cwd().replace(/\//g, '-');
+  return join(homedir(), '.claude', 'projects', projectDirName, 'memory', 'MEMORY.md');
+}
+
+busCommand
+  .command('memory-lint')
+  .description('Lint the shared fleet MEMORY.md index against a size budget (total KB + per-line chars); exits non-zero when over budget')
+  .option('--file <path>', 'Path to the memory index file (default: this project\'s Claude memory MEMORY.md)')
+  .option('--max-bytes <n>', 'Max total file size in bytes', String(DEFAULT_MEMORY_BUDGET.maxBytes))
+  .option('--max-line-chars <n>', 'Max characters per index line', String(DEFAULT_MEMORY_BUDGET.maxLineChars))
+  .action((opts: { file?: string; maxBytes: string; maxLineChars: string }) => {
+    const file = opts.file ?? defaultMemoryPath();
+    if (!existsSync(file)) {
+      console.error(`memory-lint: file not found: ${file}`);
+      process.exit(1);
+    }
+
+    const maxBytes = Number(opts.maxBytes);
+    const maxLineChars = Number(opts.maxLineChars);
+    if (!Number.isFinite(maxBytes) || maxBytes <= 0 || !Number.isFinite(maxLineChars) || maxLineChars <= 0) {
+      console.error('memory-lint: --max-bytes and --max-line-chars must be positive numbers');
+      process.exit(1);
+    }
+
+    const content = readFileSync(file, 'utf-8');
+    const result = lintMemory(content, { maxBytes, maxLineChars });
+    console.log(`(${file})`);
+    console.log(formatLintReport(result));
+    if (!result.ok) {
+      process.exit(1);
+    }
   });
 
 function sleepMs(ms: number): Promise<void> {

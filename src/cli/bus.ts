@@ -33,6 +33,7 @@ import { logOutboundMessage, cacheLastSent } from '../telegram/logging.js';
 import { checkAndRecord } from '../telegram/dedup.js';
 import { appendToBuffer } from '../daemon/conversation-buffer.js';
 import { findBannedCronPrompts } from '../utils/cron-prompt-validator.js';
+import { recordVerificationReceipt, emitClaimWithoutReceiptWarning } from '../utils/verification-receipt.js';
 import { evaluateCiAlert, gatherCiAlertContext } from '../utils/ci-alert-gate.js';
 import { checkAndRecordSourceEvent, isValidSourceKey } from '../utils/event-dedup.js';
 import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext, CronDefinition, ConversationBufferEntry } from '../types/index.js';
@@ -1186,6 +1187,29 @@ busCommand
           parseMode: opts.plainText ? 'none' : 'html',
         });
         cacheLastSent(env.ctxRoot, env.agentName, chatId, message);
+
+        // WARN-ONLY certainty guard (WS2). Josh's governing goal: "never
+        // state a claim without a live check." When an outbound message
+        // asserts completion (done/shipped/live/deployed/fixed/merged/…) but
+        // the agent has recorded no verification receipt in the recent
+        // window, emit a `claim_without_receipt` warning event so the gap is
+        // visible. This is purely observational: it runs AFTER the send has
+        // already succeeded, never changes the send result, never throws,
+        // and never delays the send. Fail-open on any error.
+        try {
+          const guardPaths = resolvePaths(env.agentName, env.instanceId, env.org);
+          emitClaimWithoutReceiptWarning(
+            guardPaths,
+            env.ctxRoot,
+            env.agentName,
+            env.org,
+            message,
+            { chat_id: String(chatId), message_id: sentMessageId },
+          );
+        } catch {
+          // Fail-open: the certainty guard is warn-only telemetry and must
+          // never affect the already-completed send.
+        }
         // Append outbound to the rolling conversation buffer so post-restart
         // sessions see the literal recent exchange, not just the handoff doc
         // summary. Spec: Item 2 of .planning/larry-ux-parity-spec.md.
@@ -1210,6 +1234,27 @@ busCommand
       console.error(`Failed to send: ${err.message || err}`);
       process.exit(1);
     }
+  });
+
+busCommand
+  .command('verify-receipt')
+  .description('Record a verification receipt (build passed, URL curl-200, test run, etc.) so the outbound certainty guard knows this agent actually verified its work before claiming completion.')
+  .requiredOption('--kind <kind>', 'Kind of verification: build | tsc | test | curl | deploy | manual | ...')
+  .requiredOption('--ref <ref>', 'Reference for the verification: a URL, PR link, command, commit sha, or short note.')
+  .option('--agent <agent>', 'Agent to attribute the receipt to (defaults to the resolved CTX_AGENT_NAME).')
+  .action((opts: { kind: string; ref: string; agent?: string }) => {
+    const env = resolveEnv();
+    const agent = opts.agent || env.agentName;
+    if (!env.ctxRoot) {
+      console.error('Error: CTX_ROOT not resolved; cannot record verification receipt.');
+      process.exit(1);
+    }
+    if (!agent) {
+      console.error('Error: no agent name resolved; pass --agent or set CTX_AGENT_NAME.');
+      process.exit(1);
+    }
+    recordVerificationReceipt(env.ctxRoot, agent, { kind: opts.kind, ref: opts.ref });
+    console.log(`Recorded verification receipt: agent=${agent} kind=${opts.kind} ref=${opts.ref}`);
   });
 
 busCommand

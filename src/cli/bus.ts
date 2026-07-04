@@ -33,6 +33,7 @@ import { findBannedCronPrompts } from '../utils/cron-prompt-validator.js';
 import { evaluateCiAlert, gatherCiAlertContext } from '../utils/ci-alert-gate.js';
 import { checkAndRecordSourceEvent, isValidSourceKey } from '../utils/event-dedup.js';
 import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext, CronDefinition, ConversationBufferEntry } from '../types/index.js';
+import { fleetReconcileCommand } from './bus-reconcile.js';
 
 /**
  * Check if the org requires deliverables and the task has none attached.
@@ -108,6 +109,9 @@ function loadConversationHistory(ctxRoot: string, agentName: string): Conversati
 
 export const busCommand = new Command('bus')
   .description('Bus commands for agent messaging, tasks, and events');
+
+// WS4: fleet drift detection (read-only). Registered as a subcommand of `bus`.
+busCommand.addCommand(fleetReconcileCommand);
 
 busCommand
   .command('send-message')

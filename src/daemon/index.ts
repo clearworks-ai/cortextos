@@ -1,5 +1,6 @@
 import { AgentManager } from './agent-manager.js';
 import { IPCServer } from './ipc-server.js';
+import { ReconcileTrigger } from './reconcile-trigger.js';
 import { readdirSync, readFileSync, writeFileSync, existsSync, chmodSync } from 'fs';
 import { spawnSync } from 'child_process';
 import { join } from 'path';
@@ -220,6 +221,7 @@ function handleFatal(
 class Daemon {
   private agentManager: AgentManager | null = null;
   private ipcServer: IPCServer | null = null;
+  private reconcileTrigger: ReconcileTrigger | null = null;
   private instanceId: string;
   private ctxRoot: string;
 
@@ -266,12 +268,28 @@ class Daemon {
     // Discover and start agents
     await this.agentManager.discoverAndStart();
 
+    // WS4: fleet drift detection. Runs a reconcile pass shortly after boot and
+    // then on a fixed cadence, emitting drift events on the deterministic event
+    // log when a declared/enabled agent isn't running, a declared cron isn't
+    // scheduled, or a declared env key is missing. READ-ONLY — never restarts
+    // or mutates agents, never pages Josh raw.
+    this.reconcileTrigger = new ReconcileTrigger(
+      this.agentManager,
+      this.instanceId,
+      frameworkRoot,
+      org,
+    );
+    this.reconcileTrigger.start();
+
     console.log(`[daemon] Running (pid: ${process.pid})`);
 
     // Handle shutdown signals
     const shutdown = async () => {
       console.log('[daemon] Shutting down...');
       try {
+        if (this.reconcileTrigger) {
+          this.reconcileTrigger.stop();
+        }
         if (this.agentManager) {
           await this.agentManager.stopAll();
         }

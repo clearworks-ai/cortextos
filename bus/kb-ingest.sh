@@ -5,12 +5,13 @@
 #   bash bus/kb-ingest.sh <path> [<path>...] [options]
 #
 # Options:
-#   --org ORG          Organization name (required if CTX_ORG not set)
-#   --agent AGENT      Agent name (required for --scope private)
+#   --org ORG            Organization name (required if CTX_ORG not set)
+#   --agent AGENT        Agent name (required for --scope private)
 #   --scope shared|private  shared = org-wide collection, private = agent-only (default: shared)
-#   --collection NAME  Override collection name directly
-#   --force            Re-ingest even if already indexed
-#   --instance ID      Instance ID (default: default)
+#   --collection NAME    Override collection name directly
+#   --force              Re-ingest even if already indexed
+#   --instance ID        Instance ID (default: default)
+#   --no-fail-on-error   Do NOT exit 1 when mmrag reports ingest errors (default: fail loud)
 #
 # Env: CTX_ORG, CTX_AGENT_NAME, CTX_INSTANCE_ID, CTX_FRAMEWORK_ROOT, GEMINI_API_KEY
 
@@ -30,6 +31,7 @@ SCOPE="shared"
 COLLECTION=""
 FORCE=""
 INSTANCE_ID="${CTX_INSTANCE_ID:-default}"
+FAIL_ON_ERROR="--fail-on-error"   # default: fail loud on ingest errors
 PATHS=()
 
 while [[ $# -gt 0 ]]; do
@@ -40,6 +42,7 @@ while [[ $# -gt 0 ]]; do
     --collection) COLLECTION="$2"; shift 2 ;;
     --force) FORCE="--force"; shift ;;
     --instance) INSTANCE_ID="$2"; shift 2 ;;
+    --no-fail-on-error) FAIL_ON_ERROR=""; shift ;;
     -*) echo "Unknown flag: $1"; exit 1 ;;
     *) PATHS+=("$1"); shift ;;
   esac
@@ -115,7 +118,8 @@ done
 
 "$VENV_DIR/bin/python3" "$MMRAG_PY" ingest "${PATHS[@]}" \
   --collection "$COLLECTION" \
-  ${FORCE}
+  ${FORCE} \
+  ${FAIL_ON_ERROR}
 
 exit_code=$?
 if [[ $exit_code -eq 0 ]]; then

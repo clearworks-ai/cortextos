@@ -2,6 +2,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import type { BusPaths } from '../types/index.js';
 import { validateInstanceId } from './validate.js';
+import { resolveActiveInstance } from './resolve-active-instance.js';
 
 /**
  * Resolve all bus paths for an agent.
@@ -25,11 +26,15 @@ import { validateInstanceId } from './validate.js';
  */
 export function resolvePaths(
   agentName: string,
-  instanceId: string = 'default',
+  instanceId?: string,
   org?: string,
 ): BusPaths {
-  validateInstanceId(instanceId);
-  const ctxRoot = join(homedir(), '.cortextos', instanceId);
+  // When no instance is passed explicitly, resolve the marker-declared active
+  // instance (falling back to the legacy literal 'default' when no marker
+  // exists). An explicit arg — including an explicit 'default' — always wins.
+  const resolvedInstanceId = instanceId ?? resolveActiveInstance('default');
+  validateInstanceId(resolvedInstanceId);
+  const ctxRoot = join(homedir(), '.cortextos', resolvedInstanceId);
 
   // Org-scoped paths for tasks, approvals, analytics
   const orgBase = org ? join(ctxRoot, 'orgs', org) : ctxRoot;
@@ -52,10 +57,13 @@ export function resolvePaths(
  * Get the IPC socket path for daemon communication.
  * Unix domain socket on macOS/Linux, named pipe on Windows.
  */
-export function getIpcPath(instanceId: string = 'default'): string {
-  validateInstanceId(instanceId);
+export function getIpcPath(instanceId?: string): string {
+  // Same marker-aware resolution as resolvePaths: an explicit arg wins; a bare
+  // call resolves the active instance (marker) or falls back to 'default'.
+  const resolvedInstanceId = instanceId ?? resolveActiveInstance('default');
+  validateInstanceId(resolvedInstanceId);
   if (process.platform === 'win32') {
-    return `\\\\.\\pipe\\cortextos-${instanceId}`;
+    return `\\\\.\\pipe\\cortextos-${resolvedInstanceId}`;
   }
-  return join(homedir(), '.cortextos', instanceId, 'daemon.sock');
+  return join(homedir(), '.cortextos', resolvedInstanceId, 'daemon.sock');
 }

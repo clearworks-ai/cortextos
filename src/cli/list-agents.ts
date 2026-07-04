@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { homedir } from 'os';
 import { join } from 'path';
 import { listAgents } from '../bus/agents.js';
+import { resolveInstanceId } from './resolve-instance-id.js';
 
 export const listAgentsCommand = new Command('list-agents')
   .description('List all agents in the system')
@@ -9,7 +10,7 @@ export const listAgentsCommand = new Command('list-agents')
   .option('--format <format>', 'Output format: json or text', 'text')
   .option('--instance <id>', 'Instance ID')
   .action((options: { org?: string; format: string; instance?: string }) => {
-    const instanceId = options.instance || process.env.CTX_INSTANCE_ID || 'default';
+    const instanceId = resolveInstanceId(options.instance);
     const ctxRoot = join(homedir(), '.cortextos', instanceId);
     const agents = listAgents(ctxRoot, options.org);
 

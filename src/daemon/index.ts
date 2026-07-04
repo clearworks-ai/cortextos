@@ -5,6 +5,7 @@ import { spawnSync } from 'child_process';
 import { join } from 'path';
 import { homedir } from 'os';
 import { ensureDir } from '../utils/atomic.js';
+import { resolveActiveInstance } from '../utils/resolve-active-instance.js';
 
 // Each fast-checker registers a process-level SIGUSR1 handler (see
 // fast-checker.ts:102). With >10 active agents the default Node listener cap
@@ -224,7 +225,9 @@ class Daemon {
   private ctxRoot: string;
 
   constructor() {
-    this.instanceId = process.env.CTX_INSTANCE_ID || 'default';
+    // PM2 normally injects CTX_INSTANCE_ID; when it is absent, resolve the
+    // marker-declared active instance before falling back to legacy 'default'.
+    this.instanceId = process.env.CTX_INSTANCE_ID || resolveActiveInstance('default');
     // Always derive ctxRoot from instanceId to avoid inheriting a parent cortextOS's CTX_ROOT
     this.ctxRoot = join(homedir(), '.cortextos', this.instanceId);
   }

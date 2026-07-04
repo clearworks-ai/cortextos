@@ -479,8 +479,10 @@ export class IPCServer {
   private socketPath: string;
   private agentManager: AgentManager;
 
-  constructor(agentManager: AgentManager, instanceId: string = 'default') {
+  constructor(agentManager: AgentManager, instanceId?: string) {
     this.agentManager = agentManager;
+    // A bare (no-instance) construction resolves the active instance via the
+    // marker inside getIpcPath; an explicit id always wins.
     this.socketPath = getIpcPath(instanceId);
   }
 
@@ -874,7 +876,9 @@ export class IPCServer {
 export class IPCClient {
   private socketPath: string;
 
-  constructor(instanceId: string = 'default') {
+  constructor(instanceId?: string) {
+    // Marker-aware when constructed without an explicit instance; an explicit
+    // id passed by a CLI command always wins.
     this.socketPath = getIpcPath(instanceId);
   }
 

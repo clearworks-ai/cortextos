@@ -121,6 +121,11 @@ export class AgentManager {
     // re-discover and re-start any agent dir on disk regardless of user intent.
     const instanceEnabled = this.readInstanceEnableList();
 
+    // Boot-start retry delay: 2 s between the first attempt and the one retry.
+    // Short enough to not delay startup noticeably; long enough to outlast a
+    // transient PTY-spawn race under 12-agent bulk contention.
+    const BOOT_RETRY_DELAY_MS = 2_000;
+
     for (const { name, dir, org, config } of agentDirs) {
       // Per-agent config.json `enabled: false` (existing behavior, unchanged)
       if (config.enabled === false) {
@@ -133,10 +138,52 @@ export class AgentManager {
         console.log(`[agent-manager] Skipping disabled agent: ${name} (enabled-agents.json)`);
         continue;
       }
+
+      // BUG-BOOT-SILENT: previously an unhandled throw from startAgent (e.g. a
+      // transient PTY spawn error under 12-agent bulk contention) propagated out
+      // of this loop, aborting all remaining agents silently. Fix: per-agent
+      // try/catch so one failure never drops the agents that follow it. On
+      // failure we log clearly (agent name + error) and retry once after a short
+      // delay. If the retry also fails, the agent is logged as failed and the
+      // boot-time self-heal pass below will make a final attempt.
+      //
       // BUG-043 fix: pass the per-agent org so startAgent can use it instead
       // of falling back to `this.org` (the daemon's startup org).
-      await this.startAgent(name, dir, config, org);
+      try {
+        await this.startAgent(name, dir, config, org);
+      } catch (firstErr) {
+        console.error(
+          `[agent-manager] Boot-start failed for ${name} (attempt 1/2): ` +
+          `${firstErr instanceof Error ? firstErr.message : String(firstErr)}. ` +
+          `Retrying in ${BOOT_RETRY_DELAY_MS}ms...`,
+        );
+        await new Promise(r => setTimeout(r, BOOT_RETRY_DELAY_MS));
+        try {
+          await this.startAgent(name, dir, config, org);
+          console.log(`[agent-manager] Boot-start retry succeeded for ${name}`);
+        } catch (retryErr) {
+          console.error(
+            `[agent-manager] Boot-start failed for ${name} (attempt 2/2 — giving up): ` +
+            `${retryErr instanceof Error ? retryErr.message : String(retryErr)}. ` +
+            `Boot-time self-heal pass will attempt recovery.`,
+          );
+        }
+      }
     }
+
+    // Boot-time self-heal: after the bulk start loop settles, reconcile the
+    // enabled-agent list against what actually made it into the live registry.
+    // Any enabled agent that is still missing from the registry (failed both
+    // attempts above, or was DEDUPED into pendingRestarts without a drainer)
+    // gets one final startAgent() call here. This guarantees an agent like
+    // "sage" comes back regardless of the root cause of the initial failure.
+    //
+    // We read the same `agentDirs` list computed above so there is no extra
+    // filesystem scan; the `instanceEnabled` filter is re-applied for safety.
+    // This pass does NOT retry agents that are already in the registry (i.e.
+    // successfully started) — it is additive only and does not touch the
+    // happy path.
+    await this.bootSelfHeal(agentDirs, instanceEnabled);
 
     // Successful startup pass — clear .daemon-crashed markers from disk
     // AND clear the in-memory daemonJustCrashed flag. After this point,
@@ -144,6 +191,63 @@ export class AgentManager {
     // are normal operation and should fire the real BUG-011 alarm if a
     // race ever does leak through PR #11's protection.
     this.clearDaemonCrashMarkers();
+  }
+
+  /**
+   * Boot-time self-heal pass: start any enabled agent that is still absent
+   * from the live registry after the main bulk-start loop.
+   *
+   * Called exactly once per daemon boot, at the end of discoverAndStart().
+   * Deliberately separate from discoverAndStart() so it can be unit-tested
+   * in isolation with an injectable failing startAgent.
+   *
+   * Safe-by-design:
+   *  - Only calls startAgent() for agents NOT already in this.agents — agents
+   *    that started successfully are never touched.
+   *  - Does not alter per-agent crash-limiter semantics or IPC-triggered ops.
+   *  - Best-effort: any error from the heal attempt is logged but never thrown.
+   */
+  async bootSelfHeal(
+    agentDirs: Array<{ name: string; dir: string; org: string; config: AgentConfig }>,
+    instanceEnabled: Record<string, { enabled?: boolean; org?: string; status?: string }>,
+  ): Promise<void> {
+    const missing: string[] = [];
+
+    for (const { name, dir, org, config } of agentDirs) {
+      // Re-apply the same enable filters as the main loop — never start a
+      // disabled agent here either.
+      if (config.enabled === false) continue;
+      const entry = instanceEnabled[name];
+      if (entry && entry.enabled === false) continue;
+
+      // Already running — happy path, nothing to do.
+      if (this.agents.has(name)) continue;
+
+      missing.push(name);
+      console.warn(
+        `[agent-manager] Boot self-heal: ${name} is enabled but not in registry after ` +
+        `bulk start — attempting recovery start.`,
+      );
+      try {
+        await this.startAgent(name, dir, config, org);
+        console.log(`[agent-manager] Boot self-heal: ${name} recovered successfully.`);
+      } catch (healErr) {
+        console.error(
+          `[agent-manager] Boot self-heal: ${name} recovery failed — ` +
+          `${healErr instanceof Error ? healErr.message : String(healErr)}. ` +
+          `Manual intervention required (run: cortextos start ${name}).`,
+        );
+      }
+    }
+
+    if (missing.length === 0) {
+      console.log(`[agent-manager] Boot self-heal: all enabled agents started successfully.`);
+    } else {
+      console.log(
+        `[agent-manager] Boot self-heal complete. ` +
+        `Recovered ${missing.length} agent(s): ${missing.join(', ')}.`,
+      );
+    }
   }
 
   /**

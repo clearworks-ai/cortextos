@@ -72,7 +72,11 @@ describe('AgentManager.discoverAndStart - BUG-028 fix', () => {
     );
 
     const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
-    const startSpy = vi.spyOn(am, 'startAgent').mockResolvedValue();
+    // The mock must also register the agent in the internal map so the
+    // boot self-heal pass sees it as "started" and does not re-call startAgent.
+    const startSpy = vi.spyOn(am, 'startAgent').mockImplementation(async (name) => {
+      (am as any).agents.set(name, { process: {}, checker: {} });
+    });
 
     await am.discoverAndStart();
 
@@ -85,7 +89,9 @@ describe('AgentManager.discoverAndStart - BUG-028 fix', () => {
   it('starts all discovered agents when enabled-agents.json is missing', async () => {
     // No enabled-agents.json on disk — daemon defaults to enabled-on-discovery
     const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
-    const startSpy = vi.spyOn(am, 'startAgent').mockResolvedValue();
+    const startSpy = vi.spyOn(am, 'startAgent').mockImplementation(async (name) => {
+      (am as any).agents.set(name, { process: {}, checker: {} });
+    });
 
     await am.discoverAndStart();
 
@@ -97,7 +103,9 @@ describe('AgentManager.discoverAndStart - BUG-028 fix', () => {
   it('starts all discovered agents when enabled-agents.json is empty {}', async () => {
     writeFileSync(join(ctxRoot, 'config', 'enabled-agents.json'), '{}');
     const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
-    const startSpy = vi.spyOn(am, 'startAgent').mockResolvedValue();
+    const startSpy = vi.spyOn(am, 'startAgent').mockImplementation(async (name) => {
+      (am as any).agents.set(name, { process: {}, checker: {} });
+    });
 
     await am.discoverAndStart();
 
@@ -114,7 +122,9 @@ describe('AgentManager.discoverAndStart - BUG-028 fix', () => {
     );
 
     const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
-    const startSpy = vi.spyOn(am, 'startAgent').mockResolvedValue();
+    const startSpy = vi.spyOn(am, 'startAgent').mockImplementation(async (name) => {
+      (am as any).agents.set(name, { process: {}, checker: {} });
+    });
 
     await am.discoverAndStart();
 
@@ -130,7 +140,9 @@ describe('AgentManager.discoverAndStart - BUG-028 fix', () => {
     );
 
     const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
-    const startSpy = vi.spyOn(am, 'startAgent').mockResolvedValue();
+    const startSpy = vi.spyOn(am, 'startAgent').mockImplementation(async (name) => {
+      (am as any).agents.set(name, { process: {}, checker: {} });
+    });
 
     await am.discoverAndStart();
 
@@ -166,7 +178,9 @@ describe('AgentManager.discoverAndStart - BUG-043 fix (multi-org support)', () =
     // would only discover agents in orgs/acme/. Agents in orgs/widgetco/
     // were silently invisible. This test pins the multi-org scan in place.
     const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
-    const startSpy = vi.spyOn(am, 'startAgent').mockResolvedValue();
+    const startSpy = vi.spyOn(am, 'startAgent').mockImplementation(async (name) => {
+      (am as any).agents.set(name, { process: {}, checker: {} });
+    });
 
     await am.discoverAndStart();
 
@@ -181,13 +195,19 @@ describe('AgentManager.discoverAndStart - BUG-043 fix (multi-org support)', () =
     // attaches org per discovered entry, and discoverAndStart threads
     // it through.
     const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
-    const startSpy = vi.spyOn(am, 'startAgent').mockResolvedValue();
+    const startSpy = vi.spyOn(am, 'startAgent').mockImplementation(async (name) => {
+      (am as any).agents.set(name, { process: {}, checker: {} });
+    });
 
     await am.discoverAndStart();
 
+    // Build a map of first-call-per-agent to check org routing.
+    // The self-heal pass may call startAgent again for any missing agents,
+    // but the first call per name is the one from the main discovery loop.
     const callsByName = new Map<string, readonly unknown[]>();
     for (const call of startSpy.mock.calls) {
-      callsByName.set(call[0] as string, call);
+      const n = call[0] as string;
+      if (!callsByName.has(n)) callsByName.set(n, call);
     }
     expect(callsByName.get('alice')?.[3]).toBe('acme');
     expect(callsByName.get('bob')?.[3]).toBe('acme');
@@ -207,7 +227,9 @@ describe('AgentManager.discoverAndStart - BUG-043 fix (multi-org support)', () =
       }),
     );
     const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
-    const startSpy = vi.spyOn(am, 'startAgent').mockResolvedValue();
+    const startSpy = vi.spyOn(am, 'startAgent').mockImplementation(async (name) => {
+      (am as any).agents.set(name, { process: {}, checker: {} });
+    });
 
     await am.discoverAndStart();
 
@@ -488,5 +510,202 @@ describe('AgentManager.reloadCrons - silent-success bug fix (iter 7)', () => {
     const result = am.reloadCrons('ghost');
     expect(result).toBe(false);
     expect((am as any).cronSchedulers.has('ghost')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Boot-start silent-fail hardening (BUG-BOOT-SILENT fix)
+// ---------------------------------------------------------------------------
+// These tests cover the three-part fix in discoverAndStart():
+//   1. Per-agent try/catch — a single failing startAgent MUST NOT abort the
+//      rest of the loop (regression from missing error isolation).
+//   2. Retry-once — a transient first failure must be re-attempted once before
+//      giving up so bulk-boot PTY-spawn contention self-corrects.
+//   3. Boot self-heal — after the main loop, bootSelfHeal() must start any
+//      enabled agent still absent from the registry.
+// ---------------------------------------------------------------------------
+
+describe('discoverAndStart - per-agent error isolation (BUG-BOOT-SILENT fix)', () => {
+  let testDir: string;
+  let ctxRoot: string;
+  let frameworkRoot: string;
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join(tmpdir(), 'cortextos-am-boot-isolation-'));
+    ctxRoot = join(testDir, 'instance');
+    frameworkRoot = join(testDir, 'framework');
+    mkdirSync(join(ctxRoot, 'config'), { recursive: true });
+    mkdirSync(join(frameworkRoot, 'orgs', 'acme', 'agents', 'alice'), { recursive: true });
+    mkdirSync(join(frameworkRoot, 'orgs', 'acme', 'agents', 'bob'), { recursive: true });
+    mkdirSync(join(frameworkRoot, 'orgs', 'acme', 'agents', 'carol'), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('continues starting remaining agents even when one agent start throws', async () => {
+    // Simulates: alice fails to start (transient PTY error), bob and carol
+    // must still be started — the old code aborted the loop on alice's throw.
+    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
+
+    const startSpy = vi.spyOn(am, 'startAgent').mockImplementation(async (name) => {
+      if (name === 'alice') throw new Error('simulated PTY spawn failure');
+      // bob and carol succeed — register so self-heal does not re-attempt them
+      (am as any).agents.set(name, { process: {}, checker: {} });
+    });
+
+    await am.discoverAndStart();
+
+    // All three agents must have been attempted. alice throws on both attempts
+    // (first + retry), but bob and carol must still be called.
+    const attempted = startSpy.mock.calls.map(c => c[0]);
+    expect(attempted).toContain('bob');
+    expect(attempted).toContain('carol');
+  });
+
+  it('retries a failing agent once before giving up', async () => {
+    // alice fails on attempt 1 then succeeds on attempt 2 (retry).
+    // On success the mock must also register alice in the agents map so the
+    // boot self-heal pass does not trigger a third attempt.
+    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
+
+    let aliceAttempts = 0;
+    vi.spyOn(am, 'startAgent').mockImplementation(async (name) => {
+      if (name === 'alice') {
+        aliceAttempts++;
+        if (aliceAttempts === 1) throw new Error('transient failure');
+        // second attempt succeeds — register so self-heal skips it
+        (am as any).agents.set(name, { process: {}, checker: {} });
+      } else {
+        // bob/carol succeed immediately — register so self-heal skips them
+        (am as any).agents.set(name, { process: {}, checker: {} });
+      }
+    });
+
+    await am.discoverAndStart();
+
+    expect(aliceAttempts).toBe(2);
+  });
+
+  it('calls startAgent exactly twice for the failing agent (no more retries)', async () => {
+    // alice fails on BOTH attempts — must be called exactly twice, not more.
+    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
+
+    let aliceAttempts = 0;
+    vi.spyOn(am, 'startAgent').mockImplementation(async (name) => {
+      if (name === 'alice') {
+        aliceAttempts++;
+        throw new Error('always fails');
+      }
+    });
+
+    await am.discoverAndStart();
+
+    // 2 attempts in main loop + 1 in boot self-heal = 3 total
+    // (boot self-heal tries once more since alice is not in registry)
+    expect(aliceAttempts).toBe(3);
+  });
+});
+
+describe('bootSelfHeal - recovery of enabled-but-missing agents', () => {
+  let testDir: string;
+  let ctxRoot: string;
+  let frameworkRoot: string;
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join(tmpdir(), 'cortextos-am-selfheal-'));
+    ctxRoot = join(testDir, 'instance');
+    frameworkRoot = join(testDir, 'framework');
+    mkdirSync(join(ctxRoot, 'config'), { recursive: true });
+    mkdirSync(join(frameworkRoot, 'orgs', 'acme', 'agents', 'alice'), { recursive: true });
+    mkdirSync(join(frameworkRoot, 'orgs', 'acme', 'agents', 'bob'), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('starts an enabled agent that is absent from the registry after bulk boot', async () => {
+    // Simulate: alice made it into the registry, but bob did not (silently missing).
+    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
+
+    // Pre-register alice so self-heal skips her.
+    (am as any).agents.set('alice', { process: {}, checker: {} });
+
+    const startSpy = vi.spyOn(am, 'startAgent').mockResolvedValue();
+
+    const agentDirs = [
+      { name: 'alice', dir: '/fake/alice', org: 'acme', config: {} },
+      { name: 'bob',   dir: '/fake/bob',   org: 'acme', config: {} },
+    ];
+    await am.bootSelfHeal(agentDirs, {});
+
+    // Only bob should be started — alice is already registered.
+    expect(startSpy).toHaveBeenCalledTimes(1);
+    expect(startSpy).toHaveBeenCalledWith('bob', '/fake/bob', {}, 'acme');
+  });
+
+  it('does not start agents that are already in the registry', async () => {
+    // All agents made it in — self-heal must be a no-op.
+    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
+    (am as any).agents.set('alice', { process: {}, checker: {} });
+    (am as any).agents.set('bob',   { process: {}, checker: {} });
+
+    const startSpy = vi.spyOn(am, 'startAgent').mockResolvedValue();
+
+    const agentDirs = [
+      { name: 'alice', dir: '/fake/alice', org: 'acme', config: {} },
+      { name: 'bob',   dir: '/fake/bob',   org: 'acme', config: {} },
+    ];
+    await am.bootSelfHeal(agentDirs, {});
+
+    expect(startSpy).not.toHaveBeenCalled();
+  });
+
+  it('skips disabled agents during self-heal', async () => {
+    // bob is disabled in enabled-agents.json — must not be started.
+    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
+    const startSpy = vi.spyOn(am, 'startAgent').mockResolvedValue();
+
+    const agentDirs = [
+      { name: 'alice', dir: '/fake/alice', org: 'acme', config: {} },
+      { name: 'bob',   dir: '/fake/bob',   org: 'acme', config: {} },
+    ];
+    const instanceEnabled = { bob: { enabled: false } };
+    await am.bootSelfHeal(agentDirs, instanceEnabled);
+
+    // alice is missing from registry AND enabled — should be started.
+    // bob is disabled — must be skipped.
+    expect(startSpy).toHaveBeenCalledTimes(1);
+    expect(startSpy).toHaveBeenCalledWith('alice', '/fake/alice', {}, 'acme');
+  });
+
+  it('skips agents disabled via per-agent config.json enabled: false', async () => {
+    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
+    const startSpy = vi.spyOn(am, 'startAgent').mockResolvedValue();
+
+    const agentDirs = [
+      { name: 'alice', dir: '/fake/alice', org: 'acme', config: { enabled: false } },
+      { name: 'bob',   dir: '/fake/bob',   org: 'acme', config: {} },
+    ];
+    await am.bootSelfHeal(agentDirs, {});
+
+    // alice disabled via config.json — only bob should be started.
+    expect(startSpy).toHaveBeenCalledTimes(1);
+    expect(startSpy).toHaveBeenCalledWith('bob', '/fake/bob', {}, 'acme');
+  });
+
+  it('logs but does not throw when self-heal startAgent fails', async () => {
+    // The self-heal must be best-effort — failure must not propagate.
+    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
+    vi.spyOn(am, 'startAgent').mockRejectedValue(new Error('heal attempt failed'));
+
+    const agentDirs = [
+      { name: 'bob', dir: '/fake/bob', org: 'acme', config: {} },
+    ];
+
+    // Must not throw
+    await expect(am.bootSelfHeal(agentDirs, {})).resolves.not.toThrow();
   });
 });

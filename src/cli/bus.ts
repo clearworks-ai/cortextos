@@ -29,6 +29,7 @@ import { checkAndRecord } from '../telegram/dedup.js';
 import { appendToBuffer } from '../daemon/conversation-buffer.js';
 import { findBannedCronPrompts } from '../utils/cron-prompt-validator.js';
 import { evaluateCiAlert, gatherCiAlertContext } from '../utils/ci-alert-gate.js';
+import { checkAndRecordSourceEvent, isValidSourceKey } from '../utils/event-dedup.js';
 import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext, CronDefinition, ConversationBufferEntry } from '../types/index.js';
 
 /**
@@ -2306,6 +2307,35 @@ busCommand
   .action((opts: { repo: string; branch: string; headSha?: string; json?: boolean }) => {
     const ctx = gatherCiAlertContext(opts.repo, opts.branch, { headSha: opts.headSha });
     const result = evaluateCiAlert(ctx);
+    if (opts.json) {
+      console.log(JSON.stringify(result));
+      return;
+    }
+    console.log(result.surface ? 'SURFACE' : 'SKIP');
+  });
+
+busCommand
+  .command('event-dedup')
+  .description('Source-event identity dedup: prints SURFACE on first sight of a source event, SKIP thereafter (atomic check-and-record)')
+  .requiredOption('--source <key>', 'Namespaced source event id, e.g. gmail:<message-id>, calendar:<event-id>, imessage:<guid>')
+  .option('--fire-once', 'Permanently suppress after first surface (calendar accepts, zcal confirmations)')
+  .option('--ttl-sec <n>', 'Re-surface window in seconds for non-fire-once events (default 2592000 = 30d)')
+  .option('--json', 'Emit { surface, reason, ageSec } as JSON instead of SURFACE/SKIP')
+  .action((opts: { source: string; fireOnce?: boolean; ttlSec?: string; json?: boolean }) => {
+    const env = resolveEnv();
+    let ttlSec: number | undefined;
+    if (opts.ttlSec !== undefined) {
+      const parsed = Number(opts.ttlSec);
+      if (Number.isInteger(parsed) && parsed > 0) {
+        ttlSec = parsed;
+      } else {
+        console.error(`Error: --ttl-sec must be a finite positive integer, got '${opts.ttlSec}'; failing open with the default TTL.`);
+      }
+    }
+    if (!isValidSourceKey(opts.source)) {
+      console.error(`Warning: invalid --source key '${opts.source}' — expected <namespace>:<id> (e.g. gmail:<message-id>); failing open.`);
+    }
+    const result = checkAndRecordSourceEvent(env.ctxRoot ?? '', opts.source, { fireOnce: opts.fireOnce, ttlSec });
     if (opts.json) {
       console.log(JSON.stringify(result));
       return;

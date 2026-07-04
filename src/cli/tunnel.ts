@@ -4,6 +4,7 @@ import { existsSync, writeFileSync, readFileSync, mkdirSync, chmodSync } from 'f
 import { join } from 'path';
 import { homedir } from 'os';
 import { stripBom } from '../utils/strip-bom.js';
+import { resolveInstanceId } from './resolve-instance-id.js';
 
 const TUNNEL_NAME = 'cortextos';
 const PLIST_LABEL = 'com.cortextos.tunnel';
@@ -300,10 +301,11 @@ function unloadService(): void {
 // ─── Sub-commands ─────────────────────────────────────────────────────────────
 
 const startCommand = new Command('start')
-  .option('--instance <id>', 'Instance ID', 'default')
+  .option('--instance <id>', 'Instance ID')
   .option('--port <port>', 'Dashboard port', '3000')
   .description('Create (or reuse) the Cloudflare tunnel and start it as a launchd service')
-  .action(async (options: { instance: string; port: string }) => {
+  .action(async (options: { instance?: string; port: string }) => {
+    const instanceId = resolveInstanceId(options.instance);
     const port = parseInt(options.port, 10);
 
     checkPlatform();
@@ -334,7 +336,7 @@ const startCommand = new Command('start')
     console.log(`  Config: ${CLOUDFLARED_CONFIG}`);
 
     // 5. Write launchd plist
-    writePlist(options.instance, port);
+    writePlist(instanceId, port);
     console.log(`  Plist: ${PLIST_PATH}`);
 
     // 6. Load launchd service
@@ -368,7 +370,7 @@ const startCommand = new Command('start')
     }
 
     // 8. Persist tunnel config
-    writeTunnelConfig(options.instance, {
+    writeTunnelConfig(instanceId, {
       tunnelId: tunnel.id,
       tunnelName: tunnel.name,
       tunnelUrl,
@@ -377,15 +379,15 @@ const startCommand = new Command('start')
     });
 
     console.log(`\n  Dashboard URL: ${tunnelUrl}`);
-    console.log(`  TUNNEL_URL saved to: ${getTunnelConfigPath(options.instance)}\n`);
+    console.log(`  TUNNEL_URL saved to: ${getTunnelConfigPath(instanceId)}\n`);
     console.log(`  The tunnel will restart automatically after reboot.`);
     console.log(`  Start the dashboard with: cortextos dashboard\n`);
   });
 
 const stopCommand = new Command('stop')
-  .option('--instance <id>', 'Instance ID', 'default')
+  .option('--instance <id>', 'Instance ID')
   .description('Stop the Cloudflare tunnel launchd service')
-  .action(async (_options: { instance: string }) => {
+  .action(async (_options: { instance?: string }) => {
     checkPlatform();
 
     if (!existsSync(PLIST_PATH)) {
@@ -404,9 +406,10 @@ const stopCommand = new Command('stop')
   });
 
 const statusCommand = new Command('status')
-  .option('--instance <id>', 'Instance ID', 'default')
+  .option('--instance <id>', 'Instance ID')
   .description('Show tunnel URL and running status')
-  .action(async (options: { instance: string }) => {
+  .action(async (options: { instance?: string }) => {
+    const instanceId = resolveInstanceId(options.instance);
     checkPlatform();
     console.log('\ncortextOS Tunnel Status\n');
 
@@ -429,7 +432,7 @@ const statusCommand = new Command('status')
     console.log(`  Service (launchd): ${running ? 'running' : 'stopped'}`);
 
     // Saved config
-    const config = readTunnelConfig(options.instance);
+    const config = readTunnelConfig(instanceId);
     if (config.tunnelUrl) {
       console.log(`  Dashboard URL: ${config.tunnelUrl}`);
     } else {
@@ -444,10 +447,11 @@ const statusCommand = new Command('status')
   });
 
 const urlCommand = new Command('url')
-  .option('--instance <id>', 'Instance ID', 'default')
+  .option('--instance <id>', 'Instance ID')
   .description('Print the tunnel URL (for scripting)')
-  .action(async (options: { instance: string }) => {
-    const config = readTunnelConfig(options.instance);
+  .action(async (options: { instance?: string }) => {
+    const instanceId = resolveInstanceId(options.instance);
+    const config = readTunnelConfig(instanceId);
     if (!config.tunnelUrl) {
       console.error('No tunnel URL found. Run: cortextos tunnel start');
       process.exit(1);

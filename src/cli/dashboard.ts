@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync, chmodSync, mkdirSync, openSync
 import { join } from 'path';
 import { homedir, platform } from 'os';
 import { randomBytes } from 'crypto';
+import { resolveInstanceId } from './resolve-instance-id.js';
 
 const IS_WINDOWS = platform() === 'win32';
 
@@ -27,11 +28,12 @@ function parseEnvFile(filePath: string): Record<string, string> {
 
 export const dashboardCommand = new Command('dashboard')
   .option('--port <port>', 'Port to run dashboard on', '3000')
-  .option('--instance <id>', 'Instance ID', 'default')
+  .option('--instance <id>', 'Instance ID')
   .option('--build', 'Build for production first (recommended for Cloudflare Tunnel / remote access)')
   .option('--install', 'Install dashboard dependencies first')
   .description('Start the cortextOS dashboard (Next.js)')
-  .action(async (options: { port: string; instance: string; build?: boolean; install?: boolean }) => {
+  .action(async (options: { port: string; instance?: string; build?: boolean; install?: boolean }) => {
+    const instanceId = resolveInstanceId(options.instance);
     const { execSync, spawn } = require('child_process');
 
     // Find dashboard directory
@@ -43,7 +45,7 @@ export const dashboardCommand = new Command('dashboard')
 
     // ─── Load / generate dashboard credentials ────────────────────────────────
 
-    const ctxRoot = join(homedir(), '.cortextos', options.instance);
+    const ctxRoot = join(homedir(), '.cortextos', instanceId);
     const dashEnvPath = join(ctxRoot, 'dashboard.env');
 
     let dashCreds: Record<string, string> = {};
@@ -118,7 +120,7 @@ export const dashboardCommand = new Command('dashboard')
       `ADMIN_PASSWORD=${adminPassword}`,
       `CTX_ROOT=${ctxRoot}`,
       `CTX_FRAMEWORK_ROOT=${process.cwd()}`,
-      `CTX_INSTANCE_ID=${options.instance}`,
+      `CTX_INSTANCE_ID=${instanceId}`,
       `PORT=${options.port}`,
     ];
     writeFileSync(nextEnvPath, nextEnvLines.join('\n') + '\n', 'utf-8');
@@ -134,7 +136,7 @@ export const dashboardCommand = new Command('dashboard')
       ADMIN_PASSWORD: adminPassword,
       CTX_ROOT: ctxRoot,
       CTX_FRAMEWORK_ROOT: process.cwd(),
-      CTX_INSTANCE_ID: options.instance,
+      CTX_INSTANCE_ID: instanceId,
       AUTH_TRUST_HOST: process.env.AUTH_TRUST_HOST || 'true',
     };
 

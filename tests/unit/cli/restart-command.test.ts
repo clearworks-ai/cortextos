@@ -22,9 +22,16 @@ describe('issue #328: cortextos restart <agent>', () => {
     expect(args[0].name()).toBe('agent');
   });
 
-  it('accepts --instance with a default of "default"', () => {
+  it('declares --instance with NO hardcoded commander default', () => {
+    // WS7 marker-aware resolution: the commander option must NOT set a literal
+    // 'default' fallback. If it did, options.instance would never be undefined
+    // and resolveInstanceId() could never fall through to CTX_INSTANCE_ID or
+    // the active-instance marker (cortextos1) — which is exactly the bug that
+    // made `cortextos restart <agent>` say "Daemon is not running" unless you
+    // passed --instance cortextos1. Bare command must yield undefined here so
+    // the resolver (not commander) decides the effective instance.
     const opts = restartCommand.opts();
-    expect(opts.instance).toBe('default');
+    expect(opts.instance).toBeUndefined();
   });
 
   it('describes itself as a stop+start (not a daemon restart)', () => {

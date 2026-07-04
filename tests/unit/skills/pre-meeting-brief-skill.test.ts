@@ -48,6 +48,35 @@ describe('pre-meeting-brief-page-worker skill', () => {
     });
   });
 
+  // The duplicate-worker race is closed by claim-FIRST wiring in the SKILL: the
+  // worker must claim each event BEFORE expensive work, release on failure so
+  // the next fire retries, and mark (permanent) on success. These assertions are
+  // the guard against a future edit silently dropping that wiring and reopening
+  // the race — the load-bearing part of the fix lives here, not just in code.
+  describe('claim-first race guard', () => {
+    it('claims the event (meeting-brief-claim) before publishing (claim precedes expensive work)', () => {
+      expect(skill).toContain('meeting-brief-claim');
+      const claimIdx = skill.indexOf('meeting-brief-claim');
+      const publishIdx = skill.indexOf('publish_brief.py');
+      expect(claimIdx).toBeGreaterThan(-1);
+      expect(publishIdx).toBeGreaterThan(-1);
+      expect(claimIdx).toBeLessThan(publishIdx);
+    });
+
+    it('releases the claim (meeting-brief-release) on the publish/verify failure path so the next fire retries', () => {
+      expect(skill).toContain('meeting-brief-release');
+    });
+
+    it('on success marks permanently AND releases the short-lived claim', () => {
+      // The success step must contain both the permanent mark and a release so
+      // the claim lockfile does not linger for the full TTL after completion.
+      expect(skill).toContain('meeting-brief-mark');
+      const lastMark = skill.lastIndexOf('meeting-brief-mark');
+      const releaseAfterMark = skill.indexOf('meeting-brief-release', lastMark);
+      expect(releaseAfterMark).toBeGreaterThan(-1);
+    });
+  });
+
   describe('publish + delivery path', () => {
     it('publishes via the existing briefs publisher (publish_brief.py)', () => {
       expect(skill).toContain('publish_brief.py');

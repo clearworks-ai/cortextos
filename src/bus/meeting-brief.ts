@@ -1,4 +1,4 @@
-import { readFileSync, openSync, closeSync, writeSync, statSync, utimesSync, readdirSync, mkdirSync } from 'fs';
+import { readFileSync, openSync, closeSync, writeSync, statSync, utimesSync, readdirSync, mkdirSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { createHash } from 'crypto';
 import { atomicWriteSync } from '../utils/atomic.js';
@@ -301,9 +301,17 @@ export function markSurfaced(filePath: string, eventId: string): void {
 // separate node processes (two cron fires) can both read "unclaimed" and both
 // write. So the claim is a per-event LOCKFILE opened with O_CREAT|O_EXCL
 // (openSync 'wx'), which is atomic across processes — exactly one caller wins.
-// On EEXIST we inspect the lock's timestamp: if it is older than the TTL the
-// previous holder crashed/hung, so we reclaim it; otherwise the event is
-// actively claimed and the caller skips it.
+// On EEXIST we inspect the lock's timestamp. A lock younger than the TTL is an
+// active claim and the caller skips it. A lock OLDER than the TTL is stale (the
+// previous holder crashed/hung): we GARBAGE-COLLECT it (unlink) and return
+// `stale-cleared` WITHOUT reclaiming in-band. We deliberately do NOT reclaim +
+// proceed on the stale path: an in-band reclaim (unlink-then-recreate, or an
+// r+ rewrite) is NOT atomic across processes — two overlapping fires could each
+// unlink the other's fresh lock and both win. By only ever winning through the
+// single atomic O_EXCL fast path, a double-win is impossible. The stale lock is
+// cleared this cycle and the NEXT cron fire cleanly O_EXCL-claims the event
+// (~15-min recovery latency on the rare crash path, in exchange for a hard
+// no-duplicate guarantee).
 //
 // The TTL is deliberately SHORT (default 20 min — longer than the 15-min cron
 // interval so overlapping fires collide, short enough that a failed publish is
@@ -315,7 +323,7 @@ export const DEFAULT_CLAIM_TTL_MS = 20 * 60 * 1000;
 
 export interface ClaimResult {
   claimed: boolean;
-  reason: 'won' | 'stale-reclaimed' | 'already-claimed';
+  reason: 'won' | 'stale-cleared' | 'already-claimed';
 }
 
 /** Map an arbitrary event id to a filesystem-safe lockfile path. */
@@ -349,7 +357,10 @@ function claimAgeMs(lockPath: string, nowMs: number): number | undefined {
  * Atomically claim an event for processing. Returns `{ claimed: true }` for
  * exactly one caller per live lease; a concurrent second caller (no release in
  * between) gets `{ claimed: false, reason: 'already-claimed' }`. A lock older
- * than `ttlMs` is treated as expired and reclaimed (`stale-reclaimed`).
+ * than `ttlMs` is stale: it is garbage-collected and the caller gets
+ * `{ claimed: false, reason: 'stale-cleared' }` — the NEXT fire then cleanly
+ * O_EXCL-claims the event. Winning ONLY ever happens through the atomic O_EXCL
+ * fast path, so two processes can never both win (even on the stale path).
  *
  * Cross-process atomic: the winning write is an O_CREAT|O_EXCL open, so two
  * separate node processes racing on the same event id cannot both win.
@@ -385,23 +396,20 @@ export function claimEventLease(
   // Lock exists — decide whether it is stale (reclaimable) or live.
   const ageMs = claimAgeMs(lockPath, nowMs);
   if (ageMs === undefined || ageMs > ttlMs) {
-    // Stale (or vanished after our failed create). Reclaim by rewriting the
-    // timestamp and stamping mtime to now. openSync 'r+' does not race with a
-    // fresh EXCL create because the file already exists; the last writer wins,
-    // which is acceptable for reclaim of an already-abandoned lease.
+    // Stale (crashed/hung holder), or it vanished after our failed create.
+    // Garbage-collect it WITHOUT reclaiming in-band, then report stale-cleared.
+    // We never win off the stale path: an in-band reclaim would be a non-atomic
+    // read-modify-write that two overlapping fires could both win (each unlinks
+    // the other's fresh lock). Because a stale lock EXISTS, no caller can
+    // fast-path-create over it, so the only thing this unlink can remove is the
+    // stale lock itself (or one another racer already removed) — never a valid
+    // fresh lock. The next cron fire then O_EXCL-claims cleanly.
     try {
-      const fd = openSync(lockPath, 'r+', 0o600);
-      try {
-        writeSync(fd, String(nowMs), 0);
-      } finally {
-        closeSync(fd);
-      }
-      utimesSync(lockPath, nowMs / 1000, nowMs / 1000);
-      return { claimed: true, reason: 'stale-reclaimed' };
+      unlinkSync(lockPath);
     } catch {
-      // Someone else may have removed/reclaimed it in between; be conservative.
-      return { claimed: false, reason: 'already-claimed' };
+      // Another racer already cleared it — fine.
     }
+    return { claimed: false, reason: 'stale-cleared' };
   }
 
   return { claimed: false, reason: 'already-claimed' };
@@ -414,7 +422,6 @@ export function claimEventLease(
 export function releaseEventLease(claimsDir: string, eventId: string): void {
   const lockPath = claimLockPath(claimsDir, eventId);
   try {
-    const { unlinkSync } = require('fs') as typeof import('fs');
     unlinkSync(lockPath);
   } catch {
     // Already gone — nothing to release.

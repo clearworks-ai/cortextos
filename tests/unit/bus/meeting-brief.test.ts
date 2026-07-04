@@ -271,7 +271,7 @@ describe('claim lease', () => {
     expect(claimEventLease(claimsDir, 'evt-b').claimed).toBe(true);
   });
 
-  it('a stale/expired claim (older than TTL) is reclaimable', () => {
+  it('a stale/expired claim (older than TTL) is garbage-collected, not reclaimed in-band', () => {
     const claimsDir = join(tmpDir, 'claims');
     const t0 = 1_000_000_000_000;
     const ttlMs = DEFAULT_CLAIM_TTL_MS;
@@ -283,10 +283,46 @@ describe('claim lease', () => {
     expect(stillLive.claimed).toBe(false);
     expect(stillLive.reason).toBe('already-claimed');
 
-    // Past TTL — the previous holder is assumed dead, so we reclaim.
-    const reclaimed = claimEventLease(claimsDir, 'evt-1', { nowMs: t0 + ttlMs + 1, ttlMs });
-    expect(reclaimed.claimed).toBe(true);
-    expect(reclaimed.reason).toBe('stale-reclaimed');
+    // Past TTL — the previous holder is assumed dead. The stale lock is CLEARED
+    // (not reclaimed in-band): winning only ever happens via the atomic O_EXCL
+    // fast path, so this call does NOT win.
+    const cleared = claimEventLease(claimsDir, 'evt-1', { nowMs: t0 + ttlMs + 1, ttlMs });
+    expect(cleared.claimed).toBe(false);
+    expect(cleared.reason).toBe('stale-cleared');
+
+    // The very next fire finds no lock and cleanly claims it (crash recovery,
+    // one cycle later).
+    const recovered = claimEventLease(claimsDir, 'evt-1', { nowMs: t0 + ttlMs + 2, ttlMs });
+    expect(recovered.claimed).toBe(true);
+    expect(recovered.reason).toBe('won');
+  });
+
+  it('stale-clear never double-wins: two racers past TTL both fail to claim, next fire wins once', () => {
+    // Simulate the crash-recovery boundary: a stale lock plus two overlapping
+    // fires. Neither may win off the stale path (that was the residual race);
+    // exactly one clean claim happens on the following fire.
+    const claimsDir = join(tmpDir, 'claims');
+    const t0 = 1_000_000_000_000;
+    const ttlMs = DEFAULT_CLAIM_TTL_MS;
+    expect(claimEventLease(claimsDir, 'evt-x', { nowMs: t0, ttlMs }).claimed).toBe(true);
+
+    const past = t0 + ttlMs + 1;
+    const racerA = claimEventLease(claimsDir, 'evt-x', { nowMs: past, ttlMs });
+    // The call that takes the STALE path never wins in-band — it only clears the
+    // lock. This is the invariant that kills the double-win: a winner can ONLY
+    // come from the atomic O_EXCL fast path, never from a stale reclaim.
+    expect(racerA.claimed).toBe(false);
+    expect(racerA.reason).toBe('stale-cleared');
+
+    // Across the boundary there is at most one holder at a time: after the clear,
+    // the next fast-path fire wins once, and a further overlapping fire is then
+    // rejected as already-claimed.
+    const recovered = claimEventLease(claimsDir, 'evt-x', { nowMs: past + 1, ttlMs });
+    const overlap = claimEventLease(claimsDir, 'evt-x', { nowMs: past + 2, ttlMs });
+    expect(recovered.claimed).toBe(true);
+    expect(recovered.reason).toBe('won');
+    expect(overlap.claimed).toBe(false);
+    expect(overlap.reason).toBe('already-claimed');
   });
 
   it('after release (failure path) the event can be claimed again', () => {

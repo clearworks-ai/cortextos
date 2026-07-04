@@ -21,6 +21,7 @@ import { nextFireFromCron } from '../daemon/cron-scheduler.js';
 import { queryKnowledgeBase, ingestKnowledgeBase, ensureKBDirs } from '../bus/knowledge-base.js';
 import { parseCalendarEvents, selectUpcomingExternalMeetings, readSurfacedIds, markSurfaced, lookupCrmContext, renderBriefMarkdown, claimEventLease, releaseEventLease, readClaimedIds } from '../bus/meeting-brief.js';
 import type { BriefData, CrmContext } from '../bus/meeting-brief.js';
+import { runScopeGuard } from '../bus/scope-guard.js';
 import { checkUsageApi, refreshOAuthToken, rotateOAuth, loadAccounts, ALERT_5H, ALERT_7D } from '../bus/oauth.js';
 import { resolvePaths } from '../utils/paths.js';
 import { resolveEnv } from '../utils/env.js';
@@ -3182,6 +3183,47 @@ busCommand
       console.log('\nRestart affected agents to apply the new settings:');
       console.log('  cortextos restart <agent-name>');
     }
+  });
+
+// --- scope-guard (SCOPE_GUARD: real-time scope-drift detection) ---
+
+busCommand
+  .command('scope-guard')
+  .description('Compare files a coding run touched against a declared scope allowlist and flag stray files. Read-only — reports drift, never edits/reverts. Exits non-zero when stray files exist so it can gate a codex/M2C1 run.')
+  .option('--allow <globs>', 'Declared scope allowlist, comma/newline-separated (e.g. "src/bus/**,tests/**")')
+  .option('--scope-file <path>', 'Read declared scope from a file (plain glob list, or a spec with a Targets:/Files-Touched: field)')
+  .option('--base <ref>', 'Diff committed changes since this git ref (merge-base ...HEAD) in addition to the working tree')
+  .option('--cwd <dir>', 'Repo directory to run git in (defaults to project root)')
+  .option('--json', 'Emit the full report as JSON')
+  .action((opts: { allow?: string; scopeFile?: string; base?: string; cwd?: string; json?: boolean }) => {
+    if (!opts.allow && !opts.scopeFile) {
+      console.error('Error: provide a declared scope via --allow "<globs>" or --scope-file <path>.');
+      process.exit(2);
+    }
+    const env = resolveEnv();
+    const cwd = opts.cwd || env.projectRoot || env.frameworkRoot || process.cwd();
+
+    let report;
+    try {
+      report = runScopeGuard({ allow: opts.allow, scopeFile: opts.scopeFile, base: opts.base, cwd });
+    } catch (err) {
+      console.error(`scope-guard failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(2);
+    }
+
+    if (opts.json) {
+      console.log(JSON.stringify(report, null, 2));
+    } else if (report.ok) {
+      console.log(`SCOPE OK — ${report.touchedFiles.length} touched file(s), all within declared scope (${report.declaredGlobs.length} pattern(s)).`);
+    } else {
+      console.error(`SCOPE VIOLATION — ${report.strayFiles.length} stray file(s) outside declared scope:`);
+      for (const f of report.strayFiles) console.error(`  ✗ ${f}`);
+      console.error(`\nDeclared scope (${report.declaredGlobs.length} pattern(s)): ${report.declaredGlobs.join(', ')}`);
+      console.error('Review these files as a scope violation before proceeding (do not merge blind).');
+    }
+
+    // Non-zero exit on stray files so this can be a CI/pre-merge gate.
+    if (!report.ok) process.exit(1);
   });
 
 function sleepMs(ms: number): Promise<void> {

@@ -455,6 +455,23 @@ cd $PROJECT_DIR && npm run build 2>/dev/null
 git log --oneline | head -10
 ```
 
+### Scope Guard (SCOPE_GUARD — catch scope drift)
+After the worker run, check the files it actually touched against the scope the
+spec declared (its `Targets:` / `Files-Touched:` list). Stray files — anything
+outside the declared scope — are the early signal of a run sprawling into a
+conflict bomb. Run the deterministic checker:
+
+```bash
+cd $PROJECT_DIR && cortextos bus scope-guard \
+  --scope-file .claude/orchestration-*/03-specs/<spec>.md
+# or pass the allowlist inline:
+cortextos bus scope-guard --allow "src/**,tests/**"
+```
+
+It is read-only (reports drift, never reverts) and exits non-zero when stray
+files exist, so it can gate a run in CI. Any stray file is a scope violation:
+review it before proceeding — do not merge blind.
+
 ### Final E2E Testing
 The worker's last phase should be comprehensive testing. Verify:
 1. The software actually runs

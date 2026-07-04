@@ -19,7 +19,7 @@ import { addCron, removeCron, readCrons, updateCron as updateCronDef, getCronByN
 import { listAgents } from '../bus/agents.js';
 import { nextFireFromCron } from '../daemon/cron-scheduler.js';
 import { queryKnowledgeBase, ingestKnowledgeBase, ensureKBDirs } from '../bus/knowledge-base.js';
-import { parseCalendarEvents, selectUpcomingExternalMeetings, readSurfacedIds, markSurfaced, lookupCrmContext, renderBriefMarkdown } from '../bus/meeting-brief.js';
+import { parseCalendarEvents, selectUpcomingExternalMeetings, readSurfacedIds, markSurfaced, lookupCrmContext, renderBriefMarkdown, claimEventLease, releaseEventLease, readClaimedIds } from '../bus/meeting-brief.js';
 import type { BriefData, CrmContext } from '../bus/meeting-brief.js';
 import { checkUsageApi, refreshOAuthToken, rotateOAuth, loadAccounts, ALERT_5H, ALERT_7D } from '../bus/oauth.js';
 import { resolvePaths } from '../utils/paths.js';
@@ -1302,6 +1302,7 @@ busCommand
 // ---------------------------------------------------------------------------
 
 const DEFAULT_BRIEF_STATE_FILE = join(process.cwd(), 'state', 'pre-meeting-brief-surfaced.txt');
+const DEFAULT_BRIEF_CLAIMS_DIR = join(process.cwd(), 'state', 'pre-meeting-brief-claims');
 
 busCommand
   .command('meeting-brief-scan')
@@ -1312,9 +1313,10 @@ busCommand
   .option('--max-lead <n>', 'Maximum lead time in minutes', '75')
   .option('--internal-domains <csv>', 'Comma-separated internal domains and exact emails', 'clearworks.ai,weissjosh0@gmail.com')
   .option('--state-file <path>', 'Surfaced-ids state file', DEFAULT_BRIEF_STATE_FILE)
+  .option('--claims-dir <path>', 'In-flight claim-lease dir (excludes live-claimed events from the scan)', DEFAULT_BRIEF_CLAIMS_DIR)
   .option('--crm-dir <path>', 'CRM data dir (contacts.json/pipeline.json/interactions.jsonl); enriches candidates when set')
   .option('--json', 'Output raw JSON')
-  .action((opts: { eventsFile: string; now?: string; minLead?: string; maxLead?: string; internalDomains?: string; stateFile?: string; crmDir?: string; json?: boolean }) => {
+  .action((opts: { eventsFile: string; now?: string; minLead?: string; maxLead?: string; internalDomains?: string; stateFile?: string; claimsDir?: string; crmDir?: string; json?: boolean }) => {
     let raw: string;
     try {
       raw = readFileSync(opts.eventsFile, 'utf-8');
@@ -1336,12 +1338,18 @@ busCommand
 
     const events = parseCalendarEvents(raw);
     const surfaced = readSurfacedIds(opts.stateFile ?? DEFAULT_BRIEF_STATE_FILE);
+    const claimed = readClaimedIds(
+      opts.claimsDir ?? DEFAULT_BRIEF_CLAIMS_DIR,
+      events.map(e => e.id),
+      { nowMs },
+    );
     const selected = selectUpcomingExternalMeetings(
       events,
       nowMs,
       { minLeadMin: parseInt(opts.minLead ?? '30', 10), maxLeadMin: parseInt(opts.maxLead ?? '75', 10) },
       internalDomains,
       surfaced,
+      claimed,
     );
 
     const candidates = selected.map(candidate => {
@@ -1377,6 +1385,33 @@ busCommand
   .action((eventId: string, opts: { stateFile?: string }) => {
     markSurfaced(opts.stateFile ?? DEFAULT_BRIEF_STATE_FILE, eventId);
     console.log(`Marked ${eventId}`);
+  });
+
+busCommand
+  .command('meeting-brief-claim')
+  .description('Atomically claim an event for briefing BEFORE the expensive work (exit 0 = won, non-zero = already claimed)')
+  .argument('<eventId>', 'Calendar event id to claim')
+  .option('--claims-dir <path>', 'In-flight claim-lease dir', DEFAULT_BRIEF_CLAIMS_DIR)
+  .option('--ttl-min <n>', 'Claim TTL in minutes (default 20 — longer than the 15-min cron interval)', '20')
+  .action((eventId: string, opts: { claimsDir?: string; ttlMin?: string }) => {
+    const ttlMs = parseInt(opts.ttlMin ?? '20', 10) * 60_000;
+    const result = claimEventLease(opts.claimsDir ?? DEFAULT_BRIEF_CLAIMS_DIR, eventId, { ttlMs });
+    if (result.claimed) {
+      console.log(`Claimed ${eventId} (${result.reason})`);
+      process.exit(0);
+    }
+    console.error(`Already claimed ${eventId} (${result.reason})`);
+    process.exit(1);
+  });
+
+busCommand
+  .command('meeting-brief-release')
+  .description('Release a claim so the next cron fire retries (call on publish/verify failure). Idempotent.')
+  .argument('<eventId>', 'Calendar event id to release')
+  .option('--claims-dir <path>', 'In-flight claim-lease dir', DEFAULT_BRIEF_CLAIMS_DIR)
+  .action((eventId: string, opts: { claimsDir?: string }) => {
+    releaseEventLease(opts.claimsDir ?? DEFAULT_BRIEF_CLAIMS_DIR, eventId);
+    console.log(`Released ${eventId}`);
   });
 
 // ---------------------------------------------------------------------------

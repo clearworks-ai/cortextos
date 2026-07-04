@@ -8,6 +8,10 @@ import {
   selectUpcomingExternalMeetings,
   readSurfacedIds,
   markSurfaced,
+  claimEventLease,
+  releaseEventLease,
+  readClaimedIds,
+  DEFAULT_CLAIM_TTL_MS,
   lookupCrmContext,
   renderBriefMarkdown,
 } from '../../../src/bus/meeting-brief';
@@ -176,6 +180,26 @@ describe('selectUpcomingExternalMeetings', () => {
     expect(out).toEqual([]);
   });
 
+  it('excludes live-claimed event ids (in-flight worker), keeping unclaimed ones', () => {
+    const a = makeEvent({ id: 'evt-a', attendees: ['matt@ocg.com'] });
+    const b = makeEvent({ id: 'evt-b', attendees: ['jane@corp.com'] });
+    const out = selectUpcomingExternalMeetings(
+      [a, b], now, opts, INTERNAL,
+      new Set(),          // none surfaced
+      new Set(['evt-a']), // evt-a claimed
+    );
+    expect(out.map(c => c.eventId)).toEqual(['evt-b']);
+  });
+
+  it('excludes an id that is BOTH surfaced AND live-claimed', () => {
+    const out = selectUpcomingExternalMeetings(
+      [makeEvent()], now, opts, INTERNAL,
+      new Set(['evt-1']),
+      new Set(['evt-1']),
+    );
+    expect(out).toEqual([]);
+  });
+
   it('skips all-day (date-only start) events', () => {
     const allDay = makeEvent({ id: 'allday', start: '2026-07-03' });
     expect(selectUpcomingExternalMeetings([allDay], now, opts, INTERNAL, new Set())).toEqual([]);
@@ -221,6 +245,92 @@ describe('surfaced-id dedup file', () => {
     writeFileSync(stateFile, 'a\n\nb\n  \nc\n');
     const ids = readSurfacedIds(stateFile);
     expect(Array.from(ids).sort()).toEqual(['a', 'b', 'c']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Claim lease — cross-process-atomic in-flight dedup
+// ---------------------------------------------------------------------------
+
+describe('claim lease', () => {
+  it('two overlapping claims for the same eventId: exactly ONE wins', () => {
+    const claimsDir = join(tmpDir, 'claims');
+    const first = claimEventLease(claimsDir, 'evt-1');
+    const second = claimEventLease(claimsDir, 'evt-1');
+
+    expect(first.claimed).toBe(true);
+    expect(first.reason).toBe('won');
+    // Second caller, no release in between -> rejected.
+    expect(second.claimed).toBe(false);
+    expect(second.reason).toBe('already-claimed');
+  });
+
+  it('different event ids each get their own claim', () => {
+    const claimsDir = join(tmpDir, 'claims');
+    expect(claimEventLease(claimsDir, 'evt-a').claimed).toBe(true);
+    expect(claimEventLease(claimsDir, 'evt-b').claimed).toBe(true);
+  });
+
+  it('a stale/expired claim (older than TTL) is reclaimable', () => {
+    const claimsDir = join(tmpDir, 'claims');
+    const t0 = 1_000_000_000_000;
+    const ttlMs = DEFAULT_CLAIM_TTL_MS;
+
+    expect(claimEventLease(claimsDir, 'evt-1', { nowMs: t0, ttlMs }).claimed).toBe(true);
+
+    // Just before TTL — still actively claimed, rejected.
+    const stillLive = claimEventLease(claimsDir, 'evt-1', { nowMs: t0 + ttlMs - 1, ttlMs });
+    expect(stillLive.claimed).toBe(false);
+    expect(stillLive.reason).toBe('already-claimed');
+
+    // Past TTL — the previous holder is assumed dead, so we reclaim.
+    const reclaimed = claimEventLease(claimsDir, 'evt-1', { nowMs: t0 + ttlMs + 1, ttlMs });
+    expect(reclaimed.claimed).toBe(true);
+    expect(reclaimed.reason).toBe('stale-reclaimed');
+  });
+
+  it('after release (failure path) the event can be claimed again', () => {
+    const claimsDir = join(tmpDir, 'claims');
+    expect(claimEventLease(claimsDir, 'evt-1').claimed).toBe(true);
+    // Second attempt blocked while the claim is live.
+    expect(claimEventLease(claimsDir, 'evt-1').claimed).toBe(false);
+
+    releaseEventLease(claimsDir, 'evt-1');
+
+    // Now a fresh claim wins outright.
+    const after = claimEventLease(claimsDir, 'evt-1');
+    expect(after.claimed).toBe(true);
+    expect(after.reason).toBe('won');
+  });
+
+  it('release is idempotent — releasing a non-existent claim is a no-op', () => {
+    const claimsDir = join(tmpDir, 'claims');
+    expect(() => releaseEventLease(claimsDir, 'never-claimed')).not.toThrow();
+    expect(() => releaseEventLease(claimsDir, 'never-claimed')).not.toThrow();
+  });
+
+  it('readClaimedIds returns only live-claimed candidate ids', () => {
+    const claimsDir = join(tmpDir, 'claims');
+    const t0 = 1_000_000_000_000;
+    const ttlMs = DEFAULT_CLAIM_TTL_MS;
+
+    claimEventLease(claimsDir, 'evt-live', { nowMs: t0, ttlMs });
+    claimEventLease(claimsDir, 'evt-old', { nowMs: t0 - ttlMs - 1000, ttlMs });
+
+    const claimed = readClaimedIds(
+      claimsDir,
+      ['evt-live', 'evt-old', 'evt-unclaimed'],
+      { nowMs: t0, ttlMs },
+    );
+    expect(claimed.has('evt-live')).toBe(true);
+    expect(claimed.has('evt-old')).toBe(false);        // expired -> not live
+    expect(claimed.has('evt-unclaimed')).toBe(false);  // never claimed
+    expect(claimed.size).toBe(1);
+  });
+
+  it('readClaimedIds on a missing claims dir returns an empty set', () => {
+    const claimed = readClaimedIds(join(tmpDir, 'no-such-claims-dir'), ['evt-1']);
+    expect(claimed.size).toBe(0);
   });
 });
 

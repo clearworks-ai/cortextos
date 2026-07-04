@@ -1,5 +1,6 @@
-import { readFileSync } from 'fs';
+import { readFileSync, openSync, closeSync, writeSync, statSync, utimesSync, readdirSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { createHash } from 'crypto';
 import { atomicWriteSync } from '../utils/atomic.js';
 
 // ---------------------------------------------------------------------------
@@ -216,7 +217,10 @@ function isDateOnly(start: string): boolean {
 /**
  * Keep events starting within [nowMs+minLead, nowMs+maxLead] that have at
  * least one external attendee and have not already been surfaced. All-day
- * (date-only) events are skipped.
+ * (date-only) events are skipped. When `claimedIds` is provided, events that
+ * hold a live (non-expired) claim lease are excluded too — this is what stops
+ * a second, overlapping cron fire from spawning a duplicate worker while the
+ * first worker is still mid-flight (see claim-lease section below).
  */
 export function selectUpcomingExternalMeetings(
   events: CalendarEventInput[],
@@ -224,6 +228,7 @@ export function selectUpcomingExternalMeetings(
   opts: { minLeadMin: number; maxLeadMin: number },
   internalDomains: string[],
   surfacedIds: Set<string>,
+  claimedIds?: Set<string>,
 ): MeetingCandidate[] {
   const windowStart = nowMs + opts.minLeadMin * 60_000;
   const windowEnd = nowMs + opts.maxLeadMin * 60_000;
@@ -231,6 +236,7 @@ export function selectUpcomingExternalMeetings(
   const candidates: MeetingCandidate[] = [];
   for (const event of events) {
     if (surfacedIds.has(event.id)) continue;
+    if (claimedIds && claimedIds.has(event.id)) continue;
     if (isDateOnly(event.start)) continue;
 
     const startMs = Date.parse(event.start);
@@ -282,6 +288,186 @@ export function markSurfaced(filePath: string, eventId: string): void {
   if (ids.has(eventId)) return;
   ids.add(eventId);
   atomicWriteSync(filePath, Array.from(ids).join('\n'));
+}
+
+// ---------------------------------------------------------------------------
+// Claim lease — short-TTL, cross-process-atomic dedup for in-flight briefs
+//
+// The surfaced-id file is marked LAST (only after a verified publish), which
+// leaves a multi-minute window where an overlapping 15-min cron fire still
+// sees the event as un-surfaced and spawns a SECOND worker -> duplicate brief.
+//
+// A plain read-modify-write on a shared JSON file is NOT enough here: two
+// separate node processes (two cron fires) can both read "unclaimed" and both
+// write. So the claim is a per-event LOCKFILE opened with O_CREAT|O_EXCL
+// (openSync 'wx'), which is atomic across processes — exactly one caller wins.
+// On EEXIST we inspect the lock's timestamp: if it is older than the TTL the
+// previous holder crashed/hung, so we reclaim it; otherwise the event is
+// actively claimed and the caller skips it.
+//
+// The TTL is deliberately SHORT (default 20 min — longer than the 15-min cron
+// interval so overlapping fires collide, short enough that a failed publish is
+// retried the same hour). This is why we do NOT reuse event-dedup.ts: its
+// pruneLedger enforces a 30-day floor, which would permanently block retry.
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_CLAIM_TTL_MS = 20 * 60 * 1000;
+
+export interface ClaimResult {
+  claimed: boolean;
+  reason: 'won' | 'stale-reclaimed' | 'already-claimed';
+}
+
+/** Map an arbitrary event id to a filesystem-safe lockfile path. */
+function claimLockPath(claimsDir: string, eventId: string): string {
+  const hash = createHash('sha256').update(eventId).digest('hex').slice(0, 32);
+  return join(claimsDir, `${hash}.lock`);
+}
+
+/** Age, in ms, of a claim lock. mtime is authoritative; fall back to content. */
+function claimAgeMs(lockPath: string, nowMs: number): number | undefined {
+  let mtimeMs: number | undefined;
+  try {
+    mtimeMs = statSync(lockPath).mtimeMs;
+  } catch {
+    return undefined;
+  }
+  let contentMs: number | undefined;
+  try {
+    const parsed = Number.parseInt(readFileSync(lockPath, 'utf-8').trim(), 10);
+    if (Number.isFinite(parsed)) contentMs = parsed;
+  } catch {
+    // ignore — mtime is enough
+  }
+  // Use whichever timestamp is more recent so a touched/rewritten lock is
+  // never mistaken for stale.
+  const claimedAt = Math.max(mtimeMs ?? 0, contentMs ?? 0);
+  return nowMs - claimedAt;
+}
+
+/**
+ * Atomically claim an event for processing. Returns `{ claimed: true }` for
+ * exactly one caller per live lease; a concurrent second caller (no release in
+ * between) gets `{ claimed: false, reason: 'already-claimed' }`. A lock older
+ * than `ttlMs` is treated as expired and reclaimed (`stale-reclaimed`).
+ *
+ * Cross-process atomic: the winning write is an O_CREAT|O_EXCL open, so two
+ * separate node processes racing on the same event id cannot both win.
+ */
+export function claimEventLease(
+  claimsDir: string,
+  eventId: string,
+  opts?: { nowMs?: number; ttlMs?: number },
+): ClaimResult {
+  const nowMs = opts?.nowMs ?? Date.now();
+  const ttlMs = opts?.ttlMs ?? DEFAULT_CLAIM_TTL_MS;
+  mkdirSync(claimsDir, { recursive: true });
+  const lockPath = claimLockPath(claimsDir, eventId);
+
+  // Fast path: atomic exclusive create. Winner writes its claim timestamp and
+  // stamps mtime to match, so age checks stay consistent even when callers
+  // pass a simulated `nowMs` that differs from wall-clock time.
+  try {
+    const fd = openSync(lockPath, 'wx', 0o600);
+    try {
+      writeSync(fd, String(nowMs));
+    } finally {
+      closeSync(fd);
+    }
+    utimesSync(lockPath, nowMs / 1000, nowMs / 1000);
+    return { claimed: true, reason: 'won' };
+  } catch (err) {
+    if (!(err instanceof Error) || (err as NodeJS.ErrnoException).code !== 'EEXIST') {
+      throw err;
+    }
+  }
+
+  // Lock exists — decide whether it is stale (reclaimable) or live.
+  const ageMs = claimAgeMs(lockPath, nowMs);
+  if (ageMs === undefined || ageMs > ttlMs) {
+    // Stale (or vanished after our failed create). Reclaim by rewriting the
+    // timestamp and stamping mtime to now. openSync 'r+' does not race with a
+    // fresh EXCL create because the file already exists; the last writer wins,
+    // which is acceptable for reclaim of an already-abandoned lease.
+    try {
+      const fd = openSync(lockPath, 'r+', 0o600);
+      try {
+        writeSync(fd, String(nowMs), 0);
+      } finally {
+        closeSync(fd);
+      }
+      utimesSync(lockPath, nowMs / 1000, nowMs / 1000);
+      return { claimed: true, reason: 'stale-reclaimed' };
+    } catch {
+      // Someone else may have removed/reclaimed it in between; be conservative.
+      return { claimed: false, reason: 'already-claimed' };
+    }
+  }
+
+  return { claimed: false, reason: 'already-claimed' };
+}
+
+/**
+ * Release a claim so the next cron fire can retry (used on publish/verify
+ * failure). Idempotent — releasing a non-existent claim is a no-op.
+ */
+export function releaseEventLease(claimsDir: string, eventId: string): void {
+  const lockPath = claimLockPath(claimsDir, eventId);
+  try {
+    const { unlinkSync } = require('fs') as typeof import('fs');
+    unlinkSync(lockPath);
+  } catch {
+    // Already gone — nothing to release.
+  }
+}
+
+/**
+ * Read the set of event ids that currently hold a LIVE (non-expired) claim.
+ * Because lockfile names are hashed event ids, this cannot recover the raw
+ * ids; instead it returns the SET OF HASHES that are live. Pair it with
+ * {@link liveClaimHashes}-aware filtering. For scan filtering we expose a
+ * companion that tests a specific event id — see {@link readClaimedIds}.
+ */
+function liveClaimHashes(claimsDir: string, nowMs: number, ttlMs: number): Set<string> {
+  const live = new Set<string>();
+  let entries: string[];
+  try {
+    entries = readdirSync(claimsDir);
+  } catch {
+    return live;
+  }
+  for (const name of entries) {
+    if (!name.endsWith('.lock')) continue;
+    const lockPath = join(claimsDir, name);
+    const ageMs = claimAgeMs(lockPath, nowMs);
+    if (ageMs !== undefined && ageMs <= ttlMs) {
+      live.add(name.slice(0, -'.lock'.length));
+    }
+  }
+  return live;
+}
+
+/**
+ * Given the candidate event ids, return the subset that currently hold a live
+ * claim. Used by the scan to exclude in-flight events (it hashes each candidate
+ * id and checks it against the live lock set). Event ids that are not among
+ * `candidateIds` are ignored.
+ */
+export function readClaimedIds(
+  claimsDir: string,
+  candidateIds: Iterable<string>,
+  opts?: { nowMs?: number; ttlMs?: number },
+): Set<string> {
+  const nowMs = opts?.nowMs ?? Date.now();
+  const ttlMs = opts?.ttlMs ?? DEFAULT_CLAIM_TTL_MS;
+  const liveHashes = liveClaimHashes(claimsDir, nowMs, ttlMs);
+  const claimed = new Set<string>();
+  if (liveHashes.size === 0) return claimed;
+  for (const id of candidateIds) {
+    const hash = createHash('sha256').update(id).digest('hex').slice(0, 32);
+    if (liveHashes.has(hash)) claimed.add(id);
+  }
+  return claimed;
 }
 
 // ---------------------------------------------------------------------------

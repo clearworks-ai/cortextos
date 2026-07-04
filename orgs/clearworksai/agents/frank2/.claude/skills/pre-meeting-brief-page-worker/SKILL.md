@@ -49,11 +49,31 @@ The cron already ran the scan and wrote the candidates file:
 cat /tmp/pmb-candidates.json
 ```
 
-(It was produced via `cortextos bus meeting-brief-scan --events-file /tmp/pmb-events.json --crm-dir /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm/crm --state-file /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/state/pre-meeting-brief-surfaced.txt --json`.)
+(It was produced via `cortextos bus meeting-brief-scan --events-file /tmp/pmb-events.json --crm-dir /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm/crm --state-file /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/state/pre-meeting-brief-surfaced.txt --json`. The scan already excludes events that are surfaced OR hold a live in-flight claim.)
 
 Each candidate already contains `externalAttendees` plus CRM context (matches, engagements with stage + open commitments, recent interactions). Do NOT re-run the scan.
 
 If the file is missing or `candidates` is empty: complete the task, self-terminate (Step 8 bash, skipping the mark), output DONE — send NOTHING.
+
+---
+
+## Step 2.5 — Claim the event BEFORE any expensive work (Bash, per candidate)
+
+The surfaced-mark happens LAST (Step 8, only after a verified publish). Brief generation takes minutes, and a second/overlapping cron fire could otherwise spawn a duplicate worker for the same meeting. Close that race by atomically CLAIMING each candidate first. The claim is a short-TTL (default 20 min) cross-process-atomic lease — only ONE worker can hold it.
+
+For EACH candidate `<eventId>`:
+
+```bash
+if cortextos bus meeting-brief-claim <eventId> --claims-dir /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/state/pre-meeting-brief-claims; then
+  echo "claimed <eventId> — proceed"
+else
+  echo "already claimed by another worker — SKIP this candidate"
+fi
+```
+
+- Exit 0 = you won the claim; proceed to Steps 3+ for that candidate.
+- Non-zero = another worker already holds a live claim; SKIP this candidate entirely (do NOT research, publish, or send).
+- Do the expensive work (Steps 3–7) ONLY for candidates you successfully claimed.
 
 ---
 
@@ -121,11 +141,14 @@ cortextos bus send-telegram 6690120787 '📋 Pre-meeting brief — <title> at <l
 
 - Single-quote the literal text (dollar-sign bash-expansion rule) and append `"$URL"` as shown.
 - NEVER paste brief content into Telegram — the link is the deliverable.
-- On publish/verify failure: send NOTHING to Josh. Instead log the failure and leave the event UNMARKED so the next fire retries:
+- On publish/verify failure: send NOTHING to Josh. RELEASE the claim so the next fire retries immediately (without waiting for the TTL to expire), then log the failure and leave the event UNMARKED:
 
 ```bash
+cortextos bus meeting-brief-release <eventId> --claims-dir /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/state/pre-meeting-brief-claims
 cortextos bus log-event error premeeting_brief_publish_failed warn 2>/dev/null
 ```
+
+(Even if you skip the release, the 20-min claim TTL guarantees the event becomes claimable again — release just makes the retry immediate.)
 
 ---
 
@@ -133,8 +156,11 @@ cortextos bus log-event error premeeting_brief_publish_failed warn 2>/dev/null
 
 Only after a VERIFIED send (Step 6 CODE=200 and Step 7 message sent):
 
+The permanent surfaced-mark supersedes the temporary claim (releasing the claim just cleans up the lock — the surfaced file now excludes the event permanently):
+
 ```bash
 cortextos bus meeting-brief-mark <eventId> --state-file /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/state/pre-meeting-brief-surfaced.txt
+cortextos bus meeting-brief-release <eventId> --claims-dir /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/state/pre-meeting-brief-claims
 cortextos bus complete-task $TASK_ID --result "Pre-meeting brief published + link delivered" 2>/dev/null
 # FINAL — mandatory self-terminate so this worker PTY does not leak (2026-06-22 worker-leak incident)
 cortextos terminate-worker $CTX_AGENT_NAME

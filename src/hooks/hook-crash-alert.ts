@@ -272,16 +272,37 @@ async function main(): Promise<void> {
   const agentName = process.env.CTX_AGENT_NAME;
   const instanceId = process.env.CTX_INSTANCE_ID || 'default';
   if (!agentName) return;
-  // Worker PTYs are ephemeral; their exit is normal completion, never a crash.
-  // CTX_WORKER is set by the daemon (post-#25 build). The name-suffix check is a
-  // fallback so the skip also works BEFORE the daemon is reloaded: worker names are
-  // "<base>-<unix-seconds>" (e.g. comms-check-1782229983), which no real agent uses.
-  if (process.env.CTX_WORKER || /-\d{10,}$/.test(agentName)) return;
 
   const ctxRoot = join(homedir(), '.cortextos', instanceId);
   const stateDir = join(ctxRoot, 'state', agentName);
   const logDir = join(ctxRoot, 'logs', agentName);
-  const isWorker = existsSync(join(stateDir, '.is-worker'));
+
+  // Worker PTYs are ephemeral; their exit is normal completion, never a crash.
+  // Detection priority (most-robust first):
+  //   1. CTX_WORKER env — set by AgentPTY when env.worker is true (post-#25 builds).
+  //   2. .is-worker marker — written by WorkerProcess.spawn() before the PTY starts.
+  //      This is the PRIMARY filesystem signal and handles the window between a fresh
+  //      daemon spawn and the PTY inheriting CTX_WORKER; it also covers the case where
+  //      a worker was spawned by an older daemon version that did not set CTX_WORKER.
+  //   3. Name-suffix regex — belt-and-suspenders fallback ONLY. Worker names follow
+  //      the pattern "<base>-<unix-seconds>" (e.g. comms-check-1782229983). Fragile:
+  //      any future worker named without a 10-digit epoch suffix would fall through,
+  //      so this is never the only guard between a normal exit and a 🚨 CRASH page.
+  //
+  // All three checks return before any crash classification / count / notify.
+  // The .is-worker marker check is done here (before stateDir is mkdir'd) because
+  // WorkerProcess writes it at spawn time; by the time this hook fires it exists.
+  const isWorkerByEnv = !!process.env.CTX_WORKER;
+  const isWorkerByMarker = existsSync(join(stateDir, '.is-worker'));
+  const isWorkerBySuffix = /-\d{10,}$/.test(agentName);
+
+  if (isWorkerByEnv || isWorkerByMarker || isWorkerBySuffix) return;
+
+  // isWorker is always false here — all three worker-detection paths above returned
+  // before reaching this point. The variable is kept so the crashes.log and
+  // crash-count guards below read cleanly and can be verified against the spec without
+  // tracking the control-flow back to the early returns.
+  const isWorker = false;
 
   mkdirSync(stateDir, { recursive: true });
   mkdirSync(logDir, { recursive: true });

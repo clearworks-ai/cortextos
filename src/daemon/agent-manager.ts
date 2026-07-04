@@ -1210,9 +1210,38 @@ export class AgentManager {
       // dedup-rejected and treated as a dispatch failure.
       const firedAt = new Date().toISOString();
       const injection = `[CRON FIRED ${firedAt}] ${cron.name}: ${prompt}`;
-      const injected = this.injectAgent(agentName, injection);
-      if (!injected) {
-        throw new Error(`injectAgent returned false for agent "${agentName}" — agent may not be running`);
+
+      // Write the .cron-active marker BEFORE injecting so the permission hook
+      // can immediately detect a cron-originated tool call and deny-fast (no
+      // 30-min interactive wait). The marker contains a JSON payload with the
+      // cron name and an expiry timestamp so a stale marker from a crashed
+      // daemon process does not permanently disable interactive approvals.
+      // The try/finally guarantees the marker is cleared even if injectAgent
+      // throws — leaving a stale marker behind would deny ALL permission
+      // requests for the agent indefinitely.
+      const agentStateDir = join(this.ctxRoot, 'state', agentName);
+      const cronActiveMarker = join(agentStateDir, '.cron-active');
+      const CRON_BUDGET_MS = 10 * 60 * 1000; // 10 min max budget per cron fire
+      try {
+        mkdirSync(agentStateDir, { recursive: true });
+        writeFileSync(
+          cronActiveMarker,
+          JSON.stringify({ cronName: cron.name, firedAt, expiresAt: Date.now() + CRON_BUDGET_MS }),
+          'utf-8',
+        );
+      } catch { /* best-effort — don't block the cron fire if the marker can't be written */ }
+
+      try {
+        const injected = this.injectAgent(agentName, injection);
+        if (!injected) {
+          throw new Error(`injectAgent returned false for agent "${agentName}" — agent may not be running`);
+        }
+      } finally {
+        // Always clear the marker after the cron injection completes (or fails).
+        // The hook reads this synchronously, so clearing immediately after inject
+        // means the deny-fast window is the time the cron's first tool call takes
+        // to reach the permission hook — typically milliseconds.
+        try { unlinkSync(cronActiveMarker); } catch { /* ignore if already gone */ }
       }
     };
 

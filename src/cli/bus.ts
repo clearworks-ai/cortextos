@@ -18,7 +18,7 @@ import { updateCronFire, parseDurationMs, readCronState } from '../bus/cron-stat
 import { addCron, removeCron, readCrons, updateCron as updateCronDef, getCronByName, getExecutionLog } from '../bus/crons.js';
 import { nextFireFromCron } from '../daemon/cron-scheduler.js';
 import { queryKnowledgeBase, ingestKnowledgeBase, ensureKBDirs } from '../bus/knowledge-base.js';
-import { parseCalendarEvents, selectUpcomingExternalMeetings, readSurfacedIds, markSurfaced, lookupCrmContext, renderBriefMarkdown } from '../bus/meeting-brief.js';
+import { parseCalendarEvents, selectUpcomingExternalMeetings, readSurfacedIds, markSurfaced, lookupCrmContext, renderBriefMarkdown, claimInFlight, readInFlightIds, clearInFlight } from '../bus/meeting-brief.js';
 import type { BriefData, CrmContext } from '../bus/meeting-brief.js';
 import { checkUsageApi, refreshOAuthToken, rotateOAuth, loadAccounts, ALERT_5H, ALERT_7D } from '../bus/oauth.js';
 import { resolvePaths } from '../utils/paths.js';
@@ -1331,13 +1331,18 @@ busCommand
       .filter(d => d.length > 0);
 
     const events = parseCalendarEvents(raw);
-    const surfaced = readSurfacedIds(opts.stateFile ?? DEFAULT_BRIEF_STATE_FILE);
+    const stateFile = opts.stateFile ?? DEFAULT_BRIEF_STATE_FILE;
+    // Exclude surfaced (published) AND in-flight (claimed, worker running) ids
+    // so overlapping cron fires never double-brief the same event.
+    const surfaced = readSurfacedIds(stateFile);
+    const inFlight = readInFlightIds(stateFile);
+    const excluded = new Set([...surfaced, ...inFlight]);
     const selected = selectUpcomingExternalMeetings(
       events,
       nowMs,
       { minLeadMin: parseInt(opts.minLead ?? '30', 10), maxLeadMin: parseInt(opts.maxLead ?? '75', 10) },
       internalDomains,
-      surfaced,
+      excluded,
     );
 
     const candidates = selected.map(candidate => {
@@ -1348,6 +1353,31 @@ busCommand
     });
 
     console.log(JSON.stringify({ candidates }, null, opts.json ? 2 : 0));
+  });
+
+busCommand
+  .command('meeting-brief-claim')
+  .description('Atomically claim an event as in-flight BEFORE spawning its brief worker (exit 1 if already claimed)')
+  .argument('<eventId>', 'Calendar event id to claim')
+  .option('--state-file <path>', 'Surfaced-ids state file', DEFAULT_BRIEF_STATE_FILE)
+  .action((eventId: string, opts: { stateFile?: string }) => {
+    const stateFile = opts.stateFile ?? DEFAULT_BRIEF_STATE_FILE;
+    if (claimInFlight(stateFile, eventId)) {
+      console.log('CLAIMED ' + eventId);
+    } else {
+      console.error('IN_FLIGHT ' + eventId);
+      process.exit(1);
+    }
+  });
+
+busCommand
+  .command('meeting-brief-clear-inflight')
+  .description('Release an in-flight claim after a publish FAILURE so the next cron fire retries')
+  .argument('<eventId>', 'Calendar event id whose claim to release')
+  .option('--state-file <path>', 'Surfaced-ids state file', DEFAULT_BRIEF_STATE_FILE)
+  .action((eventId: string, opts: { stateFile?: string }) => {
+    clearInFlight(opts.stateFile ?? DEFAULT_BRIEF_STATE_FILE, eventId);
+    console.log(`Cleared ${eventId}`);
   });
 
 busCommand
@@ -1371,7 +1401,10 @@ busCommand
   .argument('<eventId>', 'Calendar event id to mark as surfaced')
   .option('--state-file <path>', 'Surfaced-ids state file', DEFAULT_BRIEF_STATE_FILE)
   .action((eventId: string, opts: { stateFile?: string }) => {
-    markSurfaced(opts.stateFile ?? DEFAULT_BRIEF_STATE_FILE, eventId);
+    const stateFile = opts.stateFile ?? DEFAULT_BRIEF_STATE_FILE;
+    markSurfaced(stateFile, eventId);
+    // Success path releases the in-flight claim so stale files never accumulate.
+    clearInFlight(stateFile, eventId);
     console.log(`Marked ${eventId}`);
   });
 

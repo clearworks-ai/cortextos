@@ -46,6 +46,10 @@ describe('pre-meeting-brief-page-worker skill', () => {
     it('references meeting-brief-mark (dedup state after send)', () => {
       expect(skill).toContain('meeting-brief-mark');
     });
+
+    it('references meeting-brief-clear-inflight (claim release on failure)', () => {
+      expect(skill).toContain('meeting-brief-clear-inflight');
+    });
   });
 
   describe('publish + delivery path', () => {
@@ -85,6 +89,13 @@ describe('pre-meeting-brief-page-worker skill', () => {
       expect(publishIdx).toBeGreaterThan(-1);
       expect(markIdx).toBeGreaterThan(-1);
       expect(markIdx).toBeGreaterThan(publishIdx);
+    });
+
+    it('releases the in-flight claim in the Step 7 failure path', () => {
+      const failureIdx = skill.indexOf('publish/verify failure');
+      const clearIdx = skill.indexOf('meeting-brief-clear-inflight');
+      expect(failureIdx).toBeGreaterThan(-1);
+      expect(clearIdx).toBeGreaterThan(failureIdx);
     });
   });
 });

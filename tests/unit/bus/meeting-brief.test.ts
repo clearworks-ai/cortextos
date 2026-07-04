@@ -10,6 +10,10 @@ import {
   markSurfaced,
   lookupCrmContext,
   renderBriefMarkdown,
+  claimInFlight,
+  readInFlightIds,
+  clearInFlight,
+  IN_FLIGHT_TTL_MS,
 } from '../../../src/bus/meeting-brief';
 import type { BriefData, CalendarEventInput, MeetingCandidate } from '../../../src/bus/meeting-brief';
 
@@ -221,6 +225,70 @@ describe('surfaced-id dedup file', () => {
     writeFileSync(stateFile, 'a\n\nb\n  \nc\n');
     const ids = readSurfacedIds(stateFile);
     expect(Array.from(ids).sort()).toEqual(['a', 'b', 'c']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// In-flight claim guard (claim-before-spawn — kills the duplicate-worker race)
+// ---------------------------------------------------------------------------
+
+describe('in-flight claim guard', () => {
+  it('first claim succeeds, second claim for the same event fails', () => {
+    const stateFile = join(tmpDir, 'surfaced.txt');
+    // THE fix: the second cron fire's claim exits nonzero → no duplicate worker/link.
+    expect(claimInFlight(stateFile, 'evt-1')).toBe(true);
+    expect(claimInFlight(stateFile, 'evt-1')).toBe(false);
+  });
+
+  it('an in-flight event produces zero scan candidates', () => {
+    const stateFile = join(tmpDir, 'surfaced.txt');
+    const now = Date.parse('2026-07-03T17:15:00Z');
+    const opts = { minLeadMin: 30, maxLeadMin: 75 };
+
+    // Control: without the claim, the event is a candidate.
+    const before = new Set([...readSurfacedIds(stateFile), ...readInFlightIds(stateFile)]);
+    expect(selectUpcomingExternalMeetings([makeEvent()], now, opts, INTERNAL, before)).toHaveLength(1);
+
+    claimInFlight(stateFile, 'evt-1');
+    const excluded = new Set([...readSurfacedIds(stateFile), ...readInFlightIds(stateFile)]);
+    expect(selectUpcomingExternalMeetings([makeEvent()], now, opts, INTERNAL, excluded)).toHaveLength(0);
+  });
+
+  it('clearInFlight releases the claim', () => {
+    const stateFile = join(tmpDir, 'surfaced.txt');
+    expect(claimInFlight(stateFile, 'evt-1')).toBe(true);
+    clearInFlight(stateFile, 'evt-1');
+    expect(claimInFlight(stateFile, 'evt-1')).toBe(true);
+    // Clearing a never-claimed id must not throw.
+    expect(() => clearInFlight(stateFile, 'never-claimed')).not.toThrow();
+  });
+
+  it('stale claim past TTL is reclaimable', () => {
+    const stateFile = join(tmpDir, 'surfaced.txt');
+    const nowMs = Date.now();
+    expect(claimInFlight(stateFile, 'evt-1', nowMs)).toBe(true);
+    // Same instant: still in flight.
+    expect(claimInFlight(stateFile, 'evt-1', nowMs)).toBe(false);
+    // Past the TTL the claim is stale — a crashed worker's event retries.
+    expect(claimInFlight(stateFile, 'evt-1', nowMs + IN_FLIGHT_TTL_MS + 60_000)).toBe(true);
+  });
+
+  it('readInFlightIds round-trips raw event ids', () => {
+    const stateFile = join(tmpDir, 'surfaced.txt');
+    const unsafeId = 'Weekly Sync@2026-07-03T18:00:00Z/x';
+    expect(claimInFlight(stateFile, unsafeId)).toBe(true);
+    const ids = readInFlightIds(stateFile);
+    expect(ids.has(unsafeId)).toBe(true);
+    expect(ids.size).toBe(1);
+  });
+
+  it('markSurfaced followed by clearInFlight leaves event excluded via surfaced set', () => {
+    const stateFile = join(tmpDir, 'surfaced.txt');
+    claimInFlight(stateFile, 'evt-1');
+    markSurfaced(stateFile, 'evt-1');
+    clearInFlight(stateFile, 'evt-1');
+    expect(readSurfacedIds(stateFile).has('evt-1')).toBe(true);
+    expect(readInFlightIds(stateFile).size).toBe(0);
   });
 });
 

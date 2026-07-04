@@ -1,5 +1,6 @@
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, unlinkSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
+import { createHash } from 'crypto';
 import { atomicWriteSync } from '../utils/atomic.js';
 
 // ---------------------------------------------------------------------------
@@ -282,6 +283,109 @@ export function markSurfaced(filePath: string, eventId: string): void {
   if (ids.has(eventId)) return;
   ids.add(eventId);
   atomicWriteSync(filePath, Array.from(ids).join('\n'));
+}
+
+// ---------------------------------------------------------------------------
+// In-flight claim (O_EXCL claim-before-spawn — at most one brief worker per
+// event id). The surfaced file only records VERIFIED publishes (Step 8), so
+// two cron fires 15 min apart both see the same unsurfaced event and both
+// spawn workers. The claim closes that window: the cron claims each candidate
+// BEFORE spawn-worker; a second fire's claim fails and the duplicate is
+// dropped. A claim is released on publish failure (clearInFlight) or expires
+// after IN_FLIGHT_TTL_MS so a crashed worker's event still retries.
+// ---------------------------------------------------------------------------
+
+/** 90 min > worker lifetime; a crashed worker's stale claim expires and the event retries. */
+export const IN_FLIGHT_TTL_MS = 90 * 60_000;
+
+/** Claim dir lives next to the surfaced state file. */
+function inFlightDirFor(stateFile: string): string {
+  return stateFile + '.inflight.d';
+}
+
+/**
+ * One file per event. Filename is the sha256 of the eventId — event ids can
+ * be the `title@start` fallback containing '/', ':' etc., so the raw id is
+ * never used as a filename. File CONTENT is the raw eventId (one line) so
+ * readInFlightIds can recover ids.
+ */
+function inFlightPathFor(stateFile: string, eventId: string): string {
+  return join(inFlightDirFor(stateFile), createHash('sha256').update(eventId).digest('hex'));
+}
+
+/**
+ * Atomically claim an event as in-flight. Returns true if this caller won the
+ * claim; false if a live (non-expired) claim already exists. The 'wx' flag
+ * (O_EXCL) makes the create atomic — exactly one of two concurrent claimers
+ * succeeds. A stale claim (older than IN_FLIGHT_TTL_MS) is removed and the
+ * claim retried once. Never throws on the expected-contention path.
+ */
+export function claimInFlight(stateFile: string, eventId: string, nowMs = Date.now()): boolean {
+  const dir = inFlightDirFor(stateFile);
+  mkdirSync(dir, { recursive: true });
+  const claimPath = inFlightPathFor(stateFile, eventId);
+  try {
+    writeFileSync(claimPath, eventId + '\n', { flag: 'wx', encoding: 'utf-8' });
+    return true;
+  } catch {
+    // EEXIST (or transient stat/unlink races below) — check for staleness.
+  }
+  try {
+    const stat = statSync(claimPath);
+    if (nowMs - stat.mtimeMs <= IN_FLIGHT_TTL_MS) return false; // live claim
+  } catch {
+    // Claim vanished between write and stat — fall through and retry once.
+  }
+  try {
+    unlinkSync(claimPath);
+  } catch {
+    // Already removed by a concurrent claimer — retry decides the winner.
+  }
+  try {
+    writeFileSync(claimPath, eventId + '\n', { flag: 'wx', encoding: 'utf-8' });
+    return true;
+  } catch {
+    return false; // Lost the retry race to another claimer.
+  }
+}
+
+/**
+ * Read the raw event ids of all live (non-expired) in-flight claims.
+ * Tolerant: a missing claim dir or unreadable entry contributes nothing.
+ */
+export function readInFlightIds(stateFile: string, nowMs = Date.now()): Set<string> {
+  const dir = inFlightDirFor(stateFile);
+  const ids = new Set<string>();
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return ids;
+  }
+  for (const name of names) {
+    const filePath = join(dir, name);
+    try {
+      const stat = statSync(filePath);
+      if (nowMs - stat.mtimeMs > IN_FLIGHT_TTL_MS) continue; // stale — ignore
+      const id = readFileSync(filePath, 'utf-8').trim();
+      if (id) ids.add(id);
+    } catch {
+      continue; // removed or unreadable mid-scan — skip
+    }
+  }
+  return ids;
+}
+
+/**
+ * Release an in-flight claim (publish failure path, and after markSurfaced on
+ * success so stale claim files never accumulate). Tolerant of ENOENT.
+ */
+export function clearInFlight(stateFile: string, eventId: string): void {
+  try {
+    unlinkSync(inFlightPathFor(stateFile, eventId));
+  } catch {
+    // Never claimed or already cleared — fine.
+  }
 }
 
 // ---------------------------------------------------------------------------

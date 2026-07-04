@@ -3,13 +3,14 @@ import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { IPCClient } from '../daemon/ipc-server.js';
+import { resolveInstanceId } from './resolve-instance-id.js';
 import type { AgentStatus, Heartbeat } from '../types/index.js';
 
 export const statusCommand = new Command('status')
   .option('--instance <id>', 'Instance ID')
   .description('Show agent health and status')
   .action(async (options: { instance?: string }) => {
-    const instanceId = options.instance || process.env.CTX_INSTANCE_ID || 'default';
+    const instanceId = resolveInstanceId(options.instance);
     const ipc = new IPCClient(instanceId);
     const daemonRunning = await ipc.isDaemonRunning();
 

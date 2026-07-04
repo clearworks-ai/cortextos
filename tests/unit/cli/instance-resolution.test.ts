@@ -1,4 +1,13 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+// Isolate from any real ACTIVE_INSTANCE marker on the host machine: this suite
+// tests the option > env > fallback precedence, so the marker layer resolves to
+// its fallback deterministically (the marker itself is covered in
+// resolve-active-instance.test.ts).
+vi.mock('../../../src/utils/resolve-active-instance', () => ({
+  resolveActiveInstance: (fallback = 'default') => fallback,
+}));
+
 import { resolveInstanceId } from '../../../src/cli/resolve-instance-id';
 import { startCommand } from '../../../src/cli/start';
 import { stopCommand } from '../../../src/cli/stop';

@@ -6,6 +6,7 @@ import { spawnSync } from 'child_process';
 import { validateAgentName } from '../utils/validate.js';
 import { IPCClient } from '../daemon/ipc-server.js';
 import { resolvePaths } from '../utils/paths.js';
+import { resolveInstanceId } from './resolve-instance-id.js';
 
 interface ExportManifest {
   version: string;
@@ -22,10 +23,11 @@ export const importAgentCommand = new Command('import-agent')
   .argument('<tarball>', 'Path to the .tar.gz file exported from cortextos-single')
   .option('--org <org>', 'Organization to import the agent into')
   .option('--name <name>', 'Override the agent name from the export manifest')
-  .option('--instance <id>', 'Instance ID', 'default')
+  .option('--instance <id>', 'Instance ID')
   .option('--no-start', 'Import files only — do not start the agent')
   .description('Import a cortextos-single agent export into full cortextOS')
-  .action(async (tarball: string, options: { org?: string; name?: string; instance: string; start: boolean }) => {
+  .action(async (tarball: string, options: { org?: string; name?: string; instance?: string; start: boolean }) => {
+    const instanceId = resolveInstanceId(options.instance);
     const projectRoot = process.env.CTX_FRAMEWORK_ROOT || process.env.CTX_PROJECT_ROOT || process.cwd();
 
     if (!existsSync(tarball)) {
@@ -134,8 +136,8 @@ export const importAgentCommand = new Command('import-agent')
     // Copy state (tasks, memory) from export if present
     const exportedStateDir = join(tmpDir, 'state');
     if (existsSync(exportedStateDir)) {
-      const ctxRoot = join(homedir(), '.cortextos', options.instance);
-      const paths = resolvePaths(agentName, options.instance, org);
+      const ctxRoot = join(homedir(), '.cortextos', instanceId);
+      const paths = resolvePaths(agentName, instanceId, org);
 
       // Tasks
       const exportedTasks = join(exportedStateDir, 'tasks');
@@ -155,7 +157,7 @@ export const importAgentCommand = new Command('import-agent')
     }
 
     // Register in enabled-agents.json
-    const ctxRoot = join(homedir(), '.cortextos', options.instance);
+    const ctxRoot = join(homedir(), '.cortextos', instanceId);
     const enabledPath = join(ctxRoot, 'config', 'enabled-agents.json');
     let enabledAgents: Record<string, any> = {};
     try {
@@ -182,7 +184,7 @@ export const importAgentCommand = new Command('import-agent')
 
     // Start the agent
     if (options.start) {
-      const ipc = new IPCClient(options.instance);
+      const ipc = new IPCClient(instanceId);
       const daemonRunning = await ipc.isDaemonRunning();
       if (daemonRunning) {
         console.log(`\n  Starting agent...`);

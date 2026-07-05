@@ -179,6 +179,45 @@ describe('queryKnowledgeBase — graceful missing-config', () => {
     // Happy path emits no [kb] warning.
     expect(warnLog.filter((m) => m.includes('[kb]'))).toHaveLength(0);
   });
+
+  it('empty results + healthy store does not emit anomaly warning', () => {
+    mockConfiguredKb();
+    execFileSyncMock
+      .mockReturnValueOnce(JSON.stringify({ results: [] }))
+      .mockReturnValueOnce(JSON.stringify({ collection: 'shared-TestOrg', count: 12 }));
+
+    const result = queryKnowledgeBase(dummyPaths, 'no match', { ...baseOptions, scope: 'shared' });
+
+    expect(result).toEqual({
+      results: [],
+      total: 0,
+      query: 'no match',
+      collection: 'shared-TestOrg',
+    });
+    expect(warnLog.some((m) => m.includes('ANOMALY'))).toBe(false);
+  });
+
+  it('empty results + 0-chunk store emits anomaly warning', () => {
+    mockConfiguredKb();
+    execFileSyncMock
+      .mockReturnValueOnce(JSON.stringify({ results: [] }))
+      .mockReturnValueOnce(JSON.stringify({ collection: 'shared-TestOrg', count: 0 }));
+
+    const result = queryKnowledgeBase(dummyPaths, 'empty store?', { ...baseOptions, scope: 'shared' });
+
+    expect(result).toEqual({
+      results: [],
+      total: 0,
+      query: 'empty store?',
+      collection: 'shared-TestOrg',
+    });
+    expect(
+      warnLog.some(
+        (m) => m.includes('[kb] ANOMALY: resolved store has 0 chunks / unreachable')
+          && m.includes('/knowledge-base/chromadb'),
+      ),
+    ).toBe(true);
+  });
 });
 
 describe('kb warn messages — UX invariants', () => {

@@ -111,6 +111,24 @@ export interface KBQueryResponse {
   collection: string;
 }
 
+interface MmragQueryJson {
+  results?: Array<{
+    content?: string;
+    result?: string;
+    similarity?: number;
+    source?: string;
+    type?: string;
+  }>;
+}
+
+interface MmragStatusJson {
+  collection?: string;
+  count?: number;
+  data_dir?: string;
+  chromadb_dir?: string;
+  config_file?: string;
+}
+
 /**
  * Query the knowledge base.
  * Returns parsed JSON results when --json is used internally.
@@ -155,6 +173,30 @@ export function queryKnowledgeBase(
   const pythonPath = getVenvPython(frameworkRoot);
   const mmragPath = join(frameworkRoot, 'knowledge-base', 'scripts', 'mmrag.py');
 
+  const runMmrag = (args: string[]): string | null => {
+    try {
+      return execFileSync(pythonPath, [mmragPath, ...args], {
+        encoding: 'utf-8',
+        timeout: 30000,
+        env,
+      });
+    } catch {
+      return null;
+    }
+  };
+
+  const parseJsonBlock = <T>(output: string | null): T | null => {
+    if (!output) return null;
+    const trimmed = output.trim();
+    const jsonStart = trimmed.indexOf('{');
+    if (jsonStart === -1) return null;
+    try {
+      return JSON.parse(trimmed.slice(jsonStart)) as T;
+    } catch {
+      return null;
+    }
+  };
+
   // Determine which collections to query based on scope
   const collections: string[] = [];
   switch (scope) {
@@ -171,47 +213,34 @@ export function queryKnowledgeBase(
   }
 
   const runQuery = (col: string): string | null => {
-    try {
-      return execFileSync(pythonPath, [
-        mmragPath, 'query', question,
+    return runMmrag([
+        'query', question,
         '--collection', col,
         '--top-k', String(topK),
         '--threshold', String(threshold),
         '--json',
-      ], {
-        encoding: 'utf-8',
-        timeout: 30000,
-        env,
-      });
-    } catch {
-      return null;
-    }
+      ]);
   };
 
   const parseOutput = (output: string | null): KBQueryResult[] => {
-    if (!output) return [];
-    // mmrag.py --json outputs pretty-printed JSON; find and parse the JSON block
-    const trimmed = output.trim();
-    const jsonStart = trimmed.indexOf('{');
-    if (jsonStart === -1) return [];
-    try {
-      const raw = JSON.parse(trimmed.slice(jsonStart)) as {
-        results?: Array<{ content?: string; result?: string; similarity?: number; source?: string; type?: string }>;
-        result_count?: number;
-        query?: string;
-        collection?: string;
-      };
-      return (raw.results || []).map((r) => ({
-        content: r.content || r.result || '',
-        source_file: r.source || '',
-        org,
-        agent_name: agent,
-        score: r.similarity ?? 0,
-        doc_type: r.type || 'markdown',
-      }));
-    } catch {
-      return [];
-    }
+    const raw = parseJsonBlock<MmragQueryJson>(output);
+    return (raw?.results || []).map((r) => ({
+      content: r.content || r.result || '',
+      source_file: r.source || '',
+      org,
+      agent_name: agent,
+      score: r.similarity ?? 0,
+      doc_type: r.type || 'markdown',
+    }));
+  };
+
+  const probeChunkCount = (col: string): number | null => {
+    const raw = parseJsonBlock<MmragStatusJson>(runMmrag([
+      'status',
+      '--collection', col,
+      '--json',
+    ]));
+    return typeof raw?.count === 'number' ? raw.count : null;
   };
 
   try {
@@ -233,6 +262,16 @@ export function queryKnowledgeBase(
     }
   } catch {
     // Failed — return empty
+  }
+
+  const hasHealthyStore = collections.some((col) => {
+    const count = probeChunkCount(col);
+    return typeof count === 'number' && count > 0;
+  });
+  if (!hasHealthyStore) {
+    console.warn(
+      `[kb] ANOMALY: resolved store has 0 chunks / unreachable — do NOT conclude the KB is empty; store=${env.MMRAG_CHROMADB_DIR || env.MMRAG_DIR}`,
+    );
   }
 
   return { results: [], total: 0, query: question, collection: `shared-${org}` };

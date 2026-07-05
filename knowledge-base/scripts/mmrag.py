@@ -37,7 +37,20 @@ from pathlib import Path
 # Constants
 # ---------------------------------------------------------------------------
 # cortextOS env-var overrides (set by kb-*.sh scripts)
-MMRAG_DIR = Path(os.environ.get("MMRAG_DIR", str(Path.home() / ".mmrag")))
+def _resolve_mmrag_dir():
+    raw = os.environ.get("MMRAG_DIR", "").strip()
+    if raw:
+        return Path(raw)
+    sys.stderr.write(
+        "MMRAG_DIR is not set. Do not call mmrag.py directly — use:  "
+        "cortextos bus kb-query '<question>' --org <org>\n"
+        "(the wrapper resolves the correct store; a bare call would open a "
+        "wrong/empty store and lie.)\n"
+    )
+    sys.exit(2)
+
+
+MMRAG_DIR = _resolve_mmrag_dir()
 CONFIG_FILE = Path(os.environ.get("MMRAG_CONFIG", str(MMRAG_DIR / "config.json")))
 CHROMADB_DIR = Path(os.environ.get("MMRAG_CHROMADB_DIR", str(MMRAG_DIR / "chromadb")))
 MEDIA_DIR = MMRAG_DIR / "media"
@@ -3567,6 +3580,16 @@ def cmd_status(args):
     except Exception:
         count = 0
 
+    if getattr(args, "json", False):
+        print(json.dumps({
+            "collection": collection_name,
+            "count": count,
+            "data_dir": str(MMRAG_DIR),
+            "chromadb_dir": str(CHROMADB_DIR),
+            "config_file": str(CONFIG_FILE),
+        }))
+        return
+
     print(f"Collection: {collection_name}")
     print(f"Total chunks: {count}")
     print(f"Data dir: {MMRAG_DIR}")
@@ -3742,6 +3765,7 @@ def main():
     # status
     p_status = sub.add_parser("status", help="Show knowledge base status")
     p_status.add_argument("--collection", "-c", help="Collection name")
+    p_status.add_argument("--json", "-j", action="store_true", help="Output status as JSON")
 
     # list
     p_list = sub.add_parser("list", help="List ingested documents")

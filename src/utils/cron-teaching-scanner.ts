@@ -115,12 +115,21 @@ const NEGATION_PATTERNS: RegExp[] = [
   /\bdo\s+not\b/i,
   /\bdon'?t\s+(?:use|edit|write|call|put)\b/i,
   /\bnever\s+(?:use|write|edit|call|put)\b/i,
+  /\bnot\b[^.]{0,60}(config\.json|CronCreate|CronList|CronDelete|\/loop)/i,
   /\bwon'?t\s+survive\b/i,
   /\bevaporate\b/i,
   /\bsession[-\s]only\b/i,
   /\bsession[-\s]local\b/i,
   /\brecurring:\s*false\b/i,
   /\bnot\s+(?:for\s+)?persistent\b/i,
+  /\b(is|are)\s+inert\b/i,
+  /\bdocs?[-\s]only\b/i,
+  /\bno\s+longer\b/i,
+  /\bnot\s+the\s+mechanism\b/i,
+  /\bdaemon[-\s]managed\b/i,
+  /\bno\s+`?config\.json`?\s+edit\s+needed\b/i,
+  /\|\s*config\.json\s+crons\s*\|/i,
+  /\be\.g\.,?\s*["“'][^"”'\n]*config\.json[^"”'\n]*crons?["”']/i,
   /\bdeprecated\b/i,
 ];
 
@@ -138,8 +147,13 @@ const SAFE_SUBSTITUTIONS: SafeSubstitution[] = [
   },
 ];
 
+function stripInlineMarkdown(line: string): string {
+  return line.replace(/[*_`]+/g, '');
+}
+
 function hasNegationContext(line: string): boolean {
-  return NEGATION_PATTERNS.some((re) => re.test(line));
+  const normalized = stripInlineMarkdown(line);
+  return NEGATION_PATTERNS.some((re) => re.test(normalized));
 }
 
 /** Scan a single file. Returns matches and (when `apply`) writes back. */
@@ -160,6 +174,7 @@ export function scanFile(filePath: string, opts: ScanOptions = {}): FileScanResu
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    if (/^\s*triggers:\s*\[/i.test(line)) continue;
     if (hasNegationContext(line)) continue;
     for (const p of STALE_PATTERNS) {
       if (p.match(line)) {

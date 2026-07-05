@@ -1,0 +1,41 @@
+{
+  "$comment": "Per-stage model routing for dynamic-pipeline. provider ∈ anthropic|openrouter|codex. Fable is opt-in at plan only; when not explicitly confirmed, plan falls back to opus.",
+  "fableGate": {
+    "fallback": "opus"
+  },
+  "stages": {
+    "explore": {
+      "provider": "openrouter",
+      "model": "openrouter/google/gemini-3.5-flash"
+    },
+    "plan": {
+      "provider": "anthropic",
+      "model": "fable",
+      "effort": "high",
+      "lean": true,
+      "requiresConfirmation": true,
+      "fallback": "opus"
+    },
+    "implement": {
+      "provider": "codex",
+      "model": "gpt-5.4"
+    },
+    "merge": {
+      "provider": "anthropic",
+      "model": "haiku"
+    },
+    "review": {
+      "provider": "anthropic",
+      "model": "opus",
+      "effort": "high"
+    },
+    "pr": {
+      "provider": "anthropic",
+      "model": "sonnet"
+    },
+    "lessons": {
+      "provider": "anthropic",
+      "model": "sonnet"
+    }
+  }
+}

@@ -47,6 +47,54 @@ describe('scanFile — pattern detection', () => {
     expect(r.matches).toHaveLength(0);
   });
 
+  it('does NOT flag markdown-emphasis negation like "Do **not** call CronCreate"', () => {
+    const fp = write('markdown-negation.md',
+      'Do **not** call CronCreate/CronList to restore crons from config.json.\n');
+    const r = scanFile(fp);
+    expect(r.matches).toHaveLength(0);
+  });
+
+  it('does NOT flag verb-less corrective "NOT config.json / /loop / CronCreate" lines', () => {
+    const fp = write('canonical-not.md',
+      'CANONICAL: crons are daemon-managed via cortextos bus, NOT config.json / /loop / CronCreate.\n');
+    const r = scanFile(fp);
+    expect(r.matches).toHaveLength(0);
+  });
+
+  it('does NOT flag inert/docs-only/not-the-mechanism corrective lines', () => {
+    const fp = write('docs-only.md',
+      'Config.json crons are INERT (docs-only). /loop, CronCreate, and CronList are NOT the mechanism.\n');
+    const r = scanFile(fp);
+    expect(r.matches).toHaveLength(0);
+  });
+
+  it('does NOT flag "no config.json edit needed" corrective lines', () => {
+    const fp = write('no-edit-needed.md',
+      'The daemon persists these in crons.json automatically; no `config.json` edit needed.\n');
+    const r = scanFile(fp);
+    expect(r.matches).toHaveLength(0);
+  });
+
+  it('does NOT flag YAML frontmatter triggers arrays', () => {
+    const fp = write('frontmatter.md', 'triggers: ["cron","loop","schedule"]\n');
+    const r = scanFile(fp);
+    expect(r.matches).toHaveLength(0);
+  });
+
+  it('does NOT flag migration decision-table rows about config.json crons', () => {
+    const fp = write('migration-table.md',
+      '| config.json crons | Selectively | Port user-defined schedules, update paths |\n');
+    const r = scanFile(fp);
+    expect(r.matches).toHaveLength(0);
+  });
+
+  it('does NOT flag quoted task-title examples mentioning config.json + crons', () => {
+    const fp = write('task-example.md',
+      '- Log EACH file edit cluster as its own task (e.g., "Edit frank2 config.json — added 3 crons")\n');
+    const r = scanFile(fp);
+    expect(r.matches).toHaveLength(0);
+  });
+
   it('does NOT flag the one-shot reminder fallback (recurring: false)', () => {
     const fp = write('one-shot.md',
       'For one-time reminders, fall back to the Claude Code built-in CronCreate with recurring: false.\n');

@@ -6,6 +6,7 @@ const mockOpencodePty = {
   spawn: vi.fn().mockResolvedValue(undefined),
   kill: vi.fn(),
   write: vi.fn(),
+  injectMessage: vi.fn().mockResolvedValue(true),
   getPid: vi.fn().mockReturnValue(13579),
   isAlive: vi.fn().mockReturnValue(true),
   onExit: vi.fn().mockImplementation((cb: (exitCode: number, signal?: number) => void) => {
@@ -44,7 +45,21 @@ vi.mock('../../../src/pty/opencode-pty.js', () => ({
 
 vi.mock('../../../src/pty/inject.js', () => ({
   injectMessage: vi.fn(),
-  MessageDedup: class { isDuplicate() { return false; } },
+  MessageDedup: class {
+    private seen = new Set<string>();
+
+    isDuplicate(content: string) {
+      if (this.seen.has(content)) {
+        return true;
+      }
+      this.seen.add(content);
+      return false;
+    }
+
+    remove(content: string) {
+      this.seen.delete(content);
+    }
+  },
 }));
 
 vi.mock('../../../src/utils/atomic.js', () => ({
@@ -105,6 +120,8 @@ beforeEach(() => {
     pty.spawn.mockClear();
     pty.kill.mockClear();
     pty.write.mockClear();
+    pty.injectMessage.mockClear();
+    pty.injectMessage.mockResolvedValue(true);
     pty.getPid.mockClear();
     pty.isAlive.mockReset().mockReturnValue(true);
     pty.onExit.mockClear();
@@ -278,4 +295,16 @@ describe('AgentProcess opencode runtime', () => {
     capturedOnExit!(0, 0);
     await stopPromise;
   }, 10000);
+
+  it('rolls back dedup when opencode injection fails so the same content can retry', async () => {
+    const ap = new AgentProcess('opencode-agent', mockEnv, { runtime: 'opencode' });
+    await ap.start();
+
+    mockOpencodePty.injectMessage.mockResolvedValueOnce(false);
+    await expect(ap.injectMessage('retry-me')).resolves.toBe(false);
+
+    mockOpencodePty.injectMessage.mockResolvedValueOnce(true);
+    await expect(ap.injectMessage('retry-me')).resolves.toBe(true);
+    expect(mockOpencodePty.injectMessage).toHaveBeenCalledTimes(2);
+  });
 });

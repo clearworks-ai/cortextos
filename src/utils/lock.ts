@@ -34,8 +34,15 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
-function lockAgeMs(lockDir: string): number {
-  return Date.now() - statSync(lockDir).mtimeMs;
+function lockAgeMs(lockDir: string): number | null {
+  try {
+    return Date.now() - statSync(lockDir).mtimeMs;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null;
+    }
+    throw err;
+  }
 }
 
 function readObservedOwner(pidFile: string): ObservedOwner {
@@ -158,6 +165,11 @@ export function acquireLock(dir: string): boolean {
     // 12).  When the PID file is missing, the holder is mid-acquire; the
     // caller should retry.
     const ageMs = lockAgeMs(lockDir);
+    if (ageMs === null) {
+      // The holder released .lock.d between mkdir contention and our probe.
+      // Treat that as a normal retry window, not as a hard failure.
+      return false;
+    }
     const owner = readObservedOwner(pidFile);
 
     if (owner.kind === 'live') {

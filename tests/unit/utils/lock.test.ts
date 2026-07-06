@@ -8,7 +8,7 @@ import {
   utimesSync,
   writeFileSync,
 } from 'fs';
-import { fork, spawn, type ChildProcess } from 'child_process';
+import { fork, spawn, spawnSync, type ChildProcess } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
@@ -113,6 +113,52 @@ process.on('message', (message) => {
 });
 
 send({ type: 'ready', pid: process.pid });
+`;
+
+const STAT_ENOENT_HELPER_SCRIPT = String.raw`
+const Module = require('module');
+const originalLoad = Module._load;
+let threwEnoent = false;
+
+Module._load = function(request, parent, isMain) {
+  if (request === 'fs') {
+    const actualFs = originalLoad.call(this, request, parent, isMain);
+    return {
+      ...actualFs,
+      statSync(...args) {
+        if (!threwEnoent) {
+          threwEnoent = true;
+          const err = new Error('lock vanished');
+          err.code = 'ENOENT';
+          throw err;
+        }
+        return actualFs.statSync(...args);
+      },
+    };
+  }
+  return originalLoad.call(this, request, parent, isMain);
+};
+
+require(process.env.TSX_CJS_PATH);
+
+const { mkdirSync, writeFileSync } = require('fs');
+const { join } = require('path');
+const { acquireLock } = require(process.env.LOCK_MODULE_PATH);
+
+const dir = process.argv[2];
+const lockDir = join(dir, '.lock.d');
+mkdirSync(lockDir, { recursive: true });
+writeFileSync(join(lockDir, 'pid'), String(process.pid));
+
+try {
+  const result = acquireLock(dir);
+  process.stdout.write(JSON.stringify({ result }));
+  process.exit(0);
+} catch (error) {
+  const message = error instanceof Error ? error.stack ?? error.message : String(error);
+  process.stderr.write(message);
+  process.exit(2);
+}
 `;
 
 const SLEEP_VIEW = new Int32Array(new SharedArrayBuffer(4));
@@ -282,12 +328,15 @@ class LockWorker {
 
 let testDir: string;
 let helperPath: string;
+let statEnoentHelperPath: string;
 let activeWorkers: LockWorker[] = [];
 
 beforeEach(() => {
   testDir = mkdtempSync(join(tmpdir(), 'cortextos-lock-test-'));
   helperPath = join(testDir, 'lock-worker.cjs');
+  statEnoentHelperPath = join(testDir, 'lock-stat-enoent.cjs');
   writeFileSync(helperPath, HELPER_SCRIPT);
+  writeFileSync(statEnoentHelperPath, STAT_ENOENT_HELPER_SCRIPT);
 });
 
 afterEach(async () => {
@@ -433,6 +482,22 @@ describe('mkdir-based locking', () => {
     mkdirSync(freshDir, { recursive: true });
     seedMissingPidLock(freshDir, 0);
     expect(acquireLock(freshDir)).toBe(false);
+  });
+
+  it('retries instead of throwing when lockDir disappears before statSync', () => {
+    const result = spawnSync(
+      process.execPath,
+      [statEnoentHelperPath, testDir],
+      {
+        cwd: REPO_ROOT,
+        env: { ...process.env, LOCK_MODULE_PATH, TSX_CJS_PATH },
+        encoding: 'utf8',
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(result.stdout.trim()).toBe(JSON.stringify({ result: false }));
   });
 
   it('does not let a non-owner release a live foreign-owned lock', async () => {

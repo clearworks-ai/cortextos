@@ -62,13 +62,15 @@ describe('bus list-tasks classification flags', () => {
 
   it('prefixes text rows with the computed class tag', async () => {
     const paths = makePaths('paul');
-    createTask(paths, 'paul', 'acme', 'Build row');
+    createTask(paths, 'paul', 'acme', 'Build row', { project: 'bus-programmatic-ssot' });
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
     await busCommand.parseAsync(['node', 'bus', 'list-tasks']);
 
     expect(logSpy.mock.calls.some(([msg]) => typeof msg === 'string' && msg.includes('[build]'))).toBe(true);
+    expect(logSpy.mock.calls.some(([msg]) => typeof msg === 'string' && msg.includes('bus-programmatic'))).toBe(true);
+    expect(logSpy.mock.calls.some(([msg]) => typeof msg === 'string' && msg.includes('paul'))).toBe(true);
   });
 
   it('supports --real-build and adds a computed class field in json output', async () => {
@@ -86,5 +88,21 @@ describe('bus list-tasks classification flags', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].title).toBe('Build row');
     expect(rows[0].class).toBe('build');
+  });
+
+  it('groups text output by project when --by-project is set', async () => {
+    const paths = makePaths('paul');
+    createTask(paths, 'paul', 'acme', 'Build row', { project: 'bus-programmatic-ssot' });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await busCommand.parseAsync(['node', 'bus', 'list-tasks', '--real-build', '--by-project']);
+
+    expect(
+      logSpy.mock.calls.some(
+        ([msg]) => typeof msg === 'string' && msg.includes('▸ bus-programmatic-ssot (1)'),
+      ),
+    ).toBe(true);
+    expect(logSpy.mock.calls.some(([msg]) => typeof msg === 'string' && msg.includes('Build row'))).toBe(true);
   });
 });

@@ -5,7 +5,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { sendMessage, checkInbox, ackInbox } from '../bus/message.js';
 import { validateAgentName, validateTaskId } from '../utils/validate.js';
-import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, checkStaleTasks, archiveTasks, checkHumanTasks } from '../bus/task.js';
+import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, checkStaleTasks, archiveTasks, checkHumanTasks, classifyTask } from '../bus/task.js';
 import { saveOutput } from '../bus/save-output.js';
 import { logEvent } from '../bus/event.js';
 import { updateHeartbeat, readAllHeartbeats } from '../bus/heartbeat.js';
@@ -40,6 +40,7 @@ import { recordVerificationReceipt, emitClaimWithoutReceiptWarning, evaluateClai
 import { evaluateCiAlert, gatherCiAlertContext } from '../utils/ci-alert-gate.js';
 import { checkAndRecordSourceEvent, isValidSourceKey } from '../utils/event-dedup.js';
 import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext, CronDefinition, ConversationBufferEntry } from '../types/index.js';
+import type { TaskClass } from '../bus/task.js';
 import { fleetReconcileCommand } from './bus-reconcile.js';
 import { activityLedgerCommand } from './bus-activity-ledger.js';
 
@@ -435,19 +436,29 @@ busCommand
   .command('list-tasks')
   .option('--agent <name>', 'Filter by agent')
   .option('--status <s>', 'Filter by status')
+  .option('--class <c>', 'Filter by class: system | human | build')
+  .option('--real-build', 'Only real build work (excludes system + human)')
+  .option('--by-project', 'Group text output by project name')
   .option('--format <fmt>', 'Output format: json or text', 'text')
   .option('--respect-deps', 'Sort DAG-aware: unblocked tasks first, blocked tasks last')
-  .action((opts: { agent?: string; status?: string; format?: string; respectDeps?: boolean }) => {
+  .action((opts: { agent?: string; status?: string; class?: string; realBuild?: boolean; byProject?: boolean; format?: string; respectDeps?: boolean }) => {
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    const requestedClass = (opts.realBuild ? 'build' : opts.class) as TaskClass | undefined;
+    if (requestedClass && !['system', 'human', 'build'].includes(requestedClass)) {
+      console.error(`Invalid class '${requestedClass}'. Must be one of: system, human, build`);
+      process.exit(1);
+    }
     const tasks = listTasks(paths, {
       agent: opts.agent,
       status: opts.status as TaskStatus,
+      class: requestedClass,
       respectDeps: opts.respectDeps ?? false,
     });
+    const decoratedTasks = tasks.map(task => ({ ...task, class: classifyTask(task) }));
 
     if (opts.format === 'json') {
-      console.log(JSON.stringify(tasks, null, 2));
+      console.log(JSON.stringify(decoratedTasks, null, 2));
       return;
     }
 
@@ -459,21 +470,48 @@ busCommand
 
     const PRIORITY_ICON: Record<string, string> = { urgent: '🔴', high: '🟠', normal: '🔵', low: '⚪' };
     const STATUS_ICON: Record<string, string> = { pending: '○', in_progress: '●', waiting: '⏸', blocked: '◑', completed: '✓', done: '✓', cancelled: '✗' };
-
-    console.log(`\n  Tasks (${tasks.length})\n`);
-    const header = '  Status  Pri  ID                        Assignee         Title';
+    const header = '  Class     Status  Pri  Project          From             Assignee         Title';
     const separator = '  ' + '-'.repeat(header.length - 2);
-    console.log(header);
-    console.log(separator);
-
-    for (const t of tasks) {
+    const renderRow = (t: Task & { class: TaskClass }): string => {
+      const taskClass = `[${t.class}]`.padEnd(10);
       const statusIcon = (STATUS_ICON[t.status] || '?').padEnd(8);
       const priIcon = (PRIORITY_ICON[t.priority] || '·').padEnd(5);
-      const id = t.id.padEnd(28);
+      const project = (t.project || '-').substring(0, 16).padEnd(17);
+      const createdBy = (t.created_by || '-').substring(0, 16).padEnd(17);
       const assignee = (t.assigned_to || '-').substring(0, 16).padEnd(17);
       const title = t.title.substring(0, 50);
-      console.log(`  ${statusIcon}${priIcon}${id}${assignee}${title}`);
+      return `  ${taskClass}${statusIcon}${priIcon}${project}${createdBy}${assignee}${title}`;
+    };
+
+    console.log(`\n  Tasks (${tasks.length})\n`);
+    if (opts.byProject) {
+      const groups = new Map<string, Array<Task & { class: TaskClass }>>();
+      for (const task of decoratedTasks) {
+        const key = task.project || '';
+        const bucket = groups.get(key);
+        if (bucket) bucket.push(task);
+        else groups.set(key, [task]);
+      }
+      const sortedProjects = [...groups.keys()].sort((a, b) => {
+        if (a === '') return 1;
+        if (b === '') return -1;
+        return a.localeCompare(b);
+      });
+      for (const projectName of sortedProjects) {
+        const groupedTasks = groups.get(projectName) ?? [];
+        const label = projectName || '(unassigned)';
+        console.log(`  ▸ ${label} (${groupedTasks.length})`);
+        console.log(header);
+        console.log(separator);
+        for (const task of groupedTasks) console.log(renderRow(task));
+        console.log('');
+      }
+      return;
     }
+
+    console.log(header);
+    console.log(separator);
+    for (const t of decoratedTasks) console.log(renderRow(t));
     console.log('');
   });
 

@@ -131,9 +131,10 @@ export function createTask(
   const rand = randomDigits(8);
   const taskId = `task_${epoch}_${rand}`;
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-  const project = requestedProject === '' && SYSTEM_TASK_CREATOR_RE.test(agentName)
-    ? 'system'
-    : requestedProject;
+  let project = requestedProject;
+  if (requestedProject === '') {
+    project = SYSTEM_TASK_CREATOR_RE.test(agentName) ? 'system' : agentName;
+  }
 
   const task: Task = {
     id: taskId,

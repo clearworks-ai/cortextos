@@ -8,6 +8,14 @@ import { validatePriority, validateTaskId } from '../utils/validate.js';
 import { logEvent } from './event.js';
 
 export type TaskClass = 'system' | 'human' | 'build';
+export interface EnsureEpicTaskResult {
+  id: string;
+  created: boolean;
+}
+
+export interface CloseEpicResult {
+  closed: number;
+}
 
 const SYSTEM_TASK_CREATOR_RE = /^(transcript-scanner|comms-check|session-save|heartbeat)-/;
 const HUMAN_TITLE_RE = /^(\[HUMAN\]|Josh:|Decide:)/i;
@@ -32,6 +40,55 @@ export function classifyTask(task: Task): TaskClass {
     return 'human';
   }
   return 'build';
+}
+
+export function ensureEpicTask(
+  paths: BusPaths,
+  agentName: string,
+  org: string,
+  slug: string,
+  opts: {
+    assignee?: string;
+    priority?: Priority;
+    description?: string;
+  } = {},
+): EnsureEpicTaskResult {
+  const existing = listTasks(paths).find(task =>
+    task.project === slug
+    && task.status !== 'completed'
+    && task.status !== 'cancelled',
+  );
+  if (existing) {
+    return { id: existing.id, created: false };
+  }
+  const id = createTask(paths, agentName, org, `Epic: ${slug}`, {
+    assignee: opts.assignee ?? agentName,
+    priority: opts.priority ?? 'normal',
+    description: opts.description ?? '',
+    project: slug,
+  });
+  return { id, created: true };
+}
+
+export function closeEpic(
+  paths: BusPaths,
+  slug: string,
+  opts: {
+    result?: string;
+    dryRun?: boolean;
+  } = {},
+): CloseEpicResult {
+  const openStatuses: TaskStatus[] = ['pending', 'in_progress', 'blocked', 'waiting'];
+  const openTasks = listTasks(paths).filter(task =>
+    task.project === slug && openStatuses.includes(task.status),
+  );
+  if (opts.dryRun) {
+    return { closed: openTasks.length };
+  }
+  for (const task of openTasks) {
+    completeTask(paths, task.id, opts.result ?? 'epic closed (slug landed)');
+  }
+  return { closed: openTasks.length };
 }
 
 /**

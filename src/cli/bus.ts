@@ -5,7 +5,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { sendMessage, checkInbox, ackInbox } from '../bus/message.js';
 import { validateAgentName, validateTaskId } from '../utils/validate.js';
-import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, checkStaleTasks, archiveTasks, checkHumanTasks, classifyTask } from '../bus/task.js';
+import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, checkStaleTasks, archiveTasks, checkHumanTasks, classifyTask, ensureEpicTask, closeEpic } from '../bus/task.js';
 import { saveOutput } from '../bus/save-output.js';
 import { logEvent } from '../bus/event.js';
 import { updateHeartbeat, readAllHeartbeats } from '../bus/heartbeat.js';
@@ -252,6 +252,23 @@ busCommand
   });
 
 busCommand
+  .command('ensure-epic-task')
+  .argument('<slug>', 'Epic slug / project key')
+  .option('--assignee <agent>', 'Assigned agent for the epic anchor task')
+  .option('--priority <p>', 'Priority (urgent, high, normal, low)', 'normal')
+  .option('--desc <description>', 'Epic task description')
+  .action((slug: string, opts: { assignee?: string; priority?: string; desc?: string }) => {
+    const env = resolveEnv();
+    const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    const result = ensureEpicTask(paths, env.agentName, env.org, slug, {
+      assignee: opts.assignee,
+      priority: opts.priority as Priority | undefined,
+      description: opts.desc,
+    });
+    console.log(result.id);
+  });
+
+busCommand
   .command('update-task')
   .argument('<id>', 'Task ID')
   .argument('<status>', 'New status (pending, in_progress, completed, blocked, cancelled, waiting)')
@@ -388,6 +405,21 @@ busCommand
 
     completeTask(paths, id, effectiveResult);
     console.log(`Completed ${id}`);
+  });
+
+busCommand
+  .command('close-epic')
+  .argument('<slug>', 'Epic slug / project key')
+  .option('--result <text>', 'Completion result text', 'epic closed (slug landed)')
+  .option('--dry-run', 'Report what would close without mutating anything')
+  .action((slug: string, opts: { result?: string; dryRun?: boolean }) => {
+    const env = resolveEnv();
+    const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    const result = closeEpic(paths, slug, {
+      result: opts.result,
+      dryRun: opts.dryRun ?? false,
+    });
+    console.log(result.closed);
   });
 
 busCommand

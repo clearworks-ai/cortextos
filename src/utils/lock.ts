@@ -77,16 +77,42 @@ function matchesExpectedOwner(observed: ObservedOwner, expected: Exclude<Observe
   return observed.kind === 'dead' && observed.pid === expected.pid;
 }
 
-function restoreClaim(lockDir: string, claimPath: string): boolean {
+function restoreClaim(lockDir: string, pidFile: string, claimPath: string): boolean {
   try {
     renameSync(claimPath, lockDir);
     return false;
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT' || code === 'EEXIST') {
+    if (code === 'ENOENT') {
       return false;
     }
-    throw err;
+    if (code !== 'EEXIST' && code !== 'ENOTEMPTY') {
+      throw err;
+    }
+  }
+
+  const claimPidFile = join(claimPath, 'pid');
+  let owner: string;
+  try {
+    owner = readFileSync(claimPidFile, 'utf-8');
+  } catch {
+    return false;
+  }
+
+  while (true) {
+    try {
+      writeFileSync(pidFile, owner, { flag: 'wx' });
+      return false;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') {
+        continue;
+      }
+      if (code === 'EEXIST' || code === 'ENOTEMPTY') {
+        return false;
+      }
+      throw err;
+    }
   }
 }
 
@@ -95,8 +121,80 @@ function stealLock(
   pidFile: string,
   expectedOwner: Exclude<ObservedOwner, { kind: 'live'; pid: number }>,
 ): boolean {
-  const claimPath = join(dirname(lockDir), `.lock.d.claim.${process.pid}.${nextClaimSeq()}`);
+  const currentAge = lockAgeMs(lockDir);
+  if (currentAge === null) {
+    return false;
+  }
+  const currentOwner = readObservedOwner(pidFile);
+  if (!matchesExpectedOwner(currentOwner, expectedOwner)) {
+    return false;
+  }
+  if ((currentOwner.kind === 'missing' || currentOwner.kind === 'corrupt') && currentAge < STALE_PID_GRACE_MS) {
+    return false;
+  }
 
+  if (expectedOwner.kind === 'dead') {
+    const claimPidFile = join(dirname(lockDir), `.lock.pid.claim.${process.pid}.${nextClaimSeq()}`);
+    try {
+      renameSync(pidFile, claimPidFile);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') {
+        return false;
+      }
+      throw err;
+    }
+
+    try {
+      const claimedOwner = readObservedOwner(claimPidFile);
+      if (!matchesExpectedOwner(claimedOwner, expectedOwner)) {
+        let owner: string;
+        try {
+          owner = readFileSync(claimPidFile, 'utf-8');
+        } catch {
+          return false;
+        }
+
+        while (true) {
+          try {
+            writeFileSync(pidFile, owner, { flag: 'wx' });
+            return false;
+          } catch (err) {
+            const code = (err as NodeJS.ErrnoException).code;
+            if (code === 'ENOENT') {
+              continue;
+            }
+            if (code === 'EEXIST' || code === 'ENOTEMPTY') {
+              return false;
+            }
+            throw err;
+          }
+        }
+      }
+
+      writeFileSync(claimPidFile, String(process.pid));
+
+      while (true) {
+        try {
+          writeFileSync(pidFile, String(process.pid), { flag: 'wx' });
+          return true;
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException).code;
+          if (code === 'ENOENT') {
+            continue;
+          }
+          if (code === 'EEXIST' || code === 'ENOTEMPTY') {
+            return false;
+          }
+          throw err;
+        }
+      }
+    } finally {
+      try { rmSync(claimPidFile, { force: true }); } catch { /* ignore */ }
+    }
+  }
+
+  const claimPath = join(dirname(lockDir), `.lock.d.claim.${process.pid}.${nextClaimSeq()}`);
   try {
     renameSync(lockDir, claimPath);
   } catch (err) {
@@ -108,28 +206,47 @@ function stealLock(
   }
 
   try {
-    const claimedOwner = readObservedOwner(join(claimPath, 'pid'));
+    const claimPidFile = join(claimPath, 'pid');
+    const claimedOwner = readObservedOwner(claimPidFile);
     if (!matchesExpectedOwner(claimedOwner, expectedOwner)) {
-      return restoreClaim(lockDir, claimPath);
+      return restoreClaim(lockDir, pidFile, claimPath);
     }
 
-    rmSync(claimPath, { recursive: true, force: true });
+    if (claimedOwner.kind === 'missing' || claimedOwner.kind === 'corrupt') {
+      const claimAge = lockAgeMs(claimPath);
+      if (claimAge === null || claimAge < STALE_PID_GRACE_MS) {
+        return restoreClaim(lockDir, pidFile, claimPath);
+      }
+    }
+
+    writeFileSync(claimPidFile, String(process.pid));
+
     try {
       mkdirSync(lockDir);
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'EEXIST' || code === 'ENOTEMPTY') {
         return false;
       }
       throw err;
     }
 
-    try {
-      writeFileSync(pidFile, String(process.pid));
-    } catch (err) {
-      try { rmSync(lockDir, { recursive: true, force: true }); } catch { /* ignore */ }
-      throw err;
+    while (true) {
+      try {
+        writeFileSync(pidFile, String(process.pid), { flag: 'wx' });
+        return true;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT') {
+          continue;
+        }
+        try { rmSync(lockDir, { recursive: true, force: true }); } catch { /* ignore */ }
+        if (code === 'EEXIST' || code === 'ENOTEMPTY') {
+          return false;
+        }
+        throw err;
+      }
     }
-    return true;
   } finally {
     try { rmSync(claimPath, { recursive: true, force: true }); } catch { /* ignore */ }
   }

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, findTaskFile, archiveTasks, classifyTask } from '../../../src/bus/task';
+import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, findTaskFile, archiveTasks, classifyTask, ensureEpicTask, closeEpic } from '../../../src/bus/task';
 import type { BusPaths } from '../../../src/types';
 
 describe('Task Management', () => {
@@ -282,6 +282,66 @@ describe('Task Management', () => {
       expect(classifyTask({ ...baseTask, assigned_to: 'human' })).toBe('human');
       expect(classifyTask({ ...baseTask, title: 'Josh: send token' })).toBe('human');
       expect(classifyTask(baseTask)).toBe('build');
+    });
+  });
+
+  describe('epic task hooks', () => {
+    it('ensureEpicTask creates exactly one epic and is idempotent on re-run', () => {
+      const first = ensureEpicTask(paths, 'paul', 'acme', 'alpha');
+      const second = ensureEpicTask(paths, 'paul', 'acme', 'alpha');
+
+      expect(first.created).toBe(true);
+      expect(second.created).toBe(false);
+      expect(second.id).toBe(first.id);
+      expect(listTasks(paths)).toHaveLength(1);
+    });
+
+    it('ensureEpicTask epic classifies as build', () => {
+      const epic = ensureEpicTask(paths, 'paul', 'acme', 'alpha');
+      const task = listTasks(paths).find(t => t.id === epic.id);
+      expect(task).toBeTruthy();
+      expect(classifyTask(task!)).toBe('build');
+    });
+
+    it('ensureEpicTask ignores completed or cancelled same-slug tasks and opens a fresh epic', () => {
+      const completedEpic = ensureEpicTask(paths, 'paul', 'acme', 'alpha');
+      completeTask(paths, completedEpic.id, 'done');
+      const reopened = ensureEpicTask(paths, 'paul', 'acme', 'alpha');
+      expect(reopened.created).toBe(true);
+      expect(reopened.id).not.toBe(completedEpic.id);
+
+      const cancelledEpic = ensureEpicTask(paths, 'paul', 'acme', 'beta');
+      cancelTask(paths, cancelledEpic.id, 'stop');
+      const reopenedCancelled = ensureEpicTask(paths, 'paul', 'acme', 'beta');
+      expect(reopenedCancelled.created).toBe(true);
+      expect(reopenedCancelled.id).not.toBe(cancelledEpic.id);
+    });
+
+    it('closeEpic completes all open children and is idempotent on re-run', () => {
+      const one = createTask(paths, 'paul', 'acme', 'One', { project: 'alpha' });
+      createTask(paths, 'paul', 'acme', 'Two', { project: 'alpha' });
+      createTask(paths, 'paul', 'acme', 'Other', { project: 'beta' });
+      updateTask(paths, one, 'in_progress');
+
+      const first = closeEpic(paths, 'alpha');
+      const second = closeEpic(paths, 'alpha');
+
+      expect(first.closed).toBe(2);
+      expect(second.closed).toBe(0);
+      const alphaTasks = listTasks(paths, { status: 'completed' }).filter(t => t.project === 'alpha');
+      expect(alphaTasks).toHaveLength(2);
+    });
+
+    it('closeEpic dry-run mutates nothing', () => {
+      createTask(paths, 'paul', 'acme', 'One', { project: 'alpha' });
+      createTask(paths, 'paul', 'acme', 'Two', { project: 'alpha' });
+
+      const result = closeEpic(paths, 'alpha', { dryRun: true });
+
+      expect(result.closed).toBe(2);
+      const alphaTasks = listTasks(paths).filter(t => t.project === 'alpha');
+      expect(alphaTasks).toHaveLength(2);
+      expect(alphaTasks.every(t => t.status === 'pending')).toBe(true);
     });
   });
 });

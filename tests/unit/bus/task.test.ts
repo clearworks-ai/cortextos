@@ -96,6 +96,17 @@ describe('Task Management', () => {
       const content = JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8'));
       expect(content.project).toBe('system');
     });
+
+    it('creates someday tasks without changing their derived class', () => {
+      const taskId = createTask(paths, 'larry', 'acme', 'Wave 4 backlog', {
+        project: 'roadmap',
+        someday: true,
+      });
+
+      const content = JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8'));
+      expect(content.status).toBe('someday');
+      expect(classifyTask(content)).toBe('build');
+    });
   });
 
   describe('updateTask', () => {
@@ -118,6 +129,23 @@ describe('Task Management', () => {
       expect(waiting).toHaveLength(1);
       expect(waiting[0].id).toBe(taskId);
       expect(waiting[0].status).toBe('waiting');
+    });
+
+    it('transitions to someday and records the audit trail', () => {
+      const taskId = createTask(paths, 'paul', 'acme', 'Backlog task');
+
+      updateTask(paths, taskId, 'someday');
+
+      const content = JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8'));
+      expect(content.status).toBe('someday');
+
+      const log = readTaskAudit(paths, taskId);
+      expect(log.map(entry => entry.event)).toEqual(['create', 'update']);
+      expect(log[1]).toMatchObject({
+        agent: 'paul',
+        from: 'pending',
+        to: 'someday',
+      });
     });
   });
 
@@ -342,6 +370,18 @@ describe('Task Management', () => {
       const alphaTasks = listTasks(paths).filter(t => t.project === 'alpha');
       expect(alphaTasks).toHaveLength(2);
       expect(alphaTasks.every(t => t.status === 'pending')).toBe(true);
+    });
+
+    it('closeEpic excludes someday tasks from its open count', () => {
+      createTask(paths, 'paul', 'acme', 'Active child', { project: 'alpha' });
+      createTask(paths, 'paul', 'acme', 'Backlog child', {
+        project: 'alpha',
+        someday: true,
+      });
+
+      const result = closeEpic(paths, 'alpha', { dryRun: true });
+
+      expect(result.closed).toBe(1);
     });
   });
 });

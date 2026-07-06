@@ -10,6 +10,7 @@ import { readCronState } from '../bus/cron-state.js';
 import { AgentProcess } from './agent-process.js';
 import type { TelegramAPI } from '../telegram/api.js';
 import { KEYS } from '../pty/inject.js';
+import { atomicWriteSync } from '../utils/atomic.js';
 import { stripControlChars, sanitizeForPtyInjection, wrapFenceSafe } from '../utils/validate.js';
 import { loadBuffer } from './conversation-buffer.js';
 import { agentHoldsContextHandoffLease, releaseContextHandoffLease, requestContextHandoffLease } from './context-handoff-lease.js';
@@ -784,7 +785,7 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       const [, decision, hexId] = permMatch;
       const hookDecision = decision === 'continue' ? 'deny' : decision;
       const responseFile = join(this.paths.stateDir, `hook-response-${hexId}.json`);
-      writeFileSync(responseFile, JSON.stringify({ decision: hookDecision }) + '\n', 'utf-8');
+      atomicWriteSync(responseFile, JSON.stringify({ decision: hookDecision }), /* keepBak= */ true);
 
       if (this.telegramApi) {
         try { await this.telegramApi.answerCallbackQuery(callbackQueryId, 'Got it'); } catch { /* ignore */ }
@@ -802,7 +803,7 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     if (restartMatch) {
       const [, decision, hexId] = restartMatch;
       const responseFile = join(this.paths.stateDir, `restart-response-${hexId}.json`);
-      writeFileSync(responseFile, JSON.stringify({ decision }) + '\n', 'utf-8');
+      atomicWriteSync(responseFile, JSON.stringify({ decision }), /* keepBak= */ true);
 
       if (this.telegramApi) {
         try { await this.telegramApi.answerCallbackQuery(callbackQueryId, 'Got it'); } catch { /* ignore */ }

@@ -225,10 +225,11 @@ busCommand
   .option('--assignee <agent>', 'Assigned agent')
   .option('--priority <p>', 'Priority (urgent, high, normal, low)', 'normal')
   .option('--project <name>', 'Project name')
+  .option('--someday', 'Create as someday/backlog (status=someday)')
   .option('--needs-approval', 'Require human approval before execution')
   .option('--blocked-by <ids>', 'Comma-separated task IDs that must complete before this task can progress')
   .option('--blocks <ids>', 'Comma-separated task IDs that this new task will block (symmetric reverse edge)')
-  .action((title: string, opts: { desc?: string; assignee?: string; priority: string; project?: string; needsApproval?: boolean; blockedBy?: string; blocks?: string }) => {
+  .action((title: string, opts: { desc?: string; assignee?: string; priority: string; project?: string; someday?: boolean; needsApproval?: boolean; blockedBy?: string; blocks?: string }) => {
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
     const parseList = (raw?: string) => (raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : []);
@@ -237,6 +238,7 @@ busCommand
       assignee: opts.assignee,
       priority: opts.priority as Priority,
       project: opts.project,
+      someday: opts.someday ?? false,
       needsApproval: opts.needsApproval ?? false,
       blockedBy: parseList(opts.blockedBy),
       blocks: parseList(opts.blocks),
@@ -271,9 +273,9 @@ busCommand
 busCommand
   .command('update-task')
   .argument('<id>', 'Task ID')
-  .argument('<status>', 'New status (pending, in_progress, completed, blocked, cancelled, waiting)')
+  .argument('<status>', 'New status (pending, in_progress, completed, blocked, cancelled, waiting, someday)')
   .action((id: string, status: string) => {
-    const validStatuses: TaskStatus[] = ['pending', 'in_progress', 'completed', 'blocked', 'cancelled', 'waiting'];
+    const validStatuses: TaskStatus[] = ['pending', 'in_progress', 'completed', 'blocked', 'cancelled', 'waiting', 'someday'];
     if (!validStatuses.includes(status as TaskStatus)) {
       console.error(`Invalid status '${status}'. Must be one of: ${validStatuses.join(', ')}`);
       process.exit(1);
@@ -470,10 +472,11 @@ busCommand
   .option('--status <s>', 'Filter by status')
   .option('--class <c>', 'Filter by class: system | human | build')
   .option('--real-build', 'Only real build work (excludes system + human)')
+  .option('--someday', 'Show only someday/backlog tasks')
   .option('--by-project', 'Group text output by project name')
   .option('--format <fmt>', 'Output format: json or text', 'text')
   .option('--respect-deps', 'Sort DAG-aware: unblocked tasks first, blocked tasks last')
-  .action((opts: { agent?: string; status?: string; class?: string; realBuild?: boolean; byProject?: boolean; format?: string; respectDeps?: boolean }) => {
+  .action((opts: { agent?: string; status?: string; class?: string; realBuild?: boolean; someday?: boolean; byProject?: boolean; format?: string; respectDeps?: boolean }) => {
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
     const requestedClass = (opts.realBuild ? 'build' : opts.class) as TaskClass | undefined;
@@ -487,7 +490,11 @@ busCommand
       class: requestedClass,
       respectDeps: opts.respectDeps ?? false,
     });
-    const decoratedTasks = tasks.map(task => ({ ...task, class: classifyTask(task) }));
+    const showSomedayOnly = (opts.someday ?? false) || opts.status === 'someday';
+    const visibleTasks = showSomedayOnly
+      ? tasks.filter(task => task.status === 'someday')
+      : tasks.filter(task => task.status !== 'someday');
+    const decoratedTasks = visibleTasks.map(task => ({ ...task, class: classifyTask(task) }));
 
     if (opts.format === 'json') {
       console.log(JSON.stringify(decoratedTasks, null, 2));
@@ -495,13 +502,13 @@ busCommand
     }
 
     // Text table format
-    if (tasks.length === 0) {
+    if (visibleTasks.length === 0) {
       console.log('  No tasks found.');
       return;
     }
 
     const PRIORITY_ICON: Record<string, string> = { urgent: '🔴', high: '🟠', normal: '🔵', low: '⚪' };
-    const STATUS_ICON: Record<string, string> = { pending: '○', in_progress: '●', waiting: '⏸', blocked: '◑', completed: '✓', done: '✓', cancelled: '✗' };
+    const STATUS_ICON: Record<string, string> = { pending: '○', in_progress: '●', waiting: '⏸', blocked: '◑', completed: '✓', done: '✓', cancelled: '✗', someday: '◌' };
     const header = '  Class     Status  Pri  Project          From             Assignee         Title';
     const separator = '  ' + '-'.repeat(header.length - 2);
     const renderRow = (t: Task & { class: TaskClass }): string => {
@@ -515,7 +522,7 @@ busCommand
       return `  ${taskClass}${statusIcon}${priIcon}${project}${createdBy}${assignee}${title}`;
     };
 
-    console.log(`\n  Tasks (${tasks.length})\n`);
+    console.log(`\n  Tasks (${visibleTasks.length})\n`);
     if (opts.byProject) {
       const groups = new Map<string, Array<Task & { class: TaskClass }>>();
       for (const task of decoratedTasks) {

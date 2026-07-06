@@ -104,6 +104,7 @@ export function createTask(
     assignee?: string;
     priority?: Priority;
     project?: string;
+    someday?: boolean;
     needsApproval?: boolean;
     dueDate?: string;
     blockedBy?: string[];
@@ -115,6 +116,7 @@ export function createTask(
     assignee = agentName,
     priority = 'normal',
     project: requestedProject = '',
+    someday = false,
     needsApproval = false,
     dueDate = '',
     blockedBy = [],
@@ -141,7 +143,7 @@ export function createTask(
     description,
     type: 'agent',
     needs_approval: needsApproval,
-    status: 'pending',
+    status: someday ? 'someday' : 'pending',
     assigned_to: assignee,
     created_by: agentName,
     org,
@@ -180,7 +182,7 @@ export function createTask(
     for (const downId of blocks) addSymmetricEdge(paths, downId, 'blocked_by', taskId);
   });
 
-  appendTaskAudit(paths, taskId, { event: 'create', agent: agentName, to: 'pending', note: title });
+  appendTaskAudit(paths, taskId, { event: 'create', agent: agentName, to: task.status, note: title });
 
   return taskId;
 }

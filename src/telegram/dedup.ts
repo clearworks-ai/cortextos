@@ -85,3 +85,20 @@ export function checkAndRecord(
     return { duplicate: false };
   });
 }
+
+export function removeRecord(ctxRoot: string, chatId: string, body: string): void {
+  const ledgerPath = join(ctxRoot, 'state', 'telegram-dedup.json');
+  const lockDir = dedupLockDir(ctxRoot);
+  const key = dedupKey(chatId, body);
+  ensureDir(dirname(ledgerPath));
+  ensureDir(lockDir);
+
+  withFileLockSync(lockDir, () => {
+    const ledger = readLedger(ledgerPath);
+    if (ledger[key] === undefined) {
+      return;
+    }
+    delete ledger[key];
+    atomicWriteSync(ledgerPath, JSON.stringify(ledger, null, 2), /* keepBak= */ true);
+  });
+}

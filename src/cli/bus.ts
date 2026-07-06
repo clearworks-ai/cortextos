@@ -33,7 +33,7 @@ import { withFileLockSync } from '../utils/lock.js';
 import { IPCClient } from '../daemon/ipc-server.js';
 import { TelegramAPI } from '../telegram/api.js';
 import { logOutboundMessage, cacheLastSent } from '../telegram/logging.js';
-import { checkAndRecord } from '../telegram/dedup.js';
+import { checkAndRecord, removeRecord } from '../telegram/dedup.js';
 import { appendToBuffer } from '../daemon/conversation-buffer.js';
 import { findBannedCronPrompts } from '../utils/cron-prompt-validator.js';
 import { recordVerificationReceipt, emitClaimWithoutReceiptWarning, evaluateClaimGate } from '../utils/verification-receipt.js';
@@ -1130,6 +1130,7 @@ busCommand
       process.exit(1);
     }
 
+    let recordedDedup = false;
     const dedupEnabled = opts.dedup !== false && !opts.streaming && !!env.ctxRoot;
     if (dedupEnabled) {
       const parsedWindow = Number(opts.dedupWindow ?? process.env.CTX_TELEGRAM_DEDUP_WINDOW_SEC ?? 21600);
@@ -1148,6 +1149,7 @@ busCommand
         }
         return;
       }
+      recordedDedup = true;
     }
 
     // -----------------------------------------------------------------------
@@ -1208,6 +1210,13 @@ busCommand
           process.stderr.write(
             `[claim-gate] HOLD (${decision.rung}): ${decision.reason}\n`
           );
+          try {
+            if (recordedDedup && env.ctxRoot) {
+              removeRecord(env.ctxRoot, chatId, message);
+            }
+          } catch {
+            // Non-fatal: rollback best-effort only.
+          }
           process.exit(2);
         }
         // For 'warn' decision the post-send emitClaimWithoutReceiptWarning
@@ -1324,6 +1333,13 @@ busCommand
 
       console.log('Message sent');
     } catch (err: any) {
+      try {
+        if (recordedDedup && env.ctxRoot) {
+          removeRecord(env.ctxRoot, chatId, message);
+        }
+      } catch {
+        // Non-fatal: rollback best-effort only.
+      }
       console.error(`Failed to send: ${err.message || err}`);
       process.exit(1);
     }

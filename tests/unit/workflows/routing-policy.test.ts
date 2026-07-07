@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const routingPolicy = require('../../../.claude/workflows/lib/routing-policy.js') as {
@@ -13,6 +14,10 @@ const routingPolicy = require('../../../.claude/workflows/lib/routing-policy.js'
     route: Record<string, unknown>,
   ) => Record<string, unknown>;
   loadRoutingConfig: (configPath: string, options?: Record<string, unknown>) => Record<string, unknown>;
+  resolveReviewStack: (
+    config: Record<string, unknown>,
+    options?: Record<string, unknown>,
+  ) => Record<string, unknown>;
   resolveStageRoute: (
     config: Record<string, unknown>,
     stageName: string,
@@ -122,6 +127,98 @@ describe('routing-policy', () => {
 
     expect(() => routingPolicy.resolveStageRoute(badConfig, 'review')).toThrow(
       'Review stage must stay on provider=anthropic',
+    );
+  });
+
+  it('routes the reconciled stages: research, synthesize, and the implement weight split', () => {
+    const defaults = routingPolicy.ROUTING_CONFIG_DEFAULTS;
+
+    expect(routingPolicy.resolveStageRoute(defaults, 'research')).toMatchObject({
+      provider: 'openrouter',
+      model: 'openrouter/google/gemini-3.5-flash',
+    });
+    expect(routingPolicy.resolveStageRoute(defaults, 'synthesize')).toMatchObject({
+      provider: 'anthropic',
+      model: 'opus',
+      effort: 'high',
+    });
+    expect(routingPolicy.resolveStageRoute(defaults, 'implement_light')).toMatchObject({
+      provider: 'openrouter',
+      model: 'openrouter/deepseek/deepseek-v4-flash',
+    });
+    expect(routingPolicy.resolveStageRoute(defaults, 'implement_heavy')).toMatchObject({
+      provider: 'codex',
+      model: 'gpt-5.5',
+    });
+  });
+
+  it('loads the COMMITTED routing-config.json and resolves the approved design end-to-end', () => {
+    const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
+    const config = routingPolicy.loadRoutingConfig('.claude/workflows/routing-config.json', {
+      cwd: repoRoot,
+    });
+
+    expect(routingPolicy.resolveStageRoute(config, 'research')).toMatchObject({
+      provider: 'openrouter',
+      model: 'openrouter/google/gemini-3.5-flash',
+      feature: 'grounded-search',
+    });
+    expect(routingPolicy.resolveStageRoute(config, 'synthesize')).toMatchObject({
+      provider: 'anthropic',
+      model: 'opus',
+    });
+    expect(routingPolicy.resolveStageRoute(config, 'implement_light')).toMatchObject({
+      provider: 'openrouter',
+      model: 'openrouter/deepseek/deepseek-v4-flash',
+    });
+    expect(routingPolicy.resolveStageRoute(config, 'implement_heavy')).toMatchObject({
+      provider: 'codex',
+      model: 'gpt-5.5',
+    });
+
+    const stack = routingPolicy.resolveReviewStack(config);
+    expect(stack).toMatchObject({
+      runGatesFirst: true,
+      diffScopedOnly: true,
+      maxLoops: 2,
+    });
+    expect(stack.primary).toMatchObject({
+      provider: 'openrouter',
+      model: 'openrouter/google/gemini-3.5-flash',
+    });
+    expect(stack.escalation).toMatchObject({
+      provider: 'anthropic',
+      model: 'opus',
+      effort: 'high',
+    });
+  });
+
+  it('falls the review stack back to the flat Opus route when no inverted stack is configured', () => {
+    const stack = routingPolicy.resolveReviewStack(routingPolicy.CURRENT_BEHAVIOR_ROUTING);
+
+    expect(stack.primary).toBeNull();
+    expect(stack.escalation).toMatchObject({
+      provider: 'anthropic',
+      model: 'opus',
+      effort: 'high',
+    });
+  });
+
+  it('rejects a review escalation pass that leaves Anthropic', () => {
+    const badConfig = {
+      ...routingPolicy.ROUTING_CONFIG_DEFAULTS,
+      stages: {
+        ...routingPolicy.ROUTING_CONFIG_DEFAULTS.stages,
+        review: {
+          provider: 'anthropic',
+          model: 'opus',
+          escalation: { provider: 'openrouter', model: 'openrouter/google/gemini-3.5-flash' },
+        },
+      },
+    };
+
+    expect(() => routingPolicy.resolveStageRoute(badConfig, 'review')).toThrow(
+      'Review escalation pass must stay on provider=anthropic',
     );
   });
 });

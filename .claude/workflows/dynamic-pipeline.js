@@ -1,13 +1,15 @@
 export const meta = {
   name: 'dynamic-pipeline',
-  description: 'Explore (parallel, read-only) -> plan (single, high-reasoning decompose) -> implement (parallel, worktree-isolated) -> merge (deterministic) -> review (single, high-effort, loops back to implement) -> PR',
+  description: 'Research (grounded external search) -> explore (parallel, read-only) -> synthesize (fold findings) -> plan (single, high-reasoning decompose) -> implement (weight-split: light=Opencoder/DeepSeek, heavy=Codex; parallel, worktree-isolated) -> merge (deterministic) -> review (cheap diff-scoped lens first, Opus escalation, loops back to implement) -> PR',
   whenToUse: 'A non-trivial coding task worth decomposing into non-conflicting workstreams and implementing in parallel with a high-effort review gate before opening a PR. Pass the task via args.',
   phases: [
+    { title: 'Research', detail: 'single grounded external-research scan routed via routing-config.json (default: OpenRouter Gemini grounded search)' },
     { title: 'Explore', detail: 'N parallel read-only scans routed via routing-config.json (default: OpenRouter Gemini)' },
+    { title: 'Synthesize', detail: 'fold research + explore findings into one brief before planning (default: Opus high)' },
     { title: 'Plan', detail: 'single plan stage with Fable opt-in gate; decline fallback defaults to Opus' },
-    { title: 'Implement', detail: 'one worktree-isolated worker per workstream, in parallel (default: Codex)' },
+    { title: 'Implement', detail: 'one worktree-isolated worker per workstream, in parallel, split by weight (light: OpenRouter DeepSeek; heavy: Codex)' },
     { title: 'Merge', detail: 'deterministic git merge of all workstream branches into one candidate branch (default: Haiku)' },
-    { title: 'Review', detail: 'one high-effort review of the merged diff; always Anthropic Opus', model: 'opus' },
+    { title: 'Review', detail: 'diff-scoped review: cheap primary lens first, Anthropic Opus escalation on flag/gate-fail', model: 'opus' },
     { title: 'PR', detail: 'open a PR from the final candidate branch (default: Sonnet)' },
   ],
 }
@@ -19,7 +21,7 @@ const { existsSync, mkdirSync, rmSync } = await import('node:fs')
 const { join } = await import('node:path')
 
 const { sendWork } = runtimeBridgeModule.default ?? runtimeBridgeModule
-const { buildAnthropicAgentOptions, loadRoutingConfig, resolveStageRoute } =
+const { buildAnthropicAgentOptions, loadRoutingConfig, resolveReviewStack, resolveStageRoute } =
   routingPolicyModule.default ?? routingPolicyModule
 
 // ----------------------------------------------------------------------------
@@ -107,6 +109,38 @@ function prepareImplementWorktree(branch, baseRef) {
 // ----------------------------------------------------------------------------
 // SCHEMAS — force structured output so stages hand clean data to the next stage
 // ----------------------------------------------------------------------------
+const RESEARCH_SCHEMA = {
+  type: 'object',
+  required: ['summary', 'findings'],
+  properties: {
+    summary: { type: 'string', description: 'One-paragraph digest of the external context relevant to the task' },
+    findings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['finding', 'relevance'],
+        properties: {
+          finding: { type: 'string' },
+          relevance: { type: 'string', description: 'Why this matters for the task' },
+          source: { type: 'string', description: 'URL/doc/reference where this came from' },
+        },
+      },
+    },
+    openQuestions: { type: 'array', items: { type: 'string' }, description: 'Unknowns the planner should resolve' },
+  },
+}
+
+const SYNTHESIZE_SCHEMA = {
+  type: 'object',
+  required: ['brief', 'keyFacts'],
+  properties: {
+    brief: { type: 'string', description: 'The folded, de-duplicated context brief the planner should work from' },
+    keyFacts: { type: 'array', items: { type: 'string' }, description: 'Load-bearing facts the plan must respect' },
+    constraints: { type: 'array', items: { type: 'string' }, description: 'Hard constraints/conventions the implementation must follow' },
+    risks: { type: 'array', items: { type: 'string' } },
+  },
+}
+
 const EXPLORE_SCHEMA = {
   type: 'object',
   required: ['summary', 'relevantFiles'],
@@ -145,6 +179,7 @@ const PLAN_SCHEMA = {
           instructions: { type: 'string', description: 'Precise, self-contained build instructions for one agent' },
           files: { type: 'array', items: { type: 'string' }, description: 'Files this workstream owns (must not overlap others)' },
           acceptance: { type: 'string', description: 'How to know this workstream is done' },
+          weight: { type: 'string', enum: ['light', 'heavy'], description: 'light = small mechanical change (cheap implementer); heavy = substantial logic (heavy implementer)' },
         },
       },
     },
@@ -207,7 +242,24 @@ const PR_SCHEMA = {
 }
 
 // ----------------------------------------------------------------------------
-// STAGE 1 — EXPLORE (parallel, read-only). No shared state, no locking.
+// STAGE 1 — RESEARCH (single, external/grounded). Gathers context OUTSIDE the
+// repo (docs, APIs, prior art) before any code is read.
+// ----------------------------------------------------------------------------
+phase('Research')
+const research = await executeStage(
+  'research',
+  `You are the RESEARCHER. READ-ONLY — do not edit anything.\n` +
+  `Use grounded/external search to gather context relevant to this task BEFORE any code is written: ` +
+  `official docs, API contracts, known pitfalls, prior art, version constraints.\n\n` +
+  `TASK:\n${task}\n\n` +
+  `Report only findings that would change how this task is planned or implemented. ` +
+  `Cite a source for each finding when you have one, and list open questions the planner must resolve.`,
+  { label: 'research', phase: 'Research', schema: RESEARCH_SCHEMA },
+)
+log(`Research complete: ${research.findings.length} finding(s)`)
+
+// ----------------------------------------------------------------------------
+// STAGE 2 — EXPLORE (parallel, read-only). No shared state, no locking.
 // ----------------------------------------------------------------------------
 phase('Explore')
 const reports = (await parallel(
@@ -228,18 +280,38 @@ const reports = (await parallel(
 log(`Explore complete: ${reports.length}/${exploreCount} reports`)
 
 // ----------------------------------------------------------------------------
-// STAGE 2 — PLANNING. Decompose into non-conflicting workstreams.
+// STAGE 3 — SYNTHESIZE. Fold research + explore findings into ONE brief so the
+// planner works from a de-duplicated, contradiction-checked context.
+// ----------------------------------------------------------------------------
+phase('Synthesize')
+const synthesis = await executeStage(
+  'synthesize',
+  `You are the SYNTHESIZER. Fold the external research and the ${reports.length} independent explore ` +
+  `reports below into ONE de-duplicated context brief for the planner.\n\n` +
+  `TASK:\n${task}\n\n` +
+  `RESEARCH (JSON):\n${JSON.stringify(research, null, 2)}\n\n` +
+  `EXPLORE REPORTS (JSON):\n${JSON.stringify(reports, null, 2)}\n\n` +
+  `Resolve contradictions between reports explicitly, drop duplicates, and surface the load-bearing ` +
+  `facts, hard constraints/conventions, and risks the plan must respect. Do not plan — only synthesize.`,
+  { label: 'synthesize', phase: 'Synthesize', schema: SYNTHESIZE_SCHEMA },
+)
+log(`Synthesize complete: ${synthesis.keyFacts.length} key fact(s), ${(synthesis.constraints || []).length} constraint(s)`)
+
+// ----------------------------------------------------------------------------
+// STAGE 4 — PLANNING. Decompose into non-conflicting workstreams.
 // ----------------------------------------------------------------------------
 phase('Plan')
 const plan = await executeStage(
   'plan',
-  `You are the PLANNER. Read the ${reports.length} independent explore reports below and produce ONE ` +
+  `You are the PLANNER. Work from the synthesized brief below and produce ONE ` +
   `implementation plan for this task, decomposed into independent workstreams.\n\n` +
   `TASK:\n${task}\n\n` +
-  `EXPLORE REPORTS (JSON):\n${JSON.stringify(reports, null, 2)}\n\n` +
+  `SYNTHESIZED BRIEF (JSON):\n${JSON.stringify(synthesis, null, 2)}\n\n` +
   `HARD REQUIREMENT: workstreams must be file-disjoint — no two workstreams may edit the same file — ` +
   `so they can be implemented in parallel git worktrees without conflicting. ` +
-  `Cap at ${maxWorkstreams} workstreams. Each workstream must be self-contained with precise instructions.`,
+  `Cap at ${maxWorkstreams} workstreams. Each workstream must be self-contained with precise instructions. ` +
+  `Tag each workstream with weight: "light" (small mechanical change) or "heavy" (substantial logic) — ` +
+  `light workstreams route to a cheaper implementer.`,
   { phase: 'Plan', schema: PLAN_SCHEMA },
 )
 
@@ -247,9 +319,14 @@ let workstreams = plan.workstreams.slice(0, maxWorkstreams).map((workstream) => 
 log(`Plan: ${workstreams.length} workstreams — ${workstreams.map((workstream) => workstream.id).join(', ')}`)
 
 // ----------------------------------------------------------------------------
-// STAGES 3-5 — IMPLEMENT -> MERGE -> REVIEW, looping back to IMPLEMENT while
-// the reviewer finds real problems, up to maxReviewLoops.
+// STAGES 5-7 — IMPLEMENT -> MERGE -> REVIEW, looping back to IMPLEMENT while
+// the reviewer finds real problems, up to maxReviewLoops. Implement is split
+// by workstream weight: light -> implement_light (cheap), heavy -> implement_heavy.
 // ----------------------------------------------------------------------------
+function implementStageName(workstream) {
+  return workstream.weight === 'light' ? 'implement_light' : 'implement_heavy'
+}
+
 let review = null
 let lastMerge = null
 
@@ -275,7 +352,7 @@ for (let loop = 1; loop <= maxReviewLoops; loop++) {
         `When done, COMMIT your changes to branch "${branch}" with a clear message, then return the branch name. ` +
         `If you made no changes, return committed:false.`
 
-      const route = stageRoute('implement')
+      const route = stageRoute(implementStageName(workstream))
       if (route.provider === 'anthropic') {
         return agent(
           prompt,
@@ -316,17 +393,50 @@ for (let loop = 1; loop <= maxReviewLoops; loop++) {
   )
   log(`Merge -> ${lastMerge.candidateBranch}; conflicts: ${lastMerge.conflicts.length ? lastMerge.conflicts.join(', ') : 'none'}; build: ${lastMerge.buildPassed ? 'pass' : 'unknown/fail'}`)
 
-  review = await executeStage(
-    'review',
-    `You are the REVIEWER. High-effort review of the merged candidate branch "${candidateBranch}" vs "${baseBranch}".\n` +
+  // INVERTED review stack: deterministic gates first (merge already ran the
+  // build), then the cheap always-on diff-scoped primary lens, and Opus only
+  // as an escalation pass when the gate failed or the primary lens flagged.
+  const reviewStack = resolveReviewStack(routingConfig, { confirmFableUse: () => isFableConfirmed() })
+  const reviewPrompt =
+    `You are the REVIEWER. Diff-scoped review of the merged candidate branch "${candidateBranch}" vs "${baseBranch}".\n` +
     `Repo: ${repoPath}.\n\n` +
     `ORIGINAL TASK:\n${task}\n\n` +
-    `Read the full merged diff (e.g. \`git diff ${baseBranch}...${candidateBranch}\`). ` +
+    `Read ONLY the merged diff (\`git diff ${baseBranch}...${candidateBranch}\`) — do not re-read the rest of the repo. ` +
     `Flag only REAL correctness or design problems — not nits. For each problem, name the workstream id that owns the fix ` +
     `(valid ids: ${workstreams.map((workstream) => workstream.id).join(', ')}) so it can be routed back to Implement. ` +
-    `If there are no real problems, set approved:true.`,
-    { label: 'review', phase: 'Review', schema: REVIEW_SCHEMA },
-  )
+    `If there are no real problems, set approved:true.`
+
+  const gateFailed = reviewStack.runGatesFirst && lastMerge.buildPassed === false
+  let primaryReview = null
+
+  if (!gateFailed && reviewStack.primary && reviewStack.primary.provider !== 'anthropic') {
+    primaryReview = await sendWork({
+      provider: reviewStack.primary.provider,
+      model: reviewStack.primary.model,
+      prompt: reviewPrompt,
+      schema: REVIEW_SCHEMA,
+      effort: reviewStack.primary.effort,
+      cwd: repoPath,
+    })
+    log(`Primary review lens (${reviewStack.primary.model}): ${primaryReview.approved ? 'APPROVED' : `${primaryReview.problems.length} problem(s) flagged`}`)
+  }
+
+  if (primaryReview && primaryReview.approved && primaryReview.problems.length === 0) {
+    review = primaryReview
+  } else {
+    const escalationReason = gateFailed
+      ? `A deterministic gate FAILED: the post-merge build/typecheck did not pass. Attribute the failure to the owning workstream(s).`
+      : primaryReview
+        ? `The primary review lens flagged problems — verify, correct, or extend them:\n${JSON.stringify(primaryReview.problems, null, 2)}`
+        : ''
+    review = await agent(
+      (escalationReason ? `${reviewPrompt}\n\nESCALATION CONTEXT:\n${escalationReason}` : reviewPrompt),
+      buildAnthropicAgentOptions(
+        { label: 'review', phase: 'Review', schema: REVIEW_SCHEMA },
+        reviewStack.escalation,
+      ),
+    )
+  }
 
   if (review.approved || review.problems.length === 0) {
     log(`Review APPROVED on iteration ${loop}`)

@@ -1,14 +1,28 @@
 const { existsSync, readFileSync } = require('node:fs');
 const { isAbsolute, resolve } = require('node:path');
 
-const STAGE_NAMES = ['explore', 'plan', 'implement', 'merge', 'review', 'pr', 'lessons'];
+const STAGE_NAMES = [
+  'research',
+  'explore',
+  'synthesize',
+  'plan',
+  'implement',
+  'implement_light',
+  'implement_heavy',
+  'merge',
+  'review',
+  'pr',
+  'lessons',
+];
 
 const CURRENT_BEHAVIOR_ROUTING = {
   fableGate: {
     fallback: 'opus',
   },
   stages: {
+    research: { provider: 'anthropic', model: 'sonnet' },
     explore: { provider: 'anthropic', model: 'sonnet' },
+    synthesize: { provider: 'anthropic', model: 'opus', effort: 'high' },
     plan: {
       provider: 'anthropic',
       model: 'fable',
@@ -18,6 +32,8 @@ const CURRENT_BEHAVIOR_ROUTING = {
       fallback: 'opus',
     },
     implement: { provider: 'anthropic', model: 'sonnet', effort: 'medium' },
+    implement_light: { provider: 'anthropic', model: 'sonnet', effort: 'medium' },
+    implement_heavy: { provider: 'anthropic', model: 'sonnet', effort: 'medium' },
     merge: { provider: 'anthropic', model: 'sonnet' },
     review: { provider: 'anthropic', model: 'opus', effort: 'high' },
     pr: { provider: 'anthropic', model: 'sonnet' },
@@ -31,7 +47,14 @@ const ROUTING_CONFIG_DEFAULTS = {
     fallback: 'opus',
   },
   stages: {
+    research: {
+      provider: 'openrouter',
+      model: 'openrouter/google/gemini-3.5-flash',
+      worker: 'opencoder',
+      feature: 'grounded-search',
+    },
     explore: { provider: 'openrouter', model: 'openrouter/google/gemini-3.5-flash' },
+    synthesize: { provider: 'anthropic', model: 'opus', effort: 'high' },
     plan: {
       provider: 'anthropic',
       model: 'fable',
@@ -40,7 +63,13 @@ const ROUTING_CONFIG_DEFAULTS = {
       requiresConfirmation: true,
       fallback: 'opus',
     },
-    implement: { provider: 'codex', model: 'gpt-5.4' },
+    implement: { provider: 'codex', model: 'gpt-5.5' },
+    implement_light: {
+      provider: 'openrouter',
+      model: 'openrouter/deepseek/deepseek-v4-flash',
+      worker: 'opencoder',
+    },
+    implement_heavy: { provider: 'codex', model: 'gpt-5.5', worker: 'codexer' },
     merge: { provider: 'anthropic', model: 'haiku' },
     review: { provider: 'anthropic', model: 'opus', effort: 'high' },
     pr: { provider: 'anthropic', model: 'sonnet' },
@@ -113,8 +142,13 @@ function resolveStageRoute(config, stageName, options = {}) {
 
   const route = { ...configured };
 
-  if (stageName === 'review' && route.provider !== 'anthropic') {
-    throw new Error('Review stage must stay on provider=anthropic');
+  if (stageName === 'review') {
+    if (route.provider !== 'anthropic') {
+      throw new Error('Review stage must stay on provider=anthropic');
+    }
+    if (isRecord(route.escalation) && route.escalation.provider !== 'anthropic') {
+      throw new Error('Review escalation pass must stay on provider=anthropic');
+    }
   }
 
   if (route.model === 'fable' && stageName !== 'plan') {
@@ -143,6 +177,22 @@ function resolveStageRoute(config, stageName, options = {}) {
   return route;
 }
 
+function resolveReviewStack(config, options = {}) {
+  const route = resolveStageRoute(config, 'review', options);
+  const primary = isRecord(route.primary) ? { ...route.primary } : null;
+  const escalation = isRecord(route.escalation)
+    ? { ...route.escalation }
+    : { provider: route.provider, model: route.model, effort: route.effort };
+
+  return {
+    runGatesFirst: route.runGatesFirst === true,
+    diffScopedOnly: route.diffScopedOnly === true,
+    primary,
+    escalation,
+    maxLoops: typeof escalation.maxLoops === 'number' ? escalation.maxLoops : 2,
+  };
+}
+
 function buildAnthropicAgentOptions(base, route) {
   const options = {
     ...base,
@@ -162,5 +212,6 @@ module.exports = {
   ROUTING_CONFIG_DEFAULTS,
   buildAnthropicAgentOptions,
   loadRoutingConfig,
+  resolveReviewStack,
   resolveStageRoute,
 };

@@ -1,14 +1,29 @@
 {
-  "$comment": "Per-stage model routing for dynamic-pipeline. provider ∈ anthropic|openrouter|codex. Fable is opt-in at plan only; when not explicitly confirmed, plan falls back to opus.",
+  "$comment": "Per-stage model routing for dynamic-pipeline. provider ∈ anthropic|openrouter|codex. Reconciled to AgenticJames's verified design (reels transcribed 2026-07-05, see larry/PIPELINE.md + larry/memory/reference/agenticjames-reel*.txt). Adds research (Gemini grounded search) + synthesize (Opus) stages; implement is split into implement_light (DeepSeek V4 via Opencoder) + implement_heavy (Codex GPT 5.5). Fable is opt-in at plan only; when not explicitly confirmed, plan falls back to opus. All slugs verified against OpenRouter /models 2026-07-05.",
   "fableGate": {
     "fallback": "opus"
   },
   "stages": {
+    "research": {
+      "$comment": "reel1 step1 — Gemini grounded search via Opencoder. External research stage.",
+      "provider": "openrouter",
+      "model": "openrouter/google/gemini-3.5-flash",
+      "worker": "opencoder",
+      "feature": "grounded-search"
+    },
     "explore": {
+      "$comment": "reel2 — parallel explore agents per domain; pair with Graphify on large repos.",
       "provider": "openrouter",
       "model": "openrouter/google/gemini-3.5-flash"
     },
+    "synthesize": {
+      "$comment": "reel1 step2 — Opus 4.8 folds research/explore docs together before planning.",
+      "provider": "anthropic",
+      "model": "opus",
+      "effort": "high"
+    },
     "plan": {
+      "$comment": "reel1 step3 / reel2 — Fable 5 HIGH, stripped/lean context. Opt-in; falls back to opus.",
       "provider": "anthropic",
       "model": "fable",
       "effort": "high",
@@ -16,18 +31,52 @@
       "requiresConfirmation": true,
       "fallback": "opus"
     },
-    "implement": {
+    "implement_light": {
+      "$comment": "reel1 step4 (light) — cheaper coding impl on DeepSeek V4 via Opencoder.",
+      "provider": "openrouter",
+      "model": "openrouter/deepseek/deepseek-v4-flash",
+      "worker": "opencoder"
+    },
+    "implement_heavy": {
+      "$comment": "reel1 step4 (heavy) — GPT 5.5 in Codex CLI via Codexer; plan split across sessions.",
       "provider": "codex",
-      "model": "gpt-5.4"
+      "model": "gpt-5.5",
+      "worker": "codexer"
+    },
+    "implement": {
+      "$comment": "Legacy alias — weight-unaware callers land on the heavy arm.",
+      "provider": "codex",
+      "model": "gpt-5.5"
     },
     "merge": {
       "provider": "anthropic",
       "model": "haiku"
     },
     "review": {
+      "$comment": "INVERTED review stack (Fable pick 2026-07-05, Josh-approved). Deterministic gates (build/test) run BEFORE any review token; reviewers are ALWAYS diff-scoped. Cheap cross-model lens first (always-on); Opus demoted to a capped, diff-only escalation pass.",
       "provider": "anthropic",
       "model": "opus",
-      "effort": "high"
+      "effort": "high",
+      "diffScopedOnly": true,
+      "runGatesFirst": true,
+      "primary": {
+        "$comment": "First lens — cheap non-Anthropic model, always-on, diff-scoped.",
+        "provider": "openrouter",
+        "model": "openrouter/google/gemini-3.5-flash",
+        "worker": "opencoder",
+        "diffScoped": true,
+        "alwaysOn": true
+      },
+      "escalation": {
+        "$comment": "Second pass — Opus HIGH, diff-only, triggered ONLY when the primary lens flags or a deterministic gate fails. NEVER off-Anthropic.",
+        "provider": "anthropic",
+        "model": "opus",
+        "effort": "high",
+        "diffScoped": true,
+        "triggerOn": ["primaryFlagged", "gateFailed"],
+        "loopToImplement": true,
+        "maxLoops": 2
+      }
     },
     "pr": {
       "provider": "anthropic",

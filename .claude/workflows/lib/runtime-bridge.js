@@ -223,6 +223,23 @@ function runOpenRouter(input, deps) {
   throw new Error(`OpenRouter stage failed (${input.model})`);
 }
 
+function enforceClosedObjects(schema) {
+  if (Array.isArray(schema)) {
+    return schema.map((item) => enforceClosedObjects(item));
+  }
+  if (!isRecord(schema)) {
+    return schema;
+  }
+  const out = {};
+  for (const [key, value] of Object.entries(schema)) {
+    out[key] = enforceClosedObjects(value);
+  }
+  if (out.type === 'object' && !('additionalProperties' in out)) {
+    out.additionalProperties = false;
+  }
+  return out;
+}
+
 function runCodex(input, deps) {
   const run = deps.execFileSync || execFileSync;
   const makeTempDir = deps.mkdtempSync || mkdtempSync;
@@ -237,14 +254,21 @@ function runCodex(input, deps) {
     const outputPath = join(tempDir, 'output.json');
 
     try {
-      writeText(schemaPath, JSON.stringify(input.schema, null, 2), 'utf8');
+      // Codex's --output-schema (Structured Outputs) rejects any object schema
+      // that omits `additionalProperties: false`. Enforce it recursively so
+      // callers don't have to hand-author closed schemas for the heavy arm.
+      writeText(schemaPath, JSON.stringify(enforceClosedObjects(input.schema), null, 2), 'utf8');
       const args = [
         'exec',
         '--skip-git-repo-check',
         '--output-schema', schemaPath,
         '--output-last-message', outputPath,
       ];
-      if (input.model) {
+      // Codex under a ChatGPT-account auth rejects explicit `--model` for the
+      // gpt-5* family (400: "not supported when using Codex with a ChatGPT
+      // account"); only the account default works. Treat the "default" sentinel
+      // (and empty) as "omit --model" so the heavy arm runs on that default.
+      if (input.model && input.model !== 'default' && input.model !== 'codex-default') {
         args.push('--model', input.model);
       }
       if (input.allowWrite) {

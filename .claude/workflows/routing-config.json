@@ -38,15 +38,15 @@
       "worker": "opencoder"
     },
     "implement_heavy": {
-      "$comment": "reel1 step4 (heavy) — GPT 5.5 in Codex CLI via Codexer; plan split across sessions.",
+      "$comment": "reel1 step4 (heavy) — heavy impl in Codex CLI via Codexer. NOTE (2026-07-07 dogfood): `codex exec --model gpt-5.5|gpt-5|gpt-5-codex` all return 400 under this ChatGPT-account auth ('model not supported when using Codex with a ChatGPT account'); only the account default works. Use the 'default' sentinel — runtime-bridge omits --model so the heavy arm runs on the codex account default.",
       "provider": "codex",
-      "model": "gpt-5.5",
+      "model": "default",
       "worker": "codexer"
     },
     "implement": {
-      "$comment": "Legacy alias — weight-unaware callers land on the heavy arm.",
+      "$comment": "Legacy alias — weight-unaware callers land on the heavy arm (codex account default).",
       "provider": "codex",
-      "model": "gpt-5.5"
+      "model": "default"
     },
     "merge": {
       "provider": "anthropic",

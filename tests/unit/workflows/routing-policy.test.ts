@@ -148,7 +148,7 @@ describe('routing-policy', () => {
     });
     expect(routingPolicy.resolveStageRoute(defaults, 'implement_heavy')).toMatchObject({
       provider: 'codex',
-      model: 'gpt-5.5',
+      model: 'default',
     });
   });
 
@@ -173,7 +173,7 @@ describe('routing-policy', () => {
     });
     expect(routingPolicy.resolveStageRoute(config, 'implement_heavy')).toMatchObject({
       provider: 'codex',
-      model: 'gpt-5.5',
+      model: 'default',
     });
 
     const stack = routingPolicy.resolveReviewStack(config);

@@ -478,72 +478,102 @@ export function claimTask(
     );
   }
 
-  let task: Task;
-  try {
-    task = JSON.parse(readFileSync(filePath, 'utf-8')) as Task;
-  } catch (err) {
-    throw new Error(`Task ${taskId} claim failed (unreadable): ${err}`);
-  }
-
   const claimsDir = join(paths.taskDir, '.claims');
+  // Ensure the claims dir exists before attempting to lock it — withFileLockSync
+  // uses a non-recursive mkdirSync(.lock.d) which requires the parent to exist.
   ensureDir(claimsDir);
-  const claimPath = join(claimsDir, `${taskId}.claim`);
-  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 
-  // Idempotency: if this agent already owns the claim, succeed silently.
-  if (existsSync(claimPath)) {
+  // All claim state is read and mutated inside a single file lock so that
+  // concurrent claimers are serialized.  The O_EXCL create is retained as a
+  // belt-and-suspenders inner guard, but the task-status check and the task-JSON
+  // write are now also protected — closing the TOCTOU window where a claimer
+  // could observe task.status='pending' before another writer had flipped it.
+  let resultTask: Task;
+  let auditPrevStatus: TaskStatus | undefined;
+
+  withFileLockSync(claimsDir, () => {
+    // Re-read the task JSON inside the lock so status is never observed before
+    // the lock is held.  Keep the original error message verbatim.
+    let task: Task;
     try {
-      const owner = readFileSync(claimPath, 'utf-8').split('\t')[0];
-      if (owner === agent) {
-        return task;
-      }
-      throw new Error(
-        `Task ${taskId} already claimed by ${owner} (current status=${task.status})`,
-      );
+      task = JSON.parse(readFileSync(filePath, 'utf-8')) as Task;
     } catch (err) {
-      if (err instanceof Error && err.message.startsWith(`Task ${taskId} already claimed`)) throw err;
-      // Unreadable claim file — fall through and try the exclusive write.
+      throw new Error(`Task ${taskId} claim failed (unreadable): ${err}`);
     }
-  }
 
-  if (task.status !== 'pending') {
-    throw new Error(
-      `Task ${taskId} is not pending (status=${task.status}); cannot claim`,
-    );
-  }
+    const claimPath = join(claimsDir, `${taskId}.claim`);
+    const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 
-  // Atomic: O_EXCL fails if the file exists, giving us true mutual
-  // exclusion even under concurrent claims from two agents.
-  try {
-    const fd = openSync(claimPath, 'wx', 0o600);
+    // Idempotency: if this agent already owns the claim, succeed silently.
+    // If another agent owns it, throw the existing error (verbatim string).
+    if (existsSync(claimPath)) {
+      try {
+        const owner = readFileSync(claimPath, 'utf-8').split('\t')[0];
+        if (owner === agent) {
+          resultTask = task;
+          return;
+        }
+        throw new Error(
+          `Task ${taskId} already claimed by ${owner} (current status=${task.status})`,
+        );
+      } catch (err) {
+        if (err instanceof Error && err.message.startsWith(`Task ${taskId} already claimed`)) throw err;
+        // Unreadable claim file — fall through and try the exclusive write.
+      }
+    }
+
+    if (task.status !== 'pending') {
+      throw new Error(
+        `Task ${taskId} is not pending (status=${task.status}); cannot claim`,
+      );
+    }
+
+    // O_EXCL create — belt-and-suspenders inner guard against any cross-process
+    // claimer that races outside the file lock (e.g. a process that doesn't call
+    // withFileLockSync before writing the claim file).
     try {
-      writeSync(fd, `${agent}\t${now}\n`, undefined, 'utf-8');
-    } finally {
-      closeSync(fd);
+      const fd = openSync(claimPath, 'wx', 0o600);
+      try {
+        writeSync(fd, `${agent}\t${now}\n`, undefined, 'utf-8');
+      } finally {
+        closeSync(fd);
+      }
+    } catch (err) {
+      // Someone else won the O_EXCL race — read the winner and surface it.
+      let owner = 'unknown';
+      try { owner = readFileSync(claimPath, 'utf-8').split('\t')[0]; } catch { /* stays 'unknown' */ }
+      if (owner === agent) {
+        resultTask = task;
+        return; // Benign race with self — treat as idempotent success.
+      }
+      throw new Error(`Task ${taskId} already claimed by ${owner}`);
     }
-  } catch (err) {
-    // Someone else won the race — read the winner and surface it.
-    let owner = 'unknown';
-    try { owner = readFileSync(claimPath, 'utf-8').split('\t')[0]; } catch { /* stays 'unknown' */ }
-    if (owner === agent) return task; // Benign race with self — treat as idempotent success.
-    throw new Error(`Task ${taskId} already claimed by ${owner}`);
-  }
 
-  // Lock held — safe to mutate the task JSON.
-  const prevStatus = task.status;
-  task.status = 'in_progress';
-  task.assigned_to = agent;
-  task.updated_at = now;
-  try {
-    atomicWriteSync(filePath, JSON.stringify(task));
-  } catch (err) {
-    // Roll back the claim so a retry can succeed; we never want a ghost
-    // lock surviving a write failure on the task JSON itself.
-    try { unlinkSync(claimPath); } catch { /* best-effort */ }
-    throw new Error(`Task ${taskId} claim commit failed: ${err}`);
+    // Mutate the task JSON atomically.  On failure, roll back the claim file
+    // so a subsequent retry can succeed.
+    const prevStatus = task.status;
+    task.status = 'in_progress';
+    task.assigned_to = agent;
+    task.updated_at = now;
+    try {
+      atomicWriteSync(filePath, JSON.stringify(task), /* keepBak= */ true);
+    } catch (err) {
+      // Roll back the claim so a retry can succeed; we never want a ghost
+      // lock surviving a write failure on the task JSON itself.
+      try { unlinkSync(claimPath); } catch { /* best-effort */ }
+      throw new Error(`Task ${taskId} claim commit failed: ${err}`);
+    }
+
+    auditPrevStatus = prevStatus;
+    resultTask = task;
+  });
+
+  // Append the audit entry outside the lock (best-effort; O_APPEND on POSIX
+  // guarantees our ~200 B entry is not interleaved with another agent's entry).
+  if (auditPrevStatus !== undefined) {
+    appendTaskAudit(paths, taskId, { event: 'claim', agent, from: auditPrevStatus, to: 'in_progress' });
   }
-  appendTaskAudit(paths, taskId, { event: 'claim', agent, from: prevStatus, to: 'in_progress' });
-  return task;
+  return resultTask!;
 }
 
 /**

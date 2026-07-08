@@ -670,6 +670,39 @@ describe('claimTask — atomic claim (beads-inspired)', () => {
     expect(() => claimTask(paths, id, 'alice')).toThrow(/not found in any org/);
     expect(existsSync(claimPath)).toBe(false);
   });
+
+  it('concurrent tight-loop race: exactly one agent wins and task JSON is consistent', () => {
+    // Two agents attempt to claim the same pending task in a tight sequential
+    // loop that mimics rapid concurrent callers (same process, same event loop
+    // tick — sufficient because withFileLockSync serializes same-process
+    // callers via acquireLock which uses mkdirSync O_EXCL).
+    const id = createTask(paths, 'sys', 'acme', 'Race prize');
+
+    const results: Array<{ agent: string; error: string | null }> = [];
+    for (const agent of ['alice', 'bob']) {
+      try {
+        claimTask(paths, id, agent);
+        results.push({ agent, error: null });
+      } catch (err) {
+        results.push({ agent, error: (err as Error).message });
+      }
+    }
+
+    // Exactly one winner, exactly one loser.
+    const winners = results.filter(r => r.error === null);
+    const losers  = results.filter(r => r.error !== null);
+    expect(winners).toHaveLength(1);
+    expect(losers).toHaveLength(1);
+
+    // Loser must get the 'already claimed by' error (not a spurious crash).
+    expect(losers[0].error).toMatch(/already claimed by/);
+
+    // The task JSON on disk must reflect exactly the winner's assignment.
+    const taskPath = join(paths.taskDir, `${id}.json`);
+    const onDisk = JSON.parse(readFileSync(taskPath, 'utf-8'));
+    expect(onDisk.status).toBe('in_progress');
+    expect(onDisk.assigned_to).toBe(winners[0].agent);
+  });
 });
 
 describe('Task audit log (append-only JSONL)', () => {

@@ -16,6 +16,7 @@ import { collectTelegramCommands, registerTelegramCommands } from '../bus/metric
 import { stripControlChars } from '../utils/validate.js';
 import { processMediaMessage } from '../telegram/media.js';
 import { stripBom } from '../utils/strip-bom.js';
+import { readEnabledAgentsMap } from '../bus/enabled-agents-io.js';
 
 type LogFn = (msg: string) => void;
 
@@ -252,18 +253,20 @@ export class AgentManager {
 
   /**
    * Read the instance-level enabled-agents.json registry.
-   * Returns an empty object if the file is missing or unreadable —
-   * agents not present in the file default to enabled, matching the existing
-   * default-on behavior of `discoverAndStart`.
+   *
+   * ROOT CAUSE OF SAGE-DROP TOCTOU: The old implementation did a bare
+   * existsSync + JSON.parse(readFileSync(...)) with NO lock. If a CLI
+   * `cortextos enable/disable` overlapped daemon boot, the daemon could
+   * read a half-written or empty enabled-agents.json, see sage as absent,
+   * skip it in discoverAndStart AND in bootSelfHeal (which re-read the
+   * same corrupt map), so sage was dropped and never recovered. FIX: route
+   * through readEnabledAgentsMap which acquires the config-dir lock and
+   * uses the .bak fallback, so the daemon only ever observes a fully-
+   * committed map and sage survives a concurrent CLI write.
    */
   private readInstanceEnableList(): Record<string, { enabled?: boolean; org?: string; status?: string }> {
-    const enabledFile = join(this.ctxRoot, 'config', 'enabled-agents.json');
-    if (!existsSync(enabledFile)) return {};
-    try {
-      return JSON.parse(readFileSync(enabledFile, 'utf-8'));
-    } catch {
-      return {}; // corrupt or unreadable — fall through to default-enabled
-    }
+    // Locked read via shared I/O module — closes the sage-drop TOCTOU.
+    return readEnabledAgentsMap(this.ctxRoot);
   }
 
   private isPidAlive(pid: number): boolean {

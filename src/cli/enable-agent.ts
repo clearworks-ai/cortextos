@@ -12,6 +12,7 @@ import {
   validateClaudeWorkingDirectoryPolicy,
 } from '../utils/agent-session-isolation.js';
 import { resolveInstanceId } from './resolve-instance-id.js';
+import { readEnabledAgentsMap, mutateEnabledAgentsMap } from '../bus/enabled-agents-io.js';
 
 /**
  * BUG-035 fix: discover the cortextOS framework root without depending on
@@ -231,33 +232,42 @@ export const enableAgentCommand = new Command('enable')
       console.error('  Continuing enable. Investigate the validator if this recurs.');
     }
 
-    const agents = readEnabledAgents(instanceId);
     if (!agentLocation) {
       console.error(`Error: Could not locate agent directory for "${agent}" under ${projectRoot}.`);
       process.exit(1);
     }
+
+    // ctxRoot needed both for the advisory read and for mutateEnabledAgentsMap.
+    const ctxRoot = join(homedir(), '.cortextos', instanceId);
+
+    // Advisory pre-read for validateClaudeWorkingDirectoryPolicy (not the committed state).
+    // Uses the shared locked reader for consistency with the daemon's read path.
+    const agentsSnapshot = readEnabledAgentsMap(ctxRoot);
+
     const config = readAgentConfigSafe(agentLocation.agentDir);
     const validation = validateClaudeWorkingDirectoryPolicy({
       agentName: agent,
       agentDir: agentLocation.agentDir,
       config,
       projectRoot,
-      enabledAgents: agents,
+      enabledAgents: agentsSnapshot,
       allowExternalCwd: options.allowExternalCwd,
     });
     if (!validation.ok) {
       console.error(`Error: ${validation.error}`);
       process.exit(1);
     }
-    agents[agent] = {
-      enabled: true,
-      status: 'configured',
-      ...(options.org ? { org: options.org } : {}),
-    };
-    writeEnabledAgents(instanceId, agents);
 
-    // Create per-agent state directories
-    const ctxRoot = join(homedir(), '.cortextos', instanceId);
+    // Transactional enable: read + mutate + write in a single lock acquisition.
+    // This closes the TOCTOU window where a concurrent CLI call could interleave
+    // between the read and write, causing one enable to overwrite the other.
+    mutateEnabledAgentsMap(ctxRoot, (agents) => {
+      agents[agent] = {
+        enabled: true,
+        status: 'configured',
+        ...(options.org ? { org: options.org } : {}),
+      };
+    });
     const agentDirs = [
       join(ctxRoot, 'inbox', agent),
       join(ctxRoot, 'inflight', agent),
@@ -291,17 +301,23 @@ export const disableAgentCommand = new Command('disable')
   .description('Disable an agent (stop and deregister)')
   .action(async (agent: string, options: { instance?: string }) => {
     const instanceId = resolveInstanceId(options.instance);
-    const agents = readEnabledAgents(instanceId);
+    const ctxRoot = join(homedir(), '.cortextos', instanceId);
     const projectRoot = discoverProjectRoot();
-    const agentLocation = findAgentDirAndOrg(projectRoot, agent, agents[agent]?.org);
+
+    // Pre-read org for launchDir resolution (advisory, not the committed state).
+    const agentsSnapshot = readEnabledAgentsMap(ctxRoot);
+    const agentLocation = findAgentDirAndOrg(projectRoot, agent, agentsSnapshot[agent]?.org);
     const agentConfig = agentLocation ? readAgentConfigSafe(agentLocation.agentDir) : {};
     const launchDir = agentLocation
       ? normalizeConfiguredWorkingDirectory(agentLocation.agentDir, agentConfig.working_directory)
       : null;
-    if (agents[agent]) {
-      agents[agent].enabled = false;
-    }
-    writeEnabledAgents(instanceId, agents);
+
+    // Transactional disable: read + mutate + write in a single lock acquisition.
+    mutateEnabledAgentsMap(ctxRoot, (agents) => {
+      if (agents[agent]) {
+        agents[agent].enabled = false;
+      }
+    });
 
     // Try to stop via daemon IPC
     const ipc = new IPCClient(instanceId);

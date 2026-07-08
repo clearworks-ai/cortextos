@@ -1,6 +1,6 @@
 import { createServer, Server, Socket } from 'net';
-import { existsSync, unlinkSync, chmodSync, readFileSync } from 'fs';
-import { join, resolve as pathResolve } from 'path';
+import { existsSync, unlinkSync, chmodSync } from 'fs';
+import { resolve as pathResolve } from 'path';
 import type { IPCRequest, IPCResponse, CronSummaryRow, CronDefinition } from '../types/index.js';
 import { AgentManager } from './agent-manager.js';
 import { getIpcPath } from '../utils/paths.js';
@@ -9,6 +9,7 @@ import type { ExecutionLogStatusFilter } from '../bus/crons.js';
 import { nextFireFromCron } from './cron-scheduler.js';
 import { parseDurationMs } from '../bus/cron-state.js';
 import { computeHealth, aggregateFleetHealth } from '../utils/cron-health.js';
+import { readEnabledAgentsMap } from '../bus/enabled-agents-io.js';
 
 const WORKER_NAME_REGEX = /^[a-z0-9_-]+$/;
 
@@ -152,16 +153,10 @@ export function computeNextFire(
  */
 function listAllCrons(): CronSummaryRow[] {
   const ctxRoot = process.env.CTX_ROOT ?? process.cwd();
-  const enabledFile = join(ctxRoot, 'config', 'enabled-agents.json');
 
-  let enabledAgents: Record<string, { enabled?: boolean; org?: string }> = {};
-  if (existsSync(enabledFile)) {
-    try {
-      enabledAgents = JSON.parse(readFileSync(enabledFile, 'utf-8'));
-    } catch {
-      // corrupt — fall through with empty map
-    }
-  }
+  // Serialized locked read via shared I/O module — dashboard/IPC snapshots
+  // cannot observe a torn map written by a concurrent daemon/CLI enable.
+  const enabledAgents = readEnabledAgentsMap(ctxRoot);
 
   const rows: CronSummaryRow[] = [];
   const now = Date.now();
@@ -222,16 +217,10 @@ export function computeFleetHealth(
   }
 
   const ctxRoot = process.env.CTX_ROOT ?? process.cwd();
-  const enabledFile = join(ctxRoot, 'config', 'enabled-agents.json');
 
-  let enabledAgents: Record<string, { enabled?: boolean; org?: string }> = {};
-  if (existsSync(enabledFile)) {
-    try {
-      enabledAgents = JSON.parse(readFileSync(enabledFile, 'utf-8'));
-    } catch {
-      // corrupt — continue with empty
-    }
-  }
+  // Serialized locked read — ensures computeFleetHealth cannot see a partially-
+  // written map from a concurrent CLI enable/disable during daemon boot.
+  const enabledAgents = readEnabledAgentsMap(ctxRoot);
 
   const cutoff24h = nowMs - 24 * 60 * 60 * 1000;
   const rows = listAllCrons();
@@ -302,22 +291,15 @@ export function isValidSchedule(schedule: string): boolean {
 
 /**
  * Read the list of enabled agent names from enabled-agents.json.
+ * Serialized via the shared locked I/O module to prevent observation of a
+ * torn map from a concurrent CLI enable/disable.
  */
 function getEnabledAgents(): string[] {
   const ctxRoot = process.env.CTX_ROOT ?? process.cwd();
-  const enabledFile = join(ctxRoot, 'config', 'enabled-agents.json');
-  if (!existsSync(enabledFile)) return [];
-  try {
-    const data = JSON.parse(readFileSync(enabledFile, 'utf-8')) as Record<
-      string,
-      { enabled?: boolean }
-    >;
-    return Object.entries(data)
-      .filter(([, v]) => v.enabled !== false)
-      .map(([k]) => k);
-  } catch {
-    return [];
-  }
+  const data = readEnabledAgentsMap(ctxRoot);
+  return Object.entries(data)
+    .filter(([, v]) => v.enabled !== false)
+    .map(([k]) => k);
 }
 
 /**

@@ -345,11 +345,18 @@ const SLEEP_VIEW = new Int32Array(SLEEP_SAB);
  * Acquire `dir`'s mutex, run `fn`, then release the lock — even if `fn`
  * throws.  Retries with exponential backoff (capped) until `timeoutMs`.
  *
- * Use this around any read-modify-write sequence on a per-agent file
- * (crons.json etc.) so two concurrent processes can't lose each other's
- * mutations between the read and the write (the atomic rename in
- * writeCrons is per-write only — it does NOT make the surrounding
- * read-modify-write transactional).
+ * This is the CANONICAL wrapper for ALL read-modify-write AND
+ * read-only-during-concurrent-mutation sequences on shared JSON state,
+ * including (but not limited to):
+ *   - enabled-agents.json  (src/bus/enabled-agents-io.ts)
+ *   - crons.json           (src/bus/crons.ts)
+ *   - task JSON files      (src/bus/task.ts)
+ *
+ * Use `withFileLockSync` whenever two concurrent processes could observe an
+ * intermediate state between a read and a subsequent write.  The atomic rename
+ * inside atomicWriteSync makes each individual write crash-safe, but it does NOT
+ * make the surrounding read-modify-write transactional — that serialization is
+ * the responsibility of this wrapper.
  *
  * @throws if the lock cannot be acquired within `timeoutMs`.
  */

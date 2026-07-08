@@ -4,6 +4,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, findTaskFile, archiveTasks, classifyTask, ensureEpicTask, closeEpic } from '../../../src/bus/task';
 import type { BusPaths } from '../../../src/types';
+import * as lockMod from '../../../src/utils/lock';
 
 describe('Task Management', () => {
   let testDir: string;
@@ -702,6 +703,30 @@ describe('claimTask — atomic claim (beads-inspired)', () => {
     const onDisk = JSON.parse(readFileSync(taskPath, 'utf-8'));
     expect(onDisk.status).toBe('in_progress');
     expect(onDisk.assigned_to).toBe(winners[0].agent);
+  });
+
+  it('serializes claim against completeTask on the same lock key (no lost update)', () => {
+    // Spy on withFileLockSync to capture the lock key each mutator acquires.
+    // claimTask MUST lock on dirname(filePath) — the same key completeTask uses —
+    // so all writers to <taskId>.json are mutually exclusive.
+    //
+    // Failure mode under pre-fix code: claimTask locked on <taskDir>/.claims
+    // while completeTask locked on <taskDir>, so claimKeys and completeKeys
+    // contain different paths and the containment assertion fails.
+    const spy = vi.spyOn(lockMod, 'withFileLockSync');
+    const id = createTask(paths, 'alice', 'acme', 'Concurrency probe');
+    spy.mockClear(); // discard createTask's lock calls
+    claimTask(paths, id, 'alice');
+    const claimKeys = spy.mock.calls.map(c => c[0] as string);
+    spy.mockClear();
+    completeTask(paths, id, 'done');
+    const completeKeys = spy.mock.calls.map(c => c[0] as string);
+    spy.mockRestore();
+    // Both mutators must acquire a lock on the task directory.
+    expect(claimKeys.length).toBeGreaterThan(0);
+    expect(completeKeys.length).toBeGreaterThan(0);
+    // claimTask must use the SAME lock key as completeTask.
+    expect(claimKeys).toContain(completeKeys[completeKeys.length - 1]);
   });
 });
 

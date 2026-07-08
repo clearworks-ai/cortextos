@@ -479,19 +479,16 @@ export function claimTask(
   }
 
   const claimsDir = join(paths.taskDir, '.claims');
-  // Ensure the claims dir exists before attempting to lock it — withFileLockSync
-  // uses a non-recursive mkdirSync(.lock.d) which requires the parent to exist.
-  ensureDir(claimsDir);
 
-  // All claim state is read and mutated inside a single file lock so that
-  // concurrent claimers are serialized.  The O_EXCL create is retained as a
-  // belt-and-suspenders inner guard, but the task-status check and the task-JSON
-  // write are now also protected — closing the TOCTOU window where a claimer
-  // could observe task.status='pending' before another writer had flipped it.
-  let resultTask: Task;
-  let auditPrevStatus: TaskStatus | undefined;
+  // All claim state is read and mutated inside the task-dir file lock so that
+  // claimTask is serialized against completeTask/updateTask/cancelTask — all of
+  // which also hold withFileLockSync(dirname(filePath)).  The O_EXCL .claim
+  // create is retained as a belt-and-suspenders inner guard.
+  return withFileLockSync(dirname(filePath), () => {
+    // Ensure the claims dir exists inside the lock — withFileLockSync uses a
+    // non-recursive mkdirSync(.lock.d) which requires the parent to exist.
+    ensureDir(claimsDir);
 
-  withFileLockSync(claimsDir, () => {
     // Re-read the task JSON inside the lock so status is never observed before
     // the lock is held.  Keep the original error message verbatim.
     let task: Task;
@@ -510,8 +507,7 @@ export function claimTask(
       try {
         const owner = readFileSync(claimPath, 'utf-8').split('\t')[0];
         if (owner === agent) {
-          resultTask = task;
-          return;
+          return task;
         }
         throw new Error(
           `Task ${taskId} already claimed by ${owner} (current status=${task.status})`,
@@ -543,8 +539,7 @@ export function claimTask(
       let owner = 'unknown';
       try { owner = readFileSync(claimPath, 'utf-8').split('\t')[0]; } catch { /* stays 'unknown' */ }
       if (owner === agent) {
-        resultTask = task;
-        return; // Benign race with self — treat as idempotent success.
+        return task; // Benign race with self — treat as idempotent success.
       }
       throw new Error(`Task ${taskId} already claimed by ${owner}`);
     }
@@ -564,16 +559,10 @@ export function claimTask(
       throw new Error(`Task ${taskId} claim commit failed: ${err}`);
     }
 
-    auditPrevStatus = prevStatus;
-    resultTask = task;
+    // Append the audit entry inside the lock (best-effort; mirrors other mutators).
+    appendTaskAudit(paths, taskId, { event: 'claim', agent, from: prevStatus, to: 'in_progress' });
+    return task;
   });
-
-  // Append the audit entry outside the lock (best-effort; O_APPEND on POSIX
-  // guarantees our ~200 B entry is not interleaved with another agent's entry).
-  if (auditPrevStatus !== undefined) {
-    appendTaskAudit(paths, taskId, { event: 'claim', agent, from: auditPrevStatus, to: 'in_progress' });
-  }
-  return resultTask!;
 }
 
 /**

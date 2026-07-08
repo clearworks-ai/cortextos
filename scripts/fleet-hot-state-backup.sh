@@ -71,6 +71,7 @@ INCLUDES=(
   "${DATA_ROOT}/state"                                        # per-agent session/heartbeat (filtered below)
   "${HOME_CTX}/state/ACTIVE_INSTANCE"
   "${REPO_ROOT}/orgs"                                         # gitignored mission/memory/goals/config
+  "${HOME}/.claude/projects"                                 # Claude Code session transcripts: main .jsonl + subagents/ + tool-results/ (irreplaceable, not in git; loss found 2026-07-08)
 )
 
 # --- exclude filters (regenerable / disposable / stale / bloat / secrets-heavy) ---
@@ -90,6 +91,7 @@ EXCLUDES=(
   --exclude="*/agents/larry/state/cowork-handoff-pkg"        # 61M disposable
   --exclude="*/node_modules"
   --exclude="*/.git"
+  --exclude="*/projects/*claude-mem-observer*"               # 1.4G regenerable observer store, not agent transcripts
 )
 # NOTE: do NOT exclude "*/.cortextOS" — that suffix-matches the LIVE crons dir
 # ${DATA_ROOT}/.cortextOS (the crown jewel) and would silently drop every

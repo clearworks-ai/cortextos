@@ -1,5 +1,9 @@
 // cortextOS Dashboard - SQLite database singleton
 // Read cache for JSON/JSONL files on disk. WAL mode for concurrent reads.
+//
+// IMPORTANT: importing this module must not construct a Database at module
+// evaluation time. The exported `db` is a lazy Proxy that creates the real
+// better-sqlite3 instance on first property access.
 
 import Database from 'better-sqlite3';
 import path from 'path';
@@ -181,21 +185,32 @@ const globalForDb = globalThis as unknown as {
   __cortextos_db: Database.Database | undefined;
 };
 
-export const db = globalForDb.__cortextos_db ?? createDatabase();
-
-if (process.env.NODE_ENV !== 'production') {
-  globalForDb.__cortextos_db = db;
+function getDb(): Database.Database {
+  if (!globalForDb.__cortextos_db) {
+    globalForDb.__cortextos_db = createDatabase();
+  }
+  return globalForDb.__cortextos_db;
 }
 
-/** Re-export for explicit initialization (idempotent - db is created on import) */
+export const db = new Proxy({} as Database.Database, {
+  get(_target, prop: string | symbol) {
+    return getDb()[prop as keyof Database.Database];
+  },
+  set(_target, prop: string | symbol, value: unknown) {
+    getDb()[prop as keyof Database.Database] = value as never;
+    return true;
+  },
+});
+
+/** Re-export for explicit initialization (idempotent) */
 export function initializeDb(): Database.Database {
-  return db;
+  return getDb();
 }
 
 /** Check if the database connection is healthy */
 export function isDatabaseReady(): boolean {
   try {
-    db.prepare('SELECT 1').get();
+    getDb().prepare('SELECT 1').get();
     return true;
   } catch {
     return false;
@@ -216,7 +231,7 @@ export function getTableCounts(): Record<string, number> {
   ];
   const counts: Record<string, number> = {};
   for (const table of tables) {
-    const row = db.prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as {
+    const row = getDb().prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as {
       count: number;
     };
     counts[table] = row.count;

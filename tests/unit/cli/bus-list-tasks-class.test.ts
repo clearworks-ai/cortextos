@@ -90,6 +90,39 @@ describe('bus list-tasks classification flags', () => {
     expect(rows[0].class).toBe('build');
   });
 
+  it('filters json output by --priority', async () => {
+    const paths = makePaths('paul');
+    createTask(paths, 'paul', 'acme', 'Urgent row', { priority: 'urgent' });
+    createTask(paths, 'paul', 'acme', 'Normal row', { priority: 'normal' });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await busCommand.parseAsync(['node', 'bus', 'list-tasks', '--priority', 'urgent', '--format', 'json']);
+
+    const jsonLine = logSpy.mock.calls.find(([msg]) => typeof msg === 'string' && msg.startsWith('['))?.[0];
+    expect(typeof jsonLine).toBe('string');
+    const rows = JSON.parse(jsonLine as string) as Array<{ title: string; priority: string }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].title).toBe('Urgent row');
+    expect(rows[0].priority).toBe('urgent');
+  });
+
+  it('leaves priorities unfiltered when --priority is absent', async () => {
+    const paths = makePaths('paul');
+    createTask(paths, 'paul', 'acme', 'Urgent row', { priority: 'urgent' });
+    createTask(paths, 'paul', 'acme', 'Low row', { priority: 'low' });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await busCommand.parseAsync(['node', 'bus', 'list-tasks', '--format', 'json']);
+
+    const jsonLine = logSpy.mock.calls.find(([msg]) => typeof msg === 'string' && msg.startsWith('['))?.[0];
+    expect(typeof jsonLine).toBe('string');
+    const rows = JSON.parse(jsonLine as string) as Array<{ title: string; priority: string }>;
+    expect(rows.map((row) => row.priority)).toEqual(expect.arrayContaining(['urgent', 'low']));
+    expect(rows.map((row) => row.title)).toEqual(expect.arrayContaining(['Urgent row', 'Low row']));
+  });
+
   it('groups text output by project when --by-project is set', async () => {
     const paths = makePaths('paul');
     createTask(paths, 'paul', 'acme', 'Build row', { project: 'bus-programmatic-ssot' });

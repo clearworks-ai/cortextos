@@ -1,0 +1,17 @@
+MISSION (Josh ANGRY 2026-07-10 ~04:50Z): 521 dashboard — EVERY record/KPI correct on the LIVE dashboard across EVERY month, self-verified + Opus adversarial LIVE cert. GO DARK (NO Telegram) until certified. Merge pre-approved. Josh's "ok" = ack only, no reply.
+FULL STATE + resume recipe: memory/handoffs/handoff-2026-07-10T05-46-25Z.md — READ IT FIRST.
+
+## ★ STATUS: DATA FIXED + VERIFIED. LIVE DASHBOARD CODE IS STALE — that's the remaining gap.
+DONE (proven): trigger deploy fixed (pdfjs lazy → v20260710.6); classifier fixed (removed temperature:0, was 400ing all classify); June reclassified in prod DB (3→43 complete); April/May 14 pilot rows marked test_row_stripped; cert cross-verified 2 ways (SQL + real getMonthlySubmissionStats code) + adversarial label audit 0/87 mismatches. Commit 4b8f2f4 on branch fix/521-dataquality.
+
+CORRECT numbers (local prod-code, exclusions applied): June received 45 / matchable 43 / complete 43 / partial 1 / missing 0 / failed 1 / $7,440.37. April+May = 0 (all pilot/test, excluded).
+LIVE /api/stats STILL WRONG (stale deployed code): June 48/44, April 14, May 7. Josh's "44" complaint number still showing live.
+
+## NEXT (resume order — from handoff)
+1. Verify origin/main submissions.ts applies `.filter(!isSubmissionExcludedFromDashboard)` (main HAS the fn, 3 refs).
+2. REDEPLOY seiu521-dashboard from main (open PR from fix/521-dataquality → merge → auto-deploy; Josh pre-approved). Merge also lands temperature/pdfjs fix for future inbound.
+3. RE-RUN LIVE BROWSER CERT (recipe in handoff: mint token via scripts/mintToken.ts with Railway SESSION_SECRET → /auth/callback?token= → fetch /api/stats authed). CONFIRM live = June 45/43/43/1/0/1, April+May absent. Screenshot.
+4. Opus adversarial pass vs POST-DEPLOY live.
+5. THEN surface per-month proof to Josh (end go-dark): June 43 complete / 43 ready-to-match (not 44) / 1 partial / 1 failed; April+May 100% pilot, now hidden.
+
+KEY TRAPS: shell ANTHROPIC_API_KEY (...HIQXRAAA) DEAD — force funded 521 key from ../.env. Railway: unset RAILWAY_TOKEN first. dotenv loads typescript/.env not ../.env — force E2E_TEST_SENDERS on cmdline. Repo ~/code/doordash-linker/typescript. ORG_ID 5b393a79-6196-46f6-b7df-2326b8537734.

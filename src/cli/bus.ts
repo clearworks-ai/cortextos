@@ -470,13 +470,14 @@ busCommand
   .command('list-tasks')
   .option('--agent <name>', 'Filter by agent')
   .option('--status <s>', 'Filter by status')
+  .option('--priority <p>', 'Filter by priority: urgent | high | normal | low')
   .option('--class <c>', 'Filter by class: system | human | build')
   .option('--real-build', 'Only real build work (excludes system + human)')
   .option('--someday', 'Show only someday/backlog tasks')
   .option('--by-project', 'Group text output by project name')
   .option('--format <fmt>', 'Output format: json or text', 'text')
   .option('--respect-deps', 'Sort DAG-aware: unblocked tasks first, blocked tasks last')
-  .action((opts: { agent?: string; status?: string; class?: string; realBuild?: boolean; someday?: boolean; byProject?: boolean; format?: string; respectDeps?: boolean }) => {
+  .action((opts: { agent?: string; status?: string; priority?: string; class?: string; realBuild?: boolean; someday?: boolean; byProject?: boolean; format?: string; respectDeps?: boolean }) => {
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
     const requestedClass = (opts.realBuild ? 'build' : opts.class) as TaskClass | undefined;
@@ -487,6 +488,7 @@ busCommand
     const tasks = listTasks(paths, {
       agent: opts.agent,
       status: opts.status as TaskStatus,
+      priority: opts.priority as Priority | undefined,
       class: requestedClass,
       respectDeps: opts.respectDeps ?? false,
     });

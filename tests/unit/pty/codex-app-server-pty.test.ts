@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createServer } from 'net';
 
 const fsMocks = {
   existsSync: vi.fn().mockReturnValue(false),
@@ -93,7 +94,7 @@ beforeEach(() => {
 
 describe('CodexAppServerPTY socket path policy', () => {
   // codex 0.118.0 dropped unix:// transport — these tests verify the TCP fallback
-  // (ws://127.0.0.1:<port>) with a stable port derived from the state dir.
+  // (ws://127.0.0.1:<port>) and the per-spawn ephemeral port refresh.
   it('uses a TCP loopback address by default', () => {
     const pty = new CodexAppServerPTY(mockEnv, {});
     expect((pty as unknown as { _socketPath: string })._socketPath).toMatch(/^127\.0\.0\.1:\d+$/);
@@ -108,6 +109,57 @@ describe('CodexAppServerPTY socket path policy', () => {
     const pty = new CodexAppServerPTY(longEnv, {});
     expect((pty as unknown as { _socketPath: string })._socketPath).toMatch(/^127\.0\.0\.1:\d+$/);
     expect((pty as unknown as { _socketListenArg: string })._socketListenArg).toMatch(/^ws:\/\/127\.0\.0\.1:\d+$/);
+  });
+
+  it('acquireFreePort returns a bindable loopback port', async () => {
+    const pty = new CodexAppServerPTY(mockEnv, {});
+    const internals = pty as unknown as { acquireFreePort(): Promise<number> };
+    const port = await internals.acquireFreePort();
+
+    expect(port).toBeGreaterThan(0);
+
+    await new Promise<void>((resolve, reject) => {
+      const server = createServer();
+      server.once('error', reject);
+      server.listen(port, '127.0.0.1', () => {
+        server.close(() => resolve());
+      });
+    });
+  });
+
+  it('refreshes the listen port across sequential spawn cycles', async () => {
+    const pty = new CodexAppServerPTY(mockEnv, {});
+    const internals = pty as unknown as {
+      _socketListenArg: string;
+      acquireFreePort(): Promise<number>;
+      removeSocket(): void;
+      startAppServer(): Promise<void>;
+      startAppServerWithRetry(): Promise<void>;
+    };
+
+    const acquireFreePortMock = vi
+      .spyOn(internals, 'acquireFreePort')
+      .mockResolvedValueOnce(41001)
+      .mockResolvedValueOnce(41002);
+    const startAppServerMock = vi
+      .spyOn(internals, 'startAppServer')
+      .mockImplementation(async () => undefined);
+    const removeSocketMock = vi
+      .spyOn(internals, 'removeSocket')
+      .mockImplementation(() => undefined);
+
+    await internals.startAppServerWithRetry();
+    const firstListenArg = internals._socketListenArg;
+
+    await internals.startAppServerWithRetry();
+    const secondListenArg = internals._socketListenArg;
+
+    expect(firstListenArg).toBe('ws://127.0.0.1:41001');
+    expect(secondListenArg).toBe('ws://127.0.0.1:41002');
+    expect(secondListenArg).not.toBe(firstListenArg);
+    expect(acquireFreePortMock).toHaveBeenCalledTimes(2);
+    expect(startAppServerMock).toHaveBeenCalledTimes(2);
+    expect(removeSocketMock).toHaveBeenCalledTimes(2);
   });
 });
 

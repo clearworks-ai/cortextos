@@ -422,6 +422,9 @@ export class CodexAppServerPTY {
 
     for (let attempt = 0; attempt < delays.length; attempt += 1) {
       try {
+        const port = await this.acquireFreePort();
+        this._socketPath = `127.0.0.1:${port}`;
+        this._socketListenArg = `ws://127.0.0.1:${port}`;
         this.removeSocket();
         await this.startAppServer();
         return;
@@ -436,6 +439,25 @@ export class CodexAppServerPTY {
     }
 
     throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+  }
+
+  private async acquireFreePort(): Promise<number> {
+    const net = require('net') as typeof import('net');
+    return await new Promise<number>((resolve, reject) => {
+      const server = net.createServer();
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => {
+        const address = server.address();
+        const port = typeof address === 'object' && address ? address.port : 0;
+        server.close(() => {
+          if (port) {
+            resolve(port);
+            return;
+          }
+          reject(new Error('Failed to acquire free port'));
+        });
+      });
+    });
   }
 
   private startAppServer(): Promise<void> {
@@ -974,14 +996,9 @@ export class CodexAppServerPTY {
 
   private resolveSocketPath(): { path: string; listenArg: string; cwd: string } {
     // codex 0.118.0 does not support unix:// transport — use ws://127.0.0.1:<port> instead.
-    // Derive a stable port from the state directory path to avoid agent collisions.
-    let hash = 0;
-    for (let i = 0; i < this._stateDir.length; i++) {
-      hash = ((hash << 5) - hash + this._stateDir.charCodeAt(i)) | 0;
-    }
-    const port = 35000 + (Math.abs(hash) % 1000);
-    const address = `127.0.0.1:${port}`;
-    return { path: address, listenArg: `ws://127.0.0.1:${port}`, cwd: this._stateDir };
+    // The constructor only needs a placeholder; the real free port is acquired
+    // fresh inside startAppServerWithRetry() before every spawn attempt.
+    return { path: '127.0.0.1:0', listenArg: 'ws://127.0.0.1:0', cwd: this._stateDir };
   }
 
   private removeSocket(): void {

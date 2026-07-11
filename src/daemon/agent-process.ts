@@ -116,6 +116,8 @@ export class AgentProcess {
   private sessionTimer: ReturnType<typeof setTimeout> | null = null;
   private crashCount: number = 0;
   private rateLimitCount: number = 0;
+  private plannedRestartRetries = 0;
+  private readonly plannedRestartRetryMax = 3;
   private maxCrashesPerDay: number = 10;
   // CrashLoopPauser (instar-inspired): sliding-window crash detection.
   // Timestamps of recent crashes within the configured window. If the
@@ -293,6 +295,7 @@ export class AgentProcess {
       }
       this.status = 'running';
       this.rateLimitCount = 0;
+      this.plannedRestartRetries = 0;
       this.sessionStart = new Date();
       this.log(`Running (pid: ${this.pty.getPid()})`);
 
@@ -773,6 +776,33 @@ export class AgentProcess {
     if (this.stopRequested || this.stopping) {
       this.stopRequested = false;
       return;
+    }
+
+    // Planned restart (hard-restart / self-restart / context-force-restart)
+    // writes a `.restart-planned` marker. A fresh-boot exit inside that
+    // window is a restart transient, not a real crash, so suppress the crash
+    // counter/alert. Keep a bounded retry budget so a persistently broken boot
+    // still falls through to the real crash path and surfaces normally.
+    if (this.isPlannedRestartRecent()) {
+      this.plannedRestartRetries += 1;
+      if (this.plannedRestartRetries <= this.plannedRestartRetryMax) {
+        const backoff = Math.min(5000 * Math.pow(2, this.plannedRestartRetries - 1), 60000);
+        this.log(
+          `Planned-restart boot transient (exit_code=${exitCode}, retry ${this.plannedRestartRetries}/${this.plannedRestartRetryMax}) — not counted as crash.`,
+        );
+        this.appendCrashToRestartsLog(exitCode, backoff, 'PLANNED_RESTART_RETRY');
+        this.status = 'starting';
+        this.notifyStatusChange();
+        setTimeout(() => {
+          if (this.status === 'starting') {
+            this.start().catch(err => this.log(`Planned-restart retry failed: ${err}`));
+          }
+        }, backoff);
+        return;
+      }
+      this.log(
+        `Planned-restart retries exhausted (${this.plannedRestartRetries}) — treating as real crash.`,
+      );
     }
 
     // Image-poison auto-recovery (companion to PR #446's photo-injection fix).
@@ -1293,6 +1323,17 @@ export class AgentProcess {
     }
   }
 
+  private isPlannedRestartRecent(): boolean {
+    const marker = join(this.env.ctxRoot, 'state', this.name, '.restart-planned');
+    try {
+      if (!existsSync(marker)) return false;
+      const ageMs = Date.now() - statSync(marker).mtimeMs;
+      return ageMs < 120_000;
+    } catch {
+      return false;
+    }
+  }
+
   /**
    * Append an unplanned-exit entry to restarts.log. Complements the planned
    * SELF-RESTART / HARD-RESTART entries written by src/bus/system.ts so that
@@ -1306,7 +1347,7 @@ export class AgentProcess {
   private appendCrashToRestartsLog(
     exitCode: number,
     backoffMs: number,
-    kind: 'CRASH' | 'HALTED' | 'CRASH_LOOP' | 'IMAGE_POISON_RECOVERY' | 'RATE_LIMIT',
+    kind: 'CRASH' | 'HALTED' | 'CRASH_LOOP' | 'IMAGE_POISON_RECOVERY' | 'RATE_LIMIT' | 'PLANNED_RESTART_RETRY',
   ): void {
     try {
       const logDir = join(this.env.ctxRoot, 'logs', this.name);
@@ -1319,6 +1360,8 @@ export class AgentProcess {
             ? `exit_code=${exitCode} backoff_s=${backoffMs / 1000} (not counted toward max_crashes)`
             : kind === 'RATE_LIMIT'
               ? `exit_code=${exitCode} rate_limit_count=${this.rateLimitCount} backoff_s=${backoffMs / 1000} (not counted toward max_crashes)`
+              : kind === 'PLANNED_RESTART_RETRY'
+                ? `exit_code=${exitCode} planned_restart_retry=${this.plannedRestartRetries} backoff_s=${backoffMs / 1000} (not counted toward max_crashes)`
               : `exit_code=${exitCode} crash_count=${this.crashCount} backoff_s=${backoffMs / 1000}`;
       const logLine = `[${timestamp}] ${kind}: ${details}\n`;
       appendFileSync(join(logDir, 'restarts.log'), logLine, 'utf-8');

@@ -14,6 +14,12 @@ import { writeCortextosEnv } from '../utils/env.js';
 import { getOverdueReminders } from '../bus/reminders.js';
 import { resolvePaths } from '../utils/paths.js';
 import { loadBuffer } from './conversation-buffer.js';
+import {
+  HANDOFF_BACKPING_SUPPRESS_MS,
+  readLastBackPingMs,
+  shouldSuppressBackPing,
+  writeLastBackPingMs,
+} from './handoff-backping.js';
 
 type LogFn = (msg: string) => void;
 
@@ -964,7 +970,14 @@ export class AgentProcess {
     // before cron restoration, before heartbeat, before anything else. Placing this instruction
     // immediately after the handoffBlock in the prompt ensures it is not buried.
     const shouldPromptTelegram = this.shouldPromptTelegramOnlineMessage();
-    const handoffUxOverride = isHandoffRestart && shouldPromptTelegram
+    const emitHandoffBackPing = isHandoffRestart
+      && shouldPromptTelegram
+      && this.config.runtime !== 'opencode'
+      && !this.isHandoffBackPingSuppressed();
+    if (emitHandoffBackPing) {
+      writeLastBackPingMs(this.env.ctxRoot, this.name, Date.now());
+    }
+    const handoffUxOverride = emitHandoffBackPing
       ? ' HANDOFF UX: This is a context handoff restart — your memory is intact via the handoff document, but the VERBATIM LIVE TAIL below is more authoritative than the doc. If the handoff document conflicts with the newest inbound message, the newest inbound message wins. CRITICAL: After reading the handoff document and the live tail, your VERY FIRST tool call MUST be a Bash call running: cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID \'back — [what you were just working on]\' — replace the brackets with one brief plain-English sentence about your current state derived from the handoff doc plus the newest inbound message, with the newest inbound message winning. Do this BEFORE running heartbeat, BEFORE any other tool call. No cron IDs, no status report, no cold-boot phrasing. Do NOT send "Booting up... one moment" (skip AGENTS.md step 1 entirely).'
       : '';
     const onlineMessage = isHandoffRestart || !shouldPromptTelegram
@@ -1019,6 +1032,32 @@ export class AgentProcess {
     }
 
     return { missionBlock, liveTailBlock };
+  }
+
+  /** epoch ms of the newest inbound (sender != self) buffer message, or null. */
+  private newestInboundMessageMs(): number | null {
+    try {
+      const entries = loadBuffer(this.env.ctxRoot, this.name);
+      let newest: number | null = null;
+      for (const e of entries) {
+        if (e.sender === this.name) continue;
+        const t = Date.parse(e.ts);
+        if (Number.isFinite(t) && (newest === null || t > newest)) newest = t;
+      }
+      return newest;
+    } catch {
+      return null;
+    }
+  }
+
+  /** True when the handoff back-ping should be skipped this restart. */
+  private isHandoffBackPingSuppressed(): boolean {
+    return shouldSuppressBackPing({
+      lastPingMs: readLastBackPingMs(this.env.ctxRoot, this.name),
+      nowMs: Date.now(),
+      newestInboundMs: this.newestInboundMessageMs(),
+      windowMs: HANDOFF_BACKPING_SUPPRESS_MS,
+    });
   }
 
   private normalizePromptText(text: string, maxChars: number): string {
@@ -1128,8 +1167,9 @@ export class AgentProcess {
    *    emits the same notification here for parity (James saw msg1 only for
    *    claude agents otherwise). Format mirrors hook-crash-alert.ts:394-397.
    *  - msg2 (back-online / "back — ..." summary): codex reliably self-sends its
-   *    own contextual reply via the boot prompt; opencode (deepseek) does NOT, so
-   *    the daemon sends a handoff-flavored back-online ping for opencode only.
+   *    own contextual reply via the boot prompt; opencode uses the daemon-side
+   *    handoff back-online ping so both emit sites can share the persisted
+   *    suppression marker.
    *
    * Skipped when:
    *  - runtime is anything other than codex-app-server/opencode (claude-code
@@ -1151,12 +1191,10 @@ export class AgentProcess {
       // msg1: planned-restart lifecycle notif, hook parity for runtimes without
       // Claude Code hooks. Both codex and opencode were missing this.
       send(this.buildPlannedRestartNotification());
-      // msg2 ("back — ...") is self-sent by the agent via the handoff boot prompt
-      // (agent-process.ts buildStartupPrompt handoffUxOverride) for BOTH codex and
-      // opencode — opencode now reliably honors it. The daemon used to send an
-      // "Agent X is back online (context handoff)" substitute for opencode, but
-      // that produced a redundant 3rd message on top of the self-sent "back —".
-      // Removed: msg1 (daemon) + msg2 (agent self-send) = clean 2-message pattern.
+      if (this.config.runtime === 'opencode' && !this.isHandoffBackPingSuppressed()) {
+        writeLastBackPingMs(this.env.ctxRoot, this.name, Date.now());
+        send(`Agent ${this.name} is back online (context handoff)`);
+      }
       return;
     }
 

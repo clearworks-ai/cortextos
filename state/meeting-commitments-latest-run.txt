@@ -1,0 +1,27 @@
+MEETING-COMMITMENTS-WORKER RUN SUMMARY
+
+Run Time: 2026-07-09 16:10:30 PDT
+Fireflies API: Connected ✓
+Google Calendar: Connected ✓
+
+UPCOMING MEETINGS (Next 24h):
+- Alloi Interview #3: Architecture Interview (2026-07-10 10:00-11:00 AM PDT)
+- Audit Scope (2026-07-10 11:15-11:45 AM PDT)
+- Review/Planning (2026-07-10 2:00-5:15 PM PDT)
+
+RECENT FIREFLIES TRANSCRIPTS CHECKED:
+- Dulce Appiagyei (2026-07-09)
+- Scott Shadian (2026-07-09)
+- Alloi Interview #2: Michelle (2026-07-08)
+- Alloi Interview #1: Marcos (2026-07-08)
+- MSIA/Clearworks Executive Presentation (2026-07-07)
+- And 5 more recent transcripts
+
+COMMITMENTS SURFACED THIS RUN: 0
+(Note: Fireflies transcript content extraction not yet fully implemented)
+
+State files initialized:
+- meeting-commitments-last.txt
+- meeting-commitments-surfaced.txt
+
+Next run: Scheduled for +2 hours

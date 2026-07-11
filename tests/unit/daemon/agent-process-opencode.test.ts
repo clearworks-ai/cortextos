@@ -215,7 +215,7 @@ describe('AgentProcess opencode runtime', () => {
     expect(sendMessage).toHaveBeenCalledWith('12345', 'Agent opencode-agent is back online');
   });
 
-  it('sends daemon msg1 and relies on the handoff prompt for opencode msg2', async () => {
+  it('sends daemon msg1 and daemon msg2 for opencode handoff restart', async () => {
     const handoffDocPath = '/tmp/opencode-handoff.md';
     fsMocks.existsSync.mockImplementation((path: string) =>
       typeof path === 'string'
@@ -238,16 +238,14 @@ describe('AgentProcess opencode runtime', () => {
 
     const prompt = mockOpencodePty.spawn.mock.calls[0]?.[1] ?? '';
     expect(prompt).toContain('CONTEXT HANDOFF');
-    expect(prompt).toContain('VERY FIRST tool call MUST be a Bash call running');
-    expect(prompt).toContain("cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID 'back");
+    expect(prompt).not.toContain('VERY FIRST tool call MUST be a Bash call running');
+    expect(prompt).not.toContain("cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID 'back");
     // msg1: hook parity — codex/opencode don't run Claude Code hooks, so the
     // daemon emits the planned-restart lifecycle notif itself.
     expect(sendMessage).toHaveBeenCalledWith('12345', '🔄 opencode-agent restarted (planned): context handoff at 92%');
-    // msg2: opencode receives the same prompt-level first-action requirement as
-    // codex, so the daemon must not synthesize a weaker generic handoff ping.
-    expect(sendMessage).not.toHaveBeenCalledWith('12345', 'Agent opencode-agent is back online (context handoff)');
+    expect(sendMessage).toHaveBeenCalledWith('12345', 'Agent opencode-agent is back online (context handoff)');
     expect(sendMessage).not.toHaveBeenCalledWith('12345', 'Agent opencode-agent is back online');
-    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledTimes(2);
   });
 
   it('sends msg1 (planned-restart) but NOT msg2 on codex handoff restart (codex self-sends its own back-online)', async () => {

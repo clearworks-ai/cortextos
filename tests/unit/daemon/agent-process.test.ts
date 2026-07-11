@@ -234,6 +234,75 @@ describe('AgentProcess - BUG-011 fix (stop awaits PTY exit)', () => {
     expect(String(fsMocks.appendFileSync.mock.calls[0][1])).toMatch(/\] CRASH: /);
   });
 
+  it('recent .restart-planned marker suppresses crash labeling and crashCount', async () => {
+    fsMocks.existsSync.mockImplementation((p: unknown) =>
+      String(p).endsWith('/state/alice/.restart-planned'),
+    );
+    fsMocks.statSync.mockImplementation(() => ({ mtimeMs: Date.now() - 2_000 }));
+
+    vi.useFakeTimers();
+    try {
+      const ap = new AgentProcess('alice', mockEnv, {});
+      await ap.start();
+
+      capturedOnExit!(0, 0);
+
+      expect(ap.getStatus().status).toBe('starting');
+      expect(ap.getStatus().crashCount).toBe(0);
+      expect(fsMocks.appendFileSync).toHaveBeenCalledTimes(1);
+      expect(String(fsMocks.appendFileSync.mock.calls[0][1])).toMatch(/\] PLANNED_RESTART_RETRY: exit_code=0 planned_restart_retry=1 backoff_s=5\b/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('planned-restart retry budget exhausts and falls through to real crash path', async () => {
+    fsMocks.existsSync.mockImplementation((p: unknown) =>
+      String(p).endsWith('/state/alice/.restart-planned'),
+    );
+    fsMocks.statSync.mockImplementation(() => ({ mtimeMs: Date.now() - 2_000 }));
+
+    vi.useFakeTimers();
+    try {
+      const ap = new AgentProcess('alice', mockEnv, {});
+      await ap.start();
+      const internals = ap as unknown as { handleExit(exitCode: number): void };
+
+      internals.handleExit(1);
+      internals.handleExit(1);
+      internals.handleExit(1);
+
+      expect(ap.getStatus().status).toBe('starting');
+      expect(ap.getStatus().crashCount).toBe(0);
+
+      internals.handleExit(1);
+
+      expect(ap.getStatus().status).toBe('crashed');
+      expect(ap.getStatus().crashCount).toBe(1);
+      expect(fsMocks.appendFileSync).toHaveBeenCalledTimes(4);
+      expect(String(fsMocks.appendFileSync.mock.calls[2][1])).toMatch(/\] PLANNED_RESTART_RETRY: exit_code=1 planned_restart_retry=3 backoff_s=20\b/);
+      expect(String(fsMocks.appendFileSync.mock.calls[3][1])).toMatch(/\] CRASH: exit_code=1 crash_count=1 backoff_s=5\b/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stale .restart-planned marker (>120s old) does NOT mask a real crash', async () => {
+    fsMocks.existsSync.mockImplementation((p: unknown) =>
+      String(p).endsWith('/state/alice/.restart-planned'),
+    );
+    fsMocks.statSync.mockImplementation(() => ({ mtimeMs: Date.now() - 300_000 }));
+
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+    capturedOnExit!(1, 0);
+
+    expect(ap.getStatus().status).toBe('crashed');
+    expect(ap.getStatus().crashCount).toBe(1);
+    expect(fsMocks.appendFileSync).toHaveBeenCalledTimes(1);
+    expect(String(fsMocks.appendFileSync.mock.calls[0][1])).toMatch(/\] CRASH: exit_code=1 crash_count=1 backoff_s=5\b/);
+  });
+
   it('sessionRefresh() delegates to stop() then start() (in order)', async () => {
     const ap = new AgentProcess('alice', mockEnv, {});
     await ap.start();

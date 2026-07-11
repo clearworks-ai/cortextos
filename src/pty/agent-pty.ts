@@ -24,6 +24,7 @@ interface IPtySpawnOptions {
 }
 
 type SpawnFn = (file: string, args: string[], options: IPtySpawnOptions) => IPty;
+type PtyDisposable = { dispose(): void };
 
 /**
  * Manages a single Claude Code PTY session.
@@ -37,6 +38,8 @@ export class AgentPTY {
   protected config: AgentConfig;
   private onExitHandler: ((exitCode: number, signal?: number) => void) | null = null;
   private spawnFn: SpawnFn | null = null;
+  private onDataDisposable: PtyDisposable | null = null;
+  private onExitDisposable: PtyDisposable | null = null;
 
   constructor(env: CtxEnv, config: AgentConfig, logPath?: string, bootstrapPattern?: string) {
     this.env = env;
@@ -160,14 +163,15 @@ export class AgentPTY {
     this._alive = true;
 
     // Set up output capture
-    this.pty.onData((data: string) => {
+    this.onDataDisposable = this.pty.onData((data: string) => {
       this.outputBuffer.push(data);
     });
 
     // Set up exit handler
-    this.pty.onExit(({ exitCode, signal }) => {
+    this.onExitDisposable = this.pty.onExit(({ exitCode, signal }) => {
       this._alive = false;
       this.pty = null;
+      this.disposeListeners();
       if (this.onExitHandler) {
         this.onExitHandler(exitCode, signal);
       }
@@ -329,6 +333,7 @@ export class AgentPTY {
     if (pty) {
       this._alive = false;
       this.pty = null;
+      this.disposeListeners();
       pty.kill();
     }
   }
@@ -395,5 +400,20 @@ export class AgentPTY {
     }
 
     return env;
+  }
+
+  private disposeListeners(): void {
+    try {
+      this.onDataDisposable?.dispose();
+    } catch {
+      // Listener may already be gone.
+    }
+    try {
+      this.onExitDisposable?.dispose();
+    } catch {
+      // Listener may already be gone.
+    }
+    this.onDataDisposable = null;
+    this.onExitDisposable = null;
   }
 }

@@ -2,15 +2,21 @@ import { beforeEach, describe, it, expect, vi } from 'vitest';
 
 // --- node-pty is native; stub it so constructing/spawning AgentPTY never touches it.
 let onDataHandler: ((data: string) => void) | null = null;
+let onExitHandler: ((e: { exitCode: number; signal?: number }) => void) | null = null;
+let onDataDisposable = { dispose: vi.fn() };
+let onExitDisposable = { dispose: vi.fn() };
 
 const mockInnerPty = {
   pid: 42,
   write: vi.fn(),
   onData: vi.fn().mockImplementation((cb: (data: string) => void) => {
     onDataHandler = cb;
-    return { dispose: vi.fn() };
+    return onDataDisposable;
   }),
-  onExit: vi.fn().mockReturnValue({ dispose: vi.fn() }),
+  onExit: vi.fn().mockImplementation((cb: (e: { exitCode: number; signal?: number }) => void) => {
+    onExitHandler = cb;
+    return onExitDisposable;
+  }),
   kill: vi.fn(),
   resize: vi.fn(),
 };
@@ -61,6 +67,9 @@ function argsFor(config: any): string[] {
 
 beforeEach(() => {
   onDataHandler = null;
+  onExitHandler = null;
+  onDataDisposable = { dispose: vi.fn() };
+  onExitDisposable = { dispose: vi.fn() };
   spawnMock.mockClear();
   mockInnerPty.write.mockClear();
   mockInnerPty.onData.mockClear();
@@ -136,5 +145,49 @@ describe('AgentPTY session isolation', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('AgentPTY listener disposal', () => {
+  async function spawnPty(): Promise<InstanceType<typeof AgentPTY>> {
+    const pty = new AgentPTY(env, {});
+    (pty as unknown as { spawnFn: typeof spawnMock }).spawnFn = spawnMock;
+    await pty.spawn('fresh', 'boot');
+    return pty;
+  }
+
+  it('captures the node-pty listener disposables on spawn', async () => {
+    const pty = await spawnPty();
+    const internals = pty as unknown as {
+      onDataDisposable: typeof onDataDisposable | null;
+      onExitDisposable: typeof onExitDisposable | null;
+    };
+
+    expect(internals.onDataDisposable).toBe(onDataDisposable);
+    expect(internals.onExitDisposable).toBe(onExitDisposable);
+  });
+
+  it('disposes both listeners exactly once on kill()', async () => {
+    const pty = await spawnPty();
+
+    pty.kill();
+    pty.kill();
+
+    expect(onDataDisposable.dispose).toHaveBeenCalledTimes(1);
+    expect(onExitDisposable.dispose).toHaveBeenCalledTimes(1);
+    expect(mockInnerPty.kill).toHaveBeenCalledTimes(1);
+  });
+
+  it('disposes both listeners on natural exit and does not double-dispose on later kill()', async () => {
+    const pty = await spawnPty();
+
+    onExitHandler!({ exitCode: 0 });
+
+    expect(onDataDisposable.dispose).toHaveBeenCalledTimes(1);
+    expect(onExitDisposable.dispose).toHaveBeenCalledTimes(1);
+    expect(() => pty.kill()).not.toThrow();
+    expect(onDataDisposable.dispose).toHaveBeenCalledTimes(1);
+    expect(onExitDisposable.dispose).toHaveBeenCalledTimes(1);
+    expect(mockInnerPty.kill).not.toHaveBeenCalled();
   });
 });

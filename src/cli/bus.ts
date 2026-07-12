@@ -228,7 +228,13 @@ busCommand
       console.error(`Warning: agent '${to}' not found in project. Message will be queued but may never be read.`);
     }
 
-    const msgId = sendMessage(paths, env.agentName, to, priority as Priority, text, effectiveReplyTo);
+    let msgId: string;
+    try {
+      msgId = sendMessage(paths, env.agentName, to, priority as Priority, text, effectiveReplyTo);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
     try {
       logEvent(paths, env.agentName, env.org, 'message', 'agent_message_sent', 'info', JSON.stringify({ to, priority, msg_id: msgId, reply_to: effectiveReplyTo ?? null }));
     } catch { /* non-fatal */ }

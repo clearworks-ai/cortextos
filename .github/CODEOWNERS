@@ -1,0 +1,7 @@
+# Gate machinery - Josh reviews any change (proposal-side lock, not runtime enforcement)
+/orgs/clearworksai/agents/larry/.claude/hooks/           @grandamenium
+/orgs/clearworksai/agents/larry/.claude/settings.json    @grandamenium
+/bin/pipeline-stage-emit                                 @grandamenium
+/bin/pipeline-provision-secret                           @grandamenium
+/src/pipeline/                                           @grandamenium
+/src/bus/message.ts                                      @grandamenium

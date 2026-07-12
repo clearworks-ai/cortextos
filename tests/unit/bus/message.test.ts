@@ -1,15 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readdirSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { mkdtempSync, mkdirSync, rmSync, readdirSync, readFileSync, writeFileSync } from 'fs';
+import { dirname, join } from 'path';
 import { tmpdir } from 'os';
 import { sendMessage, checkInbox, ackInbox } from '../../../src/bus/message';
-import { resolvePaths } from '../../../src/utils/paths';
+import { BuildGateError } from '../../../src/pipeline/build-gate';
+import { describeArtifact, emitLedgerRow } from '../../../src/pipeline/ledger';
 import type { BusPaths } from '../../../src/types';
 
 describe('Message Bus', () => {
   let testDir: string;
   let senderPaths: BusPaths;
   let receiverPaths: BusPaths;
+  const envSnapshot: Record<string, string | undefined> = {};
 
   beforeEach(() => {
     testDir = mkdtempSync(join(tmpdir(), 'cortextos-bus-test-'));
@@ -34,10 +36,20 @@ describe('Message Bus', () => {
       logDir: join(testDir, 'logs', 'receiver'),
       stateDir: join(testDir, 'state', 'receiver'),
     };
+    envSnapshot.CTX_PROJECT_ROOT = process.env.CTX_PROJECT_ROOT;
+    envSnapshot.PIPELINE_SECRET_PATH = process.env.PIPELINE_SECRET_PATH;
+    envSnapshot.PIPELINE_TRANSCRIPT_ROOT_OVERRIDE = process.env.PIPELINE_TRANSCRIPT_ROOT_OVERRIDE;
   });
 
   afterEach(() => {
     rmSync(testDir, { recursive: true, force: true });
+    for (const [key, value] of Object.entries(envSnapshot)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
   });
 
   describe('sendMessage', () => {
@@ -92,6 +104,142 @@ describe('Message Bus', () => {
       expect(() =>
         sendMessage(senderPaths, '../bad', 'good', 'normal', 'test')
       ).toThrow();
+    });
+
+    it('blocks ungated build dispatches before inbox write', () => {
+      process.env.CTX_PROJECT_ROOT = testDir;
+      process.env.PIPELINE_SECRET_PATH = join(testDir, '.pipeline-secret');
+      writeFileSync(process.env.PIPELINE_SECRET_PATH, `${'ab'.repeat(32)}\n`, 'utf-8');
+
+      expect(() => sendMessage(
+        senderPaths,
+        'sender',
+        'codexer',
+        'normal',
+        `GATE: build framework=one-big-feature slug=hard-spec-gate repo=${testDir} scope-sha=${'a'.repeat(64)}`,
+      )).toThrow(BuildGateError);
+
+      const receiverInbox = join(testDir, 'inbox', 'codexer');
+      expect(() => readdirSync(receiverInbox)).toThrow();
+    });
+
+    it('allows a valid build dispatch and writes the inbox message', () => {
+      const repoRoot = join(testDir, 'repo');
+      const secretPath = join(testDir, '.pipeline-secret');
+      const projectsRoot = join(testDir, 'projects');
+      const slugDir = join(repoRoot, '.agent', 'one-big-feature', 'hard-spec-gate');
+      const researchPath = join(slugDir, '01-research.md');
+      const planPath = join(slugDir, '02-master-plan.md');
+      const specsDir = join(slugDir, '03-specs');
+      const specPath = join(specsDir, '01-signed-stage-ledger.md');
+      const planSession = 'plan-session-send';
+      const specsSession = 'specs-session-send';
+      const planTranscript = join(projectsRoot, 'larry', planSession, 'subagents', 'agent-plan.jsonl');
+      const specsTranscript = join(projectsRoot, 'larry', specsSession, 'subagents', 'agent-specs.jsonl');
+      const ledgerPath = join(repoRoot, 'state', 'pipeline-ledger.jsonl');
+      const nowSeconds = Math.floor(Date.now() / 1000);
+
+      mkdirSync(specsDir, { recursive: true });
+      mkdirSync(dirname(planTranscript), { recursive: true });
+      mkdirSync(dirname(specsTranscript), { recursive: true });
+      writeFileSync(secretPath, `${'ab'.repeat(32)}\n`, 'utf-8');
+      writeFileSync(researchPath, '# research\n', 'utf-8');
+      writeFileSync(planPath, '# master plan\n', 'utf-8');
+      writeFileSync(specPath, '# signed spec\n', 'utf-8');
+      writeFileSync(planTranscript, `${JSON.stringify({
+        type: 'assistant',
+        sessionId: planSession,
+        isSidechain: true,
+        message: {
+          role: 'assistant',
+          content: [{
+            type: 'tool_use',
+            id: 'toolu_write_plan',
+            name: 'Write',
+            input: { file_path: planPath, content: '# master plan\n' },
+          }],
+        },
+      })}\n`, 'utf-8');
+      writeFileSync(specsTranscript, `${JSON.stringify({
+        type: 'assistant',
+        sessionId: specsSession,
+        isSidechain: true,
+        message: {
+          role: 'assistant',
+          content: [{
+            type: 'tool_use',
+            id: 'toolu_write_specs',
+            name: 'Write',
+            input: { file_path: specPath, content: '# signed spec\n' },
+          }],
+        },
+      })}\n`, 'utf-8');
+
+      emitLedgerRow({
+        slug: 'hard-spec-gate',
+        stage: 'research',
+        artifactPath: researchPath,
+        ledgerPath,
+        secretPath,
+        nowSeconds: nowSeconds - 30,
+      });
+      emitLedgerRow({
+        slug: 'hard-spec-gate',
+        stage: 'plan',
+        artifactPath: planPath,
+        runner: 'fable-lean',
+        sessionId: planSession,
+        transcriptPath: planTranscript,
+        transcriptRoot: projectsRoot,
+        ledgerPath,
+        secretPath,
+        nowSeconds: nowSeconds - 20,
+      });
+      emitLedgerRow({
+        slug: 'hard-spec-gate',
+        stage: 'specs',
+        artifactPath: specsDir,
+        runner: 'architect',
+        sessionId: specsSession,
+        transcriptPath: specsTranscript,
+        transcriptRoot: projectsRoot,
+        ledgerPath,
+        secretPath,
+        nowSeconds: nowSeconds - 10,
+      });
+
+      process.env.CTX_PROJECT_ROOT = repoRoot;
+      process.env.PIPELINE_SECRET_PATH = secretPath;
+      process.env.PIPELINE_TRANSCRIPT_ROOT_OVERRIDE = projectsRoot;
+
+      const msgId = sendMessage(
+        senderPaths,
+        'sender',
+        'codexer',
+        'normal',
+        `GATE: build framework=one-big-feature slug=hard-spec-gate repo=${repoRoot} scope-sha=${describeArtifact(specsDir).sha256}`,
+      );
+
+      expect(msgId).toBeTruthy();
+      const receiverInbox = join(testDir, 'inbox', 'codexer');
+      const files = readdirSync(receiverInbox).filter(f => f.endsWith('.json'));
+      expect(files).toHaveLength(1);
+    });
+
+    it('fails closed when the signing secret is unreadable but still allows GATE: comms', () => {
+      process.env.CTX_PROJECT_ROOT = testDir;
+      process.env.PIPELINE_SECRET_PATH = join(testDir, 'missing-secret');
+
+      expect(() => sendMessage(
+        senderPaths,
+        'sender',
+        'codexer',
+        'normal',
+        `GATE: build framework=one-big-feature slug=hard-spec-gate repo=${testDir} scope-sha=${'a'.repeat(64)}`,
+      )).toThrow(/PIPELINE_GATE_BROKEN/);
+
+      const msgId = sendMessage(senderPaths, 'sender', 'codexer', 'normal', 'GATE: comms status update');
+      expect(msgId).toBeTruthy();
     });
   });
 

@@ -133,6 +133,45 @@ function ensureCtxRootEnv(env: ReturnType<typeof resolveEnv>): void {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readStdinUtf8(): string {
+  try {
+    return readFileSync(0, 'utf-8');
+  } catch {
+    return '';
+  }
+}
+
+function parseCommsFilterInput(raw: string): { emails: unknown[]; warning?: string } {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (isRecord(parsed) && Array.isArray(parsed.emails)) {
+      return { emails: parsed.emails };
+    }
+    if (Array.isArray(parsed)) {
+      return { emails: parsed };
+    }
+    if (isRecord(parsed) && Array.isArray(parsed.messages)) {
+      return { emails: parsed.messages };
+    }
+    if (isRecord(parsed) && Array.isArray(parsed.results)) {
+      return { emails: parsed.results };
+    }
+    return {
+      emails: [],
+      warning: 'Warning: comms-filter stdin JSON did not match an accepted shape; returning empty emails.',
+    };
+  } catch (err) {
+    return {
+      emails: [],
+      warning: `Warning: comms-filter failed to parse stdin JSON (${String(err)}); returning empty emails.`,
+    };
+  }
+}
+
 export const busCommand = new Command('bus')
   .description('Bus commands for agent messaging, tasks, and events');
 
@@ -2715,6 +2754,43 @@ busCommand
       return;
     }
     console.log(result.surface ? 'SURFACE' : 'SKIP');
+  });
+
+busCommand
+  .command('comms-filter')
+  .description('Filter comms JSON through the event-dedup ledger and emit only first-seen emails')
+  .option('--namespace <ns>', 'Namespace prefix for dedup source keys', 'gmail')
+  .option('--fire-once', 'Permanently suppress after first surface (calendar accepts, zcal confirmations)')
+  .action((opts: { namespace: string; fireOnce?: boolean }) => {
+    const env = resolveEnv();
+    const parsed = parseCommsFilterInput(readStdinUtf8());
+    if (parsed.warning) {
+      console.error(parsed.warning);
+    }
+
+    const kept: unknown[] = [];
+    for (const item of parsed.emails) {
+      const rawId = isRecord(item) ? (item.id ?? item.messageId) : undefined;
+      if (typeof rawId !== 'string') {
+        console.error('Warning: comms-filter item missing string id/messageId; passing through.');
+        kept.push(item);
+        continue;
+      }
+
+      const source = `${opts.namespace}:${rawId}`;
+      if (!isValidSourceKey(source)) {
+        console.error(`Warning: comms-filter produced invalid source key '${source}'; passing through.`);
+        kept.push(item);
+        continue;
+      }
+
+      const result = checkAndRecordSourceEvent(env.ctxRoot ?? '', source, { fireOnce: opts.fireOnce });
+      if (result.surface) {
+        kept.push(item);
+      }
+    }
+
+    process.stdout.write(`${JSON.stringify({ emails: kept })}\n`);
   });
 
 busCommand

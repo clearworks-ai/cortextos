@@ -9,12 +9,18 @@ import type {
   ArchiveReport,
   ReclaimOrphansReport,
   ReclaimedTaskAssignment,
+  DueSweepAction,
+  DueSweepDelivery,
+  DueSweepReport,
+  DueSweepReason,
 } from '../types/index.js';
 import { atomicWriteSync, ensureDir } from '../utils/atomic.js';
 import { withFileLockSync } from '../utils/lock.js';
 import { randomDigits } from '../utils/random.js';
 import { validatePriority, validateTaskId } from '../utils/validate.js';
 import { logEvent } from './event.js';
+import { sendMessage } from './message.js';
+import { resolvePaths } from '../utils/paths.js';
 
 export type TaskClass = 'system' | 'human' | 'build';
 export interface EnsureEpicTaskResult {
@@ -32,6 +38,17 @@ const RECLAIM_HUMAN_TITLE_RE = /^\[HUMAN\]/i;
 const SYSTEM_TITLE_RE = /^cron:/i;
 export const EPHEMERAL_WORKER_RE = /-\d{10,}$/;
 const DEFAULT_ORPHAN_OWNER = 'frank2';
+/** Priority-scaled default due windows (days). Someday/backlog gets 30. */
+export const DEFAULT_DUE_DAYS: Record<Priority, number> = {
+  urgent: 1,
+  high: 3,
+  normal: 7,
+  low: 14,
+};
+export const SOMEDAY_DUE_DAYS = 30;
+export const STALL_ESCALATE_MS = 4 * 60 * 60 * 1000;
+export const RESURFACE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+export const DEFAULT_SWEEP_MAX_ACTIONS = 20;
 
 export function classifyTask(task: Task): TaskClass {
   const by = task.created_by || '';
@@ -113,7 +130,18 @@ export function resolveTaskOwner(agentName: string, explicitAssignee?: string): 
   return (process.env.CTX_PARENT_AGENT || '').trim() || DEFAULT_ORPHAN_OWNER;
 }
 
-function isHumanReclaimExempt(task: Task): boolean {
+export function computeDefaultDueDate(
+  priority: Priority,
+  someday: boolean,
+  now: Date = new Date(),
+): string {
+  const days = someday ? SOMEDAY_DUE_DAYS : DEFAULT_DUE_DAYS[priority];
+  return new Date(now.getTime() + days * 86400_000)
+    .toISOString()
+    .replace(/\.\d{3}Z$/, 'Z');
+}
+
+export function isHumanExemptTask(task: Task): boolean {
   return task.assigned_to === 'human'
     || task.assigned_to === 'user'
     || task.project === 'human-tasks'
@@ -168,7 +196,7 @@ export function reclaimOrphanTasks(
 
     for (const task of tasks) {
       if (task.status === 'completed' || task.status === 'cancelled') continue;
-      if (isHumanReclaimExempt(task)) {
+      if (isHumanExemptTask(task)) {
         report.skipped_human.push(task.id);
         continue;
       }
@@ -209,6 +237,159 @@ export function reclaimOrphanTasks(
   return report;
 }
 
+function parseIsoEpoch(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const epoch = Date.parse(value);
+  return Number.isNaN(epoch) ? null : epoch;
+}
+
+function formatDueSweepMessage(action: DueSweepAction): string {
+  const overdue = action.reasons.includes('overdue');
+  const stalled = action.reasons.includes('stalled');
+  const dueText = action.due_date ?? 'unknown';
+
+  if (overdue && stalled) {
+    return `Task overdue + stalled: [${action.priority}] ${action.title} (id: ${action.id}, due ${dueText}) — in_progress >4h untouched. Act, update, or re-date.`;
+  }
+  if (overdue) {
+    return `Task overdue: [${action.priority}] ${action.title} (id: ${action.id}, due ${dueText}) — act on it, update its status, or move the due date.`;
+  }
+  return `Task stalled: [${action.priority}] ${action.title} (id: ${action.id}) has sat in_progress >4h untouched — update status or hand it off.`;
+}
+
+export function sweepDueTasks(
+  paths: BusPaths,
+  options: {
+    dryRun?: boolean;
+    now?: Date;
+    maxActions?: number;
+    includeSystem?: boolean;
+  } = {},
+): DueSweepReport {
+  const dryRun = options.dryRun !== false;
+  const now = options.now ?? new Date();
+  const nowEpoch = now.getTime();
+  const nowIso = now.toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const maxActions = Number.isInteger(options.maxActions) && (options.maxActions ?? 0) > 0
+    ? options.maxActions as number
+    : DEFAULT_SWEEP_MAX_ACTIONS;
+  const includeSystem = options.includeSystem === true;
+  const openStatuses = new Set<TaskStatus>(['pending', 'in_progress', 'blocked', 'waiting']);
+
+  const report: DueSweepReport = {
+    dry_run: dryRun,
+    scanned: 0,
+    actions: [],
+    skipped_human: [],
+    skipped_system: 0,
+    capped: 0,
+  };
+
+  const mutate = () => {
+    const tasks = readAllTasks(paths.taskDir);
+    report.scanned = tasks.length;
+
+    for (const task of tasks) {
+      if (!openStatuses.has(task.status) || task.archived) continue;
+      if (isHumanExemptTask(task)) {
+        report.skipped_human.push(task.id);
+        continue;
+      }
+      if (!includeSystem && classifyTask(task) === 'system') {
+        report.skipped_system += 1;
+        continue;
+      }
+
+      const assignee = (task.assigned_to || '').trim();
+      if (assignee === '' || isEphemeralWorkerName(assignee)) continue;
+
+      const reasons: DueSweepReason[] = [];
+      const dueEpoch = parseIsoEpoch(task.due_date);
+      const resurfacedEpoch = parseIsoEpoch(task.resurfaced_at);
+      if (
+        dueEpoch !== null
+        && dueEpoch < nowEpoch
+        && (resurfacedEpoch === null || nowEpoch - resurfacedEpoch >= RESURFACE_COOLDOWN_MS)
+      ) {
+        reasons.push('overdue');
+      }
+
+      const updatedEpoch = parseIsoEpoch(task.updated_at);
+      const escalatedEpoch = parseIsoEpoch(task.escalated_at);
+      if (
+        task.status === 'in_progress'
+        && updatedEpoch !== null
+        && nowEpoch - updatedEpoch > STALL_ESCALATE_MS
+        && !(escalatedEpoch !== null && escalatedEpoch >= updatedEpoch)
+      ) {
+        reasons.push('stalled');
+      }
+
+      if (reasons.length === 0) continue;
+      if (report.actions.length >= maxActions) {
+        report.capped += 1;
+        continue;
+      }
+
+      report.actions.push({
+        id: task.id,
+        title: task.title,
+        assigned_to: assignee,
+        org: task.org,
+        priority: task.priority,
+        due_date: task.due_date,
+        updated_at: task.updated_at,
+        reasons,
+      });
+
+      if (dryRun) continue;
+      if (reasons.includes('overdue')) task.resurfaced_at = nowIso;
+      if (reasons.includes('stalled')) task.escalated_at = nowIso;
+      atomicWriteSync(join(paths.taskDir, `${task.id}.json`), JSON.stringify(task), /* keepBak= */ true);
+    }
+  };
+
+  if (dryRun) {
+    mutate();
+  } else {
+    ensureDir(paths.taskDir);
+    withFileLockSync(paths.taskDir, mutate);
+  }
+
+  return report;
+}
+
+export function deliverDueSweepActions(
+  actions: DueSweepAction[],
+  opts: { instanceId: string; org: string; fromAgent: string },
+): DueSweepDelivery {
+  const delivery: DueSweepDelivery = {
+    delivered: 0,
+    failed: [],
+  };
+
+  for (const action of actions) {
+    try {
+      const toPaths = resolvePaths(action.assigned_to, opts.instanceId, opts.org);
+      sendMessage(
+        toPaths,
+        opts.fromAgent,
+        action.assigned_to,
+        action.priority,
+        formatDueSweepMessage(action),
+      );
+      delivery.delivered += 1;
+    } catch (err) {
+      delivery.failed.push({
+        id: action.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  return delivery;
+}
+
 /**
  * Create a new task. Identical JSON format to bash create-task.sh.
  */
@@ -243,6 +424,16 @@ export function createTask(
   const assignee = resolveTaskOwner(agentName, explicitAssignee);
 
   validatePriority(priority);
+  let effectiveDueDate: string;
+  if (dueDate !== '') {
+    const parsed = new Date(dueDate);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new Error(`Invalid due_date '${dueDate}': must be a parseable date/datetime`);
+    }
+    effectiveDueDate = parsed.toISOString().replace(/\.\d{3}Z$/, 'Z');
+  } else {
+    effectiveDueDate = computeDefaultDueDate(priority, someday);
+  }
 
   const epoch = Date.now();
   // 8 digits: same-millisecond collision probability is ~1e-8 instead of ~1e-3.
@@ -272,7 +463,7 @@ export function createTask(
     created_at: now,
     updated_at: now,
     completed_at: null,
-    due_date: dueDate || null,
+    due_date: effectiveDueDate,
     archived: false,
     ...(blockedBy.length ? { blocked_by: [...blockedBy] } : {}),
     ...(blocks.length ? { blocks: [...blocks] } : {}),

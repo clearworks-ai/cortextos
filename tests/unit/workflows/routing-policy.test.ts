@@ -13,6 +13,7 @@ const routingPolicy = require('../../../.claude/workflows/lib/routing-policy.js'
     route: Record<string, unknown>,
   ) => Record<string, unknown>;
   loadRoutingConfig: (configPath: string, options?: Record<string, unknown>) => Record<string, unknown>;
+  resolvePlannerChoice: (env?: Record<string, string | undefined>) => string | null;
   resolveStageRoute: (
     config: Record<string, unknown>,
     stageName: string,
@@ -95,6 +96,93 @@ describe('routing-policy', () => {
       effort: 'high',
       agentType: 'fable-lean',
     });
+  });
+
+  it('routes plan to lean fable when plannerChoice is explicitly fable', () => {
+    const route = routingPolicy.resolveStageRoute(
+      routingPolicy.ROUTING_CONFIG_DEFAULTS,
+      'plan',
+      { plannerChoice: 'fable' },
+    );
+    const options = routingPolicy.buildAnthropicAgentOptions({ phase: 'Plan' }, route);
+
+    expect(route).toMatchObject({
+      provider: 'anthropic',
+      model: 'fable',
+      lean: true,
+      effort: 'high',
+    });
+    expect(route.confirmationDeclined).not.toBeTruthy();
+    expect(options).toMatchObject({
+      model: 'fable',
+      effort: 'high',
+      agentType: 'fable-lean',
+    });
+  });
+
+  it('forces plan to opus when plannerChoice is explicitly opus, even if the callback approves', () => {
+    let called = false;
+    const route = routingPolicy.resolveStageRoute(
+      routingPolicy.ROUTING_CONFIG_DEFAULTS,
+      'plan',
+      {
+        plannerChoice: 'opus',
+        confirmFableUse: () => {
+          called = true;
+          return true;
+        },
+      },
+    );
+
+    expect(route).toMatchObject({
+      provider: 'anthropic',
+      model: 'opus',
+      lean: false,
+      confirmationDeclined: true,
+      fallback: 'opus',
+    });
+    expect(called).toBe(false);
+  });
+
+  it('preserves the default opus fallback when plannerChoice is unset', () => {
+    const route = routingPolicy.resolveStageRoute(
+      routingPolicy.ROUTING_CONFIG_DEFAULTS,
+      'plan',
+      {},
+    );
+
+    expect(route).toMatchObject({
+      provider: 'anthropic',
+      model: 'opus',
+      confirmationDeclined: true,
+    });
+  });
+
+  it('parses PIPELINE_PLANNER into a planner choice', () => {
+    expect(routingPolicy.resolvePlannerChoice({ PIPELINE_PLANNER: 'fable' })).toBe('fable');
+    expect(routingPolicy.resolvePlannerChoice({ PIPELINE_PLANNER: ' OPUS ' })).toBe('opus');
+    expect(routingPolicy.resolvePlannerChoice({ PIPELINE_PLANNER: 'gpt' })).toBeNull();
+    expect(routingPolicy.resolvePlannerChoice({})).toBeNull();
+  });
+
+  it('wires env choice end to end for both picks', () => {
+    const fableRoute = routingPolicy.resolveStageRoute(
+      routingPolicy.ROUTING_CONFIG_DEFAULTS,
+      'plan',
+      {
+        plannerChoice: routingPolicy.resolvePlannerChoice({ PIPELINE_PLANNER: 'fable' }),
+      },
+    );
+    const opusRoute = routingPolicy.resolveStageRoute(
+      routingPolicy.ROUTING_CONFIG_DEFAULTS,
+      'plan',
+      {
+        plannerChoice: routingPolicy.resolvePlannerChoice({ PIPELINE_PLANNER: 'opus' }),
+      },
+    );
+
+    expect(fableRoute).toMatchObject({ model: 'fable' });
+    expect(opusRoute).toMatchObject({ model: 'opus', confirmationDeclined: true });
   });
 
   it('rejects routing Fable outside the plan stage', () => {

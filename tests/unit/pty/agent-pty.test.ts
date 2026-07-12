@@ -146,6 +146,22 @@ describe('AgentPTY session isolation', () => {
       vi.useRealTimers();
     }
   });
+
+  it('exports CTX_PARENT_AGENT when the worker env includes a parent agent', async () => {
+    const workerEnv = {
+      ...env,
+      projectRoot: '/tmp/fw',
+      parentAgent: 'frank2',
+      worker: true,
+    };
+    const pty = new AgentPTY(workerEnv as any, {});
+    (pty as unknown as { spawnFn: typeof spawnMock }).spawnFn = spawnMock;
+
+    await pty.spawn('fresh', 'boot');
+
+    const options = spawnMock.mock.calls[0]?.[2] as { env?: Record<string, string> } | undefined;
+    expect(options?.env?.CTX_PARENT_AGENT).toBe('frank2');
+  });
 });
 
 describe('AgentPTY listener disposal', () => {

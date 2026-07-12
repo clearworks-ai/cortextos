@@ -83,6 +83,9 @@ export class AgentPTY {
     if (this.env.worker) {
       ptyEnv['CTX_WORKER'] = '1';
     }
+    if (this.env.parentAgent) {
+      ptyEnv['CTX_PARENT_AGENT'] = this.env.parentAgent;
+    }
 
     // Source org-level shared secrets (orgs/{org}/secrets.env).
     // These are shared across all agents in the org: OPENAI_KEY, APIFY_TOKEN, GEMINI_API_KEY, etc.

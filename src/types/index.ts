@@ -641,6 +641,22 @@ export interface StaleTaskReport {
   overdue: Task[];
 }
 
+export interface ReclaimedTaskAssignment {
+  id: string;
+  title: string;
+  from: string;
+  to: string;
+  reason: 'ephemeral_worker' | 'non_live_agent';
+  parentKnown: boolean;
+}
+
+export interface ReclaimOrphansReport {
+  dry_run: boolean;
+  scanned: number;
+  reassigned: ReclaimedTaskAssignment[];
+  skipped_human: string[];
+}
+
 export interface ArchiveReport {
   archived: number;
   skipped: number;
@@ -659,6 +675,8 @@ export interface CtxEnv {
   projectRoot: string;
   timezone?: string;
   orchestrator?: string;
+  /** Agent that spawned this worker; empty for top-level agents. */
+  parentAgent?: string;
   /** True only for ephemeral worker PTYs spawned by spawnWorker. */
   worker?: boolean;
 }

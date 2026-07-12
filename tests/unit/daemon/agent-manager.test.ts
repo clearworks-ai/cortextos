@@ -20,6 +20,10 @@ interface AgentManagerInternals {
   isPidAlive(pid: number): boolean;
 }
 
+const workerCtorArgs: Array<{ name: string; dir: string; parent?: string }> = [];
+const workerSpawnMock = vi.fn();
+const workerOnDoneMock = vi.fn();
+
 // Mock the PTY layer so we don't load native bindings or spawn real processes.
 // AgentManager → AgentProcess → AgentPTY → node-pty. We mock at AgentProcess.
 vi.mock('../../../src/daemon/agent-process.js', () => ({
@@ -34,6 +38,44 @@ vi.mock('../../../src/daemon/agent-process.js', () => ({
     async stop() { /* no-op */ }
     getStatus() { return { name: this.name, status: 'stopped' }; }
     onExit() { /* no-op */ }
+  },
+}));
+
+vi.mock('../../../src/daemon/worker-process.js', () => ({
+  WorkerProcess: class {
+    name: string;
+    dir: string;
+    parent: string | undefined;
+
+    constructor(name: string, dir: string, parent?: string) {
+      this.name = name;
+      this.dir = dir;
+      this.parent = parent;
+      workerCtorArgs.push({ name, dir, parent });
+    }
+
+    async spawn(env: unknown, prompt: string, config: { model?: string } = {}) {
+      workerSpawnMock(env, prompt, config);
+    }
+
+    onDone(cb: (name: string, exitCode: number) => void) {
+      workerOnDoneMock(cb);
+    }
+
+    isFinished() { return false; }
+
+    getStatus() {
+      return {
+        name: this.name,
+        status: 'running',
+        dir: this.dir,
+        parent: this.parent,
+        spawnedAt: new Date().toISOString(),
+      };
+    }
+
+    async terminate() { /* no-op */ }
+    inject() { return true; }
   },
 }));
 
@@ -61,6 +103,40 @@ vi.mock('../../../src/telegram/poller.js', () => ({
 }));
 
 const { AgentManager } = await import('../../../src/daemon/agent-manager.js');
+
+describe('AgentManager.spawnWorker - parent ownership threading', () => {
+  beforeEach(() => {
+    workerCtorArgs.length = 0;
+    workerSpawnMock.mockClear();
+    workerOnDoneMock.mockClear();
+  });
+
+  it('passes parentAgent through the worker CtxEnv export path', async () => {
+    const am = new AgentManager('test-instance', '/tmp/ctx', '/tmp/fw', 'acme');
+
+    await am.spawnWorker(
+      'transcript-scanner-1783880818',
+      '/tmp/fw/orgs/acme/agents/frank2',
+      'scan now',
+      'frank2',
+    );
+
+    expect(workerCtorArgs[0]).toEqual({
+      name: 'transcript-scanner-1783880818',
+      dir: '/tmp/fw/orgs/acme/agents/frank2',
+      parent: 'frank2',
+    });
+    expect(workerSpawnMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentName: 'transcript-scanner-1783880818',
+        parentAgent: 'frank2',
+        worker: true,
+      }),
+      'scan now',
+      {},
+    );
+  });
+});
 
 describe('AgentManager.discoverAndStart - BUG-028 fix', () => {
   let testDir: string;

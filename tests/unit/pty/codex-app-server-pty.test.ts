@@ -28,14 +28,16 @@ vi.mock('../../../src/utils/atomic.js', () => ({
   atomicWriteSync: atomicWriteSyncMock,
 }));
 
+const mockAppServerPty = {
+  pid: 88,
+  write: vi.fn(),
+  onData: vi.fn().mockReturnValue({ dispose() {} }),
+  onExit: vi.fn().mockReturnValue({ dispose() {} }),
+  kill: vi.fn(),
+};
+
 vi.mock('node-pty', () => ({
-  spawn: vi.fn().mockReturnValue({
-    pid: 88,
-    write: vi.fn(),
-    onData: vi.fn(),
-    onExit: vi.fn(),
-    kill: vi.fn(),
-  }),
+  spawn: vi.fn().mockReturnValue(mockAppServerPty),
 }));
 
 const requestMock = vi.fn();
@@ -78,6 +80,10 @@ const mockEnv = {
 };
 
 beforeEach(() => {
+  mockAppServerPty.write.mockClear();
+  mockAppServerPty.onData.mockClear();
+  mockAppServerPty.onExit.mockClear();
+  mockAppServerPty.kill.mockClear();
   fsMocks.existsSync.mockReset().mockReturnValue(false);
   fsMocks.readFileSync.mockReset();
   fsMocks.writeFileSync.mockReset();
@@ -90,6 +96,72 @@ beforeEach(() => {
   logEventMock.mockReset();
   atomicWriteSyncMock.mockReset();
   messageHandler = null;
+});
+
+describe('CodexAppServerPTY listener disposal', () => {
+  function createPtyHarness() {
+    let onExitHandler: ((e: { exitCode: number; signal?: number }) => void) | null = null;
+    const onDataDisposable = { dispose: vi.fn() };
+    const onExitDisposable = { dispose: vi.fn() };
+    const pty = {
+      pid: 88,
+      write: vi.fn(),
+      onData: vi.fn().mockImplementation((_handler: (data: string) => void) => onDataDisposable),
+      onExit: vi.fn().mockImplementation((handler: (e: { exitCode: number; signal?: number }) => void) => {
+        onExitHandler = handler;
+        return onExitDisposable;
+      }),
+      kill: vi.fn(),
+    };
+    return { pty, onDataDisposable, onExitDisposable, getOnExitHandler: () => onExitHandler };
+  }
+
+  async function startReadyPty() {
+    const harness = createPtyHarness();
+    const pty = new CodexAppServerPTY(mockEnv, {});
+    const internals = pty as unknown as {
+      startAppServer(): Promise<void>;
+      waitForSocket(timeoutMs?: number): Promise<void>;
+      _spawnFn: ((file: string, args: string[], options: unknown) => unknown) | null;
+      _onDataDisposable: { dispose(): void } | null;
+      _onExitDisposable: { dispose(): void } | null;
+    };
+    internals._spawnFn = vi.fn().mockReturnValue(harness.pty);
+    vi.spyOn(internals, 'waitForSocket').mockResolvedValue(undefined);
+    await internals.startAppServer();
+    return { pty, internals, harness };
+  }
+
+  it('captures the app-server PTY listener disposables on start', async () => {
+    const { internals, harness } = await startReadyPty();
+
+    expect(internals._onDataDisposable).toBe(harness.onDataDisposable);
+    expect(internals._onExitDisposable).toBe(harness.onExitDisposable);
+  });
+
+  it('disposes both app-server PTY listeners exactly once on kill()', async () => {
+    const { pty, harness } = await startReadyPty();
+
+    pty.kill();
+    pty.kill();
+
+    expect(harness.onDataDisposable.dispose).toHaveBeenCalledTimes(1);
+    expect(harness.onExitDisposable.dispose).toHaveBeenCalledTimes(1);
+    expect(harness.pty.kill).toHaveBeenCalledTimes(1);
+  });
+
+  it('disposes both app-server PTY listeners on onExit and does not double-dispose on later kill()', async () => {
+    const { pty, harness } = await startReadyPty();
+
+    harness.getOnExitHandler()!({ exitCode: 0 });
+
+    expect(harness.onDataDisposable.dispose).toHaveBeenCalledTimes(1);
+    expect(harness.onExitDisposable.dispose).toHaveBeenCalledTimes(1);
+    expect(() => pty.kill()).not.toThrow();
+    expect(harness.onDataDisposable.dispose).toHaveBeenCalledTimes(1);
+    expect(harness.onExitDisposable.dispose).toHaveBeenCalledTimes(1);
+    expect(harness.pty.kill).not.toHaveBeenCalled();
+  });
 });
 
 describe('CodexAppServerPTY socket path policy', () => {

@@ -27,6 +27,7 @@ interface IPtySpawnOptions {
 }
 
 type SpawnFn = (file: string, args: string[], options: IPtySpawnOptions) => IPty;
+type PtyDisposable = { dispose(): void };
 
 interface ThreadState {
   threadId: string;
@@ -106,6 +107,8 @@ export class CodexAppServerPTY {
   } | null = null;
   private _spawnFn: SpawnFn | null = null;
   private _appServerPty: IPty | null = null;
+  private _onDataDisposable: PtyDisposable | null = null;
+  private _onExitDisposable: PtyDisposable | null = null;
   private _rpc: WsUnixJsonRpcClient | null = null;
   private _onExitHandler: ((exitCode: number, signal?: number) => void) | null = null;
   private _outputBuffer: OutputBuffer;
@@ -198,6 +201,7 @@ export class CodexAppServerPTY {
       this._rpc = null;
     }
     if (this._appServerPty) {
+      this.disposePtyListeners();
       try {
         this._appServerPty.kill();
       } catch {
@@ -480,16 +484,17 @@ export class CodexAppServerPTY {
       });
 
       this._appServerPty = pty;
-      pty.onData((data) => {
+      this._onDataDisposable = pty.onData((data) => {
         this._outputBuffer.push(data);
         if (data.includes('Error:')) {
           reject(new Error(data.trim()));
         }
       });
-      pty.onExit(({ exitCode, signal }) => {
+      this._onExitDisposable = pty.onExit(({ exitCode, signal }) => {
         if (this._appServerPty !== pty) return;
         this._appServerPty = null;
         this._alive = false;
+        this.disposePtyListeners();
         this.rejectTurnCompletion(new Error('Codex app-server exited'));
         this._onExitHandler?.(exitCode, signal);
       });
@@ -1014,6 +1019,7 @@ export class CodexAppServerPTY {
   private cleanupSpawnAttempt(): void {
     const pty = this._appServerPty;
     this._appServerPty = null;
+    this.disposePtyListeners();
     if (pty) {
       try {
         pty.kill();
@@ -1068,6 +1074,21 @@ export class CodexAppServerPTY {
     }
 
     return env;
+  }
+
+  private disposePtyListeners(): void {
+    try {
+      this._onDataDisposable?.dispose();
+    } catch {
+      // Listener may already be gone.
+    }
+    try {
+      this._onExitDisposable?.dispose();
+    } catch {
+      // Listener may already be gone.
+    }
+    this._onDataDisposable = null;
+    this._onExitDisposable = null;
   }
 
   private loadEnvFile(path: string, env: Record<string, string>): void {

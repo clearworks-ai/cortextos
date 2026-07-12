@@ -1,18 +1,26 @@
 import { spawnSync } from 'child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  existsSync,
   mkdtempSync,
   mkdirSync,
   rmSync,
   writeFileSync,
 } from 'fs';
 import { tmpdir } from 'os';
-import { dirname, join } from 'path';
+import { dirname, join, resolve } from 'path';
 import { describeArtifact, emitLedgerRow } from '../../../src/pipeline/ledger';
 
-const repoRoot = '/Users/joshweiss/code/cortextos';
+// The gate shell hooks are per-agent, gitignored, defense-in-depth artifacts —
+// they are NOT part of the repo, so they are absent in CI and on other machines.
+// Derive the repo root from this test's location and only run the hook suite when
+// the hooks are actually present locally. The authoritative sink + ledger +
+// provenance behaviour is covered independently by message.test.ts / ledger.test.ts.
+const repoRoot = process.env.CTX_FRAMEWORK_ROOT || resolve(__dirname, '../../..');
 const gateCodexer = join(repoRoot, 'orgs/clearworksai/agents/larry/.claude/hooks/gate-codexer-planning.sh');
 const blockDirectCoding = join(repoRoot, 'orgs/clearworksai/agents/larry/.claude/hooks/block-direct-coding.sh');
+const hooksPresent = existsSync(gateCodexer) && existsSync(blockDirectCoding);
+const describeHooks = hooksPresent ? describe : describe.skip;
 
 function transcriptLine(sessionId: string, block: Record<string, unknown>, type: 'assistant' | 'user' = 'assistant'): string {
   return JSON.stringify({
@@ -39,7 +47,7 @@ function runHook(scriptPath: string, payload: unknown, env: Record<string, strin
   });
 }
 
-describe('hard-spec gate hooks', () => {
+describeHooks('hard-spec gate hooks', () => {
   let root: string;
   let projectRoot: string;
   let projectsRoot: string;

@@ -5,7 +5,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { sendMessage, checkInbox, ackInbox } from '../bus/message.js';
 import { validateAgentName, validateTaskId } from '../utils/validate.js';
-import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, checkStaleTasks, archiveTasks, checkHumanTasks, classifyTask, ensureEpicTask, closeEpic, reclaimOrphanTasks, resolveTaskOwner } from '../bus/task.js';
+import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, checkStaleTasks, archiveTasks, checkHumanTasks, classifyTask, ensureEpicTask, closeEpic, reclaimOrphanTasks, resolveTaskOwner, sweepDueTasks, deliverDueSweepActions, DEFAULT_SWEEP_MAX_ACTIONS } from '../bus/task.js';
 import { saveOutput } from '../bus/save-output.js';
 import { logEvent } from '../bus/event.js';
 import { updateHeartbeat, readAllHeartbeats } from '../bus/heartbeat.js';
@@ -145,6 +145,32 @@ function readStdinUtf8(): string {
   }
 }
 
+function parseDueOption(raw: string): string {
+  const trimmed = raw.trim();
+  const daysMatch = /^\+(\d+)d$/i.exec(trimmed);
+  if (daysMatch) {
+    const days = Number.parseInt(daysMatch[1], 10);
+    return new Date(Date.now() + days * 86400_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  }
+
+  const hoursMatch = /^\+(\d+)h$/i.exec(trimmed);
+  if (hoursMatch) {
+    const hours = Number.parseInt(hoursMatch[1], 10);
+    return new Date(Date.now() + hours * 3600_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return `${trimmed}T23:59:59Z`;
+  }
+
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    console.error(`Invalid --due value '${raw}': use ISO datetime, YYYY-MM-DD, +<n>d, or +<n>h`);
+    process.exit(1);
+  }
+  return parsed.toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
 function parseCommsFilterInput(raw: string): { emails: unknown[]; warning?: string } {
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -272,9 +298,10 @@ busCommand
   .option('--project <name>', 'Project name')
   .option('--someday', 'Create as someday/backlog (status=someday)')
   .option('--needs-approval', 'Require human approval before execution')
+  .option('--due <when>', 'Due date: ISO datetime, YYYY-MM-DD (end of day), or relative +<n>d / +<n>h. Omitted = priority default.')
   .option('--blocked-by <ids>', 'Comma-separated task IDs that must complete before this task can progress')
   .option('--blocks <ids>', 'Comma-separated task IDs that this new task will block (symmetric reverse edge)')
-  .action((title: string, opts: { desc?: string; assignee?: string; priority: string; project?: string; someday?: boolean; needsApproval?: boolean; blockedBy?: string; blocks?: string }) => {
+  .action((title: string, opts: { desc?: string; assignee?: string; priority: string; project?: string; someday?: boolean; needsApproval?: boolean; due?: string; blockedBy?: string; blocks?: string }) => {
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
     const parseList = (raw?: string) => (raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : []);
@@ -286,6 +313,7 @@ busCommand
       project: opts.project,
       someday: opts.someday ?? false,
       needsApproval: opts.needsApproval ?? false,
+      dueDate: opts.due ? parseDueOption(opts.due) : undefined,
       blockedBy: parseList(opts.blockedBy),
       blocks: parseList(opts.blocks),
     });
@@ -908,6 +936,63 @@ busCommand
     }
 
     console.log(JSON.stringify(report));
+  });
+
+busCommand
+  .command('sweep-due-tasks')
+  .description('Dry-run or apply the due-date sweep: resurface past-due open tasks and escalate >4h in_progress stalls to their owners (human tasks always exempt)')
+  .option('--dry-run', 'Preview sweep actions without writing or messaging')
+  .option('--apply', 'Stamp sweep state, message assignees, and emit events')
+  .option('--max <n>', 'Max actions per pass', String(DEFAULT_SWEEP_MAX_ACTIONS))
+  .option('--include-system', 'Also sweep system-class (Cron:*) tasks')
+  .action((opts: { dryRun?: boolean; apply?: boolean; max: string; includeSystem?: boolean }) => {
+    if (opts.dryRun && opts.apply) {
+      console.error('Choose either --dry-run or --apply, not both');
+      process.exit(1);
+    }
+
+    const maxActions = Number.parseInt(opts.max, 10);
+    if (!Number.isInteger(maxActions) || maxActions <= 0) {
+      console.error('Invalid --max value: must be a positive integer');
+      process.exit(1);
+    }
+
+    const env = resolveEnv();
+    const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    const dryRun = opts.apply !== true;
+    const report = sweepDueTasks(paths, {
+      dryRun,
+      maxActions,
+      includeSystem: opts.includeSystem ?? false,
+    });
+
+    const output: Record<string, unknown> = { ...report };
+    if (!dryRun) {
+      const delivery = deliverDueSweepActions(report.actions, {
+        instanceId: env.instanceId,
+        org: env.org,
+        fromAgent: env.agentName,
+      });
+      output.delivery = delivery;
+
+      for (const action of report.actions) {
+        const metadata = {
+          task_id: action.id,
+          title: action.title,
+          assigned_to: action.assigned_to,
+          due_date: action.due_date,
+          reasons: action.reasons,
+        };
+        if (action.reasons.includes('overdue')) {
+          logEvent(paths, env.agentName, env.org, 'task', 'task_due_resurfaced', 'warning', metadata);
+        }
+        if (action.reasons.includes('stalled')) {
+          logEvent(paths, env.agentName, env.org, 'task', 'task_stalled_escalated', 'warning', metadata);
+        }
+      }
+    }
+
+    console.log(JSON.stringify(output));
   });
 
 busCommand

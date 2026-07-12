@@ -6,8 +6,8 @@
  * the daemon runs the reconcile check automatically on a fixed cadence (and
  * once shortly after boot), emitting a drift event per finding on the same
  * deterministic event log other workers use. It also runs the task-ownership
- * orphan reclaim pass on that same cadence so phantom worker assignees heal
- * without introducing a separate long-lived process.
+ * orphan reclaim pass and the due-date sweep on that same cadence so phantom
+ * worker assignees heal and stale work resurfaces without separate loops.
  *
  * Reuses:
  *   - the pure reconcile() logic (src/bus/reconcile.ts)
@@ -23,7 +23,7 @@ import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import type { AgentConfig, AgentStatus, WorkerStatus } from '../types/index.js';
 import { logEvent } from '../bus/event.js';
-import { reclaimOrphanTasks } from '../bus/task.js';
+import { reclaimOrphanTasks, sweepDueTasks, deliverDueSweepActions } from '../bus/task.js';
 import { resolvePaths } from '../utils/paths.js';
 import { parseEnvFile } from '../utils/env.js';
 import {
@@ -256,9 +256,10 @@ export class ReconcileTrigger {
 
   /**
    * Run a single reconcile pass: gather live + declared inputs, run the pure
-   * reconcile, emit drift events, then apply orphan-task reclaim. Best-effort
-   * — any error is swallowed so a reconcile hiccup never crashes the daemon.
-   * Re-entrancy guarded so a slow pass never overlaps the next tick.
+   * reconcile, emit drift events, then apply orphan-task reclaim and the due
+   * sweep. Best-effort — any error is swallowed so a reconcile hiccup never
+   * crashes the daemon. Re-entrancy guarded so a slow pass never overlaps the
+   * next tick.
    */
   runOnce(): DriftReport | null {
     if (this.running) return null;
@@ -287,6 +288,13 @@ export class ReconcileTrigger {
       } catch (err) {
         console.error(
           `[reconcile-trigger] orphan reclaim failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      try {
+        this.runDueSweep();
+      } catch (err) {
+        console.error(
+          `[reconcile-trigger] due sweep failed: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
       return report;
@@ -340,6 +348,39 @@ export class ReconcileTrigger {
         reason: row.reason,
         parentKnown: row.parentKnown,
       });
+    }
+  }
+
+  private runDueSweep(): void {
+    const emitAgent = this.options.emitAgent ?? 'daemon';
+    const emitOrg = this.options.emitOrg ?? this.org;
+    const paths = resolvePaths(emitAgent, this.instanceId, emitOrg);
+
+    const report = sweepDueTasks(paths, { dryRun: false });
+    if (report.actions.length === 0) return;
+
+    const delivery = deliverDueSweepActions(report.actions, {
+      instanceId: this.instanceId,
+      org: emitOrg,
+      fromAgent: emitAgent,
+    });
+    const failedIds = new Set(delivery.failed.map(failure => failure.id));
+
+    for (const action of report.actions) {
+      const meta = {
+        task_id: action.id,
+        title: action.title,
+        assigned_to: action.assigned_to,
+        due_date: action.due_date,
+        reasons: action.reasons,
+        delivered: !failedIds.has(action.id),
+      };
+      if (action.reasons.includes('overdue')) {
+        logEvent(paths, emitAgent, emitOrg, 'task', 'task_due_resurfaced', 'warning', meta);
+      }
+      if (action.reasons.includes('stalled')) {
+        logEvent(paths, emitAgent, emitOrg, 'task', 'task_stalled_escalated', 'warning', meta);
+      }
     }
   }
 }

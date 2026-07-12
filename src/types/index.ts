@@ -68,6 +68,10 @@ export interface Task {
    */
   blocks?: string[];
   blocked_by?: string[];
+  /** Last time the due-sweep resurfaced this task to its owner (ISO 8601). */
+  resurfaced_at?: string | null;
+  /** Last time the due-sweep escalated a >4h in_progress stall (ISO 8601). */
+  escalated_at?: string | null;
 }
 
 // Event Types
@@ -655,6 +659,33 @@ export interface ReclaimOrphansReport {
   scanned: number;
   reassigned: ReclaimedTaskAssignment[];
   skipped_human: string[];
+}
+
+export type DueSweepReason = 'overdue' | 'stalled';
+
+export interface DueSweepAction {
+  id: string;
+  title: string;
+  assigned_to: string;
+  org: string;
+  priority: Priority;
+  due_date: string | null;
+  updated_at: string;
+  reasons: DueSweepReason[];
+}
+
+export interface DueSweepReport {
+  dry_run: boolean;
+  scanned: number;
+  actions: DueSweepAction[];
+  skipped_human: string[];
+  skipped_system: number;
+  capped: number;
+}
+
+export interface DueSweepDelivery {
+  delivered: number;
+  failed: Array<{ id: string; error: string }>;
 }
 
 export interface ArchiveReport {

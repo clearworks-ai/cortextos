@@ -2,9 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, findTaskFile, archiveTasks, classifyTask, ensureEpicTask, closeEpic, resolveTaskOwner } from '../../../src/bus/task';
-import type { BusPaths } from '../../../src/types';
+import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, findTaskFile, archiveTasks, classifyTask, ensureEpicTask, closeEpic, resolveTaskOwner, sweepDueTasks, deliverDueSweepActions } from '../../../src/bus/task';
+import type { BusPaths, Task } from '../../../src/types';
 import * as lockMod from '../../../src/utils/lock';
+import { resolvePaths } from '../../../src/utils/paths';
 
 describe('Task Management', () => {
   let testDir: string;
@@ -88,7 +89,7 @@ describe('Task Management', () => {
       expect(content.created_at).toBeTruthy();
       expect(content.updated_at).toBeTruthy();
       expect(content.completed_at).toBeNull();
-      expect(content.due_date).toBeNull();
+      expect(content.due_date).toBeTruthy();
       expect(content.archived).toBe(false);
     });
 
@@ -403,6 +404,421 @@ describe('Task Management', () => {
 
       expect(result.closed).toBe(1);
     });
+  });
+});
+
+describe('Task due dates and due sweep', () => {
+  let testDir: string;
+  let paths: BusPaths;
+  const originalCtxRoot = process.env.CTX_ROOT;
+  const originalAgentName = process.env.CTX_AGENT_NAME;
+  const originalInstanceId = process.env.CTX_INSTANCE_ID;
+  const originalOrg = process.env.CTX_ORG;
+  const originalHome = process.env.HOME;
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join(tmpdir(), 'cortextos-due-sweep-test-'));
+    process.env.CTX_ROOT = testDir;
+    process.env.CTX_AGENT_NAME = 'codexer';
+    process.env.CTX_INSTANCE_ID = 'default';
+    process.env.CTX_ORG = 'acme';
+    process.env.HOME = testDir;
+    paths = {
+      ctxRoot: testDir,
+      inbox: join(testDir, 'inbox', 'codexer'),
+      inflight: join(testDir, 'inflight', 'codexer'),
+      processed: join(testDir, 'processed', 'codexer'),
+      logDir: join(testDir, 'logs', 'codexer'),
+      stateDir: join(testDir, 'state', 'codexer'),
+      taskDir: join(testDir, 'tasks'),
+      approvalDir: join(testDir, 'approvals'),
+      analyticsDir: join(testDir, 'analytics'),
+      deliverablesDir: join(testDir, 'deliverables'),
+      heartbeatDir: join(testDir, 'heartbeats'),
+    };
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    if (originalCtxRoot === undefined) delete process.env.CTX_ROOT;
+    else process.env.CTX_ROOT = originalCtxRoot;
+    if (originalAgentName === undefined) delete process.env.CTX_AGENT_NAME;
+    else process.env.CTX_AGENT_NAME = originalAgentName;
+    if (originalInstanceId === undefined) delete process.env.CTX_INSTANCE_ID;
+    else process.env.CTX_INSTANCE_ID = originalInstanceId;
+    if (originalOrg === undefined) delete process.env.CTX_ORG;
+    else process.env.CTX_ORG = originalOrg;
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  function readTaskJson(taskId: string): Task {
+    return JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8')) as Task;
+  }
+
+  function readTaskRaw(taskId: string): string {
+    return readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8');
+  }
+
+  function makeTask(overrides: Partial<Task> & { id: string; title: string; assigned_to: string }): Task {
+    const now = overrides.created_at ?? '2026-07-12T12:00:00Z';
+    return {
+      id: overrides.id,
+      title: overrides.title,
+      description: overrides.description ?? '',
+      type: overrides.type ?? 'agent',
+      needs_approval: overrides.needs_approval ?? false,
+      status: overrides.status ?? 'pending',
+      assigned_to: overrides.assigned_to,
+      created_by: overrides.created_by ?? 'larry',
+      org: overrides.org ?? 'acme',
+      priority: overrides.priority ?? 'normal',
+      project: overrides.project ?? '',
+      kpi_key: overrides.kpi_key ?? null,
+      created_at: now,
+      updated_at: overrides.updated_at ?? now,
+      completed_at: overrides.completed_at ?? null,
+      due_date: overrides.due_date ?? null,
+      archived: overrides.archived ?? false,
+      ...(overrides.blocks ? { blocks: overrides.blocks } : {}),
+      ...(overrides.blocked_by ? { blocked_by: overrides.blocked_by } : {}),
+      ...(overrides.resurfaced_at !== undefined ? { resurfaced_at: overrides.resurfaced_at } : {}),
+      ...(overrides.escalated_at !== undefined ? { escalated_at: overrides.escalated_at } : {}),
+    };
+  }
+
+  function writeTask(task: Task): void {
+    mkdirSync(paths.taskDir, { recursive: true });
+    writeFileSync(join(paths.taskDir, `${task.id}.json`), JSON.stringify(task));
+  }
+
+  function readInbox(agentName: string): Array<{ text: string }> {
+    const inboxDir = resolvePaths(agentName, 'default', 'acme').inbox;
+    if (!existsSync(inboxDir)) return [];
+    return readdirSync(inboxDir)
+      .filter(file => file.endsWith('.json'))
+      .map(file => JSON.parse(readFileSync(join(inboxDir, file), 'utf-8')) as { text: string });
+  }
+
+  it('assigns priority-scaled default due dates and preserves explicit due dates', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-12T10:00:00Z'));
+
+    const urgent = createTask(paths, 'alice', 'acme', 'Urgent', { priority: 'urgent' });
+    const high = createTask(paths, 'alice', 'acme', 'High', { priority: 'high' });
+    const normal = createTask(paths, 'alice', 'acme', 'Normal', { priority: 'normal' });
+    const low = createTask(paths, 'alice', 'acme', 'Low', { priority: 'low' });
+    const someday = createTask(paths, 'alice', 'acme', 'Someday', { someday: true });
+    const explicit = createTask(paths, 'alice', 'acme', 'Explicit', {
+      dueDate: '2026-07-20T10:11:12.999Z',
+    });
+
+    expect(readTaskJson(urgent).due_date).toBe('2026-07-13T10:00:00Z');
+    expect(readTaskJson(high).due_date).toBe('2026-07-15T10:00:00Z');
+    expect(readTaskJson(normal).due_date).toBe('2026-07-19T10:00:00Z');
+    expect(readTaskJson(low).due_date).toBe('2026-07-26T10:00:00Z');
+    expect(readTaskJson(someday).due_date).toBe('2026-08-11T10:00:00Z');
+    expect(readTaskJson(explicit).due_date).toBe('2026-07-20T10:11:12Z');
+  });
+
+  it('rejects an invalid explicit due date before writing any task file', () => {
+    expect(() => createTask(paths, 'alice', 'acme', 'Broken due', { dueDate: 'not-a-date' })).toThrow(
+      "Invalid due_date 'not-a-date': must be a parseable date/datetime",
+    );
+    expect(existsSync(paths.taskDir)).toBe(false);
+  });
+
+  it('ensureEpicTask inherits the default due date', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-12T10:00:00Z'));
+
+    const epic = ensureEpicTask(paths, 'alice', 'acme', 'phase-2');
+
+    expect(readTaskJson(epic.id).due_date).toBe('2026-07-19T10:00:00Z');
+  });
+
+  it('resurfaces overdue tasks once per 24h cooldown window', () => {
+    writeTask(makeTask({
+      id: 'task_overdue',
+      title: 'Overdue task',
+      assigned_to: 'alice',
+      due_date: '2026-07-10T12:00:00Z',
+      updated_at: '2026-07-12T08:00:00Z',
+    }));
+
+    const dryRun = sweepDueTasks(paths, {
+      now: new Date('2026-07-12T12:00:00Z'),
+    });
+    expect(dryRun.actions).toEqual([
+      expect.objectContaining({ id: 'task_overdue', reasons: ['overdue'] }),
+    ]);
+    expect(readTaskJson('task_overdue').resurfaced_at).toBeUndefined();
+
+    const applied = sweepDueTasks(paths, {
+      dryRun: false,
+      now: new Date('2026-07-12T12:00:00Z'),
+    });
+    expect(applied.actions).toHaveLength(1);
+    expect(readTaskJson('task_overdue').resurfaced_at).toBe('2026-07-12T12:00:00Z');
+    expect(readTaskJson('task_overdue').updated_at).toBe('2026-07-12T08:00:00Z');
+
+    const cooling = sweepDueTasks(paths, {
+      now: new Date('2026-07-13T11:59:59Z'),
+    });
+    expect(cooling.actions).toEqual([]);
+
+    const afterCooldown = sweepDueTasks(paths, {
+      now: new Date('2026-07-13T12:00:01Z'),
+    });
+    expect(afterCooldown.actions).toEqual([
+      expect.objectContaining({ id: 'task_overdue', reasons: ['overdue'] }),
+    ]);
+  });
+
+  it('escalates stalled in_progress tasks once per stall episode and re-arms after a status touch', () => {
+    writeTask(makeTask({
+      id: 'task_stalled',
+      title: 'Stalled task',
+      assigned_to: 'alice',
+      status: 'in_progress',
+      due_date: '2026-07-20T12:00:00Z',
+      updated_at: '2026-07-12T06:59:59Z',
+    }));
+
+    const first = sweepDueTasks(paths, {
+      dryRun: false,
+      now: new Date('2026-07-12T12:00:00Z'),
+    });
+    expect(first.actions).toEqual([
+      expect.objectContaining({ id: 'task_stalled', reasons: ['stalled'] }),
+    ]);
+    let task = readTaskJson('task_stalled');
+    expect(task.escalated_at).toBe('2026-07-12T12:00:00Z');
+    expect(task.updated_at).toBe('2026-07-12T06:59:59Z');
+
+    const stillSameEpisode = sweepDueTasks(paths, {
+      now: new Date('2026-07-12T18:00:00Z'),
+    });
+    expect(stillSameEpisode.actions).toEqual([]);
+
+    task = {
+      ...task,
+      updated_at: '2026-07-12T18:00:00Z',
+    };
+    writeTask(task);
+
+    const rearmed = sweepDueTasks(paths, {
+      now: new Date('2026-07-12T22:30:01Z'),
+    });
+    expect(rearmed.actions).toEqual([
+      expect.objectContaining({ id: 'task_stalled', reasons: ['stalled'] }),
+    ]);
+  });
+
+  it('reports combined overdue + stalled candidates as one action row', () => {
+    writeTask(makeTask({
+      id: 'task_combined',
+      title: 'Combined task',
+      assigned_to: 'alice',
+      status: 'in_progress',
+      due_date: '2026-07-10T12:00:00Z',
+      updated_at: '2026-07-12T06:00:00Z',
+    }));
+
+    const report = sweepDueTasks(paths, {
+      now: new Date('2026-07-12T12:00:00Z'),
+    });
+
+    expect(report.actions).toHaveLength(1);
+    expect(report.actions[0].reasons).toEqual(['overdue', 'stalled']);
+  });
+
+  it('keeps human-exempt overdue and stalled tasks byte-identical in dry-run and apply mode', () => {
+    const cases = [
+      makeTask({
+        id: 'task_human_assignee',
+        title: 'Human assignee',
+        assigned_to: 'human',
+        status: 'in_progress',
+        due_date: '2026-07-10T12:00:00Z',
+        updated_at: '2026-07-12T06:00:00Z',
+      }),
+      makeTask({
+        id: 'task_user_assignee',
+        title: 'User assignee',
+        assigned_to: 'user',
+        status: 'in_progress',
+        due_date: '2026-07-10T12:00:00Z',
+        updated_at: '2026-07-12T06:00:00Z',
+      }),
+      makeTask({
+        id: 'task_human_title',
+        title: '[HUMAN] Call client back',
+        assigned_to: 'alice',
+        status: 'in_progress',
+        due_date: '2026-07-10T12:00:00Z',
+        updated_at: '2026-07-12T06:00:00Z',
+      }),
+      makeTask({
+        id: 'task_human_project',
+        title: 'Manual bookkeeping',
+        assigned_to: 'alice',
+        project: 'human-tasks',
+        status: 'in_progress',
+        due_date: '2026-07-10T12:00:00Z',
+        updated_at: '2026-07-12T06:00:00Z',
+      }),
+    ];
+
+    for (const task of cases) {
+      writeTask(task);
+      const before = readTaskRaw(task.id);
+
+      const dryRun = sweepDueTasks(paths, {
+        now: new Date('2026-07-12T12:00:00Z'),
+      });
+      expect(dryRun.skipped_human).toContain(task.id);
+      expect(dryRun.actions.find(action => action.id === task.id)).toBeUndefined();
+
+      const applied = sweepDueTasks(paths, {
+        dryRun: false,
+        now: new Date('2026-07-12T12:00:00Z'),
+      });
+      expect(applied.skipped_human).toContain(task.id);
+      expect(applied.actions.find(action => action.id === task.id)).toBeUndefined();
+      expect(readTaskRaw(task.id)).toBe(before);
+    }
+  });
+
+  it('skips system tasks by default but can include them explicitly', () => {
+    writeTask(makeTask({
+      id: 'task_system',
+      title: 'Cron: heartbeat backlog',
+      assigned_to: 'alice',
+      due_date: '2026-07-10T12:00:00Z',
+      updated_at: '2026-07-12T06:00:00Z',
+      created_by: 'heartbeat-1783880818',
+      project: 'system',
+    }));
+
+    const defaultReport = sweepDueTasks(paths, {
+      now: new Date('2026-07-12T12:00:00Z'),
+    });
+    expect(defaultReport.actions).toEqual([]);
+    expect(defaultReport.skipped_system).toBe(1);
+
+    const included = sweepDueTasks(paths, {
+      now: new Date('2026-07-12T12:00:00Z'),
+      includeSystem: true,
+    });
+    expect(included.actions).toEqual([
+      expect.objectContaining({ id: 'task_system', reasons: ['overdue'] }),
+    ]);
+  });
+
+  it('skips someday tasks and treats legacy null due dates as stalled-only when applicable', () => {
+    writeTask(makeTask({
+      id: 'task_someday',
+      title: 'Someday task',
+      assigned_to: 'alice',
+      status: 'someday',
+      due_date: '2026-07-10T12:00:00Z',
+      updated_at: '2026-07-12T06:00:00Z',
+    }));
+    writeTask(makeTask({
+      id: 'task_legacy_pending',
+      title: 'Legacy pending',
+      assigned_to: 'alice',
+      due_date: null,
+      updated_at: '2026-07-12T06:00:00Z',
+    }));
+    writeTask(makeTask({
+      id: 'task_legacy_stalled',
+      title: 'Legacy stalled',
+      assigned_to: 'alice',
+      status: 'in_progress',
+      due_date: null,
+      updated_at: '2026-07-12T06:00:00Z',
+    }));
+
+    const report = sweepDueTasks(paths, {
+      now: new Date('2026-07-12T12:00:00Z'),
+    });
+
+    expect(report.actions.find(action => action.id === 'task_someday')).toBeUndefined();
+    expect(report.actions.find(action => action.id === 'task_legacy_pending')).toBeUndefined();
+    expect(report.actions.find(action => action.id === 'task_legacy_stalled')).toEqual(
+      expect.objectContaining({ reasons: ['stalled'] }),
+    );
+  });
+
+  it('dry-run makes no file changes and maxActions caps overflow candidates', () => {
+    writeTask(makeTask({
+      id: 'task_cap_1',
+      title: 'Cap 1',
+      assigned_to: 'alice',
+      due_date: '2026-07-10T12:00:00Z',
+    }));
+    writeTask(makeTask({
+      id: 'task_cap_2',
+      title: 'Cap 2',
+      assigned_to: 'alice',
+      due_date: '2026-07-10T12:00:00Z',
+    }));
+    writeTask(makeTask({
+      id: 'task_cap_3',
+      title: 'Cap 3',
+      assigned_to: 'alice',
+      due_date: '2026-07-10T12:00:00Z',
+    }));
+
+    const before = readTaskRaw('task_cap_1');
+    const report = sweepDueTasks(paths, {
+      now: new Date('2026-07-12T12:00:00Z'),
+      maxActions: 2,
+    });
+
+    expect(report.actions).toHaveLength(2);
+    expect(report.capped).toBe(1);
+    expect(readTaskRaw('task_cap_1')).toBe(before);
+  });
+
+  it('deliverDueSweepActions writes inbox messages and survives a bad assignee name', () => {
+    const delivery = deliverDueSweepActions([
+      {
+        id: 'task_due_msg',
+        title: 'Due message',
+        assigned_to: 'frank2',
+        org: 'acme',
+        priority: 'high',
+        due_date: '2026-07-12T11:00:00Z',
+        updated_at: '2026-07-12T08:00:00Z',
+        reasons: ['overdue'],
+      },
+      {
+        id: 'task_bad_msg',
+        title: 'Bad assignee',
+        assigned_to: 'bad/name',
+        org: 'acme',
+        priority: 'normal',
+        due_date: null,
+        updated_at: '2026-07-12T08:00:00Z',
+        reasons: ['stalled'],
+      },
+    ], {
+      instanceId: 'default',
+      org: 'acme',
+      fromAgent: 'codexer',
+    });
+
+    expect(delivery.delivered).toBe(1);
+    expect(delivery.failed).toEqual([
+      expect.objectContaining({ id: 'task_bad_msg', error: expect.stringMatching(/Invalid agent name/) }),
+    ]);
+    const inbox = readInbox('frank2');
+    expect(inbox).toHaveLength(1);
+    expect(inbox[0].text).toContain('Task overdue: [high] Due message');
   });
 });
 

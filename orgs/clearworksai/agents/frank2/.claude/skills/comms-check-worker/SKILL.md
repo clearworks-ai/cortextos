@@ -23,14 +23,13 @@ DO:
 TASK_ID=$(cortextos bus create-task "Cron: comms-check" --desc "Comms check: Gmail, iMessage, GitHub CI" 2>/dev/null)
 cortextos bus update-task $TASK_ID in_progress 2>/dev/null
 cortextos bus update-cron-fire comms-check --interval 15m 2>/dev/null
-SURFACED_FILE="state/comms-surfaced.txt"
-mkdir -p state
-[[ -f "$SURFACED_FILE" ]] || touch "$SURFACED_FILE"
-NOW=$(date -u +%s)
-awk -v now=$NOW '$2 && (now-$2 < 7200)' "$SURFACED_FILE" > "${SURFACED_FILE}.tmp" && mv "${SURFACED_FILE}.tmp" "$SURFACED_FILE" || true
 ```
 
-LEGACY fallback only — the authoritative dedup is `cortextos bus event-dedup` (Step 3); keep appending to this file as belt-and-suspenders until the bus command is verified live.
+Dedup is now DETERMINISTIC and upstream of your reasoning: in Step 2 the raw Gmail
+fetch JSON is piped through `cortextos bus comms-filter`, which drops any message
+whose source id was already surfaced. You never see an already-announced email, so
+you cannot re-announce it — there is no honor-system step to forget. No surfaced.txt
+file, no manual per-thread holds.
 
 ---
 
@@ -45,7 +44,6 @@ LEGACY fallback only — the authoritative dedup is `cortextos bus event-dedup` 
 - Any zcal booking confirmation or calendar meeting notification — these go on the calendar automatically. Do an explicit fire-once record-then-skip: `cortextos bus event-dedup --source "gmail:${MSG_ID}" --fire-once >/dev/null` then skip. Fire-once = at most one lifetime handling, never re-surfaced regardless of rewording or re-run; the source key is the confirmation EMAIL's message id, not a text hash.
 - from:notify.railway.app (and any Railway "Deployment crashed" / deploy alert) — DO NOT surface to Josh and DO NOT route to Larry. Railway/CI infra alerts reach Larry directly via the repo-health cron + Railway CLI/MCP; routing them here just re-pings Larry every cycle for the same stale email. Skip entirely, mark as seen.
 - CI / GitHub Actions failure alerts for any cortextos repo (`clearworks-ai/cortextos` or `grandamenium/cortextos`) — DO NOT surface to Josh and DO NOT route to Larry. Larry gets CI health directly via the repo-health cron + `gh` CLI; routing build/type-check/test-run failures here just re-pings Larry every cycle, often for a stale or already-superseded run. Skip entirely, mark as seen. (Durable replacement in flight: PR #40 adds `cortextos bus ci-alert-gate` for a deterministic surface/skip decision; until it merges, do not emit CI-failure alerts from this worker at all.)
-- TEMPORARY HOLD (added 2026-07-02, remove once task_1782975510530_74147799 lands): the James Goldbach / Skool inbound ("Dude please do that would be great help") — already surfaced to Josh, do NOT re-ping it under any reworded phrasing. The durable fix (source-event dedup via `cortextos bus event-dedup`) is now in this SKILL (Step 3); once this build is deployed and one comms cycle has recorded the thread's source id (or it has been recorded manually), delete this hold paragraph. This hold covers only this specific thread — a genuinely new, distinct inbound should still surface normally.
 
 **OOO / AUTO-REPLY EXCLUSIONS** (skip silently — these are never actionable):
 After reading headers for any email, check subject and sender patterns BEFORE surfacing:
@@ -63,13 +61,14 @@ After reading subject/body, skip if the email matches cold outreach patterns:
 
 Run these 4 checks (Bash):
 
-1. **AP INVOICES**: `gws gmail +triage --query 'to:ap@clearworks.ai newer_than:3d' --format json`
+1. **AP INVOICES**: `gws gmail +triage --query 'to:ap@clearworks.ai newer_than:3d' --format json | cortextos bus comms-filter --namespace gmail`
+   The `comms-filter` pipe drops any invoice email already surfaced in a prior cycle — you only ever see first-seen items.
    Skip auto-renewing subs (CalendarBridge, Senja, Google Workspace, Supabase).
    For real AP: `gws gmail +read --id <id> --headers` to extract vendor, amount, payment link, due date.
 
-2. **JOSH INBOX**: `gws gmail +triage --query 'is:unread newer_than:1h -category:promotions -category:social -from:notify.railway.app' --format json`
+2. **JOSH INBOX**: `gws gmail +triage --query 'is:unread newer_than:1h -category:promotions -category:social -from:notify.railway.app' --format json | cortextos bus comms-filter --namespace gmail`
+   The `comms-filter` pipe is the real protection layer: it records each message id in the shared dedup ledger and emits only messages not seen before, so an already-announced email (e.g. the Bones-skills thread) can never reach you a second time regardless of rewording.
    For each result: `gws gmail +read --id <id> --headers` to get content.
-   The Step 3 source-event dedup gate (`cortextos bus event-dedup`, not a time window) is the real protection layer.
 
 3. **GITHUB CI FAILURES**: `gws gmail +triage --query 'from:notifications@github.com subject:"Run failed" newer_than:6h' --format json`
    Group by repo.
@@ -97,23 +96,17 @@ Run these 4 checks (Bash):
 
 ---
 
-## Step 3 — Source-event dedup gate (mandatory before surfacing ANY item)
+## Step 3 — Dedup already happened (no per-item gate to run)
 
-For each candidate item, extract its source id and run the gate. It is a single atomic check-AND-record — there is no separate mark step, so it cannot be half-executed:
+There is no manual dedup step here anymore. In Step 2 every Gmail fetch was piped through
+`cortextos bus comms-filter`, which keys on the SOURCE EVENT identity (namespace + message
+id) and atomically records-and-drops anything already surfaced. Rewording the same inbound
+does NOT make it new — the id is immutable, so the filter has already removed it before you
+saw it. Nothing you do in reasoning can re-surface a previously announced email.
 
-```bash
-RESULT=$(cortextos bus event-dedup --source "gmail:${MSG_ID}")   # or calendar:<id> / imessage:<guid>
-# SKIP  -> already surfaced to Josh once; drop silently, no Telegram, no task
-# SURFACE -> proceed; the event is now recorded — do NOT re-check
-```
-
-Namespaces: `gmail:<gws-message-id>` (the id from `gws gmail +triage` JSON), `calendar:<event-id>`, `imessage:<message-guid>`.
-
-**Dedup keys on the SOURCE EVENT identity (sender + message-id / event-id), never on the message text you generate — rewording the same inbound does NOT make it new.**
-
-Add `--fire-once` for any calendar accept/confirm that somehow reaches this step.
-
-After a SURFACE, also append the legacy belt-and-suspenders line: `echo "MSG_ID $(date -u +%s)" >> "$SURFACED_FILE"`
+For the fire-once carve-outs (calendar accepts / zcal confirmations) the exclusion rules in
+Step 2 still call `cortextos bus event-dedup --source "gmail:${MSG_ID}" --fire-once` to
+permanently suppress those specific noise classes.
 
 ---
 

@@ -3,10 +3,13 @@ import { join } from 'path';
 import { createHmac, timingSafeEqual } from 'crypto';
 import type { InboxMessage, Priority, BusPaths } from '../types/index.js';
 import { PRIORITY_MAP } from '../types/index.js';
+import { BuildGateError, enforceBuildDispatchGate } from '../pipeline/build-gate.js';
 import { atomicWriteSync, ensureDir } from '../utils/atomic.js';
 import { acquireLock, releaseLock, withFileLockSync } from '../utils/lock.js';
 import { randomString } from '../utils/random.js';
 import { validateAgentName, validatePriority } from '../utils/validate.js';
+
+export { BuildGateError };
 
 // ---------------------------------------------------------------------------
 // Security (H10): HMAC-SHA256 message signing
@@ -59,6 +62,10 @@ export function sendMessage(
   validateAgentName(from);
   validateAgentName(to);
   validatePriority(priority);
+
+  // Hard-spec gate: build dispatches to code-writing workers must pass the
+  // signed pipeline gate before the inbox write becomes durable.
+  enforceBuildDispatchGate(to, text);
 
   const pnum = PRIORITY_MAP[priority];
   const epochMs = Date.now();

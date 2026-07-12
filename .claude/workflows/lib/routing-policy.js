@@ -2,6 +2,7 @@ const { existsSync, readFileSync } = require('node:fs');
 const { isAbsolute, resolve } = require('node:path');
 
 const STAGE_NAMES = ['explore', 'plan', 'implement', 'merge', 'review', 'pr', 'lessons'];
+const PLANNER_CHOICES = ['fable', 'opus'];
 
 const CURRENT_BEHAVIOR_ROUTING = {
   fableGate: {
@@ -104,6 +105,13 @@ function loadRoutingConfig(configPath, options = {}) {
   }
 }
 
+function resolvePlannerChoice(env = process.env) {
+  const raw = env && typeof env.PIPELINE_PLANNER === 'string'
+    ? env.PIPELINE_PLANNER.trim().toLowerCase()
+    : '';
+  return PLANNER_CHOICES.includes(raw) ? raw : null;
+}
+
 function resolveStageRoute(config, stageName, options = {}) {
   const stages = config && isRecord(config.stages) ? config.stages : CURRENT_BEHAVIOR_ROUTING.stages;
   const configured = isRecord(stages[stageName]) ? stages[stageName] : CURRENT_BEHAVIOR_ROUTING.stages[stageName];
@@ -123,11 +131,18 @@ function resolveStageRoute(config, stageName, options = {}) {
 
   if (stageName === 'plan' && route.model === 'fable') {
     route.lean = true;
+    const plannerChoice = PLANNER_CHOICES.includes(options.plannerChoice)
+      ? options.plannerChoice
+      : null;
     const confirmFableUse = typeof options.confirmFableUse === 'function'
       ? options.confirmFableUse
       : null;
-    const approved = confirmFableUse ? Boolean(confirmFableUse({ stageName, route, config })) : false;
-    if (!approved && route.requiresConfirmation !== false) {
+    const approved = plannerChoice === 'fable'
+      ? true
+      : plannerChoice === 'opus'
+        ? false
+        : confirmFableUse ? Boolean(confirmFableUse({ stageName, route, config })) : false;
+    if (!approved && (plannerChoice === 'opus' || route.requiresConfirmation !== false)) {
       return {
         provider: 'anthropic',
         model: route.fallback || config?.fableGate?.fallback || 'opus',
@@ -162,5 +177,6 @@ module.exports = {
   ROUTING_CONFIG_DEFAULTS,
   buildAnthropicAgentOptions,
   loadRoutingConfig,
+  resolvePlannerChoice,
   resolveStageRoute,
 };

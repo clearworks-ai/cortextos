@@ -1,6 +1,15 @@
 import { appendFileSync, closeSync, existsSync, openSync, readdirSync, readFileSync, unlinkSync, writeSync } from 'fs';
 import { dirname, join } from 'path';
-import type { Task, Priority, TaskStatus, BusPaths, StaleTaskReport, ArchiveReport } from '../types/index.js';
+import type {
+  Task,
+  Priority,
+  TaskStatus,
+  BusPaths,
+  StaleTaskReport,
+  ArchiveReport,
+  ReclaimOrphansReport,
+  ReclaimedTaskAssignment,
+} from '../types/index.js';
 import { atomicWriteSync, ensureDir } from '../utils/atomic.js';
 import { withFileLockSync } from '../utils/lock.js';
 import { randomDigits } from '../utils/random.js';
@@ -19,7 +28,10 @@ export interface CloseEpicResult {
 
 const SYSTEM_TASK_CREATOR_RE = /^(transcript-scanner|comms-check|session-save|heartbeat)-/;
 const HUMAN_TITLE_RE = /^(\[HUMAN\]|Josh:|Decide:)/i;
+const RECLAIM_HUMAN_TITLE_RE = /^\[HUMAN\]/i;
 const SYSTEM_TITLE_RE = /^cron:/i;
+export const EPHEMERAL_WORKER_RE = /-\d{10,}$/;
+const DEFAULT_ORPHAN_OWNER = 'frank2';
 
 export function classifyTask(task: Task): TaskClass {
   const by = task.created_by || '';
@@ -91,6 +103,112 @@ export function closeEpic(
   return { closed: openTasks.length };
 }
 
+export function isEphemeralWorkerName(name: string): boolean {
+  return EPHEMERAL_WORKER_RE.test(name);
+}
+
+export function resolveTaskOwner(agentName: string, explicitAssignee?: string): string {
+  if (explicitAssignee) return explicitAssignee;
+  if (!isEphemeralWorkerName(agentName)) return agentName;
+  return (process.env.CTX_PARENT_AGENT || '').trim() || DEFAULT_ORPHAN_OWNER;
+}
+
+function isHumanReclaimExempt(task: Task): boolean {
+  return task.assigned_to === 'human'
+    || task.assigned_to === 'user'
+    || task.project === 'human-tasks'
+    || task.type === 'human'
+    || RECLAIM_HUMAN_TITLE_RE.test(task.title || '');
+}
+
+function resolveReclaimOwner(
+  task: Task,
+  workerParents: ReadonlyMap<string, string>,
+  defaultOwner: string,
+): { owner: string; parentKnown: boolean } {
+  const assigned = (task.assigned_to || '').trim();
+  if (assigned) {
+    const parent = workerParents.get(assigned);
+    if (parent) return { owner: parent, parentKnown: true };
+  }
+  const creator = (task.created_by || '').trim();
+  if (creator) {
+    const parent = workerParents.get(creator);
+    if (parent) return { owner: parent, parentKnown: true };
+  }
+  return { owner: defaultOwner, parentKnown: false };
+}
+
+export function reclaimOrphanTasks(
+  paths: BusPaths,
+  options: {
+    dryRun?: boolean;
+    liveAgents?: Iterable<string>;
+    workerParents?: ReadonlyMap<string, string> | Record<string, string>;
+    defaultOwner?: string;
+  } = {},
+): ReclaimOrphansReport {
+  const dryRun = options.dryRun !== false;
+  const defaultOwner = (options.defaultOwner || DEFAULT_ORPHAN_OWNER).trim() || DEFAULT_ORPHAN_OWNER;
+  const liveAgents = options.liveAgents ? new Set(options.liveAgents) : null;
+  const workerParents = options.workerParents instanceof Map
+    ? options.workerParents
+    : new Map(Object.entries(options.workerParents ?? {}));
+
+  const report: ReclaimOrphansReport = {
+    dry_run: dryRun,
+    scanned: 0,
+    reassigned: [],
+    skipped_human: [],
+  };
+
+  const mutate = () => {
+    const tasks = readAllTasks(paths.taskDir);
+    report.scanned = tasks.length;
+
+    for (const task of tasks) {
+      if (task.status === 'completed' || task.status === 'cancelled') continue;
+      if (isHumanReclaimExempt(task)) {
+        report.skipped_human.push(task.id);
+        continue;
+      }
+
+      const assignee = (task.assigned_to || '').trim();
+      const ephemeralWorker = isEphemeralWorkerName(assignee);
+      const notLiveAgent = !!liveAgents && assignee !== '' && !liveAgents.has(assignee);
+      if (!ephemeralWorker && !notLiveAgent) continue;
+
+      const { owner, parentKnown } = resolveReclaimOwner(task, workerParents, defaultOwner);
+      if (!owner || owner === assignee) continue;
+
+      const row: ReclaimedTaskAssignment = {
+        id: task.id,
+        title: task.title,
+        from: assignee,
+        to: owner,
+        reason: ephemeralWorker ? 'ephemeral_worker' : 'non_live_agent',
+        parentKnown,
+      };
+      report.reassigned.push(row);
+
+      if (dryRun) continue;
+
+      task.assigned_to = owner;
+      task.updated_at = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+      atomicWriteSync(join(paths.taskDir, `${task.id}.json`), JSON.stringify(task), /* keepBak= */ true);
+    }
+  };
+
+  if (dryRun) {
+    mutate();
+  } else {
+    ensureDir(paths.taskDir);
+    withFileLockSync(paths.taskDir, mutate);
+  }
+
+  return report;
+}
+
 /**
  * Create a new task. Identical JSON format to bash create-task.sh.
  */
@@ -113,7 +231,7 @@ export function createTask(
 ): string {
   const {
     description = '',
-    assignee = agentName,
+    assignee: explicitAssignee,
     priority = 'normal',
     project: requestedProject = '',
     someday = false,
@@ -122,6 +240,7 @@ export function createTask(
     blockedBy = [],
     blocks = [],
   } = options;
+  const assignee = resolveTaskOwner(agentName, explicitAssignee);
 
   validatePriority(priority);
 

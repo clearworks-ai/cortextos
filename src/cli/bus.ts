@@ -5,7 +5,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { sendMessage, checkInbox, ackInbox } from '../bus/message.js';
 import { validateAgentName, validateTaskId } from '../utils/validate.js';
-import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, checkStaleTasks, archiveTasks, checkHumanTasks, classifyTask, ensureEpicTask, closeEpic } from '../bus/task.js';
+import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, checkStaleTasks, archiveTasks, checkHumanTasks, classifyTask, ensureEpicTask, closeEpic, reclaimOrphanTasks, resolveTaskOwner } from '../bus/task.js';
 import { saveOutput } from '../bus/save-output.js';
 import { logEvent } from '../bus/event.js';
 import { updateHeartbeat, readAllHeartbeats } from '../bus/heartbeat.js';
@@ -278,6 +278,7 @@ busCommand
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
     const parseList = (raw?: string) => (raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : []);
+    const resolvedAssignee = resolveTaskOwner(env.agentName, opts.assignee);
     const taskId = createTask(paths, env.agentName, env.org, title, {
       description: opts.desc,
       assignee: opts.assignee,
@@ -290,10 +291,10 @@ busCommand
     });
     console.log(taskId);
     // Auto-notify assignee so the task is visible immediately (issue #78)
-    if (opts.assignee && opts.assignee !== env.agentName) {
-      const assigneePaths = resolvePaths(opts.assignee, env.instanceId, env.org);
+    if (resolvedAssignee && resolvedAssignee !== env.agentName) {
+      const assigneePaths = resolvePaths(resolvedAssignee, env.instanceId, env.org);
       const desc = opts.desc ? ` — ${opts.desc.slice(0, 120)}` : '';
-      sendMessage(assigneePaths, env.agentName, opts.assignee, 'normal',
+      sendMessage(assigneePaths, env.agentName, resolvedAssignee, 'normal',
         `Task assigned: [${opts.priority}] ${title}${desc} (id: ${taskId})`);
     }
   });
@@ -831,6 +832,81 @@ busCommand
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
     const report = checkStaleTasks(paths);
+    console.log(JSON.stringify(report));
+  });
+
+busCommand
+  .command('reclaim-orphans')
+  .description('Dry-run or apply orphan task reassignment for phantom worker/live-agent drift')
+  .option('--dry-run', 'Preview orphan reassignments without modifying task files')
+  .option('--apply', 'Write the reassignment changes to task files')
+  .action(async (opts: { dryRun?: boolean; apply?: boolean }) => {
+    if (opts.dryRun && opts.apply) {
+      console.error('Choose either --dry-run or --apply, not both');
+      process.exit(1);
+    }
+
+    const env = resolveEnv();
+    const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    const dryRun = opts.apply !== true;
+    let liveAgents: Set<string> | undefined;
+    const workerParents = new Map<string, string>();
+
+    const ipc = new IPCClient(env.instanceId);
+    try {
+      const statusResp = await ipc.send({ type: 'status', source: 'cortextos bus reclaim-orphans' });
+      if (statusResp.success && Array.isArray(statusResp.data)) {
+        const names = (statusResp.data as Array<{ name: string; status: string }>)
+          .filter(agent => agent.status === 'running' || agent.status === 'starting')
+          .map(agent => agent.name);
+        if (names.length > 0) {
+          liveAgents = new Set(names);
+        }
+      }
+    } catch {
+      // Daemon unavailable — fall through to heartbeat/directory fallback below.
+    }
+
+    try {
+      const workersResp = await ipc.send({ type: 'list-workers', source: 'cortextos bus reclaim-orphans' });
+      if (workersResp.success && Array.isArray(workersResp.data)) {
+        for (const worker of workersResp.data as Array<{ name: string; parent?: string }>) {
+          const parent = worker.parent?.trim();
+          if (parent) workerParents.set(worker.name, parent);
+        }
+      }
+    } catch {
+      // Best-effort only — reclaim can still fall back to frank2 when parent is unknown.
+    }
+
+    if (!liveAgents) {
+      const fallbackLive = listAgents(env.ctxRoot, env.org)
+        .filter(agent => agent.running)
+        .map(agent => agent.name);
+      if (fallbackLive.length > 0) {
+        liveAgents = new Set(fallbackLive);
+      }
+    }
+
+    const report = reclaimOrphanTasks(paths, {
+      dryRun,
+      ...(liveAgents ? { liveAgents } : {}),
+      workerParents,
+    });
+
+    if (!dryRun) {
+      for (const row of report.reassigned) {
+        logEvent(paths, env.agentName, env.org, 'task', 'task_reclaimed', 'info', {
+          task_id: row.id,
+          title: row.title,
+          from: row.from,
+          to: row.to,
+          reason: row.reason,
+          parentKnown: row.parentKnown,
+        });
+      }
+    }
+
     console.log(JSON.stringify(report));
   });
 

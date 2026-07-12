@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, findTaskFile, archiveTasks, classifyTask, ensureEpicTask, closeEpic } from '../../../src/bus/task';
+import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, findTaskFile, archiveTasks, classifyTask, ensureEpicTask, closeEpic, resolveTaskOwner } from '../../../src/bus/task';
 import type { BusPaths } from '../../../src/types';
 import * as lockMod from '../../../src/utils/lock';
 
@@ -107,6 +107,25 @@ describe('Task Management', () => {
       const content = JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8'));
       expect(content.status).toBe('someday');
       expect(classifyTask(content)).toBe('build');
+    });
+  });
+
+  describe('resolveTaskOwner', () => {
+    const originalParentAgent = process.env.CTX_PARENT_AGENT;
+
+    afterEach(() => {
+      if (originalParentAgent === undefined) delete process.env.CTX_PARENT_AGENT;
+      else process.env.CTX_PARENT_AGENT = originalParentAgent;
+    });
+
+    it('resolves ephemeral worker ownership to CTX_PARENT_AGENT', () => {
+      process.env.CTX_PARENT_AGENT = 'frank2';
+      expect(resolveTaskOwner('transcript-scanner-1783880818')).toBe('frank2');
+    });
+
+    it('keeps an explicit assignee even when the creator is a worker', () => {
+      process.env.CTX_PARENT_AGENT = 'frank2';
+      expect(resolveTaskOwner('transcript-scanner-1783880818', 'pa')).toBe('pa');
     });
   });
 

@@ -5,13 +5,14 @@
  * worker session happened to fire it. That is the gap this module closes:
  * the daemon runs the reconcile check automatically on a fixed cadence (and
  * once shortly after boot), emitting a drift event per finding on the same
- * deterministic event log other workers use. It does NOT page Josh and does
- * NOT restart or mutate any agent — it is READ-ONLY drift detection. Per
- * fleet policy, alerts get diagnosed then surfaced; they don't page raw.
+ * deterministic event log other workers use. It also runs the task-ownership
+ * orphan reclaim pass on that same cadence so phantom worker assignees heal
+ * without introducing a separate long-lived process.
  *
  * Reuses:
  *   - the pure reconcile() logic (src/bus/reconcile.ts)
- *   - the AgentManager's live status + cron-scheduler introspection
+ *   - the task reclaim helper (src/bus/task.ts)
+ *   - the AgentManager's live status + worker/cron introspection
  *   - logEvent (src/bus/event.ts) for the deterministic event/receipt channel
  *
  * The gather helpers here are shared with the CLI (src/cli/bus-reconcile.ts)
@@ -20,8 +21,9 @@
 
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
-import type { AgentConfig, AgentStatus } from '../types/index.js';
+import type { AgentConfig, AgentStatus, WorkerStatus } from '../types/index.js';
 import { logEvent } from '../bus/event.js';
+import { reclaimOrphanTasks } from '../bus/task.js';
 import { resolvePaths } from '../utils/paths.js';
 import { parseEnvFile } from '../utils/env.js';
 import {
@@ -192,6 +194,7 @@ export function emitDriftEvents(
  */
 export interface ReconcileManagerLike {
   getAllStatuses(): AgentStatus[];
+  listWorkers(): WorkerStatus[];
   getCronScheduler(agentName: string): { getNextFireTimes(): Array<{ name: string; nextFireAt: number }> } | undefined;
 }
 
@@ -253,9 +256,9 @@ export class ReconcileTrigger {
 
   /**
    * Run a single reconcile pass: gather live + declared inputs, run the pure
-   * reconcile, and emit drift events. Best-effort — any error is swallowed so
-   * a reconcile hiccup never crashes the daemon. Re-entrancy guarded so a slow
-   * pass never overlaps the next tick.
+   * reconcile, emit drift events, then apply orphan-task reclaim. Best-effort
+   * — any error is swallowed so a reconcile hiccup never crashes the daemon.
+   * Re-entrancy guarded so a slow pass never overlaps the next tick.
    */
   runOnce(): DriftReport | null {
     if (this.running) return null;
@@ -279,6 +282,13 @@ export class ReconcileTrigger {
         this.options.emitAgent ?? 'daemon',
         this.options.emitOrg ?? this.org,
       );
+      try {
+        this.runOrphanReclaim(statuses);
+      } catch (err) {
+        console.error(
+          `[reconcile-trigger] orphan reclaim failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
       return report;
     } catch (err) {
       console.error(
@@ -299,5 +309,37 @@ export class ReconcileTrigger {
       out[a.name] = scheduler.getNextFireTimes().map(f => f.name);
     }
     return out;
+  }
+
+  private runOrphanReclaim(statuses: AgentStatus[]): void {
+    const emitAgent = this.options.emitAgent ?? 'daemon';
+    const emitOrg = this.options.emitOrg ?? this.org;
+    const paths = resolvePaths(emitAgent, this.instanceId, emitOrg);
+    const liveAgents = statuses
+      .filter(status => status.status === 'running' || status.status === 'starting')
+      .map(status => status.name);
+    const workerParents = new Map<string, string>();
+
+    for (const worker of this.manager.listWorkers()) {
+      const parent = worker.parent?.trim();
+      if (parent) workerParents.set(worker.name, parent);
+    }
+
+    const report = reclaimOrphanTasks(paths, {
+      dryRun: false,
+      liveAgents,
+      workerParents,
+    });
+
+    for (const row of report.reassigned) {
+      logEvent(paths, emitAgent, emitOrg, 'task', 'task_reclaimed', 'info', {
+        task_id: row.id,
+        title: row.title,
+        from: row.from,
+        to: row.to,
+        reason: row.reason,
+        parentKnown: row.parentKnown,
+      });
+    }
   }
 }

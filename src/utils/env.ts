@@ -78,6 +78,11 @@ export function resolveEnv(overrides?: Partial<CtxEnv>): CtxEnv {
   // Resolve timezone and orchestrator from org context.json
   let timezone = overrides?.timezone || process.env.CTX_TIMEZONE || '';
   let orchestrator = overrides?.orchestrator || process.env.CTX_ORCHESTRATOR || '';
+  const parentAgent =
+    overrides?.parentAgent ||
+    process.env.CTX_PARENT_AGENT ||
+    envFile.CTX_PARENT_AGENT ||
+    '';
 
   if ((!timezone || !orchestrator) && org && projectRoot) {
     try {
@@ -156,7 +161,18 @@ export function resolveEnv(overrides?: Partial<CtxEnv>): CtxEnv {
     }
   }
 
-  return { instanceId, ctxRoot, frameworkRoot, agentName, agentDir, org, projectRoot, timezone, orchestrator };
+  return {
+    instanceId,
+    ctxRoot,
+    frameworkRoot,
+    agentName,
+    agentDir,
+    org,
+    projectRoot,
+    timezone,
+    orchestrator,
+    ...(parentAgent ? { parentAgent } : {}),
+  };
 }
 
 /**
@@ -173,6 +189,7 @@ export function writeCortextosEnv(agentDir: string, env: CtxEnv): void {
     `CTX_ORG=${env.org}`,
     `CTX_AGENT_DIR=${env.agentDir}`,
     `CTX_PROJECT_ROOT=${env.projectRoot}`,
+    ...(env.parentAgent ? [`CTX_PARENT_AGENT=${env.parentAgent}`] : []),
   ].join('\n');
 
   writeFileSync(join(agentDir, '.cortextos-env'), content + '\n', 'utf-8');

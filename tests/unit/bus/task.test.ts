@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, findTaskFile, archiveTasks, classifyTask, ensureEpicTask, closeEpic, resolveTaskOwner, sweepDueTasks, deliverDueSweepActions } from '../../../src/bus/task';
+import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, findTaskFile, archiveTasks, classifyTask, ensureEpicTask, closeEpic, resolveTaskOwner, sweepDueTasks, deliverDueSweepActions, fleetTaskHealth, STALL_ESCALATE_MS } from '../../../src/bus/task';
 import type { BusPaths, Task } from '../../../src/types';
 import * as lockMod from '../../../src/utils/lock';
 import { resolvePaths } from '../../../src/utils/paths';
@@ -30,6 +30,18 @@ describe('Task Management', () => {
   afterEach(() => {
     rmSync(testDir, { recursive: true, force: true });
   });
+
+  const normalizeIso = (date: Date): string => date.toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+  const readTaskJson = (taskId: string): Task => (
+    JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8')) as Task
+  );
+
+  const patchTask = (taskId: string, patch: Partial<Task>): Task => {
+    const nextTask = { ...readTaskJson(taskId), ...patch };
+    writeFileSync(join(paths.taskDir, `${taskId}.json`), JSON.stringify(nextTask));
+    return nextTask;
+  };
 
   describe('path-traversal hardening (#13/#14)', () => {
     it('findTaskFile rejects a traversal task id', () => {
@@ -301,6 +313,342 @@ describe('Task Management', () => {
       expect(buildTasks).toHaveLength(1);
       expect(buildTasks[0].id).toBe(buildTaskId);
       expect(buildTasks[0].title).toBe('Build row');
+    });
+
+    it('openOnly returns only pending/in_progress/blocked/waiting', () => {
+      const pendingId = createTask(paths, 'paul', 'acme', 'Pending');
+      const inProgressId = createTask(paths, 'paul', 'acme', 'In progress');
+      updateTask(paths, inProgressId, 'in_progress');
+      const blockedId = createTask(paths, 'paul', 'acme', 'Blocked');
+      updateTask(paths, blockedId, 'blocked');
+      const waitingId = createTask(paths, 'paul', 'acme', 'Waiting');
+      updateTask(paths, waitingId, 'waiting');
+      const completedId = createTask(paths, 'paul', 'acme', 'Completed');
+      completeTask(paths, completedId, 'done');
+      const cancelledId = createTask(paths, 'paul', 'acme', 'Cancelled');
+      cancelTask(paths, cancelledId, 'duplicate');
+      createTask(paths, 'paul', 'acme', 'Someday', { someday: true });
+
+      const tasks = listTasks(paths, { openOnly: true });
+
+      expect(tasks.map(task => task.id).sort()).toEqual(
+        [pendingId, inProgressId, blockedId, waitingId].sort(),
+      );
+      expect(tasks.map(task => task.status).sort()).toEqual(
+        ['pending', 'in_progress', 'blocked', 'waiting'].sort(),
+      );
+    });
+
+    it('openOnly with an explicit status filter lets status win', () => {
+      const completedId = createTask(paths, 'paul', 'acme', 'Completed');
+      completeTask(paths, completedId, 'done');
+      createTask(paths, 'paul', 'acme', 'Pending');
+
+      const tasks = listTasks(paths, { openOnly: true, status: 'completed' });
+
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].id).toBe(completedId);
+      expect(tasks[0].status).toBe('completed');
+    });
+
+    it('limit truncates after created_at DESC ordering', () => {
+      const oldestId = createTask(paths, 'paul', 'acme', 'Oldest');
+      const middleId = createTask(paths, 'paul', 'acme', 'Middle');
+      const newestId = createTask(paths, 'paul', 'acme', 'Newest');
+      patchTask(oldestId, { created_at: '2026-07-10T10:00:00Z' });
+      patchTask(middleId, { created_at: '2026-07-10T11:00:00Z' });
+      patchTask(newestId, { created_at: '2026-07-10T12:00:00Z' });
+
+      const tasks = listTasks(paths, { limit: 2 });
+
+      expect(tasks.map(task => task.id)).toEqual([newestId, middleId]);
+    });
+
+    it('limit is hard-capped at 200 in the library', () => {
+      for (let index = 0; index < 205; index += 1) {
+        createTask(paths, 'paul', 'acme', `Task ${index}`);
+      }
+
+      const tasks = listTasks(paths, { limit: 10_000 });
+
+      expect(tasks).toHaveLength(200);
+    });
+
+    it('absent limit and openOnly is a no-op', () => {
+      createTask(paths, 'paul', 'acme', 'Task 1');
+      createTask(paths, 'paul', 'acme', 'Task 2', { someday: true });
+
+      expect(listTasks(paths, {})).toEqual(
+        listTasks(paths, { limit: undefined, openOnly: false }),
+      );
+    });
+
+    it('limit applies after respectDeps DAG ordering', () => {
+      const dependencyId = createTask(paths, 'paul', 'acme', 'Dependency');
+      const peerId = createTask(paths, 'paul', 'acme', 'Peer');
+      const blockedId = createTask(paths, 'paul', 'acme', 'Blocked', { blockedBy: [dependencyId] });
+      patchTask(dependencyId, { created_at: '2026-07-10T10:00:00Z' });
+      patchTask(peerId, { created_at: '2026-07-10T11:00:00Z' });
+      patchTask(blockedId, { created_at: '2026-07-10T12:00:00Z' });
+
+      const tasks = listTasks(paths, { respectDeps: true, limit: 2 });
+
+      expect(tasks.map(task => task.id)).toEqual([peerId, dependencyId]);
+    });
+  });
+
+  describe('fleetTaskHealth', () => {
+    it('clean store: empty exception arrays, totals reflect open build counts', () => {
+      const now = new Date('2026-07-12T12:00:00Z');
+      const pendingId = createTask(paths, 'paul', 'acme', 'Pending build', { assignee: 'alice' });
+      const waitingId = createTask(paths, 'paul', 'acme', 'Waiting build', { assignee: 'bob' });
+      updateTask(paths, waitingId, 'waiting');
+      patchTask(pendingId, {
+        due_date: '2026-07-13T12:00:00Z',
+        updated_at: '2026-07-12T08:00:00Z',
+      });
+      patchTask(waitingId, {
+        due_date: '2026-07-13T13:00:00Z',
+        updated_at: '2026-07-12T09:00:00Z',
+      });
+
+      const report = fleetTaskHealth(paths, { now });
+
+      expect(report.class_scope).toBe('build');
+      expect(report.generated_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+      expect(report.scanned).toBe(2);
+      expect(report.totals).toEqual([
+        { agent: 'alice', status: 'pending', count: 1 },
+        { agent: 'bob', status: 'waiting', count: 1 },
+      ]);
+      expect(report.overdue).toEqual([]);
+      expect(report.stalled).toEqual([]);
+      expect(report.orphaned).toEqual([]);
+    });
+
+    it('overdue: open build task past due lands in overdue with reason overdue', () => {
+      const now = new Date('2026-07-12T12:00:00Z');
+      const taskId = createTask(paths, 'paul', 'acme', 'Past due build', { assignee: 'frank2' });
+      patchTask(taskId, {
+        due_date: '2026-07-11T12:00:00Z',
+        updated_at: '2026-07-12T09:00:00Z',
+      });
+
+      const report = fleetTaskHealth(paths, { now });
+
+      expect(report.overdue).toEqual([
+        {
+          id: taskId,
+          title: 'Past due build',
+          assigned_to: 'frank2',
+          status: 'pending',
+          priority: 'normal',
+          due_date: '2026-07-11T12:00:00Z',
+          updated_at: '2026-07-12T09:00:00Z',
+          reason: 'overdue',
+        },
+      ]);
+    });
+
+    it('overdue ignores the resurface cooldown', () => {
+      const now = new Date('2026-07-12T12:00:00Z');
+      const taskId = createTask(paths, 'paul', 'acme', 'Resurfaced recently');
+      patchTask(taskId, {
+        due_date: '2026-07-11T12:00:00Z',
+        resurfaced_at: '2026-07-12T11:00:00Z',
+      });
+
+      const report = fleetTaskHealth(paths, { now });
+
+      expect(report.overdue.map(row => row.id)).toContain(taskId);
+    });
+
+    it('stalled: in_progress untouched >4h trips, <4h does not', () => {
+      const now = new Date('2026-07-12T12:00:00Z');
+      const stalledId = createTask(paths, 'paul', 'acme', 'Stalled');
+      updateTask(paths, stalledId, 'in_progress');
+      patchTask(stalledId, {
+        updated_at: normalizeIso(new Date(now.getTime() - STALL_ESCALATE_MS - 1000)),
+        due_date: '2026-07-13T12:00:00Z',
+      });
+      const freshId = createTask(paths, 'paul', 'acme', 'Fresh');
+      updateTask(paths, freshId, 'in_progress');
+      patchTask(freshId, {
+        updated_at: normalizeIso(new Date(now.getTime() - STALL_ESCALATE_MS + 1000)),
+        due_date: '2026-07-13T12:00:00Z',
+      });
+
+      const report = fleetTaskHealth(paths, { now });
+
+      expect(report.stalled.map(row => row.id)).toContain(stalledId);
+      expect(report.stalled.map(row => row.id)).not.toContain(freshId);
+    });
+
+    it('stalled ignores escalated_at episode state', () => {
+      const now = new Date('2026-07-12T12:00:00Z');
+      const taskId = createTask(paths, 'paul', 'acme', 'Escalated already');
+      updateTask(paths, taskId, 'in_progress');
+      patchTask(taskId, {
+        updated_at: '2026-07-12T06:00:00Z',
+        escalated_at: '2026-07-12T11:30:00Z',
+      });
+
+      const report = fleetTaskHealth(paths, { now });
+
+      expect(report.stalled.map(row => row.id)).toContain(taskId);
+    });
+
+    it('orphaned: ephemeral-worker assignee trips without liveAgents', () => {
+      const now = new Date('2026-07-12T12:00:00Z');
+      const taskId = createTask(paths, 'paul', 'acme', 'Ephemeral worker task', {
+        assignee: 'transcript-scanner-1783880818',
+      });
+
+      const report = fleetTaskHealth(paths, { now });
+
+      expect(report.orphaned).toEqual([
+        expect.objectContaining({
+          id: taskId,
+          reason: 'ephemeral_worker',
+        }),
+      ]);
+    });
+
+    it('orphaned: non-live agent trips only when liveAgents is provided', () => {
+      const now = new Date('2026-07-12T12:00:00Z');
+      const taskId = createTask(paths, 'paul', 'acme', 'Non-live agent task', { assignee: 'larry' });
+
+      const noLiveAgents = fleetTaskHealth(paths, { now });
+      const withLiveAgents = fleetTaskHealth(paths, { now, liveAgents: ['frank2'] });
+
+      expect(noLiveAgents.orphaned).toEqual([]);
+      expect(withLiveAgents.orphaned).toEqual([
+        expect.objectContaining({
+          id: taskId,
+          reason: 'non_live_agent',
+        }),
+      ]);
+    });
+
+    it('both overdue and stalled: one row in each array', () => {
+      const now = new Date('2026-07-12T12:00:00Z');
+      const taskId = createTask(paths, 'paul', 'acme', 'Overdue and stalled');
+      updateTask(paths, taskId, 'in_progress');
+      patchTask(taskId, {
+        due_date: '2026-07-11T12:00:00Z',
+        updated_at: '2026-07-12T06:00:00Z',
+      });
+
+      const report = fleetTaskHealth(paths, { now });
+
+      expect(report.overdue.filter(row => row.id === taskId)).toHaveLength(1);
+      expect(report.stalled.filter(row => row.id === taskId)).toHaveLength(1);
+    });
+
+    it('human never leaks into the build scope', () => {
+      const now = new Date('2026-07-12T12:00:00Z');
+      const humanAssigneeId = createTask(paths, 'paul', 'acme', 'Human assignee', { assignee: 'human' });
+      updateTask(paths, humanAssigneeId, 'in_progress');
+      patchTask(humanAssigneeId, {
+        due_date: '2026-07-11T12:00:00Z',
+        updated_at: '2026-07-12T06:00:00Z',
+      });
+      const humanTitleId = createTask(paths, 'paul', 'acme', '[HUMAN] pay invoice');
+      updateTask(paths, humanTitleId, 'in_progress');
+      patchTask(humanTitleId, {
+        due_date: '2026-07-11T12:00:00Z',
+        updated_at: '2026-07-12T06:00:00Z',
+      });
+      const humanProjectId = createTask(paths, 'paul', 'acme', 'Human project', {
+        project: 'human-tasks',
+      });
+      updateTask(paths, humanProjectId, 'in_progress');
+      patchTask(humanProjectId, {
+        due_date: '2026-07-11T12:00:00Z',
+        updated_at: '2026-07-12T06:00:00Z',
+      });
+
+      const report = fleetTaskHealth(paths, { now });
+
+      expect(report.totals).toEqual([]);
+      expect(report.overdue).toEqual([]);
+      expect(report.stalled).toEqual([]);
+      expect(report.orphaned).toEqual([]);
+    });
+
+    it('class human is the only path that surfaces human tasks', () => {
+      const now = new Date('2026-07-12T12:00:00Z');
+      const humanId = createTask(paths, 'paul', 'acme', '[HUMAN] follow up', { assignee: 'human' });
+      updateTask(paths, humanId, 'in_progress');
+      patchTask(humanId, {
+        due_date: '2026-07-11T12:00:00Z',
+        updated_at: '2026-07-12T06:00:00Z',
+      });
+      const buildId = createTask(paths, 'paul', 'acme', 'Build task', { assignee: 'frank2' });
+      updateTask(paths, buildId, 'in_progress');
+      patchTask(buildId, {
+        due_date: '2026-07-11T12:00:00Z',
+        updated_at: '2026-07-12T06:00:00Z',
+      });
+
+      const report = fleetTaskHealth(paths, { now, class: 'human' });
+
+      expect(report.totals).toEqual([
+        { agent: 'human', status: 'in_progress', count: 1 },
+      ]);
+      expect(report.overdue.map(row => row.id)).toContain(humanId);
+      expect(report.overdue.map(row => row.id)).not.toContain(buildId);
+      expect(report.stalled.map(row => row.id)).toContain(humanId);
+      expect(report.stalled.map(row => row.id)).not.toContain(buildId);
+    });
+
+    it('system class excluded from build scope', () => {
+      const now = new Date('2026-07-12T12:00:00Z');
+      const taskId = createTask(paths, 'paul', 'acme', 'Cron: heartbeat', { assignee: 'codexer' });
+      patchTask(taskId, {
+        due_date: '2026-07-11T12:00:00Z',
+        updated_at: '2026-07-12T06:00:00Z',
+      });
+
+      const buildReport = fleetTaskHealth(paths, { now });
+      const systemReport = fleetTaskHealth(paths, { now, class: 'system' });
+
+      expect(buildReport.overdue).toEqual([]);
+      expect(systemReport.overdue.map(row => row.id)).toContain(taskId);
+    });
+
+    it('completed/cancelled/someday/archived tasks contribute nothing', () => {
+      const now = new Date('2026-07-12T12:00:00Z');
+      const completedId = createTask(paths, 'paul', 'acme', 'Completed');
+      completeTask(paths, completedId, 'done');
+      patchTask(completedId, {
+        due_date: '2026-07-11T12:00:00Z',
+        updated_at: '2026-07-12T06:00:00Z',
+      });
+      const cancelledId = createTask(paths, 'paul', 'acme', 'Cancelled');
+      cancelTask(paths, cancelledId, 'duplicate');
+      patchTask(cancelledId, {
+        due_date: '2026-07-11T12:00:00Z',
+        updated_at: '2026-07-12T06:00:00Z',
+      });
+      const somedayId = createTask(paths, 'paul', 'acme', 'Someday', { someday: true });
+      patchTask(somedayId, {
+        due_date: '2026-07-11T12:00:00Z',
+        updated_at: '2026-07-12T06:00:00Z',
+      });
+      const archivedId = createTask(paths, 'paul', 'acme', 'Archived');
+      patchTask(archivedId, {
+        archived: true,
+        due_date: '2026-07-11T12:00:00Z',
+        updated_at: '2026-07-12T06:00:00Z',
+      });
+
+      const report = fleetTaskHealth(paths, { now });
+
+      expect(report.totals).toEqual([]);
+      expect(report.overdue).toEqual([]);
+      expect(report.stalled).toEqual([]);
+      expect(report.orphaned).toEqual([]);
     });
   });
 

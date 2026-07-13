@@ -688,6 +688,41 @@ export interface DueSweepDelivery {
   failed: Array<{ id: string; error: string }>;
 }
 
+/** Why a task landed in a fleet-health exception array. */
+export type TaskHealthReason = 'overdue' | 'stalled' | 'ephemeral_worker' | 'non_live_agent';
+
+/**
+ * One exception row in the fleet task-health rollup. Mirrors the DueSweepAction
+ * field set (minus org, plus status/reason) so consumers see one shape.
+ */
+export interface TaskHealthRow {
+  id: string;
+  title: string;
+  assigned_to: string;
+  status: TaskStatus;
+  priority: Priority;
+  due_date: string | null;
+  updated_at: string;
+  reason: TaskHealthReason;
+}
+
+/** One non-zero agent x status cell in the totals rollup. */
+export interface TaskHealthTotal {
+  agent: string;
+  status: TaskStatus;
+  count: number;
+}
+
+export interface FleetTaskHealthReport {
+  generated_at: string;
+  scanned: number;
+  class_scope: 'build' | 'human' | 'system';
+  totals: TaskHealthTotal[];
+  overdue: TaskHealthRow[];
+  stalled: TaskHealthRow[];
+  orphaned: TaskHealthRow[];
+}
+
 export interface ArchiveReport {
   archived: number;
   skipped: number;

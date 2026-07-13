@@ -5,7 +5,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { sendMessage, checkInbox, ackInbox } from '../bus/message.js';
 import { validateAgentName, validateTaskId } from '../utils/validate.js';
-import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, checkStaleTasks, archiveTasks, checkHumanTasks, classifyTask, ensureEpicTask, closeEpic, reclaimOrphanTasks, resolveTaskOwner, sweepDueTasks, deliverDueSweepActions, DEFAULT_SWEEP_MAX_ACTIONS } from '../bus/task.js';
+import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, checkStaleTasks, archiveTasks, checkHumanTasks, classifyTask, ensureEpicTask, closeEpic, reclaimOrphanTasks, resolveTaskOwner, sweepDueTasks, deliverDueSweepActions, fleetTaskHealth, DEFAULT_SWEEP_MAX_ACTIONS, LIST_TASKS_MAX_LIMIT } from '../bus/task.js';
 import { saveOutput } from '../bus/save-output.js';
 import { logEvent } from '../bus/event.js';
 import { updateHeartbeat, readAllHeartbeats } from '../bus/heartbeat.js';
@@ -39,7 +39,7 @@ import { findBannedCronPrompts } from '../utils/cron-prompt-validator.js';
 import { recordVerificationReceipt, emitClaimWithoutReceiptWarning, evaluateClaimGate } from '../utils/verification-receipt.js';
 import { evaluateCiAlert, gatherCiAlertContext } from '../utils/ci-alert-gate.js';
 import { checkAndRecordSourceEvent, isValidSourceKey } from '../utils/event-dedup.js';
-import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext, CronDefinition, ConversationBufferEntry } from '../types/index.js';
+import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext, CronDefinition, ConversationBufferEntry, TaskHealthRow } from '../types/index.js';
 import type { TaskClass } from '../bus/task.js';
 import { fleetReconcileCommand } from './bus-reconcile.js';
 import { activityLedgerCommand } from './bus-activity-ledger.js';
@@ -551,13 +551,28 @@ busCommand
   .option('--by-project', 'Group text output by project name')
   .option('--format <fmt>', 'Output format: json or text', 'text')
   .option('--respect-deps', 'Sort DAG-aware: unblocked tasks first, blocked tasks last')
-  .action((opts: { agent?: string; status?: string; priority?: string; class?: string; realBuild?: boolean; someday?: boolean; byProject?: boolean; format?: string; respectDeps?: boolean }) => {
+  .option('--limit <n>', `Cap results: positive integer, max ${LIST_TASKS_MAX_LIMIT} (values above are clamped). With --open and no --limit, defaults to 50.`)
+  .option('--open', 'Only open statuses (pending, in_progress, blocked, waiting); defaults --class to build unless one is given')
+  .action((opts: { agent?: string; status?: string; priority?: string; class?: string; realBuild?: boolean; someday?: boolean; byProject?: boolean; format?: string; respectDeps?: boolean; limit?: string; open?: boolean }) => {
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
-    const requestedClass = (opts.realBuild ? 'build' : opts.class) as TaskClass | undefined;
+    const requestedClass = (opts.realBuild
+      ? 'build'
+      : opts.class ?? (opts.open ? 'build' : undefined)) as TaskClass | undefined;
     if (requestedClass && !['system', 'human', 'build'].includes(requestedClass)) {
       console.error(`Invalid class '${requestedClass}'. Must be one of: system, human, build`);
       process.exit(1);
+    }
+    let limit: number | undefined;
+    if (opts.limit !== undefined) {
+      const parsed = Number.parseInt(opts.limit, 10);
+      if (!Number.isInteger(parsed) || parsed <= 0) {
+        console.error('Invalid --limit value: must be a positive integer');
+        process.exit(1);
+      }
+      limit = Math.min(parsed, LIST_TASKS_MAX_LIMIT);
+    } else if (opts.open) {
+      limit = 50;
     }
     const tasks = listTasks(paths, {
       agent: opts.agent,
@@ -565,6 +580,8 @@ busCommand
       priority: opts.priority as Priority | undefined,
       class: requestedClass,
       respectDeps: opts.respectDeps ?? false,
+      openOnly: opts.open ?? false,
+      limit,
     });
     const showSomedayOnly = (opts.someday ?? false) || opts.status === 'someday';
     const visibleTasks = showSomedayOnly
@@ -993,6 +1010,81 @@ busCommand
     }
 
     console.log(JSON.stringify(output));
+  });
+
+busCommand
+  .command('task-health')
+  .description('Exception-only fleet task rollup: agent x status totals + overdue / stalled / orphaned open tasks (build class by default; human tasks never included unless --class human)')
+  .option('--json', 'Print the FleetTaskHealthReport as single-line JSON')
+  .option('--class <c>', 'Class scope: build | human | system', 'build')
+  .action(async (opts: { json?: boolean; class: string }) => {
+    if (!['system', 'human', 'build'].includes(opts.class)) {
+      console.error(`Invalid class '${opts.class}'. Must be one of: system, human, build`);
+      process.exit(1);
+    }
+    const env = resolveEnv();
+    const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+
+    let liveAgents: Set<string> | undefined;
+    const ipc = new IPCClient(env.instanceId);
+    try {
+      const statusResp = await ipc.send({ type: 'status', source: 'cortextos bus task-health' });
+      if (statusResp.success && Array.isArray(statusResp.data)) {
+        const names = (statusResp.data as Array<{ name: string; status: string }>)
+          .filter(agent => agent.status === 'running' || agent.status === 'starting')
+          .map(agent => agent.name);
+        if (names.length > 0) {
+          liveAgents = new Set(names);
+        }
+      }
+    } catch {
+      // Daemon unavailable — fall through to the directory fallback below.
+    }
+    if (!liveAgents) {
+      try {
+        const fallbackLive = listAgents(env.ctxRoot, env.org)
+          .filter(agent => agent.running)
+          .map(agent => agent.name);
+        if (fallbackLive.length > 0) {
+          liveAgents = new Set(fallbackLive);
+        }
+      } catch {
+        // Directory fallback unavailable — degrade to ephemeral-worker-only checks.
+      }
+    }
+
+    const report = fleetTaskHealth(paths, {
+      class: opts.class as TaskClass,
+      ...(liveAgents ? { liveAgents } : {}),
+    });
+
+    if (opts.json) {
+      console.log(JSON.stringify(report));
+      return;
+    }
+
+    const exceptionCount = report.overdue.length + report.stalled.length + report.orphaned.length;
+    if (exceptionCount === 0) {
+      console.log(`Fleet task health: clean — no overdue, stalled, or orphaned ${report.class_scope} tasks.`);
+      return;
+    }
+
+    console.log(`\n  Fleet task health — ${report.generated_at} (class: ${report.class_scope}, scanned: ${report.scanned}, exceptions: ${exceptionCount})\n`);
+    console.log('  Agent × status totals:');
+    for (const cell of report.totals) {
+      console.log(`    ${cell.agent.padEnd(20)} ${cell.status.padEnd(13)} ${cell.count}`);
+    }
+    const renderSection = (label: string, rows: TaskHealthRow[]): void => {
+      if (rows.length === 0) return;
+      console.log(`\n  ${label} (${rows.length}):`);
+      for (const row of rows) {
+        console.log(`    ${row.id}  [${row.priority}] ${row.status}  ${row.assigned_to || '(unassigned)'}  due ${row.due_date ?? '-'}  updated ${row.updated_at}  ${row.reason}  ${row.title.slice(0, 60)}`);
+      }
+    };
+    renderSection('Overdue', report.overdue);
+    renderSection('Stalled', report.stalled);
+    renderSection('Orphaned', report.orphaned);
+    console.log('');
   });
 
 busCommand

@@ -13,6 +13,10 @@ import type {
   DueSweepDelivery,
   DueSweepReport,
   DueSweepReason,
+  FleetTaskHealthReport,
+  TaskHealthReason,
+  TaskHealthRow,
+  TaskHealthTotal,
 } from '../types/index.js';
 import { atomicWriteSync, ensureDir } from '../utils/atomic.js';
 import { withFileLockSync } from '../utils/lock.js';
@@ -49,6 +53,15 @@ export const SOMEDAY_DUE_DAYS = 30;
 export const STALL_ESCALATE_MS = 4 * 60 * 60 * 1000;
 export const RESURFACE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_SWEEP_MAX_ACTIONS = 20;
+/**
+ * Open (actionable) task statuses. Shared by sweepDueTasks, listTasks
+ * (openOnly), and fleetTaskHealth so the definitions cannot drift.
+ */
+export const OPEN_TASK_STATUSES: ReadonlySet<TaskStatus> = new Set<TaskStatus>([
+  'pending', 'in_progress', 'blocked', 'waiting',
+]);
+/** Library-side hard cap for listTasks `limit` — the CLI clamps to the same value. */
+export const LIST_TASKS_MAX_LIMIT = 200;
 
 export function classifyTask(task: Task): TaskClass {
   const by = task.created_by || '';
@@ -274,7 +287,6 @@ export function sweepDueTasks(
     ? options.maxActions as number
     : DEFAULT_SWEEP_MAX_ACTIONS;
   const includeSystem = options.includeSystem === true;
-  const openStatuses = new Set<TaskStatus>(['pending', 'in_progress', 'blocked', 'waiting']);
 
   const report: DueSweepReport = {
     dry_run: dryRun,
@@ -290,7 +302,7 @@ export function sweepDueTasks(
     report.scanned = tasks.length;
 
     for (const task of tasks) {
-      if (!openStatuses.has(task.status) || task.archived) continue;
+      if (!OPEN_TASK_STATUSES.has(task.status) || task.archived) continue;
       if (isHumanExemptTask(task)) {
         report.skipped_human.push(task.id);
         continue;
@@ -388,6 +400,88 @@ export function deliverDueSweepActions(
   }
 
   return delivery;
+}
+
+/**
+ * Exception-only fleet task-health rollup — the anti-firehose read.
+ *
+ * Pure read: no writes, no messages, no events, no prints.
+ */
+export function fleetTaskHealth(
+  paths: BusPaths,
+  options: {
+    now?: Date;
+    class?: TaskClass;
+    liveAgents?: Iterable<string>;
+  } = {},
+): FleetTaskHealthReport {
+  const now = options.now ?? new Date();
+  const nowEpoch = now.getTime();
+  const classScope: TaskClass = options.class ?? 'build';
+  const liveAgents = options.liveAgents ? new Set(options.liveAgents) : null;
+
+  const report: FleetTaskHealthReport = {
+    generated_at: now.toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    scanned: 0,
+    class_scope: classScope,
+    totals: [],
+    overdue: [],
+    stalled: [],
+    orphaned: [],
+  };
+
+  const totalsMap = new Map<string, TaskHealthTotal>();
+  const tasks = readAllTasks(paths.taskDir);
+  report.scanned = tasks.length;
+
+  for (const task of tasks) {
+    if (!OPEN_TASK_STATUSES.has(task.status) || task.archived) continue;
+    if (classifyTask(task) !== classScope) continue;
+    if (classScope !== 'human' && isHumanExemptTask(task)) continue;
+
+    const assignee = (task.assigned_to || '').trim();
+    const agentKey = assignee || '(unassigned)';
+    const cellKey = `${agentKey}\u0000${task.status}`;
+    const cell = totalsMap.get(cellKey);
+    if (cell) cell.count += 1;
+    else totalsMap.set(cellKey, { agent: agentKey, status: task.status, count: 1 });
+
+    const row = (reason: TaskHealthReason): TaskHealthRow => ({
+      id: task.id,
+      title: task.title,
+      assigned_to: task.assigned_to,
+      status: task.status,
+      priority: task.priority,
+      due_date: task.due_date,
+      updated_at: task.updated_at,
+      reason,
+    });
+
+    const dueEpoch = parseIsoEpoch(task.due_date);
+    if (dueEpoch !== null && dueEpoch < nowEpoch) {
+      report.overdue.push(row('overdue'));
+    }
+
+    const updatedEpoch = parseIsoEpoch(task.updated_at);
+    if (
+      task.status === 'in_progress'
+      && updatedEpoch !== null
+      && nowEpoch - updatedEpoch > STALL_ESCALATE_MS
+    ) {
+      report.stalled.push(row('stalled'));
+    }
+
+    if (isEphemeralWorkerName(assignee)) {
+      report.orphaned.push(row('ephemeral_worker'));
+    } else if (liveAgents && assignee !== '' && !liveAgents.has(assignee)) {
+      report.orphaned.push(row('non_live_agent'));
+    }
+  }
+
+  report.totals = [...totalsMap.values()].sort(
+    (a, b) => a.agent.localeCompare(b.agent) || a.status.localeCompare(b.status),
+  );
+  return report;
 }
 
 /**
@@ -1000,6 +1094,16 @@ export function listTasks(
     priority?: Priority;
     class?: TaskClass;
     respectDeps?: boolean;
+    /**
+     * Cap the returned list, applied AFTER ordering (created_at DESC or the
+     * DAG order). Absent = return all.
+     */
+    limit?: number;
+    /**
+     * Only open statuses (pending | in_progress | blocked | waiting). An
+     * explicit status filter wins and makes openOnly a no-op.
+     */
+    openOnly?: boolean;
   },
 ): Task[] {
   const { taskDir } = paths;
@@ -1021,6 +1125,7 @@ export function listTasks(
       // Apply filters
       if (filters?.agent && task.assigned_to !== filters.agent) continue;
       if (filters?.status && task.status !== filters.status) continue;
+      if (filters?.openOnly && !filters.status && !OPEN_TASK_STATUSES.has(task.status)) continue;
       if (filters?.priority && task.priority !== filters.priority) continue;
       if (task.archived) continue;
       // Cancelled tasks are hidden from every default view (like archived).
@@ -1038,7 +1143,14 @@ export function listTasks(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   );
 
-  if (!filters?.respectDeps) return sorted;
+  const applyLimit = (list: Task[]): Task[] => {
+    const requested = filters?.limit;
+    if (typeof requested !== 'number' || !Number.isFinite(requested)) return list;
+    const cap = Math.min(Math.max(Math.trunc(requested), 0), LIST_TASKS_MAX_LIMIT);
+    return list.slice(0, cap);
+  };
+
+  if (!filters?.respectDeps) return applyLimit(sorted);
 
   // DAG-aware ordering: unblocked tasks first, blocked ones after, with
   // the secondary order preserving created_at DESC within each bucket.
@@ -1058,7 +1170,7 @@ export function listTasks(
   const unblocked: Task[] = [];
   const blocked: Task[] = [];
   for (const t of sorted) (isBlocked(t) ? blocked : unblocked).push(t);
-  return [...unblocked, ...blocked];
+  return applyLimit([...unblocked, ...blocked]);
 }
 
 /**

@@ -145,7 +145,8 @@ Read `.claude/skills/nighttime-mode/SKILL.md` before proposing any overnight tas
 ### Scan for autonomous work
 
 ```bash
-cortextos bus list-tasks --status pending
+cortextos bus task-health
+cortextos bus list-tasks --open --limit 25
 cat GOALS.md
 cortextos bus read-all-heartbeats
 ```

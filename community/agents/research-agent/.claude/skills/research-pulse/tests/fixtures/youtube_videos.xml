@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/" xmlns:yt="http://www.youtube.com/xml/schemas/2015">
+  <title>YouTube video feed</title>
+  <updated>2026-07-14T00:00:00+00:00</updated>
+  <entry>
+    <id>yt:video:vid-3</id>
+    <yt:videoId>vid-3</yt:videoId>
+    <title>Episode 3</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=vid-3"/>
+    <published>2026-07-14T00:00:00+00:00</published>
+    <updated>2026-07-14T00:00:00+00:00</updated>
+  </entry>
+  <entry>
+    <id>yt:video:vid-2</id>
+    <yt:videoId>vid-2</yt:videoId>
+    <title>Episode 2</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=vid-2"/>
+    <published>2026-07-13T00:00:00+00:00</published>
+    <updated>2026-07-13T00:00:00+00:00</updated>
+  </entry>
+  <entry>
+    <id>yt:video:vid-1</id>
+    <yt:videoId>vid-1</yt:videoId>
+    <title>Episode 1</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=vid-1"/>
+    <published>2026-07-12T00:00:00+00:00</published>
+    <updated>2026-07-12T00:00:00+00:00</updated>
+  </entry>
+</feed>

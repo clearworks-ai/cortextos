@@ -1,0 +1,35 @@
+{
+  "feeds": [
+    {
+      "title": "Nonprofit Everything",
+      "url": "https://example.com/nonprofit-everything.rss",
+      "link": "https://nonprofiteverything.example.com",
+      "episodeCount": 128,
+      "categories": {
+        "1": "Nonprofits",
+        "2": "Leadership"
+      }
+    },
+    {
+      "title": "Fundraising Growth Show",
+      "url": "https://example.com/fundraising-growth.rss",
+      "link": "https://fundraisinggrowth.example.com",
+      "episodeCount": 84,
+      "categories": {
+        "1": "Fundraising",
+        "2": "Operations"
+      }
+    },
+    {
+      "title": "Mission Ops Weekly",
+      "url": "https://example.com/mission-ops.rss",
+      "link": "https://missionops.example.com",
+      "episodeCount": 52,
+      "categories": {
+        "1": "Operations",
+        "2": "Strategy"
+      }
+    }
+  ]
+}
+

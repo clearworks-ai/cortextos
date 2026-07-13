@@ -1,0 +1,35 @@
+{
+  "items": [
+    {
+      "id": {
+        "channelId": "UCNONPROFIT001"
+      },
+      "snippet": {
+        "channelTitle": "Nonprofit Lab",
+        "title": "Nonprofit Lab",
+        "description": "Operating systems and fundraising strategy for nonprofits."
+      }
+    },
+    {
+      "id": {
+        "channelId": "UCNONPROFIT002"
+      },
+      "snippet": {
+        "channelTitle": "Mission Revenue",
+        "title": "Mission Revenue",
+        "description": "Revenue growth, donor operations, and nonprofit finance."
+      }
+    },
+    {
+      "id": {
+        "channelId": "UCNONPROFIT003"
+      },
+      "snippet": {
+        "channelTitle": "Boardroom for Good",
+        "title": "Boardroom for Good",
+        "description": "Governance, compliance, and leadership for mission-led orgs."
+      }
+    }
+  ]
+}
+

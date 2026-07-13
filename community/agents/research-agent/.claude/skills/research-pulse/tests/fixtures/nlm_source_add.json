@@ -1,0 +1,9 @@
+{
+  "source": {
+    "id": "nlm-1",
+    "title": "Source 1",
+    "type": "web_page",
+    "url": "https://example.com/source-1"
+  }
+}
+

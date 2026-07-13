@@ -201,17 +201,19 @@ describe('bus list-tasks + task-health', () => {
 
   it('task-health renders totals plus only non-empty exception sections', async () => {
     const paths = makePaths('codexer');
+    // Keep fixture dates relative so the overdue/not-overdue split stays deterministic against the wall clock.
+    const nowMs = Date.now();
     const overdueId = createTask(paths, 'paul', 'acme', 'Overdue task', { assignee: 'frank2' });
     patchTask(overdueId, {
-      due_date: '2026-07-10T10:00:00Z',
-      updated_at: '2026-07-12T10:00:00Z',
+      due_date: new Date(nowMs - 2 * 86400_000).toISOString(),
+      updated_at: new Date(nowMs - 60_000).toISOString(),
     });
     const orphanId = createTask(paths, 'paul', 'acme', 'Ephemeral orphan', {
       assignee: 'transcript-scanner-1783880818',
     });
     patchTask(orphanId, {
-      due_date: '2026-07-13T10:00:00Z',
-      updated_at: '2026-07-12T10:00:00Z',
+      due_date: new Date(nowMs + 86400_000).toISOString(),
+      updated_at: new Date(nowMs - 60_000).toISOString(),
     });
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});

@@ -21,7 +21,8 @@ triggers: ["weekly review", "weekly check-in", "end of week", "week summary", "r
 cortextos bus read-all-heartbeats
 
 # All tasks this week
-cortextos bus list-tasks
+cortextos bus task-health
+cortextos bus list-tasks --open --limit 50
 cortextos bus list-tasks --status completed
 
 # This week's memory files (last 7 days)

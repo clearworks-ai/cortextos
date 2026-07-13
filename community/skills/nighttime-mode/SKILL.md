@@ -92,7 +92,8 @@ TODAY=$(date -u +%Y-%m-%d)
 echo "COMPLETED: $TASK_ID - <description> (by <agent>)" >> "memory/$TODAY.md"
 
 # 4. Dispatch next task if queue has more
-cortextos bus list-tasks --status pending
+cortextos bus task-health
+cortextos bus list-tasks --open --limit 25
 ```
 
 ### Step 4: Handle blockers

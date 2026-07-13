@@ -627,6 +627,7 @@ function verifyDispatchLikeRecord(
   ledgerPath: string,
   secretPath: string,
   transcriptRoot: string,
+  nowSeconds: number,
   scopeSha?: string,
 ): { finding?: AuditFinding; verified?: boolean } {
   if (!slug) {
@@ -647,6 +648,7 @@ function verifyDispatchLikeRecord(
     ledgerPath,
     secretPath,
     transcriptRoot,
+    nowSeconds,
   });
   if (!result.ok) {
     return {
@@ -730,6 +732,7 @@ export function runBypassAudit(opts: RunAuditOptions): AuditReport {
       ledgerPath,
       secretPath,
       transcriptRoot,
+      nowSeconds: Math.floor(nowMs / 1000),
     });
     if (!result.ok) {
       bypasses.push(pushBypass('dispatch-no-chain', result.detail, evidence, dispatch.directive.slug, result.code));
@@ -774,6 +777,7 @@ export function runBypassAudit(opts: RunAuditOptions): AuditReport {
       ledgerPath,
       secretPath,
       transcriptRoot,
+      Math.floor(nowMs / 1000),
     );
     if (result.finding) {
       bypasses.push(result.finding);
@@ -793,6 +797,7 @@ export function runBypassAudit(opts: RunAuditOptions): AuditReport {
       ledgerPath,
       secretPath,
       transcriptRoot,
+      Math.floor(nowMs / 1000),
     );
     if (result.finding) {
       bypasses.push(result.finding);

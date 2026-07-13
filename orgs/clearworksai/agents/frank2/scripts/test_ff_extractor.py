@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import tempfile
+import urllib.error
 import unittest
 import unittest.mock
 from datetime import date
@@ -349,7 +350,7 @@ class InboundDirectionTests(unittest.TestCase):
 class RunStdoutContractTests(unittest.TestCase):
     ENV = {
         "FIREFLIES_API_KEY": "ff-test",
-        "ANTHROPIC_API_KEY": "an-test",
+        "OPENROUTER_API_KEY": "or-test",
         "BRIEFS_INGEST_URL": "https://briefs.example/api/tasks/ingest",
         "TASKS_INGEST_TOKEN": "tok-test",
     }
@@ -360,34 +361,28 @@ class RunStdoutContractTests(unittest.TestCase):
             calls.append(url)
             if "fireflies" in url:
                 body: dict[str, object] = {"data": {"transcripts": transcripts}}
-            elif "anthropic" in url:
-                prompt = json.loads(request.data.decode("utf-8"))["messages"][0]["content"]
+            elif "openrouter" in url:
+                prompt = json.loads(request.data.decode("utf-8"))["messages"][-1]["content"]
                 if prompt.startswith("Extract action items"):
-                    body = {
-                        "content": [
+                    content = json.dumps(
+                        [
                             {
-                                "type": "text",
-                                "text": json.dumps(
-                                    [
-                                        {
-                                            "action": "Send the proposal to Acme",
-                                            "owner": "Josh",
-                                            "dueDate": "tomorrow",
-                                            "status": "pending",
-                                        },
-                                        {
-                                            "action": "Send Josh the signed contract",
-                                            "owner": "Sara",
-                                            "dueDate": "tomorrow",
-                                            "status": "pending",
-                                        },
-                                    ]
-                                ),
-                            }
+                                "action": "Send the proposal to Acme",
+                                "owner": "Josh",
+                                "dueDate": "tomorrow",
+                                "status": "pending",
+                            },
+                            {
+                                "action": "Send Josh the signed contract",
+                                "owner": "Sara",
+                                "dueDate": "tomorrow",
+                                "status": "pending",
+                            },
                         ]
-                    }
+                    )
                 else:
-                    body = {"content": [{"type": "text", "text": json.dumps({"is_casual": False})}]}
+                    content = json.dumps({"is_casual": False})
+                body = {"choices": [{"message": {"content": content}}]}
             else:
                 body = {"ok": True}
             return FakeResponse(json.dumps(body).encode("utf-8"))
@@ -455,7 +450,7 @@ class RunStdoutContractTests(unittest.TestCase):
         calls: list[str] = []
         degraded_env = {
             "FIREFLIES_API_KEY": "ff-test",
-            "ANTHROPIC_API_KEY": "an-test",
+            "OPENROUTER_API_KEY": "or-test",
         }
         with tempfile.TemporaryDirectory() as tmp:
             watermark_path = Path(tmp) / "watermark.json"
@@ -482,7 +477,7 @@ class RunStdoutContractTests(unittest.TestCase):
     def test_non_dry_run_still_requires_ingest_env(self) -> None:
         degraded_env = {
             "FIREFLIES_API_KEY": "ff-test",
-            "ANTHROPIC_API_KEY": "an-test",
+            "OPENROUTER_API_KEY": "or-test",
         }
         with tempfile.TemporaryDirectory() as tmp:
             watermark_path = Path(tmp) / "watermark.json"
@@ -503,8 +498,8 @@ class RunStdoutContractTests(unittest.TestCase):
             calls.append(url)
             if "fireflies" in url:
                 body: dict[str, object] = {"data": {"transcripts": [self.make_transcript()]}}
-            elif "anthropic" in url:
-                body = {"content": [{"type": "text", "text": json.dumps({"is_casual": True})}]}
+            elif "openrouter" in url:
+                body = {"choices": [{"message": {"content": json.dumps({"is_casual": True})}}]}
             else:
                 body = {"ok": True}
             return FakeResponse(json.dumps(body).encode("utf-8"))
@@ -532,6 +527,71 @@ class RunStdoutContractTests(unittest.TestCase):
         self.assertEqual(sources, {"ff", "ff-inbound"})
         self.assertTrue(any("briefs.example" in url for url in calls))
         self.assertTrue(printed["_watermark_exists"])
+
+
+class FailureContractTests(unittest.TestCase):
+    ENV = {
+        "FIREFLIES_API_KEY": "ff-test",
+        "OPENROUTER_API_KEY": "or-test",
+        "BRIEFS_INGEST_URL": "https://briefs.example/api/tasks/ingest",
+        "TASKS_INGEST_TOKEN": "tok-test",
+    }
+
+    def make_transcript(self) -> dict[str, object]:
+        return {
+            "id": "meeting_123",
+            "title": "Acme Follow Up",
+            "date": "2026-06-08T16:00:00Z",
+            "sentences": [{"speaker_name": "Josh Weiss", "text": "I'll send the proposal tomorrow."}],
+        }
+
+    def test_execute_prints_error_json_and_notifies_on_openrouter_failure(self) -> None:
+        def failing_urlopen(request: object, timeout: int | None = None) -> FakeResponse:
+            url = request.full_url
+            if "fireflies" in url:
+                return FakeResponse(json.dumps({"data": {"transcripts": [self.make_transcript()]}}).encode("utf-8"))
+            if "openrouter" in url:
+                raise urllib.error.HTTPError(
+                    url=url,
+                    code=402,
+                    msg="Payment Required",
+                    hdrs=None,
+                    fp=io.BytesIO(b'{"error":{"message":"credit balance too low"}}'),
+                )
+            raise AssertionError(f"unexpected URL: {url}")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, self.ENV, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.execute(
+                        limit=5,
+                        dry_run=False,
+                        watermark_path=Path(tmp) / "watermark.json",
+                        urlopen=failing_urlopen,
+                    )
+
+        self.assertEqual(exit_code, 1)
+        printed = json.loads(stdout.getvalue())
+        self.assertEqual(printed["items"], [])
+        self.assertIn("credit balance too low", printed["error"])
+
+    def test_execute_marks_dry_run_in_error_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, {"FIREFLIES_API_KEY": "ff-test"}, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.execute(
+                        limit=5,
+                        dry_run=True,
+                        watermark_path=Path(tmp) / "watermark.json",
+                    )
+
+        self.assertEqual(exit_code, 1)
+        printed = json.loads(stdout.getvalue())
+        self.assertTrue(printed["dry_run"])
+        self.assertEqual(printed["items"], [])
+        self.assertIn("missing required env: OPENROUTER_API_KEY", printed["error"])
 
 
 if __name__ == "__main__":

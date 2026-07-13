@@ -14,21 +14,22 @@ import unicodedata
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
 
 LOGGER = logging.getLogger(__name__)
+UTC = timezone.utc
 SCRIPT_PATH = Path(__file__).resolve()
 AGENT_DIR = SCRIPT_PATH.parent.parent
 STATE_DIR = AGENT_DIR / "state"
 DEFAULT_WATERMARK_PATH = STATE_DIR / "ff-extractor-watermark.json"
 DEFAULT_TRANSCRIPT_LIMIT = 20
 FIREFLIES_API_URL = "https://api.fireflies.ai/graphql"
-ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-CLASSIFIER_MODEL = os.environ.get("FF_CLASSIFIER_MODEL", "claude-haiku-4-5")
-EXTRACTOR_MODEL = os.environ.get("FF_EXTRACTOR_MODEL", "claude-sonnet-4-5")
+OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
+CLASSIFIER_MODEL = os.environ.get("FF_CLASSIFIER_MODEL", "anthropic/claude-haiku-4.5")
+EXTRACTOR_MODEL = os.environ.get("FF_EXTRACTOR_MODEL", "anthropic/claude-sonnet-4.5")
 CLASSIFIER_MAX_CHARS = 24000
 EXTRACTOR_MAX_CHARS = 48000
 TRANSCRIPT_FIELDS = """
@@ -214,7 +215,7 @@ def parse_json_payload(value: str) -> Any:
 def parse_extracted_items(value: str) -> list[ExtractedItem]:
     payload = parse_json_payload(value)
     if not isinstance(payload, list):
-        return []
+        raise ValueError("extractor response was not a JSON array")
     items: list[ExtractedItem] = []
     for item in payload:
         if not isinstance(item, dict):
@@ -380,7 +381,56 @@ def fetch_recent_transcripts(
     return [item for item in transcripts if isinstance(item, dict)]
 
 
-def anthropic_request(
+def extract_provider_error_message(raw_body: str) -> str:
+    text = collapse_ws(raw_body)
+    if not text:
+        return ""
+    try:
+        payload = json.loads(text)
+    except ValueError:
+        return text
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict):
+            message = collapse_ws(str(error.get("message") or error.get("code") or ""))
+            if message:
+                return message
+        if isinstance(error, str):
+            return collapse_ws(error)
+        message = collapse_ws(str(payload.get("message") or ""))
+        if message:
+            return message
+    return text
+
+
+def read_http_error_body(exc: urllib.error.HTTPError) -> str:
+    try:
+        raw = exc.read()
+    except OSError:
+        return ""
+    return raw.decode("utf-8", errors="replace")
+
+
+def normalize_openrouter_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        texts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                texts.append(item)
+                continue
+            if isinstance(item, dict) and item.get("type") == "text":
+                text = item.get("text")
+                if isinstance(text, str):
+                    texts.append(text)
+        combined = "\n".join(texts).strip()
+        if combined:
+            return combined
+    raise ValueError("OpenRouter response missing choices[0].message.content")
+
+
+def openrouter_request(
     api_key: str,
     *,
     model: str,
@@ -388,70 +438,67 @@ def anthropic_request(
     max_tokens: int,
     urlopen: Urlopen = urllib.request.urlopen,
 ) -> str:
-    body = {
-        "model": model,
-        "max_tokens": max_tokens,
-        "temperature": 0,
-        "messages": [{"role": "user", "content": prompt}],
-    }
+    body = {"model": model, "max_tokens": max_tokens, "temperature": 0, "messages": [{"role": "user", "content": prompt}]}
     request = urllib.request.Request(
-        ANTHROPIC_API_URL,
+        OPENROUTER_API_URL,
         data=json.dumps(body).encode("utf-8"),
         method="POST",
     )
     request.add_header("Content-Type", "application/json")
-    request.add_header("x-api-key", api_key)
-    request.add_header("anthropic-version", "2023-06-01")
-    with urlopen(request, timeout=60) as response:
-        payload = json.loads(response.read().decode("utf-8"))
+    request.add_header("Authorization", f"Bearer {api_key}")
+    try:
+        with urlopen(request, timeout=60) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body_text = extract_provider_error_message(read_http_error_body(exc))
+        detail = f": {body_text}" if body_text else ""
+        raise RuntimeError(f"OpenRouter HTTP {exc.code}{detail}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"OpenRouter request failed: {exc.reason}") from exc
     if not isinstance(payload, dict):
-        raise ValueError("Anthropic response was not an object")
-    content = payload.get("content")
-    if not isinstance(content, list):
-        raise ValueError("Anthropic response missing content")
-    texts = [item.get("text", "") for item in content if isinstance(item, dict) and item.get("type") == "text"]
-    return "\n".join(texts).strip()
+        raise ValueError("OpenRouter response was not an object")
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        raise ValueError("OpenRouter response missing choices")
+    message = choices[0].get("message")
+    if not isinstance(message, dict):
+        raise ValueError("OpenRouter response missing choices[0].message")
+    return normalize_openrouter_content(message.get("content"))
 
 
 def is_casual_transcript(
     transcript_text: str,
     *,
-    anthropic_api_key: str,
+    openrouter_api_key: str,
     urlopen: Urlopen = urllib.request.urlopen,
 ) -> bool:
-    response_text = anthropic_request(
-        anthropic_api_key,
+    response_text = openrouter_request(
+        openrouter_api_key,
         model=CLASSIFIER_MODEL,
         prompt=CLASSIFIER_PROMPT.format(transcript=transcript_text),
         max_tokens=1024,
         urlopen=urlopen,
     )
-    try:
-        payload = parse_json_payload(response_text)
-    except ValueError:
-        return True
+    payload = parse_json_payload(response_text)
     if not isinstance(payload, dict):
-        return True
+        raise ValueError("classifier response was not a JSON object")
     return bool(payload.get("is_casual"))
 
 
 def extract_action_items(
     transcript_text: str,
     *,
-    anthropic_api_key: str,
+    openrouter_api_key: str,
     urlopen: Urlopen = urllib.request.urlopen,
 ) -> list[ExtractedItem]:
-    response_text = anthropic_request(
-        anthropic_api_key,
+    response_text = openrouter_request(
+        openrouter_api_key,
         model=EXTRACTOR_MODEL,
         prompt=ACTION_ITEMS_PROMPT.format(transcript=transcript_text),
         max_tokens=2400,
         urlopen=urlopen,
     )
-    try:
-        return parse_extracted_items(response_text)
-    except ValueError:
-        return []
+    return parse_extracted_items(response_text)
 
 
 def normalized_tokens(value: str) -> set[str]:
@@ -722,6 +769,22 @@ def require_env(name: str) -> str:
     return value
 
 
+def execute(
+    *,
+    limit: int,
+    dry_run: bool,
+    watermark_path: Path,
+    urlopen: Urlopen = urllib.request.urlopen,
+) -> int:
+    try:
+        return run(limit=limit, dry_run=dry_run, watermark_path=watermark_path, urlopen=urlopen)
+    except (RuntimeError, ValueError, urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError) as exc:
+        reason = collapse_ws(str(exc)) or exc.__class__.__name__
+        LOGGER.error("ff-extractor failed: %s", reason)
+        print(json.dumps({"error": reason, "items": [], "dry_run": dry_run}))
+        return 1
+
+
 def run(
     *,
     limit: int,
@@ -730,7 +793,7 @@ def run(
     urlopen: Urlopen = urllib.request.urlopen,
 ) -> int:
     fireflies_api_key = require_env("FIREFLIES_API_KEY")
-    anthropic_api_key = require_env("ANTHROPIC_API_KEY")
+    openrouter_api_key = require_env("OPENROUTER_API_KEY")
     # Ingest env is only required on the actual POST path. The SKILL's DEGRADED
     # fallback deliberately invokes --dry-run precisely when these are missing,
     # so dry-run must not fail on them.
@@ -754,11 +817,11 @@ def run(
         if not transcript_text:
             processed.append(transcript)
             continue
-        if is_casual_transcript(transcript_text, anthropic_api_key=anthropic_api_key, urlopen=urlopen):
+        if is_casual_transcript(transcript_text, openrouter_api_key=openrouter_api_key, urlopen=urlopen):
             processed.append(transcript)
             continue
         extraction_text = build_transcript_text(transcript.get("sentences", []), limit=EXTRACTOR_MAX_CHARS)
-        extracted = extract_action_items(extraction_text, anthropic_api_key=anthropic_api_key, urlopen=urlopen)
+        extracted = extract_action_items(extraction_text, openrouter_api_key=openrouter_api_key, urlopen=urlopen)
         all_commitments.extend(refine_items(transcript, extracted))
         processed.append(transcript)
 
@@ -805,15 +868,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     args = parse_args(argv)
-    try:
-        return run(
-            limit=max(1, args.limit),
-            dry_run=args.dry_run,
-            watermark_path=Path(args.watermark_path),
-        )
-    except (ValueError, urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError) as exc:
-        LOGGER.error("ff-extractor failed: %s", exc)
-        return 1
+    return execute(
+        limit=max(1, args.limit),
+        dry_run=args.dry_run,
+        watermark_path=Path(args.watermark_path),
+    )
 
 
 if __name__ == "__main__":

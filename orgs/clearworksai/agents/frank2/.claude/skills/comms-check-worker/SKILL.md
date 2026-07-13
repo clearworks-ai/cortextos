@@ -90,7 +90,13 @@ Run these 4 checks (Bash):
    - `gh run list --repo <owner>/<repo> --branch <branch> --limit 5 --json conclusion | jq '[.[].conclusion] | any(. == "success")'`
    - If true: skip silently
 
-   Only alert on failures where ALL three gates pass (PR still OPEN, SHA not behind main, no subsequent success).
+   **GATE D — Same run already alerted (dedup — kills repeat spam for one failing run):**
+   - Using the `<run_id>` extracted in GATE B, run the deterministic gate WITH `--run-id`:
+     `cortextos bus ci-alert-gate --repo <owner>/<repo> --branch <branch> --head-sha <head_sha> --run-id <run_id> --json`
+   - This folds gates A/B/C AND per-run dedup into one call. If it prints `{"surface":false,...}` (any reason, including `already alerted (dedup)`): skip silently.
+   - It records the run id on the FIRST surface only, so the 2nd..Nth "Run failed" email for the same run (different message ids, reworded text) all SKIP. Root CI failure is unaffected — this only suppresses duplicate alerts for an already-surfaced run.
+
+   Only alert on failures where ALL gates pass (`ci-alert-gate --run-id` prints `surface:true`): PR still OPEN, SHA not behind main, no subsequent success, and this run not already alerted.
 
 4. **iMESSAGE**: Use mcp imessage tool — only flag messages timestamped within the last 30 min.
 

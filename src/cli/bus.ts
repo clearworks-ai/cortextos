@@ -2975,10 +2975,19 @@ busCommand
   .requiredOption('--repo <owner/repo>', 'GitHub repo, e.g. clearworks-ai/cortextos')
   .requiredOption('--branch <branch>', 'Branch the failing run is on')
   .option('--head-sha <sha>', 'Head SHA from the failing run/email (enables the behind-main gate)')
+  .option('--run-id <id>', 'GitHub Actions run id — enables per-run alert dedup')
   .option('--json', 'Emit { surface, reason } as JSON instead of SURFACE/SKIP')
-  .action((opts: { repo: string; branch: string; headSha?: string; json?: boolean }) => {
+  .action((opts: { repo: string; branch: string; headSha?: string; json?: boolean; runId?: string }) => {
     const ctx = gatherCiAlertContext(opts.repo, opts.branch, { headSha: opts.headSha });
-    const result = evaluateCiAlert(ctx);
+    let result = evaluateCiAlert(ctx);
+    if (opts.runId && result.surface) {
+      const env = resolveEnv();
+      const dedupKey = `ci:${opts.repo}/${opts.runId}`;
+      const dedup = checkAndRecordSourceEvent(env.ctxRoot ?? '', dedupKey);
+      if (!dedup.surface) {
+        result = { surface: false, reason: `skip: run ${opts.runId} already alerted (dedup)` };
+      }
+    }
     if (opts.json) {
       console.log(JSON.stringify(result));
       return;

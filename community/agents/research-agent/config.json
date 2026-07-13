@@ -37,6 +37,12 @@
       "type": "recurring",
       "cron": "0 12 * * 5",
       "prompt": "Create a task for this research quality review, mark it in_progress, read .claude/skills/research-quality-review/SKILL.md, and inspect source failures, noisy sources, duplicate patterns, scoring threshold quality, stale config, and suggested tuning changes. When finished, run: cortextos bus update-cron-fire research-quality-review --interval \"0 12 * * 5\""
+    },
+    {
+      "name": "research-pulse-delta",
+      "type": "recurring",
+      "cron": "15 6,18 * * *",
+      "prompt": "Run the research-pulse delta check: execute `/Users/joshweiss/.venvs/research-pulse/bin/python .claude/skills/research-pulse/scripts/delta_check.py` (the durable venv has feedparser+requests; bare python3 lacks them and will no-op) and read the JSON run summary it prints. SILENT-OK: if new_deltas is 0 and there are no errors, log the run and send NOTHING to Telegram. If new_deltas >= 10 in this run, send a Telegram digest of the newest items grouped by vertical. If any source was auto-deactivated (summary `deactivated` non-empty), send a bus message to larry (eng owner) naming the deactivated source ids — never page Josh raw for feed health. If summary `vertical_errors` is non-empty, send a bus message to larry naming the failed verticals. When finished, run: cortextos bus update-cron-fire research-pulse-delta --interval \"15 6,18 * * *\""
     }
   ],
   "ecosystem": {

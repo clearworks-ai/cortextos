@@ -94,6 +94,45 @@ class DeltaCheckTests(unittest.TestCase):
             self.assertEqual(saved["deltas"][0]["url"], "https://example.com/podcast/ep-4")
             self.assertEqual(saved["deltas"][0]["pubdate"], "2026-07-14T00:00:00Z")
 
+    def test_run_summary_new_items_carries_item_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = self.make_registry()
+            baseline = MODULE.parse_entries(self.load_fixture_bytes("podcast_feed.xml"))
+            source = registry["sources"][0]
+            source["last_seen_guid"] = baseline[0]["guid"]
+            source["last_seen_pubdate"] = baseline[0]["pubdate"]
+            self.save_registry(registry, tmp)
+
+            def fake_fetch(*_: object, **__: object):
+                return 200, self.load_fixture_bytes("podcast_feed_plus_one.xml"), None, None
+
+            original_poll_vertical = MODULE.poll_vertical
+
+            def patched_poll_vertical(vertical: str, dry_run: bool = False):
+                return original_poll_vertical(vertical, dry_run=dry_run, fetch=fake_fetch)
+
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, {"PULSE_STATE_DIR": tmp}, clear=False):
+                with unittest.mock.patch.object(MODULE, "poll_vertical", side_effect=patched_poll_vertical):
+                    with contextlib.redirect_stdout(stdout):
+                        rc = MODULE.main(["--vertical", "nonprofit", "--state-dir", tmp])
+
+            self.assertEqual(rc, 0)
+            summary = json.loads(stdout.getvalue())
+            self.assertEqual(summary["new_deltas"], 1)
+            self.assertEqual(len(summary["new_items"]), summary["new_deltas"])
+            self.assertEqual(len(summary["new_items"]), 1)
+            self.assertEqual(
+                set(summary["new_items"][0].keys()),
+                {"vertical", "source_id", "guid", "title", "url", "pubdate"},
+            )
+            self.assertEqual(summary["new_items"][0]["vertical"], "nonprofit")
+            self.assertEqual(summary["new_items"][0]["source_id"], source["id"])
+            self.assertEqual(summary["new_items"][0]["guid"], "episode-4")
+            self.assertEqual(summary["new_items"][0]["title"], "Episode 4: Grants Acceleration")
+            self.assertEqual(summary["new_items"][0]["url"], "https://example.com/podcast/ep-4")
+            self.assertEqual(summary["new_items"][0]["pubdate"], "2026-07-14T00:00:00Z")
+
     def test_detect_new_falls_back_to_pubdate_without_reflood(self) -> None:
         baseline = MODULE.parse_entries(self.load_fixture_bytes("podcast_feed.xml"))
         entries = MODULE.parse_entries(self.load_fixture_bytes("podcast_feed_plus_one.xml"))

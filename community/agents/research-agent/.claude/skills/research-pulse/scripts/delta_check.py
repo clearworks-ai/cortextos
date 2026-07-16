@@ -217,6 +217,7 @@ def poll_vertical(vertical: str, dry_run: bool = False, fetch=fetch_feed) -> dic
         "new_deltas": 0,
         "deactivated": [],
         "error_sources": [],
+        "new_items": [],
     }
 
     for source in registry.get("sources", []):
@@ -240,6 +241,9 @@ def poll_vertical(vertical: str, dry_run: bool = False, fetch=fetch_feed) -> dic
         if result["new_items"]:
             pulse_registry.record_delta(registry, result["source_id"], result["new_items"])
             summary["new_deltas"] += len(result["new_items"])
+            summary["new_items"].extend(
+                {"source_id": result["source_id"], **item} for item in result["new_items"]
+            )
 
     if not dry_run:
         pulse_registry.write_pulse_snapshot(registry)
@@ -282,6 +286,7 @@ def main(argv: list[str] | None = None) -> int:
         "deactivated": [],
         "error_sources": [],
         "vertical_errors": [],
+        "new_items": [],
     }
 
     for vertical in verticals:
@@ -299,6 +304,9 @@ def main(argv: list[str] | None = None) -> int:
         summary["new_deltas"] += vertical_summary["new_deltas"]
         summary["deactivated"].extend(vertical_summary["deactivated"])
         summary["error_sources"].extend(vertical_summary["error_sources"])
+        summary["new_items"].extend(
+            {"vertical": vertical, **item} for item in vertical_summary["new_items"]
+        )
 
     print(json.dumps(summary))
     return 0

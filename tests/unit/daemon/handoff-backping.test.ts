@@ -83,6 +83,33 @@ describe('handoff back-ping dedup', () => {
     expect(readLastBackPingMs(ctxRoot, 'agent-a')).toBe(NOW);
   });
 
+  it('suppresses a follow-up online-message emit after a handoff emit within the window (handoff-then-nonhandoff dedup)', () => {
+    writeLastBackPingMs(ctxRoot, 'agent-a', NOW);
+
+    const lastPingMs = readLastBackPingMs(ctxRoot, 'agent-a');
+    expect(lastPingMs).toBe(NOW);
+    expect(shouldSuppressBackPing({
+      lastPingMs,
+      nowMs: NOW + 31_000,
+      newestInboundMs: null,
+      windowMs: W,
+    })).toBe(true);
+
+    expect(shouldSuppressBackPing({
+      lastPingMs,
+      nowMs: NOW + 31_000,
+      newestInboundMs: NOW + 10_000,
+      windowMs: W,
+    })).toBe(false);
+
+    expect(shouldSuppressBackPing({
+      lastPingMs,
+      nowMs: NOW + W,
+      newestInboundMs: null,
+      windowMs: W,
+    })).toBe(false);
+  });
+
   it('treats a corrupt marker file as unreadable', () => {
     const stateDir = join(ctxRoot, 'state', 'agent-a');
     writeLastBackPingMs(ctxRoot, 'agent-a', NOW);

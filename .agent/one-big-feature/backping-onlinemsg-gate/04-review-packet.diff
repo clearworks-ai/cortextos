@@ -1,0 +1,75 @@
+diff --git a/src/daemon/agent-process.ts b/src/daemon/agent-process.ts
+index 6af9eed..1ae48f4 100644
+--- a/src/daemon/agent-process.ts
++++ b/src/daemon/agent-process.ts
+@@ -1010,9 +1010,15 @@ export class AgentProcess {
+     const handoffUxOverride = emitHandoffBackPing
+       ? ' HANDOFF UX: This is a context handoff restart — your memory is intact via the handoff document, but the VERBATIM LIVE TAIL below is more authoritative than the doc. If the handoff document conflicts with the newest inbound message, the newest inbound message wins. CRITICAL: After reading the handoff document and the live tail, your VERY FIRST tool call MUST be a Bash call running: cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID \'back — [what you were just working on]\' — replace the brackets with one brief plain-English sentence about your current state derived from the handoff doc plus the newest inbound message, with the newest inbound message winning. Do this BEFORE running heartbeat, BEFORE any other tool call. No cron IDs, no status report, no cold-boot phrasing. Do NOT send "Booting up... one moment" (skip AGENTS.md step 1 entirely).'
+       : '';
+-    const onlineMessage = isHandoffRestart || !shouldPromptTelegram
+-      ? ''
+-      : ' Send a Telegram message to the user saying you are back online.';
++    const emitOnlineMessage = !isHandoffRestart
++      && shouldPromptTelegram
++      && !this.isHandoffBackPingSuppressed();
++    if (emitOnlineMessage) {
++      writeLastBackPingMs(this.env.ctxRoot, this.name, Date.now());
++    }
++    const onlineMessage = emitOnlineMessage
++      ? ' Send a Telegram message to the user saying you are back online.'
++      : '';
+     return `You are starting a new session. Current UTC time: ${nowUtc}. Read AGENTS.md and all bootstrap files listed there. External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${reminderBlock}${deliverablesBlock}${missionBlock}${handoffBlock}${liveTailBlock}${handoffUxOverride}${onlineMessage}${onboardingAppend}`;
+   }
+ 
+@@ -1023,7 +1029,12 @@ export class AgentProcess {
+     const { missionBlock, liveTailBlock } = this.buildResumeContextBlocks();
+     // Session refresh (--continue) is never a handoff restart.
+     this.lastSpawnWasHandoff = false;
+-    const onlineMessage = this.shouldPromptTelegramOnlineMessage()
++    const emitOnlineMessage = this.shouldPromptTelegramOnlineMessage()
++      && !this.isHandoffBackPingSuppressed();
++    if (emitOnlineMessage) {
++      writeLastBackPingMs(this.env.ctxRoot, this.name, Date.now());
++    }
++    const onlineMessage = emitOnlineMessage
+       ? ' After checking inbox, send a Telegram message to the user saying you are back online.'
+       : '';
+     return `SESSION CONTINUATION: Your CLI process was restarted with --continue to reload configs. Current UTC time: ${nowUtc}. Your full conversation history is preserved. Re-read AGENTS.md and ALL bootstrap files listed there. External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${reminderBlock}${deliverablesBlock}${missionBlock}${liveTailBlock} Check inbox. Resume normal operations.${onlineMessage}`;
+diff --git a/tests/unit/daemon/handoff-backping.test.ts b/tests/unit/daemon/handoff-backping.test.ts
+index 5cef74a..c1a8efc 100644
+--- a/tests/unit/daemon/handoff-backping.test.ts
++++ b/tests/unit/daemon/handoff-backping.test.ts
+@@ -83,6 +83,33 @@ describe('handoff back-ping dedup', () => {
+     expect(readLastBackPingMs(ctxRoot, 'agent-a')).toBe(NOW);
+   });
+ 
++  it('suppresses a follow-up online-message emit after a handoff emit within the window (handoff-then-nonhandoff dedup)', () => {
++    writeLastBackPingMs(ctxRoot, 'agent-a', NOW);
++
++    const lastPingMs = readLastBackPingMs(ctxRoot, 'agent-a');
++    expect(lastPingMs).toBe(NOW);
++    expect(shouldSuppressBackPing({
++      lastPingMs,
++      nowMs: NOW + 31_000,
++      newestInboundMs: null,
++      windowMs: W,
++    })).toBe(true);
++
++    expect(shouldSuppressBackPing({
++      lastPingMs,
++      nowMs: NOW + 31_000,
++      newestInboundMs: NOW + 10_000,
++      windowMs: W,
++    })).toBe(false);
++
++    expect(shouldSuppressBackPing({
++      lastPingMs,
++      nowMs: NOW + W,
++      newestInboundMs: null,
++      windowMs: W,
++    })).toBe(false);
++  });
++
+   it('treats a corrupt marker file as unreadable', () => {
+     const stateDir = join(ctxRoot, 'state', 'agent-a');
+     writeLastBackPingMs(ctxRoot, 'agent-a', NOW);

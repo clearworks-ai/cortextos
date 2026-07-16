@@ -1,0 +1,28 @@
+Scope Validation — comms-meeting-dedup
+
+Requested scope:
+- NEW src/utils/meeting-alert-gate.ts
+- NEW tests/unit/utils/meeting-alert-gate.test.ts
+- EDIT src/cli/bus.ts (meeting-alert-gate command after event-dedup)
+- EDIT orgs/clearworksai/agents/pa/.claude/skills/comms-check-worker/SKILL.md (Step 4c + Step 5 bullet + zcal xref)
+
+Implemented scope:
+- Added deterministic meeting identity derivation + TTL-backed surface/skip decision in src/utils/meeting-alert-gate.ts.
+- Added bus command `meeting-alert-gate` in src/cli/bus.ts immediately after the existing `event-dedup` block.
+- Added real-ledger unit coverage in tests/unit/utils/meeting-alert-gate.test.ts for the 7 spec case groups (8 tests total).
+- Patched the PA comms-check-worker skill with the exact Step 4c meeting gate text, new Step 5 meeting-reminders bullet, and the zcal cross-reference.
+
+Validation:
+- npm run build: PASS
+- npx vitest run tests/unit/utils/meeting-alert-gate.test.ts: PASS (1 file, 8 tests)
+- npm test: PASS (173 passed | 1 skipped files, 2629 passed | 3 skipped tests)
+- CLI smoke with isolated CTX_ROOT: PASS
+  1. node dist/cli.js bus meeting-alert-gate --subject "E-Rate for Scholarship Prep" --date 2026-07-16 --json
+     -> {"surface":true,"reason":"surface: first alert for this meeting","key":"meeting:subj-erateforscholarshipprep-2026-07-16"}
+  2. same command again
+     -> {"surface":false,"reason":"skip: meeting already alerted (0s ago)","key":"meeting:subj-erateforscholarshipprep-2026-07-16"}
+
+Scope exclusions / notes:
+- The cortextos worktree already contains unrelated preserved backping changes from earlier Larry review loops. They are intentionally excluded from 04-review-packet.diff.
+- orgs/clearworksai/agents/pa/.claude/skills/comms-check-worker/SKILL.md is git-ignored under orgs/, so its unified diff was generated manually from the exact inserted/edited text and included in the packet.
+- No commit or push performed.

@@ -1,0 +1,16 @@
+true-verify — comms-meeting-dedup — 2026-07-16T06:51:47Z
+isolated CTX_ROOT=/var/folders/9h/_28txm2j60g3n1tv2_hy98400000gn/T/tmp.fKF63h03A4
+
+# Case 1: same meeting twice (subject+date) — expect surface:true then surface:false
+call1: {"surface":true,"reason":"surface: first alert for this meeting","key":"meeting:subj-erateforscholarshipprep-2026-07-16"}
+call2 (reworded): {"surface":false,"reason":"skip: meeting already alerted (0s ago)","key":"meeting:subj-erateforscholarshipprep-2026-07-16"}
+
+# Case 2: distinct meeting same day — expect surface:true
+call3: {"surface":true,"reason":"surface: first alert for this meeting","key":"meeting:subj-budgetreviewwithfinance-2026-07-16"}
+
+# Case 3: eventId path fire-once — expect surface:true then surface:false
+call4: {"surface":true,"reason":"surface: first alert for this meeting","key":"meeting:evt-abc123@google.com"}
+call5: {"surface":false,"reason":"skip: meeting already alerted (0s ago)","key":"meeting:evt-abc123@google.com"}
+
+# Case 4: fail-open no key — expect surface:true key:null
+call6: {"surface":true,"reason":"surface: no derivable meeting key (fail-open)","key":null}

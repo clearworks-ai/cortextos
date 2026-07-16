@@ -1,0 +1,402 @@
+diff --git a/src/cli/bus.ts b/src/cli/bus.ts
+index d9760ac..c9e7569 100644
+--- a/src/cli/bus.ts
++++ b/src/cli/bus.ts
+@@ -39,6 +39,7 @@ import { findBannedCronPrompts } from '../utils/cron-prompt-validator.js';
+ import { recordVerificationReceipt, emitClaimWithoutReceiptWarning, evaluateClaimGate } from '../utils/verification-receipt.js';
+ import { evaluateCiAlert, gatherCiAlertContext } from '../utils/ci-alert-gate.js';
+ import { checkAndRecordSourceEvent, isValidSourceKey } from '../utils/event-dedup.js';
++import { evaluateMeetingAlert } from '../utils/meeting-alert-gate.js';
+ import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext, CronDefinition, ConversationBufferEntry, TaskHealthRow } from '../types/index.js';
+ import type { TaskClass } from '../bus/task.js';
+ import { fleetReconcileCommand } from './bus-reconcile.js';
+@@ -3024,6 +3025,37 @@ busCommand
+     console.log(result.surface ? 'SURFACE' : 'SKIP');
+   });
+ 
++busCommand
++  .command('meeting-alert-gate')
++  .description('Deterministically decide whether a meeting notification should be surfaced — fires once per meeting identity (SURFACE/SKIP)')
++  .option('--event-id <id>', 'calendar event id, preferred')
++  .option('--subject <subject>', 'meeting title or thread subject, fallback')
++  .option('--date <YYYY-MM-DD>', 'the MEETING\'s local date, fallback')
++  .option('--ttl-sec <n>', 'suppression window in seconds, default 604800 = 7d')
++  .option('--json', 'Emit { surface, reason, key } as JSON instead of SURFACE/SKIP')
++  .action((opts: { eventId?: string; subject?: string; date?: string; ttlSec?: string; json?: boolean }) => {
++    const env = resolveEnv();
++    let ttlSec: number | undefined;
++    if (opts.ttlSec !== undefined) {
++      const parsed = Number(opts.ttlSec);
++      if (Number.isInteger(parsed) && parsed > 0) {
++        ttlSec = parsed;
++      } else {
++        console.error(`Error: --ttl-sec must be a finite positive integer, got '${opts.ttlSec}'; failing open with the default TTL.`);
++      }
++    }
++    const result = evaluateMeetingAlert(
++      env.ctxRoot ?? '',
++      { eventId: opts.eventId, subject: opts.subject, date: opts.date },
++      { ttlSec },
++    );
++    if (opts.json) {
++      console.log(JSON.stringify(result));
++      return;
++    }
++    console.log(result.surface ? 'SURFACE' : 'SKIP');
++  });
++
+ busCommand
+   .command('comms-filter')
+   .description('Filter comms JSON through the event-dedup ledger and emit only first-seen emails')
+
+diff --git a/src/utils/meeting-alert-gate.ts b/src/utils/meeting-alert-gate.ts
+new file mode 100644
+index 0000000..79f5118
+--- /dev/null
++++ b/src/utils/meeting-alert-gate.ts
+@@ -0,0 +1,85 @@
++import { checkAndRecordSourceEvent } from './event-dedup.js';
++
++export interface MeetingAlertInput {
++  eventId?: string;
++  subject?: string;
++  date?: string;
++}
++
++export interface MeetingAlertDecision {
++  surface: boolean;
++  reason: string;
++  key: string | null;
++}
++
++export const DEFAULT_MEETING_TTL_SEC = 7 * 86400;
++
++const EVENT_ID_ALLOWED_CHARS = /[^A-Za-z0-9_/+=@.<>-]/g;
++const MEETING_SUBJECT_PREFIX = /^(re|fwd|fw)\s*:\s*/i;
++const MEETING_SUBJECT_ALLOWED_CHARS = /[^a-z0-9]/g;
++const STRICT_LOCAL_DATE = /^\d{4}-\d{2}-\d{2}$/;
++
++export function normalizeMeetingSubject(subject: string): string {
++  let normalized = subject.trim().toLowerCase();
++  while (true) {
++    const stripped = normalized.replace(MEETING_SUBJECT_PREFIX, '').trim();
++    if (stripped === normalized) {
++      break;
++    }
++    normalized = stripped;
++  }
++
++  return normalized.replace(MEETING_SUBJECT_ALLOWED_CHARS, '').slice(0, 100);
++}
++
++export function deriveMeetingKey(input: MeetingAlertInput): string | null {
++  const rawEventId = typeof input.eventId === 'string' ? input.eventId.trim() : '';
++  if (rawEventId) {
++    const sanitizedEventId = rawEventId.replace(EVENT_ID_ALLOWED_CHARS, '').slice(0, 200);
++    if (sanitizedEventId) {
++      return `meeting:evt-${sanitizedEventId}`;
++    }
++  }
++
++  const token = typeof input.subject === 'string'
++    ? normalizeMeetingSubject(input.subject)
++    : '';
++  const date = typeof input.date === 'string' ? input.date : '';
++  if (token && STRICT_LOCAL_DATE.test(date)) {
++    return `meeting:subj-${token}-${date}`;
++  }
++
++  return null;
++}
++
++export function evaluateMeetingAlert(
++  ctxRoot: string,
++  input: MeetingAlertInput,
++  opts?: { ttlSec?: number },
++): MeetingAlertDecision {
++  const key = deriveMeetingKey(input);
++  if (key === null) {
++    return {
++      surface: true,
++      reason: 'surface: no derivable meeting key (fail-open)',
++      key: null,
++    };
++  }
++
++  const result = checkAndRecordSourceEvent(ctxRoot, key, {
++    ttlSec: opts?.ttlSec ?? DEFAULT_MEETING_TTL_SEC,
++  });
++  if (result.surface) {
++    return {
++      surface: true,
++      reason: 'surface: first alert for this meeting',
++      key,
++    };
++  }
++
++  return {
++    surface: false,
++    reason: `skip: meeting already alerted (${result.ageSec ?? 0}s ago)`,
++    key,
++  };
++}
+
+diff --git a/tests/unit/utils/meeting-alert-gate.test.ts b/tests/unit/utils/meeting-alert-gate.test.ts
+new file mode 100644
+index 0000000..325760c
+--- /dev/null
++++ b/tests/unit/utils/meeting-alert-gate.test.ts
+@@ -0,0 +1,188 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
++import { tmpdir } from 'os';
++import { join } from 'path';
++import {
++  DEFAULT_MEETING_TTL_SEC,
++  deriveMeetingKey,
++  evaluateMeetingAlert,
++  normalizeMeetingSubject,
++} from '../../../src/utils/meeting-alert-gate.js';
++import { isValidSourceKey } from '../../../src/utils/event-dedup.js';
++
++describe('meeting-alert-gate', () => {
++  let ctxRoot: string;
++  let nowMs: number;
++
++  beforeEach(() => {
++    ctxRoot = mkdtempSync(join(tmpdir(), 'meeting-alert-gate-'));
++    nowMs = 1_700_000_000_000;
++    vi.spyOn(Date, 'now').mockImplementation(() => nowMs);
++  });
++
++  afterEach(() => {
++    vi.restoreAllMocks();
++    rmSync(ctxRoot, { recursive: true, force: true });
++  });
++
++  function ledgerPath(): string {
++    return join(ctxRoot, 'state', 'comms-event-dedup.json');
++  }
++
++  function readLedger(): Record<string, { firstSeenAt: number; fireOnce: boolean }> {
++    return JSON.parse(readFileSync(ledgerPath(), 'utf-8')) as Record<
++      string,
++      { firstSeenAt: number; fireOnce: boolean }
++    >;
++  }
++
++  function seedLedger(entries: Record<string, { firstSeenAt: number; fireOnce: boolean }>): void {
++    mkdirSync(join(ctxRoot, 'state'), { recursive: true });
++    writeFileSync(ledgerPath(), JSON.stringify(entries), 'utf-8');
++  }
++
++  function nowSec(): number {
++    return Math.floor(nowMs / 1000);
++  }
++
++  it('surfaces the first event-id meeting alert and records the derived key', () => {
++    const result = evaluateMeetingAlert(ctxRoot, { eventId: 'abc123@google.com' });
++
++    expect(result).toEqual({
++      surface: true,
++      reason: 'surface: first alert for this meeting',
++      key: 'meeting:evt-abc123@google.com',
++    });
++    expect(isValidSourceKey(result.key ?? '')).toBe(true);
++    expect(readLedger()).toEqual({
++      'meeting:evt-abc123@google.com': { firstSeenAt: nowSec(), fireOnce: false },
++    });
++  });
++
++  it('suppresses the same eventId on the second alert and reports the prior age', () => {
++    evaluateMeetingAlert(ctxRoot, { eventId: 'abc123@google.com' });
++
++    nowMs += 10_000;
++    const result = evaluateMeetingAlert(ctxRoot, { eventId: 'abc123@google.com' });
++
++    expect(result).toEqual({
++      surface: false,
++      reason: 'skip: meeting already alerted (10s ago)',
++      key: 'meeting:evt-abc123@google.com',
++    });
++  });
++
++  it('suppresses fallback-title rewordings that normalize to the same meeting key', () => {
++    const first = evaluateMeetingAlert(ctxRoot, {
++      subject: 'E-Rate for Scholarship Prep',
++      date: '2026-07-16',
++    });
++    nowMs += 1_000;
++    const second = evaluateMeetingAlert(ctxRoot, {
++      subject: 'Re: E-rate for scholarship prep!',
++      date: '2026-07-16',
++    });
++    nowMs += 1_000;
++    const third = evaluateMeetingAlert(ctxRoot, {
++      subject: 'FWD: e rate for scholarship prep',
++      date: '2026-07-16',
++    });
++
++    expect(first.key).toBe('meeting:subj-erateforscholarshipprep-2026-07-16');
++    expect(second.key).toBe(first.key);
++    expect(third.key).toBe(first.key);
++    expect(second.surface).toBe(false);
++    expect(third.surface).toBe(false);
++  });
++
++  it('surfaces distinct meetings independently across eventId, title, and date boundaries', () => {
++    const eventA = evaluateMeetingAlert(ctxRoot, { eventId: 'event-a@google.com' });
++    const eventB = evaluateMeetingAlert(ctxRoot, { eventId: 'event-b@google.com' });
++    const titleA = evaluateMeetingAlert(ctxRoot, {
++      subject: 'Scholarship Prep',
++      date: '2026-07-16',
++    });
++    const titleB = evaluateMeetingAlert(ctxRoot, {
++      subject: 'Budget Review',
++      date: '2026-07-16',
++    });
++    const recurringA = evaluateMeetingAlert(ctxRoot, {
++      subject: 'Board Sync',
++      date: '2026-07-16',
++    });
++    const recurringB = evaluateMeetingAlert(ctxRoot, {
++      subject: 'Board Sync',
++      date: '2026-07-23',
++    });
++
++    expect(eventA.surface).toBe(true);
++    expect(eventB.surface).toBe(true);
++    expect(titleA.surface).toBe(true);
++    expect(titleB.surface).toBe(true);
++    expect(recurringA.surface).toBe(true);
++    expect(recurringB.surface).toBe(true);
++  });
++
++  it('derives and gates subject-plus-date meetings when no eventId exists', () => {
++    const first = evaluateMeetingAlert(ctxRoot, {
++      subject: 'Vendor Check-In',
++      date: '2026-07-18',
++    });
++    const second = evaluateMeetingAlert(ctxRoot, {
++      subject: 'Vendor Check-In',
++      date: '2026-07-18',
++    });
++
++    expect(first.key).toBe('meeting:subj-vendorcheckin-2026-07-18');
++    expect(first.surface).toBe(true);
++    expect(second.surface).toBe(false);
++  });
++
++  it('implements the derivation edge table exactly', () => {
++    expect(normalizeMeetingSubject(' Re: FWD: E-Rate for Scholarship Prep! ')).toBe(
++      'erateforscholarshipprep',
++    );
++    expect(deriveMeetingKey({ eventId: ' abc:123?@google.com ' })).toBe(
++      'meeting:evt-abc123@google.com',
++    );
++    expect(deriveMeetingKey({
++      eventId: ':::',
++      subject: 'Re: Demo Meeting',
++      date: '2026-07-16',
++    })).toBe('meeting:subj-demomeeting-2026-07-16');
++    expect(deriveMeetingKey({ subject: 'Demo Meeting', date: '7/16/2026' })).toBeNull();
++    expect(deriveMeetingKey({ subject: 'Demo Meeting', date: '2026-7-16' })).toBeNull();
++    expect(deriveMeetingKey({ subject: '!!!', date: '2026-07-16' })).toBeNull();
++    expect(deriveMeetingKey({})).toBeNull();
++  });
++
++  it('fails open when no meeting key can be derived and writes nothing to the ledger', () => {
++    const result = evaluateMeetingAlert(ctxRoot, {});
++
++    expect(result.surface).toBe(true);
++    expect(result.reason).toContain('fail-open');
++    expect(result.key).toBeNull();
++    expect(existsSync(ledgerPath())).toBe(false);
++  });
++
++  it('re-surfaces after ttl expiry and refreshes the ledger timestamp', () => {
++    const key = 'meeting:evt-abc123@google.com';
++    seedLedger({
++      [key]: {
++        firstSeenAt: nowSec() - DEFAULT_MEETING_TTL_SEC - 1,
++        fireOnce: false,
++      },
++    });
++
++    const result = evaluateMeetingAlert(ctxRoot, { eventId: 'abc123@google.com' });
++
++    expect(result).toEqual({
++      surface: true,
++      reason: 'surface: first alert for this meeting',
++      key,
++    });
++    expect(readLedger()).toEqual({
++      [key]: { firstSeenAt: nowSec(), fireOnce: false },
++    });
++  });
++});
+
+diff --git a/orgs/clearworksai/agents/pa/.claude/skills/comms-check-worker/SKILL.md b/orgs/clearworksai/agents/pa/.claude/skills/comms-check-worker/SKILL.md
+--- a/orgs/clearworksai/agents/pa/.claude/skills/comms-check-worker/SKILL.md
++++ b/orgs/clearworksai/agents/pa/.claude/skills/comms-check-worker/SKILL.md
+@@ -139,6 +139,44 @@
+ If ANY check fails → do NOT create the task.
+ 
+ ---
++
++## Step 4c — Meeting-notification gate (MANDATORY before ANY meeting Telegram)
++
++One meeting = ONE notification, ever, within its scheduling window. A single meeting
++generates many inbound emails (schedule → platform question → confirmation → meeting
++link). Each email has a fresh gmail id, so comms-filter correctly shows it to you —
++but that does NOT make it a fresh meeting. Before sending ANY Telegram that is a
++meeting reminder, meeting notification, meeting update, or meeting-link message, you
++MUST run the deterministic gate and obey it:
++
++```bash
++# Derive the meeting identity FIRST:
++#   - EVENT_ID: the calendar event id, when the notice comes from (or matches) a
++#     calendar event. Always preferred.
++#   - Fallback: MEETING_TITLE = the meeting's title (strip Re:/Fwd: mentally — the
++#     gate normalizes case/punctuation deterministically) and MEETING_DATE = the
++#     MEETING's local date as YYYY-MM-DD (the day the meeting happens, NOT the day
++#     the email arrived).
++if [ -n "$EVENT_ID" ]; then
++  GATE=$(cortextos bus meeting-alert-gate --event-id "$EVENT_ID" --json)
++else
++  GATE=$(cortextos bus meeting-alert-gate --subject "$MEETING_TITLE" --date "$MEETING_DATE" --json)
++fi
++echo "$GATE"
++```
++
++- If the output contains `"surface":false` → SKIP the Telegram entirely. Do not
++  reword it, do not summarize it, do not fold it into another message. The meeting
++  was already announced; a new email about the same meeting is not news.
++- If `"surface":true` → send exactly one Telegram for this meeting. The gate has now
++  recorded the meeting key; every later email about the same meeting will gate false.
++- The gate records on the FIRST surface only and keys on the MEETING (calendar event
++  id, or normalized title + meeting date) — so 4 differently-worded emails about the
++  same Thursday 10 AM meeting collapse to one ping, while two different meetings on
++  the same day each still surface once.
++
++---
++
+ ## Step 5 — Handle results
+ 
+ - **AP invoices** → Telegram 6690120787 + create task:
+@@ -149,10 +187,14 @@
+   `cortextos bus send-message larry normal 'CI alert: [repo] [branch] — [brief description]. Please investigate and diagnose.'`
+   Josh gets ONLY the diagnosis + fix from Larry, never the raw alert. If Larry is offline/unreachable, log silently and retry next cycle.
+ 
++- **Meeting reminders / meeting updates** → gated by Step 4c. Only a
++  `"surface":true` result may produce a Telegram, and only ONE per meeting. On
++  `"surface":false`, skip silently — no task, no summary, no reworded follow-up.
++
+ - **Action-item emails** → Telegram + create task:
+   `cortextos bus create-task "[HUMAN] [action item]" --assignee human --project human-tasks`
+ 
+-- **Meeting confirmations / zcal bookings** → SKIP. They are already on the calendar. Do NOT create a task. Do NOT send Telegram.
++- **Meeting confirmations / zcal bookings** → SKIP. They are already on the calendar. Do NOT create a task. Do NOT send Telegram. If you nonetheless judge a meeting notice worth surfacing (e.g. a new external meeting Josh may not have seen), it MUST pass the Step 4c meeting-alert-gate first.
+ 
+ - **Needs response** → Telegram with draft response.
+ 

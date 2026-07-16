@@ -39,6 +39,7 @@ import { findBannedCronPrompts } from '../utils/cron-prompt-validator.js';
 import { recordVerificationReceipt, emitClaimWithoutReceiptWarning, evaluateClaimGate } from '../utils/verification-receipt.js';
 import { evaluateCiAlert, gatherCiAlertContext } from '../utils/ci-alert-gate.js';
 import { checkAndRecordSourceEvent, isValidSourceKey } from '../utils/event-dedup.js';
+import { evaluateMeetingAlert } from '../utils/meeting-alert-gate.js';
 import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext, CronDefinition, ConversationBufferEntry, TaskHealthRow } from '../types/index.js';
 import type { TaskClass } from '../bus/task.js';
 import { fleetReconcileCommand } from './bus-reconcile.js';
@@ -3017,6 +3018,37 @@ busCommand
       console.error(`Warning: invalid --source key '${opts.source}' — expected <namespace>:<id> (e.g. gmail:<message-id>); failing open.`);
     }
     const result = checkAndRecordSourceEvent(env.ctxRoot ?? '', opts.source, { fireOnce: opts.fireOnce, ttlSec });
+    if (opts.json) {
+      console.log(JSON.stringify(result));
+      return;
+    }
+    console.log(result.surface ? 'SURFACE' : 'SKIP');
+  });
+
+busCommand
+  .command('meeting-alert-gate')
+  .description('Deterministically decide whether a meeting notification should be surfaced — fires once per meeting identity (SURFACE/SKIP)')
+  .option('--event-id <id>', 'calendar event id, preferred')
+  .option('--subject <subject>', 'meeting title or thread subject, fallback')
+  .option('--date <YYYY-MM-DD>', 'the MEETING\'s local date, fallback')
+  .option('--ttl-sec <n>', 'suppression window in seconds, default 604800 = 7d')
+  .option('--json', 'Emit { surface, reason, key } as JSON instead of SURFACE/SKIP')
+  .action((opts: { eventId?: string; subject?: string; date?: string; ttlSec?: string; json?: boolean }) => {
+    const env = resolveEnv();
+    let ttlSec: number | undefined;
+    if (opts.ttlSec !== undefined) {
+      const parsed = Number(opts.ttlSec);
+      if (Number.isInteger(parsed) && parsed > 0) {
+        ttlSec = parsed;
+      } else {
+        console.error(`Error: --ttl-sec must be a finite positive integer, got '${opts.ttlSec}'; failing open with the default TTL.`);
+      }
+    }
+    const result = evaluateMeetingAlert(
+      env.ctxRoot ?? '',
+      { eventId: opts.eventId, subject: opts.subject, date: opts.date },
+      { ttlSec },
+    );
     if (opts.json) {
       console.log(JSON.stringify(result));
       return;

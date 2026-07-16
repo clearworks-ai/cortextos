@@ -250,6 +250,13 @@ export interface AgentConfig {
    */
   telegram_polling?: boolean;
   /**
+   * Opt-IN to system-status Telegram pings (compaction notice + restart
+   * back/online ping). Default absent/false = SILENT: the event is written to
+   * the bus event log instead of Telegram. Set true only for agents the human
+   * actively converses with (e.g. larry, frank2). Reversible via config only.
+   */
+  emit_system_telegram_pings?: boolean;
+  /**
    * Enables the FastChecker loop-stall watchdog. Defaults to false when absent
    * so the detector can be rolled out per-agent first.
    */

@@ -12,6 +12,7 @@ import { TelegramStreamer } from './telegram-streamer.js';
 import { ensureDir } from '../utils/atomic.js';
 import { writeCortextosEnv } from '../utils/env.js';
 import { getOverdueReminders } from '../bus/reminders.js';
+import { logEvent } from '../bus/event.js';
 import { resolvePaths } from '../utils/paths.js';
 import { loadBuffer } from './conversation-buffer.js';
 import {
@@ -1000,7 +1001,12 @@ export class AgentProcess {
     // before cron restoration, before heartbeat, before anything else. Placing this instruction
     // immediately after the handoffBlock in the prompt ensures it is not buried.
     const shouldPromptTelegram = this.shouldPromptTelegramOnlineMessage();
+    const systemPingsEnabled = this.systemPingsEnabled();
+    if (!systemPingsEnabled && shouldPromptTelegram) {
+      this.logSystemPingSuppressed(isHandoffRestart ? 'handoff_back_ping' : 'online_message');
+    }
     const emitHandoffBackPing = isHandoffRestart
+      && systemPingsEnabled
       && shouldPromptTelegram
       && this.config.runtime !== 'opencode'
       && !this.isHandoffBackPingSuppressed();
@@ -1011,6 +1017,7 @@ export class AgentProcess {
       ? ' HANDOFF UX: This is a context handoff restart — your memory is intact via the handoff document, but the VERBATIM LIVE TAIL below is more authoritative than the doc. If the handoff document conflicts with the newest inbound message, the newest inbound message wins. CRITICAL: After reading the handoff document and the live tail, your VERY FIRST tool call MUST be a Bash call running: cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID \'back — [what you were just working on]\' — replace the brackets with one brief plain-English sentence about your current state derived from the handoff doc plus the newest inbound message, with the newest inbound message winning. Do this BEFORE running heartbeat, BEFORE any other tool call. No cron IDs, no status report, no cold-boot phrasing. Do NOT send "Booting up... one moment" (skip AGENTS.md step 1 entirely).'
       : '';
     const emitOnlineMessage = !isHandoffRestart
+      && systemPingsEnabled
       && shouldPromptTelegram
       && !this.isHandoffBackPingSuppressed();
     if (emitOnlineMessage) {
@@ -1029,7 +1036,13 @@ export class AgentProcess {
     const { missionBlock, liveTailBlock } = this.buildResumeContextBlocks();
     // Session refresh (--continue) is never a handoff restart.
     this.lastSpawnWasHandoff = false;
-    const emitOnlineMessage = this.shouldPromptTelegramOnlineMessage()
+    const shouldPromptTelegram = this.shouldPromptTelegramOnlineMessage();
+    const systemPingsEnabled = this.systemPingsEnabled();
+    if (!systemPingsEnabled && shouldPromptTelegram) {
+      this.logSystemPingSuppressed('continue_online_message');
+    }
+    const emitOnlineMessage = systemPingsEnabled
+      && shouldPromptTelegram
       && !this.isHandoffBackPingSuppressed();
     if (emitOnlineMessage) {
       writeLastBackPingMs(this.env.ctxRoot, this.name, Date.now());
@@ -1128,6 +1141,29 @@ export class AgentProcess {
   }
 
   /**
+   * Per-agent opt-IN gate for system-status Telegram pings (restart back/online
+   * ping; the compaction notice checks the same flag in hook-compact-telegram).
+   * Default absent/false = silent. Evaluated BEFORE the PR #108 dup-suppressor:
+   * a gated-off agent never consults or writes the back-ping marker.
+   */
+  private systemPingsEnabled(): boolean {
+    return this.config.emit_system_telegram_pings === true;
+  }
+
+  /**
+   * Best-effort bus-event record of a ping suppressed by the per-agent gate,
+   * so the restart signal is preserved off-Telegram. Never throws.
+   */
+  private logSystemPingSuppressed(kind: string): void {
+    try {
+      const paths = resolvePaths(this.name, this.env.instanceId, this.env.org);
+      logEvent(paths, this.name, this.env.org, 'agent_activity', 'system_ping_suppressed', 'info', { kind });
+    } catch {
+      /* best-effort — suppression logging must never affect the spawn */
+    }
+  }
+
+  /**
    * Build a reminder block for the boot prompt.
    * If any pending reminders are overdue, include them so the agent handles them
    * even after a hard-restart that cleared in-memory cron state (#69).
@@ -1220,6 +1256,10 @@ export class AgentProcess {
   private maybeSendRuntimeLifecycleNotification(): void {
     if (this.config.runtime !== 'codex-app-server' && this.config.runtime !== 'opencode') return;
     if (!this.shouldPromptTelegramOnlineMessage()) return;
+    if (!this.systemPingsEnabled()) {
+      this.logSystemPingSuppressed(this.lastSpawnWasHandoff ? 'handoff_back_ping' : 'online_message');
+      return;
+    }
     const telegramApi = this.telegramApi;
     const telegramChatId = this.telegramChatId;
     if (!telegramApi || !telegramChatId) return;

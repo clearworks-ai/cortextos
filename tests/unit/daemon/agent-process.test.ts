@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { TelegramAPI } from '../../../src/telegram/api.js';
 
 // Capture the PTY exit handler so tests can simulate exits at controlled times
 let capturedOnExit: ((exitCode: number, signal?: number) => void) | null = null;
@@ -40,6 +41,11 @@ vi.mock('../../../src/bus/reminders.js', () => ({
 
 vi.mock('../../../src/utils/paths.js', () => ({
   resolvePaths: vi.fn().mockReturnValue({ stateDir: '/tmp/test-ctx/state/alice' }),
+}));
+
+const mockLogEvent = vi.fn();
+vi.mock('../../../src/bus/event.js', () => ({
+  logEvent: (...args: unknown[]) => mockLogEvent(...args),
 }));
 
 const fsMocks = {
@@ -102,6 +108,7 @@ beforeEach(() => {
   mockPty.isAlive.mockReturnValue(true);
   mockPty.onExit.mockClear();
   mockInjectMessage.mockClear();
+  mockLogEvent.mockReset();
   fsMocks.existsSync.mockReset().mockReturnValue(false);
   fsMocks.readFileSync.mockReset();
   fsMocks.writeFileSync.mockReset();
@@ -682,5 +689,153 @@ describe('AgentProcess - resume context blocks', () => {
     expect(prompt).toContain('MISSION ANCHOR');
     expect(prompt).toContain('VERBATIM LIVE TAIL');
     expect(prompt).toContain('Newest live message for continue path');
+  });
+});
+
+describe('AgentProcess - system-status telegram gate', () => {
+  const missionPath = `${mockEnv.agentDir}/state/current-mission.txt`;
+  const handoffMarkerPath = `${mockEnv.ctxRoot}/state/alice/.handoff-doc-path`;
+  const handoffDocPath = '/tmp/handoff-system-pings.md';
+  const lastBackPingPath = `${mockEnv.ctxRoot}/state/alice/.last-back-ping`;
+
+  function buildStartupPrompt(ap: object): string {
+    return (ap as { buildStartupPrompt: () => string }).buildStartupPrompt();
+  }
+
+  function buildContinuePrompt(ap: object): string {
+    return (ap as { buildContinuePrompt: () => string }).buildContinuePrompt();
+  }
+
+  function wroteLastBackPingMarker(): boolean {
+    return fsMocks.writeFileSync.mock.calls.some(call => String(call[0]).endsWith('.last-back-ping'));
+  }
+
+  function mockHandoffRestart(options?: { withExistingMarker?: boolean }): void {
+    fsMocks.existsSync.mockImplementation((path: unknown) => {
+      const value = String(path);
+      return value === missionPath
+        || value === handoffMarkerPath
+        || value === handoffDocPath
+        || (options?.withExistingMarker === true && value === lastBackPingPath);
+    });
+    fsMocks.readFileSync.mockImplementation((path: unknown) => {
+      const value = String(path);
+      if (value === missionPath) return 'Mission anchor content';
+      if (value === handoffMarkerPath) return handoffDocPath;
+      if (value === lastBackPingPath) return String(Date.now());
+      return '';
+    });
+    fsMocks.statSync.mockImplementation(() => ({ mtimeMs: Date.now() }) as { mtimeMs: number });
+  }
+
+  it('suppresses the handoff back-ping when the flag is absent', () => {
+    mockHandoffRestart();
+
+    const ap = new AgentProcess('alice', mockEnv, {});
+    ap.setTelegramHandle({} as TelegramAPI, '123');
+    const prompt = buildStartupPrompt(ap);
+
+    expect(prompt).not.toContain('HANDOFF UX');
+    expect(mockLogEvent).toHaveBeenCalledTimes(1);
+    expect(mockLogEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      'alice',
+      'acme',
+      'agent_activity',
+      'system_ping_suppressed',
+      'info',
+      { kind: 'handoff_back_ping' },
+    );
+    expect(wroteLastBackPingMarker()).toBe(false);
+  });
+
+  it('suppresses the non-handoff back-online prompt when the flag is absent', () => {
+    const ap = new AgentProcess('alice', mockEnv, {});
+    ap.setTelegramHandle({} as TelegramAPI, '123');
+    const prompt = buildStartupPrompt(ap);
+
+    expect(prompt).not.toContain('back online');
+    expect(mockLogEvent).toHaveBeenCalledTimes(1);
+    expect(mockLogEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      'alice',
+      'acme',
+      'agent_activity',
+      'system_ping_suppressed',
+      'info',
+      { kind: 'online_message' },
+    );
+    expect(wroteLastBackPingMarker()).toBe(false);
+  });
+
+  it('preserves the handoff back-ping when the flag is true', () => {
+    mockHandoffRestart();
+
+    const ap = new AgentProcess('alice', mockEnv, { emit_system_telegram_pings: true });
+    ap.setTelegramHandle({} as TelegramAPI, '123');
+    const prompt = buildStartupPrompt(ap);
+
+    expect(prompt).toContain('HANDOFF UX');
+    expect(mockLogEvent).not.toHaveBeenCalled();
+    expect(wroteLastBackPingMarker()).toBe(true);
+  });
+
+  it('preserves the non-handoff back-online prompt when the flag is true', () => {
+    const ap = new AgentProcess('alice', mockEnv, { emit_system_telegram_pings: true });
+    ap.setTelegramHandle({} as TelegramAPI, '123');
+    const prompt = buildStartupPrompt(ap);
+
+    expect(prompt).toContain('Send a Telegram message to the user saying you are back online.');
+    expect(mockLogEvent).not.toHaveBeenCalled();
+  });
+
+  it('does not log suppression when Telegram is not wired', () => {
+    mockHandoffRestart();
+
+    const ap = new AgentProcess('alice', mockEnv, {});
+    const prompt = buildStartupPrompt(ap);
+
+    expect(prompt).not.toContain('HANDOFF UX');
+    expect(prompt).not.toContain('back online');
+    expect(mockLogEvent).not.toHaveBeenCalled();
+  });
+
+  it('suppresses the continue-path back-online prompt when the flag is absent', () => {
+    const ap = new AgentProcess('alice', mockEnv, {});
+    ap.setTelegramHandle({} as TelegramAPI, '123');
+    const prompt = buildContinuePrompt(ap);
+
+    expect(prompt).not.toContain('back online');
+    expect(mockLogEvent).toHaveBeenCalledTimes(1);
+    expect(mockLogEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      'alice',
+      'acme',
+      'agent_activity',
+      'system_ping_suppressed',
+      'info',
+      { kind: 'continue_online_message' },
+    );
+    expect(wroteLastBackPingMarker()).toBe(false);
+  });
+
+  it('preserves the continue-path back-online prompt when the flag is true', () => {
+    const ap = new AgentProcess('alice', mockEnv, { emit_system_telegram_pings: true });
+    ap.setTelegramHandle({} as TelegramAPI, '123');
+    const prompt = buildContinuePrompt(ap);
+
+    expect(prompt).toContain('After checking inbox, send a Telegram message to the user saying you are back online.');
+    expect(mockLogEvent).not.toHaveBeenCalled();
+  });
+
+  it('still honors the duplicate-suppression marker when the flag is true', () => {
+    mockHandoffRestart({ withExistingMarker: true });
+
+    const ap = new AgentProcess('alice', mockEnv, { emit_system_telegram_pings: true });
+    ap.setTelegramHandle({} as TelegramAPI, '123');
+    const prompt = buildStartupPrompt(ap);
+
+    expect(prompt).not.toContain('HANDOFF UX');
+    expect(mockLogEvent).not.toHaveBeenCalled();
   });
 });

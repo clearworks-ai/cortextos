@@ -170,7 +170,10 @@ describe('AgentProcess opencode runtime', () => {
   });
 
   it('prompts Telegram-enabled opencode agents to send back-online Telegram on fresh start', async () => {
-    const ap = new AgentProcess('opencode-agent', mockEnv, { runtime: 'opencode' });
+    const ap = new AgentProcess('opencode-agent', mockEnv, {
+      runtime: 'opencode',
+      emit_system_telegram_pings: true,
+    });
 
     ap.setTelegramHandle({ sendChatAction: vi.fn().mockResolvedValue(undefined) } as any, '12345');
     await ap.start();
@@ -180,7 +183,10 @@ describe('AgentProcess opencode runtime', () => {
   });
 
   it('sends daemon-direct back-online Telegram for opencode fresh start', async () => {
-    const ap = new AgentProcess('opencode-agent', mockEnv, { runtime: 'opencode' });
+    const ap = new AgentProcess('opencode-agent', mockEnv, {
+      runtime: 'opencode',
+      emit_system_telegram_pings: true,
+    });
     const sendMessage = vi.fn().mockResolvedValue(undefined);
     const api = { sendChatAction: vi.fn().mockResolvedValue(undefined), sendMessage };
 
@@ -192,7 +198,10 @@ describe('AgentProcess opencode runtime', () => {
 
   it('prompts Telegram-enabled opencode agents to send back-online Telegram on continue start', async () => {
     mockOpencodeSessionExists.mockReturnValue(true);
-    const ap = new AgentProcess('opencode-agent', mockEnv, { runtime: 'opencode' });
+    const ap = new AgentProcess('opencode-agent', mockEnv, {
+      runtime: 'opencode',
+      emit_system_telegram_pings: true,
+    });
 
     ap.setTelegramHandle({ sendChatAction: vi.fn().mockResolvedValue(undefined) } as any, '12345');
     await ap.start();
@@ -204,7 +213,10 @@ describe('AgentProcess opencode runtime', () => {
 
   it('sends daemon-direct back-online Telegram for opencode continue start', async () => {
     mockOpencodeSessionExists.mockReturnValue(true);
-    const ap = new AgentProcess('opencode-agent', mockEnv, { runtime: 'opencode' });
+    const ap = new AgentProcess('opencode-agent', mockEnv, {
+      runtime: 'opencode',
+      emit_system_telegram_pings: true,
+    });
     const sendMessage = vi.fn().mockResolvedValue(undefined);
     const api = { sendChatAction: vi.fn().mockResolvedValue(undefined), sendMessage };
 
@@ -229,7 +241,10 @@ describe('AgentProcess opencode runtime', () => {
         : handoffDocPath,
     );
 
-    const ap = new AgentProcess('opencode-agent', mockEnv, { runtime: 'opencode' });
+    const ap = new AgentProcess('opencode-agent', mockEnv, {
+      runtime: 'opencode',
+      emit_system_telegram_pings: true,
+    });
     const sendMessage = vi.fn().mockResolvedValue(undefined);
     const api = { sendChatAction: vi.fn().mockResolvedValue(undefined), sendMessage };
 
@@ -262,7 +277,10 @@ describe('AgentProcess opencode runtime', () => {
         : handoffDocPath,
     );
 
-    const ap = new AgentProcess('codex-agent', mockEnv, { runtime: 'codex-app-server' });
+    const ap = new AgentProcess('codex-agent', mockEnv, {
+      runtime: 'codex-app-server',
+      emit_system_telegram_pings: true,
+    });
     const sendMessage = vi.fn().mockResolvedValue(undefined);
     const api = { sendChatAction: vi.fn().mockResolvedValue(undefined), sendMessage };
 

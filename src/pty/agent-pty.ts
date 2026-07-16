@@ -13,6 +13,7 @@ interface IPty {
   onExit(callback: (e: { exitCode: number; signal?: number }) => void): { dispose(): void };
   kill(signal?: string): void;
   resize(cols: number, rows: number): void;
+  destroy?(): void;
 }
 
 interface IPtySpawnOptions {
@@ -172,9 +173,15 @@ export class AgentPTY {
 
     // Set up exit handler
     this.onExitDisposable = this.pty.onExit(({ exitCode, signal }) => {
+      const pty = this.pty;
       this._alive = false;
       this.pty = null;
       this.disposeListeners();
+      // node-pty kill() only signals; on macOS the master /dev/ptmx fd is not
+      // reliably closed on exit (leaks until kern.tty.ptmx_max=511 → ENXIO
+      // "posix_spawnp failed" for every subsequent spawn). destroy() closes the
+      // read stream + write stream, releasing the fd. Idempotent if already closed.
+      try { pty?.destroy?.(); } catch { /* fd already closed */ }
       if (this.onExitHandler) {
         this.onExitHandler(exitCode, signal);
       }
@@ -338,6 +345,7 @@ export class AgentPTY {
       this.pty = null;
       this.disposeListeners();
       pty.kill();
+      try { pty.destroy?.(); } catch { /* fd already closed */ }
     }
   }
 

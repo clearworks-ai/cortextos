@@ -102,8 +102,13 @@ describe('validateEventCategory', () => {
     }
   });
 
+  it('accepts agent_activity (fix: was missing from VALID_CATEGORIES)', () => {
+    expect(() => validateEventCategory('agent_activity')).not.toThrow();
+  });
+
   it('rejects invalid categories', () => {
     expect(() => validateEventCategory('invalid')).toThrow();
+    expect(() => validateEventCategory('unknown_category')).toThrow();
   });
 });
 

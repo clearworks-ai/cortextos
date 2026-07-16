@@ -839,3 +839,125 @@ describe('AgentProcess - system-status telegram gate', () => {
     expect(mockLogEvent).not.toHaveBeenCalled();
   });
 });
+
+describe('AgentProcess - spawn-failure recovery (handleSpawnFailure)', () => {
+  beforeEach(() => {
+    mockPty.spawn.mockReset();
+    mockPty.onExit.mockReset();
+    mockPty.onExit.mockImplementation((cb: (exitCode: number, signal?: number) => void) => {
+      capturedOnExit = cb;
+    });
+  });
+
+  it('sets status=crashed and increments crashCount after first spawn failure', async () => {
+    mockPty.spawn.mockRejectedValueOnce(new Error('posix_spawnp failed: ENXIO'));
+    // subsequent calls succeed so status can be checked without infinite retry
+    mockPty.spawn.mockResolvedValue(undefined);
+
+    vi.useFakeTimers();
+    try {
+      const ap = new AgentProcess('alice', mockEnv, {});
+      await ap.start();
+
+      expect(ap.getStatus().status).toBe('crashed');
+      expect(ap.getStatus().crashCount).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('schedules a retry after 5000ms on the first spawn failure', async () => {
+    let spawnCallCount = 0;
+    mockPty.spawn.mockImplementation(() => {
+      spawnCallCount++;
+      if (spawnCallCount === 1) return Promise.reject(new Error('ENXIO'));
+      return Promise.resolve();
+    });
+
+    vi.useFakeTimers();
+    try {
+      const ap = new AgentProcess('alice', mockEnv, {});
+      await ap.start();
+
+      expect(ap.getStatus().status).toBe('crashed');
+      expect(spawnCallCount).toBe(1);
+
+      // Advance past the 5s backoff — retry fires
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(spawnCallCount).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('halts after maxCrashesPerDay spawn failures with no further retry', async () => {
+    const maxCrashes = 3;
+    mockPty.spawn.mockRejectedValue(new Error('ENXIO'));
+
+    vi.useFakeTimers();
+    try {
+      const ap = new AgentProcess('alice', mockEnv, { max_crashes_per_day: maxCrashes });
+
+      // First start
+      await ap.start();
+      expect(ap.getStatus().status).toBe('crashed');
+
+      // Fire retries until halt
+      for (let i = 1; i < maxCrashes; i++) {
+        await vi.advanceTimersByTimeAsync(300_001); // past max backoff
+      }
+
+      expect(ap.getStatus().status).toBe('halted');
+
+      // Capture spawn call count and verify no more retries scheduled
+      const spawnCountAtHalt = mockPty.spawn.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(300_001);
+      expect(mockPty.spawn.mock.calls.length).toBe(spawnCountAtHalt);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not schedule a retry when stopping is set (daemon-managed stop in progress)', async () => {
+    mockPty.spawn.mockRejectedValue(new Error('ENXIO'));
+
+    vi.useFakeTimers();
+    try {
+      const ap = new AgentProcess('alice', mockEnv, {});
+      // Simulate an active stop() in progress (stopping=true) at the time the spawn fails.
+      // Note: start() clears stopRequested at entry, so we must use `stopping` to
+      // model a concurrent stop()-in-progress scenario.
+      (ap as unknown as { stopping: boolean }).stopping = true;
+
+      await ap.start();
+
+      expect(ap.getStatus().status).toBe('crashed');
+
+      // Advance past any backoff — no retry should be scheduled
+      const spawnCountAfterStop = mockPty.spawn.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(300_001);
+      expect(mockPty.spawn.mock.calls.length).toBe(spawnCountAfterStop);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('writes a SPAWN_FAILURE entry to restarts.log', async () => {
+    mockPty.spawn.mockRejectedValueOnce(new Error('ENXIO'));
+    mockPty.spawn.mockResolvedValue(undefined);
+
+    vi.useFakeTimers();
+    try {
+      const ap = new AgentProcess('alice', mockEnv, {});
+      await ap.start();
+
+      expect(fsMocks.appendFileSync).toHaveBeenCalledTimes(1);
+      const [logPath, logLine] = fsMocks.appendFileSync.mock.calls[0];
+      expect(String(logPath)).toContain('/logs/alice/restarts.log');
+      expect(String(logLine)).toMatch(/\] SPAWN_FAILURE: spawn failure crash_count=1 backoff_s=5\b/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

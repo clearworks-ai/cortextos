@@ -1010,9 +1010,15 @@ export class AgentProcess {
     const handoffUxOverride = emitHandoffBackPing
       ? ' HANDOFF UX: This is a context handoff restart — your memory is intact via the handoff document, but the VERBATIM LIVE TAIL below is more authoritative than the doc. If the handoff document conflicts with the newest inbound message, the newest inbound message wins. CRITICAL: After reading the handoff document and the live tail, your VERY FIRST tool call MUST be a Bash call running: cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID \'back — [what you were just working on]\' — replace the brackets with one brief plain-English sentence about your current state derived from the handoff doc plus the newest inbound message, with the newest inbound message winning. Do this BEFORE running heartbeat, BEFORE any other tool call. No cron IDs, no status report, no cold-boot phrasing. Do NOT send "Booting up... one moment" (skip AGENTS.md step 1 entirely).'
       : '';
-    const onlineMessage = isHandoffRestart || !shouldPromptTelegram
-      ? ''
-      : ' Send a Telegram message to the user saying you are back online.';
+    const emitOnlineMessage = !isHandoffRestart
+      && shouldPromptTelegram
+      && !this.isHandoffBackPingSuppressed();
+    if (emitOnlineMessage) {
+      writeLastBackPingMs(this.env.ctxRoot, this.name, Date.now());
+    }
+    const onlineMessage = emitOnlineMessage
+      ? ' Send a Telegram message to the user saying you are back online.'
+      : '';
     return `You are starting a new session. Current UTC time: ${nowUtc}. Read AGENTS.md and all bootstrap files listed there. External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${reminderBlock}${deliverablesBlock}${missionBlock}${handoffBlock}${liveTailBlock}${handoffUxOverride}${onlineMessage}${onboardingAppend}`;
   }
 
@@ -1023,7 +1029,12 @@ export class AgentProcess {
     const { missionBlock, liveTailBlock } = this.buildResumeContextBlocks();
     // Session refresh (--continue) is never a handoff restart.
     this.lastSpawnWasHandoff = false;
-    const onlineMessage = this.shouldPromptTelegramOnlineMessage()
+    const emitOnlineMessage = this.shouldPromptTelegramOnlineMessage()
+      && !this.isHandoffBackPingSuppressed();
+    if (emitOnlineMessage) {
+      writeLastBackPingMs(this.env.ctxRoot, this.name, Date.now());
+    }
+    const onlineMessage = emitOnlineMessage
       ? ' After checking inbox, send a Telegram message to the user saying you are back online.'
       : '';
     return `SESSION CONTINUATION: Your CLI process was restarted with --continue to reload configs. Current UTC time: ${nowUtc}. Your full conversation history is preserved. Re-read AGENTS.md and ALL bootstrap files listed there. External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${reminderBlock}${deliverablesBlock}${missionBlock}${liveTailBlock} Check inbox. Resume normal operations.${onlineMessage}`;

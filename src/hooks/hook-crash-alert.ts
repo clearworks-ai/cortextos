@@ -18,6 +18,7 @@ import { existsSync, readFileSync, writeFileSync, appendFileSync, unlinkSync, mk
 import { join } from 'path';
 import { homedir } from 'os';
 import { execFile } from 'child_process';
+import { logSuppressedSystemPing, readEmitSystemPingsFlag } from './system-pings.js';
 
 const DEDUP_WINDOW_MS = 10 * 60 * 1000;         // 10 minutes
 const QUIET_HOUR_START_LA = 22;                 // 22:00 America/Los_Angeles
@@ -36,6 +37,8 @@ const QUIET_SUPPRESSED_TYPES = new Set([
   'rate-limited',
 ]);
 
+const GATED_LIFECYCLE_TYPES = new Set(['planned-restart', 'session-refresh', 'daemon-stop']);
+
 function isQuietHoursLA(now: Date): boolean {
   const laString = now.toLocaleString('en-US', {
     timeZone: 'America/Los_Angeles',
@@ -46,6 +49,14 @@ function isQuietHoursLA(now: Date): boolean {
   const hour = parseInt(m[1], 10);
   // Window wraps midnight: 22:00-23:59 OR 00:00-06:59
   return hour >= QUIET_HOUR_START_LA || hour < QUIET_HOUR_END_LA;
+}
+
+function logSuppressedLifecycleNotice(agentName: string, endType: string): void {
+  try {
+    logSuppressedSystemPing(agentName, 'lifecycle_notice', endType);
+  } catch {
+    /* best-effort — suppression logging must never block the hook */
+  }
 }
 
 /**
@@ -479,6 +490,14 @@ async function main(): Promise<void> {
       if (crashCount > 0) message += ` Crashes today: ${crashCount}.`;
       if (lastTask) message += `\nLast status: ${lastTask}`;
       break;
+  }
+
+  if (
+    GATED_LIFECYCLE_TYPES.has(endType) &&
+    !readEmitSystemPingsFlag(process.env.CTX_AGENT_DIR)
+  ) {
+    logSuppressedLifecycleNotice(agentName, endType);
+    return;
   }
 
   if (message) {

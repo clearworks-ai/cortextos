@@ -2,7 +2,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { checkAndRecordSourceEvent, isValidSourceKey } from '../../../src/utils/event-dedup';
+import { checkAndRecordSourceEvent, isValidSourceKey, removeSourceEventRecord } from '../../../src/utils/event-dedup';
 
 const DAY_SEC = 86400;
 
@@ -217,6 +217,58 @@ describe('event dedup', () => {
     expect(after).toEqual({ surface: true, reason: 'first-seen' });
     expect(readLedger()).toEqual({
       'gmail:18f3c2b1a9': { firstSeenAt: nowSec(), fireOnce: false },
+    });
+  });
+
+  describe('removeSourceEventRecord', () => {
+    it('removes a recorded key so the next check surfaces again', () => {
+      checkAndRecordSourceEvent(ctxRoot, 'automator:meeting-evt1');
+
+      removeSourceEventRecord(ctxRoot, 'automator:meeting-evt1');
+
+      expect(readLedger()).toEqual({});
+      expect(checkAndRecordSourceEvent(ctxRoot, 'automator:meeting-evt1')).toEqual({
+        surface: true,
+        reason: 'first-seen',
+      });
+    });
+
+    it('is a no-op for a missing key', () => {
+      checkAndRecordSourceEvent(ctxRoot, 'automator:meeting-evt1');
+
+      expect(() => removeSourceEventRecord(ctxRoot, 'automator:meeting-missing')).not.toThrow();
+      expect(readLedger()).toEqual({
+        'automator:meeting-evt1': { firstSeenAt: nowSec(), fireOnce: false },
+      });
+    });
+
+    it('is a no-op for invalid key or empty ctxRoot', () => {
+      seedLedgerFile(
+        JSON.stringify({
+          'automator:meeting-evt1': { firstSeenAt: nowSec(), fireOnce: false },
+        }, null, 2),
+      );
+      const before = readFileSync(ledgerPath(), 'utf-8');
+
+      removeSourceEventRecord('', 'automator:meeting-evt1');
+      removeSourceEventRecord(ctxRoot, 'NotValid');
+
+      expect(readFileSync(ledgerPath(), 'utf-8')).toBe(before);
+    });
+
+    it('does not disturb sibling entries', () => {
+      seedLedgerFile(
+        JSON.stringify({
+          'automator:meeting-evt1': { firstSeenAt: nowSec(), fireOnce: false },
+          'automator:meeting-evt2': { firstSeenAt: nowSec() - 120, fireOnce: true },
+        }),
+      );
+
+      removeSourceEventRecord(ctxRoot, 'automator:meeting-evt1');
+
+      expect(readLedger()).toEqual({
+        'automator:meeting-evt2': { firstSeenAt: nowSec() - 120, fireOnce: true },
+      });
     });
   });
 });

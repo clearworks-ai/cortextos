@@ -38,7 +38,7 @@ import { appendToBuffer } from '../daemon/conversation-buffer.js';
 import { findBannedCronPrompts } from '../utils/cron-prompt-validator.js';
 import { recordVerificationReceipt, emitClaimWithoutReceiptWarning, evaluateClaimGate } from '../utils/verification-receipt.js';
 import { evaluateCiAlert, gatherCiAlertContext } from '../utils/ci-alert-gate.js';
-import { checkAndRecordSourceEvent, isValidSourceKey } from '../utils/event-dedup.js';
+import { checkAndRecordSourceEvent, isValidSourceKey, removeSourceEventRecord } from '../utils/event-dedup.js';
 import { evaluateMeetingAlert } from '../utils/meeting-alert-gate.js';
 import { VALID_PRIORITIES } from '../types/index.js';
 import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext, CronDefinition, ConversationBufferEntry, TaskHealthRow } from '../types/index.js';
@@ -216,7 +216,9 @@ busCommand
   .argument('<text>', 'Message text')
   .argument('[reply-to]', 'Reply to message ID (optional positional form)')
   .option('--reply-to <id>', 'Reply to message ID')
-  .action((to: string, priority: string, text: string, replyToArg: string | undefined, opts: { replyTo?: string }) => {
+  .option('--source-key <key>', 'Source-event identity key (<namespace>:<id>). When set, this bus message is suppressed if the same source event was already surfaced (shared comms-event-dedup ledger). Invalid keys warn and fail open.')
+  .option('--source-ttl-sec <n>', 'Re-surface window in seconds for --source-key (default 2592000 = 30d).')
+  .action((to: string, priority: string, text: string, replyToArg: string | undefined, opts: { replyTo?: string; sourceKey?: string; sourceTtlSec?: string }) => {
     // Accept reply-to as either positional arg or --reply-to flag (P2 fix #9)
     const effectiveReplyTo = opts.replyTo ?? replyToArg;
     const validPriorities: Priority[] = ['urgent', 'high', 'normal', 'low'];
@@ -256,10 +258,47 @@ busCommand
       console.error(`Warning: agent '${to}' not found in project. Message will be queued but may never be read.`);
     }
 
+    let recordedSourceEvent = false;
+    const sourceKey = opts.sourceKey;
+    if (sourceKey !== undefined) {
+      if (!isValidSourceKey(sourceKey)) {
+        console.error(`Warning: invalid --source-key '${sourceKey}' — expected <namespace>:<id> (e.g. automator:meeting-<eventId>); failing open.`);
+      } else if (env.ctxRoot) {
+        let sourceTtlSec: number | undefined;
+        if (opts.sourceTtlSec !== undefined) {
+          const parsed = Number(opts.sourceTtlSec);
+          if (Number.isInteger(parsed) && parsed > 0) {
+            sourceTtlSec = parsed;
+          } else {
+            console.error(`Error: --source-ttl-sec must be a finite positive integer, got '${opts.sourceTtlSec}'; failing open with the default TTL.`);
+          }
+        }
+        const sourceResult = checkAndRecordSourceEvent(env.ctxRoot, sourceKey, { ttlSec: sourceTtlSec });
+        if (!sourceResult.surface) {
+          const mins = Math.round((sourceResult.ageSec ?? 0) / 60);
+          console.log(`Message suppressed (source event '${sourceKey}' already surfaced ${mins}m ago)`);
+          try {
+            logEvent(paths, env.agentName, env.org, 'message', 'agent_message_suppressed', 'info', JSON.stringify({ to, source_key: sourceKey, age_sec: sourceResult.ageSec ?? 0 }));
+          } catch {
+            // Non-fatal: suppression still succeeds even if event logging fails.
+          }
+          return;
+        }
+        recordedSourceEvent = sourceResult.reason === 'first-seen';
+      }
+    }
+
     let msgId: string;
     try {
       msgId = sendMessage(paths, env.agentName, to, priority as Priority, text, effectiveReplyTo);
     } catch (err) {
+      try {
+        if (recordedSourceEvent && env.ctxRoot && sourceKey) {
+          removeSourceEventRecord(env.ctxRoot, sourceKey);
+        }
+      } catch {
+        // Non-fatal: rollback best-effort only.
+      }
       console.error(err instanceof Error ? err.message : String(err));
       process.exit(1);
     }
@@ -1488,9 +1527,11 @@ busCommand
   .option('--plain-text', 'Skip Telegram Markdown parsing entirely. Use this when the message contains unescaped _, *, backtick, or [ that would otherwise trip the Markdown parser. Without this flag, sendMessage still retries once with parse_mode disabled on a parse-entity error — so it is purely an opt-in to save the retry roundtrip.', false)
   .option('--no-dedup', 'Bypass duplicate-content suppression for this send (always deliver).')
   .option('--dedup-window <seconds>', 'Suppression window in seconds (default 21600 = 6h, or env CTX_TELEGRAM_DEDUP_WINDOW_SEC).')
+  .option('--source-key <key>', 'Source-event identity key (<namespace>:<id>, e.g. automator:meeting-<eventId>). When set, the send is gated on first-sight of this SOURCE EVENT via the comms-event-dedup ledger — reworded duplicates of the same event are suppressed BEFORE the byte-hash layer. Invalid keys warn and fall through to byte-hash dedup (fail-open). Ignored with --streaming; bypassed by --no-dedup.')
+  .option('--source-ttl-sec <n>', 'Re-surface window in seconds for --source-key (default 2592000 = 30d, same as `bus event-dedup`). Meeting-reminder workers should pass 43200 (12h).')
   .option('--streaming', 'Stream the reply into ONE Telegram message: <message> is the initial placeholder, then newline-delimited tokens from stdin are appended via editMessageText (≤1 edit/sec, identical-content guard, final edit applies markdown→HTML). Closes the stream when stdin ends. Spec: Item 1 of .planning/larry-ux-parity-spec.md.', false)
   .option('--confirm-claim', 'Assert that the agent has verified the completion claim in this message off-ledger (no receipt recorded). Bypasses the require-confirm hold for deploy/merge claims when CTX_CLAIM_GATE=enforce. Has NO effect on block-rung claims (external-send); those require a real receipt or state/claim-gate-override.json.', false)
-  .action(async (chatId: string, message: string, opts: { dedup?: boolean; dedupWindow?: string; image?: string; file?: string; plainText?: boolean; streaming?: boolean; confirmClaim?: boolean }) => {
+  .action(async (chatId: string, message: string, opts: { dedup?: boolean; dedupWindow?: string; image?: string; file?: string; plainText?: boolean; streaming?: boolean; confirmClaim?: boolean; sourceKey?: string; sourceTtlSec?: string }) => {
     // Codex agents emit literal '\n'/'\t' inside single-quoted bash where bash
     // does not expand escapes, so they arrive at argv as 2-char literals and
     // Telegram renders them as visible text. Normalize before send + log.
@@ -1519,6 +1560,43 @@ busCommand
     if (!botToken) {
       console.error('Error: BOT_TOKEN not configured. Set it in your agent .env file or as an environment variable to enable Telegram.');
       process.exit(1);
+    }
+
+    let recordedSourceEvent = false;
+    const sourceKey = opts.sourceKey;
+    if (sourceKey !== undefined) {
+      if (opts.dedup !== false) {
+        if (opts.streaming) {
+          console.error('Warning: --source-key is ignored with --streaming.');
+        } else if (!isValidSourceKey(sourceKey)) {
+          console.error(`Warning: invalid --source-key '${sourceKey}' — expected <namespace>:<id> (e.g. automator:meeting-<eventId>); failing open to byte-hash dedup.`);
+        } else if (env.ctxRoot) {
+          let sourceTtlSec: number | undefined;
+          if (opts.sourceTtlSec !== undefined) {
+            const parsed = Number(opts.sourceTtlSec);
+            if (Number.isInteger(parsed) && parsed > 0) {
+              sourceTtlSec = parsed;
+            } else {
+              console.error(`Error: --source-ttl-sec must be a finite positive integer, got '${opts.sourceTtlSec}'; failing open with the default TTL.`);
+            }
+          }
+          const sourceResult = checkAndRecordSourceEvent(env.ctxRoot, sourceKey, { ttlSec: sourceTtlSec });
+          if (!sourceResult.surface) {
+            const mins = Math.round((sourceResult.ageSec ?? 0) / 60);
+            console.log(`Message suppressed (source event '${sourceKey}' already surfaced ${mins}m ago)`);
+            try {
+              if (env.agentName) {
+                const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+                logEvent(paths, env.agentName, env.org, 'message', 'telegram_suppressed', 'info', JSON.stringify({ chat_id: chatId, source_key: sourceKey, age_sec: sourceResult.ageSec ?? 0, layer: 'source-event' }));
+              }
+            } catch {
+              // Non-fatal: suppression still succeeds even if event logging fails.
+            }
+            return;
+          }
+          recordedSourceEvent = sourceResult.reason === 'first-seen';
+        }
+      }
     }
 
     let recordedDedup = false;
@@ -1604,6 +1682,9 @@ busCommand
           try {
             if (recordedDedup && env.ctxRoot) {
               removeRecord(env.ctxRoot, chatId, message);
+            }
+            if (recordedSourceEvent && env.ctxRoot && opts.sourceKey) {
+              removeSourceEventRecord(env.ctxRoot, opts.sourceKey);
             }
           } catch {
             // Non-fatal: rollback best-effort only.
@@ -1727,6 +1808,9 @@ busCommand
       try {
         if (recordedDedup && env.ctxRoot) {
           removeRecord(env.ctxRoot, chatId, message);
+        }
+        if (recordedSourceEvent && env.ctxRoot && opts.sourceKey) {
+          removeSourceEventRecord(env.ctxRoot, opts.sourceKey);
         }
       } catch {
         // Non-fatal: rollback best-effort only.

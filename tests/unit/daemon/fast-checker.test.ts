@@ -651,6 +651,40 @@ describe('FastChecker', () => {
       const result = FastChecker.formatTelegramTextMessage('alice', '999', 'Hello', '/opt/cortextos');
       expect(result).toContain("send-telegram 999 '<your reply>'");
     });
+
+    it('labels the body with the NEW MESSAGE marker', () => {
+      const result = FastChecker.formatTelegramTextMessage('alice', '999', 'Hello there', '/opt/cortextos');
+      expect(result).toContain('[NEW MESSAGE — respond to THIS now:]');
+      expect(result.indexOf('[NEW MESSAGE — respond to THIS now:]'))
+        .toBeLessThan(result.indexOf('Hello there'));
+    });
+
+    it('marker sits between recent-history block and the body', () => {
+      const result = FastChecker.formatTelegramTextMessage(
+        'alice',
+        '999',
+        'live new ask',
+        '/opt/cortextos',
+        undefined,
+        undefined,
+        '[alice]: older question\n[frank2]: my reply',
+      );
+      const historyIdx = result.indexOf('[Recent conversation:]');
+      const markerIdx = result.indexOf('[NEW MESSAGE — respond to THIS now:]');
+      const bodyIdx = result.indexOf('live new ask');
+      expect(historyIdx).toBeGreaterThanOrEqual(0);
+      expect(markerIdx).toBeGreaterThan(historyIdx);
+      expect(bodyIdx).toBeGreaterThan(markerIdx);
+    });
+
+    it('marker precedes slash-command bodies without fencing them', () => {
+      const result = FastChecker.formatTelegramTextMessage('alice', '999', '/restart', '/opt/cortextos');
+      const markerIdx = result.indexOf('[NEW MESSAGE — respond to THIS now:]');
+      const bodyIdx = result.indexOf('/restart');
+      expect(markerIdx).toBeGreaterThanOrEqual(0);
+      expect(bodyIdx).toBeGreaterThan(markerIdx);
+      expect(result).not.toContain('```\n/restart');
+    });
   });
 
   describe('readLastSent', () => {

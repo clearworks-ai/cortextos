@@ -723,7 +723,7 @@ export class AgentManager {
         const text = stripControlChars(msg.text || '');
         const lastSent = FastChecker.readLastSent(stateDir, effectiveChatId);
 
-        const recentHistory = buildRecentHistory(this.ctxRoot, name, effectiveChatId, 6) ?? undefined;
+        const recentHistory = buildRecentHistory(this.ctxRoot, name, effectiveChatId, 6, text) ?? undefined;
         const formatted = FastChecker.formatTelegramTextMessage(
           from,
           effectiveChatId,

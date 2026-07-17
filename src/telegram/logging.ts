@@ -203,33 +203,31 @@ export function readLastSent(
 
 /**
  * Build a short recent conversation snippet for context injection.
- * Reads the last cputime         unlimited
-filesize        unlimited
-datasize        unlimited
-stacksize       7MB
-
-
-/**
- * Build a short recent conversation snippet for context injection.
  * Reads the last `limit` messages (combined inbound + outbound) for the
  * given agent/chatId, sorts by timestamp, and returns a formatted string.
  * Returns null if no history is available.
+ *
+ * `excludeText`: when set, the single NEWEST inbound entry whose text
+ * matches (control-chars stripped, trimmed) is dropped — used to keep the
+ * just-arrived message (already logged before injection) out of the
+ * history block so the agent never reads the live message as an echo.
  */
 export function buildRecentHistory(
   ctxRoot: string,
   agentName: string,
   chatId: string | number,
   limit: number = 6,
+  excludeText?: string,
 ): string | null {
   const logDir = join(ctxRoot, 'logs', agentName);
   const inboundPath = join(logDir, 'inbound-messages.jsonl');
   const outboundPath = join(logDir, 'outbound-messages.jsonl');
   const chatIdStr = String(chatId);
 
-  interface Entry { ts: string; speaker: string; text: string; }
+  interface Entry { ts: string; speaker: string; text: string; inbound: boolean; }
   const entries: Entry[] = [];
 
-  const readLines = (filePath: string, speaker: string) => {
+  const readLines = (filePath: string, speaker: string, inbound: boolean) => {
     if (!existsSync(filePath)) return;
     try {
       const raw = readFileSync(filePath, 'utf-8').trim();
@@ -242,18 +240,35 @@ export function buildRecentHistory(
           if (String(obj.chat_id) !== chatIdStr) continue;
           const text = (obj.text || '').trim();
           if (!text) continue;
-          entries.push({ ts: obj.timestamp || obj.archived_at || '', speaker, text });
+          entries.push({ ts: obj.timestamp || obj.archived_at || '', speaker, text, inbound });
         } catch { /* skip malformed */ }
       }
     } catch { /* skip unreadable */ }
   };
 
-  readLines(inboundPath, process.env.ADMIN_USERNAME ?? 'user');
-  readLines(outboundPath, agentName);
+  readLines(inboundPath, process.env.ADMIN_USERNAME ?? 'user', true);
+  readLines(outboundPath, agentName, false);
 
   if (entries.length === 0) return null;
 
   entries.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+
+  // Drop the single newest inbound entry matching the current message —
+  // it is already logged before injection and must not double as history.
+  if (excludeText !== undefined) {
+    const target = stripControlChars(excludeText).trim();
+    if (target.length > 0) {
+      for (let i = entries.length - 1; i >= 0; i--) {
+        const entry = entries[i];
+        if (entry && entry.inbound && stripControlChars(entry.text).trim() === target) {
+          entries.splice(i, 1);
+          break;
+        }
+      }
+    }
+  }
+  if (entries.length === 0) return null;
+
   const recent = entries.slice(-limit);
 
   const formatted = recent.map(e => {

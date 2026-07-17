@@ -287,6 +287,43 @@ describe('Task Management', () => {
       expect(pending.length).toBe(1);
     });
 
+    it('filters by a priority array and excludes priorities outside the set', () => {
+      const urgentId = createTask(paths, 'paul', 'acme', 'Urgent task', { priority: 'urgent' });
+      const highId = createTask(paths, 'paul', 'acme', 'High task', { priority: 'high' });
+      const normalId = createTask(paths, 'paul', 'acme', 'Normal task', { priority: 'normal' });
+      createTask(paths, 'paul', 'acme', 'Low task', { priority: 'low' });
+
+      const tasks = listTasks(paths, { priority: ['urgent', 'high', 'normal'] });
+
+      expect(tasks.map(task => task.id).sort()).toEqual([urgentId, highId, normalId].sort());
+      expect(tasks.every(task => ['urgent', 'high', 'normal'].includes(task.priority))).toBe(true);
+    });
+
+    it('filters by a single priority string without changing legacy behavior', () => {
+      const highId = createTask(paths, 'paul', 'acme', 'High task', { priority: 'high' });
+      createTask(paths, 'paul', 'acme', 'Normal task', { priority: 'normal' });
+
+      const tasks = listTasks(paths, { priority: 'high' });
+
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].id).toBe(highId);
+      expect(tasks[0].priority).toBe('high');
+    });
+
+    it('combines status and priority-array filters', () => {
+      const pendingHighId = createTask(paths, 'paul', 'acme', 'Pending high', { priority: 'high' });
+      const pendingNormalId = createTask(paths, 'paul', 'acme', 'Pending normal', { priority: 'normal' });
+      const pendingLowId = createTask(paths, 'paul', 'acme', 'Pending low', { priority: 'low' });
+      const doneHighId = createTask(paths, 'paul', 'acme', 'Done high', { priority: 'high' });
+      updateTask(paths, doneHighId, 'completed');
+
+      const tasks = listTasks(paths, { status: 'pending', priority: ['high', 'normal'] });
+
+      expect(tasks.map(task => task.id).sort()).toEqual([pendingHighId, pendingNormalId].sort());
+      expect(tasks.map(task => task.id)).not.toContain(pendingLowId);
+      expect(tasks.map(task => task.id)).not.toContain(doneHighId);
+    });
+
     it('hides cancelled tasks by default', () => {
       const taskId = createTask(paths, 'paul', 'acme', 'Task 1');
       cancelTask(paths, taskId, 'duplicate');

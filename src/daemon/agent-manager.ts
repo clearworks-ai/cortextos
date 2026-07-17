@@ -1430,6 +1430,10 @@ export class AgentManager {
 
         for (const name of dirs) {
           const dir = join(agentsBase, name);
+          if (!existsSync(join(dir, 'config.json'))) {
+            console.log(`[agent-manager] skipping non-agent dir (no config.json): ${dir}`);
+            continue;
+          }
           const config = this.loadAgentConfig(dir);
           agents.push({ name, dir, org, config });
         }

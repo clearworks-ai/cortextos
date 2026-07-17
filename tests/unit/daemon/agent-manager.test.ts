@@ -150,6 +150,8 @@ describe('AgentManager.discoverAndStart - BUG-028 fix', () => {
     mkdirSync(join(ctxRoot, 'config'), { recursive: true });
     mkdirSync(join(frameworkRoot, 'orgs', 'acme', 'agents', 'alice'), { recursive: true });
     mkdirSync(join(frameworkRoot, 'orgs', 'acme', 'agents', 'bob'), { recursive: true });
+    writeFileSync(join(frameworkRoot, 'orgs', 'acme', 'agents', 'alice', 'config.json'), '{}');
+    writeFileSync(join(frameworkRoot, 'orgs', 'acme', 'agents', 'bob', 'config.json'), '{}');
   });
 
   afterEach(() => {
@@ -259,6 +261,10 @@ describe('AgentManager.discoverAndStart - BUG-043 fix (multi-org support)', () =
     mkdirSync(join(frameworkRoot, 'orgs', 'acme', 'agents', 'bob'), { recursive: true });
     mkdirSync(join(frameworkRoot, 'orgs', 'widgetco', 'agents', 'carol'), { recursive: true });
     mkdirSync(join(frameworkRoot, 'orgs', 'widgetco', 'agents', 'dave'), { recursive: true });
+    writeFileSync(join(frameworkRoot, 'orgs', 'acme', 'agents', 'alice', 'config.json'), '{}');
+    writeFileSync(join(frameworkRoot, 'orgs', 'acme', 'agents', 'bob', 'config.json'), '{}');
+    writeFileSync(join(frameworkRoot, 'orgs', 'widgetco', 'agents', 'carol', 'config.json'), '{}');
+    writeFileSync(join(frameworkRoot, 'orgs', 'widgetco', 'agents', 'dave', 'config.json'), '{}');
   });
 
   afterEach(() => {
@@ -343,6 +349,67 @@ describe('AgentManager.discoverAndStart - BUG-043 fix (multi-org support)', () =
     } finally {
       rmSync(emptyDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('AgentManager.discoverAgents - config.json adoption guard', () => {
+  let testDir: string;
+  let ctxRoot: string;
+  let frameworkRoot: string;
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join(tmpdir(), 'cortextos-am-config-guard-'));
+    ctxRoot = join(testDir, 'instance');
+    frameworkRoot = join(testDir, 'framework');
+    mkdirSync(join(ctxRoot, 'config'), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('excludes config-less dirs from discovery', () => {
+    mkdirSync(join(frameworkRoot, 'orgs', 'acme', 'agents', 'alice'), { recursive: true });
+    mkdirSync(join(frameworkRoot, 'orgs', 'acme', 'agents', 'state'), { recursive: true });
+    writeFileSync(join(frameworkRoot, 'orgs', 'acme', 'agents', 'alice', 'config.json'), '{}');
+
+    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
+    const agents = (am as any).discoverAgents();
+
+    expect(agents.map((agent: { name: string }) => agent.name)).toEqual(['alice']);
+  });
+
+  it('includes dirs with config.json and preserves dir/org metadata', () => {
+    const aliceDir = join(frameworkRoot, 'orgs', 'acme', 'agents', 'alice');
+    mkdirSync(aliceDir, { recursive: true });
+    writeFileSync(join(aliceDir, 'config.json'), '{}');
+
+    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
+    const agents = (am as any).discoverAgents();
+
+    expect(agents).toHaveLength(1);
+    expect(agents[0]).toMatchObject({
+      name: 'alice',
+      dir: aliceDir,
+      org: 'acme',
+    });
+  });
+
+  it('keeps present-but-invalid config.json dirs with empty config', () => {
+    const brokenDir = join(frameworkRoot, 'orgs', 'acme', 'agents', 'broken');
+    mkdirSync(brokenDir, { recursive: true });
+    writeFileSync(join(brokenDir, 'config.json'), '{not json', 'utf-8');
+
+    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
+    const agents = (am as any).discoverAgents();
+
+    expect(agents).toHaveLength(1);
+    expect(agents[0]).toMatchObject({
+      name: 'broken',
+      dir: brokenDir,
+      org: 'acme',
+      config: {},
+    });
   });
 });
 
@@ -685,6 +752,9 @@ describe('discoverAndStart - per-agent error isolation (BUG-BOOT-SILENT fix)', (
     mkdirSync(join(frameworkRoot, 'orgs', 'acme', 'agents', 'alice'), { recursive: true });
     mkdirSync(join(frameworkRoot, 'orgs', 'acme', 'agents', 'bob'), { recursive: true });
     mkdirSync(join(frameworkRoot, 'orgs', 'acme', 'agents', 'carol'), { recursive: true });
+    writeFileSync(join(frameworkRoot, 'orgs', 'acme', 'agents', 'alice', 'config.json'), '{}');
+    writeFileSync(join(frameworkRoot, 'orgs', 'acme', 'agents', 'bob', 'config.json'), '{}');
+    writeFileSync(join(frameworkRoot, 'orgs', 'acme', 'agents', 'carol', 'config.json'), '{}');
   });
 
   afterEach(() => {

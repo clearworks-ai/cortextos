@@ -40,6 +40,7 @@ import { recordVerificationReceipt, emitClaimWithoutReceiptWarning, evaluateClai
 import { evaluateCiAlert, gatherCiAlertContext } from '../utils/ci-alert-gate.js';
 import { checkAndRecordSourceEvent, isValidSourceKey } from '../utils/event-dedup.js';
 import { evaluateMeetingAlert } from '../utils/meeting-alert-gate.js';
+import { VALID_PRIORITIES } from '../types/index.js';
 import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext, CronDefinition, ConversationBufferEntry, TaskHealthRow } from '../types/index.js';
 import type { TaskClass } from '../bus/task.js';
 import { fleetReconcileCommand } from './bus-reconcile.js';
@@ -545,7 +546,7 @@ busCommand
   .command('list-tasks')
   .option('--agent <name>', 'Filter by agent')
   .option('--status <s>', 'Filter by status')
-  .option('--priority <p>', 'Filter by priority: urgent | high | normal | low')
+  .option('--priority <p>', 'Filter by priority: urgent | high | normal | low (comma lists allowed)')
   .option('--class <c>', 'Filter by class: system | human | build')
   .option('--real-build', 'Only real build work (excludes system + human)')
   .option('--someday', 'Show only someday/backlog tasks')
@@ -575,10 +576,22 @@ busCommand
     } else if (opts.open) {
       limit = 50;
     }
+    let priorities: Priority[] | undefined;
+    if (opts.priority !== undefined) {
+      const tokens = [...new Set(
+        opts.priority.split(',').map(token => token.trim()).filter(token => token.length > 0),
+      )];
+      const invalid = tokens.filter(token => !VALID_PRIORITIES.includes(token as Priority));
+      if (tokens.length === 0 || invalid.length > 0) {
+        console.error(`Invalid priority '${opts.priority}'. Must be one or more of: ${VALID_PRIORITIES.join(', ')}`);
+        process.exit(1);
+      }
+      priorities = tokens as Priority[];
+    }
     const tasks = listTasks(paths, {
       agent: opts.agent,
       status: opts.status as TaskStatus,
-      priority: opts.priority as Priority | undefined,
+      priority: priorities,
       class: requestedClass,
       respectDeps: opts.respectDeps ?? false,
       openOnly: opts.open ?? false,

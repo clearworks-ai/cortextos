@@ -1091,7 +1091,7 @@ export function listTasks(
   filters?: {
     agent?: string;
     status?: TaskStatus;
-    priority?: Priority;
+    priority?: Priority | Priority[];
     class?: TaskClass;
     respectDeps?: boolean;
     /**
@@ -1126,7 +1126,10 @@ export function listTasks(
       if (filters?.agent && task.assigned_to !== filters.agent) continue;
       if (filters?.status && task.status !== filters.status) continue;
       if (filters?.openOnly && !filters.status && !OPEN_TASK_STATUSES.has(task.status)) continue;
-      if (filters?.priority && task.priority !== filters.priority) continue;
+      if (filters?.priority) {
+        const wanted = Array.isArray(filters.priority) ? filters.priority : [filters.priority];
+        if (!wanted.includes(task.priority)) continue;
+      }
       if (task.archived) continue;
       // Cancelled tasks are hidden from every default view (like archived).
       // An explicit `--status cancelled` query still surfaces them for audit/recovery.

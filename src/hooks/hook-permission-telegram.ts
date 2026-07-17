@@ -68,6 +68,17 @@ function readCronActive(stateDir: string): { cronName: string; firedAt: string }
 }
 
 /**
+ * Worker-session detection. Worker PTYs (comms-check, transcript-scanner,
+ * meeting-brief pages, etc.) launch with CTX_WORKER=1 (set in
+ * src/pty/agent-pty.ts). They have no human attached — identical to cron in
+ * that nobody can approve — so permission prompts must deny-fast instead of
+ * forwarding a live Approve/Deny to Telegram and hanging 30 minutes.
+ */
+export function isWorkerSession(): boolean {
+  return process.env.CTX_WORKER === '1';
+}
+
+/**
  * Emit a `cron_permission_denied` bus event via `cortextos bus log-event` so
  * the orchestrator digest can surface which cron+tool needs a privilege it can't
  * have in the interactive main session. Best-effort: failures are swallowed so
@@ -151,6 +162,15 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Deny-fast for worker-session permission requests (see isWorkerSession).
+  if (isWorkerSession()) {
+    outputDecision(
+      'deny',
+      'auto-denied: worker-session (CTX_WORKER=1), no human present — refactor to a --skip-permissions worker',
+    );
+    return;
+  }
+
   // Build human-readable summary
   const summary = formatToolSummary(tool_name, tool_input);
 
@@ -216,7 +236,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  process.stderr.write(`hook-permission-telegram error: ${err}\n`);
-  outputDecision('deny', `Hook error: ${err}`);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    process.stderr.write(`hook-permission-telegram error: ${err}\n`);
+    outputDecision('deny', `Hook error: ${err}`);
+  });
+}

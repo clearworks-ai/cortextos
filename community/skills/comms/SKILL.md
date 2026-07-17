@@ -21,6 +21,22 @@ Reply using: cortextos bus send-telegram <chat_id> "<your reply>"
 Reply using: cortextos bus send-message <agent> normal '<your reply>' <msg_id>
 ```
 
+## Proactive Event-Driven Pings
+
+If you are notifying about a SOURCE EVENT rather than replying to a human message, always
+pass a deterministic source identity so reworded duplicates cannot surface twice:
+
+```bash
+cortextos bus send-telegram <chat_id> "<message>" \
+  --source-key "<agent>:meeting-<eventId>" --source-ttl-sec 43200
+```
+
+Key format is `<your-agent-name>:<event-type>-<stable-id>`. Use the calendar event id for
+meetings, the Gmail thread id for email threads (`<agent>:thread-<threadId>`), and a run
+id for CI or workflow alerts. Never derive the key from your own generated wording. If
+the send prints `Message suppressed (source event ...)`, stop there — the event was
+already announced.
+
 ## What To Do
 
 1. Read every message block in the injected content

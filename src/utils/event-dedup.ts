@@ -129,3 +129,18 @@ export function checkAndRecordSourceEvent(
   writeLedger(ledgerPath, ledger);
   return { surface: true, reason: 'first-seen' };
 }
+
+export function removeSourceEventRecord(ctxRoot: string, source: string): void {
+  if (!ctxRoot || !isValidSourceKey(source)) {
+    return;
+  }
+
+  const ledgerPath = join(ctxRoot, 'state', 'comms-event-dedup.json');
+  const ledger = readLedger(ledgerPath);
+  if (ledger[source] === undefined) {
+    return;
+  }
+
+  delete ledger[source];
+  writeLedger(ledgerPath, ledger);
+}

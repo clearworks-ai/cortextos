@@ -474,7 +474,8 @@ Reply using: cortextos bus send-message ${safeFrom} normal '<your reply>' ${msg.
       ? sanitizeForPtyInjection(text).trim()
       : wrapFenceSafe(text);
     return `=== TELEGRAM from [USER: ${sanitizeForPtyInjection(from)}] (chat_id:${chatId}) ===
-${replyCx}${historyCx}${body}
+${replyCx}${historyCx}[NEW MESSAGE — respond to THIS now:]
+${body}
 ${lastSentCtx}Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
 
 `;

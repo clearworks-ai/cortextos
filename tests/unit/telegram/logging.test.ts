@@ -8,6 +8,7 @@ import {
   recordInboundTelegram,
   cacheLastSent,
   readLastSent,
+  buildRecentHistory,
 } from '../../../src/telegram/logging';
 import { TelegramAPI } from '../../../src/telegram/api';
 import type { BusPaths, TelegramMessage } from '../../../src/types';
@@ -239,6 +240,74 @@ describe('Telegram Logging', () => {
     it('returns null when file does not exist', () => {
       const result = readLastSent(testDir, 'bot1', '000');
       expect(result).toBeNull();
+    });
+  });
+
+  describe('buildRecentHistory', () => {
+    const writeJsonl = (file: string, rows: object[]) => {
+      const dir = join(testDir, 'logs', 'frank2');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, file), rows.map(r => JSON.stringify(r)).join('\n') + '\n');
+    };
+
+    it('excludes the current inbound message when excludeText is passed', () => {
+      writeJsonl('inbound-messages.jsonl', [
+        { chat_id: '77', text: 'older question', timestamp: '2026-07-17T10:00:00Z' },
+        { chat_id: '77', text: 'live new ask', timestamp: '2026-07-17T10:05:00Z' },
+      ]);
+      writeJsonl('outbound-messages.jsonl', [
+        { chat_id: '77', text: 'my reply', timestamp: '2026-07-17T10:01:00Z' },
+      ]);
+
+      const result = buildRecentHistory(testDir, 'frank2', '77', 6, 'live new ask');
+      expect(result).not.toBeNull();
+      expect(result).not.toContain('live new ask');
+      expect(result).toContain('older question');
+      expect(result).toContain('my reply');
+    });
+
+    it('drops only the newest inbound match — older duplicate text survives', () => {
+      writeJsonl('inbound-messages.jsonl', [
+        { chat_id: '77', text: 'same text', timestamp: '2026-07-17T10:00:00Z' },
+        { chat_id: '77', text: 'same text', timestamp: '2026-07-17T10:05:00Z' },
+      ]);
+
+      const result = buildRecentHistory(testDir, 'frank2', '77', 6, 'same text');
+      expect(result).not.toBeNull();
+      expect(result!.split('same text').length - 1).toBe(1);
+    });
+
+    it('does not drop outbound entries matching excludeText', () => {
+      writeJsonl('inbound-messages.jsonl', [
+        { chat_id: '77', text: 'ping', timestamp: '2026-07-17T10:05:00Z' },
+      ]);
+      writeJsonl('outbound-messages.jsonl', [
+        { chat_id: '77', text: 'ping', timestamp: '2026-07-17T10:06:00Z' },
+      ]);
+
+      const result = buildRecentHistory(testDir, 'frank2', '77', 6, 'ping');
+      expect(result).not.toBeNull();
+      expect(result!.split('ping').length - 1).toBe(1);
+    });
+
+    it('returns null when exclusion empties the history', () => {
+      writeJsonl('inbound-messages.jsonl', [
+        { chat_id: '77', text: 'only message', timestamp: '2026-07-17T10:05:00Z' },
+      ]);
+
+      const result = buildRecentHistory(testDir, 'frank2', '77', 6, 'only message');
+      expect(result).toBeNull();
+    });
+
+    it('behavior unchanged when no excludeText is passed', () => {
+      writeJsonl('inbound-messages.jsonl', [
+        { chat_id: '77', text: 'older question', timestamp: '2026-07-17T10:00:00Z' },
+        { chat_id: '77', text: 'live new ask', timestamp: '2026-07-17T10:05:00Z' },
+      ]);
+
+      const result = buildRecentHistory(testDir, 'frank2', '77', 6);
+      expect(result).toContain('older question');
+      expect(result).toContain('live new ask');
     });
   });
 });

@@ -25,6 +25,7 @@ export interface Experiment {
   started_at: string | null;
   completed_at: string | null;
   changes_description: string | null;
+  window_flagged_at?: string | null;
 }
 
 export interface ExperimentCreateOptions {
@@ -103,7 +104,7 @@ function historyDir(agentDir: string): string {
   return join(agentDir, 'experiments', 'history');
 }
 
-function loadExperiment(agentDir: string, experimentId: string): Experiment {
+export function loadExperiment(agentDir: string, experimentId: string): Experiment {
   const filePath = join(historyDir(agentDir), `${experimentId}.json`);
   if (!existsSync(filePath)) {
     throw new Error(`Experiment ${experimentId} not found`);
@@ -111,7 +112,7 @@ function loadExperiment(agentDir: string, experimentId: string): Experiment {
   return JSON.parse(readFileSync(filePath, 'utf-8').trim());
 }
 
-function saveExperiment(agentDir: string, experiment: Experiment): void {
+export function saveExperiment(agentDir: string, experiment: Experiment): void {
   const dir = historyDir(agentDir);
   ensureDir(dir);
   atomicWriteSync(join(dir, `${experiment.id}.json`), JSON.stringify(experiment, null, 2));
@@ -345,6 +346,76 @@ export function evaluateExperiment(
   appendFileSync(learningsPath, learningEntry + '\n', 'utf-8');
 
   // Remove active.json
+  const activePath = join(expDir, 'active.json');
+  if (existsSync(activePath)) {
+    try {
+      unlinkSync(activePath);
+    } catch {
+      // ignore
+    }
+  }
+
+  return experiment;
+}
+
+export function autoCloseExpiredExperiment(
+  agentDir: string,
+  experimentId: string,
+  reason: string,
+): Experiment {
+  const experiment = loadExperiment(agentDir, experimentId);
+
+  if (experiment.status !== 'running') {
+    throw new Error(`Experiment ${experimentId} is '${experiment.status}', expected 'running'`);
+  }
+
+  experiment.status = 'completed';
+  experiment.completed_at = nowISO();
+  experiment.decision = 'discard';
+  experiment.result_value = null;
+  experiment.learning = experiment.learning
+    ? `${experiment.learning} — ${reason}`
+    : reason;
+
+  saveExperiment(agentDir, experiment);
+
+  const expDir = join(agentDir, 'experiments');
+  ensureDir(expDir);
+  const tsvPath = join(expDir, 'results.tsv');
+  if (!existsSync(tsvPath)) {
+    appendFileSync(
+      tsvPath,
+      'experiment_id\tagent\tmetric\tmeasured_value\tbaseline\tdecision\thypothesis\ttimestamp\n',
+      'utf-8',
+    );
+  }
+  const tsvLine = [
+    experiment.id,
+    experiment.agent,
+    experiment.metric,
+    '',
+    String(experiment.baseline_value),
+    'discard',
+    experiment.hypothesis,
+    experiment.completed_at,
+  ].join('\t');
+  appendFileSync(tsvPath, tsvLine + '\n', 'utf-8');
+
+  const learningsPath = join(expDir, 'learnings.md');
+  if (!existsSync(learningsPath)) {
+    appendFileSync(learningsPath, '# Experiment Learnings\n\n', 'utf-8');
+  }
+  const learningEntry = [
+    `## ${experiment.id} (discard)`,
+    `- **Metric:** ${experiment.metric}`,
+    `- **Hypothesis:** ${experiment.hypothesis}`,
+    experiment.learning ? `- **Learning:** ${experiment.learning}` : '',
+    '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+  appendFileSync(learningsPath, learningEntry + '\n', 'utf-8');
+
   const activePath = join(expDir, 'active.json');
   if (existsSync(activePath)) {
     try {

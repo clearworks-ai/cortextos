@@ -11,6 +11,7 @@ import { logEvent } from '../bus/event.js';
 import { updateHeartbeat, readAllHeartbeats } from '../bus/heartbeat.js';
 import { selfRestart, hardRestart, autoCommit, checkGoalStaleness, postActivity } from '../bus/system.js';
 import { createExperiment, runExperiment, evaluateExperiment, listExperiments, gatherContext, manageCycle, loadExperimentConfig } from '../bus/experiment.js';
+import { sweepExperiments } from '../bus/experiment-sweep.js';
 import { browseCatalog, installCommunityItem, prepareSubmission, submitCommunityItem } from '../bus/catalog.js';
 import { collectMetrics, parseUsageOutput, storeUsageData, checkUpstream, collectTelegramCommands, registerTelegramCommands } from '../bus/metrics.js';
 import { createApproval, updateApproval } from '../bus/approval.js';
@@ -1330,6 +1331,25 @@ busCommand
       justification: opts.justification,
     });
     console.log(JSON.stringify(experiment, null, 2));
+  });
+
+busCommand
+  .command('sweep-experiments')
+  .description('Sweep running experiments for expired windows (flag/auto-close)')
+  .option('--apply', 'Apply mutations (flag / auto-close). Default is dry-run.', false)
+  .option('--grace <dur>', 'Grace window after expiry before auto-close (e.g. 24h)')
+  .option('--dry-run', 'Compute + print actions without mutating (default).', false)
+  .action((opts: { apply?: boolean; grace?: string; dryRun?: boolean }) => {
+    const env = resolveEnv();
+    const agentDir = env.agentDir || process.cwd();
+    const parsedGraceMs = opts.grace ? parseDurationMs(opts.grace) : NaN;
+    const graceMs = Number.isNaN(parsedGraceMs) ? undefined : parsedGraceMs;
+    const dryRun = !opts.apply;
+    const actions = sweepExperiments(agentDir, env.agentName, { graceMs, dryRun });
+    for (const action of actions) {
+      console.log(`${action.id}\t${action.action}\t${action.window}\t${Math.round(action.ageMs / 3_600_000)}h`);
+    }
+    console.log(`${actions.length} action(s)${dryRun ? ' (dry-run — nothing mutated)' : ''}`);
   });
 
 busCommand

@@ -42,6 +42,8 @@ export interface LiveProcess {
 export interface DeclaredAgent {
   name: string;
   org?: string;
+  /** Absolute path to this agent's dir (orgs/<org>/agents/<name>). */
+  dir?: string;
   /**
    * Effective enabled flag: config.json `enabled !== false` AND
    * enabled-agents.json entry not disabled. Caller resolves this; the pure

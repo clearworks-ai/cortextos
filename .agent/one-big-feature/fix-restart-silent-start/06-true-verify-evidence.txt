@@ -1,0 +1,16 @@
+=== npm run build ===
+CJS dist/hooks/hook-loop-detector.js.map       49.81 KB
+CJS dist/hooks/hook-context-status.js.map      7.33 KB
+CJS dist/daemon.js.map                         1.04 MB
+CJS dist/cli.js.map                            1.38 MB
+CJS ⚡️ Build success in 53ms
+=== vitest restart-command ===
+
+ RUN  v4.1.2 /Users/joshweiss/code/cortextos
+
+
+ Test Files  1 passed (1)
+      Tests  7 passed (7)
+   Start at  13:24:00
+   Duration  96ms (transform 24ms, setup 8ms, import 28ms, tests 6ms, environment 0ms)
+

@@ -2,7 +2,7 @@ const { existsSync, readFileSync } = require('node:fs');
 const { isAbsolute, resolve } = require('node:path');
 
 const STAGE_NAMES = ['explore', 'plan', 'implement', 'merge', 'review', 'pr', 'lessons'];
-const PLANNER_CHOICES = ['fable', 'opus'];
+const PLANNER_CHOICES = ['fable', 'opus', 'kimi-k3'];
 
 const CURRENT_BEHAVIOR_ROUTING = {
   fableGate: {
@@ -17,6 +17,18 @@ const CURRENT_BEHAVIOR_ROUTING = {
       lean: true,
       requiresConfirmation: true,
       fallback: 'opus',
+      engines: {
+        fable: { provider: 'anthropic', model: 'fable', effort: 'high', lean: true, dispatch: 'claude-subagent' },
+        opus: { provider: 'anthropic', model: 'opus', effort: 'high', dispatch: 'claude-subagent' },
+        'kimi-k3': {
+          provider: 'openrouter',
+          model: 'moonshotai/kimi-k3',
+          dispatch: 'opencode',
+          fallback: 'opus',
+          on429: 'opus',
+          note: '1M ctx, $3/$15 per 1M. Tool-calling implied not guaranteed — staging-verify structured/tool output before prod. Pin the slug; avoid moonshotai/kimi-latest.',
+        },
+      },
     },
     implement: { provider: 'anthropic', model: 'sonnet', effort: 'medium' },
     merge: { provider: 'anthropic', model: 'sonnet' },
@@ -40,6 +52,18 @@ const ROUTING_CONFIG_DEFAULTS = {
       lean: true,
       requiresConfirmation: true,
       fallback: 'opus',
+      engines: {
+        fable: { provider: 'anthropic', model: 'fable', effort: 'high', lean: true, dispatch: 'claude-subagent' },
+        opus: { provider: 'anthropic', model: 'opus', effort: 'high', dispatch: 'claude-subagent' },
+        'kimi-k3': {
+          provider: 'openrouter',
+          model: 'moonshotai/kimi-k3',
+          dispatch: 'opencode',
+          fallback: 'opus',
+          on429: 'opus',
+          note: '1M ctx, $3/$15 per 1M. Tool-calling implied not guaranteed — staging-verify structured/tool output before prod. Pin the slug; avoid moonshotai/kimi-latest.',
+        },
+      },
     },
     implement: { provider: 'codex', model: 'gpt-5.4' },
     merge: { provider: 'anthropic', model: 'haiku' },
@@ -130,10 +154,28 @@ function resolveStageRoute(config, stageName, options = {}) {
   }
 
   if (stageName === 'plan' && route.model === 'fable') {
-    route.lean = true;
     const plannerChoice = PLANNER_CHOICES.includes(options.plannerChoice)
       ? options.plannerChoice
       : null;
+
+    // kimi-k3 is an OpenRouter route dispatched via the Opencoder worker, NOT a Claude
+    // subagent. It short-circuits the fable/opus confirmation path entirely, so
+    // buildAnthropicAgentOptions is never called for it (that helper is anthropic-only).
+    if (plannerChoice === 'kimi-k3') {
+      const kimi = route.engines && isRecord(route.engines['kimi-k3'])
+        ? route.engines['kimi-k3']
+        : null;
+      return {
+        provider: kimi?.provider || 'openrouter',
+        model: kimi?.model || 'moonshotai/kimi-k3',
+        dispatch: kimi?.dispatch || 'opencode',
+        fallback: kimi?.fallback || 'opus',
+        on429: kimi?.on429 || 'opus',
+        requiresConfirmation: false,
+      };
+    }
+
+    route.lean = true;
     const confirmFableUse = typeof options.confirmFableUse === 'function'
       ? options.confirmFableUse
       : null;

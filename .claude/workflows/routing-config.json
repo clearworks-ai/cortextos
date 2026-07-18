@@ -1,5 +1,5 @@
 {
-  "$comment": "Per-stage model routing for dynamic-pipeline. provider ∈ anthropic|openrouter|codex. Fable is opt-in at plan only; when not explicitly confirmed, plan falls back to opus.",
+  "$comment": "Per-stage model routing for dynamic-pipeline. provider ∈ anthropic|openrouter|codex. Plan engine is a mandatory Josh-confirmed choice among plan.engines (fable|opus|kimi-k3); when not explicitly confirmed, plan falls back to opus. anthropic engines run as Larry's Claude subagent; openrouter engines (kimi-k3) dispatch via the Opencoder worker.",
   "fableGate": {
     "fallback": "opus"
   },
@@ -14,7 +14,12 @@
       "effort": "high",
       "lean": true,
       "requiresConfirmation": true,
-      "fallback": "opus"
+      "fallback": "opus",
+      "engines": {
+        "fable": { "provider": "anthropic", "model": "fable", "effort": "high", "lean": true, "dispatch": "claude-subagent" },
+        "opus": { "provider": "anthropic", "model": "opus", "effort": "high", "dispatch": "claude-subagent" },
+        "kimi-k3": { "provider": "openrouter", "model": "moonshotai/kimi-k3", "dispatch": "opencode", "fallback": "opus", "on429": "opus", "note": "1M ctx, $3/$15 per 1M. Tool-calling implied not guaranteed — staging-verify structured/tool output before prod. Pin the slug; avoid moonshotai/kimi-latest." }
+      }
     },
     "implement": {
       "provider": "codex",

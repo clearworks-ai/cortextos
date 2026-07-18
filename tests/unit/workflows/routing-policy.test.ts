@@ -161,8 +161,47 @@ describe('routing-policy', () => {
   it('parses PIPELINE_PLANNER into a planner choice', () => {
     expect(routingPolicy.resolvePlannerChoice({ PIPELINE_PLANNER: 'fable' })).toBe('fable');
     expect(routingPolicy.resolvePlannerChoice({ PIPELINE_PLANNER: ' OPUS ' })).toBe('opus');
+    expect(routingPolicy.resolvePlannerChoice({ PIPELINE_PLANNER: 'kimi-k3' })).toBe('kimi-k3');
+    expect(routingPolicy.resolvePlannerChoice({ PIPELINE_PLANNER: ' KIMI-K3 ' })).toBe('kimi-k3');
     expect(routingPolicy.resolvePlannerChoice({ PIPELINE_PLANNER: 'gpt' })).toBeNull();
     expect(routingPolicy.resolvePlannerChoice({})).toBeNull();
+  });
+
+  it('routes plan to the kimi-k3 openrouter engine when plannerChoice is kimi-k3', () => {
+    const route = routingPolicy.resolveStageRoute(
+      routingPolicy.ROUTING_CONFIG_DEFAULTS,
+      'plan',
+      { plannerChoice: 'kimi-k3' },
+    );
+
+    expect(route).toMatchObject({
+      provider: 'openrouter',
+      model: 'moonshotai/kimi-k3',
+      dispatch: 'opencode',
+      fallback: 'opus',
+      on429: 'opus',
+      requiresConfirmation: false,
+    });
+    expect(route.confirmationDeclined).not.toBeTruthy();
+    expect(route.model).not.toBe('fable');
+  });
+
+  it('does not consult confirmFableUse when plannerChoice is kimi-k3', () => {
+    let called = false;
+    const route = routingPolicy.resolveStageRoute(
+      routingPolicy.ROUTING_CONFIG_DEFAULTS,
+      'plan',
+      {
+        plannerChoice: 'kimi-k3',
+        confirmFableUse: () => {
+          called = true;
+          return true;
+        },
+      },
+    );
+
+    expect(called).toBe(false);
+    expect(route).toMatchObject({ provider: 'openrouter', model: 'moonshotai/kimi-k3' });
   });
 
   it('wires env choice end to end for both picks', () => {

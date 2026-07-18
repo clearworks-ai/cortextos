@@ -1,1 +1,1 @@
-{"ts": 1783751664, "exempt": true, "reason": "coordination only \u2014 acked larry's queue confirmation + 521 deploy status, no code touched"}
+{"ts":1784350435,"exempt":true,"reason":"routine queue-stale-check cron - unchanged, no new nudges"}

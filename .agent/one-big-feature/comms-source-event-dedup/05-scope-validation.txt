@@ -1,0 +1,41 @@
+Scope Validation — comms-source-event-dedup
+Date: 2026-07-17 UTC
+Scope SHA: dcec4c211f1dc964b2f0ab890afa527a8a50c3163a743d6e803a2802a31aada9
+
+Signed spec inputs
+- .agent/one-big-feature/comms-source-event-dedup/02-master-plan.md
+- .agent/one-big-feature/comms-source-event-dedup/03-specs/01-bus-send-source-key.md
+- .agent/one-big-feature/comms-source-event-dedup/03-specs/02-worker-source-key.md
+- .agent/one-big-feature/comms-source-event-dedup/03-specs/03-tests.md
+
+Implemented scope
+- src/utils/event-dedup.ts
+  - Added exported removeSourceEventRecord(ctxRoot, source) helper so callers can roll back newly-recorded source keys when downstream sends fail.
+- src/cli/bus.ts
+  - Added --source-key and --source-ttl-sec to both send-telegram and send-message.
+  - Inserted source-event dedup before the existing byte-hash / send paths.
+  - Added best-effort rollback on existing failure paths, limited to first-seen source keys.
+- tests/unit/utils/event-dedup.test.ts
+  - Added removeSourceEventRecord coverage.
+- tests/unit/cli/send-telegram-source-key.test.ts
+  - Added the spec 03 source-key send-telegram coverage, including duplicate suppression, ttl expiry, no-source regression, and failure rollback behavior.
+- tests/unit/cli/send-message-source-key.test.ts
+  - Added source-key send-message coverage, including duplicate suppression, no-source regression, and failure rollback behavior.
+- community/skills/comms/SKILL.md
+  - Added proactive comms guidance to use --source-key and --source-ttl-sec 43200 for event-driven sends.
+
+Local verification from this run
+- npx vitest run tests/unit/utils/event-dedup.test.ts tests/unit/cli/send-telegram-source-key.test.ts tests/unit/cli/send-message-source-key.test.ts
+  - Test Files  3 passed (3)
+  - Tests  29 passed (29)
+- npm run build
+  - CJS Build success in 58ms
+- npm test
+  - exit=0
+  - Test Files  176 passed | 1 skipped (177)
+  - Tests  2664 passed | 3 skipped (2667)
+
+Scope exclusions / notes
+- state/pipeline-ledger.jsonl was already dirty before this task and is intentionally excluded from 04-review-packet.diff.
+- state/current-mission.txt was updated for the restart handoff and is intentionally excluded from 04-review-packet.diff.
+- No commit or push performed.

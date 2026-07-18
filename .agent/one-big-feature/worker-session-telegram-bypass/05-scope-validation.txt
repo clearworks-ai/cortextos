@@ -1,0 +1,35 @@
+Scope Validation — worker-session-telegram-bypass
+Date: 2026-07-17 UTC
+Dispatch Scope SHA: 7d294b35cb18bbf83e27e436a72c130918509febc52737f94b4031c26adb17ee
+Packet SHA: c8c5d3db99624beecbee5f8bd9ab1e3b9bfb7c4803f0a4e34fc0ac3e8db3c1de
+Branch: fix/fleet-bus-daemon-bugfixes
+
+Signed spec input
+- .agent/one-big-feature/worker-session-telegram-bypass/03-specs/01-worker-deny-fast.md
+
+Implemented scope
+- src/hooks/hook-permission-telegram.ts
+  - Added exported isWorkerSession() immediately after readCronActive().
+  - Inserted the worker-session deny-fast block directly after the unchanged cron deny-fast block and before summary construction.
+  - Wrapped the main().catch module entry point with if (require.main === module).
+- tests/unit/hooks/hook-permission-telegram.test.ts
+  - Added the verbatim focused env-predicate tests for isWorkerSession().
+
+Local verification from this run
+- npx vitest run tests/unit/hooks/hook-permission-telegram.test.ts
+  - Test Files  1 passed (1)
+  - Tests  4 passed (4)
+- npm run build
+  - CJS Build success in 54ms
+- npm test
+  - exit=0
+  - Test Files  177 passed | 1 skipped (178)
+  - Tests  2676 passed | 3 skipped (2679)
+- grep -n "console.log|: any" src/hooks/hook-permission-telegram.ts
+  - no matches
+
+Scope exclusions / notes
+- The cron deny-fast block was kept first and unchanged.
+- No bus event was added for the worker path.
+- No files outside src/hooks/hook-permission-telegram.ts and tests/unit/hooks/hook-permission-telegram.test.ts were touched.
+- No commit or push performed.

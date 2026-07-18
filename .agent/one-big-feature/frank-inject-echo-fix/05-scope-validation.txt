@@ -1,0 +1,39 @@
+Scope Validation — frank-inject-echo-fix
+Date: 2026-07-17 UTC
+Dispatch Scope SHA: 5d620732f112723b0744287e41b51358d8f34a939c94c0944981abd7b7828b59
+Packet SHA: 6dc2b7cf6bbc6de673c4f6767592abe1fe4d21eadab42e6fabb0b48e5ae09f91
+
+Signed spec input
+- .agent/one-big-feature/frank-inject-echo-fix/03-specs/01-inject-echo-fix.md
+
+Implemented scope
+- src/telegram/logging.ts
+  - Replaced the corrupted duplicate docblock above buildRecentHistory().
+  - Added optional excludeText to buildRecentHistory().
+  - Tagged history rows with inbound boolean and dropped the single newest inbound match after timestamp sort.
+- src/daemon/fast-checker.ts
+  - Added the exact marker line [NEW MESSAGE — respond to THIS now:] before the injected text body in formatTelegramTextMessage().
+- src/daemon/agent-manager.ts
+  - Passed the normalized text body as buildRecentHistory(..., 6, text) for live Telegram text-message injection.
+- tests/unit/telegram/logging.test.ts
+  - Added 5 buildRecentHistory acceptance tests covering exclusion, newest-only duplicate drop, outbound preservation, empty-history null, and no-exclude regression behavior.
+- tests/unit/daemon/fast-checker.test.ts
+  - Added 3 marker-placement acceptance tests covering plain text, recent-history ordering, and slash-command formatting.
+
+Local verification from this run
+- npx vitest run tests/unit/telegram/logging.test.ts tests/unit/daemon/fast-checker.test.ts
+  - Test Files  2 passed (2)
+  - Tests  89 passed (89)
+- npm run build
+  - CJS Build success in 60ms
+- npm test
+  - exit=0
+  - Test Files  176 passed | 1 skipped (177)
+  - Tests  2672 passed | 3 skipped (2675)
+- grep check on changed diff for "console.log|: any"
+  - no matches added in src/telegram/logging.ts, src/daemon/fast-checker.ts, or src/daemon/agent-manager.ts
+
+Scope exclusions / notes
+- No media formatter, reaction formatter, inbox formatter, dedup logic, or conversation-buffer files were touched.
+- The raw grep against full source files still finds pre-existing console.log lines elsewhere in fast-checker.ts and agent-manager.ts; none were added by this patch.
+- No commit or push performed.

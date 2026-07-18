@@ -23,6 +23,8 @@ import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import type { AgentConfig, AgentStatus, WorkerStatus } from '../types/index.js';
 import { logEvent } from '../bus/event.js';
+import { sendMessage } from '../bus/message.js';
+import { sweepExperiments, type ExperimentSweepAction } from '../bus/experiment-sweep.js';
 import { reclaimOrphanTasks, sweepDueTasks, deliverDueSweepActions } from '../bus/task.js';
 import { resolvePaths } from '../utils/paths.js';
 import { parseEnvFile } from '../utils/env.js';
@@ -121,6 +123,7 @@ export function gatherDeclaredAgents(frameworkRoot: string): DeclaredAgent[] {
       const declaredEnvKeys = config.required_env ?? [];
       declared.push({
         name,
+        dir,
         org,
         enabled: config.enabled !== false,
         declaredCrons,
@@ -297,6 +300,13 @@ export class ReconcileTrigger {
           `[reconcile-trigger] due sweep failed: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
+      try {
+        this.runExperimentSweep(declaredAgents);
+      } catch (err) {
+        console.error(
+          `[reconcile-trigger] experiment sweep failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
       return report;
     } catch (err) {
       console.error(
@@ -380,6 +390,56 @@ export class ReconcileTrigger {
       }
       if (action.reasons.includes('stalled')) {
         logEvent(paths, emitAgent, emitOrg, 'task', 'task_stalled_escalated', 'warning', meta);
+      }
+    }
+  }
+
+  private runExperimentSweep(declaredAgents: DeclaredAgent[]): void {
+    const emitAgent = this.options.emitAgent ?? 'daemon';
+    const emitOrg = this.options.emitOrg ?? this.org;
+    const paths = resolvePaths(emitAgent, this.instanceId, emitOrg);
+
+    for (const agent of declaredAgents) {
+      const agentDir = agent.dir;
+      if (!agentDir) continue;
+      let actions: ExperimentSweepAction[];
+      try {
+        actions = sweepExperiments(agentDir, agent.name, { dryRun: false });
+      } catch (err) {
+        console.error(
+          `[reconcile-trigger] experiment sweep failed for ${agent.name}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        continue;
+      }
+      for (const action of actions) {
+        const meta = {
+          experiment_id: action.id,
+          agent: action.agent,
+          window: action.window,
+          expired_at: action.expiredAt,
+          age_ms: action.ageMs,
+        };
+        if (action.action === 'flag') {
+          logEvent(paths, emitAgent, emitOrg, 'experiment', 'experiment_window_expired', 'warning', meta);
+          try {
+            const toPaths = resolvePaths(action.agent, this.instanceId, emitOrg);
+            sendMessage(
+              toPaths,
+              emitAgent,
+              action.agent,
+              'normal',
+              `Experiment ${action.id} (window ${action.window}) expired ${Math.round(action.ageMs / 3_600_000)}h ago and is unevaluated. Evaluate or it auto-closes as discard after the grace window.`,
+            );
+          } catch (err) {
+            console.error(
+              `[reconcile-trigger] experiment flag message failed for ${action.agent}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        } else if (action.action === 'autoclose') {
+          logEvent(paths, emitAgent, emitOrg, 'experiment', 'experiment_autoclosed', 'warning', meta);
+        } else {
+          logEvent(paths, emitAgent, emitOrg, 'experiment', 'experiment_window_unparseable', 'warning', meta);
+        }
       }
     }
   }

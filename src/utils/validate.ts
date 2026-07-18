@@ -49,7 +49,7 @@ export function validatePriority(priority: string): asserts priority is Priority
 }
 
 const VALID_CATEGORIES: EventCategory[] = [
-  'action', 'error', 'metric', 'milestone', 'heartbeat', 'message', 'task', 'approval', 'agent_activity',
+  'action', 'error', 'metric', 'milestone', 'heartbeat', 'message', 'task', 'approval', 'agent_activity', 'experiment',
 ];
 
 export function validateEventCategory(category: string): asserts category is EventCategory {

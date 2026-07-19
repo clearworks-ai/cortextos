@@ -1,0 +1,18 @@
+true-verify — industry-resource-map (AEC skill MVP)
+runner: opus (larry main thread)
+verified after review row ts=1784421003
+
+python3 -m unittest discover -s orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/tests :
+Ran 29 tests in 0.015s
+
+OK
+
+os.sys.stderr sanity: works in CPython (os re-exports sys) — reviewer 'crash' blocker was FALSE POSITIVE.
+Fixtures: tests isolate via tempfile.TemporaryDirectory + --roots-json; no missing dependency.
+No TS/product-code change; cortextos build unaffected (skill is standalone Python under muse/).
+
+Scope (applied, working tree, muse skill dir only):
+  SKILL.md, scripts/{__init__,discover_internal,registry_ref,resource_map}.py
+  tests/ + fixtures (registry_stale.json, roots.json)
+
+Verdict: PASS-WITH-NITS. Non-blocking follow-ups: SKILL.md set_external()/add_notebook() snippets; wrap subprocess.TimeoutExpired in registry_ref run=True path.

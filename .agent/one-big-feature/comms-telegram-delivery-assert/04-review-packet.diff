@@ -1,0 +1,227 @@
+--- a/orgs/clearworksai/agents/frank2/.claude/hooks/assert-telegram-delivery.sh
++++ b/orgs/clearworksai/agents/frank2/.claude/hooks/assert-telegram-delivery.sh
+@@ -0,0 +1,64 @@
++#!/usr/bin/env bash
++# assert-telegram-delivery.sh
++# Stop hook for frank2 — prevent a Telegram inbound from being "answered"
++# only in assistant text without the actual `cortextos bus send-telegram`
++# delivery command. Safety: FAIL-OPEN on any parse/read issue, and LOOP-GUARD
++# via stop_hook_active so a block can fire once without trapping the turn.
++set +e
++
++PAYLOAD="$(cat 2>/dev/null)"
++
++STOP_ACTIVE="$(printf '%s' "$PAYLOAD" | jq -r '.stop_hook_active // false' 2>/dev/null)"
++TRANSCRIPT="$(printf '%s' "$PAYLOAD" | jq -r '.transcript_path // empty' 2>/dev/null)"
++
++[ "$STOP_ACTIVE" = "true" ] && exit 0
++[ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ] || exit 0
++
++TAIL="$(tail -n 400 "$TRANSCRIPT" 2>/dev/null)"
++[ -n "$TAIL" ] || exit 0
++
++LAST_USER_IS_TG="$(printf '%s' "$TAIL" | jq -rs '
++  (map(.type) | rindex("user")) as $i
++  | if $i == null then "no"
++    else ((.[$i].message.content | tostring) | contains("=== TELEGRAM from")) end
++  ' 2>/dev/null)"
++
++[ "$LAST_USER_IS_TG" = "true" ] || exit 0
++
++FLAGS="$(printf '%s' "$TAIL" | jq -rs '
++  (map(.type) | rindex("user")) as $i
++  | if $i == null then "err"
++    else
++      (.[($i+1):]) as $after
++      | ([ $after[]
++           | select(.type=="assistant")
++           | .message.content[]?
++           | select(.type=="tool_use" and .name=="Bash")
++           | ((.input.command // "") | contains("send-telegram")) ]
++         | any) as $sent
++      | ([ $after[]
++           | select(.type=="assistant")
++           | .message.content[]?
++           | select(.type=="text")
++           | ((.text // "") | gsub("\\s";"") | length > 0) ]
++         | any) as $hastext
++      | "\($sent) \($hastext)"
++    end
++  ' 2>/dev/null)"
++
++[ -n "$FLAGS" ] || exit 0
++[ "$FLAGS" != "err" ] || exit 0
++
++SENT="${FLAGS%% *}"
++HAS_TEXT="${FLAGS##* }"
++
++[ "$SENT" = "true" ] && exit 0
++[ "$HAS_TEXT" = "true" ] || exit 0
++
++REASON="$(cat <<'EOF'
++TELEGRAM DELIVERY GATE: this turn answered a Telegram inbound with reply text but NEVER called `cortextos bus send-telegram`. Assistant text is NOT delivered — `cortextos bus send-telegram <chat_id> '<your reply>'` is the ONLY path that surfaces in Telegram and on the dashboard. From your side it looks answered ("already replied above"); Josh sees silence. Before stopping, DELIVER the reply you just wrote: run `cortextos bus send-telegram <chat_id> '<reply>'` using the chat_id from the "=== TELEGRAM from ... (chat_id:...) ===" inbound. (This gate blocks once, then yields.)
++EOF
++)"
++
++printf '{"decision":"block","reason":%s}\n' "$(jq -Rn --arg r "$REASON" '$r')"
++exit 0
+--- a/orgs/clearworksai/agents/frank2/.claude/settings.json
++++ b/orgs/clearworksai/agents/frank2/.claude/settings.json
+@@ -129,6 +129,11 @@
+             "type": "command",
+             "command": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/.claude/hooks/gate-pipeline-stop.sh",
+             "timeout": 10
++          },
++          {
++            "type": "command",
++            "command": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/.claude/hooks/assert-telegram-delivery.sh",
++            "timeout": 10
+           }
+         ]
+       }
+--- a/tests/unit/hooks/assert-telegram-delivery.test.ts
++++ b/tests/unit/hooks/assert-telegram-delivery.test.ts
+@@ -0,0 +1,143 @@
++import { spawnSync } from 'child_process';
++import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
++import { tmpdir } from 'os';
++import { join, resolve } from 'path';
++
++const hookPath = resolve(__dirname, '../../../orgs/clearworksai/agents/frank2/.claude/hooks/assert-telegram-delivery.sh');
++const describeHook = existsSync(hookPath) ? describe : describe.skip;
++
++function transcriptLine(
++  type: 'assistant' | 'user',
++  content: string | Array<Record<string, unknown>>,
++): string {
++  return JSON.stringify({
++    type,
++    message: {
++      role: type,
++      content,
++    },
++  });
++}
++
++function runHook(payload: Record<string, unknown>) {
++  return spawnSync('bash', [hookPath], {
++    input: JSON.stringify(payload),
++    encoding: 'utf-8',
++  });
++}
++
++describeHook('assert-telegram-delivery stop hook', () => {
++  let tempDir: string;
++  let transcriptCounter = 0;
++
++  const telegramInbound = transcriptLine(
++    'user',
++    "=== TELEGRAM from [USER: pd88] (chat_id:6690120787) ===\nwhat's the status?",
++  );
++  const normalInbound = transcriptLine('user', 'just a normal message');
++  const assistantText = transcriptLine('assistant', [
++    { type: 'text', text: 'Here is your answer: all green.' },
++  ]);
++  const assistantSend = transcriptLine('assistant', [
++    {
++      type: 'tool_use',
++      name: 'Bash',
++      input: { command: "cortextos bus send-telegram 6690120787 'all green'" },
++    },
++  ]);
++  const assistantToolOnly = transcriptLine('assistant', [
++    {
++      type: 'tool_use',
++      name: 'Read',
++      input: { file_path: '/tmp/status.txt' },
++    },
++  ]);
++
++  beforeEach(() => {
++    tempDir = mkdtempSync(join(tmpdir(), 'assert-telegram-delivery-'));
++    transcriptCounter = 0;
++  });
++
++  afterEach(() => {
++    rmSync(tempDir, { recursive: true, force: true });
++  });
++
++  function writeTranscript(lines: string[]): string {
++    transcriptCounter += 1;
++    const transcriptPath = join(tempDir, `transcript-${transcriptCounter}.jsonl`);
++    writeFileSync(transcriptPath, `${lines.join('\n')}\n`, 'utf-8');
++    return transcriptPath;
++  }
++
++  it('blocks when a Telegram inbound gets assistant text but no send-telegram tool use', () => {
++    const transcriptPath = writeTranscript([telegramInbound, assistantText]);
++
++    const result = runHook({
++      transcript_path: transcriptPath,
++      stop_hook_active: false,
++    });
++
++    expect(result.status).toBe(0);
++    expect(result.stdout).toContain('"decision":"block"');
++    expect(result.stdout).toContain('TELEGRAM DELIVERY GATE');
++  });
++
++  it('allows when a Telegram inbound is followed by assistant text and send-telegram', () => {
++    const transcriptPath = writeTranscript([telegramInbound, assistantText, assistantSend]);
++
++    const result = runHook({
++      transcript_path: transcriptPath,
++      stop_hook_active: false,
++    });
++
++    expect(result.status).toBe(0);
++    expect(result.stdout.trim()).toBe('');
++  });
++
++  it('allows non-Telegram inbound turns', () => {
++    const transcriptPath = writeTranscript([normalInbound, assistantText]);
++
++    const result = runHook({
++      transcript_path: transcriptPath,
++      stop_hook_active: false,
++    });
++
++    expect(result.status).toBe(0);
++    expect(result.stdout.trim()).toBe('');
++  });
++
++  it('allows when stop_hook_active is already true', () => {
++    const transcriptPath = writeTranscript([telegramInbound, assistantText]);
++
++    const result = runHook({
++      transcript_path: transcriptPath,
++      stop_hook_active: true,
++    });
++
++    expect(result.status).toBe(0);
++    expect(result.stdout.trim()).toBe('');
++  });
++
++  it('allows unreadable transcripts fail-open', () => {
++    const result = runHook({
++      transcript_path: join(tempDir, 'does-not-exist.jsonl'),
++      stop_hook_active: false,
++    });
++
++    expect(result.status).toBe(0);
++    expect(result.stdout.trim()).toBe('');
++  });
++
++  it('allows tool-only Telegram turns with no assistant text block', () => {
++    const transcriptPath = writeTranscript([telegramInbound, assistantToolOnly]);
++
++    const result = runHook({
++      transcript_path: transcriptPath,
++      stop_hook_active: false,
++    });
++
++    expect(result.status).toBe(0);
++    expect(result.stdout.trim()).toBe('');
++  });
++});

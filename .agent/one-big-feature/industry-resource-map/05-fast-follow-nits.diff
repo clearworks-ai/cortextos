@@ -1,0 +1,156 @@
+diff --git a/var/folders/9h/_28txm2j60g3n1tv2_hy98400000gn/T/tmp.WqAfpUnueE/SKILL.md.old b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/SKILL.md
+index 0bd693f..970fd82 100644
+--- a/var/folders/9h/_28txm2j60g3n1tv2_hy98400000gn/T/tmp.WqAfpUnueE/SKILL.md.old
++++ b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/SKILL.md
+@@ -42,6 +42,33 @@ If `freshness.is_stale` is `true`, the module has already attempted the refresh
+ `registry_path`, `notebook_id`, `framework_doc`, `source_count`, `registry_updated_at`, and
+ `freshness` block into the manifest. Never edit the research-pulse registry here.
+ 
++```bash
++python3 - <<'PY'
++from scripts import registry_ref, resource_map
++
++SLUG = "aec"
++DISPLAY_NAME = "AEC"
++
++result = registry_ref.refresh_if_stale(SLUG)
++ref = registry_ref.read_registry_ref(SLUG)
++m = (
++    resource_map.load_manifest(SLUG)
++    if resource_map.manifest_path(SLUG).exists()
++    else resource_map.new_manifest(SLUG, DISPLAY_NAME)
++)
++resource_map.set_external(
++    m,
++    registry_path=ref["registry_path"],
++    notebook_id=ref["notebook_id"],
++    framework_doc=ref["framework_doc"],
++    source_count=int(ref["source_count"]),
++    registry_updated_at=ref["registry_updated_at"],
++)
++m["external"]["freshness"] = result["freshness"]
++resource_map.save_manifest(m)
++PY
++```
++
+ ## Step 3 — Discover internal (glob+score) + curate (human confirm)
+ 
+ ```bash
+@@ -94,6 +121,38 @@ PY
+ 
+ Record the research-pulse notebook from the registry and any human-added notebooks.
+ 
++```bash
++python3 - <<'PY'
++from scripts import resource_map
++
++m = resource_map.load_manifest("aec")
++existing = {
++    entry["notebook_id"]
++    for entry in m["internal"].get("notebooks", [])
++    if isinstance(entry, dict) and isinstance(entry.get("notebook_id"), str)
++}
++
++registry_notebook_id = m["external"].get("notebook_id")
++if isinstance(registry_notebook_id, str) and registry_notebook_id and registry_notebook_id not in existing:
++    resource_map.add_notebook(
++        m,
++        title="Research Pulse: AEC",
++        notebook_id=registry_notebook_id,
++        url=f"https://notebooklm.google.com/notebook/{registry_notebook_id}",
++        confirmed=True,
++    )
++
++resource_map.add_notebook(
++    m,
++    title="AEC working notebook",
++    notebook_id="nb-human-added",
++    url="https://notebooklm.google.com/notebook/nb-human-added",
++    confirmed=True,
++)
++resource_map.save_manifest(m)
++PY
++```
++
+ ## Step 6 — Write manifest + `.md` twin
+ 
+ ```bash
+diff --git a/var/folders/9h/_28txm2j60g3n1tv2_hy98400000gn/T/tmp.WqAfpUnueE/registry_ref.py.old b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/scripts/registry_ref.py
+index 65bc2d3..1c8883f 100644
+--- a/var/folders/9h/_28txm2j60g3n1tv2_hy98400000gn/T/tmp.WqAfpUnueE/registry_ref.py.old
++++ b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/scripts/registry_ref.py
+@@ -18,6 +18,7 @@ MUSE_AGENT_HOME = (
+ DELTA_SCRIPT_REL = ".claude/skills/research-pulse/scripts/delta_check.py"
+ DELTA_CRON_NAME = "research-pulse-delta"
+ STALE_THRESHOLD_HOURS = 18.0
++DELTA_RUN_TIMEOUT_SECONDS = 600
+ 
+ 
+ def registry_path(vertical: str) -> Path:
+@@ -140,13 +141,28 @@ def request_delta_refresh(
+             "reason": "delta_script_missing",
+         }
+ 
+-    result = subprocess.run(
+-        [sys.executable, str(script), "--vertical", vertical],
+-        cwd=agent_home_path,
+-        capture_output=True,
+-        text=True,
+-        timeout=600,
+-    )
++    try:
++        result = subprocess.run(
++            [sys.executable, str(script), "--vertical", vertical],
++            cwd=agent_home_path,
++            capture_output=True,
++            text=True,
++            timeout=DELTA_RUN_TIMEOUT_SECONDS,
++        )
++    except subprocess.TimeoutExpired as exc:
++        stdout = getattr(exc, "stdout", None) or getattr(exc, "output", None)
++        stderr = getattr(exc, "stderr", None)
++        return {
++            "requested": True,
++            "ran": False,
++            "command": command,
++            "cron_name": DELTA_CRON_NAME,
++            "script_path": str(script),
++            "reason": "delta_script_timeout",
++            "timeout_seconds": DELTA_RUN_TIMEOUT_SECONDS,
++            "stdout": stdout.strip() if isinstance(stdout, str) and stdout.strip() else None,
++            "stderr": stderr.strip() if isinstance(stderr, str) and stderr.strip() else None,
++        }
+     summary: object | None = None
+     stdout = (result.stdout or "").strip()
+     if stdout:
+diff --git a/var/folders/9h/_28txm2j60g3n1tv2_hy98400000gn/T/tmp.WqAfpUnueE/test_registry_ref.py.old b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/tests/test_registry_ref.py
+index e08360d..6711606 100644
+--- a/var/folders/9h/_28txm2j60g3n1tv2_hy98400000gn/T/tmp.WqAfpUnueE/test_registry_ref.py.old
++++ b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/tests/test_registry_ref.py
+@@ -148,6 +148,26 @@ class RegistryRefTests(unittest.TestCase):
+             self.assertFalse(result["ran"])
+             self.assertEqual(result["reason"], "delta_script_missing")
+ 
++    def test_request_delta_refresh_timeout(self) -> None:
++        with tempfile.TemporaryDirectory() as tmp:
++            script = Path(tmp) / MODULE.DELTA_SCRIPT_REL
++            script.parent.mkdir(parents=True, exist_ok=True)
++            script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
++            timeout = subprocess.TimeoutExpired(
++                [sys.executable, str(script.resolve()), "--vertical", "aec"],
++                MODULE.DELTA_RUN_TIMEOUT_SECONDS,
++                output="partial stdout\n",
++                stderr="partial stderr\n",
++            )
++            with unittest.mock.patch.object(MODULE.subprocess, "run", side_effect=timeout) as mocked:
++                result = MODULE.request_delta_refresh("aec", agent_home=tmp, run=True)
++            mocked.assert_called_once()
++            self.assertFalse(result["ran"])
++            self.assertEqual(result["reason"], "delta_script_timeout")
++            self.assertEqual(result["timeout_seconds"], MODULE.DELTA_RUN_TIMEOUT_SECONDS)
++            self.assertEqual(result["stdout"], "partial stdout")
++            self.assertEqual(result["stderr"], "partial stderr")
++
+     def test_refresh_if_stale_announced_when_run_false(self) -> None:
+         with tempfile.TemporaryDirectory() as tmp:
+             self.write_registry(tmp, self.make_registry(last_checked="2026-01-01T00:00:00Z", updated_at="2026-01-01T00:00:00Z"))

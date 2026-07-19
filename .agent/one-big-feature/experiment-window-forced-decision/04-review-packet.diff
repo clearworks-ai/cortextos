@@ -1,0 +1,539 @@
+diff --git a/src/bus/experiment-sweep.ts b/src/bus/experiment-sweep.ts
+new file mode 100644
+index 0000000..7b098ba
+--- /dev/null
++++ b/src/bus/experiment-sweep.ts
+@@ -0,0 +1,101 @@
++import {
++  autoCloseExpiredExperiment,
++  listExperiments,
++  loadExperiment,
++  saveExperiment,
++  type Experiment,
++} from './experiment.js';
++import { parseDurationMs } from './cron-state.js';
++
++export const DEFAULT_EXPERIMENT_GRACE_MS = 24 * 3_600_000;
++
++export interface ExperimentSweepAction {
++  id: string;
++  agent: string;
++  agentDir: string;
++  action: 'flag' | 'autoclose' | 'skip-unparseable';
++  window: string;
++  startedAt: string | null;
++  expiredAt: number | null;
++  ageMs: number;
++}
++
++export interface ExperimentSweepOptions {
++  now?: number;
++  graceMs?: number;
++  dryRun?: boolean;
++}
++
++function buildAction(
++  experiment: Experiment,
++  agentDir: string,
++  agentName: string,
++  action: ExperimentSweepAction['action'],
++  expiredAt: number | null,
++  ageMs: number,
++): ExperimentSweepAction {
++  return {
++    id: experiment.id,
++    agent: agentName,
++    agentDir,
++    action,
++    window: experiment.window,
++    startedAt: experiment.started_at,
++    expiredAt,
++    ageMs,
++  };
++}
++
++export function sweepExperiments(
++  agentDir: string,
++  agentName: string,
++  opts?: ExperimentSweepOptions,
++): ExperimentSweepAction[] {
++  const now = opts?.now ?? Date.now();
++  const graceMs = opts?.graceMs ?? DEFAULT_EXPERIMENT_GRACE_MS;
++  const running = listExperiments(agentDir, { status: 'running' });
++  const actions: ExperimentSweepAction[] = [];
++
++  for (const experiment of running) {
++    const windowMs = parseDurationMs(experiment.window);
++    if (Number.isNaN(windowMs)) {
++      actions.push(
++        buildAction(experiment, agentDir, agentName, 'skip-unparseable', null, 0),
++      );
++      continue;
++    }
++    if (!experiment.started_at) continue;
++    const started = Date.parse(experiment.started_at);
++    if (Number.isNaN(started)) continue;
++
++    const expiredAt = started + windowMs;
++    const ageMs = now - expiredAt;
++    if (now <= expiredAt) continue;
++
++    if (now <= expiredAt + graceMs) {
++      if (experiment.window_flagged_at) continue;
++      actions.push(buildAction(experiment, agentDir, agentName, 'flag', expiredAt, ageMs));
++      continue;
++    }
++
++    actions.push(buildAction(experiment, agentDir, agentName, 'autoclose', expiredAt, ageMs));
++  }
++
++  if (!opts?.dryRun) {
++    for (const action of actions) {
++      if (action.action === 'flag') {
++        const experiment = loadExperiment(agentDir, action.id);
++        experiment.window_flagged_at = new Date(now).toISOString().replace(/\.\d{3}Z$/, 'Z');
++        saveExperiment(agentDir, experiment);
++      } else if (action.action === 'autoclose') {
++        const ageHrs = Math.round(action.ageMs / 3_600_000);
++        const reason =
++          `Auto-closed: window ${action.window} expired ${ageHrs}h ago without evaluation ` +
++          '(forced-decision sweep).';
++        autoCloseExpiredExperiment(agentDir, action.id, reason);
++      }
++    }
++  }
++
++  return actions;
++}
+diff --git a/src/bus/experiment.ts b/src/bus/experiment.ts
+index 6bcb8e4..6f298e3 100644
+--- a/src/bus/experiment.ts
++++ b/src/bus/experiment.ts
+@@ -25,6 +25,7 @@ export interface Experiment {
+   started_at: string | null;
+   completed_at: string | null;
+   changes_description: string | null;
++  window_flagged_at?: string | null;
+ }
+ 
+ export interface ExperimentCreateOptions {
+@@ -103,7 +104,7 @@ function historyDir(agentDir: string): string {
+   return join(agentDir, 'experiments', 'history');
+ }
+ 
+-function loadExperiment(agentDir: string, experimentId: string): Experiment {
++export function loadExperiment(agentDir: string, experimentId: string): Experiment {
+   const filePath = join(historyDir(agentDir), `${experimentId}.json`);
+   if (!existsSync(filePath)) {
+     throw new Error(`Experiment ${experimentId} not found`);
+@@ -111,7 +112,7 @@ function loadExperiment(agentDir: string, experimentId: string): Experiment {
+   return JSON.parse(readFileSync(filePath, 'utf-8').trim());
+ }
+ 
+-function saveExperiment(agentDir: string, experiment: Experiment): void {
++export function saveExperiment(agentDir: string, experiment: Experiment): void {
+   const dir = historyDir(agentDir);
+   ensureDir(dir);
+   atomicWriteSync(join(dir, `${experiment.id}.json`), JSON.stringify(experiment, null, 2));
+@@ -357,6 +358,76 @@ export function evaluateExperiment(
+   return experiment;
+ }
+ 
++export function autoCloseExpiredExperiment(
++  agentDir: string,
++  experimentId: string,
++  reason: string,
++): Experiment {
++  const experiment = loadExperiment(agentDir, experimentId);
++
++  if (experiment.status !== 'running') {
++    throw new Error(`Experiment ${experimentId} is '${experiment.status}', expected 'running'`);
++  }
++
++  experiment.status = 'completed';
++  experiment.completed_at = nowISO();
++  experiment.decision = 'discard';
++  experiment.result_value = null;
++  experiment.learning = experiment.learning
++    ? `${experiment.learning} — ${reason}`
++    : reason;
++
++  saveExperiment(agentDir, experiment);
++
++  const expDir = join(agentDir, 'experiments');
++  ensureDir(expDir);
++  const tsvPath = join(expDir, 'results.tsv');
++  if (!existsSync(tsvPath)) {
++    appendFileSync(
++      tsvPath,
++      'experiment_id\tagent\tmetric\tmeasured_value\tbaseline\tdecision\thypothesis\ttimestamp\n',
++      'utf-8',
++    );
++  }
++  const tsvLine = [
++    experiment.id,
++    experiment.agent,
++    experiment.metric,
++    '',
++    String(experiment.baseline_value),
++    'discard',
++    experiment.hypothesis,
++    experiment.completed_at,
++  ].join('\t');
++  appendFileSync(tsvPath, tsvLine + '\n', 'utf-8');
++
++  const learningsPath = join(expDir, 'learnings.md');
++  if (!existsSync(learningsPath)) {
++    appendFileSync(learningsPath, '# Experiment Learnings\n\n', 'utf-8');
++  }
++  const learningEntry = [
++    `## ${experiment.id} (discard)`,
++    `- **Metric:** ${experiment.metric}`,
++    `- **Hypothesis:** ${experiment.hypothesis}`,
++    experiment.learning ? `- **Learning:** ${experiment.learning}` : '',
++    '',
++  ]
++    .filter(Boolean)
++    .join('\n');
++  appendFileSync(learningsPath, learningEntry + '\n', 'utf-8');
++
++  const activePath = join(expDir, 'active.json');
++  if (existsSync(activePath)) {
++    try {
++      unlinkSync(activePath);
++    } catch {
++      // ignore
++    }
++  }
++
++  return experiment;
++}
++
+ /**
+  * List experiments with optional filters.
+  */
+diff --git a/src/bus/reconcile.ts b/src/bus/reconcile.ts
+index ea93990..611817b 100644
+--- a/src/bus/reconcile.ts
++++ b/src/bus/reconcile.ts
+@@ -42,6 +42,8 @@ export interface LiveProcess {
+ export interface DeclaredAgent {
+   name: string;
+   org?: string;
++  /** Absolute path to this agent's dir (orgs/<org>/agents/<name>). */
++  dir?: string;
+   /**
+    * Effective enabled flag: config.json `enabled !== false` AND
+    * enabled-agents.json entry not disabled. Caller resolves this; the pure
+diff --git a/src/cli/bus.ts b/src/cli/bus.ts
+index 2fac55a..50a6475 100644
+--- a/src/cli/bus.ts
++++ b/src/cli/bus.ts
+@@ -11,6 +11,7 @@ import { logEvent } from '../bus/event.js';
+ import { updateHeartbeat, readAllHeartbeats } from '../bus/heartbeat.js';
+ import { selfRestart, hardRestart, autoCommit, checkGoalStaleness, postActivity } from '../bus/system.js';
+ import { createExperiment, runExperiment, evaluateExperiment, listExperiments, gatherContext, manageCycle, loadExperimentConfig } from '../bus/experiment.js';
++import { sweepExperiments } from '../bus/experiment-sweep.js';
+ import { browseCatalog, installCommunityItem, prepareSubmission, submitCommunityItem } from '../bus/catalog.js';
+ import { collectMetrics, parseUsageOutput, storeUsageData, checkUpstream, collectTelegramCommands, registerTelegramCommands } from '../bus/metrics.js';
+ import { createApproval, updateApproval } from '../bus/approval.js';
+@@ -1332,6 +1333,25 @@ busCommand
+     console.log(JSON.stringify(experiment, null, 2));
+   });
+ 
++busCommand
++  .command('sweep-experiments')
++  .description('Sweep running experiments for expired windows (flag/auto-close)')
++  .option('--apply', 'Apply mutations (flag / auto-close). Default is dry-run.', false)
++  .option('--grace <dur>', 'Grace window after expiry before auto-close (e.g. 24h)')
++  .option('--dry-run', 'Compute + print actions without mutating (default).', false)
++  .action((opts: { apply?: boolean; grace?: string; dryRun?: boolean }) => {
++    const env = resolveEnv();
++    const agentDir = env.agentDir || process.cwd();
++    const parsedGraceMs = opts.grace ? parseDurationMs(opts.grace) : NaN;
++    const graceMs = Number.isNaN(parsedGraceMs) ? undefined : parsedGraceMs;
++    const dryRun = !opts.apply;
++    const actions = sweepExperiments(agentDir, env.agentName, { graceMs, dryRun });
++    for (const action of actions) {
++      console.log(`${action.id}\t${action.action}\t${action.window}\t${Math.round(action.ageMs / 3_600_000)}h`);
++    }
++    console.log(`${actions.length} action(s)${dryRun ? ' (dry-run — nothing mutated)' : ''}`);
++  });
++
+ busCommand
+   .command('list-experiments')
+   .description('List experiments with optional filters')
+diff --git a/src/daemon/reconcile-trigger.ts b/src/daemon/reconcile-trigger.ts
+index 3229671..801de4c 100644
+--- a/src/daemon/reconcile-trigger.ts
++++ b/src/daemon/reconcile-trigger.ts
+@@ -23,6 +23,8 @@ import { existsSync, readFileSync, readdirSync } from 'fs';
+ import { join } from 'path';
+ import type { AgentConfig, AgentStatus, WorkerStatus } from '../types/index.js';
+ import { logEvent } from '../bus/event.js';
++import { sendMessage } from '../bus/message.js';
++import { sweepExperiments, type ExperimentSweepAction } from '../bus/experiment-sweep.js';
+ import { reclaimOrphanTasks, sweepDueTasks, deliverDueSweepActions } from '../bus/task.js';
+ import { resolvePaths } from '../utils/paths.js';
+ import { parseEnvFile } from '../utils/env.js';
+@@ -121,6 +123,7 @@ export function gatherDeclaredAgents(frameworkRoot: string): DeclaredAgent[] {
+       const declaredEnvKeys = config.required_env ?? [];
+       declared.push({
+         name,
++        dir,
+         org,
+         enabled: config.enabled !== false,
+         declaredCrons,
+@@ -297,6 +300,13 @@ export class ReconcileTrigger {
+           `[reconcile-trigger] due sweep failed: ${err instanceof Error ? err.message : String(err)}`,
+         );
+       }
++      try {
++        this.runExperimentSweep(declaredAgents);
++      } catch (err) {
++        console.error(
++          `[reconcile-trigger] experiment sweep failed: ${err instanceof Error ? err.message : String(err)}`,
++        );
++      }
+       return report;
+     } catch (err) {
+       console.error(
+@@ -383,4 +393,54 @@ export class ReconcileTrigger {
+       }
+     }
+   }
++
++  private runExperimentSweep(declaredAgents: DeclaredAgent[]): void {
++    const emitAgent = this.options.emitAgent ?? 'daemon';
++    const emitOrg = this.options.emitOrg ?? this.org;
++    const paths = resolvePaths(emitAgent, this.instanceId, emitOrg);
++
++    for (const agent of declaredAgents) {
++      const agentDir = agent.dir;
++      if (!agentDir) continue;
++      let actions: ExperimentSweepAction[];
++      try {
++        actions = sweepExperiments(agentDir, agent.name, { dryRun: false });
++      } catch (err) {
++        console.error(
++          `[reconcile-trigger] experiment sweep failed for ${agent.name}: ${err instanceof Error ? err.message : String(err)}`,
++        );
++        continue;
++      }
++      for (const action of actions) {
++        const meta = {
++          experiment_id: action.id,
++          agent: action.agent,
++          window: action.window,
++          expired_at: action.expiredAt,
++          age_ms: action.ageMs,
++        };
++        if (action.action === 'flag') {
++          logEvent(paths, emitAgent, emitOrg, 'experiment', 'experiment_window_expired', 'warning', meta);
++          try {
++            const toPaths = resolvePaths(action.agent, this.instanceId, emitOrg);
++            sendMessage(
++              toPaths,
++              emitAgent,
++              action.agent,
++              'normal',
++              `Experiment ${action.id} (window ${action.window}) expired ${Math.round(action.ageMs / 3_600_000)}h ago and is unevaluated. Evaluate or it auto-closes as discard after the grace window.`,
++            );
++          } catch (err) {
++            console.error(
++              `[reconcile-trigger] experiment flag message failed for ${action.agent}: ${err instanceof Error ? err.message : String(err)}`,
++            );
++          }
++        } else if (action.action === 'autoclose') {
++          logEvent(paths, emitAgent, emitOrg, 'experiment', 'experiment_autoclosed', 'warning', meta);
++        } else {
++          logEvent(paths, emitAgent, emitOrg, 'experiment', 'experiment_window_unparseable', 'warning', meta);
++        }
++      }
++    }
++  }
+ }
+diff --git a/tests/experiment-sweep.test.ts b/tests/experiment-sweep.test.ts
+new file mode 100644
+index 0000000..a602f7c
+--- /dev/null
++++ b/tests/experiment-sweep.test.ts
+@@ -0,0 +1,178 @@
++import { beforeEach, afterEach, describe, expect, it } from 'vitest';
++import {
++  existsSync,
++  mkdirSync,
++  mkdtempSync,
++  readFileSync,
++  rmSync,
++  writeFileSync,
++} from 'fs';
++import { tmpdir } from 'os';
++import { join } from 'path';
++import {
++  createExperiment,
++  evaluateExperiment,
++  runExperiment,
++  type Experiment,
++} from '../src/bus/experiment.js';
++import { DEFAULT_EXPERIMENT_GRACE_MS, sweepExperiments } from '../src/bus/experiment-sweep.js';
++
++describe('experiment sweep', () => {
++  const agentName = 'testbot';
++  const now = Date.parse('2026-07-18T00:00:00Z');
++  let testDir = '';
++
++  beforeEach(() => {
++    testDir = mkdtempSync(join(tmpdir(), 'cortextos-experiment-sweep-'));
++    mkdirSync(join(testDir, 'experiments', 'history'), { recursive: true });
++  });
++
++  afterEach(() => {
++    try {
++      rmSync(testDir, { recursive: true, force: true });
++    } catch {
++      /* ignore */
++    }
++  });
++
++  function historyPath(id: string): string {
++    return join(testDir, 'experiments', 'history', `${id}.json`);
++  }
++
++  function readExperiment(id: string): Experiment {
++    return JSON.parse(readFileSync(historyPath(id), 'utf-8').trim()) as Experiment;
++  }
++
++  function writeExperiment(id: string, experiment: Experiment): void {
++    writeFileSync(historyPath(id), JSON.stringify(experiment, null, 2));
++  }
++
++  function isoFor(offsetMs: number): string {
++    return new Date(now - offsetMs).toISOString().replace(/\.\d{3}Z$/, 'Z');
++  }
++
++  it('flags once within grace and stays idempotent on re-sweep', () => {
++    const id = createExperiment(testDir, agentName, 'ctr', 'Bold CTA improves CTR');
++    runExperiment(testDir, id);
++
++    const experiment = readExperiment(id);
++    experiment.started_at = isoFor(25 * 3_600_000);
++    writeExperiment(id, experiment);
++
++    const firstSweep = sweepExperiments(testDir, agentName, { now, dryRun: false });
++    expect(firstSweep).toHaveLength(1);
++    expect(firstSweep[0].action).toBe('flag');
++
++    const flagged = readExperiment(id);
++    expect(flagged.window_flagged_at).toBeTruthy();
++    const flaggedAt = flagged.window_flagged_at;
++
++    const secondSweep = sweepExperiments(testDir, agentName, { now, dryRun: false });
++    expect(secondSweep).toEqual([]);
++    expect(readExperiment(id).window_flagged_at).toBe(flaggedAt);
++  });
++
++  it('autocloses after grace and stays idempotent with completed fields set', () => {
++    const id = createExperiment(testDir, agentName, 'engagement', 'More emojis');
++    runExperiment(testDir, id);
++
++    const experiment = readExperiment(id);
++    experiment.started_at = isoFor(49 * 3_600_000);
++    writeExperiment(id, experiment);
++
++    const actions = sweepExperiments(testDir, agentName, { now, dryRun: false });
++    expect(actions).toHaveLength(1);
++    expect(actions[0].action).toBe('autoclose');
++
++    const closed = readExperiment(id);
++    expect(closed.status).toBe('completed');
++    expect(closed.decision).toBe('discard');
++    expect(closed.result_value).toBeNull();
++    expect(closed.completed_at).toBeTruthy();
++    expect(closed.learning).toContain('Auto-closed');
++    expect(closed.learning).toContain(experiment.window);
++    expect(existsSync(join(testDir, 'experiments', 'results.tsv'))).toBe(true);
++    expect(existsSync(join(testDir, 'experiments', 'learnings.md'))).toBe(true);
++
++    const secondSweep = sweepExperiments(testDir, agentName, { now, dryRun: false });
++    expect(secondSweep).toEqual([]);
++  });
++
++  it('skips unparseable windows without mutating the running experiment', () => {
++    const id = createExperiment(testDir, agentName, 'latency', 'Weekly trend', {
++      window: 'weekly',
++    });
++    runExperiment(testDir, id);
++
++    const actions = sweepExperiments(testDir, agentName, { now, dryRun: false });
++    expect(actions).toHaveLength(1);
++    expect(actions[0]).toMatchObject({
++      action: 'skip-unparseable',
++      expiredAt: null,
++      ageMs: 0,
++    });
++
++    const experiment = readExperiment(id);
++    expect(experiment.status).toBe('running');
++    expect(experiment.window_flagged_at).toBeUndefined();
++    expect(experiment.decision).toBeNull();
++  });
++
++  it('leaves not-yet-expired running experiments untouched', () => {
++    const id = createExperiment(testDir, agentName, 'retention', 'Longer onboarding');
++    runExperiment(testDir, id);
++
++    const experiment = readExperiment(id);
++    experiment.started_at = isoFor(23 * 3_600_000);
++    writeExperiment(id, experiment);
++
++    const actions = sweepExperiments(testDir, agentName, { now, dryRun: false });
++    expect(actions).toEqual([]);
++
++    const unchanged = readExperiment(id);
++    expect(unchanged.status).toBe('running');
++    expect(unchanged.window_flagged_at).toBeUndefined();
++  });
++
++  it('ignores proposed and completed experiments entirely', () => {
++    const proposedId = createExperiment(testDir, agentName, 'nps', 'More follow-up');
++    const proposed = readExperiment(proposedId);
++    proposed.started_at = isoFor(72 * 3_600_000);
++    writeExperiment(proposedId, proposed);
++
++    const completedId = createExperiment(testDir, agentName, 'reply_rate', 'Faster response');
++    runExperiment(testDir, completedId);
++    evaluateExperiment(testDir, completedId, 1, { learning: 'done' });
++    const completed = readExperiment(completedId);
++    completed.started_at = isoFor(72 * 3_600_000);
++    writeExperiment(completedId, completed);
++
++    const actions = sweepExperiments(testDir, agentName, { now, dryRun: false });
++    expect(actions).toEqual([]);
++
++    expect(readExperiment(proposedId).status).toBe('proposed');
++    expect(readExperiment(completedId).status).toBe('completed');
++  });
++
++  it('returns computed actions in dry-run mode without mutating disk state', () => {
++    const id = createExperiment(testDir, agentName, 'signup_rate', 'Shorter form');
++    runExperiment(testDir, id);
++
++    const experiment = readExperiment(id);
++    experiment.started_at = isoFor(49 * 3_600_000);
++    writeExperiment(id, experiment);
++
++    const actions = sweepExperiments(testDir, agentName, {
++      now,
++      dryRun: true,
++      graceMs: DEFAULT_EXPERIMENT_GRACE_MS,
++    });
++    expect(actions).toHaveLength(1);
++    expect(actions[0].action).toBe('autoclose');
++
++    const unchanged = readExperiment(id);
++    expect(unchanged.status).toBe('running');
++    expect(unchanged.completed_at).toBeNull();
++    expect(unchanged.window_flagged_at).toBeUndefined();
++  });
++});

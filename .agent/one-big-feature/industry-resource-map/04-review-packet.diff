@@ -1,0 +1,1762 @@
+diff --git a/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/SKILL.md b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/SKILL.md
+new file mode 100644
+index 0000000..0bd693f
+--- /dev/null
++++ b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/SKILL.md
+@@ -0,0 +1,124 @@
++---
++name: industry-resource-map
++description: Build and maintain a reusable "resource map" for an industry vertical — a single manifest that references the research-pulse external registry (by path + notebook) and layers muse's internal resources on top (client audits, positioning docs, research docs, memory refs, notebooks, live-search patterns, resolved tooling paths) so research/content sessions stop re-discovering the same assets. Detects a stale registry and requests a research-pulse-delta refresh before composing. Triggers on "build the resource map for <industry>", "map my resources for <vertical>", "resource map aec".
++---
++
++# industry-resource-map
++
++Run from:
++
++```bash
++cd /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map
++```
++
++## Step 0 — Preflight (resolve tooling)
++
++```bash
++set -a
++source /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.env
++set +a
++NOTEBOOKLM_BIN=${NOTEBOOKLM_BIN:-/private/tmp/whisper-venv/bin/notebooklm}
++[ -x "$NOTEBOOKLM_BIN" ] || NOTEBOOKLM_BIN=/tmp/whisper-venv/bin/notebooklm
++"$NOTEBOOKLM_BIN" status || echo "notebooklm unavailable — proceed degraded, record status in tooling"
++```
++
++## Step 1 — Define vertical (MVP: aec)
++
++```bash
++SLUG=aec
++test -f /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/state/research-pulse/registry/$SLUG.json \
++  || { echo "no research-pulse registry for $SLUG — run the research-pulse skill first"; exit 1; }
++```
++
++If `state/resource-map/$SLUG.json` already exists, reload it and treat this as a maintenance refresh.
++
++## Step 2 — Pull external (BY REFERENCE) + freshness + delta refresh
++
++```bash
++python3 -m scripts.registry_ref --vertical "$SLUG" --json
++```
++
++If `freshness.is_stale` is `true`, the module has already attempted the refresh path. Carry the returned
++`registry_path`, `notebook_id`, `framework_doc`, `source_count`, `registry_updated_at`, and
++`freshness` block into the manifest. Never edit the research-pulse registry here.
++
++## Step 3 — Discover internal (glob+score) + curate (human confirm)
++
++```bash
++python3 -m scripts.discover_internal --vertical "$SLUG" --display-name "AEC" \
++  --synonym architecture --synonym engineering --synonym construction --synonym aec \
++  --synonym building --synonym design --synonym firm --synonym contractor --synonym infrastructure \
++  --topic project_delivery --topic construction_spending --topic infrastructure \
++  --out "/tmp/resource-map-candidates-$SLUG.json"
++```
++
++Review the generated `high` and `ambiguous` candidates. Only human-approved entries are persisted.
++
++```bash
++python3 - <<'PY'
++from scripts import resource_map
++
++m = resource_map.load_manifest("aec") if resource_map.manifest_path("aec").exists() else resource_map.new_manifest("aec", "AEC")
++resource_map.add_internal_entry(m, "client_audits", {
++    "title": "...",
++    "path": "...",
++    "matched_terms": ["..."],
++    "score": 0,
++    "confirmed": True,
++})
++resource_map.save_manifest(m)
++PY
++```
++
++## Step 4 — Record live-search patterns
++
++Do not run last30days from this skill. Record successful query patterns for reuse:
++
++```bash
++python3 - <<'PY'
++from scripts import resource_map
++
++m = resource_map.load_manifest("aec")
++resource_map.add_live_search(
++    m,
++    query="aec firm operations last 30 days",
++    returned_signal=True,
++    date="2026-07-18",
++    note="replace with the real note from the current run",
++)
++resource_map.save_manifest(m)
++PY
++```
++
++## Step 5 — Notebooks
++
++Record the research-pulse notebook from the registry and any human-added notebooks.
++
++## Step 6 — Write manifest + `.md` twin
++
++```bash
++python3 - <<'PY'
++from scripts import resource_map
++
++m = resource_map.load_manifest("aec")
++resource_map.set_tooling(m, {
++    "notebooklm_bin": "<resolved path>",
++    "notebooklm_status": "ok",
++    "resolved_at": resource_map.utc_now_iso(),
++})
++resource_map.compute_gaps(m)
++print(resource_map.save_manifest(m))
++PY
++```
++
++## Step 7 — Report
++
++Final report must include:
++- vertical slug + display name
++- manifest path + `.md` twin path
++- internal counts per category
++- external registry path, `source_count`, notebook link, framework doc, freshness, and any stale refresh command
++- resolved tooling paths
++- `gaps[]`
++
++Do not send Telegram from this skill. The caller decides how to surface the result.
+diff --git a/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/scripts/__init__.py b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/scripts/__init__.py
+new file mode 100644
+index 0000000..8b13789
+--- /dev/null
++++ b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/scripts/__init__.py
+@@ -0,0 +1 @@
++
+diff --git a/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/scripts/discover_internal.py b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/scripts/discover_internal.py
+new file mode 100644
+index 0000000..e4ced67
+--- /dev/null
++++ b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/scripts/discover_internal.py
+@@ -0,0 +1,235 @@
++from __future__ import annotations
++
++import argparse
++import json
++import os
++import re
++import sys
++from pathlib import Path
++
++
++HOME = Path(os.path.expanduser("~"))
++
++KNOWN_ROOTS = [
++    {"path": HOME / "code/knowledge-sync/raw/areas/clearworks", "category": "client_audits", "recursive": False},
++    {"path": HOME / "code/knowledge-sync/raw/areas/clearworks/research", "category": "research_docs", "recursive": False},
++    {"path": HOME / "code/knowledge-sync/raw/areas/clearworks/growth", "category": "positioning_docs", "recursive": False},
++    {"path": HOME / "code/knowledge-sync/wiki/projects", "category": "client_audits", "recursive": False},
++    {"path": HOME / "code/knowledge-sync/wiki/intelligence", "category": "positioning_docs", "recursive": False},
++    {"path": HOME / "code/cortextos/orgs/clearworksai/agents/muse/memory", "category": "memory_refs", "recursive": False},
++]
++
++CANDIDATE_EXTS = (".md", ".pdf")
++HEAD_LINES = 40
++FILENAME_WEIGHT = 3
++BODY_WEIGHT = 1
++HIGH_THRESHOLD = 4
++LOW_THRESHOLD = 2
++
++_TOKEN_RE = re.compile(r"[a-z0-9]+")
++_VERSION_RE = re.compile(r"(?:^|[-_])v(\d+)(?:$|[-_])")
++
++
++def slugify(name: str) -> str:
++    slug = "-".join(_TOKEN_RE.findall((name or "").lower())).strip("-")
++    if not slug:
++        raise ValueError("slugify() produced an empty slug")
++    return slug
++
++
++def utc_now_iso() -> str:
++    from datetime import datetime, timezone
++
++    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
++
++
++def build_terms(
++    vertical: str,
++    display_name: str,
++    topic_vocab_extra: list[str],
++    synonyms: list[str],
++) -> list[str]:
++    seen: set[str] = set()
++    ordered: list[str] = []
++    raw_terms = [vertical, display_name, *topic_vocab_extra, *synonyms]
++    for raw in raw_terms:
++        for token in _TOKEN_RE.findall((raw or "").lower()):
++            if len(token) < 3 or token in seen:
++                continue
++            seen.add(token)
++            ordered.append(token)
++    return ordered
++
++
++def _read_head_text(path: Path) -> str:
++    try:
++        with path.open(encoding="utf-8", errors="ignore") as handle:
++            lines = []
++            for index, line in enumerate(handle):
++                lines.append(line)
++                if index + 1 >= HEAD_LINES:
++                    break
++        return "".join(lines).lower()
++    except OSError:
++        return ""
++
++
++def score_file(path: Path, terms: list[str]) -> tuple[int, list[str]]:
++    filename = path.stem.lower()
++    body = _read_head_text(path)
++    score = 0
++    matched_terms: list[str] = []
++    for term in terms:
++        if term in filename:
++            score += FILENAME_WEIGHT
++            matched_terms.append(term)
++        elif term in body:
++            score += BODY_WEIGHT
++            matched_terms.append(term)
++    return score, matched_terms
++
++
++def tier(score: int) -> str:
++    if score >= HIGH_THRESHOLD:
++        return "high"
++    if score >= LOW_THRESHOLD:
++        return "ambiguous"
++    return "drop"
++
++
++def _human_title(path: Path) -> str:
++    return re.sub(r"[-_]+", " ", path.stem).strip().title()
++
++
++def _load_roots(path: str | None) -> list[dict[str, object]]:
++    if path is None:
++        return [
++            {"path": str(root["path"]), "category": root["category"], "recursive": root["recursive"]}
++            for root in KNOWN_ROOTS
++        ]
++    roots_path = Path(path).expanduser().resolve()
++    with roots_path.open(encoding="utf-8") as handle:
++        payload = json.load(handle)
++    if not isinstance(payload, list):
++        raise ValueError("roots-json must contain a list")
++    resolved: list[dict[str, object]] = []
++    for index, root in enumerate(payload):
++        if not isinstance(root, dict):
++            raise ValueError(f"roots-json entry {index} must be an object")
++        raw_path = root.get("path")
++        category = root.get("category")
++        recursive = root.get("recursive", False)
++        if not isinstance(raw_path, str) or not isinstance(category, str) or not isinstance(recursive, bool):
++            raise ValueError(f"roots-json entry {index} missing path/category/recursive")
++        path_obj = Path(raw_path)
++        if not path_obj.is_absolute():
++            path_obj = (roots_path.parent / path_obj).resolve()
++        resolved.append({"path": str(path_obj), "category": category, "recursive": recursive})
++    return resolved
++
++
++def _should_skip_dir(path: Path) -> bool:
++    name = path.name
++    return (
++        name.startswith(".")
++        or name == "__pycache__"
++        or name.startswith("_quarantine")
++        or name == ".trash"
++    )
++
++
++def _iter_candidates(root_path: Path, recursive: bool) -> list[Path]:
++    out: list[Path] = []
++    if not root_path.exists():
++        return out
++    if recursive:
++        for current_root, dirnames, filenames in os.walk(root_path):
++            dir_path = Path(current_root)
++            dirnames[:] = [name for name in dirnames if not _should_skip_dir(dir_path / name)]
++            for name in filenames:
++                if name.startswith("."):
++                    continue
++                candidate = dir_path / name
++                if candidate.suffix.lower() in CANDIDATE_EXTS:
++                    out.append(candidate.resolve())
++    else:
++        for candidate in sorted(root_path.iterdir(), key=lambda item: item.name):
++            if candidate.is_dir() or candidate.name.startswith("."):
++                continue
++            if candidate.suffix.lower() in CANDIDATE_EXTS:
++                out.append(candidate.resolve())
++    return out
++
++
++def discover(roots: list[dict[str, object]], terms: list[str]) -> list[dict[str, object]]:
++    candidates: list[dict[str, object]] = []
++    for root in roots:
++        root_path = Path(str(root["path"])).expanduser().resolve()
++        category = str(root["category"])
++        recursive = bool(root.get("recursive", False))
++        for candidate in _iter_candidates(root_path, recursive):
++            score, matched_terms = score_file(candidate, terms)
++            confidence = tier(score)
++            if confidence == "drop":
++                continue
++            version_match = _VERSION_RE.search(candidate.stem.lower())
++            candidates.append({
++                "category": category,
++                "title": _human_title(candidate),
++                "path": str(candidate),
++                "score": score,
++                "matched_terms": matched_terms,
++                "tier": confidence,
++                "version": int(version_match.group(1)) if version_match else None,
++            })
++    return sorted(candidates, key=lambda item: (str(item["category"]), -int(item["score"]), str(item["path"])))
++
++
++def main(argv: list[str] | None = None) -> int:
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--vertical", required=True)
++    parser.add_argument("--display-name", required=True)
++    parser.add_argument("--synonym", action="append", default=[])
++    parser.add_argument("--topic", action="append", default=[])
++    parser.add_argument("--roots-json")
++    parser.add_argument("--out", required=True)
++    args = parser.parse_args(argv)
++
++    try:
++        roots = _load_roots(args.roots_json)
++    except (OSError, ValueError, json.JSONDecodeError) as exc:  # pragma: no cover - CLI guard
++        print(str(exc), file=sys.stderr)
++        return 1
++
++    missing_roots = []
++    usable_roots: list[dict[str, object]] = []
++    for root in roots:
++        path = Path(str(root["path"])).expanduser().resolve()
++        if path.exists():
++            usable_roots.append(root)
++        else:
++            missing_roots.append(path)
++    for path in missing_roots:  # pragma: no cover - CLI note
++        print(f"skipping missing root: {path}", file=sys.stderr)
++
++    terms = build_terms(args.vertical, args.display_name, list(args.topic), list(args.synonym))
++    discovered = discover(usable_roots, terms)
++    payload = {
++        "vertical": args.vertical,
++        "generated_at": utc_now_iso(),
++        "terms": terms,
++        "high": [item for item in discovered if item["tier"] == "high"],
++        "ambiguous": [item for item in discovered if item["tier"] == "ambiguous"],
++    }
++
++    out_path = Path(args.out).expanduser().resolve()
++    out_path.parent.mkdir(parents=True, exist_ok=True)
++    with out_path.open("w", encoding="utf-8") as handle:
++        json.dump(payload, handle, indent=2)
++        handle.write("\n")
++    print(out_path)
++    return 0
++
++
++if __name__ == "__main__":  # pragma: no cover - CLI entrypoint
++    raise SystemExit(main())
+diff --git a/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/scripts/registry_ref.py b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/scripts/registry_ref.py
+new file mode 100644
+index 0000000..65bc2d3
+--- /dev/null
++++ b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/scripts/registry_ref.py
+@@ -0,0 +1,218 @@
++from __future__ import annotations
++
++import argparse
++import json
++import os
++import subprocess
++import sys
++from datetime import datetime, timezone
++from pathlib import Path
++
++
++RESEARCH_PULSE_STATE_DIR = (
++    "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/state/research-pulse"
++)
++MUSE_AGENT_HOME = (
++    "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse"
++)
++DELTA_SCRIPT_REL = ".claude/skills/research-pulse/scripts/delta_check.py"
++DELTA_CRON_NAME = "research-pulse-delta"
++STALE_THRESHOLD_HOURS = 18.0
++
++
++def registry_path(vertical: str) -> Path:
++    state_root = Path(os.environ.get("PULSE_STATE_DIR", RESEARCH_PULSE_STATE_DIR)).expanduser()
++    return state_root / "registry" / f"{vertical}.json"
++
++
++def _parse_iso8601(value: object) -> datetime | None:
++    if not isinstance(value, str) or not value:
++        return None
++    try:
++        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
++    except ValueError:
++        return None
++
++
++def utc_now() -> datetime:
++    return datetime.now(timezone.utc)
++
++
++def utc_now_iso(now: datetime | None = None) -> str:
++    return (now or utc_now()).strftime("%Y-%m-%dT%H:%M:%SZ")
++
++
++def _load_registry(vertical: str) -> dict[str, object]:
++    path = registry_path(vertical)
++    if not path.exists():
++        raise FileNotFoundError(f"registry not found: {path}")
++    with path.open(encoding="utf-8") as handle:
++        registry = json.load(handle)
++    if not isinstance(registry, dict):
++        raise ValueError("registry must be an object")
++    if not isinstance(registry.get("vertical"), str):
++        raise ValueError("registry missing vertical")
++    if not isinstance(registry.get("sources"), list):
++        raise ValueError("registry missing sources list")
++    return registry
++
++
++def read_registry_ref(vertical: str) -> dict[str, object]:
++    registry = _load_registry(vertical)
++    return {
++        "registry_path": str(registry_path(vertical).resolve()),
++        "notebook_id": registry.get("notebook_id"),
++        "framework_doc": registry.get("framework_doc"),
++        "source_count": len(registry.get("sources", [])),
++        "registry_updated_at": registry.get("updated_at"),
++    }
++
++
++def build_delta_command(vertical: str) -> str:
++    return f"python3 {DELTA_SCRIPT_REL} --vertical {vertical}"
++
++
++def compute_freshness(
++    vertical: str,
++    *,
++    stale_hours: float = STALE_THRESHOLD_HOURS,
++    now: datetime | None = None,
++) -> dict[str, object]:
++    registry = _load_registry(vertical)
++    effective_now = now or utc_now()
++    sources = registry.get("sources", [])
++    most_recent: datetime | None = None
++    if isinstance(sources, list):
++        for source in sources:
++            if not isinstance(source, dict):
++                continue
++            checked = _parse_iso8601(source.get("last_checked"))
++            if checked and (most_recent is None or checked > most_recent):
++                most_recent = checked
++    if most_recent is None:
++        most_recent = _parse_iso8601(registry.get("updated_at"))
++
++    age_hours: float | None = None
++    is_stale = True
++    most_recent_iso: str | None = None
++    if most_recent is not None:
++        age_hours = (effective_now - most_recent).total_seconds() / 3600
++        is_stale = age_hours > stale_hours
++        most_recent_iso = utc_now_iso(most_recent)
++
++    return {
++        "checked_at": utc_now_iso(effective_now),
++        "registry_updated_at": registry.get("updated_at"),
++        "most_recent_last_checked": most_recent_iso,
++        "age_hours": round(age_hours, 1) if age_hours is not None else None,
++        "stale_threshold_hours": stale_hours,
++        "is_stale": is_stale,
++        "delta_refresh_requested": False,
++        "delta_refresh_command": build_delta_command(vertical),
++        "delta_cron_name": DELTA_CRON_NAME,
++    }
++
++
++def request_delta_refresh(
++    vertical: str,
++    agent_home: str | Path | None = None,
++    run: bool = False,
++) -> dict[str, object]:
++    agent_home_path = Path(agent_home or MUSE_AGENT_HOME).expanduser().resolve()
++    script = agent_home_path / DELTA_SCRIPT_REL
++    command = build_delta_command(vertical)
++    if not run:
++        return {
++            "requested": True,
++            "ran": False,
++            "command": command,
++            "cron_name": DELTA_CRON_NAME,
++            "script_path": str(script),
++            "reason": "announce-only",
++        }
++    if not script.exists():
++        return {
++            "requested": True,
++            "ran": False,
++            "command": command,
++            "cron_name": DELTA_CRON_NAME,
++            "script_path": str(script),
++            "reason": "delta_script_missing",
++        }
++
++    result = subprocess.run(
++        [sys.executable, str(script), "--vertical", vertical],
++        cwd=agent_home_path,
++        capture_output=True,
++        text=True,
++        timeout=600,
++    )
++    summary: object | None = None
++    stdout = (result.stdout or "").strip()
++    if stdout:
++        try:
++            summary = json.loads(stdout)
++        except json.JSONDecodeError:
++            summary = None
++    return {
++        "requested": True,
++        "ran": True,
++        "returncode": result.returncode,
++        "command": command,
++        "summary": summary,
++        "cron_name": DELTA_CRON_NAME,
++        "script_path": str(script),
++    }
++
++
++def refresh_if_stale(
++    vertical: str,
++    *,
++    stale_hours: float = STALE_THRESHOLD_HOURS,
++    run: bool = True,
++    agent_home: str | Path | None = None,
++    now: datetime | None = None,
++) -> dict[str, object]:
++    freshness = compute_freshness(vertical, stale_hours=stale_hours, now=now)
++    if not freshness["is_stale"]:
++        return {"freshness": freshness, "action": "none"}
++
++    request = request_delta_refresh(vertical, agent_home=agent_home, run=run)
++    freshness["delta_refresh_requested"] = True
++    if request.get("ran") and request.get("returncode") == 0:
++        refreshed = compute_freshness(vertical, stale_hours=stale_hours, now=now)
++        refreshed["delta_refresh_requested"] = True
++        return {"freshness": refreshed, "action": "refreshed", "request": request}
++    return {"freshness": freshness, "action": "announced", "request": request}
++
++
++def main(argv: list[str] | None = None) -> int:
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--vertical", required=True)
++    parser.add_argument("--stale-hours", type=float, default=STALE_THRESHOLD_HOURS)
++    parser.add_argument("--agent-home")
++    parser.add_argument("--check-only", action="store_true")
++    parser.add_argument("--no-run", action="store_true")
++    parser.add_argument("--json", action="store_true")
++    args = parser.parse_args(argv)
++
++    try:
++        if args.check_only:
++            payload = compute_freshness(args.vertical, stale_hours=args.stale_hours)
++        else:
++            payload = refresh_if_stale(
++                args.vertical,
++                stale_hours=args.stale_hours,
++                run=not args.no_run,
++                agent_home=args.agent_home,
++            )
++    except (FileNotFoundError, ValueError) as exc:  # pragma: no cover - CLI guard
++        print(str(exc), file=sys.stderr)
++        return 1
++
++    print(json.dumps(payload))
++    return 0
++
++
++if __name__ == "__main__":  # pragma: no cover - CLI entrypoint
++    raise SystemExit(main())
+diff --git a/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/scripts/resource_map.py b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/scripts/resource_map.py
+new file mode 100644
+index 0000000..ff88db2
+--- /dev/null
++++ b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/scripts/resource_map.py
+@@ -0,0 +1,623 @@
++from __future__ import annotations
++
++import argparse
++import json
++import os
++import re
++import tempfile
++from datetime import datetime, timezone
++from pathlib import Path
++
++
++SCHEMA_VERSION = 1
++
++DEFAULT_STATE_DIR = (
++    "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/state/resource-map"
++)
++
++INTERNAL_LIST_KEYS = (
++    "client_audits",
++    "positioning_docs",
++    "research_docs",
++    "memory_refs",
++    "notebooks",
++    "live_search",
++)
++
++DISCOVERY_KEYS = (
++    "client_audits",
++    "positioning_docs",
++    "research_docs",
++    "memory_refs",
++)
++
++PREFIX_BY_CATEGORY = {
++    "client_audits": "aud",
++    "positioning_docs": "pos",
++    "research_docs": "res",
++    "memory_refs": "mem",
++    "notebooks": "nb",
++}
++
++_SLUG_RE = re.compile(r"[a-z0-9]+")
++_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
++
++
++def state_dir() -> Path:
++    return Path(os.environ.get("RESOURCE_MAP_STATE_DIR", DEFAULT_STATE_DIR)).expanduser()
++
++
++def manifest_path(vertical: str) -> Path:
++    return state_dir() / f"{vertical}.json"
++
++
++def manifest_md_path(vertical: str) -> Path:
++    return state_dir() / f"{vertical}.md"
++
++
++def slugify(name: str) -> str:
++    slug = "-".join(_SLUG_RE.findall((name or "").lower())).strip("-")
++    if not slug:
++        raise ValueError("slugify() produced an empty slug")
++    return slug
++
++
++def utc_now_iso() -> str:
++    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
++
++
++def atomic_write_json(path: Path, data: dict[str, object]) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    tmp_path: Path | None = None
++    try:
++        with tempfile.NamedTemporaryFile(
++            "w",
++            dir=path.parent,
++            delete=False,
++            encoding="utf-8",
++        ) as handle:
++            tmp_path = Path(handle.name)
++            json.dump(data, handle, indent=2)
++            handle.write("\n")
++            handle.flush()
++            os.fsync(handle.fileno())
++        os.replace(tmp_path, path)
++        tmp_path = None
++    finally:
++        if tmp_path is not None and tmp_path.exists():
++            tmp_path.unlink()
++
++
++def atomic_write_text(path: Path, text: str) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    tmp_path: Path | None = None
++    try:
++        with tempfile.NamedTemporaryFile(
++            "w",
++            dir=path.parent,
++            delete=False,
++            encoding="utf-8",
++        ) as handle:
++            tmp_path = Path(handle.name)
++            handle.write(text)
++            handle.flush()
++            os.fsync(handle.fileno())
++        os.replace(tmp_path, path)
++        tmp_path = None
++    finally:
++        if tmp_path is not None and tmp_path.exists():
++            tmp_path.unlink()
++
++
++def new_manifest(vertical: str, display_name: str) -> dict[str, object]:
++    if vertical != slugify(vertical):
++        raise ValueError("vertical must already be a slug")
++    now = utc_now_iso()
++    return {
++        "schema_version": SCHEMA_VERSION,
++        "vertical": vertical,
++        "display_name": display_name,
++        "generated_at": now,
++        "updated_at": now,
++        "external": {
++            "registry_path": None,
++            "notebook_id": None,
++            "framework_doc": None,
++            "source_count": 0,
++            "registry_updated_at": None,
++            "freshness": {},
++        },
++        "internal": {
++            "client_audits": [],
++            "positioning_docs": [],
++            "research_docs": [],
++            "memory_refs": [],
++            "notebooks": [],
++            "live_search": [],
++            "tooling": {},
++        },
++        "gaps": [],
++    }
++
++
++def _is_number(value: object) -> bool:
++    return isinstance(value, (int, float)) and not isinstance(value, bool)
++
++
++def _ensure_id(entry: dict[str, object], category: str, existing_ids: set[str]) -> None:
++    if isinstance(entry.get("id"), str) and entry["id"]:
++        return
++    title = str(entry.get("title") or Path(str(entry.get("path") or "")).stem or category)
++    base_id = f"{PREFIX_BY_CATEGORY[category]}_{slugify(title)}"
++    candidate = base_id
++    suffix = 2
++    while candidate in existing_ids:
++        candidate = f"{base_id}-{suffix}"
++        suffix += 1
++    entry["id"] = candidate
++
++
++def _discovery_ids(manifest: dict[str, object]) -> set[str]:
++    internal = manifest.get("internal", {})
++    if not isinstance(internal, dict):
++        return set()
++    ids: set[str] = set()
++    for key in DISCOVERY_KEYS:
++        entries = internal.get(key, [])
++        if not isinstance(entries, list):
++            continue
++        for entry in entries:
++            if isinstance(entry, dict) and isinstance(entry.get("id"), str):
++                ids.add(entry["id"])
++    return ids
++
++
++def _validate_discovery_entry(
++    errors: list[str],
++    key: str,
++    index: int,
++    entry: object,
++    seen_ids: set[str],
++) -> None:
++    if not isinstance(entry, dict):
++        errors.append(f"{key}[{index}] must be an object")
++        return
++    required = ("id", "title", "path", "matched_terms", "score", "confirmed")
++    for field in required:
++        if field not in entry:
++            errors.append(f"{key}[{index}] missing {field}")
++    entry_id = entry.get("id")
++    if not isinstance(entry_id, str) or not entry_id:
++        errors.append(f"{key}[{index}] id must be non-empty")
++    elif entry_id in seen_ids:
++        errors.append(f"{key}[{index}] duplicate id: {entry_id}")
++    else:
++        seen_ids.add(entry_id)
++
++    if not isinstance(entry.get("title"), str) or not str(entry.get("title")).strip():
++        errors.append(f"{key}[{index}] title must be non-empty")
++    if not isinstance(entry.get("path"), str) or not str(entry.get("path")).strip():
++        errors.append(f"{key}[{index}] path must be non-empty")
++    matched_terms = entry.get("matched_terms")
++    if not isinstance(matched_terms, list) or any(not isinstance(term, str) for term in matched_terms):
++        errors.append(f"{key}[{index}] matched_terms must be a list of strings")
++    if not _is_number(entry.get("score")):
++        errors.append(f"{key}[{index}] score must be numeric")
++    if not isinstance(entry.get("confirmed"), bool):
++        errors.append(f"{key}[{index}] confirmed must be a bool")
++    elif entry.get("confirmed") is not True:
++        errors.append(f"{key}[{index}] unconfirmed entry may not be persisted")
++
++    if key == "positioning_docs":
++        version = entry.get("version")
++        if version is not None and not isinstance(version, int):
++            errors.append(f"{key}[{index}] version must be an int or null")
++        latest = entry.get("latest")
++        if latest is not None and not isinstance(latest, bool):
++            errors.append(f"{key}[{index}] latest must be a bool when present")
++
++
++def validate_manifest(manifest: object) -> list[str]:
++    errors: list[str] = []
++    if not isinstance(manifest, dict):
++        return ["manifest must be an object"]
++
++    if manifest.get("schema_version") != SCHEMA_VERSION:
++        errors.append("schema_version must equal 1")
++
++    vertical = manifest.get("vertical")
++    if not isinstance(vertical, str) or not vertical:
++        errors.append("vertical must be a non-empty slug")
++    else:
++        try:
++            expected = slugify(vertical)
++        except ValueError:
++            errors.append("vertical must be a non-empty slug")
++        else:
++            if vertical != expected:
++                errors.append("vertical must be a normalized slug")
++
++    display_name = manifest.get("display_name")
++    if not isinstance(display_name, str) or not display_name.strip():
++        errors.append("display_name must be non-empty")
++
++    external = manifest.get("external")
++    if not isinstance(external, dict):
++        errors.append("external must be an object")
++        external = {}
++    if external.get("registry_path") is not None and (
++        not isinstance(external.get("registry_path"), str)
++        or not str(external.get("registry_path")).strip()
++    ):
++        errors.append("external.registry_path must be null or a non-empty string")
++    if not isinstance(external.get("freshness", {}), dict):
++        errors.append("external.freshness must be an object")
++
++    internal = manifest.get("internal")
++    if not isinstance(internal, dict):
++        errors.append("internal must be an object")
++        internal = {}
++    expected_keys = set(INTERNAL_LIST_KEYS) | {"tooling"}
++    for key in internal.keys():
++        if key not in expected_keys:
++            errors.append(f"internal has unknown key: {key}")
++    for key in INTERNAL_LIST_KEYS:
++        value = internal.get(key)
++        if not isinstance(value, list):
++            errors.append(f"internal.{key} must be a list")
++    tooling = internal.get("tooling")
++    if not isinstance(tooling, dict):
++        errors.append("internal.tooling must be an object")
++
++    seen_ids: set[str] = set()
++    for key in DISCOVERY_KEYS:
++        entries = internal.get(key, [])
++        if not isinstance(entries, list):
++            continue
++        for index, entry in enumerate(entries):
++            _validate_discovery_entry(errors, key, index, entry, seen_ids)
++
++    positioning_entries = internal.get("positioning_docs", [])
++    if isinstance(positioning_entries, list):
++        latest_count = 0
++        for entry in positioning_entries:
++            if isinstance(entry, dict) and entry.get("latest") is True:
++                latest_count += 1
++        if latest_count > 1:
++            errors.append("positioning_docs may contain at most one latest entry")
++
++    notebooks = internal.get("notebooks", [])
++    if isinstance(notebooks, list):
++        for index, entry in enumerate(notebooks):
++            if not isinstance(entry, dict):
++                errors.append(f"notebooks[{index}] must be an object")
++                continue
++            required = ("id", "title", "notebook_id", "url", "confirmed")
++            for field in required:
++                if field not in entry:
++                    errors.append(f"notebooks[{index}] missing {field}")
++            if not isinstance(entry.get("notebook_id"), str) or not str(entry.get("notebook_id")).strip():
++                errors.append(f"notebooks[{index}] notebook_id must be non-empty")
++            if not isinstance(entry.get("url"), str) or not str(entry.get("url")).strip():
++                errors.append(f"notebooks[{index}] url must be non-empty")
++            if entry.get("confirmed") is not True:
++                errors.append(f"notebooks[{index}] confirmed must be true")
++
++    live_search = internal.get("live_search", [])
++    if isinstance(live_search, list):
++        for index, entry in enumerate(live_search):
++            if not isinstance(entry, dict):
++                errors.append(f"live_search[{index}] must be an object")
++                continue
++            if not isinstance(entry.get("query"), str) or not str(entry.get("query")).strip():
++                errors.append(f"live_search[{index}] query must be non-empty")
++            if not isinstance(entry.get("returned_signal"), bool):
++                errors.append(f"live_search[{index}] returned_signal must be a bool")
++            date = entry.get("date")
++            if not isinstance(date, str) or not _DATE_RE.match(date):
++                errors.append(f"live_search[{index}] date must match YYYY-MM-DD")
++            if not isinstance(entry.get("note"), str):
++                errors.append(f"live_search[{index}] note must be a string")
++
++    gaps = manifest.get("gaps")
++    if not isinstance(gaps, list) or any(not isinstance(item, str) for item in gaps):
++        errors.append("gaps must be a list of strings")
++
++    return errors
++
++
++def load_manifest(vertical: str) -> dict[str, object]:
++    path = manifest_path(vertical)
++    if not path.exists():
++        raise FileNotFoundError(f"manifest not found: {path}")
++    with path.open(encoding="utf-8") as handle:
++        manifest = json.load(handle)
++    errors = validate_manifest(manifest)
++    if errors:
++        raise ValueError(f"manifest invalid: {'; '.join(errors)}")
++    return manifest
++
++
++def mark_latest_positioning_docs(manifest: dict[str, object]) -> None:
++    internal = manifest.get("internal")
++    if not isinstance(internal, dict):
++        return
++    docs = internal.get("positioning_docs")
++    if not isinstance(docs, list):
++        return
++    best_index: int | None = None
++    best_version = -1
++    for index, entry in enumerate(docs):
++        if not isinstance(entry, dict):
++            continue
++        version = entry.get("version")
++        if isinstance(version, int) and version > best_version:
++            best_version = version
++            best_index = index
++    for index, entry in enumerate(docs):
++        if isinstance(entry, dict):
++            if best_index is None:
++                entry.pop("latest", None)
++            else:
++                entry["latest"] = index == best_index
++
++
++def save_manifest(manifest: dict[str, object]) -> Path:
++    errors = validate_manifest(manifest)
++    if errors:
++        raise ValueError(f"manifest invalid: {'; '.join(errors)}")
++    manifest["updated_at"] = utc_now_iso()
++    path = manifest_path(str(manifest["vertical"]))
++    atomic_write_json(path, manifest)
++    write_manifest_md(manifest)
++    return path
++
++
++def _fmt_terms(entry: dict[str, object]) -> str:
++    terms = entry.get("matched_terms", [])
++    if not isinstance(terms, list) or not terms:
++        return "none"
++    return ", ".join(str(term) for term in terms)
++
++
++def _render_entry_lines(entries: list[object], formatter) -> list[str]:
++    if not entries:
++        return ["_none_"]
++    lines: list[str] = []
++    for entry in entries:
++        if isinstance(entry, dict):
++            lines.append(formatter(entry))
++    return lines or ["_none_"]
++
++
++def _format_positioning_entry(entry: dict[str, object]) -> str:
++    latest = " · LATEST" if entry.get("latest") else ""
++    version = f" (v{entry.get('version')})" if entry.get("version") is not None else ""
++    return f"- **{entry['title']}**{latest}{version} — `{entry['path']}`"
++
++
++def write_manifest_md(manifest: dict[str, object]) -> Path:
++    vertical = str(manifest["vertical"])
++    external = manifest.get("external", {})
++    internal = manifest.get("internal", {})
++    if not isinstance(external, dict):
++        external = {}
++    if not isinstance(internal, dict):
++        internal = {}
++    freshness = external.get("freshness", {})
++    if not isinstance(freshness, dict):
++        freshness = {}
++
++    lines = [
++        f"# {manifest['display_name']} Resource Map",
++        "",
++        f"Generated {manifest['generated_at']} · updated {manifest['updated_at']} · schema v{manifest['schema_version']}",
++        "",
++        "## External (research-pulse — by reference)",
++        f"- Registry: `{external.get('registry_path')}`" if external.get("registry_path") else "- Registry: _none_",
++    ]
++
++    notebook_id = external.get("notebook_id")
++    if isinstance(notebook_id, str) and notebook_id:
++        lines.append(
++            f"- Notebook: `{notebook_id}` — https://notebooklm.google.com/notebook/{notebook_id}"
++        )
++    else:
++        lines.append("- Notebook: _none_")
++    framework_doc = external.get("framework_doc")
++    lines.append(
++        f"- Framework doc: `{framework_doc}`" if isinstance(framework_doc, str) and framework_doc else "- Framework doc: _none_"
++    )
++    lines.append(f"- Sources (registry): {external.get('source_count', 0)}")
++    if freshness:
++        stale = freshness.get("is_stale") is True
++        age_hours = freshness.get("age_hours")
++        threshold = freshness.get("stale_threshold_hours")
++        age_text = f"{age_hours}h" if age_hours is not None else "unknown"
++        threshold_text = f"{threshold}h" if threshold is not None else "unknown"
++        lines.append(
++            f"- Freshness: {'STALE' if stale else 'fresh'} — age {age_text} (threshold {threshold_text})"
++        )
++        if stale and freshness.get("delta_refresh_command"):
++            lines.append(
++                f"  - Refresh: `{freshness['delta_refresh_command']}` (cron `{freshness.get('delta_cron_name')}`)"
++            )
++    else:
++        lines.append("- Freshness: unchecked")
++
++    headings = [
++        ("Client Audits", "client_audits", lambda entry: f"- **{entry['title']}** — `{entry['path']}` (score {entry['score']}, terms: {_fmt_terms(entry)})"),
++        ("Positioning Docs", "positioning_docs", _format_positioning_entry),
++        ("Research Docs", "research_docs", lambda entry: f"- **{entry['title']}** — `{entry['path']}` (score {entry['score']}, terms: {_fmt_terms(entry)})"),
++        ("Memory Refs", "memory_refs", lambda entry: f"- **{entry['title']}** — `{entry['path']}` (score {entry['score']}, terms: {_fmt_terms(entry)})"),
++        ("Notebooks", "notebooks", lambda entry: f"- **{entry['title']}** — `{entry['notebook_id']}` {entry['url']}"),
++        ("Live Search Patterns", "live_search", lambda entry: f"- `{entry['query']}` — {'signal' if entry['returned_signal'] else 'no signal'} ({entry['date']}) {entry['note']}"),
++    ]
++
++    for heading, key, formatter in headings:
++        lines.extend(["", f"## {heading}"])
++        entries = internal.get(key, [])
++        if not isinstance(entries, list):
++            entries = []
++        lines.extend(_render_entry_lines(entries, formatter))
++
++    lines.extend(["", "## Tooling"])
++    tooling = internal.get("tooling", {})
++    if isinstance(tooling, dict) and tooling:
++        for key in sorted(tooling):
++            lines.append(f"- {key}: `{tooling[key]}`")
++    else:
++        lines.append("_none_")
++
++    lines.extend(["", "## Gaps"])
++    gaps = manifest.get("gaps", [])
++    if isinstance(gaps, list) and gaps:
++        for gap in gaps:
++            lines.append(f"- {gap}")
++    else:
++        lines.append("_none_")
++
++    output = "\n".join(lines) + "\n"
++    path = manifest_md_path(vertical)
++    atomic_write_text(path, output)
++    return path
++
++
++def add_internal_entry(manifest: dict[str, object], category: str, entry: dict[str, object]) -> dict[str, object]:
++    if category not in DISCOVERY_KEYS:
++        raise ValueError(f"unsupported category: {category}")
++    if entry.get("confirmed") is not True:
++        raise ValueError("discovery entries must be confirmed before they are persisted")
++    internal = manifest.setdefault("internal", {})
++    if not isinstance(internal, dict):
++        raise ValueError("manifest internal block must be an object")
++    entries = internal.setdefault(category, [])
++    if not isinstance(entries, list):
++        raise ValueError(f"manifest internal.{category} must be a list")
++
++    existing_ids = _discovery_ids(manifest)
++    _ensure_id(entry, category, existing_ids)
++    entries.append(entry)
++    if category == "positioning_docs":
++        mark_latest_positioning_docs(manifest)
++    return entry
++
++
++def set_external(
++    manifest: dict[str, object],
++    *,
++    registry_path: str | None,
++    notebook_id: str | None,
++    framework_doc: str | None,
++    source_count: int,
++    registry_updated_at: str | None,
++) -> None:
++    external = manifest.setdefault("external", {})
++    if not isinstance(external, dict):
++        raise ValueError("manifest external block must be an object")
++    external["registry_path"] = registry_path
++    external["notebook_id"] = notebook_id
++    external["framework_doc"] = framework_doc
++    external["source_count"] = source_count
++    external["registry_updated_at"] = registry_updated_at
++
++
++def add_notebook(
++    manifest: dict[str, object],
++    *,
++    title: str,
++    notebook_id: str,
++    url: str,
++    confirmed: bool,
++    entry_id: str | None = None,
++) -> dict[str, object]:
++    if confirmed is not True:
++        raise ValueError("notebooks must be confirmed before they are persisted")
++    internal = manifest.setdefault("internal", {})
++    if not isinstance(internal, dict):
++        raise ValueError("manifest internal block must be an object")
++    notebooks = internal.setdefault("notebooks", [])
++    if not isinstance(notebooks, list):
++        raise ValueError("manifest internal.notebooks must be a list")
++    notebook = {
++        "id": entry_id or f"{PREFIX_BY_CATEGORY['notebooks']}_{slugify(title)}",
++        "title": title,
++        "notebook_id": notebook_id,
++        "url": url,
++        "confirmed": True,
++    }
++    notebooks.append(notebook)
++    return notebook
++
++
++def add_live_search(
++    manifest: dict[str, object],
++    *,
++    query: str,
++    returned_signal: bool,
++    date: str,
++    note: str,
++) -> dict[str, object]:
++    internal = manifest.setdefault("internal", {})
++    if not isinstance(internal, dict):
++        raise ValueError("manifest internal block must be an object")
++    live_search = internal.setdefault("live_search", [])
++    if not isinstance(live_search, list):
++        raise ValueError("manifest internal.live_search must be a list")
++    entry = {
++        "query": query,
++        "returned_signal": returned_signal,
++        "date": date,
++        "note": note,
++    }
++    live_search.append(entry)
++    return entry
++
++
++def set_tooling(manifest: dict[str, object], tooling: dict[str, object]) -> None:
++    internal = manifest.setdefault("internal", {})
++    if not isinstance(internal, dict):
++        raise ValueError("manifest internal block must be an object")
++    internal["tooling"] = dict(tooling)
++
++
++def compute_gaps(manifest: dict[str, object]) -> list[str]:
++    internal = manifest.get("internal", {})
++    if not isinstance(internal, dict):
++        raise ValueError("manifest internal block must be an object")
++    gaps: list[str] = []
++    for category in (*DISCOVERY_KEYS, "notebooks", "live_search"):
++        entries = internal.get(category, [])
++        if isinstance(entries, list) and not entries:
++            gaps.append(f"no confirmed {category}")
++    external = manifest.get("external", {})
++    if isinstance(external, dict) and external.get("freshness") == {}:
++        gaps.append("external freshness not checked")
++    manifest["gaps"] = gaps
++    return gaps
++
++
++def main(argv: list[str] | None = None) -> int:
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--init", action="store_true")
++    parser.add_argument("--vertical", required=True)
++    parser.add_argument("--display-name", required=True)
++    args = parser.parse_args(argv)
++
++    if not args.init:
++        print("only --init is supported", file=os.sys.stderr)
++        return 1
++
++    try:
++        manifest = new_manifest(args.vertical, args.display_name)
++        path = save_manifest(manifest)
++    except Exception as exc:  # pragma: no cover - CLI guard
++        print(str(exc), file=os.sys.stderr)
++        return 1
++
++    print(path)
++    return 0
++
++
++if __name__ == "__main__":  # pragma: no cover - CLI entrypoint
++    raise SystemExit(main())
+diff --git a/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/tests/__init__.py b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/tests/__init__.py
+new file mode 100644
+index 0000000..8b13789
+--- /dev/null
++++ b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/tests/__init__.py
+@@ -0,0 +1 @@
++
+diff --git a/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/tests/fixtures/registry_stale.json b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/tests/fixtures/registry_stale.json
+new file mode 100644
+index 0000000..90d8122
+--- /dev/null
++++ b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/tests/fixtures/registry_stale.json
+@@ -0,0 +1,13 @@
++{
++  "vertical": "aec",
++  "notebook_id": "nb-aec",
++  "framework_doc": "/tmp/aec-indicator-framework.md",
++  "updated_at": "2026-01-01T00:00:00Z",
++  "sources": [
++    {
++      "id": "src_aec",
++      "url": "https://example.com/aec",
++      "last_checked": "2026-01-01T00:00:00Z"
++    }
++  ]
++}
+diff --git a/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/tests/fixtures/roots.json b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/tests/fixtures/roots.json
+new file mode 100644
+index 0000000..4650e59
+--- /dev/null
++++ b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/tests/fixtures/roots.json
+@@ -0,0 +1,6 @@
++[
++  {"path": "docs/audits", "category": "client_audits", "recursive": false},
++  {"path": "docs/growth", "category": "positioning_docs", "recursive": false},
++  {"path": "docs/research", "category": "research_docs", "recursive": false},
++  {"path": "docs/memory", "category": "memory_refs", "recursive": false}
++]
+diff --git a/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/tests/test_discover_internal.py b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/tests/test_discover_internal.py
+new file mode 100644
+index 0000000..a51c6d2
+--- /dev/null
++++ b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/tests/test_discover_internal.py
+@@ -0,0 +1,106 @@
++from __future__ import annotations
++
++import contextlib
++import io
++import json
++import sys
++import tempfile
++import unittest
++from pathlib import Path
++
++
++ROOT = Path(__file__).resolve().parent.parent
++FIXTURES = Path(__file__).resolve().parent / "fixtures"
++if str(ROOT) not in sys.path:
++    sys.path.insert(0, str(ROOT))
++
++from scripts import discover_internal as MODULE
++
++
++class DiscoverInternalTests(unittest.TestCase):
++    def setUp(self) -> None:
++        self.roots_json = FIXTURES / "roots.json"
++        self.aec_terms = MODULE.build_terms(
++            "aec",
++            "AEC",
++            [],
++            ["architecture", "engineering", "construction", "aec", "building", "design", "firm"],
++        )
++
++    def discover(self, terms: list[str]) -> list[dict[str, object]]:
++        roots = MODULE._load_roots(str(self.roots_json))
++        return MODULE.discover(roots, terms)
++
++    def test_scoring_ranks_on_topic_above_off_topic(self) -> None:
++        discovered = self.discover(self.aec_terms)
++        by_name = {Path(item["path"]).name: item for item in discovered}
++        self.assertGreater(int(by_name["alloi-ai-operations-audit.md"]["score"]), int(by_name["ai-trends-generic.md"]["score"]))
++        self.assertIn("aec", by_name["alloi-ai-operations-audit.md"]["matched_terms"])
++
++    def test_tiering_high_ambiguous_drop(self) -> None:
++        discovered = self.discover(self.aec_terms)
++        names = {Path(item["path"]).name: item["tier"] for item in discovered}
++        self.assertEqual(names["alloi-ai-operations-audit.md"], "high")
++        self.assertEqual(names["ai-trends-generic.md"], "ambiguous")
++        self.assertNotIn("nonprofit-donor-audit.md", names)
++
++    def test_ambiguous_not_auto_included(self) -> None:
++        with tempfile.TemporaryDirectory() as tmp:
++            out = Path(tmp) / "candidates.json"
++            with contextlib.redirect_stdout(io.StringIO()):
++                rc = MODULE.main([
++                    "--vertical", "aec",
++                    "--display-name", "AEC",
++                    "--synonym", "architecture",
++                    "--synonym", "engineering",
++                    "--synonym", "construction",
++                    "--synonym", "aec",
++                    "--synonym", "building",
++                    "--synonym", "design",
++                    "--synonym", "firm",
++                    "--roots-json", str(self.roots_json),
++                    "--out", str(out),
++                ])
++            self.assertEqual(rc, 0)
++            payload = json.loads(out.read_text(encoding="utf-8"))
++        ambiguous_names = {Path(item["path"]).name for item in payload["ambiguous"]}
++        high_names = {Path(item["path"]).name for item in payload["high"]}
++        self.assertIn("ai-trends-generic.md", ambiguous_names)
++        self.assertNotIn("ai-trends-generic.md", high_names)
++        for bucket in ("high", "ambiguous"):
++            for entry in payload[bucket]:
++                self.assertNotIn("confirmed", entry)
++
++    def test_category_by_root(self) -> None:
++        discovered = self.discover(self.aec_terms)
++        mapping = {Path(item["path"]).name: item["category"] for item in discovered}
++        self.assertEqual(mapping["alloi-ai-operations-audit.md"], "client_audits")
++        self.assertEqual(mapping["marketing-intelligence-v3.md"], "positioning_docs")
++        self.assertEqual(mapping["aec-indicator-framework.md"], "research_docs")
++        self.assertEqual(mapping["2026-07-16-aec-firm-notes.md"], "memory_refs")
++
++    def test_version_parse(self) -> None:
++        discovered = self.discover(self.aec_terms)
++        mapping = {Path(item["path"]).name: item for item in discovered}
++        self.assertEqual(mapping["marketing-intelligence-v3.md"]["version"], 3)
++        self.assertIsNone(mapping["aec-indicator-framework.md"]["version"])
++
++    def test_no_hardcoded_client_paths(self) -> None:
++        source = (ROOT / "scripts" / "discover_internal.py").read_text(encoding="utf-8").lower()
++        for needle in ("alloi", "marcos", "msia", "ocg", "marketing-intelligence-v3"):
++            self.assertNotIn(needle, source)
++
++    def test_second_vertical_same_code(self) -> None:
++        terms = MODULE.build_terms(
++            "nonprofit",
++            "Nonprofit",
++            [],
++            ["donor", "grant", "fundraising", "501c3"],
++        )
++        discovered = self.discover(terms)
++        top = max(discovered, key=lambda item: int(item["score"]))
++        self.assertEqual(Path(top["path"]).name, "nonprofit-donor-audit.md")
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/tests/test_registry_ref.py b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/tests/test_registry_ref.py
+new file mode 100644
+index 0000000..e08360d
+--- /dev/null
++++ b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/tests/test_registry_ref.py
+@@ -0,0 +1,188 @@
++from __future__ import annotations
++
++import json
++import os
++import subprocess
++import sys
++import tempfile
++import unittest
++import unittest.mock
++from datetime import datetime, timedelta, timezone
++from pathlib import Path
++
++
++ROOT = Path(__file__).resolve().parent.parent
++if str(ROOT) not in sys.path:
++    sys.path.insert(0, str(ROOT))
++
++from scripts import registry_ref as MODULE
++
++
++class RegistryRefTests(unittest.TestCase):
++    def write_registry(self, root: str, payload: dict[str, object]) -> Path:
++        path = Path(root) / "registry" / "aec.json"
++        path.parent.mkdir(parents=True, exist_ok=True)
++        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
++        return path
++
++    def make_registry(
++        self,
++        *,
++        last_checked: str | None,
++        updated_at: str | None,
++    ) -> dict[str, object]:
++        return {
++            "vertical": "aec",
++            "notebook_id": "nb-aec",
++            "framework_doc": "/tmp/aec-indicator-framework.md",
++            "updated_at": updated_at,
++            "sources": [
++                {
++                    "id": "src_aec",
++                    "url": "https://example.com/aec",
++                    "last_checked": last_checked,
++                }
++            ],
++        }
++
++    def test_read_registry_ref_readonly(self) -> None:
++        with tempfile.TemporaryDirectory() as tmp:
++            path = self.write_registry(
++                tmp,
++                self.make_registry(
++                    last_checked="2026-07-18T10:00:00Z",
++                    updated_at="2026-07-18T10:00:00Z",
++                ),
++            )
++            before_bytes = path.read_bytes()
++            before_mtime = path.stat().st_mtime_ns
++            with unittest.mock.patch.dict(os.environ, {"PULSE_STATE_DIR": tmp}, clear=False):
++                ref = MODULE.read_registry_ref("aec")
++            self.assertEqual(path.read_bytes(), before_bytes)
++            self.assertEqual(path.stat().st_mtime_ns, before_mtime)
++            self.assertEqual(ref["registry_path"], str(path.resolve()))
++            self.assertEqual(ref["notebook_id"], "nb-aec")
++            self.assertEqual(ref["source_count"], 1)
++
++    def test_freshness_fresh(self) -> None:
++        now = datetime(2026, 7, 18, 18, 0, tzinfo=timezone.utc)
++        recent = (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
++        with tempfile.TemporaryDirectory() as tmp:
++            self.write_registry(tmp, self.make_registry(last_checked=recent, updated_at=recent))
++            with unittest.mock.patch.dict(os.environ, {"PULSE_STATE_DIR": tmp}, clear=False):
++                freshness = MODULE.compute_freshness("aec", now=now)
++            self.assertFalse(freshness["is_stale"])
++            self.assertLess(float(freshness["age_hours"]), 2.0)
++
++    def test_freshness_stale_by_last_checked(self) -> None:
++        now = datetime(2026, 7, 18, 18, 0, tzinfo=timezone.utc)
++        with tempfile.TemporaryDirectory() as tmp:
++            self.write_registry(tmp, self.make_registry(last_checked="2026-01-01T00:00:00Z", updated_at="2026-07-01T00:00:00Z"))
++            with unittest.mock.patch.dict(os.environ, {"PULSE_STATE_DIR": tmp}, clear=False):
++                freshness = MODULE.compute_freshness("aec", now=now)
++            self.assertTrue(freshness["is_stale"])
++
++    def test_freshness_updated_at_fallback(self) -> None:
++        now = datetime(2026, 7, 18, 18, 0, tzinfo=timezone.utc)
++        with tempfile.TemporaryDirectory() as tmp:
++            recent = (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
++            self.write_registry(tmp, self.make_registry(last_checked=None, updated_at=recent))
++            with unittest.mock.patch.dict(os.environ, {"PULSE_STATE_DIR": tmp}, clear=False):
++                fresh = MODULE.compute_freshness("aec", now=now)
++            self.assertFalse(fresh["is_stale"])
++
++        with tempfile.TemporaryDirectory() as tmp:
++            self.write_registry(tmp, self.make_registry(last_checked=None, updated_at="2026-01-01T00:00:00Z"))
++            with unittest.mock.patch.dict(os.environ, {"PULSE_STATE_DIR": tmp}, clear=False):
++                stale = MODULE.compute_freshness("aec", now=now)
++            self.assertTrue(stale["is_stale"])
++
++    def test_freshness_no_signal_is_stale(self) -> None:
++        with tempfile.TemporaryDirectory() as tmp:
++            self.write_registry(tmp, self.make_registry(last_checked=None, updated_at=None))
++            with unittest.mock.patch.dict(os.environ, {"PULSE_STATE_DIR": tmp}, clear=False):
++                freshness = MODULE.compute_freshness("aec")
++            self.assertTrue(freshness["is_stale"])
++            self.assertIsNone(freshness["age_hours"])
++
++    def test_build_delta_command_exact(self) -> None:
++        command = MODULE.build_delta_command("aec")
++        self.assertEqual(command, "python3 .claude/skills/research-pulse/scripts/delta_check.py --vertical aec")
++        with tempfile.TemporaryDirectory() as tmp:
++            self.write_registry(tmp, self.make_registry(last_checked=None, updated_at=None))
++            with unittest.mock.patch.dict(os.environ, {"PULSE_STATE_DIR": tmp}, clear=False):
++                freshness = MODULE.compute_freshness("aec")
++            self.assertEqual(freshness["delta_refresh_command"], command)
++            self.assertEqual(freshness["delta_cron_name"], "research-pulse-delta")
++
++    def test_request_delta_refresh_announce_only(self) -> None:
++        with tempfile.TemporaryDirectory() as tmp:
++            with unittest.mock.patch.object(MODULE.subprocess, "run") as mocked:
++                result = MODULE.request_delta_refresh("aec", agent_home=tmp, run=False)
++            mocked.assert_not_called()
++            self.assertTrue(result["requested"])
++            self.assertFalse(result["ran"])
++
++    def test_request_delta_refresh_runs(self) -> None:
++        with tempfile.TemporaryDirectory() as tmp:
++            script = Path(tmp) / MODULE.DELTA_SCRIPT_REL
++            script.parent.mkdir(parents=True, exist_ok=True)
++            script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
++            completed = subprocess.CompletedProcess(
++                [sys.executable, str(script), "--vertical", "aec"],
++                0,
++                stdout=json.dumps({"updated": 1}),
++                stderr="",
++            )
++            with unittest.mock.patch.object(MODULE.subprocess, "run", return_value=completed) as mocked:
++                result = MODULE.request_delta_refresh("aec", agent_home=tmp, run=True)
++            mocked.assert_called_once()
++            args, kwargs = mocked.call_args
++            self.assertEqual(args[0], [sys.executable, str(script.resolve()), "--vertical", "aec"])
++            self.assertEqual(kwargs["cwd"], Path(tmp).resolve())
++            self.assertEqual(result["summary"], {"updated": 1})
++
++    def test_request_delta_refresh_script_missing(self) -> None:
++        with tempfile.TemporaryDirectory() as tmp:
++            result = MODULE.request_delta_refresh("aec", agent_home=tmp, run=True)
++            self.assertFalse(result["ran"])
++            self.assertEqual(result["reason"], "delta_script_missing")
++
++    def test_refresh_if_stale_announced_when_run_false(self) -> None:
++        with tempfile.TemporaryDirectory() as tmp:
++            self.write_registry(tmp, self.make_registry(last_checked="2026-01-01T00:00:00Z", updated_at="2026-01-01T00:00:00Z"))
++            with unittest.mock.patch.dict(os.environ, {"PULSE_STATE_DIR": tmp}, clear=False):
++                result = MODULE.refresh_if_stale("aec", run=False)
++            self.assertEqual(result["action"], "announced")
++            self.assertTrue(result["freshness"]["delta_refresh_requested"])
++
++    def test_refresh_if_stale_refreshed_when_run_true(self) -> None:
++        stale = {
++            "checked_at": "2026-07-18T18:00:00Z",
++            "registry_updated_at": "2026-01-01T00:00:00Z",
++            "most_recent_last_checked": "2026-01-01T00:00:00Z",
++            "age_hours": 100.0,
++            "stale_threshold_hours": 18.0,
++            "is_stale": True,
++            "delta_refresh_requested": False,
++            "delta_refresh_command": MODULE.build_delta_command("aec"),
++            "delta_cron_name": MODULE.DELTA_CRON_NAME,
++        }
++        fresh = dict(stale, is_stale=False, age_hours=1.0)
++        request = {
++            "requested": True,
++            "ran": True,
++            "returncode": 0,
++            "command": MODULE.build_delta_command("aec"),
++            "summary": {"updated": 1},
++            "cron_name": MODULE.DELTA_CRON_NAME,
++        }
++        with unittest.mock.patch.object(MODULE, "compute_freshness", side_effect=[stale, fresh]):
++            with unittest.mock.patch.object(MODULE, "request_delta_refresh", return_value=request):
++                result = MODULE.refresh_if_stale("aec", run=True)
++        self.assertEqual(result["action"], "refreshed")
++        self.assertTrue(result["freshness"]["delta_refresh_requested"])
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/tests/test_resource_map.py b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/tests/test_resource_map.py
+new file mode 100644
+index 0000000..8b3d989
+--- /dev/null
++++ b/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/industry-resource-map/tests/test_resource_map.py
+@@ -0,0 +1,181 @@
++from __future__ import annotations
++
++import os
++import sys
++import tempfile
++import unittest
++import unittest.mock
++from pathlib import Path
++
++
++ROOT = Path(__file__).resolve().parent.parent
++if str(ROOT) not in sys.path:
++    sys.path.insert(0, str(ROOT))
++
++from scripts import resource_map as MODULE
++
++
++class ResourceMapTests(unittest.TestCase):
++    def make_entry(
++        self,
++        title: str,
++        path: str,
++        *,
++        score: int = 5,
++        matched_terms: list[str] | None = None,
++        version: int | None = None,
++    ) -> dict[str, object]:
++        entry: dict[str, object] = {
++            "title": title,
++            "path": path,
++            "matched_terms": matched_terms or ["aec"],
++            "score": score,
++            "confirmed": True,
++        }
++        if version is not None:
++            entry["version"] = version
++        return entry
++
++    def test_new_manifest_schema_valid(self) -> None:
++        manifest = MODULE.new_manifest("aec", "AEC")
++        self.assertEqual(MODULE.validate_manifest(manifest), [])
++        self.assertEqual(manifest["internal"]["tooling"], {})
++        self.assertEqual(manifest["internal"]["client_audits"], [])
++        self.assertEqual(manifest["generated_at"], manifest["updated_at"])
++
++    def test_validate_rejects_bad_schema_version(self) -> None:
++        manifest = MODULE.new_manifest("aec", "AEC")
++        manifest["schema_version"] = 2
++        self.assertTrue(any("schema_version" in error for error in MODULE.validate_manifest(manifest)))
++
++    def test_validate_rejects_non_slug_vertical(self) -> None:
++        manifest = MODULE.new_manifest("aec", "AEC")
++        manifest["vertical"] = "AEC"
++        self.assertTrue(any("normalized slug" in error for error in MODULE.validate_manifest(manifest)))
++
++    def test_validate_rejects_unknown_internal_key(self) -> None:
++        manifest = MODULE.new_manifest("aec", "AEC")
++        manifest["internal"]["mystery"] = []
++        self.assertTrue(any("unknown key" in error for error in MODULE.validate_manifest(manifest)))
++
++    def test_validate_rejects_unconfirmed_entry(self) -> None:
++        manifest = MODULE.new_manifest("aec", "AEC")
++        manifest["internal"]["client_audits"].append({
++            "id": "aud_bad",
++            "title": "Bad",
++            "path": "/tmp/bad.md",
++            "matched_terms": ["aec"],
++            "score": 5,
++            "confirmed": False,
++        })
++        errors = MODULE.validate_manifest(manifest)
++        self.assertTrue(any("unconfirmed entry may not be persisted" in error for error in errors), errors)
++        with tempfile.TemporaryDirectory() as tmp:
++            with unittest.mock.patch.dict(os.environ, {"RESOURCE_MAP_STATE_DIR": tmp}, clear=False):
++                with self.assertRaises(ValueError):
++                    MODULE.save_manifest(manifest)
++
++    def test_add_internal_entry_refuses_unconfirmed(self) -> None:
++        manifest = MODULE.new_manifest("aec", "AEC")
++        with self.assertRaises(ValueError):
++            MODULE.add_internal_entry(
++                manifest,
++                "client_audits",
++                {
++                    "title": "Bad",
++                    "path": "/tmp/bad.md",
++                    "matched_terms": ["aec"],
++                    "score": 2,
++                    "confirmed": False,
++                },
++            )
++
++    def test_add_internal_entry_id_collision_suffix(self) -> None:
++        manifest = MODULE.new_manifest("aec", "AEC")
++        one = MODULE.add_internal_entry(
++            manifest,
++            "client_audits",
++            self.make_entry("AEC Audit", "/tmp/audit-1.md"),
++        )
++        two = MODULE.add_internal_entry(
++            manifest,
++            "client_audits",
++            self.make_entry("AEC Audit", "/tmp/audit-2.md"),
++        )
++        self.assertEqual(one["id"], "aud_aec-audit")
++        self.assertEqual(two["id"], "aud_aec-audit-2")
++
++    def test_save_load_roundtrip(self) -> None:
++        with tempfile.TemporaryDirectory() as tmp:
++            with unittest.mock.patch.dict(os.environ, {"RESOURCE_MAP_STATE_DIR": tmp}, clear=False):
++                manifest = MODULE.new_manifest("aec", "AEC")
++                path = MODULE.save_manifest(manifest)
++                loaded = MODULE.load_manifest("aec")
++                self.assertEqual(path, MODULE.manifest_path("aec"))
++                self.assertEqual(loaded, manifest)
++                leftovers = sorted(p.name for p in Path(tmp).iterdir())
++                self.assertEqual(leftovers, ["aec.json", "aec.md"])
++
++    def test_md_twin_rendered(self) -> None:
++        with tempfile.TemporaryDirectory() as tmp:
++            with unittest.mock.patch.dict(os.environ, {"RESOURCE_MAP_STATE_DIR": tmp}, clear=False):
++                manifest = MODULE.new_manifest("aec", "AEC")
++                MODULE.set_external(
++                    manifest,
++                    registry_path="/tmp/pulse/aec.json",
++                    notebook_id="nb-123",
++                    framework_doc="/tmp/framework.md",
++                    source_count=14,
++                    registry_updated_at="2026-07-18T13:15:24Z",
++                )
++                manifest["external"]["freshness"] = {
++                    "is_stale": False,
++                    "age_hours": 1.2,
++                    "stale_threshold_hours": 18.0,
++                }
++                MODULE.add_notebook(
++                    manifest,
++                    title="Research Pulse: AEC",
++                    notebook_id="nb-123",
++                    url="https://notebooklm.google.com/notebook/nb-123",
++                    confirmed=True,
++                )
++                MODULE.compute_gaps(manifest)
++                MODULE.save_manifest(manifest)
++                md_path = MODULE.manifest_md_path("aec")
++                text = md_path.read_text(encoding="utf-8")
++                self.assertIn("## Client Audits", text)
++                self.assertIn("## Gaps", text)
++                self.assertIn("https://notebooklm.google.com/notebook/nb-123", text)
++                self.assertIn("Freshness: fresh", text)
++                self.assertIn("_none_", text)
++
++    def test_positioning_latest_highest_version(self) -> None:
++        manifest = MODULE.new_manifest("aec", "AEC")
++        MODULE.add_internal_entry(
++            manifest,
++            "positioning_docs",
++            self.make_entry("Marketing Intelligence V2", "/tmp/v2.md", version=2),
++        )
++        MODULE.add_internal_entry(
++            manifest,
++            "positioning_docs",
++            self.make_entry("Marketing Intelligence V3", "/tmp/v3.md", version=3),
++        )
++        docs = manifest["internal"]["positioning_docs"]
++        self.assertEqual([entry.get("latest") for entry in docs], [False, True])
++        self.assertEqual(MODULE.validate_manifest(manifest), [])
++
++        docs[0]["latest"] = True
++        self.assertTrue(any("at most one latest" in error for error in MODULE.validate_manifest(manifest)))
++
++    def test_compute_gaps(self) -> None:
++        manifest = MODULE.new_manifest("aec", "AEC")
++        gaps = MODULE.compute_gaps(manifest)
++        self.assertIn("no confirmed client_audits", gaps)
++        self.assertIn("no confirmed live_search", gaps)
++        self.assertIn("external freshness not checked", gaps)
++
++
++if __name__ == "__main__":
++    unittest.main()

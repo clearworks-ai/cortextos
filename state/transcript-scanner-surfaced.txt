@@ -1,0 +1,4 @@
+transcript-scanner:run:1784406959 status=no_new_transcripts
+transcript-scanner:run:1784428640 status=no_new_transcripts
+transcript-scanner:run:1784435842 status=no_new_transcripts
+transcript-scanner:run:1784443048 status=no_new_transcripts

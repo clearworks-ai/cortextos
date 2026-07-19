@@ -1,0 +1,12 @@
+diff --git a/src/types/index.ts b/src/types/index.ts
+index ff7471a..352b774 100644
+--- a/src/types/index.ts
++++ b/src/types/index.ts
+@@ -85,6 +85,7 @@ export type EventCategory =
+   | 'message'
+   | 'task'
+   | 'approval'
++  | 'experiment'
+   | 'agent_activity';
+ 
+ export type EventSeverity = 'info' | 'warning' | 'error' | 'critical';

@@ -1,0 +1,16 @@
+TRUE-VERIFY — add-kimi-k3-planner
+Date: 2026-07-18T18:47Z  Runner: larry (evidence-based)
+
+ARTIFACT RUN LIVE:
+1. npm run build  -> "Build success in 335ms" (CJS dist emitted, no TS errors).
+2. npx vitest run tests/unit/workflows/routing-policy.test.ts
+   -> Test Files 1 passed (1) | Tests 13 passed (13). Duration 2.37s.
+
+OBSERVED BEHAVIOR vs SPEC (acceptance):
+- resolvePlannerChoice({PIPELINE_PLANNER:'kimi-k3'}) === 'kimi-k3'  [test: parses PIPELINE_PLANNER]
+- resolveStageRoute(defaults,'plan',{plannerChoice:'kimi-k3'}) -> {provider:'openrouter', model:'moonshotai/kimi-k3', dispatch:'opencode', fallback:'opus', on429:'opus', requiresConfirmation:false}  [test: routes plan to kimi-k3 openrouter engine]
+- confirmFableUse NOT consulted for kimi-k3  [test: does not consult confirmFableUse]
+- fable/opus paths unchanged (existing suite green) -> back-compat proven.
+
+VERDICT: PASS. Behavior matches spec on real execution. Adversarial review PASS (05-review.md).
+CAVEAT (not blocking this PR): kimi-k3 tool/function-call structured output must be staging-smoke-tested before it is USED to plan a real build (OpenRouter tool-calling implied not guaranteed). This PR only wires the option; it does not run a kimi-k3-planned build.

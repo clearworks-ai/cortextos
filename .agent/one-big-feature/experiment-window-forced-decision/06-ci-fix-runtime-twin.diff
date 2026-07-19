@@ -1,0 +1,25 @@
+diff --git a/src/types/index.ts b/src/types/index.ts
+index ff7471a..352b774 100644
+--- a/src/types/index.ts
++++ b/src/types/index.ts
+@@ -85,6 +85,7 @@ export type EventCategory =
+   | 'message'
+   | 'task'
+   | 'approval'
++  | 'experiment'
+   | 'agent_activity';
+ 
+ export type EventSeverity = 'info' | 'warning' | 'error' | 'critical';
+diff --git a/src/utils/validate.ts b/src/utils/validate.ts
+index 9fb3bf0..eac5014 100644
+--- a/src/utils/validate.ts
++++ b/src/utils/validate.ts
+@@ -49,7 +49,7 @@ export function validatePriority(priority: string): asserts priority is Priority
+ }
+ 
+ const VALID_CATEGORIES: EventCategory[] = [
+-  'action', 'error', 'metric', 'milestone', 'heartbeat', 'message', 'task', 'approval', 'agent_activity',
++  'action', 'error', 'metric', 'milestone', 'heartbeat', 'message', 'task', 'approval', 'agent_activity', 'experiment',
+ ];
+ 
+ export function validateEventCategory(category: string): asserts category is EventCategory {

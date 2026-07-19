@@ -1,0 +1,64 @@
+TRUE-VERIFY EVIDENCE — comms-telegram-delivery-assert
+Repo root: /Users/joshweiss/code/cortextos
+Date: 2026-07-18 (reviewer: architect / Opus)
+
+============================================================
+1) UNIT TEST
+   $ npx vitest run tests/unit/hooks/assert-telegram-delivery.test.ts
+------------------------------------------------------------
+ RUN  v4.1.2 /Users/joshweiss/code/cortextos
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  14:35:25
+   Duration  157ms
+
+RESULT: 6 passed / 6 total. Exit 0.
+
+============================================================
+2) BUILD
+   $ npm run build
+------------------------------------------------------------
+CJS  Build success in 55ms
+BUILD_EXIT=0
+
+RESULT: clean build, exit 0.
+
+============================================================
+3) BASH SYNTAX CHECK
+   $ bash -n orgs/clearworksai/agents/frank2/.claude/hooks/assert-telegram-delivery.sh
+------------------------------------------------------------
+BASH_SYNTAX_OK exit=0
+File perms: -rwx------  (executable bit set)
+
+RESULT: syntax OK, exit 0.
+
+============================================================
+4) SETTINGS.JSON WIRING
+   $ python3 -c "json.load(...)" ; inspect hooks.Stop[0].hooks
+------------------------------------------------------------
+settings.json VALID JSON
+Stop group hook count: 3
+ - cortextos bus hook-idle-flag
+ - .../frank2/.claude/hooks/gate-pipeline-stop.sh
+ - .../frank2/.claude/hooks/assert-telegram-delivery.sh
+
+RESULT: valid JSON, hook is 3rd entry, existing entries intact.
+
+============================================================
+5) ADVERSARIAL PROBES (live hook, hand-built transcripts)
+------------------------------------------------------------
+LAST-USER-NOT-TG (TG inbound early, normal msg is last user) -> stdout=[]  (allow)  PASS
+WHITESPACE-ONLY assistant text                               -> stdout=[]  (allow)  PASS
+MALFORMED-JSON transcript line                               -> stdout=[]  (allow)  PASS
+TRUE POSITIVE (TG inbound + text, no send)                   -> valid JSON, decision=block, reason_len=579  PASS
+TEXT literally says "send-telegram" but no Bash call         -> blocks (stdout non-empty)  PASS
+
+============================================================
+6) TEST HYGIENE
+   $ grep -nE "console.log|: any|<any>" tests/unit/hooks/assert-telegram-delivery.test.ts
+------------------------------------------------------------
+NONE FOUND
+
+============================================================
+OVERALL: PASS

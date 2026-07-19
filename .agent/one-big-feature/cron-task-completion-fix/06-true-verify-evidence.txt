@@ -1,0 +1,38 @@
+TRUE-VERIFY EVIDENCE — cron-task-completion-fix
+Runner: opus (larry main thread), 2026-07-19
+
+Independently executed against the real repo + live runtime state (not trusting codexer or the review subagents):
+
+1. TYPECHECK
+   $ npm run typecheck  (tsc --noEmit)
+   -> PASS, clean.
+
+2. TARGETED TESTS
+   $ npx vitest run tests/unit/utils/cron-prompt-validator.test.ts tests/unit/scripts/migrate-cron-task-leak.test.ts
+   -> 2 files passed, 14/14 tests passed.
+
+3. LIVE DRY-RUN (both ~/.cortextos roots)
+   $ npx tsx scripts/migrate-cron-task-leak.ts
+   -> Summary: filesScanned=30 leaksFound=108 stripped=105 manualReview=3
+   -> 3 manual-review residues: larry/uptime-check, muse/fleet-activity-intel, hunter/pipeline-scan
+   -> exit code 1 (nonzero because manualReview>0, as designed)
+   -> NO files written (dry-run), confirmed.
+
+4. ON-DISK FILE LOCATIONS
+   -> scripts/migrate-cron-task-leak.ts, tests/unit/scripts/migrate-cron-task-leak.test.ts,
+      src/utils/cron-prompt-validator.ts, tests/unit/utils/cron-prompt-validator.test.ts all at correct repo-relative paths.
+   -> no stray Users/ nested dir (diff packet had cosmetic absolute-path hunks for 2 new files; real files landed correctly).
+
+5. CODE QUALITY
+   -> no `any`; no console.log (CLI output via process.stdout/stderr.write); type guards isCronRecord/isCronsEnvelope; atomic write + .bak rollback.
+
+6. THREE INDEPENDENT ADVERSARIAL REVIEWS (architect/Opus subagents) all returned PASS.
+   Refined deploy-order finding (verified against call graph): a cron FIRE routes through updateCronFire (writes cron-state only, no validation), NOT writeCrons/validateCronsPrompt. So shipping the validator before the sweep does NOT auto-break 108 crons on next fire; only an explicit add/update/remove-cron or a --force re-migration against a still-leaky agent would be rejected. Deploy-order is therefore a costless sequencing PREFERENCE, not an emergency coupling.
+
+DEPLOY RUNBOOK (Josh-approval merge; --apply is a live fleet-state mutation, hold for Josh):
+  (1) hand-fix the 3 manual-review residue prompts (larry/uptime-check, muse/fleet-activity-intel, hunter/pipeline-scan)
+  (2) npx tsx scripts/migrate-cron-task-leak.ts --apply   (writes atomic + .bak on both roots)
+  (3) re-run dry-run, confirm Summary reports 0 leaks
+  (4) merge PR / restart daemon
+
+VERDICT: PASS. Ready for PR (Josh approves merge; --apply held for Josh).

@@ -1,0 +1,706 @@
+diff --git a/src/utils/cron-prompt-validator.ts b/src/utils/cron-prompt-validator.ts
+index 17e425c..0ce7647 100644
+--- a/src/utils/cron-prompt-validator.ts
++++ b/src/utils/cron-prompt-validator.ts
+@@ -5,6 +5,7 @@ import type { CronDefinition } from '../types/index.js';
+ export interface BannedCronPromptPattern {
+   id: string;
+   re: RegExp;
++  hint?: string;
+ }
+ 
+ interface OverlayPatternEntry {
+@@ -18,10 +19,25 @@ export interface BannedCronPromptMatch {
+   patternId: string;
+ }
+ 
++export const CRON_TASK_LEAK_PATTERN_ID = 'cron-task-leak-no-complete';
++
++const CRON_TASK_LEAK_RE =
++  /^(?=[\s\S]*\bcreate-task\b)(?=[\s\S]*\bupdate-task\b[\s\S]{0,120}\bin_progress\b)(?![\s\S]*\bcomplete-task\b)/;
++
+ export const BANNED_CRON_PROMPT_PATTERNS: readonly BannedCronPromptPattern[] = [
+   {
+     id: 'full-human-task-list-telegram',
+     re: /send\b[\s\S]{0,40}\b(full|entire|all|complete)\b[\s\S]{0,40}\b(human\s+)?task\s+list\b[\s\S]{0,40}\btelegram\b/i,
++    hint: 'This prompt was blocked to prevent a known Telegram-spam recurrence.',
++  },
++  {
++    id: CRON_TASK_LEAK_PATTERN_ID,
++    re: CRON_TASK_LEAK_RE,
++    hint:
++      'Cron prompts must not create a bus task and mark it in_progress without a ' +
++      'complete-task in the same prompt — that leaks tasks stuck in_progress. ' +
++      'Drop the task bookkeeping (update-cron-fire + log-event already record the fire) ' +
++      'or complete the task in the same prompt.',
+   },
+ ] as const;
+ 
+@@ -100,15 +116,23 @@ export function findBannedCronPrompts(crons: CronDefinition[]): BannedCronPrompt
+   return matches;
+ }
+ 
++export function isCronTaskLeakPrompt(prompt: string): boolean {
++  return CRON_TASK_LEAK_RE.test(prompt);
++}
++
+ export function validateCronsPrompt(crons: CronDefinition[]): void {
+   const [match] = findBannedCronPrompts(crons);
+   if (!match) {
+     return;
+   }
+ 
++  const pattern = allPatterns().find(p => p.id === match.patternId);
++  const hint =
++    pattern?.hint ?? 'This prompt was blocked to prevent a known bad-cron recurrence.';
++
+   throw new Error(
+     `Refusing to write cron "${match.name}": prompt matches banned pattern ` +
+-      `"${match.patternId}". This prompt was blocked to prevent a known Telegram-spam recurrence. ` +
++      `"${match.patternId}". ${hint} ` +
+       `Edit the prompt or update state/cron-banned-patterns.json.`
+   );
+ }
+diff --git a/tests/unit/utils/cron-prompt-validator.test.ts b/tests/unit/utils/cron-prompt-validator.test.ts
+index 7e59ca8..9356d7e 100644
+--- a/tests/unit/utils/cron-prompt-validator.test.ts
++++ b/tests/unit/utils/cron-prompt-validator.test.ts
+@@ -41,6 +41,23 @@ async function importValidator() {
+   return import('../../../src/utils/cron-prompt-validator.js');
+ }
+ 
++const LEAK_PROMPT =
++  'cortextos bus update-cron-fire heartbeat --interval 4h 2>/dev/null; ' +
++  'TASK_ID=$(cortextos bus create-task "Cron: heartbeat" --desc "Scheduled cron run" 2>/dev/null); ' +
++  'cortextos bus update-task $TASK_ID in_progress 2>/dev/null; ' +
++  'Read HEARTBEAT.md and follow its instructions. Update heartbeat, check inbox, run fleet health check across all 3 repos.';
++
++const COMPLETE_PROMPT =
++  'cortextos bus update-cron-fire usage-audit --interval 1d 2>/dev/null; ' +
++  'TASK_ID=$(cortextos bus create-task "Cron: usage-audit" --desc "Scheduled cron run" 2>/dev/null); ' +
++  'cortextos bus update-task $TASK_ID in_progress 2>/dev/null; ' +
++  'cortextos bus complete-task $TASK_ID 2>/dev/null; Run the usage audit.';
++
++const PASSIVE_PROMPT =
++  'cortextos bus update-cron-fire heartbeat --interval 4h 2>/dev/null; ' +
++  'cortextos bus log-event cron-fired heartbeat 2>/dev/null; ' +
++  'Read HEARTBEAT.md and follow its instructions.';
++
+ describe('cron prompt validator', () => {
+   it('findBannedCronPrompts reports the compiled-in banned prompt floor', async () => {
+     const { findBannedCronPrompts } = await importValidator();
+@@ -84,3 +101,49 @@ describe('cron prompt validator', () => {
+     ).toHaveLength(1);
+   });
+ });
++
++describe('cron task-lifecycle leak pattern', () => {
++  it('rejects a leaky cron prompt and exposes the reusable predicate', async () => {
++    const {
++      CRON_TASK_LEAK_PATTERN_ID,
++      findBannedCronPrompts,
++      isCronTaskLeakPrompt,
++      validateCronsPrompt,
++    } = await importValidator();
++
++    expect(isCronTaskLeakPrompt(LEAK_PROMPT)).toBe(true);
++    expect(() => validateCronsPrompt([makeCron(LEAK_PROMPT)])).toThrow(/cron-task-leak-no-complete/);
++    expect(findBannedCronPrompts([makeCron(LEAK_PROMPT)])).toEqual([
++      {
++        name: 'heartbeat',
++        patternId: CRON_TASK_LEAK_PATTERN_ID,
++      },
++    ]);
++  });
++
++  it('allows create plus complete in the same prompt', async () => {
++    const { findBannedCronPrompts, isCronTaskLeakPrompt, validateCronsPrompt } =
++      await importValidator();
++
++    expect(isCronTaskLeakPrompt(COMPLETE_PROMPT)).toBe(false);
++    expect(() => validateCronsPrompt([makeCron(COMPLETE_PROMPT, 'usage-audit')])).not.toThrow();
++    expect(findBannedCronPrompts([makeCron(COMPLETE_PROMPT, 'usage-audit')])).toEqual([]);
++  });
++
++  it('allows prompts with no task bookkeeping', async () => {
++    const { findBannedCronPrompts, isCronTaskLeakPrompt, validateCronsPrompt } =
++      await importValidator();
++
++    expect(isCronTaskLeakPrompt(PASSIVE_PROMPT)).toBe(false);
++    expect(() => validateCronsPrompt([makeCron(PASSIVE_PROMPT)])).not.toThrow();
++    expect(findBannedCronPrompts([makeCron(PASSIVE_PROMPT)])).toEqual([]);
++  });
++
++  it('keeps the Telegram floor error message unchanged', async () => {
++    const { validateCronsPrompt } = await importValidator();
++
++    expect(() =>
++      validateCronsPrompt([makeCron('Send the full HUMAN task list via Telegram.')])
++    ).toThrow(/known Telegram-spam recurrence/);
++  });
++});
+diff --git a/Users/joshweiss/code/cortextos/scripts/migrate-cron-task-leak.ts b/Users/joshweiss/code/cortextos/scripts/migrate-cron-task-leak.ts
+new file mode 100644
+index 0000000..6f4a6fe
+--- /dev/null
++++ b/Users/joshweiss/code/cortextos/scripts/migrate-cron-task-leak.ts
+@@ -0,0 +1,349 @@
++/**
++ * scripts/migrate-cron-task-leak.ts
++ *
++ * One-shot migration that strips leaky cron task bookkeeping from live
++ * crons.json files across every cortextOS runtime root under ~/.cortextos.
++ *
++ * Behavior:
++ *   - Walk each ~/.cortextos runtime root and inspect
++ *     .cortextOS/state/agents/<agent>/crons.json
++ *   - Detect leaky prompts by reusing isCronTaskLeakPrompt()
++ *   - Strip only the TASK_ID create-task + update-task in_progress segment
++ *   - Default to DRY RUN; write only with --apply
++ *   - Apply writes atomically and keep a .bak rollback file per crons.json
++ */
++import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
++import { join, resolve } from 'path';
++import { homedir } from 'os';
++import type { CronDefinition } from '../src/types/index.js';
++import { atomicWriteSync } from '../src/utils/atomic.js';
++import { isCronTaskLeakPrompt } from '../src/utils/cron-prompt-validator.js';
++
++const DEFAULT_ROOTS_DIR = join(homedir(), '.cortextos');
++const CRONS_DIRECTORY = '.cortextOS/state/agents';
++const CRONS_FILENAME = 'crons.json';
++const BOOKKEEPING_SEGMENT_RE =
++  /\s*TASK_ID=\$\(\s*cortextos bus create-task\s+("[^"]*"|'[^']*')(?:\s+--desc\s+("[^"]*"|'[^']*'))?[^)]*\)\s*;\s*cortextos bus update-task \$TASK_ID in_progress[^;]*(?:;|$)\s*/g;
++
++interface CronRecord extends CronDefinition {
++  name: string;
++  prompt: string;
++}
++
++interface CronsEnvelope {
++  updated_at: string;
++  crons: CronRecord[];
++  [key: string]: unknown;
++}
++
++export interface StripResult {
++  prompt: string;
++  changed: boolean;
++  manualReview: boolean;
++}
++
++export interface MigrationOptions {
++  rootsDir: string;
++  dryRun: boolean;
++}
++
++export interface FileChange {
++  path: string;
++  crons: { name: string; before: string; after: string }[];
++}
++
++export interface MigrationReport {
++  filesScanned: number;
++  leaksFound: number;
++  stripped: number;
++  changes: FileChange[];
++  manualReview: { path: string; cron: string }[];
++}
++
++interface MigrationReportWithParseFailures extends MigrationReport {
++  agentSummaries: AgentSummary[];
++  parseFailures: string[];
++}
++
++interface AgentSummary {
++  agent: string;
++  path: string;
++  leaksFound: number;
++  stripped: number;
++  manualReview: number;
++}
++
++function isDirectory(path: string): boolean {
++  try {
++    return statSync(path).isDirectory();
++  } catch {
++    return false;
++  }
++}
++
++function isFile(path: string): boolean {
++  try {
++    return statSync(path).isFile();
++  } catch {
++    return false;
++  }
++}
++
++function isCronRecord(value: unknown): value is CronRecord {
++  if (value === null || typeof value !== 'object') {
++    return false;
++  }
++
++  const record = value as Record<string, unknown>;
++  return typeof record.name === 'string' && typeof record.prompt === 'string';
++}
++
++function isCronsEnvelope(value: unknown): value is CronsEnvelope {
++  if (value === null || typeof value !== 'object') {
++    return false;
++  }
++
++  const record = value as Record<string, unknown>;
++  return Array.isArray(record.crons) && record.crons.every(isCronRecord);
++}
++
++function extractBookkeepingSegments(prompt: string): string[] {
++  BOOKKEEPING_SEGMENT_RE.lastIndex = 0;
++  const matches = prompt.match(BOOKKEEPING_SEGMENT_RE);
++  BOOKKEEPING_SEGMENT_RE.lastIndex = 0;
++  return matches?.map(match => match.trim()) ?? [];
++}
++
++function agentNameFromCronsPath(path: string): string {
++  const parts = path.split('/').filter(Boolean);
++  return parts.at(-2) ?? path;
++}
++
++function parseCronsEnvelope(path: string): CronsEnvelope | null {
++  let raw: string;
++  try {
++    raw = readFileSync(path, 'utf-8');
++  } catch (error) {
++    process.stderr.write(
++      `[parse-failure] ${path} :: ${error instanceof Error ? error.message : String(error)}\n`
++    );
++    return null;
++  }
++
++  let parsed: unknown;
++  try {
++    parsed = JSON.parse(raw);
++  } catch (error) {
++    process.stderr.write(
++      `[parse-failure] ${path} :: ${error instanceof Error ? error.message : String(error)}\n`
++    );
++    return null;
++  }
++
++  if (!isCronsEnvelope(parsed)) {
++    process.stderr.write(`[parse-failure] ${path} :: unexpected crons.json shape\n`);
++    return null;
++  }
++
++  return parsed;
++}
++
++export function findCronsFiles(rootsDir: string): string[] {
++  const baseDir = resolve(rootsDir);
++  if (!isDirectory(baseDir)) {
++    return [];
++  }
++
++  const files: string[] = [];
++  for (const rootEntry of readdirSync(baseDir)) {
++    const rootPath = join(baseDir, rootEntry);
++    if (!isDirectory(rootPath)) {
++      continue;
++    }
++
++    const agentsDir = join(rootPath, CRONS_DIRECTORY);
++    if (!isDirectory(agentsDir)) {
++      continue;
++    }
++
++    for (const agentEntry of readdirSync(agentsDir)) {
++      const agentDir = join(agentsDir, agentEntry);
++      if (!isDirectory(agentDir)) {
++        continue;
++      }
++
++      const cronsPath = join(agentDir, CRONS_FILENAME);
++      if (existsSync(cronsPath) && isFile(cronsPath)) {
++        files.push(cronsPath);
++      }
++    }
++  }
++
++  return files.sort();
++}
++
++export function stripTaskLeakBookkeeping(prompt: string): StripResult {
++  if (!isCronTaskLeakPrompt(prompt)) {
++    return { prompt, changed: false, manualReview: false };
++  }
++
++  BOOKKEEPING_SEGMENT_RE.lastIndex = 0;
++  const stripped = prompt.replace(BOOKKEEPING_SEGMENT_RE, ' ').replace(/ {2,}/g, ' ').trim();
++  BOOKKEEPING_SEGMENT_RE.lastIndex = 0;
++
++  if (
++    stripped.includes('$TASK_ID') ||
++    stripped.includes('create-task') ||
++    stripped.includes('cortextos bus update-task')
++  ) {
++    return { prompt, changed: false, manualReview: true };
++  }
++
++  return { prompt: stripped, changed: stripped !== prompt, manualReview: false };
++}
++
++export function runMigration(opts: MigrationOptions): MigrationReport {
++  const report: MigrationReportWithParseFailures = {
++    filesScanned: 0,
++    leaksFound: 0,
++    stripped: 0,
++    changes: [],
++    manualReview: [],
++    agentSummaries: [],
++    parseFailures: [],
++  };
++
++  for (const path of findCronsFiles(opts.rootsDir)) {
++    report.filesScanned += 1;
++
++    const envelope = parseCronsEnvelope(path);
++    if (envelope === null) {
++      report.parseFailures.push(path);
++      continue;
++    }
++
++    const nextCrons: CronRecord[] = [];
++    const fileChanges: FileChange['crons'] = [];
++    let fileLeaksFound = 0;
++    let fileStripped = 0;
++    let fileManualReview = 0;
++
++    for (const cron of envelope.crons) {
++      const result = stripTaskLeakBookkeeping(cron.prompt);
++      if (result.changed || result.manualReview) {
++        report.leaksFound += 1;
++        fileLeaksFound += 1;
++      }
++
++      if (result.manualReview) {
++        report.manualReview.push({ path, cron: cron.name });
++        fileManualReview += 1;
++        nextCrons.push(cron);
++        continue;
++      }
++
++      if (result.changed) {
++        report.stripped += 1;
++        fileStripped += 1;
++        fileChanges.push({
++          name: cron.name,
++          before: cron.prompt,
++          after: result.prompt,
++        });
++        nextCrons.push({ ...cron, prompt: result.prompt });
++        continue;
++      }
++
++      nextCrons.push(cron);
++    }
++
++    if (fileLeaksFound > 0) {
++      report.agentSummaries.push({
++        agent: agentNameFromCronsPath(path),
++        path,
++        leaksFound: fileLeaksFound,
++        stripped: fileStripped,
++        manualReview: fileManualReview,
++      });
++    }
++
++    if (fileChanges.length === 0) {
++      continue;
++    }
++
++    report.changes.push({ path, crons: fileChanges });
++    if (!opts.dryRun) {
++      const nextEnvelope: CronsEnvelope = {
++        ...envelope,
++        updated_at: new Date().toISOString(),
++        crons: nextCrons,
++      };
++      atomicWriteSync(path, JSON.stringify(nextEnvelope, null, 2), /* keepBak= */ true);
++    }
++  }
++
++  return report;
++}
++
++function formatChangedCronLine(
++  mode: 'dry-run' | 'apply',
++  path: string,
++  change: FileChange['crons'][number]
++): string {
++  const removed = extractBookkeepingSegments(change.before).join(' | ');
++  return `[${mode}] ${path} :: ${change.name} :: removed ${removed}\n`;
++}
++
++function main(): number {
++  const argv = process.argv.slice(2);
++  const dryRun = !argv.includes('--apply');
++  const rootIndex = argv.indexOf('--root');
++  const rootsDir =
++    rootIndex >= 0 && argv[rootIndex + 1] ? argv[rootIndex + 1] : DEFAULT_ROOTS_DIR;
++  const report = runMigration({ rootsDir, dryRun }) as MigrationReportWithParseFailures;
++  const mode = dryRun ? 'dry-run' : 'apply';
++
++  for (const change of report.changes) {
++    for (const cron of change.crons) {
++      process.stdout.write(formatChangedCronLine(mode, change.path, cron));
++    }
++  }
++
++  for (const review of report.manualReview) {
++    process.stderr.write(`[manual-review] ${review.path} :: ${review.cron}\n`);
++  }
++
++  for (const summary of report.agentSummaries) {
++    process.stdout.write(
++      `[agent-summary] ${summary.agent} :: leaksFound=${summary.leaksFound} ` +
++        `stripped=${summary.stripped} manualReview=${summary.manualReview} :: ${summary.path}\n`
++    );
++  }
++
++  process.stdout.write(
++    `Summary: filesScanned=${report.filesScanned} leaksFound=${report.leaksFound} ` +
++      `stripped=${report.stripped} manualReview=${report.manualReview.length}\n`
++  );
++
++  if (dryRun) {
++    process.stdout.write('Dry run — no files written. Re-run with --apply to write.\n');
++  }
++
++  if (report.parseFailures.length > 0) {
++    process.stderr.write(`Parse failures: ${report.parseFailures.length}\n`);
++  }
++
++  return report.manualReview.length > 0 || report.parseFailures.length > 0 ? 1 : 0;
++}
++
++const isMain = (() => {
++  try {
++    return Boolean(typeof require !== 'undefined' && require.main === module);
++  } catch {
++    return false;
++  }
++})();
++
++if (isMain) {
++  process.exitCode = main();
++}
+diff --git a/Users/joshweiss/code/cortextos/tests/unit/scripts/migrate-cron-task-leak.test.ts b/Users/joshweiss/code/cortextos/tests/unit/scripts/migrate-cron-task-leak.test.ts
+new file mode 100644
+index 0000000..c53b0c6
+--- /dev/null
++++ b/Users/joshweiss/code/cortextos/tests/unit/scripts/migrate-cron-task-leak.test.ts
+@@ -0,0 +1,204 @@
++import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import {
++  existsSync,
++  mkdtempSync,
++  mkdirSync,
++  readFileSync,
++  rmSync,
++  writeFileSync,
++} from 'fs';
++import { join } from 'path';
++import { tmpdir } from 'os';
++import {
++  findCronsFiles,
++  runMigration,
++  stripTaskLeakBookkeeping,
++} from '../../../scripts/migrate-cron-task-leak';
++
++const HEARTBEAT_LEAK_PROMPT =
++  'cortextos bus update-cron-fire heartbeat --interval 4h 2>/dev/null; ' +
++  'TASK_ID=$(cortextos bus create-task "Cron: heartbeat" --desc "Scheduled cron run" 2>/dev/null); ' +
++  'cortextos bus update-task $TASK_ID in_progress 2>/dev/null; ' +
++  'Read HEARTBEAT.md and follow its instructions. Update heartbeat, check inbox, run fleet health check across all 3 repos.';
++
++const HEARTBEAT_STRIPPED_PROMPT =
++  'cortextos bus update-cron-fire heartbeat --interval 4h 2>/dev/null; ' +
++  'Read HEARTBEAT.md and follow its instructions. Update heartbeat, check inbox, run fleet health check across all 3 repos.';
++
++const NEWS_LEAK_PROMPT =
++  "cortextos bus update-cron-fire news-intelligence --interval 1d 2>/dev/null; " +
++  "TASK_ID=$(cortextos bus create-task 'Cron: news-intelligence' --desc 'Daily ICP-relevant news digest' 2>/dev/null); " +
++  'cortextos bus update-task $TASK_ID in_progress 2>/dev/null; ' +
++  'Scan the latest ICP-relevant news and write the digest.';
++
++const USAGE_AUDIT_PROMPT =
++  'cortextos bus update-cron-fire usage-audit --interval 1d 2>/dev/null; ' +
++  'TASK_ID=$(cortextos bus create-task "Cron: usage-audit" --desc "Scheduled cron run" 2>/dev/null); ' +
++  'cortextos bus update-task $TASK_ID in_progress 2>/dev/null; ' +
++  'cortextos bus complete-task $TASK_ID 2>/dev/null; Run the usage audit.';
++
++const PASSIVE_PROMPT =
++  'cortextos bus update-cron-fire passive --interval 4h 2>/dev/null; ' +
++  'cortextos bus log-event cron-fired passive 2>/dev/null; ' +
++  'Read HEARTBEAT.md and follow its instructions.';
++
++describe('migrate-cron-task-leak', () => {
++  let root: string;
++
++  beforeEach(() => {
++    root = mkdtempSync(join(tmpdir(), 'cron-task-leak-'));
++  });
++
++  afterEach(() => {
++    rmSync(root, { recursive: true, force: true });
++  });
++
++  function seed(sub: string, agent: string, crons: Array<Record<string, unknown>>) {
++    const dir = join(root, sub, '.cortextOS', 'state', 'agents', agent);
++    mkdirSync(dir, { recursive: true });
++    const path = join(dir, 'crons.json');
++    writeFileSync(
++      path,
++      JSON.stringify(
++        {
++          updated_at: '2026-07-19T05:00:00.000Z',
++          crons,
++        },
++        null,
++        2
++      ) + '\n',
++      'utf-8'
++    );
++    return path;
++  }
++
++  function readCrons(path: string) {
++    return JSON.parse(readFileSync(path, 'utf-8')) as {
++      updated_at: string;
++      crons: Array<Record<string, unknown>>;
++    };
++  }
++
++  function makeCron(
++    name: string,
++    prompt: string,
++    extras: Record<string, unknown> = {}
++  ): Record<string, unknown> {
++    return {
++      name,
++      prompt,
++      schedule: '4h',
++      enabled: true,
++      created_at: '2026-07-19T05:00:00.000Z',
++      ...extras,
++    };
++  }
++
++  it('strips leaky prompts and preserves the rest', () => {
++    const path = seed('cortextos1', 'larry', [
++      makeCron('heartbeat', HEARTBEAT_LEAK_PROMPT),
++      makeCron('news-intelligence', NEWS_LEAK_PROMPT),
++      makeCron('usage-audit', USAGE_AUDIT_PROMPT),
++      makeCron('passive', PASSIVE_PROMPT),
++    ]);
++
++    const report = runMigration({ rootsDir: root, dryRun: false });
++    const envelope = readCrons(path);
++    const prompts = new Map(
++      envelope.crons.map(cron => [String(cron.name), String(cron.prompt)])
++    );
++
++    expect(prompts.get('heartbeat')).toBe(HEARTBEAT_STRIPPED_PROMPT);
++    expect(prompts.get('news-intelligence')).not.toContain('TASK_ID');
++    expect(prompts.get('news-intelligence')).not.toContain('create-task');
++    expect(prompts.get('news-intelligence')).not.toContain('in_progress');
++    expect(prompts.get('usage-audit')).toBe(USAGE_AUDIT_PROMPT);
++    expect(prompts.get('passive')).toBe(PASSIVE_PROMPT);
++    expect(report.leaksFound).toBe(2);
++    expect(report.stripped).toBe(2);
++  });
++
++  it('dry-run writes nothing', () => {
++    const path = seed('cortextos1', 'larry', [
++      makeCron('heartbeat', HEARTBEAT_LEAK_PROMPT),
++      makeCron('news-intelligence', NEWS_LEAK_PROMPT),
++    ]);
++    const before = readFileSync(path, 'utf-8');
++
++    const report = runMigration({ rootsDir: root, dryRun: true });
++
++    expect(report.leaksFound).toBe(2);
++    expect(report.stripped).toBe(2);
++    expect(readFileSync(path, 'utf-8')).toBe(before);
++    expect(existsSync(path + '.bak')).toBe(false);
++  });
++
++  it('is idempotent across repeated apply runs', () => {
++    const path = seed('cortextos1', 'larry', [makeCron('heartbeat', HEARTBEAT_LEAK_PROMPT)]);
++
++    const first = runMigration({ rootsDir: root, dryRun: false });
++    expect(first.leaksFound).toBe(1);
++    expect(first.stripped).toBe(1);
++    const afterFirst = readFileSync(path, 'utf-8');
++
++    const second = runMigration({ rootsDir: root, dryRun: false });
++    expect(second.leaksFound).toBe(0);
++    expect(second.stripped).toBe(0);
++    expect(readFileSync(path, 'utf-8')).toBe(afterFirst);
++  });
++
++  it('writes a backup file on apply', () => {
++    const path = seed('cortextos1', 'larry', [makeCron('heartbeat', HEARTBEAT_LEAK_PROMPT)]);
++
++    runMigration({ rootsDir: root, dryRun: false });
++
++    const backup = JSON.parse(readFileSync(path + '.bak', 'utf-8')) as {
++      crons: Array<Record<string, unknown>>;
++    };
++    expect(backup.crons[0]?.prompt).toBe(HEARTBEAT_LEAK_PROMPT);
++  });
++
++  it('preserves non-prompt cron fields', () => {
++    const path = seed('cortextos1', 'larry', [
++      makeCron('heartbeat', HEARTBEAT_LEAK_PROMPT, {
++        schedule: '6h',
++        enabled: false,
++        created_at: '2026-07-19T04:00:00.000Z',
++      }),
++    ]);
++
++    runMigration({ rootsDir: root, dryRun: false });
++
++    const heartbeat = readCrons(path).crons[0] ?? {};
++    expect(heartbeat.schedule).toBe('6h');
++    expect(heartbeat.enabled).toBe(false);
++    expect(heartbeat.created_at).toBe('2026-07-19T04:00:00.000Z');
++    expect(heartbeat.prompt).toBe(HEARTBEAT_STRIPPED_PROMPT);
++  });
++
++  it('flags residue for manual review and leaves the prompt untouched', () => {
++    const trickyPrompt =
++      HEARTBEAT_LEAK_PROMPT +
++      ' cortextos bus update-task $TASK_ID in_progress 2>/dev/null;';
++    const path = seed('cortextos1', 'larry', [makeCron('tricky', trickyPrompt)]);
++    const direct = stripTaskLeakBookkeeping(trickyPrompt);
++
++    expect(direct.manualReview).toBe(true);
++    expect(direct.changed).toBe(false);
++    expect(direct.prompt).toBe(trickyPrompt);
++
++    const report = runMigration({ rootsDir: root, dryRun: false });
++
++    expect(report.manualReview).toEqual([{ path, cron: 'tricky' }]);
++    expect(report.stripped).toBe(0);
++    expect(readCrons(path).crons[0]?.prompt).toBe(trickyPrompt);
++  });
++
++  it('findCronsFiles sweeps both roots and ignores stray files', () => {
++    const pathA = seed('cortextos1', 'larry', [makeCron('heartbeat', HEARTBEAT_LEAK_PROMPT)]);
++    const pathB = seed('default', 'muse', [makeCron('passive', PASSIVE_PROMPT)]);
++    writeFileSync(join(root, 'not-an-agent-file.txt'), 'ignore me\n', 'utf-8');
++
++    expect(findCronsFiles(root)).toEqual([pathB, pathA].sort());
++  });
++});

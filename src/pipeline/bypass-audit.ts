@@ -16,6 +16,7 @@ import {
   readLedgerRows,
   verifyChainDetailed,
   verifyOneBigFeatureArtifacts,
+  verifyWorkerDispatchAuthorship,
   verifyTranscriptAuthorship,
   type LedgerRow,
 } from './ledger.js';
@@ -604,6 +605,14 @@ function countSignedExempts(ledgerPath: string, windowStartMs: number): number {
     .length;
 }
 
+function loadBusSigningKeyForAudit(ctxRoot: string): string | null {
+  try {
+    return readFileSync(join(resolve(ctxRoot), 'config', 'bus-signing-key'), 'utf-8').trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 function parseBranchSlug(command: string): string | undefined {
   return command.match(/(?:^|[\s'"])(?:feature\/|fix\/|chore\/|hotfix\/)?([a-z0-9-]+)(?:[\s'"]|$)/)?.[1];
 }
@@ -627,6 +636,7 @@ function verifyDispatchLikeRecord(
   ledgerPath: string,
   secretPath: string,
   transcriptRoot: string,
+  busStoreRoot: string,
   nowSeconds: number,
   scopeSha?: string,
 ): { finding?: AuditFinding; verified?: boolean } {
@@ -648,6 +658,7 @@ function verifyDispatchLikeRecord(
     ledgerPath,
     secretPath,
     transcriptRoot,
+    busStoreRoot,
     nowSeconds,
   });
   if (!result.ok) {
@@ -712,8 +723,10 @@ export function runBypassAudit(opts: RunAuditOptions): AuditReport {
   const secretPath = resolve(opts.secretPath || defaultSecretPath());
   const transcriptRoot = resolve(opts.transcriptRoot || defaultTranscriptRoot());
   const projectRoot = resolve(opts.projectRoot);
+  const busStoreRoot = resolve(opts.ctxRoot);
+  const busSigningKey = loadBusSigningKeyForAudit(busStoreRoot);
   const timeline = scanParentTranscripts(resolve(opts.parentTranscriptRoot), window);
-  const busDispatches = readBusDispatches(resolve(opts.ctxRoot), window);
+  const busDispatches = readBusDispatches(busStoreRoot, window);
   const bypasses: AuditFinding[] = [];
   const advisories: AuditAdvisory[] = collectGateMtimeAdvisories(projectRoot, window);
   let chainsVerified = 0;
@@ -732,6 +745,7 @@ export function runBypassAudit(opts: RunAuditOptions): AuditReport {
       ledgerPath,
       secretPath,
       transcriptRoot,
+      busStoreRoot,
       nowSeconds: Math.floor(nowMs / 1000),
     });
     if (!result.ok) {
@@ -777,6 +791,7 @@ export function runBypassAudit(opts: RunAuditOptions): AuditReport {
       ledgerPath,
       secretPath,
       transcriptRoot,
+      busStoreRoot,
       Math.floor(nowMs / 1000),
     );
     if (result.finding) {
@@ -797,6 +812,7 @@ export function runBypassAudit(opts: RunAuditOptions): AuditReport {
       ledgerPath,
       secretPath,
       transcriptRoot,
+      busStoreRoot,
       Math.floor(nowMs / 1000),
     );
     if (result.finding) {
@@ -846,12 +862,31 @@ export function runBypassAudit(opts: RunAuditOptions): AuditReport {
       continue;
     }
 
-    const provenance = verifyTranscriptAuthorship({
-      artifactPath,
-      transcriptPath: row.transcript_path || '',
-      transcriptRoot,
-      expectedSessionId: row.session_id,
-    });
+    const mode = row.provenance_mode === 'worker-dispatch' ? 'worker-dispatch' : 'transcript';
+    const provenance = mode === 'worker-dispatch'
+      ? (
+        row.stage === 'plan' || row.stage === 'specs'
+          ? verifyWorkerDispatchAuthorship({
+            artifactPath,
+            messagePath: row.transcript_path || '',
+            slug: row.slug,
+            stage: row.stage,
+            expectedMessageId: row.session_id,
+            busStoreRoot,
+            busKey: busSigningKey,
+          })
+          : {
+            ok: false as const,
+            code: 'PROVENANCE_MISMATCH' as const,
+            detail: `Worker-dispatch provenance is invalid for ${row.slug}:${row.stage}`,
+          }
+      )
+      : verifyTranscriptAuthorship({
+        artifactPath,
+        transcriptPath: row.transcript_path || '',
+        transcriptRoot,
+        expectedSessionId: row.session_id,
+      });
     if (!provenance.ok) {
       bypasses.push(pushBypass(
         'hole3-deep-authorship',
@@ -873,15 +908,17 @@ export function runBypassAudit(opts: RunAuditOptions): AuditReport {
       continue;
     }
 
-    const structureFailure = checkTranscriptStructure(row);
-    if (structureFailure) {
-      bypasses.push(pushBypass(
-        'hole3-structure',
-        structureFailure,
-        [...rowEvidence, row.transcript_path || ''],
-        row.slug,
-      ));
-      continue;
+    if (mode === 'transcript') {
+      const structureFailure = checkTranscriptStructure(row);
+      if (structureFailure) {
+        bypasses.push(pushBypass(
+          'hole3-structure',
+          structureFailure,
+          [...rowEvidence, row.transcript_path || ''],
+          row.slug,
+        ));
+        continue;
+      }
     }
 
     const handWrites = timeline.planningWrites.filter((event) => event.slug === row.slug && event.tsMs <= row.ts * 1000);

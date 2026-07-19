@@ -1,0 +1,1459 @@
+diff --git a/.claude/workflows/routing-config.json b/.claude/workflows/routing-config.json
+index 0528a03..65e92f3 100644
+--- a/.claude/workflows/routing-config.json
++++ b/.claude/workflows/routing-config.json
+@@ -1,5 +1,5 @@
+ {
+-  "$comment": "Per-stage model routing for dynamic-pipeline. provider ∈ anthropic|openrouter|codex. Fable is opt-in at plan only; when not explicitly confirmed, plan falls back to opus.",
++  "$comment": "Per-stage model routing for dynamic-pipeline. provider ∈ anthropic|openrouter|codex. Fable is opt-in at plan only; when not explicitly confirmed, plan falls back to opus. plan.engines.kimi-k3 dispatches to the opencode bus worker; its plan/specs are provenance-signed via provenance_mode=worker-dispatch (see src/pipeline/ledger.ts verifyWorkerDispatchAuthorship).",
+   "fableGate": {
+     "fallback": "opus"
+   },
+diff --git a/src/pipeline/bypass-audit.ts b/src/pipeline/bypass-audit.ts
+index f2710ed..973910d 100644
+--- a/src/pipeline/bypass-audit.ts
++++ b/src/pipeline/bypass-audit.ts
+@@ -16,6 +16,7 @@ import {
+   readLedgerRows,
+   verifyChainDetailed,
+   verifyOneBigFeatureArtifacts,
++  verifyWorkerDispatchAuthorship,
+   verifyTranscriptAuthorship,
+   type LedgerRow,
+ } from './ledger.js';
+@@ -604,6 +605,14 @@ function countSignedExempts(ledgerPath: string, windowStartMs: number): number {
+     .length;
+ }
+ 
++function loadBusSigningKeyForAudit(ctxRoot: string): string | null {
++  try {
++    return readFileSync(join(resolve(ctxRoot), 'config', 'bus-signing-key'), 'utf-8').trim() || null;
++  } catch {
++    return null;
++  }
++}
++
+ function parseBranchSlug(command: string): string | undefined {
+   return command.match(/(?:^|[\s'"])(?:feature\/|fix\/|chore\/|hotfix\/)?([a-z0-9-]+)(?:[\s'"]|$)/)?.[1];
+ }
+@@ -627,6 +636,7 @@ function verifyDispatchLikeRecord(
+   ledgerPath: string,
+   secretPath: string,
+   transcriptRoot: string,
++  busStoreRoot: string,
+   nowSeconds: number,
+   scopeSha?: string,
+ ): { finding?: AuditFinding; verified?: boolean } {
+@@ -648,6 +658,7 @@ function verifyDispatchLikeRecord(
+     ledgerPath,
+     secretPath,
+     transcriptRoot,
++    busStoreRoot,
+     nowSeconds,
+   });
+   if (!result.ok) {
+@@ -712,8 +723,10 @@ export function runBypassAudit(opts: RunAuditOptions): AuditReport {
+   const secretPath = resolve(opts.secretPath || defaultSecretPath());
+   const transcriptRoot = resolve(opts.transcriptRoot || defaultTranscriptRoot());
+   const projectRoot = resolve(opts.projectRoot);
++  const busStoreRoot = resolve(opts.ctxRoot);
++  const busSigningKey = loadBusSigningKeyForAudit(busStoreRoot);
+   const timeline = scanParentTranscripts(resolve(opts.parentTranscriptRoot), window);
+-  const busDispatches = readBusDispatches(resolve(opts.ctxRoot), window);
++  const busDispatches = readBusDispatches(busStoreRoot, window);
+   const bypasses: AuditFinding[] = [];
+   const advisories: AuditAdvisory[] = collectGateMtimeAdvisories(projectRoot, window);
+   let chainsVerified = 0;
+@@ -732,6 +745,7 @@ export function runBypassAudit(opts: RunAuditOptions): AuditReport {
+       ledgerPath,
+       secretPath,
+       transcriptRoot,
++      busStoreRoot,
+       nowSeconds: Math.floor(nowMs / 1000),
+     });
+     if (!result.ok) {
+@@ -777,6 +791,7 @@ export function runBypassAudit(opts: RunAuditOptions): AuditReport {
+       ledgerPath,
+       secretPath,
+       transcriptRoot,
++      busStoreRoot,
+       Math.floor(nowMs / 1000),
+     );
+     if (result.finding) {
+@@ -797,6 +812,7 @@ export function runBypassAudit(opts: RunAuditOptions): AuditReport {
+       ledgerPath,
+       secretPath,
+       transcriptRoot,
++      busStoreRoot,
+       Math.floor(nowMs / 1000),
+     );
+     if (result.finding) {
+@@ -846,12 +862,31 @@ export function runBypassAudit(opts: RunAuditOptions): AuditReport {
+       continue;
+     }
+ 
+-    const provenance = verifyTranscriptAuthorship({
+-      artifactPath,
+-      transcriptPath: row.transcript_path || '',
+-      transcriptRoot,
+-      expectedSessionId: row.session_id,
+-    });
++    const mode = row.provenance_mode === 'worker-dispatch' ? 'worker-dispatch' : 'transcript';
++    const provenance = mode === 'worker-dispatch'
++      ? (
++        row.stage === 'plan' || row.stage === 'specs'
++          ? verifyWorkerDispatchAuthorship({
++            artifactPath,
++            messagePath: row.transcript_path || '',
++            slug: row.slug,
++            stage: row.stage,
++            expectedMessageId: row.session_id,
++            busStoreRoot,
++            busKey: busSigningKey,
++          })
++          : {
++            ok: false as const,
++            code: 'PROVENANCE_MISMATCH' as const,
++            detail: `Worker-dispatch provenance is invalid for ${row.slug}:${row.stage}`,
++          }
++      )
++      : verifyTranscriptAuthorship({
++        artifactPath,
++        transcriptPath: row.transcript_path || '',
++        transcriptRoot,
++        expectedSessionId: row.session_id,
++      });
+     if (!provenance.ok) {
+       bypasses.push(pushBypass(
+         'hole3-deep-authorship',
+@@ -873,15 +908,17 @@ export function runBypassAudit(opts: RunAuditOptions): AuditReport {
+       continue;
+     }
+ 
+-    const structureFailure = checkTranscriptStructure(row);
+-    if (structureFailure) {
+-      bypasses.push(pushBypass(
+-        'hole3-structure',
+-        structureFailure,
+-        [...rowEvidence, row.transcript_path || ''],
+-        row.slug,
+-      ));
+-      continue;
++    if (mode === 'transcript') {
++      const structureFailure = checkTranscriptStructure(row);
++      if (structureFailure) {
++        bypasses.push(pushBypass(
++          'hole3-structure',
++          structureFailure,
++          [...rowEvidence, row.transcript_path || ''],
++          row.slug,
++        ));
++        continue;
++      }
+     }
+ 
+     const handWrites = timeline.planningWrites.filter((event) => event.slug === row.slug && event.tsMs <= row.ts * 1000);
+diff --git a/src/pipeline/ledger.ts b/src/pipeline/ledger.ts
+index 0c6b184..996eb4d 100644
+--- a/src/pipeline/ledger.ts
++++ b/src/pipeline/ledger.ts
+@@ -24,6 +24,8 @@ export const STAGES = [
+ ] as const;
+ 
+ export type Stage = (typeof STAGES)[number];
++export type ProvenanceMode = 'transcript' | 'worker-dispatch';
++type WorkerProvenanceStage = Extract<Stage, 'plan' | 'specs'>;
+ 
+ export interface LedgerRow {
+   slug: string;
+@@ -35,6 +37,7 @@ export interface LedgerRow {
+   session_id?: string;
+   transcript_path?: string;
+   transcript_sha256?: string;
++  provenance_mode?: ProvenanceMode;
+   reason?: string;
+   evidence_path?: string;
+   sig: string;
+@@ -56,7 +59,8 @@ export type VerifyFailure =
+   | 'SECRET_UNREADABLE'
+   | 'NO_PROVENANCE'
+   | 'TRANSCRIPT_MISSING'
+-  | 'TRANSCRIPT_TAMPERED';
++  | 'TRANSCRIPT_TAMPERED'
++  | 'PROVENANCE_MISMATCH';
+ 
+ export interface LedgerVerifyFailure {
+   ok: false;
+@@ -86,6 +90,21 @@ export interface ProvenanceSuccess {
+ 
+ export type ProvenanceResult = ProvenanceSuccess | ProvenanceFailure;
+ 
++interface WorkerAttestationSuccess extends ProvenanceSuccess {
++  attested_sha256: string;
++}
++
++type WorkerAttestationResult = WorkerAttestationSuccess | ProvenanceFailure;
++
++interface ParsedBusMessage {
++  id: string;
++  from: string;
++  to: string;
++  text: string;
++  sig?: string;
++  reply_to?: string | null;
++}
++
+ export interface ArtifactDescription {
+   path: string;
+   kind: 'file' | 'directory';
+@@ -114,6 +133,10 @@ const GENESIS = 'GENESIS';
+ const AUTHORED_STAGES = new Set<Stage>(['synthesize', 'plan', 'specs', 'review']);
+ const SHA_HEX_RE = /^[a-f0-9]{64}$/;
+ const SLUG_RE = /^[a-z0-9-]+$/;
++const WORKER_AUTHORS = new Set<string>(['opencode', 'opencoder']);
++const PROVENANCE_LINE_RE =
++  /PROVENANCE:\s*stage=(plan|specs)\s+slug=([a-z0-9-]+)\s+artifact-sha256=([a-f0-9]{64})\b/;
++const BUS_STORE_BUCKETS = ['inbox', 'inflight', 'processed'] as const;
+ 
+ function isStage(value: string): value is Stage {
+   return (STAGES as readonly string[]).includes(value);
+@@ -123,6 +146,10 @@ function isAuthoredStage(stage: Stage): boolean {
+   return AUTHORED_STAGES.has(stage);
+ }
+ 
++function isWorkerProvenanceStage(stage: Stage): stage is WorkerProvenanceStage {
++  return stage === 'plan' || stage === 'specs';
++}
++
+ function sha256Hex(input: string | Buffer): string {
+   return createHash('sha256').update(input).digest('hex');
+ }
+@@ -244,6 +271,7 @@ function canonicalPayload(row: Omit<LedgerRow, 'sig'>): string {
+   if (row.transcript_sha256) parts.push(row.transcript_sha256);
+   if (row.reason) parts.push(row.reason);
+   if (row.evidence_path) parts.push(row.evidence_path);
++  if (row.provenance_mode) parts.push(row.provenance_mode);
+ 
+   return parts.join('|');
+ }
+@@ -269,6 +297,10 @@ function parseLedgerLine(line: string): LedgerRow | null {
+       session_id: value.session_id,
+       transcript_path: value.transcript_path,
+       transcript_sha256: value.transcript_sha256,
++      provenance_mode:
++        value.provenance_mode === 'worker-dispatch' || value.provenance_mode === 'transcript'
++          ? value.provenance_mode
++          : undefined,
+       reason: value.reason,
+       evidence_path: value.evidence_path,
+       sig: value.sig,
+@@ -333,6 +365,7 @@ function verifyRowSignature(row: LedgerRow, secret: string): boolean {
+     session_id: row.session_id,
+     transcript_path: row.transcript_path,
+     transcript_sha256: row.transcript_sha256,
++    provenance_mode: row.provenance_mode,
+     reason: row.reason,
+     evidence_path: row.evidence_path,
+   }), row.sig);
+@@ -356,6 +389,12 @@ export function defaultTranscriptRoot(): string {
+   return resolve(process.env.PIPELINE_TRANSCRIPT_ROOT_OVERRIDE || join(homedir(), '.claude', 'projects'));
+ }
+ 
++export function defaultBusStoreRoot(): string {
++  return resolve(
++    process.env.PIPELINE_BUS_STORE_ROOT_OVERRIDE || join(homedir(), '.cortextos', 'cortextos1'),
++  );
++}
++
+ export function defaultPipelineProjectRoot(explicitRoot?: string): string {
+   return resolve(
+     explicitRoot ||
+@@ -415,6 +454,271 @@ function parseTranscriptOps(transcriptPath: string): TranscriptOp[] {
+   return ops;
+ }
+ 
++function busSignPayload(id: string, from: string, to: string, text: string): string {
++  return `${id}:${from}:${to}:${text}`;
++}
++
++function loadBusSigningKey(ctxRoot: string): string | null {
++  try {
++    const keyPath = join(resolve(ctxRoot), 'config', 'bus-signing-key');
++    const key = readFileSync(keyPath, 'utf-8').trim();
++    return key.length >= 16 ? key : null;
++  } catch {
++    return null;
++  }
++}
++
++function verifyBusMessageSig(msg: ParsedBusMessage, busKey: string): boolean {
++  if (!msg.sig) return false;
++  try {
++    const expected = hmacSign(busKey, busSignPayload(msg.id, msg.from, msg.to, msg.text));
++    return timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(msg.sig, 'hex'));
++  } catch {
++    return false;
++  }
++}
++
++function parseBusMessageFile(path: string): ParsedBusMessage | null {
++  let raw: string;
++  try {
++    raw = readFileSync(path, 'utf-8');
++  } catch {
++    return null;
++  }
++
++  let value: unknown;
++  try {
++    value = JSON.parse(raw) as unknown;
++  } catch {
++    return null;
++  }
++  if (!value || typeof value !== 'object') return null;
++
++  const record = value as Record<string, unknown>;
++  if (
++    typeof record.id !== 'string'
++    || typeof record.from !== 'string'
++    || typeof record.to !== 'string'
++    || typeof record.text !== 'string'
++  ) {
++    return null;
++  }
++
++  return {
++    id: record.id,
++    from: record.from,
++    to: record.to,
++    text: record.text,
++    sig: typeof record.sig === 'string' ? record.sig : undefined,
++    reply_to: typeof record.reply_to === 'string' ? record.reply_to : null,
++  };
++}
++
++function findBusMessageById(busStoreRoot: string, id: string): { path: string; msg: ParsedBusMessage } | null {
++  for (const bucket of BUS_STORE_BUCKETS) {
++    for (const worker of WORKER_AUTHORS) {
++      const dir = join(resolve(busStoreRoot), bucket, worker);
++      if (!existsSync(dir)) continue;
++      for (const name of readdirSync(dir)) {
++        if (!name.endsWith('.json')) continue;
++        const path = join(dir, name);
++        const msg = parseBusMessageFile(path);
++        if (msg && msg.id === id) return { path, msg };
++      }
++    }
++  }
++
++  return null;
++}
++
++function resolveDispatchForReply(opts: {
++  busStoreRoot: string;
++  busKey: string;
++  replyToId: string;
++  expectedSlug: string;
++}): { ok: true } | ProvenanceFailure {
++  const found = findBusMessageById(opts.busStoreRoot, opts.replyToId);
++  if (!found) {
++    return {
++      ok: false,
++      code: 'TRANSCRIPT_MISSING',
++      detail: `Dispatch ${opts.replyToId} not found in bus store`,
++    };
++  }
++
++  const { msg } = found;
++  if (msg.from !== 'larry') {
++    return {
++      ok: false,
++      code: 'PROVENANCE_MISMATCH',
++      detail: `Dispatch ${opts.replyToId} not from larry (from=${msg.from})`,
++    };
++  }
++  if (!verifyBusMessageSig(msg, opts.busKey)) {
++    return {
++      ok: false,
++      code: 'TRANSCRIPT_TAMPERED',
++      detail: `Dispatch ${opts.replyToId} bus signature invalid`,
++    };
++  }
++
++  const slug = msg.text.match(/\bslug=([a-z0-9-]+)\b/)?.[1];
++  const isBuild = /\bGATE:\s*build\b/i.test(msg.text);
++  if (!isBuild || slug !== opts.expectedSlug) {
++    return {
++      ok: false,
++      code: 'PROVENANCE_MISMATCH',
++      detail: `Dispatch ${opts.replyToId} is not a GATE: build for slug ${opts.expectedSlug}`,
++    };
++  }
++
++  return { ok: true };
++}
++
++export function verifyWorkerAttestationMessage(opts: {
++  messagePath: string;
++  slug: string;
++  stage: WorkerProvenanceStage;
++  expectedMessageId?: string;
++  busStoreRoot?: string;
++  busKey?: string | null;
++}): WorkerAttestationResult {
++  const busStoreRoot = opts.busStoreRoot || defaultBusStoreRoot();
++  const messagePath = resolve(opts.messagePath);
++  const realMsgPath = ensureInsideRoot(messagePath, busStoreRoot);
++  if (!realMsgPath || !existsSync(realMsgPath)) {
++    return {
++      ok: false,
++      code: 'TRANSCRIPT_MISSING',
++      detail: `Return message missing or outside bus store: ${messagePath}`,
++    };
++  }
++
++  const busKey = opts.busKey ?? null;
++  if (!busKey) {
++    return {
++      ok: false,
++      code: 'NO_PROVENANCE',
++      detail: 'Bus signing key unreadable; cannot verify worker attestation',
++    };
++  }
++
++  const raw = readFileSync(realMsgPath, 'utf-8');
++  const msg = parseBusMessageFile(realMsgPath);
++  if (!msg) {
++    return {
++      ok: false,
++      code: 'PROVENANCE_MISMATCH',
++      detail: `Return message is not a parseable bus message: ${realMsgPath}`,
++    };
++  }
++  if (opts.expectedMessageId && msg.id !== opts.expectedMessageId) {
++    return {
++      ok: false,
++      code: 'PROVENANCE_MISMATCH',
++      detail: `Return message id ${msg.id} does not match expected ${opts.expectedMessageId}`,
++    };
++  }
++  if (!WORKER_AUTHORS.has(msg.from)) {
++    return {
++      ok: false,
++      code: 'PROVENANCE_MISMATCH',
++      detail: `Return message from '${msg.from}' is not a pipeline worker`,
++    };
++  }
++  if (!verifyBusMessageSig(msg, busKey)) {
++    return {
++      ok: false,
++      code: 'TRANSCRIPT_TAMPERED',
++      detail: `Return message bus signature invalid: ${realMsgPath}`,
++    };
++  }
++
++  const match = msg.text.match(PROVENANCE_LINE_RE);
++  if (!match) {
++    return {
++      ok: false,
++      code: 'PROVENANCE_MISMATCH',
++      detail: 'Return message lacks a PROVENANCE stage/slug/artifact-sha256 line',
++    };
++  }
++
++  const attestedStage = match[1];
++  const attestedSlug = match[2];
++  const attestedSha = match[3];
++  if (attestedStage !== opts.stage) {
++    return {
++      ok: false,
++      code: 'PROVENANCE_MISMATCH',
++      detail: `Attested stage ${attestedStage} does not match ${opts.stage}`,
++    };
++  }
++  if (attestedSlug !== opts.slug) {
++    return {
++      ok: false,
++      code: 'PROVENANCE_MISMATCH',
++      detail: `Attested slug ${attestedSlug} != ${opts.slug}`,
++    };
++  }
++  if (!msg.reply_to) {
++    return {
++      ok: false,
++      code: 'PROVENANCE_MISMATCH',
++      detail: 'Return message has no reply_to dispatch binding',
++    };
++  }
++
++  const dispatch = resolveDispatchForReply({
++    busStoreRoot,
++    busKey,
++    replyToId: msg.reply_to,
++    expectedSlug: opts.slug,
++  });
++  if (!dispatch.ok) return dispatch;
++
++  return {
++    ok: true,
++    attested_sha256: attestedSha,
++    transcript_sha256: sha256Hex(raw),
++    transcript_realpath: realMsgPath,
++  };
++}
++
++export function verifyWorkerDispatchAuthorship(opts: {
++  artifactPath: string;
++  messagePath: string;
++  slug: string;
++  stage: WorkerProvenanceStage;
++  expectedMessageId?: string;
++  busStoreRoot?: string;
++  busKey?: string | null;
++}): ProvenanceResult {
++  const attestation = verifyWorkerAttestationMessage({
++    messagePath: opts.messagePath,
++    slug: opts.slug,
++    stage: opts.stage,
++    expectedMessageId: opts.expectedMessageId,
++    busStoreRoot: opts.busStoreRoot,
++    busKey: opts.busKey,
++  });
++  if (!attestation.ok) return attestation;
++
++  const artifact = describeArtifact(opts.artifactPath);
++  if (artifact.sha256 !== attestation.attested_sha256) {
++    return {
++      ok: false,
++      code: 'PROVENANCE_MISMATCH',
++      detail: `Attested artifact sha ${attestation.attested_sha256} != on-disk ${artifact.sha256}`,
++    };
++  }
++
++  return {
++    ok: true,
++    transcript_sha256: attestation.transcript_sha256,
++    transcript_realpath: attestation.transcript_realpath,
++  };
++}
++
+ function applyEdit(content: string, op: TranscriptOp): string | null {
+   const oldString = op.oldString ?? '';
+   const newString = op.newString ?? '';
+@@ -541,6 +845,10 @@ export function emitLedgerRow(opts: {
+   runner?: string;
+   sessionId?: string;
+   transcriptPath?: string;
++  provenanceMode?: ProvenanceMode;
++  workerName?: string;
++  busStoreRoot?: string;
++  busKeyCtxRoot?: string;
+   evidencePath?: string;
+   reason?: string;
+   ledgerPath?: string;
+@@ -568,21 +876,42 @@ export function emitLedgerRow(opts: {
+ 
+   let transcriptSha: string | undefined;
+   let transcriptRealpath: string | undefined;
++  let provenanceMode: ProvenanceMode | undefined;
+   if (isAuthoredStage(opts.stage)) {
+     if (!opts.runner || !opts.sessionId || !opts.transcriptPath) {
+       throw new Error(`Authored stage '${opts.stage}' requires --runner, --session, and --transcript`);
+     }
+-    const provenance = verifyTranscriptAuthorship({
+-      artifactPath: opts.artifactPath,
+-      transcriptPath: opts.transcriptPath,
+-      transcriptRoot: opts.transcriptRoot,
+-      expectedSessionId: opts.sessionId,
+-    });
++    const mode: ProvenanceMode = opts.provenanceMode ?? 'transcript';
++    let provenance: ProvenanceResult;
++    if (mode === 'worker-dispatch') {
++      if (!isWorkerProvenanceStage(opts.stage)) {
++        throw new Error(`Invalid provenance mode for stage '${opts.stage}': worker-dispatch only supports plan/specs`);
++      }
++      const busKeyRoot = opts.busKeyCtxRoot || opts.busStoreRoot || defaultBusStoreRoot();
++      const busKey = loadBusSigningKey(busKeyRoot);
++      provenance = verifyWorkerDispatchAuthorship({
++        artifactPath: opts.artifactPath,
++        messagePath: opts.transcriptPath,
++        slug: opts.slug,
++        stage: opts.stage,
++        expectedMessageId: opts.sessionId,
++        busStoreRoot: opts.busStoreRoot,
++        busKey,
++      });
++    } else {
++      provenance = verifyTranscriptAuthorship({
++        artifactPath: opts.artifactPath,
++        transcriptPath: opts.transcriptPath,
++        transcriptRoot: opts.transcriptRoot,
++        expectedSessionId: opts.sessionId,
++      });
++    }
+     if (!provenance.ok) {
+       throw new Error(`${provenance.code}: ${provenance.detail}`);
+     }
+     transcriptSha = provenance.transcript_sha256;
+     transcriptRealpath = provenance.transcript_realpath;
++    provenanceMode = mode === 'worker-dispatch' ? mode : undefined;
+   }
+ 
+   mkdirSync(dirname(ledgerPath), { recursive: true });
+@@ -606,6 +935,7 @@ export function emitLedgerRow(opts: {
+     ...(opts.sessionId ? { session_id: opts.sessionId } : {}),
+     ...(transcriptRealpath ? { transcript_path: transcriptRealpath } : {}),
+     ...(transcriptSha ? { transcript_sha256: transcriptSha } : {}),
++    ...(provenanceMode === 'worker-dispatch' ? { provenance_mode: provenanceMode } : {}),
+     ...(opts.reason ? { reason: opts.reason } : {}),
+     ...(opts.evidencePath ? { evidence_path: resolve(opts.evidencePath) } : {}),
+   };
+@@ -704,6 +1034,7 @@ export function verifyChainDetailed(opts: {
+   maxAgeSeconds: number;
+   scopeSha?: string;
+   transcriptRoot?: string;
++  busStoreRoot?: string;
+   nowSeconds?: number;
+ }): LedgerVerifyResult {
+   ensureSlug(opts.slug);
+@@ -757,6 +1088,14 @@ export function verifyChainDetailed(opts: {
+           detail: `Missing provenance fields on ${row.slug}:${row.stage}`,
+         };
+       }
++      const mode: ProvenanceMode = row.provenance_mode === 'worker-dispatch' ? 'worker-dispatch' : 'transcript';
++      if (mode === 'worker-dispatch' && !isWorkerProvenanceStage(row.stage)) {
++        return {
++          ok: false,
++          code: 'PROVENANCE_MISMATCH',
++          detail: `Worker-dispatch provenance is invalid for ${row.slug}:${row.stage}`,
++        };
++      }
+       if (!existsSync(row.transcript_path)) {
+         return {
+           ok: false,
+@@ -764,7 +1103,12 @@ export function verifyChainDetailed(opts: {
+           detail: `Transcript missing for ${row.slug}:${row.stage}: ${row.transcript_path}`,
+         };
+       }
+-      const realTranscript = ensureInsideRoot(row.transcript_path, opts.transcriptRoot || defaultTranscriptRoot());
++      const realTranscript = ensureInsideRoot(
++        row.transcript_path,
++        mode === 'worker-dispatch'
++          ? (opts.busStoreRoot || defaultBusStoreRoot())
++          : (opts.transcriptRoot || defaultTranscriptRoot()),
++      );
+       if (!realTranscript) {
+         return {
+           ok: false,
+@@ -780,6 +1124,32 @@ export function verifyChainDetailed(opts: {
+           detail: `Transcript hash mismatch for ${row.slug}:${row.stage}`,
+         };
+       }
++      if (mode === 'worker-dispatch') {
++        const workerStage = row.stage;
++        if (!isWorkerProvenanceStage(workerStage)) {
++          return {
++            ok: false,
++            code: 'PROVENANCE_MISMATCH',
++            detail: `Worker-dispatch provenance is invalid for ${row.slug}:${row.stage}`,
++          };
++        }
++        const busKey = loadBusSigningKey(opts.busStoreRoot || defaultBusStoreRoot());
++        const provenance = verifyWorkerAttestationMessage({
++          messagePath: row.transcript_path,
++          slug: row.slug,
++          stage: workerStage,
++          expectedMessageId: row.session_id,
++          busStoreRoot: opts.busStoreRoot,
++          busKey,
++        });
++        if (!provenance.ok) {
++          return {
++            ok: false,
++            code: provenance.code,
++            detail: provenance.detail,
++          };
++        }
++      }
+     }
+ 
+     const nowSeconds = opts.nowSeconds ?? Math.floor(Date.now() / 1000);
+@@ -816,6 +1186,7 @@ export function verifyChain(opts: {
+   maxAgeSeconds: number;
+   scopeSha?: string;
+   transcriptRoot?: string;
++  busStoreRoot?: string;
+   nowSeconds?: number;
+ }): { ok: true; terminal: LedgerRow } | LedgerVerifyFailure {
+   const result = verifyChainDetailed(opts);
+diff --git a/src/pipeline/stage-emit.ts b/src/pipeline/stage-emit.ts
+index d66e111..e12a7a2 100644
+--- a/src/pipeline/stage-emit.ts
++++ b/src/pipeline/stage-emit.ts
+@@ -67,6 +67,7 @@ function usage(): string {
+   return [
+     'Usage:',
+     '  pipeline-stage-emit --slug <slug> --stage <stage> --artifact <path> [--runner <runner> --session <id> --transcript <path>] [--evidence <path>] [--reason <text>] [--ledger <path>] [--secret <path>]',
++    '  pipeline-stage-emit --slug <slug> --stage <plan|specs> --artifact <path> --provenance-mode worker-dispatch --runner opencode --session <return-msg-id> --transcript <return-msg.json> [--bus-store-root <path>] [--ctx-root <path>]',
+     '  pipeline-stage-emit --verify --slug <slug> --through <stage> --max-age <seconds> [--scope-sha <sha>] [--repo <path>] [--framework <name>] [--ledger <path>] [--secret <path>]',
+   ].join('\n');
+ }
+@@ -117,6 +118,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
+       scopeSha: stringFlag(flags, 'scope-sha'),
+       ledgerPath: stringFlag(flags, 'ledger') || defaultLedgerPath(),
+       secretPath: stringFlag(flags, 'secret') || defaultSecretPath(),
++      busStoreRoot: stringFlag(flags, 'bus-store-root'),
+     });
+     if (!result.ok) {
+       printAndExit(`${result.code}: ${result.detail}`, 1);
+@@ -140,6 +142,16 @@ export function main(argv: string[] = process.argv.slice(2)): void {
+       runner: stringFlag(flags, 'runner'),
+       sessionId: stringFlag(flags, 'session'),
+       transcriptPath: stringFlag(flags, 'transcript'),
++      provenanceMode: (() => {
++        const value = stringFlag(flags, 'provenance-mode');
++        if (value === 'worker-dispatch' || value === 'transcript') return value;
++        if (value !== undefined) {
++          throw new Error('Invalid --provenance-mode: expected transcript|worker-dispatch');
++        }
++        return undefined;
++      })(),
++      busStoreRoot: stringFlag(flags, 'bus-store-root'),
++      busKeyCtxRoot: stringFlag(flags, 'ctx-root') || stringFlag(flags, 'bus-store-root'),
+       evidencePath: stringFlag(flags, 'evidence'),
+       reason: stringFlag(flags, 'reason'),
+       ledgerPath: stringFlag(flags, 'ledger'),
+diff --git a/tests/unit/pipeline/bypass-audit.test.ts b/tests/unit/pipeline/bypass-audit.test.ts
+index bc70703..d0f9a05 100644
+--- a/tests/unit/pipeline/bypass-audit.test.ts
++++ b/tests/unit/pipeline/bypass-audit.test.ts
+@@ -1,3 +1,4 @@
++import { createHmac } from 'crypto';
+ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+ import {
+   existsSync,
+@@ -11,6 +12,7 @@ import {
+ import { tmpdir } from 'os';
+ import { dirname, join } from 'path';
+ import {
++  describeArtifact,
+   emitLedgerRow,
+ } from '../../../src/pipeline/ledger';
+ import {
+@@ -44,6 +46,36 @@ function appendTranscript(path: string, lines: string[]): void {
+   ]);
+ }
+ 
++function busSign(key: string, id: string, from: string, to: string, text: string): string {
++  return createHmac('sha256', key).update(`${id}:${from}:${to}:${text}`).digest('hex');
++}
++
++function writeBusMessage(dir: string, msg: {
++  id: string;
++  from: string;
++  to: string;
++  text: string;
++  timestamp: string;
++  reply_to?: string | null;
++  busKey?: string;
++  sig?: string;
++}): string {
++  mkdirSync(dir, { recursive: true });
++  const sig = msg.sig ?? (msg.busKey ? busSign(msg.busKey, msg.id, msg.from, msg.to, msg.text) : undefined);
++  const path = join(dir, `2-${msg.id}.json`);
++  writeFileSync(path, JSON.stringify({
++    id: msg.id,
++    from: msg.from,
++    to: msg.to,
++    priority: 'normal',
++    timestamp: msg.timestamp,
++    text: msg.text,
++    reply_to: msg.reply_to ?? null,
++    ...(sig ? { sig } : {}),
++  }), 'utf-8');
++  return path;
++}
++
+ describe('pipeline bypass audit', () => {
+   let root: string;
+   let ctxRoot: string;
+@@ -53,6 +85,7 @@ describe('pipeline bypass audit', () => {
+   let ledgerPath: string;
+   let secretPath: string;
+   let secret: string;
++  let busKey: string;
+   let nowMs: number;
+   let slugDir: string;
+   let researchPath: string;
+@@ -69,6 +102,7 @@ describe('pipeline bypass audit', () => {
+     ledgerPath = join(projectRoot, 'state', 'pipeline-ledger.jsonl');
+     secretPath = join(root, '.pipeline-secret');
+     secret = 'ab'.repeat(32);
++    busKey = 'bk'.repeat(20);
+     nowMs = Date.UTC(2026, 6, 12, 2, 30, 0);
+     slugDir = join(projectRoot, '.agent', 'one-big-feature', 'hard-spec-gate');
+     researchPath = join(slugDir, '01-research.md');
+@@ -77,8 +111,10 @@ describe('pipeline bypass audit', () => {
+     specPath = join(specsDir, '01-signed-stage-ledger.md');
+ 
+     mkdirSync(specsDir, { recursive: true });
++    mkdirSync(join(ctxRoot, 'config'), { recursive: true });
+     mkdirSync(join(ctxRoot, 'processed', 'codexer'), { recursive: true });
+     writeFileSync(secretPath, `${secret}\n`, 'utf-8');
++    writeFileSync(join(ctxRoot, 'config', 'bus-signing-key'), `${busKey}\n`, 'utf-8');
+     writeFileSync(researchPath, '# research\n', 'utf-8');
+     writeFileSync(planPath, '# master plan\n', 'utf-8');
+     writeFileSync(specPath, '# signed spec\n', 'utf-8');
+@@ -534,6 +570,222 @@ describe('pipeline bypass audit', () => {
+     expect(report.bypasses.some(finding => finding.kind === 'hole3-hand-authoring')).toBe(true);
+   });
+ 
++  it('flags an unbacked worker dispatch with dispatch-no-chain', () => {
++    const sessionId = 'parent-worker-dispatch';
++    const parentTranscript = join(parentTranscriptRoot, 'main.jsonl');
++    writeTranscript(parentTranscript, [
++      transcriptLine(sessionId, new Date(nowMs - 60_000).toISOString(), {
++        type: 'tool_use',
++        id: 'toolu_dispatch_worker',
++        name: 'Bash',
++        input: {
++          command: `cortextos bus send-message opencode normal 'GATE: build framework=one-big-feature slug=hard-spec-gate repo=${projectRoot} scope-sha=${'a'.repeat(64)}'`,
++        },
++      }),
++    ]);
++
++    const report = runAudit();
++    expect(report.bypasses).toContainEqual(expect.objectContaining({
++      kind: 'dispatch-no-chain',
++      slug: 'hard-spec-gate',
++      code: 'NO_ROWS',
++    }));
++  });
++
++  it('accepts a valid worker-dispatch row without hole3-structure findings', () => {
++    const parentTranscript = join(parentTranscriptRoot, 'main.jsonl');
++    const dispatchTimestamp = new Date(nowMs - 12 * 60_000).toISOString();
++    const dispatchText = `GATE: build framework=one-big-feature slug=hard-spec-gate repo=${projectRoot} scope-sha=${describeArtifact(specsDir).sha256}`;
++    writeTranscript(parentTranscript, [
++      transcriptLine('parent', new Date(nowMs - 24 * 60_000).toISOString(), {
++        type: 'tool_use',
++        id: 'toolu_plan_spawn',
++        name: 'Agent',
++        input: {
++          description: 'Plan hard-spec-gate',
++          subagent_type: 'opencode',
++          prompt: `Plan ${projectRoot}/.agent/one-big-feature/hard-spec-gate/02-master-plan.md`,
++        },
++      }),
++      transcriptLine('parent', new Date(nowMs - 23 * 60_000).toISOString(), {
++        type: 'tool_result',
++        tool_use_id: 'toolu_plan_spawn',
++        content: 'done',
++      }, 'user'),
++      transcriptLine('parent', new Date(nowMs - 18 * 60_000).toISOString(), {
++        type: 'tool_use',
++        id: 'toolu_specs_spawn',
++        name: 'Agent',
++        input: {
++          description: 'Specs hard-spec-gate',
++          subagent_type: 'opencode',
++          prompt: `Write specs for ${projectRoot}/.agent/one-big-feature/hard-spec-gate/03-specs/`,
++        },
++      }),
++      transcriptLine('parent', new Date(nowMs - 17 * 60_000).toISOString(), {
++        type: 'tool_result',
++        tool_use_id: 'toolu_specs_spawn',
++        content: 'done',
++      }, 'user'),
++      transcriptLine('parent', dispatchTimestamp, {
++        type: 'tool_use',
++        id: 'toolu_dispatch_worker_ok',
++        name: 'Bash',
++        input: {
++          command: `cortextos bus send-message opencode normal '${dispatchText}'`,
++        },
++      }),
++    ]);
++
++    writeBusMessage(join(ctxRoot, 'processed', 'opencode'), {
++      id: 'D1',
++      from: 'larry',
++      to: 'opencode',
++      text: dispatchText,
++      timestamp: dispatchTimestamp,
++      busKey,
++    });
++    const planReturnPath = writeBusMessage(join(ctxRoot, 'processed', 'larry'), {
++      id: 'R1',
++      from: 'opencode',
++      to: 'larry',
++      text: `done\nPROVENANCE: stage=plan slug=hard-spec-gate artifact-sha256=${describeArtifact(planPath).sha256}`,
++      timestamp: new Date(nowMs - 11 * 60_000).toISOString(),
++      reply_to: 'D1',
++      busKey,
++    });
++    const specsReturnPath = writeBusMessage(join(ctxRoot, 'processed', 'larry'), {
++      id: 'R2',
++      from: 'opencode',
++      to: 'larry',
++      text: `done\nPROVENANCE: stage=specs slug=hard-spec-gate artifact-sha256=${describeArtifact(specsDir).sha256}`,
++      timestamp: new Date(nowMs - 10 * 60_000).toISOString(),
++      reply_to: 'D1',
++      busKey,
++    });
++
++    emitLedgerRow({
++      slug: 'hard-spec-gate',
++      stage: 'research',
++      artifactPath: researchPath,
++      ledgerPath,
++      secretPath,
++      nowSeconds: Math.floor((nowMs - 25 * 60_000) / 1000),
++    });
++    emitLedgerRow({
++      slug: 'hard-spec-gate',
++      stage: 'plan',
++      artifactPath: planPath,
++      runner: 'opencode',
++      sessionId: 'R1',
++      transcriptPath: planReturnPath,
++      provenanceMode: 'worker-dispatch',
++      busStoreRoot: ctxRoot,
++      busKeyCtxRoot: ctxRoot,
++      ledgerPath,
++      secretPath,
++      nowSeconds: Math.floor((nowMs - 11 * 60_000) / 1000),
++    });
++    emitLedgerRow({
++      slug: 'hard-spec-gate',
++      stage: 'specs',
++      artifactPath: specsDir,
++      runner: 'opencode',
++      sessionId: 'R2',
++      transcriptPath: specsReturnPath,
++      provenanceMode: 'worker-dispatch',
++      busStoreRoot: ctxRoot,
++      busKeyCtxRoot: ctxRoot,
++      ledgerPath,
++      secretPath,
++      nowSeconds: Math.floor((nowMs - 10 * 60_000) / 1000),
++    });
++
++    const report = runAudit();
++    expect(report.bypasses).toEqual([]);
++    expect(report.bypasses.some(finding => finding.kind === 'hole3-structure')).toBe(false);
++  });
++
++  it('flags worker-dispatch return-message tampering as hole3-deep-authorship', () => {
++    const parentTranscript = join(parentTranscriptRoot, 'main.jsonl');
++    writeTranscript(parentTranscript, [
++      transcriptLine('parent', new Date(nowMs - 24 * 60_000).toISOString(), {
++        type: 'tool_use',
++        id: 'toolu_plan_spawn',
++        name: 'Agent',
++        input: {
++          description: 'Plan hard-spec-gate',
++          subagent_type: 'opencode',
++          prompt: `Plan ${projectRoot}/.agent/one-big-feature/hard-spec-gate/02-master-plan.md`,
++        },
++      }),
++      transcriptLine('parent', new Date(nowMs - 23 * 60_000).toISOString(), {
++        type: 'tool_result',
++        tool_use_id: 'toolu_plan_spawn',
++        content: 'done',
++      }, 'user'),
++    ]);
++
++    writeBusMessage(join(ctxRoot, 'processed', 'opencode'), {
++      id: 'D1',
++      from: 'larry',
++      to: 'opencode',
++      text: `GATE: build framework=one-big-feature slug=hard-spec-gate repo=${projectRoot} scope-sha=${'a'.repeat(64)}`,
++      timestamp: new Date(nowMs - 12 * 60_000).toISOString(),
++      busKey,
++    });
++    const planReturnPath = writeBusMessage(join(ctxRoot, 'processed', 'larry'), {
++      id: 'R1',
++      from: 'opencode',
++      to: 'larry',
++      text: `done\nPROVENANCE: stage=plan slug=hard-spec-gate artifact-sha256=${describeArtifact(planPath).sha256}`,
++      timestamp: new Date(nowMs - 11 * 60_000).toISOString(),
++      reply_to: 'D1',
++      busKey,
++    });
++
++    emitLedgerRow({
++      slug: 'hard-spec-gate',
++      stage: 'research',
++      artifactPath: researchPath,
++      ledgerPath,
++      secretPath,
++      nowSeconds: Math.floor((nowMs - 25 * 60_000) / 1000),
++    });
++    emitLedgerRow({
++      slug: 'hard-spec-gate',
++      stage: 'plan',
++      artifactPath: planPath,
++      runner: 'opencode',
++      sessionId: 'R1',
++      transcriptPath: planReturnPath,
++      provenanceMode: 'worker-dispatch',
++      busStoreRoot: ctxRoot,
++      busKeyCtxRoot: ctxRoot,
++      ledgerPath,
++      secretPath,
++      nowSeconds: Math.floor((nowMs - 11 * 60_000) / 1000),
++    });
++
++    writeFileSync(planReturnPath, JSON.stringify({
++      id: 'R1',
++      from: 'opencode',
++      to: 'larry',
++      priority: 'normal',
++      timestamp: new Date(nowMs - 11 * 60_000).toISOString(),
++      text: `done\nPROVENANCE: stage=plan slug=hard-spec-gate artifact-sha256=${describeArtifact(planPath).sha256}`,
++      reply_to: 'D1',
++      sig: '00'.repeat(32),
++    }), 'utf-8');
++
++    const report = runAudit();
++    expect(report.bypasses).toContainEqual(expect.objectContaining({
++      kind: 'hole3-deep-authorship',
++      slug: 'hard-spec-gate',
++      code: 'TRANSCRIPT_TAMPERED',
++    }));
++  });
++
+   it('batches multiple findings into one page body', () => {
+     const body = formatBatchedPage({
+       window: { start_ms: 1, end_ms: 2 },
+diff --git a/tests/unit/pipeline/ledger.test.ts b/tests/unit/pipeline/ledger.test.ts
+index 65f1d59..dca4e13 100644
+--- a/tests/unit/pipeline/ledger.test.ts
++++ b/tests/unit/pipeline/ledger.test.ts
+@@ -80,6 +80,7 @@ function signRow(secret: string, row: Omit<LedgerRow, 'sig'>): LedgerRow {
+   if (row.transcript_sha256) parts.push(row.transcript_sha256);
+   if (row.reason) parts.push(row.reason);
+   if (row.evidence_path) parts.push(row.evidence_path);
++  if (row.provenance_mode) parts.push(row.provenance_mode);
+   return {
+     ...row,
+     sig: createHmac('sha256', secret).update(parts.join('|')).digest('hex'),
+diff --git a/tests/unit/pipeline/worker-provenance.test.ts b/tests/unit/pipeline/worker-provenance.test.ts
+new file mode 100644
+index 0000000..7399a12
+--- /dev/null
++++ b/tests/unit/pipeline/worker-provenance.test.ts
+@@ -0,0 +1,412 @@
++import { createHmac } from 'crypto';
++import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
++import { tmpdir } from 'os';
++import { dirname, join } from 'path';
++import {
++  describeArtifact,
++  emitLedgerRow,
++  readLedgerRows,
++  verifyChainDetailed,
++  verifyOneBigFeatureArtifacts,
++} from '../../../src/pipeline/ledger';
++
++function transcriptLine(sessionId: string, block: Record<string, unknown>): string {
++  return JSON.stringify({
++    type: 'assistant',
++    timestamp: '2026-07-12T01:00:00.000Z',
++    sessionId,
++    isSidechain: true,
++    message: {
++      role: 'assistant',
++      content: [block],
++    },
++  });
++}
++
++function writeWriteTranscript(path: string, sessionId: string, writes: Array<{ filePath: string; content: string }>): void {
++  mkdirSync(dirname(path), { recursive: true });
++  const lines = writes.map((write, index) => transcriptLine(sessionId, {
++    type: 'tool_use',
++    id: `toolu_write_${index}`,
++    name: 'Write',
++    input: {
++      file_path: write.filePath,
++      content: write.content,
++    },
++  }));
++  writeFileSync(path, `${lines.join('\n')}\n`, 'utf-8');
++}
++
++function busSign(key: string, id: string, from: string, to: string, text: string): string {
++  return createHmac('sha256', key).update(`${id}:${from}:${to}:${text}`).digest('hex');
++}
++
++function writeBusMessage(dir: string, msg: {
++  id: string;
++  from: string;
++  to: string;
++  text: string;
++  reply_to?: string | null;
++  timestamp?: string;
++  busKey?: string;
++  sig?: string;
++}): string {
++  mkdirSync(dir, { recursive: true });
++  const timestamp = msg.timestamp ?? '2026-07-12T01:00:00.000Z';
++  const sig = msg.sig ?? (msg.busKey ? busSign(msg.busKey, msg.id, msg.from, msg.to, msg.text) : undefined);
++  const path = join(dir, `2-${msg.id}.json`);
++  writeFileSync(path, JSON.stringify({
++    id: msg.id,
++    from: msg.from,
++    to: msg.to,
++    priority: 'normal',
++    timestamp,
++    text: msg.text,
++    reply_to: msg.reply_to ?? null,
++    ...(sig ? { sig } : {}),
++  }), 'utf-8');
++  return path;
++}
++
++describe('worker-dispatch provenance', () => {
++  let root: string;
++  let repoRoot: string;
++  let busStoreRoot: string;
++  let projectsRoot: string;
++  let ledgerPath: string;
++  let secretPath: string;
++  let secret: string;
++  let busKey: string;
++  let slugDir: string;
++  let researchPath: string;
++  let planPath: string;
++  let specsDir: string;
++  let specPath: string;
++
++  beforeEach(() => {
++    root = mkdtempSync(join(tmpdir(), 'worker-provenance-'));
++    repoRoot = join(root, 'repo');
++    busStoreRoot = join(root, 'ctx');
++    projectsRoot = join(root, 'projects');
++    ledgerPath = join(root, 'state', 'pipeline-ledger.jsonl');
++    secretPath = join(root, '.pipeline-secret');
++    secret = 'ab'.repeat(32);
++    busKey = 'bk'.repeat(20);
++
++    slugDir = join(repoRoot, '.agent', 'one-big-feature', 'hard-spec-gate');
++    researchPath = join(slugDir, '01-research.md');
++    planPath = join(slugDir, '02-master-plan.md');
++    specsDir = join(slugDir, '03-specs');
++    specPath = join(specsDir, '01-signed-stage-ledger.md');
++
++    mkdirSync(specsDir, { recursive: true });
++    mkdirSync(join(busStoreRoot, 'config'), { recursive: true });
++    writeFileSync(join(busStoreRoot, 'config', 'bus-signing-key'), `${busKey}\n`, 'utf-8');
++    writeFileSync(secretPath, `${secret}\n`, 'utf-8');
++    writeFileSync(researchPath, '# research\n', 'utf-8');
++    writeFileSync(planPath, '# master plan\n', 'utf-8');
++    writeFileSync(specPath, '# signed spec\n', 'utf-8');
++  });
++
++  afterEach(() => {
++    rmSync(root, { recursive: true, force: true });
++  });
++
++  function emitResearch(nowSeconds = 100) {
++    return emitLedgerRow({
++      slug: 'hard-spec-gate',
++      stage: 'research',
++      artifactPath: researchPath,
++      ledgerPath,
++      secretPath,
++      nowSeconds,
++    });
++  }
++
++  function seedDispatch(id = 'D1', slug = 'hard-spec-gate'): string {
++    return writeBusMessage(join(busStoreRoot, 'processed', 'opencode'), {
++      id,
++      from: 'larry',
++      to: 'opencode',
++      text: `GATE: build framework=one-big-feature slug=${slug} repo=${repoRoot} scope-sha=${'a'.repeat(64)}`,
++      busKey,
++    });
++  }
++
++  function emitWorkerStage(
++    stage: 'plan' | 'specs',
++    artifactPath: string,
++    sessionId: string,
++    transcriptPath: string,
++    nowSeconds: number,
++  ) {
++    return emitLedgerRow({
++      slug: 'hard-spec-gate',
++      stage,
++      artifactPath,
++      runner: 'opencode',
++      sessionId,
++      transcriptPath,
++      provenanceMode: 'worker-dispatch',
++      busStoreRoot,
++      busKeyCtxRoot: busStoreRoot,
++      ledgerPath,
++      secretPath,
++      nowSeconds,
++    });
++  }
++
++  function seedPassingWorkerChain() {
++    emitResearch(100);
++    seedDispatch('D1');
++    const planReturnPath = writeBusMessage(join(busStoreRoot, 'processed', 'larry'), {
++      id: 'R1',
++      from: 'opencode',
++      to: 'larry',
++      reply_to: 'D1',
++      text: `done\nPROVENANCE: stage=plan slug=hard-spec-gate artifact-sha256=${describeArtifact(planPath).sha256}`,
++      busKey,
++    });
++    const planRow = emitWorkerStage('plan', planPath, 'R1', planReturnPath, 200);
++
++    const specsReturnPath = writeBusMessage(join(busStoreRoot, 'processed', 'larry'), {
++      id: 'R2',
++      from: 'opencode',
++      to: 'larry',
++      reply_to: 'D1',
++      text: `done\nPROVENANCE: stage=specs slug=hard-spec-gate artifact-sha256=${describeArtifact(specsDir).sha256}`,
++      busKey,
++    });
++    const specsRow = emitWorkerStage('specs', specsDir, 'R2', specsReturnPath, 300);
++
++    return { planReturnPath, specsReturnPath, planRow, specsRow };
++  }
++
++  it('emits and verifies a worker-authored research -> plan -> specs chain', () => {
++    seedPassingWorkerChain();
++
++    const verified = verifyChainDetailed({
++      slug: 'hard-spec-gate',
++      throughStage: 'specs',
++      maxAgeSeconds: 86_400,
++      scopeSha: describeArtifact(specsDir).sha256,
++      ledgerPath,
++      secretPath,
++      busStoreRoot,
++      nowSeconds: 350,
++    });
++    expect(verified.ok).toBe(true);
++    if (!verified.ok) return;
++
++    const artifactCheck = verifyOneBigFeatureArtifacts({
++      projectRoot: repoRoot,
++      slug: 'hard-spec-gate',
++      rows: verified.rows,
++    });
++    expect(artifactCheck.ok).toBe(true);
++
++    const rows = readLedgerRows(ledgerPath);
++    expect(rows.find((row) => row.stage === 'plan')?.provenance_mode).toBe('worker-dispatch');
++    expect(rows.find((row) => row.stage === 'specs')?.provenance_mode).toBe('worker-dispatch');
++  });
++
++  it('fails emit when the return message is signed from larry instead of a worker', () => {
++    emitResearch();
++    seedDispatch('D1');
++    const returnPath = writeBusMessage(join(busStoreRoot, 'processed', 'larry'), {
++      id: 'R1',
++      from: 'larry',
++      to: 'larry',
++      reply_to: 'D1',
++      text: `done\nPROVENANCE: stage=plan slug=hard-spec-gate artifact-sha256=${describeArtifact(planPath).sha256}`,
++      busKey,
++    });
++
++    expect(() => emitWorkerStage('plan', planPath, 'R1', returnPath, 200)).toThrow(/PROVENANCE_MISMATCH/);
++  });
++
++  it('fails emit when the worker return message signature is tampered', () => {
++    emitResearch();
++    seedDispatch('D1');
++    const returnPath = writeBusMessage(join(busStoreRoot, 'processed', 'larry'), {
++      id: 'R1',
++      from: 'opencode',
++      to: 'larry',
++      reply_to: 'D1',
++      text: `done\nPROVENANCE: stage=plan slug=hard-spec-gate artifact-sha256=${describeArtifact(planPath).sha256}`,
++      sig: '00'.repeat(32),
++    });
++
++    expect(() => emitWorkerStage('plan', planPath, 'R1', returnPath, 200)).toThrow(/TRANSCRIPT_TAMPERED/);
++  });
++
++  it('fails emit when the from field is spoofed without re-signing', () => {
++    emitResearch();
++    seedDispatch('D1');
++    const text = `done\nPROVENANCE: stage=plan slug=hard-spec-gate artifact-sha256=${describeArtifact(planPath).sha256}`;
++    const spoofedPath = writeBusMessage(join(busStoreRoot, 'processed', 'larry'), {
++      id: 'R1',
++      from: 'opencode',
++      to: 'larry',
++      reply_to: 'D1',
++      text,
++      sig: busSign(busKey, 'R1', 'larry', 'larry', text),
++    });
++
++    expect(() => emitWorkerStage('plan', planPath, 'R1', spoofedPath, 200)).toThrow(/TRANSCRIPT_TAMPERED/);
++  });
++
++  it('fails emit when the artifact bytes drift after attestation', () => {
++    emitResearch();
++    seedDispatch('D1');
++    const returnPath = writeBusMessage(join(busStoreRoot, 'processed', 'larry'), {
++      id: 'R1',
++      from: 'opencode',
++      to: 'larry',
++      reply_to: 'D1',
++      text: `done\nPROVENANCE: stage=plan slug=hard-spec-gate artifact-sha256=${describeArtifact(planPath).sha256}`,
++      busKey,
++    });
++    writeFileSync(planPath, '# drifted plan\n', 'utf-8');
++
++    expect(() => emitWorkerStage('plan', planPath, 'R1', returnPath, 200)).toThrow(/PROVENANCE_MISMATCH/);
++  });
++
++  it('fails emit when the reply_to dispatch slug mismatches the attested slug', () => {
++    emitResearch();
++    seedDispatch('D1', 'other-slug');
++    const returnPath = writeBusMessage(join(busStoreRoot, 'processed', 'larry'), {
++      id: 'R1',
++      from: 'opencode',
++      to: 'larry',
++      reply_to: 'D1',
++      text: `done\nPROVENANCE: stage=plan slug=hard-spec-gate artifact-sha256=${describeArtifact(planPath).sha256}`,
++      busKey,
++    });
++
++    expect(() => emitWorkerStage('plan', planPath, 'R1', returnPath, 200)).toThrow(/PROVENANCE_MISMATCH/);
++  });
++
++  it('fails emit when the reply_to dispatch is missing', () => {
++    emitResearch();
++    const returnPath = writeBusMessage(join(busStoreRoot, 'processed', 'larry'), {
++      id: 'R1',
++      from: 'opencode',
++      to: 'larry',
++      reply_to: 'NOPE',
++      text: `done\nPROVENANCE: stage=plan slug=hard-spec-gate artifact-sha256=${describeArtifact(planPath).sha256}`,
++      busKey,
++    });
++
++    expect(() => emitWorkerStage('plan', planPath, 'R1', returnPath, 200)).toThrow(/TRANSCRIPT_MISSING|PROVENANCE_MISMATCH/);
++  });
++
++  it('fails emit when the return message lacks a PROVENANCE line', () => {
++    emitResearch();
++    seedDispatch('D1');
++    const returnPath = writeBusMessage(join(busStoreRoot, 'processed', 'larry'), {
++      id: 'R1',
++      from: 'opencode',
++      to: 'larry',
++      reply_to: 'D1',
++      text: 'done without attestation',
++      busKey,
++    });
++
++    expect(() => emitWorkerStage('plan', planPath, 'R1', returnPath, 200)).toThrow(/PROVENANCE_MISMATCH/);
++  });
++
++  it('fails emit when the bus signing key is unreadable', () => {
++    emitResearch();
++    seedDispatch('D1');
++    const returnPath = writeBusMessage(join(busStoreRoot, 'processed', 'larry'), {
++      id: 'R1',
++      from: 'opencode',
++      to: 'larry',
++      reply_to: 'D1',
++      text: `done\nPROVENANCE: stage=plan slug=hard-spec-gate artifact-sha256=${describeArtifact(planPath).sha256}`,
++      busKey,
++    });
++    rmSync(join(busStoreRoot, 'config'), { recursive: true, force: true });
++
++    expect(() => emitWorkerStage('plan', planPath, 'R1', returnPath, 200)).toThrow(/NO_PROVENANCE/);
++  });
++
++  it('fails emit when the return message is outside the bus store root', () => {
++    emitResearch();
++    seedDispatch('D1');
++    const outsidePath = writeBusMessage(join(root, 'outside', 'larry'), {
++      id: 'R1',
++      from: 'opencode',
++      to: 'larry',
++      reply_to: 'D1',
++      text: `done\nPROVENANCE: stage=plan slug=hard-spec-gate artifact-sha256=${describeArtifact(planPath).sha256}`,
++      busKey,
++    });
++
++    expect(() => emitWorkerStage('plan', planPath, 'R1', outsidePath, 200)).toThrow(/TRANSCRIPT_MISSING/);
++  });
++
++  it('keeps transcript-mode rows unchanged when provenance_mode is absent', () => {
++    emitResearch();
++    const sessionId = 'plan-session-1';
++    const transcriptPath = join(projectsRoot, 'larry', sessionId, 'subagents', 'agent-plan.jsonl');
++    writeWriteTranscript(transcriptPath, sessionId, [
++      { filePath: planPath, content: '# master plan\n' },
++    ]);
++
++    emitLedgerRow({
++      slug: 'hard-spec-gate',
++      stage: 'plan',
++      artifactPath: planPath,
++      runner: 'architect',
++      sessionId,
++      transcriptPath,
++      transcriptRoot: projectsRoot,
++      ledgerPath,
++      secretPath,
++      nowSeconds: 200,
++    });
++
++    const rows = readLedgerRows(ledgerPath);
++    expect(rows.find((row) => row.stage === 'plan')?.provenance_mode).toBeUndefined();
++
++    const verified = verifyChainDetailed({
++      slug: 'hard-spec-gate',
++      throughStage: 'plan',
++      maxAgeSeconds: 86_400,
++      ledgerPath,
++      secretPath,
++      transcriptRoot: projectsRoot,
++      nowSeconds: 250,
++    });
++    expect(verified.ok).toBe(true);
++  });
++
++  it('detects verify-time tampering of a worker return message', () => {
++    const { specsReturnPath } = seedPassingWorkerChain();
++    writeFileSync(specsReturnPath, JSON.stringify({
++      id: 'R2',
++      from: 'opencode',
++      to: 'larry',
++      priority: 'normal',
++      timestamp: '2026-07-12T01:00:00.000Z',
++      text: 'tampered',
++      reply_to: 'D1',
++      sig: '00'.repeat(32),
++    }), 'utf-8');
++
++    const verified = verifyChainDetailed({
++      slug: 'hard-spec-gate',
++      throughStage: 'specs',
++      maxAgeSeconds: 86_400,
++      scopeSha: describeArtifact(specsDir).sha256,
++      ledgerPath,
++      secretPath,
++      busStoreRoot,
++      nowSeconds: 350,
++    });
++    expect(verified).toMatchObject({ ok: false, code: 'TRANSCRIPT_TAMPERED' });
++  });
++});

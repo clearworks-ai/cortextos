@@ -1,0 +1,19 @@
+true-verify — kimi-k3-provenance-bridge
+runner: opus (larry main thread, post-restart)
+verified after review row ts=1784419941
+
+npm run typecheck  : PASS (tsc --noEmit clean)
+npm run build      : PASS (esbuild Build success)
+pipeline unit tests: PASS 37/37 (tests/unit/pipeline/ — 4 files)
+  incl. new tests/unit/pipeline/worker-provenance.test.ts
+
+scope (applied, working tree):
+  src/pipeline/ledger.ts
+  src/pipeline/stage-emit.ts
+  src/pipeline/bypass-audit.ts
+  tests/unit/pipeline/ledger.test.ts
+  tests/unit/pipeline/bypass-audit.test.ts
+  tests/unit/pipeline/worker-provenance.test.ts (new)
+  .claude/workflows/routing-config.json (routing doc note)
+
+codexer report corroborated: full npm test 181 files / 2711 tests / 1 skipped, all green.

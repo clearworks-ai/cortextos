@@ -1,3 +1,4 @@
+import { createHmac } from 'crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   existsSync,
@@ -11,6 +12,7 @@ import {
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import {
+  describeArtifact,
   emitLedgerRow,
 } from '../../../src/pipeline/ledger';
 import {
@@ -44,6 +46,36 @@ function appendTranscript(path: string, lines: string[]): void {
   ]);
 }
 
+function busSign(key: string, id: string, from: string, to: string, text: string): string {
+  return createHmac('sha256', key).update(`${id}:${from}:${to}:${text}`).digest('hex');
+}
+
+function writeBusMessage(dir: string, msg: {
+  id: string;
+  from: string;
+  to: string;
+  text: string;
+  timestamp: string;
+  reply_to?: string | null;
+  busKey?: string;
+  sig?: string;
+}): string {
+  mkdirSync(dir, { recursive: true });
+  const sig = msg.sig ?? (msg.busKey ? busSign(msg.busKey, msg.id, msg.from, msg.to, msg.text) : undefined);
+  const path = join(dir, `2-${msg.id}.json`);
+  writeFileSync(path, JSON.stringify({
+    id: msg.id,
+    from: msg.from,
+    to: msg.to,
+    priority: 'normal',
+    timestamp: msg.timestamp,
+    text: msg.text,
+    reply_to: msg.reply_to ?? null,
+    ...(sig ? { sig } : {}),
+  }), 'utf-8');
+  return path;
+}
+
 describe('pipeline bypass audit', () => {
   let root: string;
   let ctxRoot: string;
@@ -53,6 +85,7 @@ describe('pipeline bypass audit', () => {
   let ledgerPath: string;
   let secretPath: string;
   let secret: string;
+  let busKey: string;
   let nowMs: number;
   let slugDir: string;
   let researchPath: string;
@@ -69,6 +102,7 @@ describe('pipeline bypass audit', () => {
     ledgerPath = join(projectRoot, 'state', 'pipeline-ledger.jsonl');
     secretPath = join(root, '.pipeline-secret');
     secret = 'ab'.repeat(32);
+    busKey = 'bk'.repeat(20);
     nowMs = Date.UTC(2026, 6, 12, 2, 30, 0);
     slugDir = join(projectRoot, '.agent', 'one-big-feature', 'hard-spec-gate');
     researchPath = join(slugDir, '01-research.md');
@@ -77,8 +111,10 @@ describe('pipeline bypass audit', () => {
     specPath = join(specsDir, '01-signed-stage-ledger.md');
 
     mkdirSync(specsDir, { recursive: true });
+    mkdirSync(join(ctxRoot, 'config'), { recursive: true });
     mkdirSync(join(ctxRoot, 'processed', 'codexer'), { recursive: true });
     writeFileSync(secretPath, `${secret}\n`, 'utf-8');
+    writeFileSync(join(ctxRoot, 'config', 'bus-signing-key'), `${busKey}\n`, 'utf-8');
     writeFileSync(researchPath, '# research\n', 'utf-8');
     writeFileSync(planPath, '# master plan\n', 'utf-8');
     writeFileSync(specPath, '# signed spec\n', 'utf-8');
@@ -532,6 +568,222 @@ describe('pipeline bypass audit', () => {
 
     const report = runAudit();
     expect(report.bypasses.some(finding => finding.kind === 'hole3-hand-authoring')).toBe(true);
+  });
+
+  it('flags an unbacked worker dispatch with dispatch-no-chain', () => {
+    const sessionId = 'parent-worker-dispatch';
+    const parentTranscript = join(parentTranscriptRoot, 'main.jsonl');
+    writeTranscript(parentTranscript, [
+      transcriptLine(sessionId, new Date(nowMs - 60_000).toISOString(), {
+        type: 'tool_use',
+        id: 'toolu_dispatch_worker',
+        name: 'Bash',
+        input: {
+          command: `cortextos bus send-message opencode normal 'GATE: build framework=one-big-feature slug=hard-spec-gate repo=${projectRoot} scope-sha=${'a'.repeat(64)}'`,
+        },
+      }),
+    ]);
+
+    const report = runAudit();
+    expect(report.bypasses).toContainEqual(expect.objectContaining({
+      kind: 'dispatch-no-chain',
+      slug: 'hard-spec-gate',
+      code: 'NO_ROWS',
+    }));
+  });
+
+  it('accepts a valid worker-dispatch row without hole3-structure findings', () => {
+    const parentTranscript = join(parentTranscriptRoot, 'main.jsonl');
+    const dispatchTimestamp = new Date(nowMs - 12 * 60_000).toISOString();
+    const dispatchText = `GATE: build framework=one-big-feature slug=hard-spec-gate repo=${projectRoot} scope-sha=${describeArtifact(specsDir).sha256}`;
+    writeTranscript(parentTranscript, [
+      transcriptLine('parent', new Date(nowMs - 24 * 60_000).toISOString(), {
+        type: 'tool_use',
+        id: 'toolu_plan_spawn',
+        name: 'Agent',
+        input: {
+          description: 'Plan hard-spec-gate',
+          subagent_type: 'opencode',
+          prompt: `Plan ${projectRoot}/.agent/one-big-feature/hard-spec-gate/02-master-plan.md`,
+        },
+      }),
+      transcriptLine('parent', new Date(nowMs - 23 * 60_000).toISOString(), {
+        type: 'tool_result',
+        tool_use_id: 'toolu_plan_spawn',
+        content: 'done',
+      }, 'user'),
+      transcriptLine('parent', new Date(nowMs - 18 * 60_000).toISOString(), {
+        type: 'tool_use',
+        id: 'toolu_specs_spawn',
+        name: 'Agent',
+        input: {
+          description: 'Specs hard-spec-gate',
+          subagent_type: 'opencode',
+          prompt: `Write specs for ${projectRoot}/.agent/one-big-feature/hard-spec-gate/03-specs/`,
+        },
+      }),
+      transcriptLine('parent', new Date(nowMs - 17 * 60_000).toISOString(), {
+        type: 'tool_result',
+        tool_use_id: 'toolu_specs_spawn',
+        content: 'done',
+      }, 'user'),
+      transcriptLine('parent', dispatchTimestamp, {
+        type: 'tool_use',
+        id: 'toolu_dispatch_worker_ok',
+        name: 'Bash',
+        input: {
+          command: `cortextos bus send-message opencode normal '${dispatchText}'`,
+        },
+      }),
+    ]);
+
+    writeBusMessage(join(ctxRoot, 'processed', 'opencode'), {
+      id: 'D1',
+      from: 'larry',
+      to: 'opencode',
+      text: dispatchText,
+      timestamp: dispatchTimestamp,
+      busKey,
+    });
+    const planReturnPath = writeBusMessage(join(ctxRoot, 'processed', 'larry'), {
+      id: 'R1',
+      from: 'opencode',
+      to: 'larry',
+      text: `done\nPROVENANCE: stage=plan slug=hard-spec-gate artifact-sha256=${describeArtifact(planPath).sha256}`,
+      timestamp: new Date(nowMs - 11 * 60_000).toISOString(),
+      reply_to: 'D1',
+      busKey,
+    });
+    const specsReturnPath = writeBusMessage(join(ctxRoot, 'processed', 'larry'), {
+      id: 'R2',
+      from: 'opencode',
+      to: 'larry',
+      text: `done\nPROVENANCE: stage=specs slug=hard-spec-gate artifact-sha256=${describeArtifact(specsDir).sha256}`,
+      timestamp: new Date(nowMs - 10 * 60_000).toISOString(),
+      reply_to: 'D1',
+      busKey,
+    });
+
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'research',
+      artifactPath: researchPath,
+      ledgerPath,
+      secretPath,
+      nowSeconds: Math.floor((nowMs - 25 * 60_000) / 1000),
+    });
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'plan',
+      artifactPath: planPath,
+      runner: 'opencode',
+      sessionId: 'R1',
+      transcriptPath: planReturnPath,
+      provenanceMode: 'worker-dispatch',
+      busStoreRoot: ctxRoot,
+      busKeyCtxRoot: ctxRoot,
+      ledgerPath,
+      secretPath,
+      nowSeconds: Math.floor((nowMs - 11 * 60_000) / 1000),
+    });
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'specs',
+      artifactPath: specsDir,
+      runner: 'opencode',
+      sessionId: 'R2',
+      transcriptPath: specsReturnPath,
+      provenanceMode: 'worker-dispatch',
+      busStoreRoot: ctxRoot,
+      busKeyCtxRoot: ctxRoot,
+      ledgerPath,
+      secretPath,
+      nowSeconds: Math.floor((nowMs - 10 * 60_000) / 1000),
+    });
+
+    const report = runAudit();
+    expect(report.bypasses).toEqual([]);
+    expect(report.bypasses.some(finding => finding.kind === 'hole3-structure')).toBe(false);
+  });
+
+  it('flags worker-dispatch return-message tampering as hole3-deep-authorship', () => {
+    const parentTranscript = join(parentTranscriptRoot, 'main.jsonl');
+    writeTranscript(parentTranscript, [
+      transcriptLine('parent', new Date(nowMs - 24 * 60_000).toISOString(), {
+        type: 'tool_use',
+        id: 'toolu_plan_spawn',
+        name: 'Agent',
+        input: {
+          description: 'Plan hard-spec-gate',
+          subagent_type: 'opencode',
+          prompt: `Plan ${projectRoot}/.agent/one-big-feature/hard-spec-gate/02-master-plan.md`,
+        },
+      }),
+      transcriptLine('parent', new Date(nowMs - 23 * 60_000).toISOString(), {
+        type: 'tool_result',
+        tool_use_id: 'toolu_plan_spawn',
+        content: 'done',
+      }, 'user'),
+    ]);
+
+    writeBusMessage(join(ctxRoot, 'processed', 'opencode'), {
+      id: 'D1',
+      from: 'larry',
+      to: 'opencode',
+      text: `GATE: build framework=one-big-feature slug=hard-spec-gate repo=${projectRoot} scope-sha=${'a'.repeat(64)}`,
+      timestamp: new Date(nowMs - 12 * 60_000).toISOString(),
+      busKey,
+    });
+    const planReturnPath = writeBusMessage(join(ctxRoot, 'processed', 'larry'), {
+      id: 'R1',
+      from: 'opencode',
+      to: 'larry',
+      text: `done\nPROVENANCE: stage=plan slug=hard-spec-gate artifact-sha256=${describeArtifact(planPath).sha256}`,
+      timestamp: new Date(nowMs - 11 * 60_000).toISOString(),
+      reply_to: 'D1',
+      busKey,
+    });
+
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'research',
+      artifactPath: researchPath,
+      ledgerPath,
+      secretPath,
+      nowSeconds: Math.floor((nowMs - 25 * 60_000) / 1000),
+    });
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'plan',
+      artifactPath: planPath,
+      runner: 'opencode',
+      sessionId: 'R1',
+      transcriptPath: planReturnPath,
+      provenanceMode: 'worker-dispatch',
+      busStoreRoot: ctxRoot,
+      busKeyCtxRoot: ctxRoot,
+      ledgerPath,
+      secretPath,
+      nowSeconds: Math.floor((nowMs - 11 * 60_000) / 1000),
+    });
+
+    writeFileSync(planReturnPath, JSON.stringify({
+      id: 'R1',
+      from: 'opencode',
+      to: 'larry',
+      priority: 'normal',
+      timestamp: new Date(nowMs - 11 * 60_000).toISOString(),
+      text: `done\nPROVENANCE: stage=plan slug=hard-spec-gate artifact-sha256=${describeArtifact(planPath).sha256}`,
+      reply_to: 'D1',
+      sig: '00'.repeat(32),
+    }), 'utf-8');
+
+    const report = runAudit();
+    expect(report.bypasses).toContainEqual(expect.objectContaining({
+      kind: 'hole3-deep-authorship',
+      slug: 'hard-spec-gate',
+      code: 'TRANSCRIPT_TAMPERED',
+    }));
   });
 
   it('batches multiple findings into one page body', () => {

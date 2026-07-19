@@ -5,6 +5,7 @@ import type { CronDefinition } from '../types/index.js';
 export interface BannedCronPromptPattern {
   id: string;
   re: RegExp;
+  hint?: string;
 }
 
 interface OverlayPatternEntry {
@@ -18,10 +19,25 @@ export interface BannedCronPromptMatch {
   patternId: string;
 }
 
+export const CRON_TASK_LEAK_PATTERN_ID = 'cron-task-leak-no-complete';
+
+const CRON_TASK_LEAK_RE =
+  /^(?=[\s\S]*\bcreate-task\b)(?=[\s\S]*\bupdate-task\b[\s\S]{0,120}\bin_progress\b)(?![\s\S]*\bcomplete-task\b)/;
+
 export const BANNED_CRON_PROMPT_PATTERNS: readonly BannedCronPromptPattern[] = [
   {
     id: 'full-human-task-list-telegram',
     re: /send\b[\s\S]{0,40}\b(full|entire|all|complete)\b[\s\S]{0,40}\b(human\s+)?task\s+list\b[\s\S]{0,40}\btelegram\b/i,
+    hint: 'This prompt was blocked to prevent a known Telegram-spam recurrence.',
+  },
+  {
+    id: CRON_TASK_LEAK_PATTERN_ID,
+    re: CRON_TASK_LEAK_RE,
+    hint:
+      'Cron prompts must not create a bus task and mark it in_progress without a ' +
+      'complete-task in the same prompt — that leaks tasks stuck in_progress. ' +
+      'Drop the task bookkeeping (update-cron-fire + log-event already record the fire) ' +
+      'or complete the task in the same prompt.',
   },
 ] as const;
 
@@ -100,15 +116,23 @@ export function findBannedCronPrompts(crons: CronDefinition[]): BannedCronPrompt
   return matches;
 }
 
+export function isCronTaskLeakPrompt(prompt: string): boolean {
+  return CRON_TASK_LEAK_RE.test(prompt);
+}
+
 export function validateCronsPrompt(crons: CronDefinition[]): void {
   const [match] = findBannedCronPrompts(crons);
   if (!match) {
     return;
   }
 
+  const pattern = allPatterns().find(p => p.id === match.patternId);
+  const hint =
+    pattern?.hint ?? 'This prompt was blocked to prevent a known bad-cron recurrence.';
+
   throw new Error(
     `Refusing to write cron "${match.name}": prompt matches banned pattern ` +
-      `"${match.patternId}". This prompt was blocked to prevent a known Telegram-spam recurrence. ` +
+      `"${match.patternId}". ${hint} ` +
       `Edit the prompt or update state/cron-banned-patterns.json.`
   );
 }

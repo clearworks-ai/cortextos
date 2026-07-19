@@ -1,5 +1,5 @@
 {
-  "$comment": "Per-stage model routing for dynamic-pipeline. provider ∈ anthropic|openrouter|codex. Plan engine is a mandatory Josh-confirmed choice among plan.engines (fable|opus|kimi-k3); when not explicitly confirmed, plan falls back to opus. anthropic engines run as Larry's Claude subagent; openrouter engines (kimi-k3) dispatch via the Opencoder worker.",
+  "$comment": "Per-stage model routing for dynamic-pipeline. provider ∈ anthropic|openrouter|codex. Plan engine is a mandatory Josh-confirmed choice among plan.engines (fable|opus|kimi-k3); when not explicitly confirmed, plan falls back to opus. anthropic engines run as Larry's Claude subagent; openrouter engines (kimi-k3) dispatch via the Opencoder/opencode bus worker, and their plan/specs are provenance-signed via provenance_mode=worker-dispatch (see src/pipeline/ledger.ts verifyWorkerDispatchAuthorship).",
   "fableGate": {
     "fallback": "opus"
   },

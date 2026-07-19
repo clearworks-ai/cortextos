@@ -24,6 +24,8 @@ export const STAGES = [
 ] as const;
 
 export type Stage = (typeof STAGES)[number];
+export type ProvenanceMode = 'transcript' | 'worker-dispatch';
+type WorkerProvenanceStage = Extract<Stage, 'plan' | 'specs'>;
 
 export interface LedgerRow {
   slug: string;
@@ -35,6 +37,7 @@ export interface LedgerRow {
   session_id?: string;
   transcript_path?: string;
   transcript_sha256?: string;
+  provenance_mode?: ProvenanceMode;
   reason?: string;
   evidence_path?: string;
   sig: string;
@@ -56,7 +59,8 @@ export type VerifyFailure =
   | 'SECRET_UNREADABLE'
   | 'NO_PROVENANCE'
   | 'TRANSCRIPT_MISSING'
-  | 'TRANSCRIPT_TAMPERED';
+  | 'TRANSCRIPT_TAMPERED'
+  | 'PROVENANCE_MISMATCH';
 
 export interface LedgerVerifyFailure {
   ok: false;
@@ -86,6 +90,21 @@ export interface ProvenanceSuccess {
 
 export type ProvenanceResult = ProvenanceSuccess | ProvenanceFailure;
 
+interface WorkerAttestationSuccess extends ProvenanceSuccess {
+  attested_sha256: string;
+}
+
+type WorkerAttestationResult = WorkerAttestationSuccess | ProvenanceFailure;
+
+interface ParsedBusMessage {
+  id: string;
+  from: string;
+  to: string;
+  text: string;
+  sig?: string;
+  reply_to?: string | null;
+}
+
 export interface ArtifactDescription {
   path: string;
   kind: 'file' | 'directory';
@@ -114,6 +133,10 @@ const GENESIS = 'GENESIS';
 const AUTHORED_STAGES = new Set<Stage>(['synthesize', 'plan', 'specs', 'review']);
 const SHA_HEX_RE = /^[a-f0-9]{64}$/;
 const SLUG_RE = /^[a-z0-9-]+$/;
+const WORKER_AUTHORS = new Set<string>(['opencode', 'opencoder']);
+const PROVENANCE_LINE_RE =
+  /PROVENANCE:\s*stage=(plan|specs)\s+slug=([a-z0-9-]+)\s+artifact-sha256=([a-f0-9]{64})\b/;
+const BUS_STORE_BUCKETS = ['inbox', 'inflight', 'processed'] as const;
 
 function isStage(value: string): value is Stage {
   return (STAGES as readonly string[]).includes(value);
@@ -121,6 +144,10 @@ function isStage(value: string): value is Stage {
 
 function isAuthoredStage(stage: Stage): boolean {
   return AUTHORED_STAGES.has(stage);
+}
+
+function isWorkerProvenanceStage(stage: Stage): stage is WorkerProvenanceStage {
+  return stage === 'plan' || stage === 'specs';
 }
 
 function sha256Hex(input: string | Buffer): string {
@@ -244,6 +271,7 @@ function canonicalPayload(row: Omit<LedgerRow, 'sig'>): string {
   if (row.transcript_sha256) parts.push(row.transcript_sha256);
   if (row.reason) parts.push(row.reason);
   if (row.evidence_path) parts.push(row.evidence_path);
+  if (row.provenance_mode) parts.push(row.provenance_mode);
 
   return parts.join('|');
 }
@@ -269,6 +297,10 @@ function parseLedgerLine(line: string): LedgerRow | null {
       session_id: value.session_id,
       transcript_path: value.transcript_path,
       transcript_sha256: value.transcript_sha256,
+      provenance_mode:
+        value.provenance_mode === 'worker-dispatch' || value.provenance_mode === 'transcript'
+          ? value.provenance_mode
+          : undefined,
       reason: value.reason,
       evidence_path: value.evidence_path,
       sig: value.sig,
@@ -333,6 +365,7 @@ function verifyRowSignature(row: LedgerRow, secret: string): boolean {
     session_id: row.session_id,
     transcript_path: row.transcript_path,
     transcript_sha256: row.transcript_sha256,
+    provenance_mode: row.provenance_mode,
     reason: row.reason,
     evidence_path: row.evidence_path,
   }), row.sig);
@@ -354,6 +387,12 @@ function ensureInsideRoot(pathToCheck: string, root: string): string | null {
 
 export function defaultTranscriptRoot(): string {
   return resolve(process.env.PIPELINE_TRANSCRIPT_ROOT_OVERRIDE || join(homedir(), '.claude', 'projects'));
+}
+
+export function defaultBusStoreRoot(): string {
+  return resolve(
+    process.env.PIPELINE_BUS_STORE_ROOT_OVERRIDE || join(homedir(), '.cortextos', 'cortextos1'),
+  );
 }
 
 export function defaultPipelineProjectRoot(explicitRoot?: string): string {
@@ -413,6 +452,271 @@ function parseTranscriptOps(transcriptPath: string): TranscriptOp[] {
   }
 
   return ops;
+}
+
+function busSignPayload(id: string, from: string, to: string, text: string): string {
+  return `${id}:${from}:${to}:${text}`;
+}
+
+function loadBusSigningKey(ctxRoot: string): string | null {
+  try {
+    const keyPath = join(resolve(ctxRoot), 'config', 'bus-signing-key');
+    const key = readFileSync(keyPath, 'utf-8').trim();
+    return key.length >= 16 ? key : null;
+  } catch {
+    return null;
+  }
+}
+
+function verifyBusMessageSig(msg: ParsedBusMessage, busKey: string): boolean {
+  if (!msg.sig) return false;
+  try {
+    const expected = hmacSign(busKey, busSignPayload(msg.id, msg.from, msg.to, msg.text));
+    return timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(msg.sig, 'hex'));
+  } catch {
+    return false;
+  }
+}
+
+function parseBusMessageFile(path: string): ParsedBusMessage | null {
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf-8');
+  } catch {
+    return null;
+  }
+
+  let value: unknown;
+  try {
+    value = JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== 'object') return null;
+
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.id !== 'string'
+    || typeof record.from !== 'string'
+    || typeof record.to !== 'string'
+    || typeof record.text !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    id: record.id,
+    from: record.from,
+    to: record.to,
+    text: record.text,
+    sig: typeof record.sig === 'string' ? record.sig : undefined,
+    reply_to: typeof record.reply_to === 'string' ? record.reply_to : null,
+  };
+}
+
+function findBusMessageById(busStoreRoot: string, id: string): { path: string; msg: ParsedBusMessage } | null {
+  for (const bucket of BUS_STORE_BUCKETS) {
+    for (const worker of WORKER_AUTHORS) {
+      const dir = join(resolve(busStoreRoot), bucket, worker);
+      if (!existsSync(dir)) continue;
+      for (const name of readdirSync(dir)) {
+        if (!name.endsWith('.json')) continue;
+        const path = join(dir, name);
+        const msg = parseBusMessageFile(path);
+        if (msg && msg.id === id) return { path, msg };
+      }
+    }
+  }
+
+  return null;
+}
+
+function resolveDispatchForReply(opts: {
+  busStoreRoot: string;
+  busKey: string;
+  replyToId: string;
+  expectedSlug: string;
+}): { ok: true } | ProvenanceFailure {
+  const found = findBusMessageById(opts.busStoreRoot, opts.replyToId);
+  if (!found) {
+    return {
+      ok: false,
+      code: 'TRANSCRIPT_MISSING',
+      detail: `Dispatch ${opts.replyToId} not found in bus store`,
+    };
+  }
+
+  const { msg } = found;
+  if (msg.from !== 'larry') {
+    return {
+      ok: false,
+      code: 'PROVENANCE_MISMATCH',
+      detail: `Dispatch ${opts.replyToId} not from larry (from=${msg.from})`,
+    };
+  }
+  if (!verifyBusMessageSig(msg, opts.busKey)) {
+    return {
+      ok: false,
+      code: 'TRANSCRIPT_TAMPERED',
+      detail: `Dispatch ${opts.replyToId} bus signature invalid`,
+    };
+  }
+
+  const slug = msg.text.match(/\bslug=([a-z0-9-]+)\b/)?.[1];
+  const isBuild = /\bGATE:\s*build\b/i.test(msg.text);
+  if (!isBuild || slug !== opts.expectedSlug) {
+    return {
+      ok: false,
+      code: 'PROVENANCE_MISMATCH',
+      detail: `Dispatch ${opts.replyToId} is not a GATE: build for slug ${opts.expectedSlug}`,
+    };
+  }
+
+  return { ok: true };
+}
+
+export function verifyWorkerAttestationMessage(opts: {
+  messagePath: string;
+  slug: string;
+  stage: WorkerProvenanceStage;
+  expectedMessageId?: string;
+  busStoreRoot?: string;
+  busKey?: string | null;
+}): WorkerAttestationResult {
+  const busStoreRoot = opts.busStoreRoot || defaultBusStoreRoot();
+  const messagePath = resolve(opts.messagePath);
+  const realMsgPath = ensureInsideRoot(messagePath, busStoreRoot);
+  if (!realMsgPath || !existsSync(realMsgPath)) {
+    return {
+      ok: false,
+      code: 'TRANSCRIPT_MISSING',
+      detail: `Return message missing or outside bus store: ${messagePath}`,
+    };
+  }
+
+  const busKey = opts.busKey ?? null;
+  if (!busKey) {
+    return {
+      ok: false,
+      code: 'NO_PROVENANCE',
+      detail: 'Bus signing key unreadable; cannot verify worker attestation',
+    };
+  }
+
+  const raw = readFileSync(realMsgPath, 'utf-8');
+  const msg = parseBusMessageFile(realMsgPath);
+  if (!msg) {
+    return {
+      ok: false,
+      code: 'PROVENANCE_MISMATCH',
+      detail: `Return message is not a parseable bus message: ${realMsgPath}`,
+    };
+  }
+  if (opts.expectedMessageId && msg.id !== opts.expectedMessageId) {
+    return {
+      ok: false,
+      code: 'PROVENANCE_MISMATCH',
+      detail: `Return message id ${msg.id} does not match expected ${opts.expectedMessageId}`,
+    };
+  }
+  if (!WORKER_AUTHORS.has(msg.from)) {
+    return {
+      ok: false,
+      code: 'PROVENANCE_MISMATCH',
+      detail: `Return message from '${msg.from}' is not a pipeline worker`,
+    };
+  }
+  if (!verifyBusMessageSig(msg, busKey)) {
+    return {
+      ok: false,
+      code: 'TRANSCRIPT_TAMPERED',
+      detail: `Return message bus signature invalid: ${realMsgPath}`,
+    };
+  }
+
+  const match = msg.text.match(PROVENANCE_LINE_RE);
+  if (!match) {
+    return {
+      ok: false,
+      code: 'PROVENANCE_MISMATCH',
+      detail: 'Return message lacks a PROVENANCE stage/slug/artifact-sha256 line',
+    };
+  }
+
+  const attestedStage = match[1];
+  const attestedSlug = match[2];
+  const attestedSha = match[3];
+  if (attestedStage !== opts.stage) {
+    return {
+      ok: false,
+      code: 'PROVENANCE_MISMATCH',
+      detail: `Attested stage ${attestedStage} does not match ${opts.stage}`,
+    };
+  }
+  if (attestedSlug !== opts.slug) {
+    return {
+      ok: false,
+      code: 'PROVENANCE_MISMATCH',
+      detail: `Attested slug ${attestedSlug} != ${opts.slug}`,
+    };
+  }
+  if (!msg.reply_to) {
+    return {
+      ok: false,
+      code: 'PROVENANCE_MISMATCH',
+      detail: 'Return message has no reply_to dispatch binding',
+    };
+  }
+
+  const dispatch = resolveDispatchForReply({
+    busStoreRoot,
+    busKey,
+    replyToId: msg.reply_to,
+    expectedSlug: opts.slug,
+  });
+  if (!dispatch.ok) return dispatch;
+
+  return {
+    ok: true,
+    attested_sha256: attestedSha,
+    transcript_sha256: sha256Hex(raw),
+    transcript_realpath: realMsgPath,
+  };
+}
+
+export function verifyWorkerDispatchAuthorship(opts: {
+  artifactPath: string;
+  messagePath: string;
+  slug: string;
+  stage: WorkerProvenanceStage;
+  expectedMessageId?: string;
+  busStoreRoot?: string;
+  busKey?: string | null;
+}): ProvenanceResult {
+  const attestation = verifyWorkerAttestationMessage({
+    messagePath: opts.messagePath,
+    slug: opts.slug,
+    stage: opts.stage,
+    expectedMessageId: opts.expectedMessageId,
+    busStoreRoot: opts.busStoreRoot,
+    busKey: opts.busKey,
+  });
+  if (!attestation.ok) return attestation;
+
+  const artifact = describeArtifact(opts.artifactPath);
+  if (artifact.sha256 !== attestation.attested_sha256) {
+    return {
+      ok: false,
+      code: 'PROVENANCE_MISMATCH',
+      detail: `Attested artifact sha ${attestation.attested_sha256} != on-disk ${artifact.sha256}`,
+    };
+  }
+
+  return {
+    ok: true,
+    transcript_sha256: attestation.transcript_sha256,
+    transcript_realpath: attestation.transcript_realpath,
+  };
 }
 
 function applyEdit(content: string, op: TranscriptOp): string | null {
@@ -541,6 +845,10 @@ export function emitLedgerRow(opts: {
   runner?: string;
   sessionId?: string;
   transcriptPath?: string;
+  provenanceMode?: ProvenanceMode;
+  workerName?: string;
+  busStoreRoot?: string;
+  busKeyCtxRoot?: string;
   evidencePath?: string;
   reason?: string;
   ledgerPath?: string;
@@ -568,21 +876,42 @@ export function emitLedgerRow(opts: {
 
   let transcriptSha: string | undefined;
   let transcriptRealpath: string | undefined;
+  let provenanceMode: ProvenanceMode | undefined;
   if (isAuthoredStage(opts.stage)) {
     if (!opts.runner || !opts.sessionId || !opts.transcriptPath) {
       throw new Error(`Authored stage '${opts.stage}' requires --runner, --session, and --transcript`);
     }
-    const provenance = verifyTranscriptAuthorship({
-      artifactPath: opts.artifactPath,
-      transcriptPath: opts.transcriptPath,
-      transcriptRoot: opts.transcriptRoot,
-      expectedSessionId: opts.sessionId,
-    });
+    const mode: ProvenanceMode = opts.provenanceMode ?? 'transcript';
+    let provenance: ProvenanceResult;
+    if (mode === 'worker-dispatch') {
+      if (!isWorkerProvenanceStage(opts.stage)) {
+        throw new Error(`Invalid provenance mode for stage '${opts.stage}': worker-dispatch only supports plan/specs`);
+      }
+      const busKeyRoot = opts.busKeyCtxRoot || opts.busStoreRoot || defaultBusStoreRoot();
+      const busKey = loadBusSigningKey(busKeyRoot);
+      provenance = verifyWorkerDispatchAuthorship({
+        artifactPath: opts.artifactPath,
+        messagePath: opts.transcriptPath,
+        slug: opts.slug,
+        stage: opts.stage,
+        expectedMessageId: opts.sessionId,
+        busStoreRoot: opts.busStoreRoot,
+        busKey,
+      });
+    } else {
+      provenance = verifyTranscriptAuthorship({
+        artifactPath: opts.artifactPath,
+        transcriptPath: opts.transcriptPath,
+        transcriptRoot: opts.transcriptRoot,
+        expectedSessionId: opts.sessionId,
+      });
+    }
     if (!provenance.ok) {
       throw new Error(`${provenance.code}: ${provenance.detail}`);
     }
     transcriptSha = provenance.transcript_sha256;
     transcriptRealpath = provenance.transcript_realpath;
+    provenanceMode = mode === 'worker-dispatch' ? mode : undefined;
   }
 
   mkdirSync(dirname(ledgerPath), { recursive: true });
@@ -606,6 +935,7 @@ export function emitLedgerRow(opts: {
     ...(opts.sessionId ? { session_id: opts.sessionId } : {}),
     ...(transcriptRealpath ? { transcript_path: transcriptRealpath } : {}),
     ...(transcriptSha ? { transcript_sha256: transcriptSha } : {}),
+    ...(provenanceMode === 'worker-dispatch' ? { provenance_mode: provenanceMode } : {}),
     ...(opts.reason ? { reason: opts.reason } : {}),
     ...(opts.evidencePath ? { evidence_path: resolve(opts.evidencePath) } : {}),
   };
@@ -704,6 +1034,7 @@ export function verifyChainDetailed(opts: {
   maxAgeSeconds: number;
   scopeSha?: string;
   transcriptRoot?: string;
+  busStoreRoot?: string;
   nowSeconds?: number;
 }): LedgerVerifyResult {
   ensureSlug(opts.slug);
@@ -757,6 +1088,14 @@ export function verifyChainDetailed(opts: {
           detail: `Missing provenance fields on ${row.slug}:${row.stage}`,
         };
       }
+      const mode: ProvenanceMode = row.provenance_mode === 'worker-dispatch' ? 'worker-dispatch' : 'transcript';
+      if (mode === 'worker-dispatch' && !isWorkerProvenanceStage(row.stage)) {
+        return {
+          ok: false,
+          code: 'PROVENANCE_MISMATCH',
+          detail: `Worker-dispatch provenance is invalid for ${row.slug}:${row.stage}`,
+        };
+      }
       if (!existsSync(row.transcript_path)) {
         return {
           ok: false,
@@ -764,7 +1103,12 @@ export function verifyChainDetailed(opts: {
           detail: `Transcript missing for ${row.slug}:${row.stage}: ${row.transcript_path}`,
         };
       }
-      const realTranscript = ensureInsideRoot(row.transcript_path, opts.transcriptRoot || defaultTranscriptRoot());
+      const realTranscript = ensureInsideRoot(
+        row.transcript_path,
+        mode === 'worker-dispatch'
+          ? (opts.busStoreRoot || defaultBusStoreRoot())
+          : (opts.transcriptRoot || defaultTranscriptRoot()),
+      );
       if (!realTranscript) {
         return {
           ok: false,
@@ -779,6 +1123,32 @@ export function verifyChainDetailed(opts: {
           code: 'TRANSCRIPT_TAMPERED',
           detail: `Transcript hash mismatch for ${row.slug}:${row.stage}`,
         };
+      }
+      if (mode === 'worker-dispatch') {
+        const workerStage = row.stage;
+        if (!isWorkerProvenanceStage(workerStage)) {
+          return {
+            ok: false,
+            code: 'PROVENANCE_MISMATCH',
+            detail: `Worker-dispatch provenance is invalid for ${row.slug}:${row.stage}`,
+          };
+        }
+        const busKey = loadBusSigningKey(opts.busStoreRoot || defaultBusStoreRoot());
+        const provenance = verifyWorkerAttestationMessage({
+          messagePath: row.transcript_path,
+          slug: row.slug,
+          stage: workerStage,
+          expectedMessageId: row.session_id,
+          busStoreRoot: opts.busStoreRoot,
+          busKey,
+        });
+        if (!provenance.ok) {
+          return {
+            ok: false,
+            code: provenance.code,
+            detail: provenance.detail,
+          };
+        }
       }
     }
 
@@ -816,6 +1186,7 @@ export function verifyChain(opts: {
   maxAgeSeconds: number;
   scopeSha?: string;
   transcriptRoot?: string;
+  busStoreRoot?: string;
   nowSeconds?: number;
 }): { ok: true; terminal: LedgerRow } | LedgerVerifyFailure {
   const result = verifyChainDetailed(opts);

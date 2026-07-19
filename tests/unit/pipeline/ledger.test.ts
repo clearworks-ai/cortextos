@@ -80,6 +80,7 @@ function signRow(secret: string, row: Omit<LedgerRow, 'sig'>): LedgerRow {
   if (row.transcript_sha256) parts.push(row.transcript_sha256);
   if (row.reason) parts.push(row.reason);
   if (row.evidence_path) parts.push(row.evidence_path);
+  if (row.provenance_mode) parts.push(row.provenance_mode);
   return {
     ...row,
     sig: createHmac('sha256', secret).update(parts.join('|')).digest('hex'),

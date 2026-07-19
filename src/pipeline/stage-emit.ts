@@ -67,6 +67,7 @@ function usage(): string {
   return [
     'Usage:',
     '  pipeline-stage-emit --slug <slug> --stage <stage> --artifact <path> [--runner <runner> --session <id> --transcript <path>] [--evidence <path>] [--reason <text>] [--ledger <path>] [--secret <path>]',
+    '  pipeline-stage-emit --slug <slug> --stage <plan|specs> --artifact <path> --provenance-mode worker-dispatch --runner opencode --session <return-msg-id> --transcript <return-msg.json> [--bus-store-root <path>] [--ctx-root <path>]',
     '  pipeline-stage-emit --verify --slug <slug> --through <stage> --max-age <seconds> [--scope-sha <sha>] [--repo <path>] [--framework <name>] [--ledger <path>] [--secret <path>]',
   ].join('\n');
 }
@@ -117,6 +118,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
       scopeSha: stringFlag(flags, 'scope-sha'),
       ledgerPath: stringFlag(flags, 'ledger') || defaultLedgerPath(),
       secretPath: stringFlag(flags, 'secret') || defaultSecretPath(),
+      busStoreRoot: stringFlag(flags, 'bus-store-root'),
     });
     if (!result.ok) {
       printAndExit(`${result.code}: ${result.detail}`, 1);
@@ -140,6 +142,16 @@ export function main(argv: string[] = process.argv.slice(2)): void {
       runner: stringFlag(flags, 'runner'),
       sessionId: stringFlag(flags, 'session'),
       transcriptPath: stringFlag(flags, 'transcript'),
+      provenanceMode: (() => {
+        const value = stringFlag(flags, 'provenance-mode');
+        if (value === 'worker-dispatch' || value === 'transcript') return value;
+        if (value !== undefined) {
+          throw new Error('Invalid --provenance-mode: expected transcript|worker-dispatch');
+        }
+        return undefined;
+      })(),
+      busStoreRoot: stringFlag(flags, 'bus-store-root'),
+      busKeyCtxRoot: stringFlag(flags, 'ctx-root') || stringFlag(flags, 'bus-store-root'),
       evidencePath: stringFlag(flags, 'evidence'),
       reason: stringFlag(flags, 'reason'),
       ledgerPath: stringFlag(flags, 'ledger'),

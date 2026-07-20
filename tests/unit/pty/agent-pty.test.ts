@@ -19,6 +19,7 @@ const mockInnerPty = {
   }),
   kill: vi.fn(),
   resize: vi.fn(),
+  destroy: vi.fn(),
 };
 
 const spawnMock = vi.fn().mockReturnValue(mockInnerPty);
@@ -75,6 +76,7 @@ beforeEach(() => {
   mockInnerPty.onData.mockClear();
   mockInnerPty.onExit.mockClear();
   mockInnerPty.kill.mockClear();
+  mockInnerPty.destroy.mockClear();
 });
 
 describe('AgentPTY --dangerously-skip-permissions toggle', () => {
@@ -205,5 +207,55 @@ describe('AgentPTY listener disposal', () => {
     expect(onDataDisposable.dispose).toHaveBeenCalledTimes(1);
     expect(onExitDisposable.dispose).toHaveBeenCalledTimes(1);
     expect(mockInnerPty.kill).not.toHaveBeenCalled();
+  });
+});
+
+describe('AgentPTY destroy() — ptmx fd leak fix', () => {
+  async function spawnPty(): Promise<InstanceType<typeof AgentPTY>> {
+    const pty = new AgentPTY(env, {});
+    (pty as unknown as { spawnFn: typeof spawnMock }).spawnFn = spawnMock;
+    await pty.spawn('fresh', 'boot');
+    return pty;
+  }
+
+  it('calls destroy() exactly once on natural exit', async () => {
+    await spawnPty();
+
+    onExitHandler!({ exitCode: 0 });
+
+    expect(mockInnerPty.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('calls destroy() exactly once on kill()', async () => {
+    const pty = await spawnPty();
+
+    pty.kill();
+
+    expect(mockInnerPty.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT call destroy() twice when kill() follows a natural exit', async () => {
+    const pty = await spawnPty();
+
+    // Natural exit fires first
+    onExitHandler!({ exitCode: 0 });
+    expect(mockInnerPty.destroy).toHaveBeenCalledTimes(1);
+
+    // Subsequent kill() is a no-op (pty already nulled)
+    pty.kill();
+    expect(mockInnerPty.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('disposes both listeners exactly once on kill() (existing regression guard stays green)', async () => {
+    const pty = await spawnPty();
+
+    pty.kill();
+    pty.kill();
+
+    expect(onDataDisposable.dispose).toHaveBeenCalledTimes(1);
+    expect(onExitDisposable.dispose).toHaveBeenCalledTimes(1);
+    expect(mockInnerPty.kill).toHaveBeenCalledTimes(1);
+    // destroy must also be called exactly once (not twice from the double kill())
+    expect(mockInnerPty.destroy).toHaveBeenCalledTimes(1);
   });
 });

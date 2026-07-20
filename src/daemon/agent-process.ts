@@ -308,9 +308,46 @@ export class AgentProcess {
       this.notifyStatusChange();
     } catch (err) {
       this.log(`Failed to start: ${err}`);
-      this.status = 'crashed';
-      this.notifyStatusChange();
+      this.handleSpawnFailure();
     }
+  }
+
+  /**
+   * Handle a PTY spawn failure (e.g. ENXIO from exhausted ptmx pool).
+   * Mirrors handleExit()'s crash-accounting tail so spawn failures are
+   * counted, backed-off, and halted at the daily budget — instead of
+   * leaving the agent permanently crashed with no scheduled recovery.
+   */
+  private handleSpawnFailure(): void {
+    // During shutdown or intentional stop: set crashed but do not schedule retry.
+    if (this.isDaemonShuttingDown() || this.stopRequested || this.stopping) {
+      this.status = 'crashed';
+      return;
+    }
+
+    this.crashCount++;
+    const today = new Date().toISOString().split('T')[0];
+    this.resetCrashCountIfNewDay(today);
+
+    if (this.crashCount >= this.maxCrashesPerDay) {
+      this.log(`HALTED: exceeded ${this.maxCrashesPerDay} spawn failures today`);
+      this.appendCrashToRestartsLog(-1, 0, 'HALTED');
+      this.status = 'halted';
+      this.notifyStatusChange();
+      return;
+    }
+
+    const backoff = Math.min(5000 * Math.pow(2, this.crashCount - 1), 300000);
+    this.log(`Spawn failure — retry in ${backoff / 1000}s (crash #${this.crashCount})`);
+    this.appendCrashToRestartsLog(-1, backoff, 'SPAWN_FAILURE');
+    this.status = 'crashed';
+    this.notifyStatusChange();
+
+    setTimeout(() => {
+      if (this.status === 'crashed') {
+        this.start().catch(err => this.log(`Spawn-failure restart failed: ${err}`));
+      }
+    }, backoff);
   }
 
   /**
@@ -1398,7 +1435,7 @@ export class AgentProcess {
   private appendCrashToRestartsLog(
     exitCode: number,
     backoffMs: number,
-    kind: 'CRASH' | 'HALTED' | 'CRASH_LOOP' | 'IMAGE_POISON_RECOVERY' | 'RATE_LIMIT' | 'PLANNED_RESTART_RETRY',
+    kind: 'CRASH' | 'HALTED' | 'CRASH_LOOP' | 'IMAGE_POISON_RECOVERY' | 'RATE_LIMIT' | 'PLANNED_RESTART_RETRY' | 'SPAWN_FAILURE',
   ): void {
     try {
       const logDir = join(this.env.ctxRoot, 'logs', this.name);
@@ -1413,6 +1450,8 @@ export class AgentProcess {
               ? `exit_code=${exitCode} rate_limit_count=${this.rateLimitCount} backoff_s=${backoffMs / 1000} (not counted toward max_crashes)`
               : kind === 'PLANNED_RESTART_RETRY'
                 ? `exit_code=${exitCode} planned_restart_retry=${this.plannedRestartRetries} backoff_s=${backoffMs / 1000} (not counted toward max_crashes)`
+              : kind === 'SPAWN_FAILURE'
+                ? `spawn failure crash_count=${this.crashCount} backoff_s=${backoffMs / 1000}`
               : `exit_code=${exitCode} crash_count=${this.crashCount} backoff_s=${backoffMs / 1000}`;
       const logLine = `[${timestamp}] ${kind}: ${details}\n`;
       appendFileSync(join(logDir, 'restarts.log'), logLine, 'utf-8');

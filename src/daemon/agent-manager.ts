@@ -542,10 +542,20 @@ export class AgentManager {
       const tgApi = telegramApi;
       const tgChatId = chatId;
       let prevStatus: string | null = null;
+      // Per-agent cooldown: collapse a crash-burst into one alert per 10 minutes.
+      // halted and recovered are state transitions (not repeats) and always send.
+      const CRASH_ALERT_COOLDOWN_MS = 10 * 60 * 1000;
+      let lastCrashAlertAt: number | null = null;
       agentProcess.onStatusChanged((status) => {
         if (status.status === 'crashed') {
-          const crashNum = status.crashCount ?? '?';
-          tgApi.sendMessage(tgChatId, `Agent ${name} crashed (crash #${crashNum}) — auto-restarting`).catch(() => {});
+          const now = Date.now();
+          if (lastCrashAlertAt !== null && now - lastCrashAlertAt < CRASH_ALERT_COOLDOWN_MS) {
+            // Duplicate crash within cooldown window — skip this alert.
+          } else {
+            lastCrashAlertAt = now;
+            const crashNum = status.crashCount ?? '?';
+            tgApi.sendMessage(tgChatId, `Agent ${name} crashed (crash #${crashNum}) — auto-restarting`).catch(() => {});
+          }
         } else if (status.status === 'halted') {
           tgApi.sendMessage(tgChatId, `Agent ${name} HALTED — exceeded crash limit. Restart manually with: cortextos start ${name}`).catch(() => {});
         } else if (status.status === 'running' && prevStatus === 'crashed') {

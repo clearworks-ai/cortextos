@@ -108,8 +108,17 @@ class DeltaCheckTests(unittest.TestCase):
 
             original_poll_vertical = MODULE.poll_vertical
 
-            def patched_poll_vertical(vertical: str, dry_run: bool = False):
-                return original_poll_vertical(vertical, dry_run=dry_run, fetch=fake_fetch)
+            def patched_poll_vertical(
+                vertical: str,
+                dry_run: bool = False,
+                caption_budget: dict | None = None,
+            ):
+                return original_poll_vertical(
+                    vertical,
+                    dry_run=dry_run,
+                    fetch=fake_fetch,
+                    caption_budget=caption_budget,
+                )
 
             stdout = io.StringIO()
             with unittest.mock.patch.dict(os.environ, {"PULSE_STATE_DIR": tmp}, clear=False):

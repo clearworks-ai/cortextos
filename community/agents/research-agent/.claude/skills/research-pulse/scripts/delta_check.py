@@ -24,6 +24,10 @@ except ImportError:
 
 
 DEPENDENCY_MESSAGE = "missing dependency: run pip install feedparser requests"
+USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+)
 
 
 def fetch_feed(
@@ -32,7 +36,7 @@ def fetch_feed(
     last_modified: str | None,
     timeout: int = 30,
 ) -> tuple[int, bytes, str | None, str | None]:
-    headers: dict[str, str] = {}
+    headers: dict[str, str] = {"User-Agent": USER_AGENT}
     if etag:
         headers["If-None-Match"] = etag
     if last_modified:

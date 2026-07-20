@@ -20,6 +20,11 @@ except ModuleNotFoundError:
     requests = None
 
 try:
+    from youtube_transcript_api import YouTubeTranscriptApi
+except ModuleNotFoundError:
+    YouTubeTranscriptApi = None
+
+try:
     from . import pulse_registry
 except ImportError:
     import pulse_registry  # type: ignore[no-redef]
@@ -31,6 +36,9 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
 SUMMARY_MAX_CHARS = 160
+CAPTION_FETCH_CAP = 6
+CAPTION_EXCERPT_MAX_CHARS = 500
+YOUTUBE_GUID_PREFIX = "yt:video:"
 _TAG_RE = re.compile(r"<[^>]+>")
 
 
@@ -167,7 +175,67 @@ def detect_new(
     return newer
 
 
-def poll_source(source: dict, fetch=fetch_feed) -> dict:
+def new_caption_budget() -> dict:
+    return {"remaining": CAPTION_FETCH_CAP}
+
+
+def _youtube_video_id(guid: str) -> str | None:
+    if isinstance(guid, str) and guid.startswith(YOUTUBE_GUID_PREFIX):
+        video_id = guid[len(YOUTUBE_GUID_PREFIX):]
+        if video_id:
+            return video_id
+    return None
+
+
+def is_descriptionless_youtube(item: dict) -> bool:
+    guid = str(item.get("guid") or "")
+    if not guid.startswith(YOUTUBE_GUID_PREFIX):
+        return False
+    summary = str(item.get("summary") or "").strip()
+    title = str(item.get("title") or "")
+    return summary == "" or summary == clean_summary(title)
+
+
+def fetch_caption_excerpt(
+    video_id: str,
+    max_chars: int = CAPTION_EXCERPT_MAX_CHARS,
+) -> str | None:
+    if YouTubeTranscriptApi is None:
+        return None
+    try:
+        transcript = YouTubeTranscriptApi().fetch(video_id)
+        text = " ".join(snippet.text for snippet in transcript)
+    except Exception:
+        return None
+    excerpt = clean_summary(text, max_chars=max_chars)
+    return excerpt or None
+
+
+def enrich_youtube_items(
+    new_items: list[dict],
+    caption_budget: dict | None,
+    fetch_caption=fetch_caption_excerpt,
+) -> None:
+    if not caption_budget:
+        return
+    for item in new_items:
+        if int(caption_budget.get("remaining", 0) or 0) <= 0:
+            return
+        if not is_descriptionless_youtube(item):
+            continue
+        video_id = _youtube_video_id(str(item.get("guid") or ""))
+        if not video_id:
+            continue
+        caption_budget["remaining"] = int(caption_budget["remaining"]) - 1
+        try:
+            excerpt = fetch_caption(video_id)
+        except Exception:
+            excerpt = None
+        if excerpt:
+            item["caption_excerpt"] = excerpt
+
+
+def poll_source(source: dict, fetch=fetch_feed, caption_budget: dict | None = None) -> dict:
     source_id = str(source.get("id") or "")
     result = {
         "source_id": source_id,
@@ -203,6 +271,8 @@ def poll_source(source: dict, fetch=fetch_feed) -> dict:
             source.get("last_seen_guid"),
             source.get("last_seen_pubdate"),
         )
+        if new_items and caption_budget is not None:
+            enrich_youtube_items(new_items, caption_budget)
         source["etag"] = new_etag
         source["last_modified"] = new_last_modified
         if entries:
@@ -225,7 +295,12 @@ def poll_source(source: dict, fetch=fetch_feed) -> dict:
         return result
 
 
-def poll_vertical(vertical: str, dry_run: bool = False, fetch=fetch_feed) -> dict:
+def poll_vertical(
+    vertical: str,
+    dry_run: bool = False,
+    fetch=fetch_feed,
+    caption_budget: dict | None = None,
+) -> dict:
     registry = pulse_registry.load_registry(vertical)
     summary = {
         "vertical": vertical,
@@ -240,7 +315,7 @@ def poll_vertical(vertical: str, dry_run: bool = False, fetch=fetch_feed) -> dic
     }
 
     for source in registry.get("sources", []):
-        result = poll_source(source, fetch=fetch)
+        result = poll_source(source, fetch=fetch, caption_budget=caption_budget)
         status = result["status"]
         if status == "skipped":
             continue
@@ -295,6 +370,7 @@ def main(argv: list[str] | None = None) -> int:
         print("no registries found", file=sys.stderr)
         return 1
 
+    caption_budget = new_caption_budget()
     summary = {
         "verticals_polled": 0,
         "sources_polled": 0,
@@ -310,7 +386,9 @@ def main(argv: list[str] | None = None) -> int:
 
     for vertical in verticals:
         try:
-            vertical_summary = poll_vertical(vertical, dry_run=args.dry_run)
+            vertical_summary = poll_vertical(
+                vertical, dry_run=args.dry_run, caption_budget=caption_budget
+            )
         except Exception as exc:
             summary["vertical_errors"].append({"vertical": vertical, "error": str(exc)})
             continue

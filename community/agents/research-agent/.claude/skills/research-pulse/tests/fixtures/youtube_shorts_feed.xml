@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/" xmlns:yt="http://www.youtube.com/xml/schemas/2015">
+  <title>YouTube Shorts feed</title>
+  <updated>2026-07-14T00:00:00+00:00</updated>
+  <entry>
+    <id>yt:video:short-1</id>
+    <yt:videoId>short-1</yt:videoId>
+    <title>Margin Killers on Site</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=short-1"/>
+    <published>2026-07-14T00:00:00+00:00</published>
+    <updated>2026-07-14T00:00:00+00:00</updated>
+    <media:group>
+      <media:title>Margin Killers on Site</media:title>
+    </media:group>
+  </entry>
+  <entry>
+    <id>yt:video:long-1</id>
+    <yt:videoId>long-1</yt:videoId>
+    <title>Episode 12: Backlog Deep Dive</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=long-1"/>
+    <published>2026-07-13T00:00:00+00:00</published>
+    <updated>2026-07-13T00:00:00+00:00</updated>
+    <media:group>
+      <media:title>Episode 12: Backlog Deep Dive</media:title>
+      <media:description>A 40-minute breakdown of how mid-size GCs are re-pricing backlog after the Q2 spend report.</media:description>
+    </media:group>
+  </entry>
+</feed>

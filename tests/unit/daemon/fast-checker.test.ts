@@ -1102,11 +1102,54 @@ describe('FastChecker', () => {
   });
 
   describe('heartbeat watchdog', () => {
-    beforeEach(() => { vi.useFakeTimers(); });
-    afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
+    let originalFrameworkRoot: string | undefined;
 
-    it('fires exec after bootstrap at 50-min interval', async () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      originalFrameworkRoot = process.env.CTX_FRAMEWORK_ROOT;
+      delete process.env.CTX_FRAMEWORK_ROOT;
+    });
+
+    afterEach(() => {
+      if (originalFrameworkRoot === undefined) {
+        delete process.env.CTX_FRAMEWORK_ROOT;
+      } else {
+        process.env.CTX_FRAMEWORK_ROOT = originalFrameworkRoot;
+      }
+      vi.useRealTimers();
+      vi.clearAllMocks();
+    });
+
+    it('uses process.execPath plus dist/cli.js when CTX_FRAMEWORK_ROOT is set', async () => {
       const { execFile } = await import('child_process');
+      process.env.CTX_FRAMEWORK_ROOT = '/tmp/fw-root';
+      const agent = createMockAgent('my-agent');
+      const checker = new FastChecker(agent, paths, '/tmp/framework');
+      checker.start();
+      await vi.advanceTimersByTimeAsync(50 * 60 * 1000);
+      expect(execFile).toHaveBeenCalledWith(
+        process.execPath,
+        [
+          join('/tmp/fw-root', 'dist', 'cli.js'),
+          'bus',
+          'update-heartbeat',
+          expect.stringContaining('[watchdog] my-agent alive — idle session'),
+        ],
+        expect.objectContaining({ timeout: 5_000 }),
+        expect.any(Function),
+      );
+      expect(execFile).not.toHaveBeenCalledWith(
+        'cortextos',
+        expect.any(Array),
+        expect.any(Function),
+      );
+      checker.stop();
+      checker.wake();
+    });
+
+    it('falls back to bare cortextos when CTX_FRAMEWORK_ROOT is unset', async () => {
+      const { execFile } = await import('child_process');
+      delete process.env.CTX_FRAMEWORK_ROOT;
       const agent = createMockAgent('my-agent');
       const checker = new FastChecker(agent, paths, '/tmp/framework');
       checker.start();
@@ -1142,11 +1185,7 @@ describe('FastChecker', () => {
       const checker = new FastChecker(agent, paths, '/tmp/framework');
       checker.start();
       await vi.advanceTimersByTimeAsync(20 * 1000);
-      expect(execFile).not.toHaveBeenCalledWith(
-        'cortextos',
-        expect.arrayContaining([expect.stringContaining('[watchdog]')]),
-        expect.any(Function),
-      );
+      expect(execFile).not.toHaveBeenCalled();
       checker.stop();
       checker.wake();
     });

@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, unlinkSync, utimesSync, writeFileSync }
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import {
+  STAGES,
   describeArtifact,
   emitLedgerRow,
   readLedgerRows,
@@ -99,6 +100,11 @@ describe('pipeline ledger', () => {
   let planPath: string;
   let specsDir: string;
   let specPath: string;
+  let reviewPath: string;
+  let stagingArtifactPath: string;
+  let stagingEvidencePath: string;
+  let trueVerifyArtifactPath: string;
+  let trueVerifyEvidencePath: string;
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'hard-spec-gate-'));
@@ -114,11 +120,21 @@ describe('pipeline ledger', () => {
     planPath = join(slugDir, '02-master-plan.md');
     specsDir = join(slugDir, '03-specs');
     specPath = join(specsDir, '01-signed-stage-ledger.md');
+    reviewPath = join(slugDir, '04-review.md');
+    stagingArtifactPath = join(slugDir, '05-staging-build.txt');
+    stagingEvidencePath = join(slugDir, '05-staging-evidence.log');
+    trueVerifyArtifactPath = join(slugDir, '06-true-verify-build.txt');
+    trueVerifyEvidencePath = join(slugDir, '06-true-verify-evidence.log');
 
     mkdirSync(specsDir, { recursive: true });
     writeFileSync(researchPath, '# research\n', 'utf-8');
     writeFileSync(planPath, '# draft\n', 'utf-8');
     writeFileSync(specPath, '# spec\n', 'utf-8');
+    writeFileSync(reviewPath, '# review\n', 'utf-8');
+    writeFileSync(stagingArtifactPath, 'staging build\n', 'utf-8');
+    writeFileSync(stagingEvidencePath, 'staging ok\n', 'utf-8');
+    writeFileSync(trueVerifyArtifactPath, 'true verify build\n', 'utf-8');
+    writeFileSync(trueVerifyEvidencePath, 'true verify ok\n', 'utf-8');
   });
 
   afterEach(() => {
@@ -191,6 +207,399 @@ describe('pipeline ledger', () => {
       rows: verified.rows,
     });
     expect(artifactCheck.ok).toBe(true);
+  });
+
+  it('lists staging-verify between review and true-verify', () => {
+    expect(STAGES).toEqual([
+      'research',
+      'synthesize',
+      'plan',
+      'specs',
+      'implement',
+      'review',
+      'staging-verify',
+      'true-verify',
+      'exempt',
+    ]);
+  });
+
+  it('emits and verifies a research -> plan -> specs -> review -> staging-verify chain', () => {
+    const planSession = 'plan-session-staging';
+    const planTranscript = join(projectsRoot, 'larry', planSession, 'subagents', 'agent-plan.jsonl');
+    writeWriteTranscript(planTranscript, planSession, [
+      { filePath: planPath, content: '# master plan\n' },
+    ]);
+    writeFileSync(planPath, '# master plan\n', 'utf-8');
+
+    const specsSession = 'specs-session-staging';
+    const specsTranscript = join(projectsRoot, 'larry', specsSession, 'subagents', 'agent-specs.jsonl');
+    writeWriteTranscript(specsTranscript, specsSession, [
+      { filePath: specPath, content: '# signed spec\n' },
+    ]);
+    writeFileSync(specPath, '# signed spec\n', 'utf-8');
+
+    const reviewSession = 'review-session-staging';
+    const reviewTranscript = join(projectsRoot, 'larry', reviewSession, 'subagents', 'agent-review.jsonl');
+    writeWriteTranscript(reviewTranscript, reviewSession, [
+      { filePath: reviewPath, content: '# review\n' },
+    ]);
+    writeFileSync(reviewPath, '# review\n', 'utf-8');
+
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'research',
+      artifactPath: researchPath,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 100,
+    });
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'plan',
+      artifactPath: planPath,
+      runner: 'fable-lean',
+      sessionId: planSession,
+      transcriptPath: planTranscript,
+      transcriptRoot: projectsRoot,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 200,
+    });
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'specs',
+      artifactPath: specsDir,
+      runner: 'architect',
+      sessionId: specsSession,
+      transcriptPath: specsTranscript,
+      transcriptRoot: projectsRoot,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 300,
+    });
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'review',
+      artifactPath: reviewPath,
+      runner: 'larry',
+      sessionId: reviewSession,
+      transcriptPath: reviewTranscript,
+      transcriptRoot: projectsRoot,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 400,
+    });
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'staging-verify',
+      artifactPath: stagingArtifactPath,
+      evidencePath: stagingEvidencePath,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 500,
+    });
+
+    const verified = verifyChainDetailed({
+      slug: 'hard-spec-gate',
+      throughStage: 'staging-verify',
+      maxAgeSeconds: 86_400,
+      ledgerPath,
+      secretPath,
+      transcriptRoot: projectsRoot,
+      nowSeconds: 550,
+    });
+    expect(verified.ok).toBe(true);
+    if (!verified.ok) return;
+    expect(verified.terminal.stage).toBe('staging-verify');
+    expect(verified.terminal.evidence_path).toBe(stagingEvidencePath);
+    expect(verified.rows.map((row) => row.stage)).toEqual([
+      'research',
+      'plan',
+      'specs',
+      'review',
+      'staging-verify',
+    ]);
+  });
+
+  it('requires non-empty evidence for staging-verify like true-verify', () => {
+    const planSession = 'plan-session-staging-evidence';
+    const planTranscript = join(projectsRoot, 'larry', planSession, 'subagents', 'agent-plan.jsonl');
+    writeWriteTranscript(planTranscript, planSession, [
+      { filePath: planPath, content: '# master plan\n' },
+    ]);
+    writeFileSync(planPath, '# master plan\n', 'utf-8');
+
+    const specsSession = 'specs-session-staging-evidence';
+    const specsTranscript = join(projectsRoot, 'larry', specsSession, 'subagents', 'agent-specs.jsonl');
+    writeWriteTranscript(specsTranscript, specsSession, [
+      { filePath: specPath, content: '# signed spec\n' },
+    ]);
+    writeFileSync(specPath, '# signed spec\n', 'utf-8');
+
+    const reviewSession = 'review-session-staging-evidence';
+    const reviewTranscript = join(projectsRoot, 'larry', reviewSession, 'subagents', 'agent-review.jsonl');
+    writeWriteTranscript(reviewTranscript, reviewSession, [
+      { filePath: reviewPath, content: '# review\n' },
+    ]);
+    writeFileSync(reviewPath, '# review\n', 'utf-8');
+
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'research',
+      artifactPath: researchPath,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 100,
+    });
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'plan',
+      artifactPath: planPath,
+      runner: 'fable-lean',
+      sessionId: planSession,
+      transcriptPath: planTranscript,
+      transcriptRoot: projectsRoot,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 200,
+    });
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'specs',
+      artifactPath: specsDir,
+      runner: 'architect',
+      sessionId: specsSession,
+      transcriptPath: specsTranscript,
+      transcriptRoot: projectsRoot,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 300,
+    });
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'review',
+      artifactPath: reviewPath,
+      runner: 'larry',
+      sessionId: reviewSession,
+      transcriptPath: reviewTranscript,
+      transcriptRoot: projectsRoot,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 400,
+    });
+
+    writeFileSync(stagingEvidencePath, '', 'utf-8');
+    expect(() => emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'staging-verify',
+      artifactPath: stagingArtifactPath,
+      evidencePath: stagingEvidencePath,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 500,
+    })).toThrow(/Artifact\/evidence missing or empty for staging-verify/);
+  });
+
+  it('allows true-verify directly after review for backward compatibility', () => {
+    const planSession = 'plan-session-direct-true-verify';
+    const planTranscript = join(projectsRoot, 'larry', planSession, 'subagents', 'agent-plan.jsonl');
+    writeWriteTranscript(planTranscript, planSession, [
+      { filePath: planPath, content: '# master plan\n' },
+    ]);
+    writeFileSync(planPath, '# master plan\n', 'utf-8');
+
+    const specsSession = 'specs-session-direct-true-verify';
+    const specsTranscript = join(projectsRoot, 'larry', specsSession, 'subagents', 'agent-specs.jsonl');
+    writeWriteTranscript(specsTranscript, specsSession, [
+      { filePath: specPath, content: '# signed spec\n' },
+    ]);
+    writeFileSync(specPath, '# signed spec\n', 'utf-8');
+
+    const reviewSession = 'review-session-direct-true-verify';
+    const reviewTranscript = join(projectsRoot, 'larry', reviewSession, 'subagents', 'agent-review.jsonl');
+    writeWriteTranscript(reviewTranscript, reviewSession, [
+      { filePath: reviewPath, content: '# review\n' },
+    ]);
+    writeFileSync(reviewPath, '# review\n', 'utf-8');
+
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'research',
+      artifactPath: researchPath,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 100,
+    });
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'plan',
+      artifactPath: planPath,
+      runner: 'fable-lean',
+      sessionId: planSession,
+      transcriptPath: planTranscript,
+      transcriptRoot: projectsRoot,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 200,
+    });
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'specs',
+      artifactPath: specsDir,
+      runner: 'architect',
+      sessionId: specsSession,
+      transcriptPath: specsTranscript,
+      transcriptRoot: projectsRoot,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 300,
+    });
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'review',
+      artifactPath: reviewPath,
+      runner: 'larry',
+      sessionId: reviewSession,
+      transcriptPath: reviewTranscript,
+      transcriptRoot: projectsRoot,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 400,
+    });
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'true-verify',
+      artifactPath: trueVerifyArtifactPath,
+      evidencePath: trueVerifyEvidencePath,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 500,
+    });
+
+    const verified = verifyChainDetailed({
+      slug: 'hard-spec-gate',
+      throughStage: 'true-verify',
+      maxAgeSeconds: 86_400,
+      ledgerPath,
+      secretPath,
+      transcriptRoot: projectsRoot,
+      nowSeconds: 550,
+    });
+    expect(verified.ok).toBe(true);
+    if (!verified.ok) return;
+    expect(verified.rows.map((row) => row.stage)).toEqual([
+      'research',
+      'plan',
+      'specs',
+      'review',
+      'true-verify',
+    ]);
+  });
+
+  it('allows true-verify after staging-verify without authored provenance', () => {
+    const planSession = 'plan-session-staged-true-verify';
+    const planTranscript = join(projectsRoot, 'larry', planSession, 'subagents', 'agent-plan.jsonl');
+    writeWriteTranscript(planTranscript, planSession, [
+      { filePath: planPath, content: '# master plan\n' },
+    ]);
+    writeFileSync(planPath, '# master plan\n', 'utf-8');
+
+    const specsSession = 'specs-session-staged-true-verify';
+    const specsTranscript = join(projectsRoot, 'larry', specsSession, 'subagents', 'agent-specs.jsonl');
+    writeWriteTranscript(specsTranscript, specsSession, [
+      { filePath: specPath, content: '# signed spec\n' },
+    ]);
+    writeFileSync(specPath, '# signed spec\n', 'utf-8');
+
+    const reviewSession = 'review-session-staged-true-verify';
+    const reviewTranscript = join(projectsRoot, 'larry', reviewSession, 'subagents', 'agent-review.jsonl');
+    writeWriteTranscript(reviewTranscript, reviewSession, [
+      { filePath: reviewPath, content: '# review\n' },
+    ]);
+    writeFileSync(reviewPath, '# review\n', 'utf-8');
+
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'research',
+      artifactPath: researchPath,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 100,
+    });
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'plan',
+      artifactPath: planPath,
+      runner: 'fable-lean',
+      sessionId: planSession,
+      transcriptPath: planTranscript,
+      transcriptRoot: projectsRoot,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 200,
+    });
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'specs',
+      artifactPath: specsDir,
+      runner: 'architect',
+      sessionId: specsSession,
+      transcriptPath: specsTranscript,
+      transcriptRoot: projectsRoot,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 300,
+    });
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'review',
+      artifactPath: reviewPath,
+      runner: 'larry',
+      sessionId: reviewSession,
+      transcriptPath: reviewTranscript,
+      transcriptRoot: projectsRoot,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 400,
+    });
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'staging-verify',
+      artifactPath: stagingArtifactPath,
+      evidencePath: stagingEvidencePath,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 500,
+    });
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'true-verify',
+      artifactPath: trueVerifyArtifactPath,
+      evidencePath: trueVerifyEvidencePath,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 600,
+    });
+
+    const verified = verifyChainDetailed({
+      slug: 'hard-spec-gate',
+      throughStage: 'true-verify',
+      maxAgeSeconds: 86_400,
+      ledgerPath,
+      secretPath,
+      transcriptRoot: projectsRoot,
+      nowSeconds: 650,
+    });
+    expect(verified.ok).toBe(true);
+    if (!verified.ok) return;
+    expect(verified.rows.map((row) => row.stage)).toEqual([
+      'research',
+      'plan',
+      'specs',
+      'review',
+      'staging-verify',
+      'true-verify',
+    ]);
   });
 
   it('fails emit when an authored stage lacks provenance flags', () => {

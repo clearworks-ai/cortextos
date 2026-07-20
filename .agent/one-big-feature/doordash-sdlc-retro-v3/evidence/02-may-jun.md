@@ -1,0 +1,129 @@
+# DoorDash / SEIU-521 Build — Dated Timeline (May 26 – Jun 25 2026)
+
+> Evidence extraction v3. Source: primary full-transcript archive
+> `/Users/joshweiss/.claude/projects/-Users-joshweiss-code-cortextos-orgs-clearworksai-agents-larry/_archived-2026-06-25-loop/` (186 jsonl files).
+> Corrects a prior report that over-compressed and skipped these files.
+> TYPE legend: scope-change | unpriced-discovery | pain | decision | milestone.
+> Quotes are VERBATIM from `.message.content` (Josh = user; Larry/assistant = claude-opus-4-8), lightly trimmed only to remove tool-call noise (marked with [...]).
+
+---
+
+## Chronological Event Table
+
+| Date/Time (UTC) | Who | Type | Verbatim Quote | Source file |
+|---|---|---|---|---|
+| 2026-06-04T17:59 | Larry | milestone | "Found the project — `clearworks-ai/doordash-linker`, local clone at `~/code/Clients/521 Doordash`. It's the SEIU Local 521 meal-expense compliance automation (email intake → Trigger.dev PDF merge/extract → Egnyte filing → billing-CSV reconciliation). Python v1 is in prod; TypeScript v2 (Trigger.dev + Supabase) finished Phase 1. Workflow 2 is operational, Workflow 1 was mid-integration when it went dormant ~3 weeks ago." | 70ee6cdb.jsonl |
+| 2026-06-04T18:00 | Larry | milestone | "SEIU Local 521 meal-expense compliance automation (60-70 orders/mo, 7+ offices). Email intake (doordash@dd.seiu521.org) → Trigger.dev merges/extracts PDFs → files to Egnyte → reconciles against DoorDash billing CSV for Finance/Great Plains." | 70ee6cdb.jsonl |
+| 2026-06-04T18:15 | Josh | scope-change | "Something that coming up now the client wants to re process last two months this sounds difficult" | 63b1a86c.jsonl |
+| 2026-06-04T18:28 | Larry | unpriced-discovery | "Reprocess thread — Supabase coverage starts Apr 23; the pre-Apr-23 window is the killed folders/spreadsheet system, so the cleanest path may be client re-forwarding (fresh Message-IDs pass dedup, zero code)." | 63b1a86c.jsonl |
+| 2026-06-04T18:29 | Josh | pain | "oh right this system doesnt even track things that aren't in the supabase anyway" | 63b1a86c.jsonl |
+| 2026-06-04T18:29 | Josh | scope-change | "i built a temporary system for this giuy previously that was based on files stored in tolders and likining them to spreadsheets - we already killed that system tho" | 63b1a86c.jsonl |
+| 2026-06-04T20:20 | Josh | scope-change | "here's the april the file. the goal is to look for every needed file in teh various city and date folderes (remebering they can be misfiled) and get the links genereatd and into the sheet. do you have the process stil?" (file: MealsSEIULocal521_OrderHistory_2026-04-01_2026-04-30.csv) | 63b1a86c.jsonl |
+| 2026-06-04T20:25 | Larry | pain | "89 processed but only 9 matched — investigating what's actually in the index vs. what we're looking for:" | 63b1a86c.jsonl |
+| 2026-06-04T20:28 | Larry | unpriced-discovery | "The twist: April docs are NOT named by Order Id like the old run expected — staff filed them under the legacy convention (YYYYMMDD.AMOUNT MERCHANTCODE.pdf). So I matched on delivery date + company-paid amount instead [...] • 9 matched by exact Order-Id filename • 68 matched uniquely on date+amount • 4 matched as same-day/same-amount pairs (suffixed -1 files; which-PDF-goes-with-which-order is arbitrary within each pair) • 5 PROBABLE — date matches + merchant code matches but amount off slightly (tip adjustments / transposed digits, e.g. KFC 75.18 vs file 7581). Flagged NEEDS HUMAN CONFIRM [...] • 3 truly missing — no PDF anywhere in any folder" | 63b1a86c.jsonl |
+| 2026-06-04T20:45 | Josh | decision | "conifrm the probabales be as good as you can and also reconfirm the missing ones" | 8e02dc5a.jsonl |
+| 2026-06-04T20:50 | Larry | milestone | "All 89 rows linked, zero without links. Sending the updated sheet:" | 8e02dc5a.jsonl |
+| 2026-06-04T20:59 | Larry | milestone | "waiting on: the May DoorDash file from David Sailer (April is fully delivered — 89/89 linked, CSV emailed) [...] (2) 5 Egnyte files renamed to standard con[vention]" | 7c17e21d.jsonl |
+| 2026-06-08T17:57 | Larry | pain | "DoorDash confirmation-email recipients — Per-submission confirmation (`notify-admin`) goes only to the submitting user right now — no CC/BCC. The code supports an extra CC via `MONITORING_EMAIL`, but that env var is not set in prod [...] Separate finance digest goes to `finance@seiu521.org`. In/out address: `doordash@dd.seiu521.org`." | 39920e26.jsonl |
+| 2026-06-08T18:09 | Larry | pain | "The screenshot shows the \"DoorDash submission filed — Pizza My Heart $207.92\" confirmation went To: 521 Finance <SEIU521.Finance@seiu521.org> — a shared finance group mailbox, single recipient, no CC. David Sailer (Interim Finance Director) says it should \"go back to the sender only\" and it's overwhelming the finance team." | 39920e26.jsonl |
+| 2026-06-08T18:10 | Larry | unpriced-discovery | "The complaint email is not the reply-to-sender confirmation. It's `sendDigest.ts` — which, despite the name, fires one email per filed submission to `FINANCE_DIGEST_TO` = `finance@seiu521.org` (the \"521 Finance\" group that fans out to the whole team). Body matches the screenshot exactly." | 39920e26.jsonl |
+| 2026-06-08T18:17 | Josh | decision | "Change to David.Sailer@seiu521.org" | 39920e26.jsonl |
+| 2026-06-08T18:18 | Larry | milestone | "DoorDash complaint resolved. `FINANCE_DIGEST_TO`: `finance@seiu521.org` → `David.Sailer@seiu521.org` in Trigger.dev prod, verified live. [...] Zero-code, reversible, no redeploy needed. Task closed." | 39920e26.jsonl |
+| 2026-06-16T17:32 | Larry | milestone | "frank2 is routing a DoorDash/SEIU 521 receipts reconciliation — a financial-data task citing \"same workflow as April.\" I have no April workflow loaded in this context [...] I won't process client billing off a compressed second-hand scope." | 57cad332.jsonl |
+| 2026-06-16T17:36 | David Sailer (relay) | milestone | "Hi Josh, We are ready! All the receipts are in there. Here is the sheet that in the future I will place in the doordash reconcile inbox. [...] David — Interim Finance Director" | 57cad332.jsonl |
+| 2026-06-16T17:40 | Larry | milestone | "Downloaded to /tmp/seiu521-doordash-may-2026.csv [...] 37KB, 28 columns including Order Id, Delivery Date, Employee Name, Merchant, Expense Code, Order Total, Company Paid. May 2026 date range confirmed. Run the same Workflow 2 reconciliation against this file." | bb9bdc74.jsonl |
+| 2026-06-16T17:51 | Larry | pain | "`fcode` is capturing the \"DDD\" DoorDash marker instead of the real merchant code. Fixing the code extraction and re-running:" | bb9bdc74.jsonl |
+| 2026-06-16T17:58 | Larry | milestone | "All 7 probables **CONFIRMED** — 5 by exact order-ID match on the receipt, 2 (Panera, Sunnyside) by merchant+amount+date (no order-ID printed, filename date was the form-submission date)." | bb9bdc74.jsonl |
+| 2026-06-16T18:00 | Larry | milestone | "**SEIU 521 May DoorDash reconciliation** — done, verified, delivered. 79/80 orders carry audit links; 1 unmatched (Cali Rays Sourdough 5/28, client must produce the missing PDF). Local only, nothing written to Egnyte." | ddc044f0.jsonl |
+| 2026-06-16T18:58 | Josh | pain | "do one more pass for the missing pdf please check everywhere" | ddc044f0.jsonl |
+| 2026-06-16T18:59 | Larry | pain | "The PDF exists — it was a **false negative**, not a missing file. Root cause: it uses DoorDash's new export naming (`doordash_<ISO>_<merchant>_<amount>.pdf`), which the legacy matcher's filename parser doesn't read." | ddc044f0.jsonl |
+| 2026-06-16T19:00 | Larry | milestone | "Patched the deliverable: **80/80 now carry audit links, zero unmatched** [...] there are 36 files total using this new naming convention in the index. Only Cali Rays fell through for May, but future months will hit more of them — the matcher's filename parser should be taught the `doordash_<ISO>_<merchant>_<amount>` format." | ddc044f0.jsonl |
+| 2026-06-16T19:04 | Josh | scope-change | "I\"m starting to think we might need a chat ingterface for david to use when he does monthly recon on the new system becuase each time you dont get this right until i ask you 3 times" | ddc044f0.jsonl |
+| 2026-06-16T19:04 | Josh | scope-change | "well we need to consier our current architecture for the new system - fhe trigger/supabase/egnyte/resend/anthropic quintet, where that would live for the client to chat, etc" | ddc044f0.jsonl |
+| 2026-06-16T19:18 | Josh | scope-change | "so if i wanted to have this not on my infra we would have to setup a railway for 521 right? did we overengineer this whole thing?" | ddc044f0.jsonl |
+| 2026-06-16T19:20 | Larry | decision | "**\"Did we overengineer?\"** — Honest answer given: for the recon job, partly — the tell is that we keep running the monthly recon with the old v1.0 Python+SQLite script, not the v2 quintet." | ddc044f0.jsonl |
+| 2026-06-16T19:20 | Josh | scope-change | "no everythign runs on 521 its all theirs. railwayis the only missing peice. nd the emails will be happening, if you check there are now emails coming in, they just didnt start sending til june and these were the previous months; reevaluate" | ddc044f0.jsonl |
+| 2026-06-16T19:22 | Larry | unpriced-discovery | "Their Supabase `submissions` table has 53 rows from April 23 through one filed an hour ago [...] April/May were backfill of pre-pipeline months; the email intake went live for June. **Bonus the data surfaced:** there are silently-failed submissions (juli.weger ×2, Sarah.Wilson) with no vendor extracted." | ddc044f0.jsonl |
+| 2026-06-16T19:25 | Josh | scope-change | "well no....i acftulaly need you to read your transcripts and build all the manual steps from april and may directly into the automation, AND go figure out why those rows are failing and fix them too and add it all to the ruleset" | ddc044f0.jsonl |
+| 2026-06-16T19:28 | Larry | unpriced-discovery | "Pulled the real failure causes from their `submissions` table (13 failed / 40 filed) [...] **Inline-image bug** (juli.weger ×2) [...] **Egnyte token 429** (David Sailer ×5) [...] **Misclassification** (Sarah.Wilson) [...] One corrupt-PDF case; the rest are our own smoke tests (noise)." | ddc044f0.jsonl |
+| 2026-06-16T21:33 | Larry | milestone | "Wrote the spec under `.agent/one-big-feature/doordash-ruleset-hardening/`. Dispatched codexer (running, gpt-5-codex) with both workstreams in one message: the four failed-submission fixes and codifying the April/May matching ruleset into `matchBilling` (both filename conventions, 3-tier match, cents-sweep)." | f9c7f63c.jsonl |
+| 2026-06-16T21:43 | Larry | unpriced-discovery | "The 13 failures decompose cleanly: **Real (9):** Egnyte 429 × 5 (David Sailer, 4/29 11-doc burst), inline-image 403 × 2 (juli.weger 6/15), corrupt PDF × 1 (5/05), `not_a_receipt` × 1 (Sarah Wilson). **Noise (4):** all our own test senders." | f9c7f63c.jsonl |
+| 2026-06-16T21:56 | codexer (relay) | milestone | "Built the full doordash-ruleset-hardening pass. A: `onInboundEmail` now filters inline/cid/signature images [...] B: `egnyte/client.ts` now dedupes concurrent token fetches [...] C: `extractFields` now marks `not_a_receipt` with details [...] D: `assembleSubmission` treats no-PDF/all-corrupt-PDF as handled failed outcomes [...] `normalize.ts` parses both legacy and new `doordash_<iso>_<merchant>_<d>_<c>.pdf` names [...] migration `0005_ruleset_match_tiers.sql`" | f9c7f63c.jsonl |
+| 2026-06-16T22:01 | Larry | milestone | "PR is open: **doordash-linker/pull/6** — committed only the reviewed scope on a feature branch, nothing touched main." | f9c7f63c.jsonl |
+| 2026-06-16T22:23 | Larry | milestone | "**PR #6 squash-merged** to `main` at 22:21Z, branch deleted. **Migration 0005 applied to prod Supabase** directly (the journal is stale past 0003 and there's no migrate-on-deploy, so prod schema is hand-applied)." | b3be4d8d.jsonl |
+| 2026-06-16T22:31 | Larry | milestone | "The 521 DoorDash ruleset-hardening feature is **fully shipped and live** [...] trigger.dev deploy | **v20260616.1, 11 tasks, prod** (seiu521 profile) — exit 0. I pinned `trigger.dev@4.4.5` and it deployed clean." | b3be4d8d.jsonl |
+| 2026-06-16T22:36 | Josh | scope-change | "can you bulid in the opening pdf to verify ?" | b3be4d8d.jsonl |
+| 2026-06-16T22:37 | Larry | unpriced-discovery | "**What Tier 3 does today:** it does not re-open the PDF file at match time — it trusts the earlier read [...] **What I offered to build:** A genuine open-the-PDF verification scoped to the ambiguous Tier-3 cases [...] the cost is download + re-read per check, which is why I'd scope it to Tier 3 only" | b3be4d8d.jsonl |
+| 2026-06-16T22:38 | Josh | scope-change | "yes only for the ambiguous ones" | b3be4d8d.jsonl |
+| 2026-06-16T22:54 | Larry | pain | "The diff *deletes* the existing \"duplicate file candidates are ambiguous\" → ambiguous_duplicate_files test [...] silently auto-linking an unresolvable ambiguity is a wrong-link risk and a regression of the prior safety behavior. Sending it back." | b3be4d8d.jsonl |
+| 2026-06-16T23:03 | Larry | milestone | "**Tier-3 open-PDF verify — SHIPPED & LIVE** [...] merged PR #7 (squash, commit db23424) → trigger.dev prod deploy **v20260616.2, 11 tasks live**. Ambiguous duplicates now open candidate PDFs and confirm merchant+amount+date; 1 confirmer → `verified_pdf`, 0 or >1 → `ambiguous_duplicate_files` (no auto-link, no wrong-link risk on member receipts)." | 6e4ecc8f.jsonl |
+| 2026-06-25T16:47 | Josh | milestone | "Pivot to DoorDash project can you check the 521 trigger.dev how many real emails have come in so far?" | 7a22058c.jsonl |
+| 2026-06-25T16:49 | Larry | milestone | "**521 DoorDash — June 2026: 45 real submission emails** from 7 SEIU 521 staff (46 total minus 1 zero-attachment test from Josh on 6/4). 41 filed to Egnyte, 5 failed (one being the test)." | 7a22058c.jsonl |
+| 2026-06-25T16:59 | Larry | pain | "**2 genuine lost submissions** (juli.weger, 6/15) — the attachment fetcher 403'd on `image001.png` (the inline signature image) and failed the whole email, so the real receipts never processed. [...] **2 classification rejections** — Sarah.Wilson's \"METRO Lunch\" flagged not-a-receipt, and MFPemail's was a real **Me-N-Ed's Pizza** catering receipt (not DoorDash), correctly rejected." | 7a22058c.jsonl |
+| 2026-06-25T17:04 | Josh | pain | "pipeline bug you already tried to fix that once need you to fix it for real and process these and use them as additional edge cases. sounds like both classification should be fxied too can you try to pull data from them and if you get it then yse use these as edge cases, make a way of noting something is DD, ad fix." | 7a22058c.jsonl |
+| 2026-06-25T17:04 | Josh | scope-change | "finally, those nice emails we send david after we run the fixes, I want us to send him something like that every month when we prep his info. [...] The total reconciled is $14,647.69 across delivery dates from April 30 through May 30." | 7a22058c.jsonl |
+| 2026-06-25T17:06 | Larry | pain | "the prior fix added `filterProcessableAttachments()` to skip inline signature images, but it (a) missed juli's `image001.png`, and (b) the per-attachment loop **re-throws on a single fetch 403**, aborting the entire submission. The \"for real\" fix is two-part — harden the inline-image filter for the `imageNNN.png` Outlook pattern, and make a single attachment's fetch failure skip-and-continue instead of killing the whole email." | 7a22058c.jsonl |
+| 2026-06-25T17:10 | Josh | decision | "file non dd, draft david" | 7a22058c.jsonl |
+| 2026-06-25T17:26 | codexer (relay) | milestone | "BUILD ready for review. attachment fetch/upload failures now warn+continue instead of aborting the whole submission [...] added `all_attachments_unfetchable` when zero genuine receipts upload [...] added `reprocessSubmissionId` support so an existing failed row can be reset and re-run without creating a duplicate raw_message_id row [...] added resetSubmissionForReprocess()" | 7a22058c.jsonl |
+| 2026-06-25T18:22 | Larry | milestone | "Both rows fully recovered: **cd4417ae → Subway $71.71 filed**, **f95fa0fe → Starbucks $26.64 filed**. The 403 is gone, receipts uploaded, classified, extracted, and filed to Egnyte. Fix proven end-to-end on production." | f0d46d2c.jsonl |
+| 2026-06-25T18:23 | Larry | pain | "Key spec-02 finding: the current `is_receipt` flag is **conflated with DoorDash-specific** (extract.ts L142: \"set to true ONLY if this document is a DoorDash order confirmation\"). That's exactly why Me-N-Ed's (a real non-DD catering receipt) gets dropped as `not_a_receipt`. spec-02 must decouple them." | f0d46d2c.jsonl |
+| 2026-06-25T18:26 | Larry | milestone | "**Shipped + proven live — 521 DoorDash spec-01 (the juli 403 bug):** skip-not-throw on attachment fetch/upload/size failure, fail only when zero receipts upload, idempotent reprocess path. Committed (1e2c24a), opened PR #8, Josh merged (87ba1a8). Deployed to trigger.dev (v20260625.1) and reprocessed juli's two stuck 6/15 submissions — **both now `filed`**." | f0d46d2c.jsonl |
+| 2026-06-25T18:26 | Josh | scope-change | "dont forget we have the cxportal department fix and then the deploy resume duplicate system in line too" | f0d46d2c.jsonl |
+| 2026-06-25T19:07 | Larry | pain | "The GATE hook split the repo path on the space in \"521 Doordash\". The spec-01 dispatch used the hyphenated symlink. Re-dispatching with `521-Doordash`:" | f0d46d2c.jsonl |
+| 2026-06-25T19:43 | Larry | milestone | "**Adversarial review: PASS.** All 94 tests green, the 3 extractFields cases map exactly to the spec (DD receipt→is_doordash=true filed, non-DD receipt→is_doordash=false filed, flyer→not_a_receipt fails), no `any`/`console.log`." | f0d46d2c.jsonl |
+| 2026-06-25T19:48 | Larry | milestone | "521 spec-02 (is_doordash) reviewed + PR-ready: PR #9. Fixes the bug where genuine non-DoorDash receipts (like the Me-N-Eds catering one) got dropped as \"not a receipt\" and never filed. Now: is_receipt = any real receipt; new is_doordash flag marks DoorDash specifically; non-DoorDash receipts still file to Egnyte tagged accordingly. 94/94 tests pass." | f0d46d2c.jsonl |
+| 2026-06-25T20:04 | Larry | unpriced-discovery | "**spec-02 (is_doordash): shipped** — merged (#9), deployed, unit-tested 94/94. Caveat I won't paper over: the 2 historical rejected rows can't be re-filed because their email attachments expired (fails at download, before the classifier). The fix works for all new receipts." | f0d46d2c.jsonl |
+| 2026-06-25T20:07 | Larry | unpriced-discovery | "The pipeline re-fetches inbound attachments from Resend at processing time, so old failed submissions have a limited reprocess window. The honest, important takeaway is the architectural risk you sensed: we should persist attachment bytes to our own storage on receipt so reprocessing never depends on Resend." | f0d46d2c.jsonl |
+| 2026-06-25T20:08 | Josh | pain | "what do you mean email attachment urls they expired in resend?" | f0d46d2c.jsonl |
+| 2026-06-25T20:08 | Josh | unpriced-discovery | "this is a big problem" | f0d46d2c.jsonl |
+
+---
+
+## Key Scope-Creep Moments (the moments scope silently grew)
+
+1. **Jun 4 — "reprocess last two months" arrives mid-conversation.** Josh: *"the client wants to re process last two months this sounds difficult."* Original v2 system only tracks what's in Supabase (data starts Apr 23); the old folders→spreadsheet linking system was already killed. This forced reviving the legacy Python matcher against Egnyte PDFs — work outside the v2 pipeline's SOW.
+
+2. **Jun 4 — legacy filename convention discovered in real data.** April PDFs were NOT named by Order Id as the matcher expected; staff filed them as `YYYYMMDD.AMOUNT MERCHANTCODE.pdf`, forcing a date+amount heuristic. First pass: "89 processed but only 9 matched." Off-by-tip/transposed-digit "probables" (e.g. KFC 75.18 vs file 7581) required human confirmation — an unpriced matching-logic layer.
+
+3. **Jun 8 — misnamed `sendDigest.ts` firing per-submission to the whole finance group.** A production behavior (one email per filed submission to `finance@seiu521.org`, not a batched digest) surfaced only when client David Sailer complained he was flooding his finance team — a live-behavior defect not caught until real use.
+
+4. **Jun 16 — the single biggest silent expansion.** A "run the May recon like April" ask expanded within ~2 hours through a chain of Josh scope-changes: detailed client email → *"we might need a chat interface for david"* → *"did we overengineer this whole thing?"* → **"build all the manual steps from april and may directly into the automation, AND go figure out why those rows are failing and fix them too and add it all to the ruleset."** That one sentence converted a one-off reconciliation into a codified-ruleset + failure-remediation build (PR #6, migration 0005).
+
+5. **Jun 16 — new `doordash_<ISO>_<merchant>_<amount>.pdf` export convention.** A "missing PDF" (Cali Rays) was a false negative: the legacy parser couldn't read DoorDash's newer auto-export filename. 36 such files already in the index — a future-facing matcher-parser requirement that wasn't in the recon scope.
+
+6. **Jun 16 — Tier-3 "open the PDF to verify" added same-day.** Josh: *"can you bulid in the opening pdf to verify?"* → new download-and-re-read verification path for ambiguous matches (PR #7, deploy v20260616.2). Net-new feature bolted on after the recon was already "delivered."
+
+7. **Jun 16 — 13 silently-failed submissions surfaced from the live table.** Querying Supabase revealed failures never reported to anyone: Egnyte token 429 ×5, inline-image 403 ×2, corrupt PDF ×1, misclassification ×1. Fixing these ("add it all to the ruleset") was pure discovered scope.
+
+8. **Jun 25 — the "for real" refix + classification decouple + monthly email.** The prior 403 fix hadn't actually worked (per-attachment loop re-threw on one 403, killing whole emails). Josh escalated to a 6-item build: real 403 fix + reprocess juli's lost rows + decouple `is_receipt` from DoorDash-specific (`is_doordash` flag so non-DD catering receipts like Me-N-Ed's stop being dropped) + file non-DD receipts + monthly reconciliation email to David + idempotent reprocess path (PRs #8, #9).
+
+9. **Jun 25 — the architectural landmine (unpriced, unresolved).** Historical rejected rows can't be re-filed because the pipeline re-fetches attachment bytes from Resend at processing time and those URLs expire. Larry: *"we should persist attachment bytes to our own storage on receipt so reprocessing never depends on Resend."* Josh: **"this is a big problem."** A durability gap in the core intake design, discovered at the very end of the window and not yet scoped/built.
+
+---
+
+## Files Found Relevant (with signal)
+
+| File | Date | Content |
+|---|---|---|
+| 70ee6cdb.jsonl | 2026-06-04 | Project rediscovery — repo `clearworks-ai/doordash-linker`, SEIU 521 meal-expense automation |
+| 63b1a86c.jsonl | 2026-06-04 | "reprocess two months" scope arrival; legacy-filename discovery; April 89-row match (9→81+probables) |
+| 8e02dc5a.jsonl | 2026-06-04 | Probable/missing confirmation; 89/89 April delivered |
+| 7c17e21d.jsonl | 2026-06-04 | Delivery wrap; awaiting May file from David Sailer; 5 Egnyte renames |
+| 39920e26.jsonl | 2026-06-08 | `sendDigest.ts` per-submission flood complaint; FINANCE_DIGEST_TO → David.Sailer fix |
+| 57cad332.jsonl | 2026-06-16 | May recon kickoff via frank2; client "we are ready" CSV drop |
+| bb9bdc74.jsonl | 2026-06-16 | `fcode`/"DDD" merchant-code bug; 7 probables confirmed via order-ID |
+| ddc044f0.jsonl | 2026-06-16 | 79/80→80/80; `doordash_<ISO>` false-negative; overengineer thread; "build all manual steps"; 13 failures |
+| f9c7f63c.jsonl | 2026-06-16 | ruleset-hardening spec + codexer dispatch; failure decomposition; PR #6 |
+| b3be4d8d.jsonl | 2026-06-16 | PR #6 merge + migration 0005 + deploy v20260616.1; Tier-3 open-PDF ask; regression catch |
+| 6e4ecc8f.jsonl | 2026-06-16/17 | Tier-3 open-PDF verify PR #7 shipped, deploy v20260616.2 |
+| 7a22058c.jsonl | 2026-06-25 | June email count; 2 lost (juli 403) + 2 rejected; "fix it for real"; monthly-email ask; spec-01 build |
+| f0d46d2c.jsonl | 2026-06-25 | spec-01 shipped (PR #8) + juli reprocessed; is_receipt/is_doordash decouple (PR #9); Resend-expiry landmine |
+
+## Files Checked but NO-SIGNAL (incidental mentions only)
+
+Confirmed non-relevant despite keyword hits — mostly cron boilerplate, tool_result dumps (wiki/CRM index listings, handoff-doc reads), or entirely different builds (CRM/briefs dashboard, LK/Alloi interviews-parity, intake open-count dedup, worker-leak fix, scout venue-scraping, zoom-downloader, auditos):
+f7c340c2 (5/30), c41897c3 (6/5), fe56f354 (6/6), 2ee3c2db (6/7), 4350a54c (6/8), 1bef265e (6/8), 42f4f318 (6/9), 674bd396 (6/10), be0e1129 (6/10), be279d02 (6/10), 0760d68c (6/10), a597a10e (6/10), d5f04683 (6/10), 6bbf9741 (6/11), dc18d851 (6/12), e1ce1925 (6/12), faa32db2 (6/12), 0fd28cb8 (6/13), 4a06a88f (6/13), e7930314 (6/13), ecfe76d4 (6/13), 1dfc5b95 (6/14), 9d96b4d7 (6/17), 36868f5f (6/18), 9887e02e (6/18), 4f0d32bd (6/19), 0ae64d80 (6/23), 56f892fc (6/23), 5e1a119a (6/23), a4ad7116 (6/23), aee0f6aa (6/23), 3454d009 (6/23), b8cb315d (6/23-24), 1d2e9b7d (6/24), 7d583b5c (6/24), 9a9f1aac (6/24), 96c1c38e (6/24), e02529bf (6/24), 4029749d (6/24).
+
+## Method Note
+
+186 jsonl files grepped for `doordash|seiu|521`; 38 substantive-keyword files date-mapped and read in full via 5 parallel extraction passes. The DoorDash/SEIU-521 build signal concentrates on exactly **four dates: Jun 4, Jun 8, Jun 16, Jun 25** across **13 files**. Jun 12-14 and most of Jun 23-24 keyword hits were false positives (unrelated builds / port 5050 / line numbers). No substantive DoorDash build content found in the May 26 – Jun 3 sub-window (only incidental client-name references).

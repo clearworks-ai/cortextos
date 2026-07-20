@@ -1,5 +1,3 @@
-## LIVE PRIORITY
-
-Newest inbound Josh message verbatim (Telegram, 2026-07-18T23:56 UTC — no reply since): "just fold the reframe and send it to me ground in the jobs you already have read about and referncing real fact"
-
-pa folded the AI-experience reframe into the JD, sent full text via Telegram, told Josh toolkits are NOT built yet, waiting on his go-ahead. STILL NO REPLY as of 06:46 UTC handoff (~7h since content sent). 6th consecutive handoff with zero Josh reply — do NOT re-ping, spaced-pings discipline. Resume routine crons; act only if Josh replies.
+LIVE PRIORITY (2026-07-20T05:22Z, muse): AEC daily digest build confirmed queued with larry (sequenced after his live DoorDash retro work), committed to 8am PT deadline for Monday AIA office hours. Task task_1784523551336_19363579, goal spec orgs/clearworksai/agents/muse/state/goals/aec-daily-digest.md (3 buckets: industry_news/spend_confidence/owner_voice, ICP-corrected sources, owner-voice pulled from AEC Pulse NotebookLM corpus).
+Secondary open thread: sent Josh a 5-slide AIA office-hours deck outline (state of digital ops/AI in AEC from corpus quotes) - awaiting his call on outline-only vs built artifact.
+Full detail: orgs/clearworksai/agents/muse/memory/handoffs/handoff-2026-07-20T05-20-43Z.md

@@ -2,3 +2,6 @@ transcript-scanner:run:1784406959 status=no_new_transcripts
 transcript-scanner:run:1784428640 status=no_new_transcripts
 transcript-scanner:run:1784435842 status=no_new_transcripts
 transcript-scanner:run:1784443048 status=no_new_transcripts
+transcript-scanner:run:1784493581 status=no_new_transcripts
+transcript-scanner:run:1784500846 status=no_new_transcripts
+transcript-scanner:run:1784508039 status=no_new_transcripts

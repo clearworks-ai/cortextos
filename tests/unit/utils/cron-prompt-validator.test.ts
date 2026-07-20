@@ -41,6 +41,23 @@ async function importValidator() {
   return import('../../../src/utils/cron-prompt-validator.js');
 }
 
+const LEAK_PROMPT =
+  'cortextos bus update-cron-fire heartbeat --interval 4h 2>/dev/null; ' +
+  'TASK_ID=$(cortextos bus create-task "Cron: heartbeat" --desc "Scheduled cron run" 2>/dev/null); ' +
+  'cortextos bus update-task $TASK_ID in_progress 2>/dev/null; ' +
+  'Read HEARTBEAT.md and follow its instructions. Update heartbeat, check inbox, run fleet health check across all 3 repos.';
+
+const COMPLETE_PROMPT =
+  'cortextos bus update-cron-fire usage-audit --interval 1d 2>/dev/null; ' +
+  'TASK_ID=$(cortextos bus create-task "Cron: usage-audit" --desc "Scheduled cron run" 2>/dev/null); ' +
+  'cortextos bus update-task $TASK_ID in_progress 2>/dev/null; ' +
+  'cortextos bus complete-task $TASK_ID 2>/dev/null; Run the usage audit.';
+
+const PASSIVE_PROMPT =
+  'cortextos bus update-cron-fire heartbeat --interval 4h 2>/dev/null; ' +
+  'cortextos bus log-event cron-fired heartbeat 2>/dev/null; ' +
+  'Read HEARTBEAT.md and follow its instructions.';
+
 describe('cron prompt validator', () => {
   it('findBannedCronPrompts reports the compiled-in banned prompt floor', async () => {
     const { findBannedCronPrompts } = await importValidator();
@@ -82,5 +99,51 @@ describe('cron prompt validator', () => {
     expect(
       findBannedCronPrompts([makeCron('Send the full human task list via Telegram.')])
     ).toHaveLength(1);
+  });
+});
+
+describe('cron task-lifecycle leak pattern', () => {
+  it('rejects a leaky cron prompt and exposes the reusable predicate', async () => {
+    const {
+      CRON_TASK_LEAK_PATTERN_ID,
+      findBannedCronPrompts,
+      isCronTaskLeakPrompt,
+      validateCronsPrompt,
+    } = await importValidator();
+
+    expect(isCronTaskLeakPrompt(LEAK_PROMPT)).toBe(true);
+    expect(() => validateCronsPrompt([makeCron(LEAK_PROMPT)])).toThrow(/cron-task-leak-no-complete/);
+    expect(findBannedCronPrompts([makeCron(LEAK_PROMPT)])).toEqual([
+      {
+        name: 'heartbeat',
+        patternId: CRON_TASK_LEAK_PATTERN_ID,
+      },
+    ]);
+  });
+
+  it('allows create plus complete in the same prompt', async () => {
+    const { findBannedCronPrompts, isCronTaskLeakPrompt, validateCronsPrompt } =
+      await importValidator();
+
+    expect(isCronTaskLeakPrompt(COMPLETE_PROMPT)).toBe(false);
+    expect(() => validateCronsPrompt([makeCron(COMPLETE_PROMPT, 'usage-audit')])).not.toThrow();
+    expect(findBannedCronPrompts([makeCron(COMPLETE_PROMPT, 'usage-audit')])).toEqual([]);
+  });
+
+  it('allows prompts with no task bookkeeping', async () => {
+    const { findBannedCronPrompts, isCronTaskLeakPrompt, validateCronsPrompt } =
+      await importValidator();
+
+    expect(isCronTaskLeakPrompt(PASSIVE_PROMPT)).toBe(false);
+    expect(() => validateCronsPrompt([makeCron(PASSIVE_PROMPT)])).not.toThrow();
+    expect(findBannedCronPrompts([makeCron(PASSIVE_PROMPT)])).toEqual([]);
+  });
+
+  it('keeps the Telegram floor error message unchanged', async () => {
+    const { validateCronsPrompt } = await importValidator();
+
+    expect(() =>
+      validateCronsPrompt([makeCron('Send the full HUMAN task list via Telegram.')])
+    ).toThrow(/known Telegram-spam recurrence/);
   });
 });

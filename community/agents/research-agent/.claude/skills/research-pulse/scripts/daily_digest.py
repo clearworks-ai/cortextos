@@ -132,6 +132,7 @@ def bucketize(items: list[dict], registry: dict) -> dict[str, list[dict]]:
                 "source_name": str(source.get("source_name") or source_id or "unknown"),
                 "source_id": source_id,
                 "pubdate": str(item.get("pubdate") or ""),
+                "summary": str(item.get("summary") or ""),
             }
         )
 
@@ -224,6 +225,12 @@ def render_telegram(digest: dict) -> str:
                 pubdate = str(item.get("pubdate") or "").strip()
                 published = pubdate[:10] if len(pubdate) >= 10 else "unknown date"
                 lines.append(f"• {title} ({source_name}, {published})")
+                url = str(item.get("url") or "").strip()
+                if url:
+                    lines.append(f"  {url}")
+                summary = str(item.get("summary") or "").strip()
+                if summary:
+                    lines.append(f"  {summary}")
         lines.append("")
 
     return "\n".join(lines).rstrip()

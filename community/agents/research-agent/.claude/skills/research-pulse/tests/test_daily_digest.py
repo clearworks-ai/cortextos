@@ -319,6 +319,94 @@ class DailyDigestTests(unittest.TestCase):
         self.assertIn("2026-07-20", rendered)
         self.assertIn("• (no new items in window)", rendered)
 
+    def test_render_telegram_surfaces_url_and_summary(self) -> None:
+        digest = {
+            "digest_date": "2026-07-20",
+            "buckets": {
+                "industry_news": [
+                    {
+                        "title": "Firm operators share margin playbooks",
+                        "source_name": "News Blog",
+                        "pubdate": "2026-07-20T04:30:00Z",
+                        "url": "https://example.com/news/item",
+                        "summary": "Operators detail how CA-phase discipline preserves design margin.",
+                    }
+                ],
+                "spend_confidence": [],
+                "owner_voice": [],
+            },
+        }
+
+        rendered = MODULE.render_telegram(digest)
+        lines = rendered.splitlines()
+        idx = lines.index("• Firm operators share margin playbooks (News Blog, 2026-07-20)")
+        self.assertEqual(lines[idx + 1], "  https://example.com/news/item")
+        self.assertEqual(
+            lines[idx + 2],
+            "  Operators detail how CA-phase discipline preserves design margin.",
+        )
+
+    def test_render_telegram_empty_summary_renders_link_only(self) -> None:
+        digest = {
+            "digest_date": "2026-07-20",
+            "buckets": {
+                "industry_news": [
+                    {
+                        "title": "Firm operators share margin playbooks",
+                        "source_name": "News Blog",
+                        "pubdate": "2026-07-20T04:30:00Z",
+                        "url": "https://example.com/news/item",
+                        "summary": "",
+                    }
+                ],
+                "spend_confidence": [],
+                "owner_voice": [],
+            },
+        }
+
+        rendered = MODULE.render_telegram(digest)
+        lines = rendered.splitlines()
+        idx = lines.index("• Firm operators share margin playbooks (News Blog, 2026-07-20)")
+        self.assertEqual(lines[idx + 1], "  https://example.com/news/item")
+        self.assertEqual(lines[idx + 2], "")
+
+    def test_render_telegram_no_url_no_summary_matches_legacy(self) -> None:
+        digest = {
+            "digest_date": "2026-07-20",
+            "buckets": {
+                "industry_news": [
+                    {
+                        "title": "Firm operators share margin playbooks",
+                        "source_name": "News Blog",
+                        "pubdate": "2026-07-20T04:30:00Z",
+                    }
+                ],
+                "spend_confidence": [],
+                "owner_voice": [],
+            },
+        }
+
+        rendered = MODULE.render_telegram(digest)
+        lines = rendered.splitlines()
+        idx = lines.index("• Firm operators share margin playbooks (News Blog, 2026-07-20)")
+        self.assertEqual(lines[idx + 1], "")
+        self.assertNotIn("https://", rendered)
+
+    def test_bucketize_carries_summary_and_defaults_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = self.make_registry()
+            items = self.make_inbox_items(registry)
+            items[0]["summary"] = "Operators detail CA-phase discipline."
+            self.write_state(tmp, registry, items, self.make_quotes())
+
+            with unittest.mock.patch.dict(os.environ, {"PULSE_STATE_DIR": tmp}, clear=False):
+                digest = MODULE.build_digest(since_hours=48, now=self.now, rotate=False)
+
+        news = digest["buckets"]["industry_news"]
+        self.assertEqual(news[0]["summary"], "Operators detail CA-phase discipline.")
+        spend = digest["buckets"]["spend_confidence"]
+        self.assertTrue(all(item["summary"] == "" for item in spend))
+
     def test_write_pulse_file_dated_path(self) -> None:
         digest = {
             "digest_date": "2026-07-20",
@@ -384,11 +472,13 @@ class DailyDigestTests(unittest.TestCase):
         fake_response = unittest.mock.Mock()
         fake_response.status_code = 304
         fake_response.headers = {}
+        fake_requests = unittest.mock.Mock()
+        fake_requests.get.return_value = fake_response
 
-        with unittest.mock.patch.object(DELTA.requests, "get", return_value=fake_response) as mocked_get:
+        with unittest.mock.patch.object(DELTA, "requests", fake_requests):
             DELTA.fetch_feed("https://example.com/feed.xml", None, None)
 
-        headers = mocked_get.call_args.kwargs["headers"]
+        headers = fake_requests.get.call_args.kwargs["headers"]
         self.assertEqual(headers["User-Agent"], DELTA.USER_AGENT)
         self.assertTrue(headers["User-Agent"].startswith("Mozilla/5.0"))
 

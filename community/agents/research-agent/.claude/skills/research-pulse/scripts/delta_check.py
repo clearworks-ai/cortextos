@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import calendar
+import html
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 
@@ -28,6 +30,8 @@ USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
+SUMMARY_MAX_CHARS = 160
+_TAG_RE = re.compile(r"<[^>]+>")
 
 
 def fetch_feed(
@@ -74,6 +78,16 @@ def _entry_guid(entry: object) -> str | None:
     return None
 
 
+def clean_summary(value: object, max_chars: int = SUMMARY_MAX_CHARS) -> str:
+    if not isinstance(value, str) or not value:
+        return ""
+    text = html.unescape(_TAG_RE.sub(" ", value))
+    text = " ".join(text.split())
+    if len(text) > max_chars:
+        text = text[: max_chars - 1].rstrip() + "\u2026"
+    return text
+
+
 def _time_struct_to_epoch(value: object) -> int | None:
     if value is None:
         return None
@@ -114,6 +128,7 @@ def parse_entries(body: bytes) -> list[dict]:
             "title": _entry_value(entry, "title") or "",
             "url": _entry_value(entry, "link") or "",
             "pubdate": _epoch_to_iso(epoch),
+            "summary": clean_summary(_entry_value(entry, "summary")),
         }
         if epoch is None:
             undated.append((index, item))

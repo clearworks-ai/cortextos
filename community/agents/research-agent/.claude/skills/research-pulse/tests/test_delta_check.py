@@ -113,9 +113,10 @@ class DeltaCheckTests(unittest.TestCase):
 
             stdout = io.StringIO()
             with unittest.mock.patch.dict(os.environ, {"PULSE_STATE_DIR": tmp}, clear=False):
-                with unittest.mock.patch.object(MODULE, "poll_vertical", side_effect=patched_poll_vertical):
-                    with contextlib.redirect_stdout(stdout):
-                        rc = MODULE.main(["--vertical", "nonprofit", "--state-dir", tmp])
+                with unittest.mock.patch.object(MODULE, "requests", object()):
+                    with unittest.mock.patch.object(MODULE, "poll_vertical", side_effect=patched_poll_vertical):
+                        with contextlib.redirect_stdout(stdout):
+                            rc = MODULE.main(["--vertical", "nonprofit", "--state-dir", tmp])
 
             self.assertEqual(rc, 0)
             summary = json.loads(stdout.getvalue())
@@ -124,7 +125,7 @@ class DeltaCheckTests(unittest.TestCase):
             self.assertEqual(len(summary["new_items"]), 1)
             self.assertEqual(
                 set(summary["new_items"][0].keys()),
-                {"vertical", "source_id", "guid", "title", "url", "pubdate"},
+                {"vertical", "source_id", "guid", "title", "url", "pubdate", "summary"},
             )
             self.assertEqual(summary["new_items"][0]["vertical"], "nonprofit")
             self.assertEqual(summary["new_items"][0]["source_id"], source["id"])
@@ -132,6 +133,49 @@ class DeltaCheckTests(unittest.TestCase):
             self.assertEqual(summary["new_items"][0]["title"], "Episode 4: Grants Acceleration")
             self.assertEqual(summary["new_items"][0]["url"], "https://example.com/podcast/ep-4")
             self.assertEqual(summary["new_items"][0]["pubdate"], "2026-07-14T00:00:00Z")
+            self.assertEqual(summary["new_items"][0]["summary"], "")
+
+    def test_clean_summary_strips_html_and_collapses_whitespace(self) -> None:
+        raw = "<p>Margins &amp; backlog</p>\n  <b>held firm</b> in Q2"
+        self.assertEqual(MODULE.clean_summary(raw), "Margins & backlog held firm in Q2")
+
+    def test_clean_summary_truncates_with_ellipsis(self) -> None:
+        raw = "x" * 400
+        cleaned = MODULE.clean_summary(raw)
+        self.assertEqual(len(cleaned), MODULE.SUMMARY_MAX_CHARS)
+        self.assertTrue(cleaned.endswith("\u2026"))
+
+    def test_clean_summary_non_string_returns_empty(self) -> None:
+        self.assertEqual(MODULE.clean_summary(None), "")
+        self.assertEqual(MODULE.clean_summary(""), "")
+        self.assertEqual(MODULE.clean_summary(123), "")
+
+    def test_parse_entries_captures_summary_and_defaults_empty(self) -> None:
+        feed = b"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Summary Feed</title>
+    <item>
+      <title>With description</title>
+      <link>https://example.com/a</link>
+      <guid>guid-a</guid>
+      <pubDate>Tue, 14 Jul 2026 00:00:00 GMT</pubDate>
+      <description>&lt;p&gt;Firm margins &amp;amp; backlog held&lt;/p&gt;</description>
+    </item>
+    <item>
+      <title>Without description</title>
+      <link>https://example.com/b</link>
+      <guid>guid-b</guid>
+      <pubDate>Mon, 13 Jul 2026 00:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>
+"""
+        entries = MODULE.parse_entries(feed)
+        self.assertEqual(entries[0]["guid"], "guid-a")
+        self.assertEqual(entries[0]["summary"], "Firm margins & backlog held")
+        self.assertEqual(entries[1]["guid"], "guid-b")
+        self.assertEqual(entries[1]["summary"], "")
 
     def test_detect_new_falls_back_to_pubdate_without_reflood(self) -> None:
         baseline = MODULE.parse_entries(self.load_fixture_bytes("podcast_feed.xml"))

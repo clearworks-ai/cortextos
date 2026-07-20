@@ -19,6 +19,7 @@ export const STAGES = [
   'specs',
   'implement',
   'review',
+  'staging-verify',
   'true-verify',
   'exempt',
 ] as const;
@@ -328,8 +329,9 @@ function stageRank(stage: Stage): number {
     case 'specs': return 3;
     case 'implement': return 4;
     case 'review': return 5;
-    case 'true-verify': return 6;
-    case 'exempt': return 7;
+    case 'staging-verify': return 6;
+    case 'true-verify': return 7;
+    case 'exempt': return 8;
   }
 }
 
@@ -341,7 +343,8 @@ function allowedPreviousStages(stage: Stage): Stage[] {
     case 'specs': return ['plan'];
     case 'implement': return ['specs'];
     case 'review': return ['specs', 'implement'];
-    case 'true-verify': return ['review'];
+    case 'staging-verify': return ['review'];
+    case 'true-verify': return ['review', 'staging-verify'];
     case 'exempt': return [];
   }
 }
@@ -865,9 +868,9 @@ export function emitLedgerRow(opts: {
   }
 
   const artifact = describeArtifact(opts.artifactPath);
-  if (opts.stage === 'true-verify') {
+  if (opts.stage === 'true-verify' || opts.stage === 'staging-verify') {
     if (!opts.evidencePath || !existsSync(opts.evidencePath) || statSync(opts.evidencePath).size === 0) {
-      throw new Error('Artifact/evidence missing or empty for true-verify');
+      throw new Error(`Artifact/evidence missing or empty for ${opts.stage}`);
     }
   }
   if (opts.stage === 'exempt' && !opts.reason) {

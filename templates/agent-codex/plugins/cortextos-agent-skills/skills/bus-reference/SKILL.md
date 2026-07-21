@@ -592,18 +592,14 @@ cortextos bus submit-community-item <item-name> <item-type> "<description>" [--d
 - **Note**: Works in headful mode only (needs a display). All agents running under the daemon have access.
 
 
-### gogcli (Google Workspace CLI)
-- **Binary**: `gog`
-- **Use for**: Gmail (search, send, archive, labels, drafts, filters), Calendar (list/create/update events, free/busy, conflicts), Drive (list/upload/download), Contacts, Tasks, Sheets, Docs
-- **Auth**: OAuth via `gog auth credentials` + `gog auth add`
-- **Accounts**: Configure during onboarding. Use `-a email@gmail.com` to specify which account.
-- **Multi-account**: Use `-a email@gmail.com` or `--account email@gmail.com` flag
-- **JSON output**: All commands support `-j` or `--json` for structured output
-- **Plain output**: Use `-p` or `--plain` for TSV parseable output
+### gws (Google Workspace CLI)
+- **Binary**: `gws`
+- **Use for**: Gmail (search, send, archive, labels, drafts), Calendar (agenda/list/create events), Drive, Sheets, Docs, Chat
+- **Auth**: OAuth token cache at `~/.config/gws/`. Reauth with `gws auth login` if needed. Note: `gws auth status` can misreport `token_valid: false` even when real API calls succeed — trust a live call over the status check.
+- **Skills**: read `.claude/skills/gws-shared/SKILL.md` first, then the per-service skill (`gws-gmail`, `gws-gmail-send`, `gws-calendar-agenda`, `gws-drive`, `gws-sheets-read`, `gws-sheets-append`, `gws-docs`, `gws-docs-write`, `gws-chat`)
 - **Usage examples**:
-  - `gog gmail ls -a YOUR_EMAIL "is:unread" --max 10`
-  - `gog gmail send -a YOUR_EMAIL --to "user@example.com" --subject "Subject" --body "Body"`
-  - `gog calendar ls -a YOUR_EMAIL --max 5`
-  - `gog calendar create -a YOUR_EMAIL --summary "Meeting" --start "2026-03-28T14:00:00" --end "2026-03-28T15:00:00"`
-  - `gog drive ls -a YOUR_EMAIL --max 10`
-- **Important**: gog replaces Gmail/Calendar MCP tools. Use gog instead of MCP for full capabilities (send, archive, labels).
+  - `gws gmail:v1 users messages list --params '{"userId":"me","maxResults":10,"q":"is:unread"}'`
+  - `gws gmail +triage --query 'is:unread newer_than:1d' --format json`
+  - `gws calendar +agenda --today`
+  - `gws calendar +agenda --days 5 --format json`
+- **Important**: `gws` is canonical for GWS. Never fall back to Gmail/Calendar/Drive MCP. `gog`/`gogcli` does not exist on this machine — do not reference it.

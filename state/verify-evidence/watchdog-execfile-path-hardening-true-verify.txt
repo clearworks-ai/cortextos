@@ -1,0 +1,54 @@
+=== true-verify watchdog-execfile-path-hardening 2026-07-20T15:54:50Z ===
+--- npm run build ---
+
+> cortextos@0.1.1 build
+> tsup
+
+CLI Building entry: {"cli":"src/cli/index.ts","daemon":"src/daemon/index.ts","pipeline/bypass-audit":"src/pipeline/bypass-audit.ts","pipeline/stage-emit":"src/pipeline/stage-emit.ts","hooks/hook-permission-telegram":"src/hooks/hook-permission-telegram.ts","hooks/hook-ask-telegram":"src/hooks/hook-ask-telegram.ts","hooks/hook-planmode-telegram":"src/hooks/hook-planmode-telegram.ts","hooks/hook-crash-alert":"src/hooks/hook-crash-alert.ts","hooks/hook-compact-telegram":"src/hooks/hook-compact-telegram.ts","hooks/hook-extract-facts":"src/hooks/hook-extract-facts.ts","hooks/hook-idle-flag":"src/hooks/hook-idle-flag.ts","hooks/hook-context-status":"src/hooks/hook-context-status.ts","hooks/hook-tool-result-router":"src/hooks/hook-tool-result-router.ts","hooks/hook-loop-detector":"src/hooks/hook-loop-detector.ts"}
+CLI Using tsconfig: tsconfig.json
+CLI tsup v8.5.1
+CLI Using tsup config: /Users/joshweiss/code/cortextos/tsup.config.ts
+CLI Target: node20
+CLI Cleaning output folder
+CJS Build start
+CJS dist/hooks/hook-ask-telegram.js            25.11 KB
+CJS dist/pipeline/bypass-audit.js              56.96 KB
+CJS dist/daemon.js                             445.05 KB
+CJS dist/pipeline/stage-emit.js                46.18 KB
+CJS dist/hooks/hook-planmode-telegram.js       29.61 KB
+CJS dist/hooks/hook-compact-telegram.js        9.43 KB
+CJS dist/hooks/hook-extract-facts.js           6.20 KB
+CJS dist/hooks/hook-idle-flag.js               736.00 B
+CJS dist/hooks/hook-crash-alert.js             18.13 KB
+CJS dist/hooks/hook-loop-detector.js           17.77 KB
+CJS dist/hooks/hook-tool-result-router.js      14.43 KB
+CJS dist/hooks/hook-permission-telegram.js     33.22 KB
+CJS dist/cli.js                                630.34 KB
+CJS dist/hooks/hook-context-status.js          2.54 KB
+CJS dist/hooks/hook-ask-telegram.js.map        59.57 KB
+CJS dist/pipeline/stage-emit.js.map            86.46 KB
+CJS dist/hooks/hook-compact-telegram.js.map    39.31 KB
+CJS dist/pipeline/bypass-audit.js.map          121.90 KB
+CJS dist/hooks/hook-idle-flag.js.map           1.40 KB
+CJS dist/hooks/hook-extract-facts.js.map       22.70 KB
+CJS dist/hooks/hook-planmode-telegram.js.map   64.17 KB
+CJS dist/hooks/hook-tool-result-router.js.map  52.12 KB
+CJS dist/hooks/hook-crash-alert.js.map         50.17 KB
+CJS dist/hooks/hook-permission-telegram.js.map 70.38 KB
+CJS dist/hooks/hook-loop-detector.js.map       49.81 KB
+CJS dist/hooks/hook-context-status.js.map      7.33 KB
+CJS dist/daemon.js.map                         1.06 MB
+CJS dist/cli.js.map                            1.40 MB
+CJS ⚡️ Build success in 54ms
+BUILD_EXIT=0
+--- npx vitest run tests/unit/daemon/fast-checker.test.ts ---
+
+ RUN  v4.1.2 /Users/joshweiss/code/cortextos
+
+
+ Test Files  1 passed (1)
+      Tests  72 passed (72)
+   Start at  08:54:55
+   Duration  4.03s (transform 114ms, setup 8ms, import 130ms, tests 3.83s, environment 0ms)
+
+TEST_EXIT=0

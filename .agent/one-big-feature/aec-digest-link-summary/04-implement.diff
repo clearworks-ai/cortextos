@@ -1,0 +1,266 @@
+diff --git a/community/agents/research-agent/.claude/skills/research-pulse/scripts/daily_digest.py b/community/agents/research-agent/.claude/skills/research-pulse/scripts/daily_digest.py
+index 6d706c8..f0cbc6f 100644
+--- a/community/agents/research-agent/.claude/skills/research-pulse/scripts/daily_digest.py
++++ b/community/agents/research-agent/.claude/skills/research-pulse/scripts/daily_digest.py
+@@ -132,6 +132,7 @@ def bucketize(items: list[dict], registry: dict) -> dict[str, list[dict]]:
+                 "source_name": str(source.get("source_name") or source_id or "unknown"),
+                 "source_id": source_id,
+                 "pubdate": str(item.get("pubdate") or ""),
++                "summary": str(item.get("summary") or ""),
+             }
+         )
+ 
+@@ -224,6 +225,12 @@ def render_telegram(digest: dict) -> str:
+                 pubdate = str(item.get("pubdate") or "").strip()
+                 published = pubdate[:10] if len(pubdate) >= 10 else "unknown date"
+                 lines.append(f"• {title} ({source_name}, {published})")
++                url = str(item.get("url") or "").strip()
++                if url:
++                    lines.append(f"  {url}")
++                summary = str(item.get("summary") or "").strip()
++                if summary:
++                    lines.append(f"  {summary}")
+         lines.append("")
+ 
+     return "\n".join(lines).rstrip()
+diff --git a/community/agents/research-agent/.claude/skills/research-pulse/scripts/delta_check.py b/community/agents/research-agent/.claude/skills/research-pulse/scripts/delta_check.py
+index 1f4bf1b..46f873b 100644
+--- a/community/agents/research-agent/.claude/skills/research-pulse/scripts/delta_check.py
++++ b/community/agents/research-agent/.claude/skills/research-pulse/scripts/delta_check.py
+@@ -2,8 +2,10 @@ from __future__ import annotations
+ 
+ import argparse
+ import calendar
++import html
+ import json
+ import os
++import re
+ import sys
+ from datetime import datetime, timezone
+ 
+@@ -28,6 +30,8 @@ USER_AGENT = (
+     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+ )
++SUMMARY_MAX_CHARS = 160
++_TAG_RE = re.compile(r"<[^>]+>")
+ 
+ 
+ def fetch_feed(
+@@ -74,6 +78,16 @@ def _entry_guid(entry: object) -> str | None:
+     return None
+ 
+ 
++def clean_summary(value: object, max_chars: int = SUMMARY_MAX_CHARS) -> str:
++    if not isinstance(value, str) or not value:
++        return ""
++    text = html.unescape(_TAG_RE.sub(" ", value))
++    text = " ".join(text.split())
++    if len(text) > max_chars:
++        text = text[: max_chars - 1].rstrip() + "\u2026"
++    return text
++
++
+ def _time_struct_to_epoch(value: object) -> int | None:
+     if value is None:
+         return None
+@@ -114,6 +128,7 @@ def parse_entries(body: bytes) -> list[dict]:
+             "title": _entry_value(entry, "title") or "",
+             "url": _entry_value(entry, "link") or "",
+             "pubdate": _epoch_to_iso(epoch),
++            "summary": clean_summary(_entry_value(entry, "summary")),
+         }
+         if epoch is None:
+             undated.append((index, item))
+diff --git a/community/agents/research-agent/.claude/skills/research-pulse/tests/test_daily_digest.py b/community/agents/research-agent/.claude/skills/research-pulse/tests/test_daily_digest.py
+index 6b6bd8c..4e5ddc0 100644
+--- a/community/agents/research-agent/.claude/skills/research-pulse/tests/test_daily_digest.py
++++ b/community/agents/research-agent/.claude/skills/research-pulse/tests/test_daily_digest.py
+@@ -319,6 +319,94 @@ class DailyDigestTests(unittest.TestCase):
+         self.assertIn("2026-07-20", rendered)
+         self.assertIn("• (no new items in window)", rendered)
+ 
++    def test_render_telegram_surfaces_url_and_summary(self) -> None:
++        digest = {
++            "digest_date": "2026-07-20",
++            "buckets": {
++                "industry_news": [
++                    {
++                        "title": "Firm operators share margin playbooks",
++                        "source_name": "News Blog",
++                        "pubdate": "2026-07-20T04:30:00Z",
++                        "url": "https://example.com/news/item",
++                        "summary": "Operators detail how CA-phase discipline preserves design margin.",
++                    }
++                ],
++                "spend_confidence": [],
++                "owner_voice": [],
++            },
++        }
++
++        rendered = MODULE.render_telegram(digest)
++        lines = rendered.splitlines()
++        idx = lines.index("• Firm operators share margin playbooks (News Blog, 2026-07-20)")
++        self.assertEqual(lines[idx + 1], "  https://example.com/news/item")
++        self.assertEqual(
++            lines[idx + 2],
++            "  Operators detail how CA-phase discipline preserves design margin.",
++        )
++
++    def test_render_telegram_empty_summary_renders_link_only(self) -> None:
++        digest = {
++            "digest_date": "2026-07-20",
++            "buckets": {
++                "industry_news": [
++                    {
++                        "title": "Firm operators share margin playbooks",
++                        "source_name": "News Blog",
++                        "pubdate": "2026-07-20T04:30:00Z",
++                        "url": "https://example.com/news/item",
++                        "summary": "",
++                    }
++                ],
++                "spend_confidence": [],
++                "owner_voice": [],
++            },
++        }
++
++        rendered = MODULE.render_telegram(digest)
++        lines = rendered.splitlines()
++        idx = lines.index("• Firm operators share margin playbooks (News Blog, 2026-07-20)")
++        self.assertEqual(lines[idx + 1], "  https://example.com/news/item")
++        self.assertEqual(lines[idx + 2], "")
++
++    def test_render_telegram_no_url_no_summary_matches_legacy(self) -> None:
++        digest = {
++            "digest_date": "2026-07-20",
++            "buckets": {
++                "industry_news": [
++                    {
++                        "title": "Firm operators share margin playbooks",
++                        "source_name": "News Blog",
++                        "pubdate": "2026-07-20T04:30:00Z",
++                    }
++                ],
++                "spend_confidence": [],
++                "owner_voice": [],
++            },
++        }
++
++        rendered = MODULE.render_telegram(digest)
++        lines = rendered.splitlines()
++        idx = lines.index("• Firm operators share margin playbooks (News Blog, 2026-07-20)")
++        self.assertEqual(lines[idx + 1], "")
++        self.assertNotIn("https://", rendered)
++
++    def test_bucketize_carries_summary_and_defaults_empty(self) -> None:
++        with tempfile.TemporaryDirectory() as tmp:
++            registry = self.make_registry()
++            items = self.make_inbox_items(registry)
++            items[0]["summary"] = "Operators detail CA-phase discipline."
++            self.write_state(tmp, registry, items, self.make_quotes())
++
++            with unittest.mock.patch.dict(os.environ, {"PULSE_STATE_DIR": tmp}, clear=False):
++                digest = MODULE.build_digest(since_hours=48, now=self.now, rotate=False)
++
++        news = digest["buckets"]["industry_news"]
++        self.assertEqual(news[0]["summary"], "Operators detail CA-phase discipline.")
++        spend = digest["buckets"]["spend_confidence"]
++        self.assertTrue(all(item["summary"] == "" for item in spend))
++
+     def test_write_pulse_file_dated_path(self) -> None:
+         digest = {
+             "digest_date": "2026-07-20",
+@@ -384,11 +472,13 @@ class DailyDigestTests(unittest.TestCase):
+         fake_response = unittest.mock.Mock()
+         fake_response.status_code = 304
+         fake_response.headers = {}
++        fake_requests = unittest.mock.Mock()
++        fake_requests.get.return_value = fake_response
+ 
+-        with unittest.mock.patch.object(DELTA.requests, "get", return_value=fake_response) as mocked_get:
++        with unittest.mock.patch.object(DELTA, "requests", fake_requests):
+             DELTA.fetch_feed("https://example.com/feed.xml", None, None)
+ 
+-        headers = mocked_get.call_args.kwargs["headers"]
++        headers = fake_requests.get.call_args.kwargs["headers"]
+         self.assertEqual(headers["User-Agent"], DELTA.USER_AGENT)
+         self.assertTrue(headers["User-Agent"].startswith("Mozilla/5.0"))
+ 
+diff --git a/community/agents/research-agent/.claude/skills/research-pulse/tests/test_delta_check.py b/community/agents/research-agent/.claude/skills/research-pulse/tests/test_delta_check.py
+index 0dfa1be..fa60255 100644
+--- a/community/agents/research-agent/.claude/skills/research-pulse/tests/test_delta_check.py
++++ b/community/agents/research-agent/.claude/skills/research-pulse/tests/test_delta_check.py
+@@ -113,9 +113,10 @@ class DeltaCheckTests(unittest.TestCase):
+ 
+             stdout = io.StringIO()
+             with unittest.mock.patch.dict(os.environ, {"PULSE_STATE_DIR": tmp}, clear=False):
+-                with unittest.mock.patch.object(MODULE, "poll_vertical", side_effect=patched_poll_vertical):
+-                    with contextlib.redirect_stdout(stdout):
+-                        rc = MODULE.main(["--vertical", "nonprofit", "--state-dir", tmp])
++                with unittest.mock.patch.object(MODULE, "requests", object()):
++                    with unittest.mock.patch.object(MODULE, "poll_vertical", side_effect=patched_poll_vertical):
++                        with contextlib.redirect_stdout(stdout):
++                            rc = MODULE.main(["--vertical", "nonprofit", "--state-dir", tmp])
+ 
+             self.assertEqual(rc, 0)
+             summary = json.loads(stdout.getvalue())
+@@ -124,7 +125,7 @@ class DeltaCheckTests(unittest.TestCase):
+             self.assertEqual(len(summary["new_items"]), 1)
+             self.assertEqual(
+                 set(summary["new_items"][0].keys()),
+-                {"vertical", "source_id", "guid", "title", "url", "pubdate"},
++                {"vertical", "source_id", "guid", "title", "url", "pubdate", "summary"},
+             )
+             self.assertEqual(summary["new_items"][0]["vertical"], "nonprofit")
+             self.assertEqual(summary["new_items"][0]["source_id"], source["id"])
+@@ -132,6 +133,49 @@ class DeltaCheckTests(unittest.TestCase):
+             self.assertEqual(summary["new_items"][0]["title"], "Episode 4: Grants Acceleration")
+             self.assertEqual(summary["new_items"][0]["url"], "https://example.com/podcast/ep-4")
+             self.assertEqual(summary["new_items"][0]["pubdate"], "2026-07-14T00:00:00Z")
++            self.assertEqual(summary["new_items"][0]["summary"], "")
++
++    def test_clean_summary_strips_html_and_collapses_whitespace(self) -> None:
++        raw = "<p>Margins &amp; backlog</p>\n  <b>held firm</b> in Q2"
++        self.assertEqual(MODULE.clean_summary(raw), "Margins & backlog held firm in Q2")
++
++    def test_clean_summary_truncates_with_ellipsis(self) -> None:
++        raw = "x" * 400
++        cleaned = MODULE.clean_summary(raw)
++        self.assertEqual(len(cleaned), MODULE.SUMMARY_MAX_CHARS)
++        self.assertTrue(cleaned.endswith("\u2026"))
++
++    def test_clean_summary_non_string_returns_empty(self) -> None:
++        self.assertEqual(MODULE.clean_summary(None), "")
++        self.assertEqual(MODULE.clean_summary(""), "")
++        self.assertEqual(MODULE.clean_summary(123), "")
++
++    def test_parse_entries_captures_summary_and_defaults_empty(self) -> None:
++        feed = b"""<?xml version="1.0" encoding="UTF-8"?>
++<rss version="2.0">
++  <channel>
++    <title>Summary Feed</title>
++    <item>
++      <title>With description</title>
++      <link>https://example.com/a</link>
++      <guid>guid-a</guid>
++      <pubDate>Tue, 14 Jul 2026 00:00:00 GMT</pubDate>
++      <description>&lt;p&gt;Firm margins &amp;amp; backlog held&lt;/p&gt;</description>
++    </item>
++    <item>
++      <title>Without description</title>
++      <link>https://example.com/b</link>
++      <guid>guid-b</guid>
++      <pubDate>Mon, 13 Jul 2026 00:00:00 GMT</pubDate>
++    </item>
++  </channel>
++</rss>
++"""
++        entries = MODULE.parse_entries(feed)
++        self.assertEqual(entries[0]["guid"], "guid-a")
++        self.assertEqual(entries[0]["summary"], "Firm margins & backlog held")
++        self.assertEqual(entries[1]["guid"], "guid-b")
++        self.assertEqual(entries[1]["summary"], "")
+ 
+     def test_detect_new_falls_back_to_pubdate_without_reflood(self) -> None:
+         baseline = MODULE.parse_entries(self.load_fixture_bytes("podcast_feed.xml"))

@@ -1,0 +1,266 @@
+=== TRUE-VERIFY pipeline-staging-verify-gate 2026-07-20T07:51:41Z ===
+--- git status (changed files) ---
+ M src/pipeline/ledger.ts
+ M tests/unit/pipeline/hook-gates.test.ts
+ M tests/unit/pipeline/ledger.test.ts
+--- npm run build ---
+
+> cortextos@0.1.1 build
+> tsup
+
+CLI Building entry: {"cli":"src/cli/index.ts","daemon":"src/daemon/index.ts","pipeline/bypass-audit":"src/pipeline/bypass-audit.ts","pipeline/stage-emit":"src/pipeline/stage-emit.ts","hooks/hook-permission-telegram":"src/hooks/hook-permission-telegram.ts","hooks/hook-ask-telegram":"src/hooks/hook-ask-telegram.ts","hooks/hook-planmode-telegram":"src/hooks/hook-planmode-telegram.ts","hooks/hook-crash-alert":"src/hooks/hook-crash-alert.ts","hooks/hook-compact-telegram":"src/hooks/hook-compact-telegram.ts","hooks/hook-extract-facts":"src/hooks/hook-extract-facts.ts","hooks/hook-idle-flag":"src/hooks/hook-idle-flag.ts","hooks/hook-context-status":"src/hooks/hook-context-status.ts","hooks/hook-tool-result-router":"src/hooks/hook-tool-result-router.ts","hooks/hook-loop-detector":"src/hooks/hook-loop-detector.ts"}
+CLI Using tsconfig: tsconfig.json
+CLI tsup v8.5.1
+CLI Using tsup config: /Users/joshweiss/code/cortextos/tsup.config.ts
+CLI Target: node20
+CLI Cleaning output folder
+CJS Build start
+CJS dist/pipeline/stage-emit.js                46.18 KB
+CJS dist/hooks/hook-permission-telegram.js     33.22 KB
+CJS dist/hooks/hook-ask-telegram.js            25.11 KB
+CJS dist/hooks/hook-compact-telegram.js        9.43 KB
+CJS dist/hooks/hook-planmode-telegram.js       29.61 KB
+CJS dist/pipeline/bypass-audit.js              56.96 KB
+CJS dist/hooks/hook-idle-flag.js               736.00 B
+CJS dist/hooks/hook-context-status.js          2.54 KB
+CJS dist/hooks/hook-crash-alert.js             18.13 KB
+CJS dist/hooks/hook-extract-facts.js           6.20 KB
+CJS dist/hooks/hook-tool-result-router.js      14.43 KB
+CJS dist/hooks/hook-loop-detector.js           17.77 KB
+CJS dist/daemon.js                             444.59 KB
+CJS dist/cli.js                                630.34 KB
+CJS dist/pipeline/stage-emit.js.map            86.46 KB
+CJS dist/hooks/hook-permission-telegram.js.map 70.38 KB
+CJS dist/hooks/hook-compact-telegram.js.map    39.31 KB
+CJS dist/hooks/hook-planmode-telegram.js.map   64.17 KB
+CJS dist/pipeline/bypass-audit.js.map          121.90 KB
+CJS dist/hooks/hook-idle-flag.js.map           1.40 KB
+CJS dist/hooks/hook-ask-telegram.js.map        59.57 KB
+CJS dist/hooks/hook-extract-facts.js.map       22.70 KB
+CJS dist/hooks/hook-crash-alert.js.map         50.17 KB
+CJS dist/hooks/hook-context-status.js.map      7.33 KB
+CJS dist/hooks/hook-loop-detector.js.map       49.81 KB
+CJS dist/hooks/hook-tool-result-router.js.map  52.12 KB
+CJS dist/daemon.js.map                         1.06 MB
+CJS dist/cli.js.map                            1.40 MB
+CJS ⚡️ Build success in 57ms
+BUILD_EXIT=0
+--- npm test ---
+
+> cortextos@0.1.1 test
+> vitest run
+
+
+ RUN  v4.1.2 /Users/joshweiss/code/cortextos
+
+ ❯ dashboard/src/lib/__tests__/cost-parser.test.ts (13 tests | 13 skipped) 104ms
+ ❯ dashboard/src/lib/__tests__/cost-parser-codex.test.ts (17 tests | 17 skipped) 104ms
+ ❯ dashboard/src/lib/__tests__/sync.test.ts (17 tests | 14 failed) 119ms
+     × syncs a task JSON file into SQLite 5ms
+     × skips unchanged files on re-sync (mtime check) 1ms
+     × re-syncs when file is modified 1ms
+     × handles missing task dir gracefully 1ms
+     × syncs pending and resolved approvals 1ms
+     × syncs JSONL lines into event rows 1ms
+     × skips malformed JSONL lines without crashing 1ms
+     × syncs heartbeat.json into heartbeats table 1ms
+     × returns false for missing heartbeat file 1ms
+     × returns correct counts across multiple orgs 1ms
+     × routes task file to syncTasks 1ms
+     × routes approval file to syncApprovals 1ms
+     × routes event JSONL to syncEvents 1ms
+     × routes heartbeat file to syncHeartbeat 1ms
+[enabled-agents] WARNING: failed to parse enabled-agents.json: Unexpected token 'h', "this is not"... is not valid JSON
+[enabled-agents] WARNING: quarantined corrupt enabled-agents.json to /var/folders/9h/_28txm2j60g3n1tv2_hy98400000gn/T/cortextos-am-test-ETXHFb/instance/config/enabled-agents.json.broken-1784533908605
+[crons] WARNING: failed to parse crons.json for agent "bad-s4a". Error: Unexpected end of JSON input
+[crons] WARNING: falling back to crons.json.bak for agent "bad-s4a"
+[crons] WARNING: failed to parse crons.json for agent "bad-s4a". Error: Unexpected end of JSON input
+[crons] WARNING: falling back to crons.json.bak for agent "bad-s4a"
+[crons] WARNING: failed to parse crons.json for agent "s4b-agent". Error: Unexpected token 'I', ...""crons": [INVALID JS"... is not valid JSON
+[crons] WARNING: falling back to crons.json.bak for agent "s4b-agent"
+[crons] WARNING: failed to parse crons.json.bak for agent "s4b-agent". Error: Unexpected token 'C', "CORRUPT BAK 4b" is not valid JSON
+[crons] WARNING: failed to parse crons.json for agent "s4b-agent". Error: Unexpected token 'I', ...""crons": [INVALID JS"... is not valid JSON
+[crons] WARNING: falling back to crons.json.bak for agent "s4b-agent"
+[crons] WARNING: failed to parse crons.json.bak for agent "s4b-agent". Error: Unexpected token 'C', "CORRUPT BAK 4b" is not valid JSON
+[crons] WARNING: failed to parse crons.json for agent "s4b-agent". Error: Unexpected token 'I', ...""crons": [INVALID JS"... is not valid JSON
+[crons] WARNING: falling back to crons.json.bak for agent "s4b-agent"
+[crons] WARNING: failed to parse crons.json.bak for agent "s4b-agent". Error: Unexpected token 'C', "CORRUPT BAK 4b" is not valid JSON
+[crons] WARNING: crons.json for agent "s4c-agent" has unexpected shape.
+[crons] WARNING: falling back to crons.json.bak for agent "s4c-agent"
+[crons] WARNING: crons.json for agent "s4c-agent" has unexpected shape.
+[crons] WARNING: falling back to crons.json.bak for agent "s4c-agent"
+[crons] WARNING: failed to parse crons.json for agent "fm-cascade". Error: Unexpected token 'C', ...""crons": [CORRUPTED" is not valid JSON
+[crons] WARNING: falling back to crons.json.bak for agent "fm-cascade"
+[crons] WARNING: failed to parse crons.json for agent "fm-bak". Error: Expected double-quoted property name in JSON at position 21 (line 1 column 22)
+[crons] WARNING: falling back to crons.json.bak for agent "fm-bak"
+[crons] WARNING: failed to parse crons.json for agent "fm-bak-order". Error: Unexpected token 'N', "NOT JSON" is not valid JSON
+[crons] WARNING: falling back to crons.json.bak for agent "fm-bak-order"
+[crons] WARNING: failed to parse crons.json for agent "fm-bak-both-corrupt". Error: Unexpected token 'C', "CORRUPT PRIMARY" is not valid JSON
+[crons] WARNING: falling back to crons.json.bak for agent "fm-bak-both-corrupt"
+[crons] WARNING: failed to parse crons.json.bak for agent "fm-bak-both-corrupt". Error: Unexpected token 'C', "CORRUPT BAK" is not valid JSON
+[crons] WARNING: failed to parse crons.json for agent "af-lastgood". Error: Expected ',' or '}' after property value in JSON at position 19 (line 1 column 20)
+[crons] WARNING: falling back to crons.json.bak for agent "af-lastgood"
+[crons] WARNING: failed to parse crons.json.bak for agent "af-lastgood". Error: Unexpected token 'b', "bak also corrupted" is not valid JSON
+[crons] WARNING: failed to parse crons.json for agent "af-lastgood". Error: Expected ',' or '}' after property value in JSON at position 19 (line 1 column 20)
+[crons] WARNING: falling back to crons.json.bak for agent "af-lastgood"
+[crons] WARNING: failed to parse crons.json.bak for agent "af-lastgood". Error: Unexpected token 'b', "bak also corrupted" is not valid JSON
+[crons] WARNING: failed to parse crons.json for agent "af-lastgood". Error: Expected ',' or '}' after property value in JSON at position 19 (line 1 column 20)
+[crons] WARNING: falling back to crons.json.bak for agent "af-lastgood"
+[crons] WARNING: failed to parse crons.json.bak for agent "af-lastgood". Error: Unexpected token 'b', "bak also corrupted" is not valid JSON
+[crons] WARNING: failed to parse crons.json for agent "af-snapshot-update". Error: Unexpected token 'c', "corrupt" is not valid JSON
+[crons] WARNING: falling back to crons.json.bak for agent "af-snapshot-update"
+[crons] WARNING: failed to parse crons.json.bak for agent "af-snapshot-update". Error: Unexpected token 'b', "bak corrupt" is not valid JSON
+[crons] WARNING: failed to parse crons.json for agent "bad-agent". Error: Unexpected token 'I', ...""crons": [INVALID JS"... is not valid JSON
+[crons] WARNING: falling back to crons.json.bak for agent "bad-agent"
+[crons] WARNING: failed to parse crons.json for agent "bad-agent". Error: Unexpected token 'I', ...""crons": [INVALID JS"... is not valid JSON
+[crons] WARNING: falling back to crons.json.bak for agent "bad-agent"
+[cron-scheduler] started for agent "new-user-scheduler" with 3 cron(s)
+[cron-scheduler] firing cron "cron-a" (was due 2026-07-20T07:53:59.454Z)
+[cron-scheduler] firing cron "cron-b" (was due 2026-07-20T07:54:59.454Z)
+[cron-scheduler] firing cron "cron-a" (was due 2026-07-20T07:55:59.454Z)
+[cron-scheduler] firing cron "cron-c" (was due 2026-07-20T07:56:59.454Z)
+[cron-scheduler] firing cron "cron-a" (was due 2026-07-20T07:57:59.454Z)
+[cron-scheduler] firing cron "cron-b" (was due 2026-07-20T07:57:59.454Z)
+[cron-scheduler] firing cron "cron-a" (was due 2026-07-20T07:59:59.454Z)
+[cron-scheduler] firing cron "cron-b" (was due 2026-07-20T08:00:59.454Z)
+[cron-scheduler] firing cron "cron-a" (was due 2026-07-20T08:01:59.454Z)
+[cron-scheduler] firing cron "cron-c" (was due 2026-07-20T08:01:59.454Z)
+[cron-scheduler] stopped for agent "new-user-scheduler"
+[cron-scheduler] started for agent "migrated-scheduler-agent" with 2 cron(s)
+[cron-scheduler] firing cron "migrated-heartbeat" (was due 2026-07-20T07:54:59.501Z)
+[cron-scheduler] firing cron "migrated-heartbeat" (was due 2026-07-20T07:57:59.501Z)
+[cron-scheduler] firing cron "migrated-report" (was due 2026-07-20T07:58:59.501Z)
+[cron-scheduler] firing cron "migrated-heartbeat" (was due 2026-07-20T08:00:59.501Z)
+[cron-scheduler] stopped for agent "migrated-scheduler-agent"
+[cron-scheduler] started for agent "audit-agent" with 1 cron(s)
+[cron-scheduler] firing cron "multi" (was due 2026-07-20T08:21:59.556Z)
+[cron-scheduler] firing cron "multi" (was due 2026-07-20T08:51:59.556Z)
+[cron-scheduler] firing cron "multi" (was due 2026-07-20T09:21:59.556Z)
+[cron-scheduler] firing cron "multi" (was due 2026-07-20T09:51:59.556Z)
+[cron-scheduler] firing cron "multi" (was due 2026-07-20T10:21:59.556Z)
+[cron-scheduler] stopped for agent "audit-agent"
+[cron-scheduler] catch-up: cron "fail-cron" missed fire at 2026-07-20T06:21:59.597Z — scheduling immediate fire
+[cron-scheduler] started for agent "audit-agent" with 1 cron(s)
+[cron-scheduler] firing cron "fail-cron" (was due 2026-07-20T07:51:59.597Z)
+[cron-scheduler] onFire failed for "fail-cron" (attempt 1/4, retrying in 1000ms): Simulated PTY failure #1
+[cron-scheduler] onFire failed for "fail-cron" (attempt 2/4, retrying in 4000ms): Simulated PTY failure #2
+[cron-scheduler] onFire failed for "fail-cron" (attempt 3/4, retrying in 16000ms): Simulated PTY failure #3
+[cron-scheduler] onFire failed for "fail-cron" after all 4 attempts — giving up. Last error: Simulated PTY failure #4
+[cron-scheduler] WARNING: "fail-cron" dispatch failed — advancing to next slot 2026-07-20T08:22:29.597Z to avoid busy-loop (no last_fired_at update; failure recorded in execution log)
+[cron-scheduler] stopped for agent "audit-agent"
+[crons] WARNING: failed to parse crons.json for agent "audit-agent". Error: Expected double-quoted property name in JSON at position 20 (line 1 column 21)
+[crons] WARNING: falling back to crons.json.bak for agent "audit-agent"
+[crons] WARNING: failed to parse crons.json for agent "audit-agent". Error: Expected property name or '}' in JSON at position 2 (line 1 column 3)
+[crons] WARNING: falling back to crons.json.bak for agent "audit-agent"
+[crons] WARNING: failed to parse crons.json.bak for agent "audit-agent". Error: Unexpected token '<', "<<< also c"... is not valid JSON
+[crons] WARNING: failed to parse crons.json for agent "audit-agent". Error: Expected property name or '}' in JSON at position 2 (line 1 column 3)
+[crons] WARNING: falling back to crons.json.bak for agent "audit-agent"
+[crons] WARNING: failed to parse crons.json.bak for agent "audit-agent". Error: Unexpected token '<', "<<< also c"... is not valid JSON
+[crons] WARNING: failed to parse crons.json for agent "audit-agent". Error: Expected property name or '}' in JSON at position 2 (line 1 column 3)
+[crons] WARNING: falling back to crons.json.bak for agent "audit-agent"
+[crons] WARNING: failed to parse crons.json.bak for agent "audit-agent". Error: Unexpected token '<', "<<< also c"... is not valid JSON
+[crons] WARNING: failed to parse crons.json for agent "malformed-agent". Error: Unexpected token 'I', ...""crons": [INVALID JS"... is not valid JSON
+[crons] WARNING: failed to parse crons.json for agent "boris". Error: Expected property name or '}' in JSON at position 2 (line 1 column 3)
+[crons] WARNING: crons.json for agent "paul" has unexpected shape.
+[crons] WARNING: failed to parse crons.json for agent "boris". Error: Expected property name or '}' in JSON at position 2 (line 1 column 3)
+[crons] WARNING: falling back to crons.json.bak for agent "boris"
+[crons] WARNING: failed to parse crons.json for agent "boris". Error: Expected property name or '}' in JSON at position 2 (line 1 column 3)
+[crons] WARNING: falling back to crons.json.bak for agent "boris"
+[crons] WARNING: failed to parse crons.json.bak for agent "boris". Error: Unexpected token '<', "<<< also broken" is not valid JSON
+[crons] WARNING: failed to parse crons.json for agent "boris". Error: Expected property name or '}' in JSON at position 2 (line 1 column 3)
+[crons] WARNING: failed to parse crons.json for agent "broken-agent". Error: Unexpected token 'o', "not valid j"... is not valid JSON
+[crons] WARNING: failed to parse crons.json for agent "bad-agent". Error: Unexpected token 'o', "not valid j"... is not valid JSON
+[enabled-agents] WARNING: failed to parse enabled-agents.json: Expected property name or '}' in JSON at position 11 (line 1 column 12)
+[enabled-agents] WARNING: falling back to enabled-agents.json.bak
+[enabled-agents] WARNING: failed to parse enabled-agents.json: Expected property name or '}' in JSON at position 2 (line 1 column 3)
+[enabled-agents] WARNING: falling back to enabled-agents.json.bak
+[enabled-agents] WARNING: failed to parse enabled-agents.json.bak: Expected property name or '}' in JSON at position 2 (line 1 column 3)
+[enabled-agents] WARNING: quarantined corrupt enabled-agents.json to /var/folders/9h/_28txm2j60g3n1tv2_hy98400000gn/T/sage-drop-reg-lMQ63M/config/enabled-agents.json.broken-1784533920291
+[enabled-agents] WARNING: failed to parse enabled-agents.json: Expected property name or '}' in JSON at position 2 (line 1 column 3)
+[enabled-agents] WARNING: falling back to enabled-agents.json.bak
+[enabled-agents] WARNING: failed to parse enabled-agents.json: Expected property name or '}' in JSON at position 2 (line 1 column 3)
+[enabled-agents] WARNING: quarantined corrupt enabled-agents.json to /var/folders/9h/_28txm2j60g3n1tv2_hy98400000gn/T/enabled-agents-io-test-rXBKoi/config/enabled-agents.json.broken-1784533920733
+[enabled-agents] WARNING: enabled-agents.json has unexpected shape (expected plain object).
+[enabled-agents] WARNING: quarantined corrupt enabled-agents.json to /var/folders/9h/_28txm2j60g3n1tv2_hy98400000gn/T/enabled-agents-io-test-smwLfx/config/enabled-agents.json.broken-1784533920735
+[enabled-agents] WARNING: enabled-agents.json has unexpected shape (expected plain object).
+[enabled-agents] WARNING: quarantined corrupt enabled-agents.json to /var/folders/9h/_28txm2j60g3n1tv2_hy98400000gn/T/enabled-agents-io-test-hZIXgs/config/enabled-agents.json.broken-1784533920735
+[enabled-agents] WARNING: failed to parse enabled-agents.json: Expected property name or '}' in JSON at position 2 (line 1 column 3)
+[enabled-agents] WARNING: falling back to enabled-agents.json.bak
+[enabled-agents] WARNING: failed to parse enabled-agents.json: Expected property name or '}' in JSON at position 2 (line 1 column 3)
+[enabled-agents] WARNING: falling back to enabled-agents.json.bak
+[enabled-agents] WARNING: failed to parse enabled-agents.json.bak: Expected property name or '}' in JSON at position 2 (line 1 column 3)
+[enabled-agents] WARNING: quarantined corrupt enabled-agents.json to /var/folders/9h/_28txm2j60g3n1tv2_hy98400000gn/T/enabled-agents-io-test-PwTChU/config/enabled-agents.json.broken-1784533920739
+[enabled-agents] WARNING: failed to parse enabled-agents.json: Expected property name or '}' in JSON at position 2 (line 1 column 3)
+[enabled-agents] WARNING: quarantined corrupt enabled-agents.json to /var/folders/9h/_28txm2j60g3n1tv2_hy98400000gn/T/enabled-agents-io-test-wOe0VU/config/enabled-agents.json.broken-1784533920739
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  dashboard/src/lib/__tests__/cost-parser-codex.test.ts [ dashboard/src/lib/__tests__/cost-parser-codex.test.ts ]
+ FAIL  dashboard/src/lib/__tests__/cost-parser.test.ts [ dashboard/src/lib/__tests__/cost-parser.test.ts ]
+Error: The module '/Users/joshweiss/code/cortextos/dashboard/node_modules/better-sqlite3/build/Release/better_sqlite3.node'
+was compiled against a different Node.js version using
+NODE_MODULE_VERSION 141. This version of Node.js requires
+NODE_MODULE_VERSION 127. Please try re-compiling or re-installing
+the module (for instance, using `npm rebuild` or `npm install`).
+ ❯ bindings dashboard/node_modules/bindings/bindings.js:112:48
+ ❯ new Database dashboard/node_modules/better-sqlite3/lib/database.js:48:64
+ ❯ createDatabase dashboard/src/lib/db.ts:25:14
+     23|   }
+     24|
+     25|   const db = new Database(DB_PATH, { timeout: 10000 });
+       |              ^
+     26|
+     27|   // Set busy_timeout BEFORE attempting any schema or pragma changes t…
+ ❯ getDb dashboard/src/lib/db.ts:190:34
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/16]⎯
+
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 14 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  dashboard/src/lib/__tests__/sync.test.ts > syncTasks > syncs a task JSON file into SQLite
+ FAIL  dashboard/src/lib/__tests__/sync.test.ts > syncTasks > skips unchanged files on re-sync (mtime check)
+ FAIL  dashboard/src/lib/__tests__/sync.test.ts > syncTasks > re-syncs when file is modified
+ FAIL  dashboard/src/lib/__tests__/sync.test.ts > syncTasks > handles missing task dir gracefully
+ FAIL  dashboard/src/lib/__tests__/sync.test.ts > syncApprovals > syncs pending and resolved approvals
+ FAIL  dashboard/src/lib/__tests__/sync.test.ts > syncEvents > syncs JSONL lines into event rows
+ FAIL  dashboard/src/lib/__tests__/sync.test.ts > syncEvents > skips malformed JSONL lines without crashing
+ FAIL  dashboard/src/lib/__tests__/sync.test.ts > syncHeartbeat > syncs heartbeat.json into heartbeats table
+ FAIL  dashboard/src/lib/__tests__/sync.test.ts > syncHeartbeat > returns false for missing heartbeat file
+ FAIL  dashboard/src/lib/__tests__/sync.test.ts > syncAll > returns correct counts across multiple orgs
+ FAIL  dashboard/src/lib/__tests__/sync.test.ts > syncFile routing > routes task file to syncTasks
+ FAIL  dashboard/src/lib/__tests__/sync.test.ts > syncFile routing > routes approval file to syncApprovals
+ FAIL  dashboard/src/lib/__tests__/sync.test.ts > syncFile routing > routes event JSONL to syncEvents
+ FAIL  dashboard/src/lib/__tests__/sync.test.ts > syncFile routing > routes heartbeat file to syncHeartbeat
+Error: The module '/Users/joshweiss/code/cortextos/dashboard/node_modules/better-sqlite3/build/Release/better_sqlite3.node'
+was compiled against a different Node.js version using
+NODE_MODULE_VERSION 141. This version of Node.js requires
+NODE_MODULE_VERSION 127. Please try re-compiling or re-installing
+the module (for instance, using `npm rebuild` or `npm install`).
+ ❯ bindings dashboard/node_modules/bindings/bindings.js:112:48
+ ❯ new Database dashboard/node_modules/better-sqlite3/lib/database.js:48:64
+ ❯ createDatabase dashboard/src/lib/db.ts:25:14
+     23|   }
+     24|
+     25|   const db = new Database(DB_PATH, { timeout: 10000 });
+       |              ^
+     26|
+     27|   // Set busy_timeout BEFORE attempting any schema or pragma changes t…
+ ❯ getDb dashboard/src/lib/db.ts:190:34
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/16]⎯
+
+
+ Test Files  3 failed | 179 passed | 1 skipped (183)
+      Tests  14 failed | 2693 passed | 33 skipped (2740)
+   Start at  00:51:48
+   Duration  15.27s (transform 3.71s, setup 838ms, import 8.39s, tests 106.15s, environment 9ms)
+
+TEST_EXIT=1
+
+=== VERDICT ===
+BUILD: PASS (exit 0)
+PIPELINE TESTS (the change): tests/unit/pipeline/{ledger,hook-gates}.test.ts = 2 files, 23 tests, ALL PASS
+FULL SUITE: 14 fails, ALL in dashboard/src/lib/__tests__/sync.test.ts (corrupt-crons fixture tests)
+ATTRIBUTION: diff touches 0 dashboard files; 0 dashboard changes in working tree -> failures pre-existing, NOT caused by this change
+CHANGE VERDICT: GREEN

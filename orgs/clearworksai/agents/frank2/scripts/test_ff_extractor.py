@@ -594,5 +594,338 @@ class FailureContractTests(unittest.TestCase):
         self.assertIn("missing required env: OPENROUTER_API_KEY", printed["error"])
 
 
+class RecapModeTests(unittest.TestCase):
+    ENV = {
+        "FIREFLIES_API_KEY": "ff-test",
+        "OPENROUTER_API_KEY": "or-test",
+    }
+
+    def make_recap_transcript(self, **overrides) -> dict[str, object]:
+        base = {
+            "id": "meeting_r1",
+            "title": "Acme Strategy Sync",
+            "date": "2026-07-21T14:00:00Z",
+            "organizer_email": "josh@clearworks.ai",
+            "participants": ["josh@clearworks.ai", "sara@acme.com"],
+            "summary": {
+                "overview": "Discussed Q3 roadmap and deliverable timeline",
+                "shorthand_bullet": "Q3 roadmap finalized",
+                "action_items": "Send revised proposal by Friday",
+                "keywords": ["roadmap", "timeline"],
+            },
+            "sentences": [
+                {
+                    "speaker_name": "Josh Weiss",
+                    "text": "I'll send the proposal to Acme by Friday.",
+                }
+            ],
+        }
+        base.update(overrides)
+        return base
+
+    def fake_urlopen(self, responses):
+        def urlopen_wrapper(request, timeout: int | None = None):
+            url = request.full_url
+            if "fireflies" in url:
+                transcript_list = responses if responses else [self.make_recap_transcript()]
+                return FakeResponse(json.dumps({"data": {"transcripts": transcript_list}}).encode("utf-8"))
+            if "openrouter" in url:
+                # Check the prompt to determine if this is classifier or extractor
+                body = json.loads(request.data)
+                messages = body.get("messages", [])
+                if messages and len(messages) > 0:
+                    content = messages[0].get("content", "")
+                    
+                    # Classifier prompt contains "is_casual" and asks for is_casual field
+                    if "is_casual" in content:
+                        return FakeResponse(json.dumps({
+                            "choices": [{
+                                "message": {
+                                    "content": json.dumps({
+                                        "contacts_mentioned": [],
+                                        "extractions": [],
+                                        "is_casual": False
+                                    })
+                                }
+                            }]
+                        }).encode("utf-8"))
+                    else:
+                        # Extractor prompt
+                        return FakeResponse(json.dumps({
+                            "choices": [{
+                                "message": {
+                                    "content": json.dumps([
+                                        {
+                                            "action": "Send revised proposal",
+                                            "owner": "Josh",
+                                            "dueDate": "Friday",
+                                            "status": "pending"
+                                        }
+                                    ])
+                                }
+                            }]
+                        }).encode("utf-8"))
+                else:
+                    raise AssertionError(f"unexpected OpenRouter request: {url}")
+            raise AssertionError(f"unexpected URL: {url}")
+        return urlopen_wrapper
+
+    def test_parse_args_recap_defaults(self):
+        args = MODULE.parse_args(["--recap"])
+        self.assertTrue(args.recap)
+        self.assertTrue(args.recap_ledger.endswith("state/meeting-recap-drafts-surfaced.txt"))
+
+    def test_load_recap_ledger_missing_and_malformed(self):
+        # Missing file
+        self.assertEqual(MODULE.load_recap_ledger(Path("/nonexistent/path.txt")), set())
+        
+        # File with content including malformed lines
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / "test-ledger.txt"
+            ledger_path.write_text("m1 1720000000\n\ngarbage-only-token\n m2 999\n")
+            result = MODULE.load_recap_ledger(ledger_path)
+            self.assertEqual(result, {"m1", "garbage-only-token", "m2"})
+
+    def test_run_recap_skips_ledgered_meeting_before_llm(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / "ledger.txt"
+            ledger_path.write_text("meeting_r1 1720000000\n")
+            
+            openrouter_calls = []
+            def counting_urlopen(request, timeout: int | None = None):
+                if "openrouter" in request.full_url:
+                    openrouter_calls.append(request.full_url)
+                return self.fake_urlopen([])(request, timeout)
+            
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, self.ENV, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run_recap(
+                        limit=10,
+                        ledger_path=ledger_path,
+                        urlopen=counting_urlopen,
+                    )
+            
+            self.assertEqual(exit_code, 0)
+            printed = json.loads(stdout.getvalue())
+            self.assertEqual(printed["meetings"], [])
+            self.assertEqual(printed["skipped_ledger"], 1)
+            self.assertEqual(len(openrouter_calls), 0)  # No LLM calls due to ledger skip
+
+    def test_run_recap_suppresses_marcos_meeting(self):
+        marcos_transcript = self.make_recap_transcript(title="Sync with Marcos Santa Ana")
+        
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / "ledger.txt"
+            ledger_path.write_text("")
+            
+            openrouter_calls = []
+            def counting_urlopen(request, timeout: int | None = None):
+                if "openrouter" in request.full_url:
+                    openrouter_calls.append(request.full_url)
+                return self.fake_urlopen([marcos_transcript])(request, timeout)
+            
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, self.ENV, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run_recap(
+                        limit=10,
+                        ledger_path=ledger_path,
+                        urlopen=counting_urlopen,
+                    )
+            
+            self.assertEqual(exit_code, 0)
+            printed = json.loads(stdout.getvalue())
+            self.assertEqual(printed["meetings"], [])
+            self.assertEqual(printed["skipped_suppressed"], 1)
+            self.assertEqual(len(openrouter_calls), 0)
+
+    def test_run_recap_skips_casual_meeting(self):
+        # Create a transcript that will be classified as casual
+        casual_transcript = self.make_recap_transcript(
+            sentences=[{"speaker_name": "Josh Weiss", "text": "Hi everyone, how are you doing?"}]
+        )
+        
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / "ledger.txt"
+            ledger_path.write_text("")
+            
+            openrouter_calls = []
+            def counting_urlopen(request, timeout: int | None = None):
+                if "fireflies" in request.full_url:
+                    return FakeResponse(json.dumps({"data": {"transcripts": [casual_transcript]}}).encode("utf-8"))
+                if "openrouter" in request.full_url:
+                    openrouter_calls.append(request.full_url)
+                    # Check the prompt to determine if this is classifier or extractor
+                    body = json.loads(request.data)
+                    messages = body.get("messages", [])
+                    if messages and len(messages) > 0:
+                        content = messages[0].get("content", "")
+                        
+                        # Classifier prompt contains "is_casual"
+                        if "is_casual" in content:
+                            return FakeResponse(json.dumps({
+                                "choices": [{
+                                    "message": {
+                                        "content": json.dumps({
+                                            "contacts_mentioned": [],
+                                            "extractions": [],
+                                            "is_casual": True
+                                        })
+                                    }
+                                }]
+                            }).encode("utf-8"))
+                        else:
+                            # Extractor prompt (shouldn't be called for casual)
+                            return FakeResponse(json.dumps({
+                                "choices": [{
+                                    "message": {
+                                        "content": json.dumps([
+                                            {
+                                                "action": "Some action",
+                                                "owner": "Josh",
+                                                "dueDate": "Friday",
+                                                "status": "pending"
+                                            }
+                                        ])
+                                    }
+                                }]
+                            }).encode("utf-8"))
+                    else:
+                        raise AssertionError(f"unexpected OpenRouter request: {request.full_url}")
+                raise AssertionError(f"unexpected URL: {request.full_url}")
+            
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, self.ENV, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run_recap(
+                        limit=10,
+                        ledger_path=ledger_path,
+                        urlopen=counting_urlopen,
+                    )
+            
+            self.assertEqual(exit_code, 0)
+            printed = json.loads(stdout.getvalue())
+            self.assertEqual(printed["meetings"], [])
+            self.assertEqual(printed["skipped_casual"], 1)
+            # Classifier was called but extractor was not
+            self.assertEqual(len([c for c in openrouter_calls if "openrouter" in c]), 1)
+
+    def test_run_recap_emits_contract_shape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / "ledger.txt"
+            ledger_path.write_text("")
+            
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, self.ENV, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run_recap(
+                        limit=10,
+                        ledger_path=ledger_path,
+                        urlopen=self.fake_urlopen([]),
+                    )
+            
+            self.assertEqual(exit_code, 0)
+            printed = json.loads(stdout.getvalue())
+            self.assertTrue(printed["recap"])
+            self.assertEqual(len(printed["meetings"]), 1)
+            
+            meeting = printed["meetings"][0]
+            self.assertEqual(meeting["id"], "meeting_r1")
+            self.assertEqual(meeting["title"], "Acme Strategy Sync")
+            self.assertIn("date", meeting)
+            self.assertIn("organizer", meeting)
+            self.assertIn("attendees", meeting)
+            self.assertIn("summary", meeting)
+            self.assertIn("overview", meeting["summary"])
+            self.assertIn("bullets", meeting["summary"])
+            self.assertIn("action_items", meeting["summary"])
+            self.assertIn("next_steps", meeting)
+            
+            # Verify next_steps have the expected structure from refine_items
+            if meeting["next_steps"]:
+                for step in meeting["next_steps"]:
+                    self.assertIn("id", step)
+                    self.assertIn("text", step)
+                    self.assertIn("direction", step)
+                    self.assertIn("source", step)
+                    self.assertIn("sourceRef", step)
+
+    def test_run_recap_never_touches_watermark_or_ledger(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            watermark_path = Path(tmp) / "watermark.json"
+            ledger_path = Path(tmp) / "ledger.txt"
+            
+            # Create initial files
+            watermark_path.write_text('{"last_transcript_id": "old_id"}')
+            ledger_path.write_text("old_meeting 1720000000\n")
+            
+            initial_watermark = watermark_path.read_bytes()
+            initial_ledger = ledger_path.read_bytes()
+            
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, self.ENV, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run_recap(
+                        limit=10,
+                        ledger_path=ledger_path,
+                        urlopen=self.fake_urlopen([]),
+                    )
+            
+            self.assertEqual(exit_code, 0)
+            # Watermark should be byte-identical (recap mode never touches it)
+            self.assertTrue(watermark_path.exists())
+            self.assertEqual(watermark_path.read_bytes(), initial_watermark)
+            # Ledger should be byte-identical (read-only)
+            self.assertEqual(ledger_path.read_bytes(), initial_ledger)
+
+    def test_execute_recap_error_contract(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / "ledger.txt"
+            
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, {}, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.execute_recap(
+                        limit=10,
+                        ledger_path=ledger_path,
+                    )
+            
+            self.assertEqual(exit_code, 1)
+            printed = json.loads(stdout.getvalue())
+            self.assertTrue(printed["recap"])
+            self.assertEqual(printed["meetings"], [])
+            self.assertIn("error", printed)
+            self.assertIn("missing required env", printed["error"])
+
+    def test_recap_mode_does_not_require_ingest_env(self):
+        recap_only_env = {
+            "FIREFLIES_API_KEY": "ff-test",
+            "OPENROUTER_API_KEY": "or-test",
+        }
+        
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / "ledger.txt"
+            ledger_path.write_text("")
+            
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, recap_only_env, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run_recap(
+                        limit=10,
+                        ledger_path=ledger_path,
+                        urlopen=self.fake_urlopen([]),
+                    )
+            
+            self.assertEqual(exit_code, 0)
+            printed = json.loads(stdout.getvalue())
+            self.assertTrue(printed["recap"])
+
+    def test_existing_dry_run_contract_unchanged(self):
+        args = MODULE.parse_args([])
+        self.assertFalse(args.recap)
+        self.assertFalse(args.dry_run)
+
+
 if __name__ == "__main__":
     unittest.main()

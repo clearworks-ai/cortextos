@@ -862,12 +862,195 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="Print the would-be ingest payload without POSTing")
     parser.add_argument("--limit", type=int, default=DEFAULT_TRANSCRIPT_LIMIT)
     parser.add_argument("--watermark-path", default=str(DEFAULT_WATERMARK_PATH))
+    parser.add_argument("--recap", action="store_true", help="Emit recap JSON (summary + gated next steps); no POST, no watermark")
+    parser.add_argument("--recap-ledger", default=str(STATE_DIR / "meeting-recap-drafts-surfaced.txt"))
     return parser.parse_args(argv)
+
+
+def execute_recap(
+    *,
+    limit: int,
+    ledger_path: Path,
+    urlopen: Urlopen = urllib.request.urlopen,
+) -> int:
+    try:
+        return run_recap(limit=limit, ledger_path=ledger_path, urlopen=urlopen)
+    except (RuntimeError, ValueError, urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError) as exc:
+        reason = collapse_ws(str(exc)) or exc.__class__.__name__
+        LOGGER.error("ff-extractor recap failed: %s", reason)
+        print(json.dumps({"error": reason, "recap": True, "meetings": []}))
+        return 1
+
+
+def load_recap_ledger(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    ledger_ids = set()
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                # First whitespace-delimited token is the meeting id
+                parts = line.split()
+                if parts:
+                    ledger_ids.add(parts[0])
+    return ledger_ids
+
+
+def is_suppressed_meeting(transcript: dict[str, Any]) -> bool:
+    suppressed_normalized = [normalize_action(name) for name in SUPPRESSED_NAMES]
+    haystacks = [
+        collapse_ws(str(transcript.get("title") or "")),
+        collapse_ws(str(transcript.get("organizer_email") or "")),
+    ]
+    # Add participants defensively
+    participants = transcript.get("participants") or []
+    if isinstance(participants, list):
+        for p in participants:
+            haystacks.append(collapse_ws(str(p)))
+    else:
+        haystacks.append(collapse_ws(str(participants)))
+    
+    for haystack in haystacks:
+        haystack_normalized = normalize_action(haystack)
+        for name in suppressed_normalized:
+            if name in haystack_normalized:
+                return True
+    return False
+
+
+def build_recap_meeting(
+    transcript: dict[str, Any],
+    *,
+    openrouter_api_key: str,
+    urlopen: Urlopen = urllib.request.urlopen,
+) -> dict[str, Any] | None:
+    meeting_id = str(transcript.get("id") or "")
+    if not meeting_id:
+        return None
+    
+    # Build transcript text for classifier
+    sentences = transcript.get("sentences") or []
+    if not isinstance(sentences, list):
+        sentences = []
+    
+    transcript_text = build_transcript_text(sentences, limit=CLASSIFIER_MAX_CHARS)
+    if not transcript_text:
+        return None
+    
+    # Check if casual
+    if is_casual_transcript(transcript_text, openrouter_api_key=openrouter_api_key, urlopen=urlopen):
+        return None
+    
+    # Extract action items for next steps
+    extracted = extract_action_items(
+        build_transcript_text(sentences, limit=EXTRACTOR_MAX_CHARS),
+        openrouter_api_key=openrouter_api_key,
+        urlopen=urlopen,
+    )
+    
+    # Build participants list defensively
+    participants = transcript.get("participants") or []
+    if isinstance(participants, list):
+        attendees = [collapse_ws(str(p)) for p in participants if p]
+    else:
+        attendees = []
+    
+    # Build summary defensively
+    summary = transcript.get("summary") or {}
+    if not isinstance(summary, dict):
+        summary = {}
+    
+    # Parse date
+    date_str = transcript.get("date") or ""
+    if date_str:
+        try:
+            parsed_date = parse_transcript_datetime(date_str)
+            date_iso = parsed_date.isoformat() if parsed_date.tzinfo else parsed_date.isoformat() + "Z"
+        except (ValueError, AttributeError):
+            date_iso = ""
+    else:
+        date_iso = ""
+    
+    return {
+        "id": meeting_id,
+        "title": collapse_ws(str(transcript.get("title") or "Untitled Meeting")),
+        "date": date_iso,
+        "organizer": collapse_ws(str(transcript.get("organizer_email") or "")),
+        "attendees": attendees,
+        "summary": {
+            "overview": collapse_ws(str(summary.get("overview") or "")),
+            "bullets": collapse_ws(str(summary.get("shorthand_bullet") or "")),
+            "action_items": collapse_ws(str(summary.get("action_items") or "")),
+        },
+        "next_steps": commitment_payload_entries(refine_items(transcript, extracted)),
+    }
+
+
+def run_recap(
+    *,
+    limit: int,
+    ledger_path: Path,
+    urlopen: Urlopen = urllib.request.urlopen,
+) -> int:
+    fireflies_api_key = require_env("FIREFLIES_API_KEY")
+    openrouter_api_key = require_env("OPENROUTER_API_KEY")
+    
+    ledger_ids = load_recap_ledger(ledger_path)
+    recent = fetch_recent_transcripts(fireflies_api_key, limit=limit, urlopen=urlopen)
+    
+    # Order newest-first
+    recent_sorted = sorted(recent, key=transcript_sort_key, reverse=True)
+    
+    meetings = []
+    skipped_ledger = 0
+    skipped_suppressed = 0
+    skipped_casual = 0
+    
+    for transcript in recent_sorted:
+        meeting_id = str(transcript.get("id") or "")
+        if not meeting_id:
+            continue
+        
+        if meeting_id in ledger_ids:
+            skipped_ledger += 1
+            continue
+        
+        if is_suppressed_meeting(transcript):
+            skipped_suppressed += 1
+            continue
+        
+        recap_meeting = build_recap_meeting(
+            transcript,
+            openrouter_api_key=openrouter_api_key,
+            urlopen=urlopen,
+        )
+        if recap_meeting is None:
+            skipped_casual += 1
+            continue
+        
+        meetings.append(recap_meeting)
+        if len(meetings) >= limit:
+            break
+    
+    print(json.dumps({
+        "recap": True,
+        "meetings": meetings,
+        "skipped_ledger": skipped_ledger,
+        "skipped_casual": skipped_casual,
+        "skipped_suppressed": skipped_suppressed,
+    }))
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     args = parse_args(argv)
+    if args.recap:
+        return execute_recap(
+            limit=max(1, args.limit),
+            ledger_path=Path(args.recap_ledger),
+        )
     return execute(
         limit=max(1, args.limit),
         dry_run=args.dry_run,

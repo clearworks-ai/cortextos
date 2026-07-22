@@ -201,6 +201,131 @@ function parseCommsFilterInput(raw: string): { emails: unknown[]; warning?: stri
   }
 }
 
+type BusSendKind = 'default' | 'comms';
+
+function resolveBusSendKind(rawKind: string | undefined): BusSendKind {
+  if (rawKind === undefined) {
+    return 'default';
+  }
+  if (rawKind === 'comms') {
+    return 'comms';
+  }
+  throw new Error(`Error: --kind must be 'comms' when set, got '${rawKind}'.`);
+}
+
+function resolveTelegramBotToken(env: ReturnType<typeof resolveEnv>): string {
+  let botToken = '';
+
+  if (env.agentDir) {
+    const agentEnv = join(env.agentDir, '.env');
+    if (existsSync(agentEnv)) {
+      const content = readFileSync(agentEnv, 'utf-8');
+      const match = content.match(/^BOT_TOKEN=(.+)$/m);
+      if (match && match[1].trim()) {
+        botToken = match[1].trim();
+      }
+    }
+  }
+
+  if (!botToken) {
+    botToken = process.env.BOT_TOKEN || '';
+  }
+
+  return botToken;
+}
+
+function firstStringField(record: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed) {
+        return trimmed;
+      }
+    }
+  }
+  return undefined;
+}
+
+function normalizeSurfaceField(value: string | undefined, fallback: string): string {
+  if (!value) {
+    return fallback;
+  }
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  return normalized || fallback;
+}
+
+function renderCommsSurfaceMessage(item: Record<string, unknown>, sourceKey: string): string {
+  const fromName = firstStringField(item, ['fromName', 'senderName', 'authorName']);
+  const fromEmail = firstStringField(item, ['fromEmail', 'email', 'senderEmail']);
+  const from = normalizeSurfaceField(
+    item.from && typeof item.from === 'string'
+      ? item.from
+      : fromName && fromEmail
+        ? `${fromName} <${fromEmail}>`
+        : fromName ?? fromEmail,
+    '(unknown sender)',
+  );
+  const subject = normalizeSurfaceField(firstStringField(item, ['subject', 'title']), '(no subject)');
+  const snippet = normalizeSurfaceField(
+    firstStringField(item, ['snippet', 'preview', 'summary', 'bodyPreview', 'excerpt']),
+    '(no snippet)',
+  );
+
+  return [
+    '[EMAIL]',
+    `From: ${from}`,
+    `Subject: ${subject}`,
+    `Snippet: ${snippet}`,
+    `Source: ${sourceKey}`,
+  ].join('\n');
+}
+
+function recordSuccessfulTelegramSend(
+  env: ReturnType<typeof resolveEnv>,
+  chatId: string,
+  message: string,
+  sentMessageId: number,
+  parseMode: 'html' | 'none',
+): void {
+  if (!env.agentName || !env.ctxRoot) {
+    return;
+  }
+
+  logOutboundMessage(env.ctxRoot, env.agentName, chatId, message, sentMessageId, { parseMode });
+  cacheLastSent(env.ctxRoot, env.agentName, chatId, message);
+
+  try {
+    const guardPaths = resolvePaths(env.agentName, env.instanceId, env.org);
+    emitClaimWithoutReceiptWarning(
+      guardPaths,
+      env.ctxRoot,
+      env.agentName,
+      env.org,
+      message,
+      { chat_id: String(chatId), message_id: sentMessageId },
+    );
+  } catch {
+    // Fail-open: warn-only telemetry must never affect the completed send.
+  }
+
+  appendToBuffer(env.ctxRoot, env.agentName, {
+    ts: new Date().toISOString(),
+    sender: env.agentName,
+    via: 'telegram',
+    content: message,
+    chat_id: String(chatId),
+  });
+
+  try {
+    const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    const preview = message.length > 120 ? message.slice(0, 120) + '…' : message;
+    logEvent(paths, env.agentName, env.org, 'message', 'telegram_sent', 'info', JSON.stringify({ chat_id: chatId, message_id: sentMessageId, preview }));
+  } catch {
+    // Non-fatal: the send itself already succeeded.
+  }
+}
+
 export const busCommand = new Command('bus')
   .description('Bus commands for agent messaging, tasks, and events');
 
@@ -217,9 +342,10 @@ busCommand
   .argument('<text>', 'Message text')
   .argument('[reply-to]', 'Reply to message ID (optional positional form)')
   .option('--reply-to <id>', 'Reply to message ID')
-  .option('--source-key <key>', 'Source-event identity key (<namespace>:<id>). When set, this bus message is suppressed if the same source event was already surfaced (shared comms-event-dedup ledger). Invalid keys warn and fail open.')
+  .option('--kind <kind>', "Message kind. Use 'comms' to require a valid --source-key and fail closed.")
+  .option('--source-key <key>', 'Source-event identity key (<namespace>:<id>). When set, this bus message is suppressed if the same source event was already surfaced (shared comms-event-dedup ledger). Invalid keys warn and fail open unless --kind comms is set.')
   .option('--source-ttl-sec <n>', 'Re-surface window in seconds for --source-key (default 2592000 = 30d).')
-  .action((to: string, priority: string, text: string, replyToArg: string | undefined, opts: { replyTo?: string; sourceKey?: string; sourceTtlSec?: string }) => {
+  .action((to: string, priority: string, text: string, replyToArg: string | undefined, opts: { replyTo?: string; kind?: string; sourceKey?: string; sourceTtlSec?: string }) => {
     // Accept reply-to as either positional arg or --reply-to flag (P2 fix #9)
     const effectiveReplyTo = opts.replyTo ?? replyToArg;
     const validPriorities: Priority[] = ['urgent', 'high', 'normal', 'low'];
@@ -237,6 +363,13 @@ busCommand
 
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    let kind: BusSendKind;
+    try {
+      kind = resolveBusSendKind(opts.kind);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
 
     // Warn if target agent doesn't exist (check project dir)
     const { existsSync } = require('fs');
@@ -261,8 +394,22 @@ busCommand
 
     let recordedSourceEvent = false;
     const sourceKey = opts.sourceKey;
-    if (sourceKey !== undefined) {
+    if (kind === 'comms') {
+      if (!sourceKey) {
+        console.error('Error: send-message --kind comms requires --source-key <namespace>:<id>.');
+        process.exit(1);
+      }
       if (!isValidSourceKey(sourceKey)) {
+        console.error(`Error: send-message --kind comms requires a valid --source-key <namespace>:<id>; got '${sourceKey}'.`);
+        process.exit(1);
+      }
+      if (!env.ctxRoot) {
+        console.error('Error: send-message --kind comms requires CTX_ROOT so source-event dedup can be enforced.');
+        process.exit(1);
+      }
+    }
+    if (sourceKey !== undefined) {
+      if (kind !== 'comms' && !isValidSourceKey(sourceKey)) {
         console.error(`Warning: invalid --source-key '${sourceKey}' — expected <namespace>:<id> (e.g. automator:meeting-<eventId>); failing open.`);
       } else if (env.ctxRoot) {
         let sourceTtlSec: number | undefined;
@@ -1547,35 +1694,26 @@ busCommand
   .option('--plain-text', 'Skip Telegram Markdown parsing entirely. Use this when the message contains unescaped _, *, backtick, or [ that would otherwise trip the Markdown parser. Without this flag, sendMessage still retries once with parse_mode disabled on a parse-entity error — so it is purely an opt-in to save the retry roundtrip.', false)
   .option('--no-dedup', 'Bypass duplicate-content suppression for this send (always deliver).')
   .option('--dedup-window <seconds>', 'Suppression window in seconds (default 21600 = 6h, or env CTX_TELEGRAM_DEDUP_WINDOW_SEC).')
-  .option('--source-key <key>', 'Source-event identity key (<namespace>:<id>, e.g. automator:meeting-<eventId>). When set, the send is gated on first-sight of this SOURCE EVENT via the comms-event-dedup ledger — reworded duplicates of the same event are suppressed BEFORE the byte-hash layer. Invalid keys warn and fall through to byte-hash dedup (fail-open). Ignored with --streaming; bypassed by --no-dedup.')
+  .option('--kind <kind>', "Message kind. Use 'comms' to require a valid --source-key and fail closed.")
+  .option('--source-key <key>', 'Source-event identity key (<namespace>:<id>, e.g. automator:meeting-<eventId>). When set, the send is gated on first-sight of this SOURCE EVENT via the comms-event-dedup ledger — reworded duplicates of the same event are suppressed BEFORE the byte-hash layer. Invalid keys warn and fall through to byte-hash dedup (fail-open) unless --kind comms is set. With --kind comms, the source-event layer still runs even if --no-dedup is present.')
   .option('--source-ttl-sec <n>', 'Re-surface window in seconds for --source-key (default 2592000 = 30d, same as `bus event-dedup`). Meeting-reminder workers should pass 43200 (12h).')
   .option('--streaming', 'Stream the reply into ONE Telegram message: <message> is the initial placeholder, then newline-delimited tokens from stdin are appended via editMessageText (≤1 edit/sec, identical-content guard, final edit applies markdown→HTML). Closes the stream when stdin ends. Spec: Item 1 of .planning/larry-ux-parity-spec.md.', false)
   .option('--confirm-claim', 'Assert that the agent has verified the completion claim in this message off-ledger (no receipt recorded). Bypasses the require-confirm hold for deploy/merge claims when CTX_CLAIM_GATE=enforce. Has NO effect on block-rung claims (external-send); those require a real receipt or state/claim-gate-override.json.', false)
-  .action(async (chatId: string, message: string, opts: { dedup?: boolean; dedupWindow?: string; image?: string; file?: string; plainText?: boolean; streaming?: boolean; confirmClaim?: boolean; sourceKey?: string; sourceTtlSec?: string }) => {
+  .action(async (chatId: string, message: string, opts: { dedup?: boolean; dedupWindow?: string; image?: string; file?: string; plainText?: boolean; streaming?: boolean; confirmClaim?: boolean; kind?: string; sourceKey?: string; sourceTtlSec?: string }) => {
     // Codex agents emit literal '\n'/'\t' inside single-quoted bash where bash
     // does not expand escapes, so they arrive at argv as 2-char literals and
     // Telegram renders them as visible text. Normalize before send + log.
     message = message.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
     // Resolve bot token: agent .env first, then process.env
     const env = resolveEnv();
-    let botToken = '';
-
-    // 1. Check agent .env (most specific)
-    if (env.agentDir) {
-      const { readFileSync, existsSync } = require('fs');
-      const { join } = require('path');
-      const agentEnv = join(env.agentDir, '.env');
-      if (existsSync(agentEnv)) {
-        const content = readFileSync(agentEnv, 'utf-8');
-        const match = content.match(/^BOT_TOKEN=(.+)$/m);
-        if (match && match[1].trim()) botToken = match[1].trim();
-      }
+    let kind: BusSendKind;
+    try {
+      kind = resolveBusSendKind(opts.kind);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
     }
-
-    // 2. Fall back to process env
-    if (!botToken) {
-      botToken = process.env.BOT_TOKEN || '';
-    }
+    const botToken = resolveTelegramBotToken(env);
 
     if (!botToken) {
       console.error('Error: BOT_TOKEN not configured. Set it in your agent .env file or as an environment variable to enable Telegram.');
@@ -1584,11 +1722,26 @@ busCommand
 
     let recordedSourceEvent = false;
     const sourceKey = opts.sourceKey;
+    if (kind === 'comms') {
+      if (!sourceKey) {
+        console.error('Error: send-telegram --kind comms requires --source-key <namespace>:<id>.');
+        process.exit(1);
+      }
+      if (!isValidSourceKey(sourceKey)) {
+        console.error(`Error: send-telegram --kind comms requires a valid --source-key <namespace>:<id>; got '${sourceKey}'.`);
+        process.exit(1);
+      }
+      if (!env.ctxRoot) {
+        console.error('Error: send-telegram --kind comms requires CTX_ROOT so source-event dedup can be enforced.');
+        process.exit(1);
+      }
+    }
     if (sourceKey !== undefined) {
-      if (opts.dedup !== false) {
-        if (opts.streaming) {
+      const sourceDedupEnabled = kind === 'comms' || opts.dedup !== false;
+      if (sourceDedupEnabled) {
+        if (opts.streaming && kind !== 'comms') {
           console.error('Warning: --source-key is ignored with --streaming.');
-        } else if (!isValidSourceKey(sourceKey)) {
+        } else if (kind !== 'comms' && !isValidSourceKey(sourceKey)) {
           console.error(`Warning: invalid --source-key '${sourceKey}' — expected <namespace>:<id> (e.g. automator:meeting-<eventId>); failing open to byte-hash dedup.`);
         } else if (env.ctxRoot) {
           let sourceTtlSec: number | undefined;
@@ -1766,62 +1919,15 @@ busCommand
         sentMessageId = result?.result?.message_id ?? 0;
       } else if (opts.file) {
         const result = await api.sendDocument(chatId, opts.file, message);
-        sentMessageId = result?.result?.message_id ?? 0;
-      } else {
-        const result = await api.sendMessage(chatId, message, undefined, {
-          parseMode: opts.plainText ? null : 'HTML',
-        });
-        sentMessageId = result?.result?.message_id ?? 0;
-      }
-
-      // Log outbound and cache last-sent for context injection
-      const env = resolveEnv();
-      if (env.agentName && env.ctxRoot) {
-        logOutboundMessage(env.ctxRoot, env.agentName, chatId, message, sentMessageId, {
-          parseMode: opts.plainText ? 'none' : 'html',
-        });
-        cacheLastSent(env.ctxRoot, env.agentName, chatId, message);
-
-        // WARN-ONLY certainty guard (WS2). Josh's governing goal: "never
-        // state a claim without a live check." When an outbound message
-        // asserts completion (done/shipped/live/deployed/fixed/merged/…) but
-        // the agent has recorded no verification receipt in the recent
-        // window, emit a `claim_without_receipt` warning event so the gap is
-        // visible. This is purely observational: it runs AFTER the send has
-        // already succeeded, never changes the send result, never throws,
-        // and never delays the send. Fail-open on any error.
-        try {
-          const guardPaths = resolvePaths(env.agentName, env.instanceId, env.org);
-          emitClaimWithoutReceiptWarning(
-            guardPaths,
-            env.ctxRoot,
-            env.agentName,
-            env.org,
-            message,
-            { chat_id: String(chatId), message_id: sentMessageId },
-          );
-        } catch {
-          // Fail-open: the certainty guard is warn-only telemetry and must
-          // never affect the already-completed send.
+          sentMessageId = result?.result?.message_id ?? 0;
+        } else {
+          const result = await api.sendMessage(chatId, message, undefined, {
+            parseMode: opts.plainText ? null : 'HTML',
+          });
+          sentMessageId = result?.result?.message_id ?? 0;
         }
-        // Append outbound to the rolling conversation buffer so post-restart
-        // sessions see the literal recent exchange, not just the handoff doc
-        // summary. Spec: Item 2 of .planning/larry-ux-parity-spec.md.
-        appendToBuffer(env.ctxRoot, env.agentName, {
-          ts: new Date().toISOString(),
-          sender: env.agentName,
-          via: 'telegram',
-          content: message,
-          chat_id: String(chatId),
-        });
-        // Auto-emit activity event so dashboard sees every Telegram send,
-        // even from agents that never call log-event directly.
-        try {
-          const paths = resolvePaths(env.agentName, env.instanceId, env.org);
-          const preview = message.length > 120 ? message.slice(0, 120) + '…' : message;
-          logEvent(paths, env.agentName, env.org, 'message', 'telegram_sent', 'info', JSON.stringify({ chat_id: chatId, message_id: sentMessageId, preview }));
-        } catch { /* non-fatal */ }
-      }
+
+      recordSuccessfulTelegramSend(env, chatId, message, sentMessageId, opts.plainText ? 'none' : 'html');
 
       console.log('Message sent');
     } catch (err: any) {
@@ -3178,33 +3284,99 @@ busCommand
   .description('Filter comms JSON through the event-dedup ledger and emit only first-seen emails')
   .option('--namespace <ns>', 'Namespace prefix for dedup source keys', 'gmail')
   .option('--fire-once', 'Permanently suppress after first surface (calendar accepts, zcal confirmations)')
-  .action((opts: { namespace: string; fireOnce?: boolean }) => {
+  .option('--surface', 'Send first-seen emails to Telegram using the fixed comms surface template')
+  .option('--chat <id>', 'Telegram chat ID used with --surface')
+  .action(async (opts: { namespace: string; fireOnce?: boolean; surface?: boolean; chat?: string }) => {
     const env = resolveEnv();
+    if (opts.surface && !opts.chat) {
+      console.error('Error: --surface requires --chat <id>.');
+      process.exit(1);
+    }
+    if (!opts.surface && opts.chat) {
+      console.error('Error: --chat is only valid with --surface.');
+      process.exit(1);
+    }
+
+    let api: TelegramAPI | undefined;
+    if (opts.surface) {
+      if (!env.ctxRoot) {
+        console.error('Error: comms-filter --surface requires CTX_ROOT so source-event dedup can be enforced.');
+        process.exit(1);
+      }
+      const botToken = resolveTelegramBotToken(env);
+      if (!botToken) {
+        console.error('Error: BOT_TOKEN not configured. Set it in your agent .env file or as an environment variable to enable Telegram.');
+        process.exit(1);
+      }
+      api = new TelegramAPI(botToken);
+    }
+
     const parsed = parseCommsFilterInput(readStdinUtf8());
     if (parsed.warning) {
       console.error(parsed.warning);
     }
 
     const kept: unknown[] = [];
+    let surfacedCount = 0;
     for (const item of parsed.emails) {
       const rawId = isRecord(item) ? (item.id ?? item.messageId) : undefined;
       if (typeof rawId !== 'string') {
         console.error('Warning: comms-filter item missing string id/messageId; passing through.');
-        kept.push(item);
+        if (!opts.surface) {
+          kept.push(item);
+        }
         continue;
       }
 
       const source = `${opts.namespace}:${rawId}`;
       if (!isValidSourceKey(source)) {
         console.error(`Warning: comms-filter produced invalid source key '${source}'; passing through.`);
-        kept.push(item);
+        if (!opts.surface) {
+          kept.push(item);
+        }
         continue;
       }
 
       const result = checkAndRecordSourceEvent(env.ctxRoot ?? '', source, { fireOnce: opts.fireOnce });
       if (result.surface) {
+        if (opts.surface) {
+          const message = renderCommsSurfaceMessage(item as Record<string, unknown>, source);
+          try {
+            const telegramResult = await api!.sendMessage(opts.chat!, message, undefined, {
+              parseMode: null,
+            });
+            const sentMessageId = telegramResult?.result?.message_id ?? 0;
+            recordSuccessfulTelegramSend(env, opts.chat!, message, sentMessageId, 'none');
+          } catch (err) {
+            try {
+              if (env.ctxRoot) {
+                removeSourceEventRecord(env.ctxRoot, source);
+              }
+            } catch {
+              // Non-fatal: rollback best-effort only.
+            }
+            console.error(`Failed to surface comms email '${source}': ${err instanceof Error ? err.message : String(err)}`);
+            process.exit(1);
+          }
+        }
         kept.push(item);
+        surfacedCount += 1;
       }
+    }
+
+    if (opts.surface) {
+      process.stdout.write(`${JSON.stringify({
+        emails: kept,
+        summary: {
+          total: parsed.emails.length,
+          surfaced: surfacedCount,
+          suppressed: parsed.emails.length - surfacedCount,
+          sent: surfacedCount,
+          chatId: opts.chat,
+          namespace: opts.namespace,
+        },
+      })}\n`);
+      return;
     }
 
     process.stdout.write(`${JSON.stringify({ emails: kept })}\n`);

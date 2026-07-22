@@ -269,4 +269,39 @@ describe('send-telegram --source-key', () => {
     expect(sendMessageSpy).toHaveBeenCalledTimes(2);
     expect(readLedger(sourceLedgerPath())).toEqual({});
   });
+
+  it('--kind comms requires a source key', async () => {
+    const exitSpy = mockExit();
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(
+      busCommand.parseAsync(
+        ['send-telegram', '12345', 'Comms send without a source key', '--kind', 'comms'],
+        { from: 'user' },
+      )
+    ).rejects.toThrow('__PROCESS_EXIT_1__');
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(sendMessageSpy).not.toHaveBeenCalled();
+    expect(
+      errSpy.mock.calls.flat().some(value => typeof value === 'string' && value.includes('requires --source-key'))
+    ).toBe(true);
+  });
+
+  it('--kind comms keeps source-event dedup active even with --no-dedup', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await busCommand.parseAsync(
+      ['send-telegram', '12345', 'First comms surface', '--kind', 'comms', '--source-key', 'gmail:19f87c605b27bab7', '--no-dedup'],
+      { from: 'user' },
+    );
+    await busCommand.parseAsync(
+      ['send-telegram', '12345', 'Second comms surface', '--kind', 'comms', '--source-key', 'gmail:19f87c605b27bab7', '--no-dedup'],
+      { from: 'user' },
+    );
+
+    expect(sendMessageSpy).toHaveBeenCalledTimes(1);
+    expect(Object.keys(readLedger(sourceLedgerPath()))).toEqual(['gmail:19f87c605b27bab7']);
+  });
 });

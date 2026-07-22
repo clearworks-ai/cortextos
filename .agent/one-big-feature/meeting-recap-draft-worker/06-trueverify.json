@@ -1,0 +1,11 @@
+{
+  "repo": "~/code/cortextos",
+  "branch": "feat/meeting-recap-draft-worker",
+  "commit": "bc6c87f9225bdbe1109db2e01ee46886f717d9a0",
+  "verify_command": "python3 -m unittest test_ff_extractor -v",
+  "unittest_exit": 0,
+  "tests": "35 passed (10 RecapModeTests)",
+  "invariants_verified": "watermark byte-identical (save_watermark only in commitments path), NO send tool (stdout JSON + create_draft only), 3-layer Marcos suppression before LLM (openrouter_calls==0), dedup ledger append-after-draft, additive-only 183/0",
+  "verified_by": "larry (self-run unittest + adversarial review PASS, not agent self-report)",
+  "verified_at": "2026-07-21T20:23Z"
+}

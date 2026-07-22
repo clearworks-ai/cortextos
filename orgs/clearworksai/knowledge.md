@@ -130,3 +130,13 @@ Source: frank-cc memory (`reference_clearpath_org_ids.md`), 2026-04-10.
 - **2026-03-30** — MUSE owns all content. Frank / other agents do not draft LinkedIn or newsletter posts directly.
 - **2026-03-30** — Todoist is authoritative for tasks, not markdown files. Query the API for status.
 - **2026-04-05** — Never create `railway.json`/`railway.toml` in Clearpath. Custom healthcheck config blocks deploys. Deploy via `git push` to main only.
+- **2026-07-21** — Adopted SkillTree `knowledge-base` convention as the org's structured brain: `knowledge/` (this file's sibling dir) holds `company.md`, `offer.md`, `voice.md`, `stack.md`, `STATE.md`, `clients/`, `meetings/`, `playbooks/`. This `knowledge.md` file stays the canonical deep reference; `knowledge/STATE.md` is the fast read-first/write-last session file.
+
+## Knowledge Base Rules
+
+1. **Read before write.** Any session doing client or business work reads `knowledge/STATE.md` and the relevant `knowledge/clients/*.md` first.
+2. **Write after work.** Material changes (deal moved, decision made, deliverable shipped) get written back the same session — to the client file and `STATE.md`.
+3. **One fact, one home.** Exact facts (prices, dates, statuses) live in exactly one file; everything else links to it.
+4. **Dated history, newest first.** Never delete history — append above it.
+5. **The stack file is law.** Skills/agents use the tools `knowledge/stack.md` names. When a tool changes, update one file and every skill follows.
+6. **No orphan transcripts.** Every meeting transcript in `knowledge/meetings/` gets its outcomes extracted into the relevant client file within a day.

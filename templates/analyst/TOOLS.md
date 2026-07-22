@@ -152,10 +152,10 @@ Agent secrets: `orgs/{org}/agents/{agent}/.env`
 - Screen Recording + Accessibility permissions granted
 - `peekaboo learn` for full usage guide
 
-### gogcli (Google Workspace)
-- Binary: `gog` (v0.12.0 at `/opt/homebrew/bin/gog`)
-- Gmail, Calendar, Drive, Contacts, Tasks, Sheets, Docs
-- Accounts: configure your Google accounts in your agent's `.env` or org `secrets.env`
-- `gog gmail search "query" --max 10 -a you@gmail.com`
-- `gog calendar ls -a you@gmail.com --max 5`
-- Use `gog` instead of Gmail/Calendar MCP — more capable (send, archive, labels)
+### gws (Google Workspace)
+- Binary: `gws`, OAuth token cache at `~/.config/gws/` (`gws auth login` if reauth needed)
+- Gmail, Calendar, Drive, Sheets, Docs, Chat — see `.claude/skills/gws-shared/SKILL.md` first, then per-service skill (`gws-gmail`, `gws-calendar-agenda`, `gws-drive`, `gws-sheets-read`, etc.)
+- `gws gmail:v1 users messages list --params '{"userId":"me","maxResults":5}'`
+- `gws calendar +agenda --today`
+- Canonical tool for GWS — never fall back to Gmail/Calendar/Drive MCP, and `gog`/`gogcli` does not exist on this machine.
+- Note: `gws auth status` can misreport `token_valid: false` while API calls still succeed — trust a real call over the status check.

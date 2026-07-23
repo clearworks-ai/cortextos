@@ -1,0 +1,345 @@
+commit e84e7f66d951197e46b403729a59f1c34a9b5de4
+Author: Josh Weiss <joshweiss@Joshs-Mac-mini.local>
+Date:   Tue Jul 21 12:03:26 2026 -0700
+
+    fix(meetings): admin meeting-detail endpoint returns comments + approvals
+    
+    getMeetingWithContacts returned only {meeting, contacts}; the admin
+    workspace page (MeetingDetailResponse) destructures comments + approvals
+    too, so approvals.length threw on every meeting open. Fetch both via the
+    existing org-scoped getCommentsByMeeting / getApprovalsByMeeting helpers
+    (same as the portal detail route). Adds regression test on GET
+    /api/meetings/:id asserting the full payload shape.
+    
+    Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_015w3bsgbSk7qDWP45aFzjKW
+
+ .../meetings-workspace-detail-fix/01-research.md   |  38 +++++
+ .../02-master-plan.md                              |  24 ++++
+ .../03-specs/01-detail-endpoint-shape.md           |  36 +++++
+ server/storage.ts                                  |   8 +-
+ tests/meeting-detail-shape.test.ts                 | 155 +++++++++++++++++++++
+ 5 files changed, 258 insertions(+), 3 deletions(-)
+commit e84e7f66d951197e46b403729a59f1c34a9b5de4
+Author: Josh Weiss <joshweiss@Joshs-Mac-mini.local>
+Date:   Tue Jul 21 12:03:26 2026 -0700
+
+    fix(meetings): admin meeting-detail endpoint returns comments + approvals
+    
+    getMeetingWithContacts returned only {meeting, contacts}; the admin
+    workspace page (MeetingDetailResponse) destructures comments + approvals
+    too, so approvals.length threw on every meeting open. Fetch both via the
+    existing org-scoped getCommentsByMeeting / getApprovalsByMeeting helpers
+    (same as the portal detail route). Adds regression test on GET
+    /api/meetings/:id asserting the full payload shape.
+    
+    Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_015w3bsgbSk7qDWP45aFzjKW
+
+diff --git a/.agent/one-big-feature/meetings-workspace-detail-fix/01-research.md b/.agent/one-big-feature/meetings-workspace-detail-fix/01-research.md
+new file mode 100644
+index 0000000..0476e7c
+--- /dev/null
++++ b/.agent/one-big-feature/meetings-workspace-detail-fix/01-research.md
+@@ -0,0 +1,38 @@
++# Research — meetings-workspace-detail-fix
++
++## Symptom (live-reproduced 2026-07-21 on locally-booted cxportal against staging DB)
++Admin Meetings Hub renders fine (3 seeded meetings). Clicking "Open workspace" on any
++meeting throws a Vite runtime overlay:
++
++```
++[plugin:runtime-error-plugin] Cannot read properties of undefined (reading 'length')
++client/src/pages/meeting-workspace.tsx:846   {approvals.length === 0 ? (
++at MeetingApprovalsSection
++```
++
++## Evidence gathered
++- `client/src/pages/meeting-workspace.tsx:91-96` — `MeetingDetailResponse` declares
++  `{ meeting, contacts, comments, approvals }`.
++- `:1407` — `const { meeting, contacts, comments, approvals } = data;`
++- `:2036` — `<MeetingApprovalsSection approvals={approvals} />`; `:846` — `approvals.length`.
++- Query `:997` — `useQuery<MeetingDetailResponse>` against `meetingQueryKey`
++  (`/api/meetings/:id?orgId=`).
++- Server `server/routes.ts:3368` — `GET /api/meetings/:id` returns
++  `storage.getMeetingWithContacts(orgId, id)` unchanged.
++- Server `server/storage.ts:1880-1885` — `getMeetingWithContacts` returns ONLY
++  `{ meeting, contacts }`. No `comments`, no `approvals`.
++- Portal `server/routes.ts:7631-7648` — the portal detail endpoint already calls
++  `storage.getCommentsByMeeting(orgId, meetingId)` + `storage.getApprovalsByMeeting(orgId, meetingId)`.
++  Both helpers exist and are org-scoped.
++
++## Conclusion
++Data-shape mismatch: the admin detail endpoint under-delivers relative to the client
++contract. `comments`/`approvals` arrive `undefined`, so `.length` throws. Correct
++layer to fix is the server storage method (deliver the data the client already asks
++for), reusing the two org-scoped helpers the portal path already uses. No client
++change, no schema change.
++
++## Test gap
++Phase-1 tests exercised admin route status/org-scoping + portal render, never rendered
++`meeting-workspace.tsx` and never asserted the admin detail payload shape. Add a
++regression test on `GET /api/meetings/:id` asserting `comments` + `approvals` keys.
+diff --git a/.agent/one-big-feature/meetings-workspace-detail-fix/02-master-plan.md b/.agent/one-big-feature/meetings-workspace-detail-fix/02-master-plan.md
+new file mode 100644
+index 0000000..232dfdf
+--- /dev/null
++++ b/.agent/one-big-feature/meetings-workspace-detail-fix/02-master-plan.md
+@@ -0,0 +1,24 @@
++# OBF Master Plan — meetings-workspace-detail-fix
++
++## Problem (live-reproduced 2026-07-21)
++Clicking any meeting in the admin Meetings Hub crashes the workspace page with a runtime error at client/src/pages/meeting-workspace.tsx:846 where `approvals.length` is read on an undefined value inside MeetingApprovalsSection.
++
++## Root cause (verified in source)
++- Client `client/src/pages/meeting-workspace.tsx:91` types the detail query as `MeetingDetailResponse = { meeting, contacts, comments, approvals }` and at line 1407 destructures all four from `data`.
++- Server `GET /api/meetings/:id` (`server/routes.ts:3368`) returns `storage.getMeetingWithContacts(orgId, id)`.
++- `storage.getMeetingWithContacts` (`server/storage.ts:1880`) returns only `{ meeting, contacts }`. `comments` and `approvals` are therefore `undefined`, so `approvals.length` throws on every meeting open.
++- The portal endpoint `GET /api/portal/meetings/:id` (`server/routes.ts:7631`) already fetches both via `storage.getCommentsByMeeting` + `storage.getApprovalsByMeeting`. The admin detail path was simply never brought up to the same shape.
++
++## Why tests missed it
++Phase-1 tests exercised admin routes (status codes, org-scoping) and portal render, but never rendered `meeting-workspace.tsx`. No test asserted the admin detail payload shape includes `comments` + `approvals`.
++
++## Fix (server-side — the correct layer)
++Make the admin detail endpoint return the full shape the client already expects. Do NOT paper over it client-side with optional-chaining defaults — that would render the page but silently hide real approvals/comments. The data must actually be delivered.
++
++## Scope
++1 storage method + its interface signature + 1 regression test. No schema change, no client change (client type is already correct). Single repo. Qualifies as one-big-feature.
++
++## Verify
++- `npm run check` (tsc) clean.
++- `npm test` — new test asserts `GET /api/meetings/:id` returns `comments` + `approvals` arrays; existing meeting tests still green.
++- Larry live-clicks the full flow on a locally-booted instance against staging DB: hub, open meeting (no crash), comments section, approvals section, sign-off, portal view, PDF export.
+diff --git a/.agent/one-big-feature/meetings-workspace-detail-fix/03-specs/01-detail-endpoint-shape.md b/.agent/one-big-feature/meetings-workspace-detail-fix/03-specs/01-detail-endpoint-shape.md
+new file mode 100644
+index 0000000..50bbc72
+--- /dev/null
++++ b/.agent/one-big-feature/meetings-workspace-detail-fix/03-specs/01-detail-endpoint-shape.md
+@@ -0,0 +1,36 @@
++# Spec 01 — Admin meeting-detail endpoint returns comments + approvals
++
++## Target files
++- `server/storage.ts` — `getMeetingWithContacts` (impl ~L1880, interface decl ~L493)
++- `tests/` — new/extended test for `GET /api/meetings/:id`
++
++## Exact change
++
++### 1. `server/storage.ts` — extend `getMeetingWithContacts`
++Return `comments` and `approvals` alongside `meeting` + `contacts`, reusing the existing storage helpers already used by the portal endpoint.
++
++Current impl:
++- fetches meeting via `this.getMeeting(orgId, id)`, returns undefined if missing
++- fetches contacts, returns `{ meeting, contacts }`
++
++New impl must additionally:
++- `const comments = await this.getCommentsByMeeting(orgId, id);`
++- `const approvals = await this.getApprovalsByMeeting(orgId, id);`
++- return `{ meeting, contacts, comments, approvals }`
++
++### 2. Update the interface signature (~L493)
++Match the new return type so the return object includes `comments` and `approvals` typed arrays.
++- Import the comment/approval row types if not already in scope. `getCommentsByMeeting` / `getApprovalsByMeeting` already return them, so infer the exact exported type names from those method signatures and reuse them — do not invent names.
++- Both helpers already exist and are org-scoped (used by the portal route). Reuse them verbatim — no new queries, no cross-org leak.
++
++## Constraints
++- No `any`. No `console.log`. Keep org-scoping (both helpers already take orgId).
++- No client change — `MeetingDetailResponse` already declares comments + approvals.
++- No schema/migration change.
++
++## Test (regression guard)
++Add a test that hits `GET /api/meetings/:id` for a seeded meeting and asserts the response body has `comments` (array) and `approvals` (array) keys, in addition to `meeting` + `contacts`. If an approval/comment is seeded, assert it appears. Follow the existing meetings test file's setup/harness pattern (find it under `tests/`).
++
++## Done when
++- `npm run check` gives 0 errors.
++- `npm test` gives new test green + existing meeting tests green.
+diff --git a/server/storage.ts b/server/storage.ts
+index 082826d..4fda4c0 100644
+--- a/server/storage.ts
++++ b/server/storage.ts
+@@ -490,7 +490,7 @@ export interface IStorage {
+   getMeetingsByOrg(orgId: string): Promise<Meeting[]>;
+   getMeetingsByEngagement(orgId: string, engagementId: number): Promise<Meeting[]>;
+   getMeeting(orgId: string, id: number): Promise<Meeting | undefined>;
+-  getMeetingWithContacts(orgId: string, id: number): Promise<{meeting: Meeting; contacts: MeetingContact[]} | undefined>;
++  getMeetingWithContacts(orgId: string, id: number): Promise<{meeting: Meeting; contacts: MeetingContact[]; comments: MeetingComment[]; approvals: MeetingApproval[]} | undefined>;
+   createMeeting(meeting: InsertMeeting): Promise<Meeting>;
+   updateMeeting(orgId: string, id: number, meeting: Partial<InsertMeeting>): Promise<Meeting | undefined>;
+   deleteMeeting(orgId: string, id: number): Promise<void>;
+@@ -1877,11 +1877,13 @@ export class DatabaseStorage implements IStorage {
+     return meeting;
+   }
+ 
+-  async getMeetingWithContacts(orgId: string, id: number): Promise<{meeting: Meeting; contacts: MeetingContact[]} | undefined> {
++  async getMeetingWithContacts(orgId: string, id: number): Promise<{meeting: Meeting; contacts: MeetingContact[]; comments: MeetingComment[]; approvals: MeetingApproval[]} | undefined> {
+     const meeting = await this.getMeeting(orgId, id);
+     if (!meeting) return undefined;
+     const contacts = await db.select().from(meetingContacts).where(eq(meetingContacts.meetingId, id));
+-    return { meeting, contacts };
++    const comments = await this.getCommentsByMeeting(orgId, id);
++    const approvals = await this.getApprovalsByMeeting(orgId, id);
++    return { meeting, contacts, comments, approvals };
+   }
+ 
+   async createMeeting(meeting: InsertMeeting): Promise<Meeting> {
+diff --git a/tests/meeting-detail-shape.test.ts b/tests/meeting-detail-shape.test.ts
+new file mode 100644
+index 0000000..b25f68a
+--- /dev/null
++++ b/tests/meeting-detail-shape.test.ts
+@@ -0,0 +1,155 @@
++import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
++import supertest from 'supertest';
++import { eq } from 'drizzle-orm';
++import { startTestServer, closeTestServer } from './helpers/testServer';
++import { loadTestModules } from './helpers/testDb';
++
++let serverContext: Awaited<ReturnType<typeof startTestServer>>;
++let testOrgId: string;
++let testUserId: string;
++
++beforeAll(async () => {
++  const loadedModules = await loadTestModules();
++  serverContext = await startTestServer();
++  const { request, agent } = serverContext;
++  
++  // Create a test org
++  const org = await loadedModules.db.insert(loadedModules.schema.organizations).values({
++    name: 'Test Org',
++    shortCode: 'TEST',
++    status: 'active',
++  }).returning();
++  testOrgId = org[0].id;
++  
++  // Create a test user
++  const user = await loadedModules.db.insert(loadedModules.schema.users).values({
++    username: 'testuser',
++    email: 'test@example.com',
++    password: await loadedModules.hashPassword('test-password-123'),
++    displayName: 'Test User',
++    role: 'owner',
++    orgId: testOrgId,
++  }).returning();
++  testUserId = user[0].id;
++  
++  // Login
++  await agent.post('/api/auth/login').send({
++    username: 'testuser',
++    password: 'test-password-123',
++  });
++}, 30000);
++
++afterAll(async () => {
++  if (serverContext) {
++    await closeTestServer(serverContext.httpServer);
++  }
++}, 30000);
++
++async function getTestServer() {
++  const loadedModules = await loadTestModules();
++  return { 
++    db: loadedModules.db, 
++    testServer: serverContext.agent, // Use authenticated agent
++    schema: loadedModules.schema,
++    orgId: testOrgId
++  };
++}
++
++describe('GET /api/meetings/:id - detail endpoint shape', () => {
++  beforeEach(async () => {
++    const { db, schema, orgId: testOrgId } = await getTestServer();
++    // Clean up test data
++    await db.delete(schema.meetingComments).where(eq(schema.meetingComments.orgId, testOrgId));
++    await db.delete(schema.meetingApprovals).where(eq(schema.meetingApprovals.orgId, testOrgId));
++    await db.delete(schema.meetingContacts).where(eq(schema.meetingContacts.meetingId, -1)); // Will delete nothing but safe
++    await db.delete(schema.meetings).where(eq(schema.meetings.orgId, testOrgId));
++  });
++
++  it('returns comments and approvals arrays alongside meeting and contacts', async () => {
++    const { db, testServer, schema, orgId: testOrgId } = await getTestServer();
++    
++    // Create a meeting
++    const meeting = await db.insert(schema.meetings).values({
++      orgId: testOrgId,
++      title: 'Test Meeting',
++      approvalStatus: 'draft',
++    }).returning();
++    const meetingId = meeting[0].id;
++
++    // Add a contact
++    await db.insert(schema.meetingContacts).values({
++      meetingId,
++      name: 'John Doe',
++      email: 'john@example.com',
++      role: 'Attendee',
++      attendanceStatus: 'confirmed',
++    });
++
++    // Add a comment
++    await db.insert(schema.meetingComments).values({
++      orgId: testOrgId,
++      meetingId,
++      authorRole: 'owner',
++      body: 'Test comment',
++    });
++
++    // Add an approval
++    await db.insert(schema.meetingApprovals).values({
++      orgId: testOrgId,
++      meetingId,
++      role: 'owner',
++      signerName: 'Test Owner',
++      signatureText: 'Test signature',
++      signedAt: new Date(),
++    });
++
++    // Request the meeting detail
++    const res = await testServer
++      .get(`/api/meetings/${meetingId}?orgId=${testOrgId}`);
++
++    expect(res.status).toBe(200);
++    expect(res.body).toHaveProperty('meeting');
++    expect(res.body).toHaveProperty('contacts');
++    expect(res.body).toHaveProperty('comments');
++    expect(res.body).toHaveProperty('approvals');
++
++    // Verify array types
++    expect(Array.isArray(res.body.contacts)).toBe(true);
++    expect(Array.isArray(res.body.comments)).toBe(true);
++    expect(Array.isArray(res.body.approvals)).toBe(true);
++
++    // Verify the seeded data appears
++    expect(res.body.contacts.length).toBeGreaterThan(0);
++    expect(res.body.contacts[0]).toHaveProperty('name', 'John Doe');
++    
++    expect(res.body.comments.length).toBeGreaterThan(0);
++    expect(res.body.comments[0]).toHaveProperty('body', 'Test comment');
++    
++    expect(res.body.approvals.length).toBeGreaterThan(0);
++    expect(res.body.approvals[0]).toHaveProperty('role', 'owner');
++  });
++
++  it('returns empty comments and approvals arrays when none exist', async () => {
++    const { db, testServer, schema, orgId: testOrgId } = await getTestServer();
++    
++    // Create a meeting without comments or approvals
++    const meeting = await db.insert(schema.meetings).values({
++      orgId: testOrgId,
++      title: 'Empty Meeting',
++      approvalStatus: 'draft',
++    }).returning();
++    const meetingId = meeting[0].id;
++
++    // Request the meeting detail
++    const res = await testServer
++      .get(`/api/meetings/${meetingId}?orgId=${testOrgId}`);
++
++    expect(res.status).toBe(200);
++    expect(res.body).toHaveProperty('comments');
++    expect(res.body).toHaveProperty('approvals');
++    expect(Array.isArray(res.body.comments)).toBe(true);
++    expect(Array.isArray(res.body.approvals)).toBe(true);
++    expect(res.body.comments.length).toBe(0);
++    expect(res.body.approvals.length).toBe(0);
++  });
++});
+\ No newline at end of file

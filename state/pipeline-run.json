@@ -1,1 +1,1 @@
-{"ts":1784611490,"exempt":true,"reason":"context handoff writing + hard-restart, no build work"}
+{"ts":1784698550,"exempt":true,"reason":"codexer heartbeat ACK — standby confirmation, no build dispatched"}

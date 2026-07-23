@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -f "$ROOT/dist/pipeline/staging-verify/cli.js" ]; then
+  exec node "$ROOT/dist/pipeline/staging-verify/cli.js" "$@"
+fi
+
+exec "$ROOT/node_modules/.bin/tsx" "$ROOT/src/pipeline/staging-verify/cli.ts" "$@"

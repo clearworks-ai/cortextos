@@ -6,6 +6,7 @@ export default defineConfig({
     daemon: 'src/daemon/index.ts',
     'pipeline/bypass-audit': 'src/pipeline/bypass-audit.ts',
     'pipeline/stage-emit': 'src/pipeline/stage-emit.ts',
+    'pipeline/staging-verify/cli': 'src/pipeline/staging-verify/cli.ts',
     'hooks/hook-permission-telegram': 'src/hooks/hook-permission-telegram.ts',
     'hooks/hook-ask-telegram': 'src/hooks/hook-ask-telegram.ts',
     'hooks/hook-planmode-telegram': 'src/hooks/hook-planmode-telegram.ts',

@@ -235,6 +235,50 @@ describe('CodexAppServerPTY socket path policy', () => {
   });
 });
 
+describe('CodexAppServerPTY env loading via shared loader', () => {
+  it('preserves org-to-agent precedence through loadEnvFileInto', () => {
+    const orgEnvFile = '/tmp/fw/orgs/acme/secrets.env';
+    const agentEnvFile = '/tmp/fw/orgs/acme/agents/codex-app-agent/.env';
+
+    fsMocks.existsSync.mockImplementation((path) => path === orgEnvFile || path === agentEnvFile);
+    fsMocks.readFileSync.mockImplementation((path) => {
+      if (path === orgEnvFile) {
+        return 'SHARED=org\nORG_ONLY=o\n';
+      }
+      if (path === agentEnvFile) {
+        return 'SHARED=agent\nAGENT_ONLY=a\n';
+      }
+      return '';
+    });
+
+    const pty = new CodexAppServerPTY(mockEnv, {});
+    const buildEnv = (pty as unknown as { buildEnv(): Record<string, string> }).buildEnv.bind(pty);
+    const env = buildEnv();
+
+    expect(env.SHARED).toBe('agent');
+    expect(env.ORG_ONLY).toBe('o');
+    expect(env.AGENT_ONLY).toBe('a');
+  });
+
+  it('delivers quoted agent values without literal quotes', () => {
+    const agentEnvFile = '/tmp/fw/orgs/acme/agents/codex-app-agent/.env';
+
+    fsMocks.existsSync.mockImplementation((path) => path === agentEnvFile);
+    fsMocks.readFileSync.mockImplementation((path) => {
+      if (path === agentEnvFile) {
+        return 'QUOTED=\"hello world\"\n';
+      }
+      return '';
+    });
+
+    const pty = new CodexAppServerPTY(mockEnv, {});
+    const buildEnv = (pty as unknown as { buildEnv(): Record<string, string> }).buildEnv.bind(pty);
+    const env = buildEnv();
+
+    expect(env.QUOTED).toBe('hello world');
+  });
+});
+
 describe('CodexAppServerPTY command mapping', () => {
   function makeReadyPty() {
     const pty = new CodexAppServerPTY(mockEnv, {});

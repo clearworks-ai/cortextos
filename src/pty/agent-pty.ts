@@ -4,6 +4,7 @@ import { platform } from 'os';
 import type { AgentConfig, CtxEnv } from '../types/index.js';
 import { OutputBuffer } from './output-buffer.js';
 import { injectMessage as injectMessageIntoPty } from './inject.js';
+import { loadEnvFileInto } from '../utils/env.js';
 
 // node-pty types
 interface IPty {
@@ -88,38 +89,15 @@ export class AgentPTY {
       ptyEnv['CTX_PARENT_AGENT'] = this.env.parentAgent;
     }
 
-    // Source org-level shared secrets (orgs/{org}/secrets.env).
-    // These are shared across all agents in the org: OPENAI_KEY, APIFY_TOKEN, GEMINI_API_KEY, etc.
-    // Agent .env is loaded after and overrides org values — agent-specific keys win.
+    // Source org-level shared secrets (orgs/{org}/secrets.env), including op:// refs when
+    // OP_SERVICE_ACCOUNT_TOKEN is available. Agent .env is loaded after and overrides org
+    // values — agent-specific keys win.
     if (this.env.org && this.env.projectRoot) {
-      const orgEnvFile = join(this.env.projectRoot, 'orgs', this.env.org, 'secrets.env');
-      if (existsSync(orgEnvFile)) {
-        const content = readFileSync(orgEnvFile, 'utf-8');
-        for (const line of content.split('\n')) {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith('#')) continue;
-          const eqIdx = trimmed.indexOf('=');
-          if (eqIdx > 0) {
-            ptyEnv[trimmed.slice(0, eqIdx).trim()] = trimmed.slice(eqIdx + 1).trim();
-          }
-        }
-      }
+      loadEnvFileInto(join(this.env.projectRoot, 'orgs', this.env.org, 'secrets.env'), ptyEnv);
     }
 
-    // Source agent .env file (overrides org secrets.env for same key names).
-    // Contains agent-specific secrets: BOT_TOKEN, CHAT_ID, CLAUDE_CODE_OAUTH_TOKEN.
-    const agentEnvFile = join(this.env.agentDir, '.env');
-    if (existsSync(agentEnvFile)) {
-      const content = readFileSync(agentEnvFile, 'utf-8');
-      for (const line of content.split('\n')) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('#')) continue;
-        const eqIdx = trimmed.indexOf('=');
-        if (eqIdx > 0) {
-          ptyEnv[trimmed.slice(0, eqIdx).trim()] = trimmed.slice(eqIdx + 1).trim();
-        }
-      }
-    }
+    // Source agent .env file after org secrets.env so agent-specific keys override org values.
+    loadEnvFileInto(join(this.env.agentDir, '.env'), ptyEnv);
 
     // Add convenience CTX_* aliases used throughout agent templates.
     // CTX_TELEGRAM_CHAT_ID: alias for CHAT_ID from the agent's .env

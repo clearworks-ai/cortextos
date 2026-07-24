@@ -58,6 +58,7 @@ let migrateCronsForAgent: typeof import('../../src/daemon/cron-migration.js').mi
 let migrateAllAgents: typeof import('../../src/daemon/cron-migration.js').migrateAllAgents;
 let isMigrated: typeof import('../../src/daemon/cron-migration.js').isMigrated;
 let readCrons: typeof import('../../src/bus/crons.js').readCrons;
+let addCron: typeof import('../../src/bus/crons.js').addCron;
 
 async function reloadModules() {
   vi.resetModules();
@@ -67,6 +68,7 @@ async function reloadModules() {
   isMigrated = migModule.isMigrated;
   const cronsModule = await import('../../src/bus/crons.js');
   readCrons = cronsModule.readCrons;
+  addCron = cronsModule.addCron;
 }
 
 /**
@@ -145,10 +147,10 @@ describe('migrateCronsForAgent', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Test 2: Idempotency — second run is a no-op
+  // Test 2: Marker exists + same config → additive sync, no duplicates
   // ---------------------------------------------------------------------------
 
-  it('is idempotent: second migration run is skipped (marker present, no duplicates)', () => {
+  it('performs additive sync on a marker-present rerun without duplicating crons', () => {
     const agentDir = join(tmpFrameworkRoot, 'orgs', 'testorg', 'agents', 'alpha');
     writeConfigJson(agentDir, [
       { name: 'heartbeat', type: 'recurring', interval: '6h', prompt: 'Run heartbeat.' },
@@ -160,9 +162,11 @@ describe('migrateCronsForAgent', () => {
     expect(first.status).toBe('migrated');
     expect(first.cronsMigrated).toBe(1);
 
-    // Second run — must be a no-op
+    // Second run — marker path now does append-only sync
     const second = migrateCronsForAgent('alpha', configPath, tmpCtxRoot);
-    expect(second.status).toBe('skipped-already-migrated');
+    expect(second.status).toBe('synced');
+    expect(second.cronsMigrated).toBe(0);
+    expect(second.cronsSkipped).toContain('heartbeat');
 
     // Still exactly 1 cron — no duplication
     const crons = readCrons('alpha');
@@ -171,6 +175,130 @@ describe('migrateCronsForAgent', () => {
 
     // Marker still exists
     expect(markerExists(tmpCtxRoot, 'alpha')).toBe(true);
+  });
+
+  it('appends only new config crons when marker exists and leaves old entries byte-for-byte intact', () => {
+    const agentDir = join(tmpFrameworkRoot, 'orgs', 'testorg', 'agents', 'alpha-append');
+    writeConfigJson(agentDir, [
+      { name: 'heartbeat', interval: '6h', prompt: 'Run heartbeat.' },
+    ]);
+    const configPath = join(agentDir, 'config.json');
+
+    const first = migrateCronsForAgent('alpha-append', configPath, tmpCtxRoot);
+    expect(first.status).toBe('migrated');
+
+    const before = rawCronsJson(tmpCtxRoot, 'alpha-append');
+    expect(before).not.toBeNull();
+    const existingCron = before!.crons[0];
+
+    writeConfigJson(agentDir, [
+      { name: 'heartbeat', interval: '6h', prompt: 'Run heartbeat.' },
+      { name: 'daily', interval: '24h', prompt: 'Daily check.' },
+    ]);
+
+    const second = migrateCronsForAgent('alpha-append', configPath, tmpCtxRoot);
+    expect(second.status).toBe('synced');
+    expect(second.cronsMigrated).toBe(1);
+    expect(second.cronsSkipped).toContain('heartbeat');
+
+    const after = rawCronsJson(tmpCtxRoot, 'alpha-append');
+    expect(after).not.toBeNull();
+    expect(after!.crons).toHaveLength(2);
+    expect(after!.crons[0]).toStrictEqual(existingCron);
+    expect(after!.crons[1].name).toBe('daily');
+    expect(after!.crons[1].metadata?.migrated_from_config).toBe(true);
+    expect(after!.crons[1].metadata?.additive_sync).toBe(true);
+  });
+
+  it('preserves CLI-added crons that are absent from config.json when marker exists', () => {
+    const agentDir = join(tmpFrameworkRoot, 'orgs', 'testorg', 'agents', 'alpha-cli');
+    writeConfigJson(agentDir, [
+      { name: 'heartbeat', interval: '6h', prompt: 'Run heartbeat.' },
+    ]);
+    const configPath = join(agentDir, 'config.json');
+
+    const first = migrateCronsForAgent('alpha-cli', configPath, tmpCtxRoot);
+    expect(first.status).toBe('migrated');
+
+    addCron('alpha-cli', {
+      name: 'cli-only',
+      prompt: 'CLI added prompt.',
+      schedule: '12h',
+      enabled: true,
+      created_at: new Date().toISOString(),
+      metadata: { source: 'cli' },
+    });
+
+    const second = migrateCronsForAgent('alpha-cli', configPath, tmpCtxRoot);
+    expect(second.status).toBe('synced');
+
+    const crons = readCrons('alpha-cli');
+    expect(crons.map((cron) => cron.name)).toEqual(['heartbeat', 'cli-only']);
+    expect(crons[1].metadata?.source).toBe('cli');
+  });
+
+  it('does not overwrite an existing crons.json entry when config has the same name with different fields', () => {
+    const agentDir = join(tmpFrameworkRoot, 'orgs', 'testorg', 'agents', 'alpha-collision');
+    writeConfigJson(agentDir, [
+      { name: 'heartbeat', interval: '6h', prompt: 'Original heartbeat.' },
+    ]);
+    const configPath = join(agentDir, 'config.json');
+
+    const first = migrateCronsForAgent('alpha-collision', configPath, tmpCtxRoot);
+    expect(first.status).toBe('migrated');
+
+    const before = readCrons('alpha-collision')[0];
+    writeConfigJson(agentDir, [
+      { name: 'heartbeat', interval: '24h', prompt: 'Modified config copy.' },
+    ]);
+
+    const second = migrateCronsForAgent('alpha-collision', configPath, tmpCtxRoot);
+    expect(second.status).toBe('synced');
+    expect(second.cronsMigrated).toBe(0);
+    expect(second.cronsSkipped).toContain('heartbeat');
+    expect(readCrons('alpha-collision')[0]).toStrictEqual(before);
+  });
+
+  it('leaves crons.json unchanged when marker exists and config.json is corrupt', () => {
+    const agentDir = join(tmpFrameworkRoot, 'orgs', 'testorg', 'agents', 'alpha-corrupt');
+    writeConfigJson(agentDir, [
+      { name: 'heartbeat', interval: '6h', prompt: 'Run heartbeat.' },
+    ]);
+    const configPath = join(agentDir, 'config.json');
+
+    const first = migrateCronsForAgent('alpha-corrupt', configPath, tmpCtxRoot);
+    expect(first.status).toBe('migrated');
+
+    const before = rawCronsJson(tmpCtxRoot, 'alpha-corrupt');
+    expect(before).not.toBeNull();
+    writeFileSync(configPath, '{ not valid json', 'utf-8');
+
+    const second = migrateCronsForAgent('alpha-corrupt', configPath, tmpCtxRoot);
+    expect(second.status).toBe('skipped-already-migrated');
+    expect(rawCronsJson(tmpCtxRoot, 'alpha-corrupt')).toStrictEqual(before);
+  });
+
+  it('still skips one-shot config entries during marker-present additive sync', () => {
+    const agentDir = join(tmpFrameworkRoot, 'orgs', 'testorg', 'agents', 'alpha-once');
+    writeConfigJson(agentDir, [
+      { name: 'heartbeat', interval: '6h', prompt: 'Run heartbeat.' },
+    ]);
+    const configPath = join(agentDir, 'config.json');
+
+    const first = migrateCronsForAgent('alpha-once', configPath, tmpCtxRoot);
+    expect(first.status).toBe('migrated');
+
+    const futureTs = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    writeConfigJson(agentDir, [
+      { name: 'heartbeat', interval: '6h', prompt: 'Run heartbeat.' },
+      { name: 'one-shot', type: 'once', fire_at: futureTs, prompt: 'Do it once.' },
+    ]);
+
+    const second = migrateCronsForAgent('alpha-once', configPath, tmpCtxRoot);
+    expect(second.status).toBe('synced');
+    expect(second.cronsMigrated).toBe(0);
+    expect(second.cronsSkipped).toEqual(expect.arrayContaining(['heartbeat', 'one-shot']));
+    expect(readCrons('alpha-once')).toHaveLength(1);
   });
 
   // ---------------------------------------------------------------------------
@@ -466,7 +594,7 @@ describe('migrateAllAgents', () => {
     expect(readCrons('becky')).toHaveLength(2);
   });
 
-  it('skips already-migrated agents and reports correct counts', () => {
+  it('additive-syncs marker-present agents during migrateAllAgents without duplicating crons', () => {
     const agentDir = join(tmpFrameworkRoot, 'orgs', 'testorg', 'agents', 'iota');
     writeConfigJson(agentDir, [
       { name: 'heartbeat', interval: '6h', prompt: 'Heartbeat.' },
@@ -482,9 +610,11 @@ describe('migrateAllAgents', () => {
       log: () => {},
     });
 
-    // iota should be in results as 'skipped-already-migrated'
+    // iota should be in results as 'synced' with zero appended crons
     const iotaResult = summary.results.find(r => r.agentName === 'iota');
-    expect(iotaResult?.status).toBe('skipped-already-migrated');
+    expect(iotaResult?.status).toBe('synced');
+    expect(iotaResult?.cronsMigrated).toBe(0);
+    expect(iotaResult?.cronsSkipped).toContain('heartbeat');
 
     // No duplicate crons
     expect(readCrons('iota')).toHaveLength(1);

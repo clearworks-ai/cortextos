@@ -11,6 +11,11 @@ ecosystem.config.js
 
 # User-created org data (not part of the framework)
 orgs/
+!orgs/
+orgs/*
+!orgs/clearworksai/
+orgs/clearworksai/*
+!orgs/clearworksai/secrets.env.example
 # But community subdirectories ARE part of the framework
 !community/
 !community/**

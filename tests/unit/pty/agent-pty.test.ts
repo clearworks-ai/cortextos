@@ -164,6 +164,59 @@ describe('AgentPTY session isolation', () => {
     const options = spawnMock.mock.calls[0]?.[2] as { env?: Record<string, string> } | undefined;
     expect(options?.env?.CTX_PARENT_AGENT).toBe('frank2');
   });
+
+  describe('env loading via shared loader', () => {
+    it('preserves org-to-agent precedence through loadEnvFileInto', async () => {
+      const orgEnvFile = '/tmp/fw/orgs/acme/secrets.env';
+      const agentEnvFile = '/tmp/fw/orgs/acme/agents/alice/.env';
+
+      const existsSyncMock = vi.mocked((await import('fs')).existsSync);
+      const readFileSyncMock = vi.mocked((await import('fs')).readFileSync);
+
+      existsSyncMock.mockImplementation((path) => path === orgEnvFile || path === agentEnvFile);
+      readFileSyncMock.mockImplementation((path) => {
+        if (path === orgEnvFile) {
+          return 'SHARED=org\nORG_ONLY=o\n';
+        }
+        if (path === agentEnvFile) {
+          return 'SHARED=agent\nAGENT_ONLY=a\n';
+        }
+        return '';
+      });
+
+      const pty = new AgentPTY(mockEnv, {});
+      (pty as unknown as { spawnFn: typeof spawnMock }).spawnFn = spawnMock;
+
+      await pty.spawn('fresh', 'boot');
+
+      const options = spawnMock.mock.calls[0]?.[2] as { env?: Record<string, string> } | undefined;
+      expect(options?.env?.SHARED).toBe('agent');
+      expect(options?.env?.ORG_ONLY).toBe('o');
+      expect(options?.env?.AGENT_ONLY).toBe('a');
+    });
+
+    it('delivers quoted agent values without the literal quotes', async () => {
+      const agentEnvFile = '/tmp/fw/orgs/acme/agents/alice/.env';
+      const existsSyncMock = vi.mocked((await import('fs')).existsSync);
+      const readFileSyncMock = vi.mocked((await import('fs')).readFileSync);
+
+      existsSyncMock.mockImplementation((path) => path === agentEnvFile);
+      readFileSyncMock.mockImplementation((path) => {
+        if (path === agentEnvFile) {
+          return 'QUOTED=\"hello world\"\n';
+        }
+        return '';
+      });
+
+      const pty = new AgentPTY(mockEnv, {});
+      (pty as unknown as { spawnFn: typeof spawnMock }).spawnFn = spawnMock;
+
+      await pty.spawn('fresh', 'boot');
+
+      const options = spawnMock.mock.calls[0]?.[2] as { env?: Record<string, string> } | undefined;
+      expect(options?.env?.QUOTED).toBe('hello world');
+    });
+  });
 });
 
 describe('AgentPTY listener disposal', () => {

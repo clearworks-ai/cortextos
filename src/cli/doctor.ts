@@ -4,6 +4,7 @@ import { existsSync, readFileSync, readdirSync, statSync, chmodSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { resolveInstanceId } from './resolve-instance-id.js';
+import { isOpRef, parseEnvFile } from '../utils/env.js';
 
 interface Check {
   name: string;
@@ -304,6 +305,41 @@ export const doctorCommand = new Command('doctor')
         status: geminiConfigured ? 'pass' : 'warn',
         message: geminiConfigured ? 'Configured' : 'Not set — semantic search and RAG disabled',
         fix: !geminiConfigured ? 'Add GEMINI_API_KEY to orgs/<org>/secrets.env — get a free key at https://aistudio.google.com/app/apikey' : undefined,
+      });
+    }
+
+    let opRefKeys: string[] = [];
+    let tokenAvailable = !!(process.env.OP_SERVICE_ACCOUNT_TOKEN && !isOpRef(process.env.OP_SERVICE_ACCOUNT_TOKEN));
+    if (existsSync(orgsDir)) {
+      try {
+        for (const org of readdirSync(orgsDir)) {
+          const secretsPath = join(orgsDir, org, 'secrets.env');
+          if (!existsSync(secretsPath)) continue;
+
+          const envVars = parseEnvFile(secretsPath);
+          for (const [key, value] of Object.entries(envVars)) {
+            if (isOpRef(value)) {
+              opRefKeys.push(key);
+            }
+          }
+
+          const localToken = envVars['OP_SERVICE_ACCOUNT_TOKEN'];
+          if (!tokenAvailable && localToken && !isOpRef(localToken)) {
+            tokenAvailable = true;
+          }
+        }
+      } catch { /* ignore scan errors */ }
+    }
+    if (opRefKeys.length > 0) {
+      checks.push({
+        name: '1Password secret refs (op://)',
+        status: tokenAvailable ? 'pass' : 'warn',
+        message: tokenAvailable
+          ? `${opRefKeys.length} op:// ref(s) found; OP_SERVICE_ACCOUNT_TOKEN available`
+          : `${opRefKeys.length} op:// ref(s) found but OP_SERVICE_ACCOUNT_TOKEN is not set — agents will boot with literal op:// strings: ${opRefKeys.join(', ')}`,
+        fix: tokenAvailable
+          ? undefined
+          : 'Add OP_SERVICE_ACCOUNT_TOKEN as a literal to orgs/<org>/secrets.env (or the daemon environment), or restore literal values for the listed keys',
       });
     }
 

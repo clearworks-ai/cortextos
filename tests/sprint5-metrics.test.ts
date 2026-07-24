@@ -345,6 +345,18 @@ describe('Sprint 5: Observability & Metrics', () => {
       expect(commands.length).toBe(0);
     });
 
+    it('caps at 100 commands (Telegram setMyCommands rejects more)', () => {
+      const scanDir = join(testDir, 'agent-many-skills');
+      for (let i = 0; i < 120; i++) {
+        const skillDir = join(scanDir, 'skills', `skill-${i}`);
+        mkdirSync(skillDir, { recursive: true });
+        writeFileSync(join(skillDir, 'SKILL.md'), `---\nname: skill-${i}\ndescription: Skill ${i}\n---\n`, 'utf-8');
+      }
+
+      const commands = collectTelegramCommands([scanDir]);
+      expect(commands.length).toBe(100);
+    });
+
     it('truncates description to 256 chars', () => {
       const scanDir = join(testDir, 'agent5');
       const skillDir = join(scanDir, 'skills', 'verbose');

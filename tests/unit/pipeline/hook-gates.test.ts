@@ -433,6 +433,31 @@ describePrHook('pr push gate hook', () => {
     });
   }
 
+  function emitExemptRow(nowSeconds: number, slug = 'hard-spec-gate'): void {
+    const exemptArtifactPath = join(projectRoot, '.agent', 'one-big-feature', slug, '07-exempt-note.md');
+    mkdirSync(dirname(exemptArtifactPath), { recursive: true });
+    writeFileSync(exemptArtifactPath, 'doc-only change; nothing runnable to true-verify\n', 'utf-8');
+    emitLedgerRow({
+      slug,
+      stage: 'exempt',
+      artifactPath: exemptArtifactPath,
+      reason: 'doc-only template port',
+      ledgerPath,
+      secretPath,
+      nowSeconds,
+    });
+  }
+
+  function commitFiles(files: Array<[string, string]>, message: string): void {
+    for (const [rel, content] of files) {
+      const abs = join(projectRoot, rel);
+      mkdirSync(dirname(abs), { recursive: true });
+      writeFileSync(abs, content, 'utf-8');
+      runGit(['add', rel], projectRoot);
+    }
+    runGit(['commit', '-m', message], projectRoot);
+  }
+
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'pr-hook-gates-'));
     projectRoot = join(root, 'repo');
@@ -703,5 +728,72 @@ describePrHook('pr push gate hook', () => {
 
     expect(passed.status).toBe(0);
     expect(passed.stdout).toBe('');
+  });
+
+  it('allows a doc-only PR with a signed exempt row (doc-exempt lane)', () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    runGit(['branch', 'main'], projectRoot);
+    commitFiles([['docs/runbook.md', '# runbook\n']], 'doc-only change');
+    emitExemptRow(nowSeconds - 5);
+
+    const result = runHook(gatePrPush, {
+      tool_name: 'Bash',
+      tool_input: {
+        command: 'gh pr create --fill',
+      },
+    }, {
+      CTX_PROJECT_ROOT: projectRoot,
+      PIPELINE_SECRET_PATH: secretPath,
+      PIPELINE_TRANSCRIPT_ROOT_OVERRIDE: projectsRoot,
+    }, projectRoot);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('blocks exempt-misuse when the PR diff touches code files', () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    runGit(['branch', 'main'], projectRoot);
+    commitFiles([
+      ['docs/runbook.md', '# runbook\n'],
+      ['src/patch.ts', 'export const patched = true;\n'],
+    ], 'doc plus code change');
+    emitExemptRow(nowSeconds - 5);
+
+    const result = runHook(gatePrPush, {
+      tool_name: 'Bash',
+      tool_input: {
+        command: 'gh pr create --fill',
+      },
+    }, {
+      CTX_PROJECT_ROOT: projectRoot,
+      PIPELINE_SECRET_PATH: secretPath,
+      PIPELINE_TRANSCRIPT_ROOT_OVERRIDE: projectsRoot,
+    }, projectRoot);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('"decision":"block"');
+    expect(result.stdout).toContain('exempt-misuse');
+    expect(result.stdout).toContain('src/patch.ts');
+  });
+
+  it('doc-only PR without an exempt row still requires the true-verify chain', () => {
+    runGit(['branch', 'main'], projectRoot);
+    commitFiles([['docs/runbook.md', '# runbook\n']], 'doc-only change');
+
+    const result = runHook(gatePrPush, {
+      tool_name: 'Bash',
+      tool_input: {
+        command: 'gh pr create --fill',
+      },
+    }, {
+      CTX_PROJECT_ROOT: projectRoot,
+      PIPELINE_SECRET_PATH: secretPath,
+      PIPELINE_TRANSCRIPT_ROOT_OVERRIDE: projectsRoot,
+    }, projectRoot);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('"decision":"block"');
+    expect(result.stdout).not.toContain('exempt-misuse');
   });
 });

@@ -1211,9 +1211,10 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     // Skip Hermes — no daemon-side scheduler
     if (this.agent.getConfig().runtime === 'hermes') return;
     // Skip when agent process not running
-    if (typeof (this.agent as { isRunning?: () => boolean }).isRunning === 'function') {
+    const maybeIsRunning = (this.agent as { isRunning?: () => boolean }).isRunning;
+    if (typeof maybeIsRunning === 'function') {
       try {
-        if (!(this.agent as { isRunning: () => boolean }).isRunning()) return;
+        if (!maybeIsRunning.call(this.agent)) return;
       } catch { /* continue */ }
     }
 

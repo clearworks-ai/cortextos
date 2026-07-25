@@ -1,0 +1,8 @@
+{
+  "min_edges": 1,
+  "frontmatter_edges_min": 0,
+  "resolve": [
+    { "name": "Josh", "expect_prefix": "people/" }
+  ],
+  "queries": []
+}

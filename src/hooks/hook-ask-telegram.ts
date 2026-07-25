@@ -1,4 +1,3 @@
-
 /**
  * hook-ask-telegram.ts - Non-blocking PreToolUse hook for AskUserQuestion
  * Sends question(s) to Telegram, saves state file, exits immediately.
@@ -17,6 +16,7 @@ import {
 } from './index';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { shouldDenyFast, buildPreToolUseDenyOutput, emitTelegramSuppressedEvent } from './lib/session-context';
 
 async function main(): Promise<void> {
   const input = await readStdin();
@@ -28,6 +28,23 @@ async function main(): Promise<void> {
   }
 
   const env = loadEnv();
+
+  const denyFast = shouldDenyFast(env.stateDir);
+  if (denyFast.deny) {
+    emitTelegramSuppressedEvent({
+      hook: 'hook-ask-telegram',
+      toolName: 'AskUserQuestion',
+      source: denyFast.source,
+      cronName: denyFast.source === 'cron' ? denyFast.cronName : undefined,
+      firedAt: denyFast.source === 'cron' ? denyFast.firedAt : undefined,
+    });
+    process.stdout.write(
+      buildPreToolUseDenyOutput(
+        `${denyFast.reason} — AskUserQuestion blocked; answer with your best judgment and continue`,
+      ) + '\n',
+    );
+    process.exit(0);
+  }
 
   if (!env.botToken || !env.chatId) {
     process.exit(0);
@@ -61,7 +78,9 @@ async function main(): Promise<void> {
   process.exit(0);
 }
 
-main().catch((err) => {
-  process.stderr.write(`hook-ask-telegram error: ${err}\n`);
-  process.exit(0);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    process.stderr.write(`hook-ask-telegram error: ${err}\n`);
+    process.exit(0);
+  });
+}

@@ -21,6 +21,7 @@
 import { readStdin, loadEnv } from './index.js';
 import { logEvent } from '../bus/event.js';
 import { resolvePaths } from '../utils/paths.js';
+import { shouldDenyFast } from './lib/session-context.js';
 
 const TELEGRAM_MAX = 200; // single-line wrap-safe cap
 
@@ -275,6 +276,7 @@ async function main(): Promise<void> {
   if (isTrivial(tool_name, tool_input)) return;
 
   const env = loadEnv();
+  const denyFast = shouldDenyFast(env.stateDir);
   const agentName = env.agentName || 'agent';
   const org = process.env.CTX_ORG || '';
 
@@ -290,12 +292,14 @@ async function main(): Promise<void> {
       summary: line,
       tool_input: tool_input,
       tool_result: result,
+      telegramSuppressed: denyFast.deny,
     });
   } catch {
     // Activity feed is best-effort.
   }
 
   // 2. Telegram (best-effort; never blocks). One line, agent name prefix.
+  if (denyFast.deny) return;
   if (!env.botToken || !env.chatId) return;
 
   const message = `[${agentName}] ${line}`.slice(0, TELEGRAM_MAX);
@@ -321,4 +325,6 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch(() => process.exit(0));
+if (require.main === module) {
+  main().catch(() => process.exit(0));
+}

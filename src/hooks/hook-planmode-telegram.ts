@@ -19,6 +19,7 @@ import {
 import { join } from 'path';
 import { mkdirSync, readFileSync, existsSync, readdirSync, statSync } from 'fs';
 import { homedir } from 'os';
+import { shouldDenyFast, emitTelegramSuppressedEvent } from './lib/session-context';
 
 export interface PlanDecisionResult {
   decision: 'allow' | 'deny';
@@ -89,6 +90,19 @@ async function main(): Promise<void> {
   const { tool_input } = parseHookInput(input);
 
   const env = loadEnv();
+
+  const denyFast = shouldDenyFast(env.stateDir);
+  if (denyFast.deny) {
+    emitTelegramSuppressedEvent({
+      hook: 'hook-planmode-telegram',
+      toolName: 'ExitPlanMode',
+      source: denyFast.source,
+      cronName: denyFast.source === 'cron' ? denyFast.cronName : undefined,
+      firedAt: denyFast.source === 'cron' ? denyFast.firedAt : undefined,
+    });
+    outputDecision('allow');
+    return;
+  }
 
   if (!env.botToken || !env.chatId) {
     outputDecision('allow');

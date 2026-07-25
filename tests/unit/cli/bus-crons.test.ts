@@ -32,8 +32,27 @@ import type { CronDefinition } from '../../../src/types/index';
 // IPC mock — prevent real socket connections in unit tests.
 // ---------------------------------------------------------------------------
 
-// Default mock: daemon is running and all IPC calls succeed.
-const mockIpcSend = vi.fn().mockResolvedValue({ success: true, data: 'mocked' });
+// Default mock: daemon is running and reload-verify succeeds with live nextFireTimes.
+// Tests that need "absent" (remove/disable) can override mockIpcSend per-test.
+const mockIpcSend = vi.fn().mockImplementation(async (req: { type?: string; agent?: string }) => {
+  if (req?.type === 'reload-crons') {
+    return {
+      success: true,
+      data: {
+        message: `Crons reloaded for ${req.agent}`,
+        nextFireTimes: [
+          { name: 'heartbeat', nextFireAt: Date.now() + 60_000 },
+          { name: 'morning-briefing', nextFireAt: Date.now() + 120_000 },
+          { name: 'temp', nextFireAt: Date.now() + 60_000 },
+          { name: 'daily', nextFireAt: Date.now() + 60_000 },
+          { name: 'x', nextFireAt: Date.now() + 60_000 },
+          { name: 'y', nextFireAt: Date.now() + 60_000 },
+        ],
+      },
+    };
+  }
+  return { success: true, data: 'mocked' };
+});
 const mockIpcIsDaemonRunning = vi.fn().mockResolvedValue(true);
 
 vi.mock('../../../src/daemon/ipc-server.js', () => {
@@ -111,7 +130,7 @@ beforeEach(() => {
   process.env.CTX_ROOT = tmpRoot;
   process.env.CTX_FRAMEWORK_ROOT = frameworkRoot;
   process.env.CTX_AGENT_NAME = TEST_AGENT;
-  process.env.CTX_INSTANCE_ID = 'default';
+  process.env.CTX_INSTANCE_ID = 'cortextos1';
   process.env.CTX_AGENT_DIR = join(frameworkRoot, 'orgs', 'lifeos', 'agents', TEST_AGENT);
   process.env.CTX_PROJECT_ROOT = frameworkRoot;
   process.env.CTX_ORG = 'lifeos';
@@ -174,8 +193,8 @@ describe('bus add-cron', () => {
       'Read HEARTBEAT.md and run heartbeat workflow.',
     ]);
 
-    expect(errSpy).not.toHaveBeenCalled();
-    expect(logSpy).toHaveBeenCalledWith(`Added cron 'heartbeat' for ${TEST_AGENT}`);
+    expect(errSpy.mock.calls.flat().join('\n')).not.toMatch(/Error:/);
+    expect(logSpy.mock.calls.flat().join('\n')).toMatch(/Added cron 'heartbeat'.*live in scheduler/);
 
     const crons = readCronsFile();
     expect(crons).toHaveLength(1);
@@ -194,7 +213,7 @@ describe('bus add-cron', () => {
       'Prepare and send the morning briefing.',
     ]);
 
-    expect(logSpy).toHaveBeenCalledWith(`Added cron 'morning-briefing' for ${TEST_AGENT}`);
+    expect(logSpy.mock.calls.flat().join('\n')).toMatch(/Added cron 'morning-briefing'.*live in scheduler/);
 
     const crons = readCronsFile();
     expect(crons).toHaveLength(1);
@@ -305,10 +324,23 @@ describe('bus remove-cron', () => {
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockIpcSend.mockImplementationOnce(async (req: { type?: string; agent?: string }) => {
+      if (req?.type === 'reload-crons') {
+        return {
+          success: true,
+          data: {
+            message: `reloaded`,
+            // heartbeat absent after remove
+            nextFireTimes: [{ name: 'morning-briefing', nextFireAt: Date.now() + 60_000 }],
+          },
+        };
+      }
+      return { success: true, data: 'mocked' };
+    });
 
     await busCommand.parseAsync(['node', 'bus', 'remove-cron', TEST_AGENT, 'heartbeat']);
 
-    expect(logSpy).toHaveBeenCalledWith(`Removed cron 'heartbeat' from ${TEST_AGENT}`);
+    expect(logSpy.mock.calls.flat().join('\n')).toMatch(/Removed cron 'heartbeat'.*cleared from live scheduler/);
 
     const crons = readCronsFile();
     expect(crons).toHaveLength(1);
@@ -429,6 +461,12 @@ describe('bus update-cron', () => {
   it('disables a cron (--enabled false)', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockIpcSend.mockImplementationOnce(async (req: { type?: string }) => {
+      if (req?.type === 'reload-crons') {
+        return { success: true, data: { message: 'reloaded', nextFireTimes: [] } };
+      }
+      return { success: true, data: 'mocked' };
+    });
 
     await busCommand.parseAsync([
       'node', 'bus', 'update-cron', TEST_AGENT, 'heartbeat', '--enabled', 'false',

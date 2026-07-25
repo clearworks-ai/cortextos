@@ -27,8 +27,10 @@
 
 import { homedir } from 'os';
 import { join } from 'path';
+import { existsSync, statSync } from 'fs';
 import { parseDurationMs, readCronState } from '../bus/cron-state.js';
 import { readCronsWithStatus, updateCron } from '../bus/crons.js';
+import { CRONS_DIRECTORY, CRONS_FILENAME } from '../bus/crons-schema.js';
 import type { CronDefinition } from '../types/index.js';
 import { appendExecutionLog } from './cron-execution-log.js';
 
@@ -267,6 +269,9 @@ export class CronScheduler {
   /** Epoch ms of the tick interval, exposed so tests can override. */
   static readonly TICK_INTERVAL_MS = 30_000;
 
+  /** mtimeMs of crons.json at last successful load (mtime self-heal). */
+  private lastLoadedMtimeMs = 0;
+
   constructor(opts: CronSchedulerOptions) {
     this.agentName = opts.agentName;
     this.onFire    = opts.onFire;
@@ -341,6 +346,15 @@ export class CronScheduler {
   private loadCrons(isReload: boolean): void {
     const now = Date.now();
     const { crons: defs, corrupt } = readCronsWithStatus(this.agentName);
+    try {
+      const ctxRoot = process.env.CTX_ROOT ?? process.cwd();
+      const filePath = join(ctxRoot, CRONS_DIRECTORY, this.agentName, CRONS_FILENAME);
+      if (existsSync(filePath)) {
+        this.lastLoadedMtimeMs = statSync(filePath).mtimeMs;
+      }
+    } catch {
+      // missing file — leave lastLoadedMtimeMs
+    }
     const nextScheduled = new Map<string, ScheduledCron>();
 
     // Read cron-state.json so catch-up sees fires recorded by `bus update-cron-fire`
@@ -462,6 +476,20 @@ export class CronScheduler {
   }
 
   private async tick(): Promise<void> {
+    // mtime self-heal: external crons.json writes land within one tick even if IPC is lost
+    try {
+      const ctxRoot = process.env.CTX_ROOT ?? process.cwd();
+      const filePath = join(ctxRoot, CRONS_DIRECTORY, this.agentName, CRONS_FILENAME);
+      if (existsSync(filePath)) {
+        const mtimeMs = statSync(filePath).mtimeMs;
+        if (mtimeMs > this.lastLoadedMtimeMs) {
+          this.loadCrons(true);
+        }
+      }
+    } catch {
+      // missing/unreadable — skip heal
+    }
+
     const now = Date.now();
 
     for (const [name, sc] of this.scheduled) {

@@ -7,6 +7,8 @@ import type { InboxMessage, BusPaths, TelegramMessage, TelegramCallbackQuery, Co
 import { checkInbox, ackInbox, sendMessage } from '../bus/message.js';
 import { updateApproval } from '../bus/approval.js';
 import { readCronState } from '../bus/cron-state.js';
+import { readCrons } from '../bus/crons.js';
+import { evaluateCronLiveness } from './cron-liveness.js';
 import { AgentProcess } from './agent-process.js';
 import type { TelegramAPI } from '../telegram/api.js';
 import { KEYS } from '../pty/inject.js';
@@ -182,6 +184,9 @@ export class FastChecker {
   private stallCircuitRestarts: number[] = [];
   private stallCircuitBrokenAt: number | null = null;
   private stallCircuitFile: string = '';
+  private cronLivenessLastCheckedAt = 0;
+  private cronLivenessLastEscalationAt = 0;
+  private cronLivenessOverdueStreak = 0;
 
   constructor(
     agent: AgentProcess,
@@ -357,6 +362,9 @@ export class FastChecker {
     if (this.evaluateStallWatchdog(unreadInboxCount)) {
       return;
     }
+
+    // Throttled cron-liveness (once/min) — escalate overdue fired-but-missed crons
+    await this.checkCronLiveness(Date.now());
 
     // Context monitor: check usage thresholds and fire warnings/handoffs
     await this.checkContextStatus();
@@ -1189,6 +1197,71 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       const ts = Date.parse(record.last_fire);
       return Number.isNaN(ts) ? latest : Math.max(latest, ts);
     }, 0);
+  }
+
+  /**
+   * Overdue-cron detector (cron-register-reliability Phase 6).
+   * reload first, restart second, circuit third — uses existing restart machinery.
+   */
+  private async checkCronLiveness(now: number): Promise<void> {
+    if (now - this.cronLivenessLastCheckedAt < 60_000) return;
+    const lastCheck = this.cronLivenessLastCheckedAt || now;
+    this.cronLivenessLastCheckedAt = now;
+
+    // Skip Hermes — no daemon-side scheduler
+    if (this.agent.getConfig().runtime === 'hermes') return;
+    // Skip when agent process not running
+    if (typeof (this.agent as { isRunning?: () => boolean }).isRunning === 'function') {
+      try {
+        if (!(this.agent as { isRunning: () => boolean }).isRunning()) return;
+      } catch { /* continue */ }
+    }
+
+    let crons;
+    try {
+      crons = readCrons(this.agent.name);
+    } catch {
+      return;
+    }
+    const state = readCronState(this.paths.stateDir);
+    const stateByName = new Map(state.crons.map((c) => [c.name, c.last_fire]));
+
+    let anyOverdue = false;
+    for (const cron of crons) {
+      if (cron.enabled === false) continue;
+      const result = evaluateCronLiveness({
+        cron,
+        stateLastFire: stateByName.get(cron.name),
+        nowMs: now,
+        lastCheckMs: lastCheck,
+      });
+      if (result.wakeSkip) {
+        this.cronLivenessOverdueStreak = 0;
+        return;
+      }
+      if (result.overdue) {
+        anyOverdue = true;
+        this.log(`Cron liveness: ${result.reason}`);
+      }
+    }
+
+    if (!anyOverdue) {
+      this.cronLivenessOverdueStreak = 0;
+      return;
+    }
+
+    this.cronLivenessOverdueStreak += 1;
+    if (this.cronLivenessOverdueStreak === 1) {
+      // First detection: soft log only (self-heal expected via mtime tick / reload).
+      this.log('Cron liveness: overdue detected — waiting one more cycle before restart escalation');
+      return;
+    }
+
+    // Second consecutive: escalate via existing sessionRefresh + circuit
+    if (now - this.cronLivenessLastEscalationAt < 15 * 60_000) return;
+    this.cronLivenessLastEscalationAt = now;
+    this.log('Cron liveness: escalating via sessionRefresh');
+    this.agent.sessionRefresh().catch((err) => this.log(`Cron liveness restart failed: ${err}`));
   }
 
   /**

@@ -78,7 +78,7 @@ const STALE_PATTERNS: StalePattern[] = [
     name: 'CronCreate',
     match: (line) => /\bCronCreate\b/.test(line),
     suggestion:
-      "Use 'cortextos bus add-cron <agent> <name> <interval> <prompt>' for persistent crons. Keep CronCreate only for one-shot reminders (recurring: false).",
+      "Use 'cortextos bus add-cron <agent> <name> <interval> <prompt>' for persistent crons. One-shot reminders: 'cortextos bus add-reminder'.",
   },
   {
     name: '/loop create cron',

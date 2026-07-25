@@ -297,34 +297,74 @@ describePrHook('pr push gate hook', () => {
     runGit(['remote', 'set-url', 'origin', url], projectRoot);
   }
 
-  function seedReviewChain(nowSeconds: number): LedgerRow {
-    const planSession = 'plan-session';
+  function pathsForSlug(slug: string) {
+    const dir = join(projectRoot, '.agent', 'one-big-feature', slug);
+    return {
+      slugDir: dir,
+      researchPath: join(dir, '01-research.md'),
+      planPath: join(dir, '02-master-plan.md'),
+      specsDir: join(dir, '03-specs'),
+      specPath: join(dir, '03-specs', '01-signed-stage-ledger.md'),
+      reviewPath: join(dir, '04-review.md'),
+      stagingArtifactPath: join(dir, '05-staging-build.txt'),
+      stagingEvidencePath: join(dir, '05-staging-evidence.log'),
+      trueVerifyArtifactPath: join(dir, '06-true-verify-build.txt'),
+      trueVerifyEvidencePath: join(dir, '06-true-verify-evidence.log'),
+    };
+  }
+
+  function ensureSlugArtifacts(slug: string): ReturnType<typeof pathsForSlug> {
+    const paths = pathsForSlug(slug);
+    mkdirSync(paths.specsDir, { recursive: true });
+    writeFileSync(paths.researchPath, '# research\n', 'utf-8');
+    writeFileSync(paths.planPath, '# master plan\n', 'utf-8');
+    writeFileSync(paths.specPath, '# signed spec\n', 'utf-8');
+    writeFileSync(paths.reviewPath, '# review\n', 'utf-8');
+    writeFileSync(paths.stagingArtifactPath, 'staging build\n', 'utf-8');
+    writeFileSync(paths.stagingEvidencePath, 'staging ok\n', 'utf-8');
+    writeFileSync(paths.trueVerifyArtifactPath, 'true verify build\n', 'utf-8');
+    writeFileSync(paths.trueVerifyEvidencePath, 'true verify ok\n', 'utf-8');
+    return paths;
+  }
+
+  function seedReviewChain(nowSeconds: number, slug = 'hard-spec-gate'): LedgerRow {
+    const paths = slug === 'hard-spec-gate'
+      ? {
+          researchPath,
+          planPath,
+          specsDir,
+          specPath,
+          reviewPath,
+        }
+      : ensureSlugArtifacts(slug);
+
+    const planSession = `plan-session-${slug}`;
     const planTranscript = join(projectsRoot, 'larry', planSession, 'subagents', 'agent-plan.jsonl');
-    writeAuthoredTranscript(planTranscript, planSession, planPath, '# master plan\n');
-    writeFileSync(planPath, '# master plan\n', 'utf-8');
+    writeAuthoredTranscript(planTranscript, planSession, paths.planPath, '# master plan\n');
+    writeFileSync(paths.planPath, '# master plan\n', 'utf-8');
 
-    const specsSession = 'specs-session';
+    const specsSession = `specs-session-${slug}`;
     const specsTranscript = join(projectsRoot, 'larry', specsSession, 'subagents', 'agent-specs.jsonl');
-    writeAuthoredTranscript(specsTranscript, specsSession, specPath, '# signed spec\n');
-    writeFileSync(specPath, '# signed spec\n', 'utf-8');
+    writeAuthoredTranscript(specsTranscript, specsSession, paths.specPath, '# signed spec\n');
+    writeFileSync(paths.specPath, '# signed spec\n', 'utf-8');
 
-    const reviewSession = 'review-session';
+    const reviewSession = `review-session-${slug}`;
     const reviewTranscript = join(projectsRoot, 'larry', reviewSession, 'subagents', 'agent-review.jsonl');
-    writeAuthoredTranscript(reviewTranscript, reviewSession, reviewPath, '# review\n');
-    writeFileSync(reviewPath, '# review\n', 'utf-8');
+    writeAuthoredTranscript(reviewTranscript, reviewSession, paths.reviewPath, '# review\n');
+    writeFileSync(paths.reviewPath, '# review\n', 'utf-8');
 
     emitLedgerRow({
-      slug: 'hard-spec-gate',
+      slug,
       stage: 'research',
-      artifactPath: researchPath,
+      artifactPath: paths.researchPath,
       ledgerPath,
       secretPath,
       nowSeconds: nowSeconds - 40,
     });
     emitLedgerRow({
-      slug: 'hard-spec-gate',
+      slug,
       stage: 'plan',
-      artifactPath: planPath,
+      artifactPath: paths.planPath,
       runner: 'fable-lean',
       sessionId: planSession,
       transcriptPath: planTranscript,
@@ -334,9 +374,9 @@ describePrHook('pr push gate hook', () => {
       nowSeconds: nowSeconds - 30,
     });
     emitLedgerRow({
-      slug: 'hard-spec-gate',
+      slug,
       stage: 'specs',
-      artifactPath: specsDir,
+      artifactPath: paths.specsDir,
       runner: 'architect',
       sessionId: specsSession,
       transcriptPath: specsTranscript,
@@ -346,9 +386,9 @@ describePrHook('pr push gate hook', () => {
       nowSeconds: nowSeconds - 20,
     });
     return emitLedgerRow({
-      slug: 'hard-spec-gate',
+      slug,
       stage: 'review',
-      artifactPath: reviewPath,
+      artifactPath: paths.reviewPath,
       runner: 'larry',
       sessionId: reviewSession,
       transcriptPath: reviewTranscript,
@@ -359,28 +399,34 @@ describePrHook('pr push gate hook', () => {
     });
   }
 
-  function emitStagingRow(nowSeconds: number): void {
-    writeFileSync(stagingArtifactPath, `staging build ${nowSeconds}\n`, 'utf-8');
-    writeFileSync(stagingEvidencePath, 'staging ok\n', 'utf-8');
+  function emitStagingRow(nowSeconds: number, slug = 'hard-spec-gate'): void {
+    const paths = slug === 'hard-spec-gate'
+      ? { stagingArtifactPath, stagingEvidencePath }
+      : ensureSlugArtifacts(slug);
+    writeFileSync(paths.stagingArtifactPath, `staging build ${nowSeconds}\n`, 'utf-8');
+    writeFileSync(paths.stagingEvidencePath, 'staging ok\n', 'utf-8');
     emitLedgerRow({
-      slug: 'hard-spec-gate',
+      slug,
       stage: 'staging-verify',
-      artifactPath: stagingArtifactPath,
-      evidencePath: stagingEvidencePath,
+      artifactPath: paths.stagingArtifactPath,
+      evidencePath: paths.stagingEvidencePath,
       ledgerPath,
       secretPath,
       nowSeconds,
     });
   }
 
-  function emitTrueVerifyRow(nowSeconds: number): void {
-    writeFileSync(trueVerifyArtifactPath, `true verify build ${nowSeconds}\n`, 'utf-8');
-    writeFileSync(trueVerifyEvidencePath, 'true verify ok\n', 'utf-8');
+  function emitTrueVerifyRow(nowSeconds: number, slug = 'hard-spec-gate'): void {
+    const paths = slug === 'hard-spec-gate'
+      ? { trueVerifyArtifactPath, trueVerifyEvidencePath }
+      : ensureSlugArtifacts(slug);
+    writeFileSync(paths.trueVerifyArtifactPath, `true verify build ${nowSeconds}\n`, 'utf-8');
+    writeFileSync(paths.trueVerifyEvidencePath, 'true verify ok\n', 'utf-8');
     emitLedgerRow({
-      slug: 'hard-spec-gate',
+      slug,
       stage: 'true-verify',
-      artifactPath: trueVerifyArtifactPath,
-      evidencePath: trueVerifyEvidencePath,
+      artifactPath: paths.trueVerifyArtifactPath,
+      evidencePath: paths.trueVerifyEvidencePath,
       ledgerPath,
       secretPath,
       nowSeconds,
@@ -547,5 +593,115 @@ describePrHook('pr push gate hook', () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toBe('');
+  });
+
+  it('client-repo PR with --head passes on the client slug', () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    setOrigin('git@github.com:joshweiss/cortextos.git');
+    seedReviewChain(nowSeconds, 'slack-todo-client');
+    emitTrueVerifyRow(nowSeconds - 5, 'slack-todo-client');
+
+    const result = runHook(gatePrPush, {
+      tool_name: 'Bash',
+      tool_input: {
+        command:
+          'gh pr create --repo alloius/JobTread-Automation --base main --head feat/slack-todo-client --fill',
+      },
+    }, {
+      CTX_PROJECT_ROOT: projectRoot,
+      PIPELINE_SECRET_PATH: secretPath,
+      PIPELINE_TRANSCRIPT_ROOT_OVERRIDE: projectsRoot,
+    }, projectRoot);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('client-repo PR without provenance blocks with NO_ROWS on the CLIENT slug', () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    setOrigin('git@github.com:joshweiss/cortextos.git');
+    seedReviewChain(nowSeconds);
+    emitTrueVerifyRow(nowSeconds - 5);
+
+    const result = runHook(gatePrPush, {
+      tool_name: 'Bash',
+      tool_input: {
+        command:
+          'gh pr create --repo alloius/JobTread-Automation --base main --head feat/slack-todo-client --fill',
+      },
+    }, {
+      CTX_PROJECT_ROOT: projectRoot,
+      PIPELINE_SECRET_PATH: secretPath,
+      PIPELINE_TRANSCRIPT_ROOT_OVERRIDE: projectsRoot,
+    }, projectRoot);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('"decision":"block"');
+    expect(
+      result.stdout.includes('slack-todo-client') || result.stdout.includes('NO_ROWS'),
+    ).toBe(true);
+  });
+
+  it('--repo without --head against a foreign checkout blocks', () => {
+    setOrigin('git@github.com:joshweiss/cortextos.git');
+
+    const result = runHook(gatePrPush, {
+      tool_name: 'Bash',
+      tool_input: {
+        command: 'gh pr create --repo alloius/JobTread-Automation --base main --fill',
+      },
+    }, {
+      CTX_PROJECT_ROOT: projectRoot,
+      PIPELINE_SECRET_PATH: secretPath,
+      PIPELINE_TRANSCRIPT_ROOT_OVERRIDE: projectsRoot,
+    }, projectRoot);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('"decision":"block"');
+    expect(
+      result.stdout.includes('--head') ||
+        result.stdout.includes('alloius/JobTread-Automation') ||
+        result.stdout.includes('CROSS_REPO_NO_HEAD'),
+    ).toBe(true);
+  });
+
+  it('--repo naming a prod repo enforces staging-first from any checkout', () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    setOrigin('git@github.com:joshweiss/cortextos.git');
+    seedReviewChain(nowSeconds);
+    emitTrueVerifyRow(nowSeconds - 5);
+
+    const blocked = runHook(gatePrPush, {
+      tool_name: 'Bash',
+      tool_input: {
+        command:
+          'gh pr create --repo clearworks-ai/clearpath --head feature/hard-spec-gate --fill',
+      },
+    }, {
+      CTX_PROJECT_ROOT: projectRoot,
+      PIPELINE_SECRET_PATH: secretPath,
+      PIPELINE_TRANSCRIPT_ROOT_OVERRIDE: projectsRoot,
+    }, projectRoot);
+
+    expect(blocked.status).toBe(0);
+    expect(blocked.stdout).toContain('"decision":"block"');
+    expect(blocked.stdout).toContain('Staging-First');
+
+    emitStagingRow(nowSeconds - 10);
+
+    const passed = runHook(gatePrPush, {
+      tool_name: 'Bash',
+      tool_input: {
+        command:
+          'gh pr create --repo clearworks-ai/clearpath --head feature/hard-spec-gate --fill',
+      },
+    }, {
+      CTX_PROJECT_ROOT: projectRoot,
+      PIPELINE_SECRET_PATH: secretPath,
+      PIPELINE_TRANSCRIPT_ROOT_OVERRIDE: projectsRoot,
+    }, projectRoot);
+
+    expect(passed.status).toBe(0);
+    expect(passed.stdout).toBe('');
   });
 });

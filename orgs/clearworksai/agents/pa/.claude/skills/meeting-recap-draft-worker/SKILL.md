@@ -14,7 +14,7 @@ DO:
 
 If a Telegram status message would report anything other than what a bash block's actual stdout/exit code says (e.g. "key missing", "degraded"), that is a bug — re-run the literal block instead of writing a status from memory/assumption.
 
-**DRAFT ONLY — never call any Gmail send tool. The only Gmail tool this worker may call is `mcp__claude_ai_Gmail__create_draft`.**
+**DRAFT ONLY — the only Gmail path this worker may use is the `gws gmail +send --draft` bash command (Step 5). It saves a Gmail draft; it does NOT send. Never omit `--draft`, never call a Gmail MCP tool (pa has no Gmail MCP configured — canonical path is `gws` + DWD token).**
 
 ---
 
@@ -85,24 +85,33 @@ Do NOT append here — append happens in Step 5 only after the draft is actually
 
 ## Step 5 — Create the Gmail draft (one per NEW meeting)
 
-For each NEW meeting, call the Gmail MCP tool `mcp__claude_ai_Gmail__create_draft` with:
+For each NEW meeting, compose the recap then create the draft with the `gws gmail +send --draft` bash block below. `--draft` saves a Gmail draft (it does NOT send).
 
-- **to:** `weissjosh0@gmail.com` (default self-draft — Josh reviews/edits/sends. Do NOT auto-address meeting attendees.)
-- **subject:** `Recap: <title> — <date YYYY-MM-DD>`
-- **body:**
+Compose these values first:
+
+- **SUBJECT:** `Recap: <title> — <date YYYY-MM-DD>`
+- **TO:** `josh@clearworks.ai` (default self-draft — Josh reviews/edits/sends. Do NOT auto-address meeting attendees.)
+- **BODY:**
   1. One recap paragraph from `summary.overview` (fallback: `summary.bullets`, then `summary.action_items`; if all empty, one neutral line naming the meeting + attendees).
   2. Blank line, then `Next steps:` followed by a numbered list of `next_steps[].text`. Render inbound items (`direction == "inbound"`, text prefixed `[inbound] Owner: ...`) as `Owner: action`; render outbound items as `Josh: action`. If `next_steps` is empty, write `Next steps: none captured.`
   3. Footer line: `— drafted automatically from the Fireflies transcript (<sourceRef meeting id>); review before sending.`
 
-**NEVER call any send tool.** Draft only.
+Then run (BODY may be multi-line — pass it as a single quoted arg):
 
-Only AFTER `create_draft` returns success for a meeting:
+```bash
+gws gmail +send --to josh@clearworks.ai --subject "$SUBJECT" --body "$BODY" --draft
+echo "gws_draft_rc=$?"
+```
+
+**NEVER omit `--draft`** — that is what makes it a draft, not a send. No Gmail MCP tool.
+
+Only AFTER `gws_draft_rc` is `0` for a meeting:
 
 ```bash
 echo "$MEETING_ID $(date -u +%s)" >> "$LEDGER"
 ```
 
-If `create_draft` fails or the Gmail MCP tool is unavailable: do NOT append the ledger (the meeting retries next run), log `recap_degraded_no_gmail` via `cortextos bus log-event action recap_degraded_no_gmail warn 2>/dev/null`, continue to Step 6.
+If `gws_draft_rc` is nonzero (or `gws` is unavailable): do NOT append the ledger (the meeting retries next run), log `recap_degraded_no_gmail` via `cortextos bus log-event action recap_degraded_no_gmail warn 2>/dev/null`, continue to Step 6.
 
 If `meetings` is empty or everything was deduped/excluded: SILENT-OK — log silently, no drafts, no Telegram.
 

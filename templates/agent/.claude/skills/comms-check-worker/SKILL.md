@@ -66,9 +66,20 @@ Run these 4 checks (Bash):
    Skip auto-renewing subs (CalendarBridge, Senja, Google Workspace, Supabase).
    For real AP: `gws gmail +read --id <id> --headers` to extract vendor, amount, payment link, due date.
 
-2. **JOSH INBOX**: `gws gmail +triage --query 'is:unread newer_than:1h -category:promotions -category:social -from:notify.railway.app' --format json | cortextos bus comms-filter --namespace gmail --surface --chat 6690120787`
-   This deterministic surface command is the ONLY allowed email-notify path for unread Gmail. It records each message id in the shared dedup ledger and sends the fixed `[EMAIL]` template for first-seen items, so an already-announced email can never reach Josh a second time regardless of rewording.
-   HARD RULE: do NOT read raw `is:unread` results and compose a Telegram email notification yourself. If you need follow-on reasoning, use the JSON emitted by the deterministic command, then `gws gmail +read --id <id> --headers` for those surfaced ids only.
+2. **JOSH INBOX** — TWO STEPS. Do NOT pipe the raw fetch straight into `comms-filter --surface` — that sends atomically on first-seen, before you ever get a chance to apply the exclusion rules above, which is exactly how non-human mail (automated reports, receipts) slipped through on 2026-07-25.
+
+   a. Fetch raw candidates only, do not send yet:
+      `gws gmail +triage --query 'is:unread newer_than:1h -category:promotions -category:social -from:notify.railway.app' --format json > /tmp/josh-inbox-raw.json`
+
+   b. Apply every HARD EXCLUSION / OOO-AUTO-REPLY / COLD-INBOUND-SPAM rule above to each item's `from`/`subject`/`snippet` YOURSELF, and drop non-surviving items. Also treat as HARD EXCLUSIONS (automated/non-human, skip silently):
+      - Any transactional receipt/invoice/report sender: `receipts@*`, `billing@*`, `info@raisedonors.com`, or subject matching "Receipt", "Invoice #", "Report" from a non-human/automated sender
+      - Any bulk-mail platform domain: `*.beehiiv.com`, `*.mailchimp.com`, `*.substack.com`, `*.convertkit.com` — unless the sender is a known human relationship
+      Write the surviving items (same `{ "emails": [...] }` shape as the input) to `/tmp/josh-inbox-filtered.json`.
+
+   c. Pipe ONLY the filtered file into the deterministic surface command — this stays the ONLY allowed send path; dedup+send is still atomic and you never hand-compose the Telegram text:
+      `cat /tmp/josh-inbox-filtered.json | cortextos bus comms-filter --namespace gmail --surface --chat 6690120787`
+
+   If you need follow-on reasoning, use the JSON emitted by the deterministic command, then `gws gmail +read --id <id> --headers` for those surfaced ids only.
 
 3. **GITHUB CI FAILURES**: `gws gmail +triage --query 'from:notifications@github.com subject:"Run failed" newer_than:6h' --format json`
    Group by repo.

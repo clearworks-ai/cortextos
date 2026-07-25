@@ -971,7 +971,11 @@ function buildChain(rows: LedgerRow[], terminal: LedgerRow, secret: string): Led
         detail: `Invalid signature on ${cursor.slug}:${cursor.stage}`,
       };
     }
-    if (cursor.ts >= lastTs) {
+    // stageRank (below) + the allowedPreviousStages transition check own strict stage
+    // ordering; this guard only rejects genuine backward time travel — a later stage
+    // timestamped before an earlier one (clock skew / forged row). Same-second ties
+    // from rapid emits are legitimate.
+    if (cursor.ts > lastTs) {
       return {
         ok: false,
         code: 'OUT_OF_ORDER',

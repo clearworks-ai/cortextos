@@ -2852,6 +2852,11 @@ busCommand
       console.log(
         `filed: entities=${result.entitiesFiled} edges=${result.edgesFiled} pages=${result.pagesWritten.length}`,
       );
+      if (result.entitiesSkipped.length > 0 || result.edgesSkipped.length > 0) {
+        const entPart = `entities=[${result.entitiesSkipped.join(', ')}]`;
+        const edgePart = `edges=[${result.edgesSkipped.join(', ')}]`;
+        console.log(`skipped: ${entPart} ${edgePart}`);
+      }
     } catch (err) {
       console.error(err instanceof Error ? err.message : String(err));
       process.exit(1);

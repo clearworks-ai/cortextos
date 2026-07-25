@@ -1302,6 +1302,21 @@ export class AgentManager {
   }
 
   /**
+   * Live next-fire schedule for an agent (used by reload-crons verify protocol).
+   * Empty when no scheduler is wired (Hermes / unknown / start-window fail).
+   */
+  getCronNextFireTimes(agentName: string): Array<{ name: string; nextFireAt: number }> {
+    return this.cronSchedulers.get(agentName)?.getNextFireTimes() ?? [];
+  }
+
+  /** Runtime label for reload-crons CLI short-circuit (hermes vs claude/opencode). */
+  getAgentRuntime(agentName: string): string | undefined {
+    const entry = this.agents.get(agentName);
+    if (!entry) return undefined;
+    return entry.process['config']?.runtime as string | undefined;
+  }
+
+  /**
    * Wire a daemon-level CronScheduler for the named agent.
    *
    * The scheduler reads `crons.json` (via `readCrons()`), computes fire times,

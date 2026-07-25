@@ -68,10 +68,11 @@ import { evaluateCiAlert, gatherCiAlertContext } from '../utils/ci-alert-gate.js
 import { checkAndRecordSourceEvent, isValidSourceKey, removeSourceEventRecord } from '../utils/event-dedup.js';
 import { evaluateMeetingAlert } from '../utils/meeting-alert-gate.js';
 import { VALID_PRIORITIES } from '../types/index.js';
-import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext, CronDefinition, ConversationBufferEntry, TaskHealthRow } from '../types/index.js';
+import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, ApprovalCategory, ApprovalStatus, OrgContext, CronDefinition, ConversationBufferEntry, TaskHealthRow, IPCResponse } from '../types/index.js';
 import type { TaskClass } from '../bus/task.js';
 import { fleetReconcileCommand } from './bus-reconcile.js';
 import { activityLedgerCommand } from './bus-activity-ledger.js';
+import { resolveActiveInstance } from '../utils/resolve-active-instance.js';
 
 /**
  * Check if the org requires deliverables and the task has none attached.
@@ -164,6 +165,126 @@ function ensureCtxRootEnv(env: ReturnType<typeof resolveEnv>): void {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Detect CLI ↔ daemon instance split (FP3).
+ * Marker exists AND differs from env.instanceId → warn (or exit under STRICT).
+ * // TODO(instance-unification): shared resolver across CLI + daemon + agent env.
+ */
+function warnOnInstanceMismatch(env: ReturnType<typeof resolveEnv>): void {
+  const marker = resolveActiveInstance('');
+  if (!marker || marker === env.instanceId) return;
+  const msg =
+    `INSTANCE MISMATCH: CLI instanceId='${env.instanceId}' but active marker='${marker}'. ` +
+    `crons.json will write under ~/.cortextos/${env.instanceId}/… while the live daemon is likely ` +
+    `${marker}. Set CTX_INSTANCE_ID=${marker} (or unset stale overrides).`;
+  console.error(msg);
+  if (process.env.CTX_STRICT_INSTANCE === '1' || process.argv.includes('--strict-instance')) {
+    process.exit(1);
+  }
+}
+
+/**
+ * Signal daemon to reload crons.json and return the IPC response for verification.
+ * Does not swallow errors — callers assert liveness before claiming success.
+ */
+async function signalCronReload(agentName: string, instanceId: string): Promise<IPCResponse> {
+  try {
+    const ipc = new IPCClient(instanceId);
+    return await ipc.send({ type: 'reload-crons', agent: agentName, source: 'cortextos bus cron-cmd' });
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+type NextFireEntry = { name: string; nextFireAt: number };
+
+function extractNextFireTimes(data: unknown): NextFireEntry[] | null {
+  if (typeof data === 'string' || data == null) return null;
+  if (!isRecord(data)) return null;
+  if (!Array.isArray(data.nextFireTimes)) return null;
+  const out: NextFireEntry[] = [];
+  for (const row of data.nextFireTimes) {
+    if (!isRecord(row)) continue;
+    if (typeof row.name !== 'string') continue;
+    const nextFireAt = typeof row.nextFireAt === 'number' ? row.nextFireAt : Number(row.nextFireAt);
+    if (!Number.isFinite(nextFireAt)) continue;
+    out.push({ name: row.name, nextFireAt });
+  }
+  return out;
+}
+
+function isHermesReload(data: unknown): boolean {
+  return isRecord(data) && data.runtime === 'hermes';
+}
+
+/**
+ * After add/update: require cron name live in nextFireTimes.
+ * After remove: require cron name absent.
+ * Exit 1 on any unverified outcome (file already written — do not roll back).
+ */
+function assertCronSchedulerLive(
+  resp: IPCResponse,
+  agent: string,
+  name: string,
+  mode: 'present' | 'absent',
+  verb: string,
+): void {
+  if (resp.success && isHermesReload(resp.data)) {
+    console.log(`${verb} cron '${name}' for ${agent} (hermes-managed)`);
+    return;
+  }
+
+  const times = extractNextFireTimes(resp.data);
+  if (resp.success && times === null) {
+    console.error(
+      `Cron '${name}' written to crons.json but NOT live in the running scheduler ` +
+      `(daemon predates reload-verify — restart the daemon).`,
+    );
+    process.exit(1);
+  }
+
+  if (!resp.success || times === undefined) {
+    const reason = resp.error || 'reload failed';
+    console.error(
+      `Cron '${name}' written to crons.json but NOT live in the running scheduler (${reason}). ` +
+      `Daemon down, wrong instance, or agent not scheduled. Fix: cortextos bus reload-crons ${agent} ` +
+      `after starting the daemon, or restart the daemon.`,
+    );
+    process.exit(1);
+  }
+
+  const entry = (times ?? []).find((t) => t.name === name);
+  if (mode === 'present') {
+    if (!entry || !Number.isFinite(entry.nextFireAt)) {
+      console.error(
+        `Cron '${name}' written to crons.json but NOT live in the running scheduler ` +
+        `(name missing from live schedule). Daemon down, wrong instance, or agent not scheduled. ` +
+        `Fix: cortextos bus reload-crons ${agent} after starting the daemon, or restart the daemon.`,
+      );
+      process.exit(1);
+    }
+    console.log(
+      `${verb} cron '${name}' for ${agent} — live in scheduler, next fire ${new Date(entry.nextFireAt).toISOString()}`,
+    );
+    return;
+  }
+
+  // absent
+  if (entry) {
+    console.error(
+      `Cron '${name}' removed from crons.json but STILL live in the running scheduler. ` +
+      `Fix: cortextos bus reload-crons ${agent} or restart the daemon.`,
+    );
+    process.exit(1);
+  }
+  console.log(`${verb} cron '${name}' from ${agent} — cleared from live scheduler`);
+}
+
+function fmtTs(iso: string | undefined): string {
+  if (!iso) return '-';
+  return iso.replace('T', ' ').slice(0, 16) + ' UTC';
 }
 
 function readStdinUtf8(): string {
@@ -2402,6 +2523,7 @@ busCommand
   .option('--api-key-env <vars>', 'Comma-separated env var names forming an API key rotation pool')
   .option('--state-dir <path>', 'Override jobs state directory')
   .allowUnknownOption(true)
+  .allowExcessArguments(true)
   .action(async (jobName: string, opts: {
     expectedInterval: string;
     org?: string;
@@ -3534,25 +3656,6 @@ function agentExistsInFramework(agentName: string, frameworkRoot: string): boole
   return false;
 }
 
-/**
- * Format an ISO timestamp for display (shortens to "YYYY-MM-DD HH:mm UTC").
- */
-function fmtTs(iso: string | undefined): string {
-  if (!iso) return '-';
-  return iso.replace('T', ' ').slice(0, 16) + ' UTC';
-}
-
-/**
- * Send a reload-crons IPC signal to the daemon (non-blocking, best-effort).
- * Silently swallows errors — the daemon will pick up changes on its next tick.
- */
-async function signalCronReload(agentName: string, instanceId: string): Promise<void> {
-  try {
-    const ipc = new IPCClient(instanceId);
-    await ipc.send({ type: 'reload-crons', agent: agentName, source: 'cortextos bus cron-cmd' });
-  } catch { /* non-fatal — scheduler picks up file change on next 30s tick */ }
-}
-
 busCommand
   .command('add-cron')
   .description('Add a new persistent cron for an agent')
@@ -3568,6 +3671,7 @@ busCommand
     const env = resolveEnv();
     // Ensure CTX_ROOT is wired so cron I/O helpers find the live instance path.
     ensureCtxRootEnv(env);
+    warnOnInstanceMismatch(env);
 
     // Validate agent exists in framework
     if (!agentExistsInFramework(agent, env.frameworkRoot)) {
@@ -3596,8 +3700,8 @@ busCommand
       process.exit(1);
     }
 
-    await signalCronReload(agent, env.instanceId);
-    console.log(`Added cron '${name}' for ${agent}`);
+    const resp = await signalCronReload(agent, env.instanceId);
+    assertCronSchedulerLive(resp, agent, name, 'present', 'Added');
   });
 
 busCommand
@@ -3611,6 +3715,7 @@ busCommand
     const env = resolveEnv();
     // Ensure CTX_ROOT is wired so cron I/O helpers find the live instance path.
     ensureCtxRootEnv(env);
+    warnOnInstanceMismatch(env);
 
     const removed = removeCron(agent, name);
     if (!removed) {
@@ -3618,8 +3723,8 @@ busCommand
       process.exit(1);
     }
 
-    await signalCronReload(agent, env.instanceId);
-    console.log(`Removed cron '${name}' from ${agent}`);
+    const resp = await signalCronReload(agent, env.instanceId);
+    assertCronSchedulerLive(resp, agent, name, 'absent', 'Removed');
   });
 
 busCommand
@@ -3994,6 +4099,7 @@ busCommand
     const env = resolveEnv();
     // Ensure CTX_ROOT is wired so cron I/O helpers find the live instance path.
     ensureCtxRootEnv(env);
+    warnOnInstanceMismatch(env);
 
     let ok: boolean;
     try {
@@ -4007,8 +4113,14 @@ busCommand
       process.exit(1);
     }
 
-    await signalCronReload(agent, env.instanceId);
-    console.log(`Updated cron '${name}' for ${agent}`);
+    const resp = await signalCronReload(agent, env.instanceId);
+    // update can enable/disable — verify based on resulting enabled flag when known
+    const def = getCronByName(agent, name);
+    if (def && def.enabled === false) {
+      assertCronSchedulerLive(resp, agent, name, 'absent', 'Updated');
+    } else {
+      assertCronSchedulerLive(resp, agent, name, 'present', 'Updated');
+    }
   });
 
 busCommand
@@ -4611,9 +4723,10 @@ busCommand
       'Bash', 'Read', 'Edit', 'Write',
       'Glob', 'Grep',
       'WebFetch', 'WebSearch',
-      'ToolSearch', 'CronCreate', 'CronList', 'CronDelete',
+      'ToolSearch',
       'Skill', 'Agent',
     ];
+    const STRIP_ALLOW = ['CronCreate', 'CronList', 'CronDelete'];
     const STATUS_LINE = {
       type: 'command',
       command: 'cortextos bus hook-context-status',
@@ -4645,7 +4758,9 @@ busCommand
         // Check allow list
         const current: string[] = settings?.permissions?.allow ?? [];
         const missing = REQUIRED_ALLOW.filter(t => !current.includes(t));
+        const toStrip = current.filter(t => STRIP_ALLOW.includes(t));
         if (missing.length > 0) changes.push(`allow: +[${missing.join(', ')}]`);
+        if (toStrip.length > 0) changes.push(`allow: -[${toStrip.join(', ')}]`);
 
         // Check statusLine
         if (!settings.statusLine) changes.push('statusLine: add hook-context-status');
@@ -4661,7 +4776,7 @@ busCommand
           patched++;
         } else {
           settings.permissions = settings.permissions ?? {};
-          settings.permissions.allow = [...current, ...missing];
+          settings.permissions.allow = [...current.filter(t => !STRIP_ALLOW.includes(t)), ...missing];
           settings.statusLine = STATUS_LINE;
           fsWrite(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
           console.log(`  FIX  ${agent}: applied [${changes.join('; ')}]`);

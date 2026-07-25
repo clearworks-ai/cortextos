@@ -27,8 +27,10 @@
 
 import { homedir } from 'os';
 import { join } from 'path';
+import { existsSync, statSync } from 'fs';
 import { parseDurationMs, readCronState } from '../bus/cron-state.js';
 import { readCronsWithStatus, updateCron } from '../bus/crons.js';
+import { CRONS_DIRECTORY, CRONS_FILENAME } from '../bus/crons-schema.js';
 import type { CronDefinition } from '../types/index.js';
 import { appendExecutionLog } from './cron-execution-log.js';
 
@@ -138,6 +140,10 @@ interface ScheduledCron {
   changeKey: string;
   /** True while onFire (+ retries) is executing — prevents re-entry on the next tick. */
   firing?: boolean;
+  /** True when a changed definition was deferred during an in-flight fire. */
+  reloadAfterFire?: boolean;
+  /** Latest changed definition deferred until the in-flight fire completes. */
+  pendingReloadDefinition?: CronDefinition;
 }
 
 function changeKeyFor(c: CronDefinition): string {
@@ -267,6 +273,9 @@ export class CronScheduler {
   /** Epoch ms of the tick interval, exposed so tests can override. */
   static readonly TICK_INTERVAL_MS = 30_000;
 
+  /** mtimeMs of crons.json at last successful load (mtime self-heal). */
+  private lastLoadedMtimeMs = 0;
+
   constructor(opts: CronSchedulerOptions) {
     this.agentName = opts.agentName;
     this.onFire    = opts.onFire;
@@ -341,6 +350,15 @@ export class CronScheduler {
   private loadCrons(isReload: boolean): void {
     const now = Date.now();
     const { crons: defs, corrupt } = readCronsWithStatus(this.agentName);
+    try {
+      const ctxRoot = process.env.CTX_ROOT ?? process.cwd();
+      const filePath = join(ctxRoot, CRONS_DIRECTORY, this.agentName, CRONS_FILENAME);
+      if (existsSync(filePath)) {
+        this.lastLoadedMtimeMs = statSync(filePath).mtimeMs;
+      }
+    } catch {
+      // missing file — leave lastLoadedMtimeMs
+    }
     const nextScheduled = new Map<string, ScheduledCron>();
 
     // Read cron-state.json so catch-up sees fires recorded by `bus update-cron-fire`
@@ -371,24 +389,30 @@ export class CronScheduler {
       const key = changeKeyFor(def);
       const existing = this.scheduled.get(def.name);
 
-      if (isReload && existing !== undefined && existing.changeKey === key) {
-        // Definition unchanged — preserve nextFireAt
-        nextScheduled.set(def.name, { ...existing, definition: def });
+      // RELOAD-WHILE-FIRING GUARD: if the cron is mid-fire, preserve the
+      // exact in-flight object until the fire completes. This must run before
+      // the unchanged-definition fast path below: cloning a firing cron during
+      // an mtime self-heal reload breaks object identity, so the active tick
+      // clears flags / advances nextFireAt on a stale reference while
+      // this.scheduled retains the cloned entry at the old due time (FM-9).
+      // For real schedule changes, stash the latest definition and apply it
+      // directly after the in-flight fire completes.
+      if (isReload && existing !== undefined && existing.firing === true) {
+        if (existing.changeKey !== key) {
+          this.logger(
+            `[cron-scheduler] reload deferred for "${def.name}" — fire in progress; ` +
+            `new schedule will apply after fire completes`
+          );
+          existing.reloadAfterFire = true;
+          existing.pendingReloadDefinition = def;
+        }
+        nextScheduled.set(def.name, existing);
         continue;
       }
 
-      // RELOAD-WHILE-FIRING GUARD: if the cron is mid-fire, preserve the
-      // existing entry as-is until the fire completes.  A fresh ScheduledCron
-      // built from stale crons.json (last_fired_at not yet persisted) would
-      // catch-up-fire on the next tick and double-fire the same logical event.
-      // The next reload (manual or after fire completes) will pick up the
-      // new schedule cleanly.
-      if (isReload && existing !== undefined && existing.firing === true) {
-        this.logger(
-          `[cron-scheduler] reload deferred for "${def.name}" — fire in progress; ` +
-          `new schedule will apply on next reload after fire completes`
-        );
-        nextScheduled.set(def.name, existing);
+      if (isReload && existing !== undefined && existing.changeKey === key) {
+        // Definition unchanged — preserve nextFireAt
+        nextScheduled.set(def.name, { ...existing, definition: def });
         continue;
       }
 
@@ -462,6 +486,20 @@ export class CronScheduler {
   }
 
   private async tick(): Promise<void> {
+    // mtime self-heal: external crons.json writes land within one tick even if IPC is lost
+    try {
+      const ctxRoot = process.env.CTX_ROOT ?? process.cwd();
+      const filePath = join(ctxRoot, CRONS_DIRECTORY, this.agentName, CRONS_FILENAME);
+      if (existsSync(filePath)) {
+        const mtimeMs = statSync(filePath).mtimeMs;
+        if (mtimeMs > this.lastLoadedMtimeMs) {
+          this.loadCrons(true);
+        }
+      }
+    } catch {
+      // missing/unreadable — skip heal
+    }
+
     const now = Date.now();
 
     for (const [name, sc] of this.scheduled) {
@@ -498,6 +536,7 @@ export class CronScheduler {
       }
 
       const success = await fireWithRetry(cron, this.agentName, this.onFire, this.logger);
+      const pendingDefinition = sc.reloadAfterFire === true ? sc.pendingReloadDefinition : undefined;
 
       if (success) {
         // Persist last_fired_at + fire_count to disk.
@@ -520,10 +559,23 @@ export class CronScheduler {
         }
 
         // Advance in-memory nextFireAt
-        const next = computeNextFireAt(cron, now);
+        const appliedDefinition = pendingDefinition !== undefined
+          ? {
+              ...pendingDefinition,
+              name: cron.name,
+              last_fired_at: nowIso,
+              fire_count: newFireCount,
+            }
+          : {
+              ...cron,
+              last_fired_at: nowIso,
+              fire_count: newFireCount,
+            };
+        const next = computeNextFireAt(appliedDefinition, now);
         if (!isNaN(next)) {
           sc.nextFireAt = next;
-          sc.definition = { ...cron, last_fired_at: nowIso, fire_count: newFireCount };
+          sc.definition = appliedDefinition;
+          sc.changeKey = changeKeyFor(appliedDefinition);
         } else {
           // Unrecognised schedule after fire — remove from schedule to avoid infinite loops
           this.scheduled.delete(name);
@@ -535,9 +587,12 @@ export class CronScheduler {
         // we don't re-fire the same scheduled slot on every subsequent tick —
         // that produced a busy-loop when an agent was unreachable. Treat the
         // failed window as a missed slot and schedule the next normal fire.
-        const next = computeNextFireAt(cron, now);
+        const appliedDefinition = pendingDefinition ?? cron;
+        const next = computeNextFireAt(appliedDefinition, now);
         if (!isNaN(next)) {
           sc.nextFireAt = next;
+          sc.definition = appliedDefinition;
+          sc.changeKey = changeKeyFor(appliedDefinition);
           this.logger(
             `[cron-scheduler] WARNING: "${name}" dispatch failed — advancing to next slot ${new Date(next).toISOString()} ` +
             `to avoid busy-loop (no last_fired_at update; failure recorded in execution log)`
@@ -554,6 +609,8 @@ export class CronScheduler {
         // leaves sc.firing=true permanently and the cron silently never fires again.
         // Safe even after `this.scheduled.delete(name)` because sc is a local reference.
         sc.firing = false;
+        sc.reloadAfterFire = false;
+        sc.pendingReloadDefinition = undefined;
       }
     }
   }

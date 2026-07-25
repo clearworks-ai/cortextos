@@ -724,10 +724,24 @@ export class IPCServer {
           if (!agentToReload) {
             response = { success: false, error: 'reload-crons requires agent name' };
           } else {
-            // crons.json was already written atomically by the CLI — acknowledge the reload.
-            // CronScheduler picks up the change on its next 30s tick.
-            this.agentManager.reloadCrons(agentToReload);
-            response = { success: true, data: `Crons reloaded for ${agentToReload}` };
+            const ok = this.agentManager.reloadCrons(agentToReload);
+            if (!ok) {
+              response = {
+                success: false,
+                code: 'AGENT_NOT_SCHEDULED',
+                error: `Agent '${agentToReload}' is not scheduled in this daemon (stopped, unknown, or wrong instance)`,
+              };
+            } else {
+              const runtime = this.agentManager.getAgentRuntime(agentToReload);
+              response = {
+                success: true,
+                data: {
+                  message: `Crons reloaded for ${agentToReload}`,
+                  nextFireTimes: this.agentManager.getCronNextFireTimes(agentToReload),
+                  ...(runtime === 'hermes' ? { runtime: 'hermes' as const } : {}),
+                },
+              };
+            }
           }
           break;
         }
@@ -796,7 +810,12 @@ export class IPCServer {
           );
           if (result.ok) {
             // Trigger scheduler reload for this agent
-            if (request.agent) this.agentManager.reloadCrons(request.agent);
+            if (request.agent) {
+              const reloaded = this.agentManager.reloadCrons(request.agent);
+              if (!reloaded) {
+                console.warn(`[ipc] add-cron: reloadCrons returned false for ${request.agent}`);
+              }
+            }
             response = { success: true, data: { ok: true } };
           } else {
             response = { success: false, error: result.error ?? 'add-cron failed', data: result };
@@ -811,7 +830,12 @@ export class IPCServer {
             request.data?.patch as Partial<CronDefinition> | undefined,
           );
           if (result.ok) {
-            if (request.agent) this.agentManager.reloadCrons(request.agent);
+            if (request.agent) {
+              const reloaded = this.agentManager.reloadCrons(request.agent);
+              if (!reloaded) {
+                console.warn(`[ipc] update-cron: reloadCrons returned false for ${request.agent}`);
+              }
+            }
             response = { success: true, data: { ok: true } };
           } else {
             response = { success: false, error: result.error ?? 'update-cron failed', data: result };
@@ -825,7 +849,12 @@ export class IPCServer {
             request.data?.name as string | undefined,
           );
           if (result.ok) {
-            if (request.agent) this.agentManager.reloadCrons(request.agent);
+            if (request.agent) {
+              const reloaded = this.agentManager.reloadCrons(request.agent);
+              if (!reloaded) {
+                console.warn(`[ipc] remove-cron: reloadCrons returned false for ${request.agent}`);
+              }
+            }
             response = { success: true, data: { ok: true } };
           } else {
             response = { success: false, error: result.error ?? 'remove-cron failed', data: result };

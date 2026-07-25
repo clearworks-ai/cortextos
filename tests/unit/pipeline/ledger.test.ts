@@ -883,4 +883,130 @@ describe('pipeline ledger', () => {
     });
     expect(drift).toMatchObject({ ok: false, code: 'SCOPE_SHA_MISMATCH' });
   });
+
+  it('verifies a chain whose adjacent stages share the same whole-second ts', () => {
+    const sessionId = 'plan-session-tie';
+    const transcript = join(projectsRoot, 'larry', sessionId, 'subagents', 'agent-plan.jsonl');
+    writeWriteEditTranscript(transcript, sessionId, planPath, '# draft\n', '# draft\n', '# master plan\n');
+    writeFileSync(planPath, '# master plan\n', 'utf-8');
+
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'research',
+      artifactPath: researchPath,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 100,
+    });
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'plan',
+      artifactPath: planPath,
+      runner: 'fable-lean',
+      sessionId,
+      transcriptPath: transcript,
+      transcriptRoot: projectsRoot,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 100,
+    });
+
+    const verified = verifyChainDetailed({
+      slug: 'hard-spec-gate',
+      throughStage: 'plan',
+      maxAgeSeconds: 86_400,
+      ledgerPath,
+      secretPath,
+      transcriptRoot: projectsRoot,
+      nowSeconds: 150,
+    });
+    expect(verified.ok).toBe(true);
+    if (!verified.ok) return;
+    expect(verified.rows.map((row) => row.stage)).toEqual(['research', 'plan']);
+  });
+
+  it('rejects genuine backward time travel as OUT_OF_ORDER', () => {
+    const sessionId = 'plan-session-backwards';
+    const transcript = join(projectsRoot, 'larry', sessionId, 'subagents', 'agent-plan.jsonl');
+    writeWriteEditTranscript(transcript, sessionId, planPath, '# draft\n', '# draft\n', '# master plan\n');
+    writeFileSync(planPath, '# master plan\n', 'utf-8');
+
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'research',
+      artifactPath: researchPath,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 200,
+    });
+    emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'plan',
+      artifactPath: planPath,
+      runner: 'fable-lean',
+      sessionId,
+      transcriptPath: transcript,
+      transcriptRoot: projectsRoot,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 100,
+    });
+
+    const verified = verifyChainDetailed({
+      slug: 'hard-spec-gate',
+      throughStage: 'plan',
+      maxAgeSeconds: 86_400,
+      ledgerPath,
+      secretPath,
+      transcriptRoot: projectsRoot,
+      nowSeconds: 300,
+    });
+    expect(verified).toMatchObject({ ok: false, code: 'OUT_OF_ORDER' });
+    if (verified.ok) return;
+    expect(verified.detail).toContain('Non-increasing timestamps');
+  });
+
+  it('rejects two same-stage rows with equal ts as OUT_OF_ORDER', () => {
+    const researchRow = emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'research',
+      artifactPath: researchPath,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 100,
+    });
+
+    const researchDupe = signRow(secret, {
+      slug: 'hard-spec-gate',
+      stage: 'research',
+      ts: 100,
+      artifact_sha256: 'ef'.repeat(32),
+      prev_sha256: researchRow.artifact_sha256,
+    });
+    const planRow = signRow(secret, {
+      slug: 'hard-spec-gate',
+      stage: 'plan',
+      ts: 100,
+      artifact_sha256: '12'.repeat(32),
+      prev_sha256: researchDupe.artifact_sha256,
+    });
+    writeFileSync(
+      ledgerPath,
+      `${readLedgerRows(ledgerPath).map((row) => JSON.stringify(row)).join('\n')}\n${JSON.stringify(researchDupe)}\n${JSON.stringify(planRow)}\n`,
+      'utf-8',
+    );
+
+    const verified = verifyChainDetailed({
+      slug: 'hard-spec-gate',
+      throughStage: 'plan',
+      maxAgeSeconds: 86_400,
+      ledgerPath,
+      secretPath,
+      transcriptRoot: projectsRoot,
+      nowSeconds: 150,
+    });
+    expect(verified).toMatchObject({ ok: false, code: 'OUT_OF_ORDER' });
+    if (verified.ok) return;
+    expect(verified.detail).toContain('research -> research');
+  });
 });

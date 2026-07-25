@@ -140,6 +140,10 @@ interface ScheduledCron {
   changeKey: string;
   /** True while onFire (+ retries) is executing — prevents re-entry on the next tick. */
   firing?: boolean;
+  /** True when a changed definition was deferred during an in-flight fire. */
+  reloadAfterFire?: boolean;
+  /** Latest changed definition deferred until the in-flight fire completes. */
+  pendingReloadDefinition?: CronDefinition;
 }
 
 function changeKeyFor(c: CronDefinition): string {
@@ -385,24 +389,30 @@ export class CronScheduler {
       const key = changeKeyFor(def);
       const existing = this.scheduled.get(def.name);
 
-      if (isReload && existing !== undefined && existing.changeKey === key) {
-        // Definition unchanged — preserve nextFireAt
-        nextScheduled.set(def.name, { ...existing, definition: def });
+      // RELOAD-WHILE-FIRING GUARD: if the cron is mid-fire, preserve the
+      // exact in-flight object until the fire completes. This must run before
+      // the unchanged-definition fast path below: cloning a firing cron during
+      // an mtime self-heal reload breaks object identity, so the active tick
+      // clears flags / advances nextFireAt on a stale reference while
+      // this.scheduled retains the cloned entry at the old due time (FM-9).
+      // For real schedule changes, stash the latest definition and apply it
+      // directly after the in-flight fire completes.
+      if (isReload && existing !== undefined && existing.firing === true) {
+        if (existing.changeKey !== key) {
+          this.logger(
+            `[cron-scheduler] reload deferred for "${def.name}" — fire in progress; ` +
+            `new schedule will apply after fire completes`
+          );
+          existing.reloadAfterFire = true;
+          existing.pendingReloadDefinition = def;
+        }
+        nextScheduled.set(def.name, existing);
         continue;
       }
 
-      // RELOAD-WHILE-FIRING GUARD: if the cron is mid-fire, preserve the
-      // existing entry as-is until the fire completes.  A fresh ScheduledCron
-      // built from stale crons.json (last_fired_at not yet persisted) would
-      // catch-up-fire on the next tick and double-fire the same logical event.
-      // The next reload (manual or after fire completes) will pick up the
-      // new schedule cleanly.
-      if (isReload && existing !== undefined && existing.firing === true) {
-        this.logger(
-          `[cron-scheduler] reload deferred for "${def.name}" — fire in progress; ` +
-          `new schedule will apply on next reload after fire completes`
-        );
-        nextScheduled.set(def.name, existing);
+      if (isReload && existing !== undefined && existing.changeKey === key) {
+        // Definition unchanged — preserve nextFireAt
+        nextScheduled.set(def.name, { ...existing, definition: def });
         continue;
       }
 
@@ -526,6 +536,7 @@ export class CronScheduler {
       }
 
       const success = await fireWithRetry(cron, this.agentName, this.onFire, this.logger);
+      const pendingDefinition = sc.reloadAfterFire === true ? sc.pendingReloadDefinition : undefined;
 
       if (success) {
         // Persist last_fired_at + fire_count to disk.
@@ -548,10 +559,23 @@ export class CronScheduler {
         }
 
         // Advance in-memory nextFireAt
-        const next = computeNextFireAt(cron, now);
+        const appliedDefinition = pendingDefinition !== undefined
+          ? {
+              ...pendingDefinition,
+              name: cron.name,
+              last_fired_at: nowIso,
+              fire_count: newFireCount,
+            }
+          : {
+              ...cron,
+              last_fired_at: nowIso,
+              fire_count: newFireCount,
+            };
+        const next = computeNextFireAt(appliedDefinition, now);
         if (!isNaN(next)) {
           sc.nextFireAt = next;
-          sc.definition = { ...cron, last_fired_at: nowIso, fire_count: newFireCount };
+          sc.definition = appliedDefinition;
+          sc.changeKey = changeKeyFor(appliedDefinition);
         } else {
           // Unrecognised schedule after fire — remove from schedule to avoid infinite loops
           this.scheduled.delete(name);
@@ -563,9 +587,12 @@ export class CronScheduler {
         // we don't re-fire the same scheduled slot on every subsequent tick —
         // that produced a busy-loop when an agent was unreachable. Treat the
         // failed window as a missed slot and schedule the next normal fire.
-        const next = computeNextFireAt(cron, now);
+        const appliedDefinition = pendingDefinition ?? cron;
+        const next = computeNextFireAt(appliedDefinition, now);
         if (!isNaN(next)) {
           sc.nextFireAt = next;
+          sc.definition = appliedDefinition;
+          sc.changeKey = changeKeyFor(appliedDefinition);
           this.logger(
             `[cron-scheduler] WARNING: "${name}" dispatch failed — advancing to next slot ${new Date(next).toISOString()} ` +
             `to avoid busy-loop (no last_fired_at update; failure recorded in execution log)`
@@ -582,6 +609,8 @@ export class CronScheduler {
         // leaves sc.firing=true permanently and the cron silently never fires again.
         // Safe even after `this.scheduled.delete(name)` because sc is a local reference.
         sc.firing = false;
+        sc.reloadAfterFire = false;
+        sc.pendingReloadDefinition = undefined;
       }
     }
   }

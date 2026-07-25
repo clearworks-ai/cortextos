@@ -172,6 +172,9 @@ class RefinedCommitment:
     source: str
     source_ref: str
     direction: str
+    owner: str = ""
+    deadline: str = ""
+    source_quote: str = ""
 
 
 def now_utc_iso() -> str:
@@ -527,6 +530,20 @@ def extract_josh_sentences(transcript: dict[str, Any]) -> list[str]:
     return collected
 
 
+def extract_all_sentences(transcript: dict[str, Any]) -> list[str]:
+    sentences = transcript.get("sentences")
+    if not isinstance(sentences, list):
+        return []
+    collected: list[str] = []
+    for sentence in sentences:
+        if not isinstance(sentence, dict):
+            continue
+        text = collapse_ws(str(sentence.get("text") or sentence.get("raw_text") or ""))
+        if text:
+            collected.append(text)
+    return collected
+
+
 def best_support_sentence(action: str, josh_sentences: list[str]) -> str | None:
     action_tokens = normalized_tokens(action)
     if not action_tokens:
@@ -651,6 +668,9 @@ def refine_outbound_item(
         source="ff",
         source_ref=source_ref,
         direction="outbound",
+        owner="Josh",
+        deadline=due or "",
+        source_quote=support or "",
     )
 
 
@@ -660,6 +680,7 @@ def refine_inbound_item(
     meeting_id: str,
     meeting_day: date,
     source_ref: str,
+    all_sentences: list[str] | None = None,
 ) -> RefinedCommitment | None:
     # Conservative inbound gate (client → Josh): concrete named owner only.
     if normalize_action(item.owner) in GENERIC_OWNERS:
@@ -679,12 +700,16 @@ def refine_inbound_item(
         return None
     if is_suppressed(item.owner, item.action, counterparty):
         return None
+    quote = best_support_sentence(item.action, all_sentences or []) or ""
     return RefinedCommitment(
         id=directional_commitment_id(meeting_id, item.action, "inbound"),
         text=build_commitment_text(f"[inbound] {item.owner}: {item.action}", due),
         source="ff-inbound",
         source_ref=source_ref,
         direction="inbound",
+        owner=item.owner,
+        deadline=due or "",
+        source_quote=quote,
     )
 
 
@@ -697,6 +722,7 @@ def refine_items(
     if not meeting_id:
         return []
     josh_sentences = extract_josh_sentences(transcript)
+    all_sentences = extract_all_sentences(transcript)
     meeting_day = meeting_day_from_transcript(transcript)
     source_ref = f"{meeting_id} · {title}"
     commitments: list[RefinedCommitment] = []
@@ -717,6 +743,7 @@ def refine_items(
                 meeting_id=meeting_id,
                 meeting_day=meeting_day,
                 source_ref=source_ref,
+                all_sentences=all_sentences,
             )
         if commitment is None or commitment.id in seen_ids:
             continue
@@ -725,17 +752,30 @@ def refine_items(
     return commitments
 
 
-def commitment_payload_entries(commitments: list[RefinedCommitment]) -> list[dict[str, str]]:
-    return [
-        {
+def commitment_entries(
+    commitments: list[RefinedCommitment],
+    *,
+    enriched: bool,
+) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    for item in commitments:
+        entry: dict[str, str] = {
             "id": item.id,
             "text": item.text,
             "direction": item.direction,
             "source": item.source,
             "sourceRef": item.source_ref,
         }
-        for item in commitments
-    ]
+        if enriched:
+            entry["owner"] = item.owner
+            entry["deadline"] = item.deadline
+            entry["sourceQuote"] = item.source_quote
+        entries.append(entry)
+    return entries
+
+
+def commitment_payload_entries(commitments: list[RefinedCommitment]) -> list[dict[str, str]]:
+    return commitment_entries(commitments, enriched=False)
 
 
 def post_commitments(
@@ -825,8 +865,8 @@ def run(
         all_commitments.extend(refine_items(transcript, extracted))
         processed.append(transcript)
 
-    items = commitment_payload_entries(all_commitments)
-    payload = {"commitments": items}
+    items = commitment_entries(all_commitments, enriched=True)
+    payload = {"commitments": commitment_payload_entries(all_commitments)}
     if dry_run:
         print(json.dumps({"dry_run": True, "items": items, "payload": payload}, indent=2))
         return 0
@@ -864,6 +904,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--watermark-path", default=str(DEFAULT_WATERMARK_PATH))
     parser.add_argument("--recap", action="store_true", help="Emit recap JSON (summary + gated next steps); no POST, no watermark")
     parser.add_argument("--recap-ledger", default=str(STATE_DIR / "meeting-recap-drafts-surfaced.txt"))
+    parser.add_argument(
+        "--mode",
+        choices=["commitments", "recap", "full"],
+        default=None,
+        help="Mode: commitments (default), recap, or full (no watermark/POST)",
+    )
+    parser.add_argument(
+        "--meeting-id",
+        default="",
+        help="Only honored in full mode: filter to one Fireflies transcript id",
+    )
     return parser.parse_args(argv)
 
 
@@ -983,7 +1034,7 @@ def build_recap_meeting(
             "bullets": collapse_ws(str(summary.get("shorthand_bullet") or "")),
             "action_items": collapse_ws(str(summary.get("action_items") or "")),
         },
-        "next_steps": commitment_payload_entries(refine_items(transcript, extracted)),
+        "next_steps": commitment_entries(refine_items(transcript, extracted), enriched=True),
     }
 
 
@@ -1043,13 +1094,92 @@ def run_recap(
     return 0
 
 
+def execute_full(
+    *,
+    limit: int,
+    meeting_id: str,
+    urlopen: Urlopen = urllib.request.urlopen,
+) -> int:
+    try:
+        return run_full(limit=limit, meeting_id=meeting_id, urlopen=urlopen)
+    except (RuntimeError, ValueError, urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError) as exc:
+        reason = collapse_ws(str(exc)) or exc.__class__.__name__
+        LOGGER.error("ff-extractor full failed: %s", reason)
+        print(json.dumps({"error": reason, "mode": "full", "meetings": []}))
+        return 1
+
+
+def run_full(
+    *,
+    limit: int,
+    meeting_id: str,
+    urlopen: Urlopen = urllib.request.urlopen,
+) -> int:
+    fireflies_api_key = require_env("FIREFLIES_API_KEY")
+    openrouter_api_key = require_env("OPENROUTER_API_KEY")
+
+    recent = fetch_recent_transcripts(fireflies_api_key, limit=limit, urlopen=urlopen)
+    recent_sorted = sorted(recent, key=transcript_sort_key, reverse=True)
+
+    if meeting_id:
+        recent_sorted = [t for t in recent_sorted if str(t.get("id") or "") == meeting_id]
+
+    meetings: list[dict[str, Any]] = []
+    skipped_suppressed = 0
+    skipped_casual = 0
+
+    for transcript in recent_sorted:
+        tid = str(transcript.get("id") or "")
+        if not tid:
+            continue
+
+        if is_suppressed_meeting(transcript):
+            skipped_suppressed += 1
+            continue
+
+        recap_meeting = build_recap_meeting(
+            transcript,
+            openrouter_api_key=openrouter_api_key,
+            urlopen=urlopen,
+        )
+        if recap_meeting is None:
+            skipped_casual += 1
+            continue
+
+        meetings.append(recap_meeting)
+        if not meeting_id and len(meetings) >= limit:
+            break
+
+    print(json.dumps({
+        "mode": "full",
+        "meetings": meetings,
+        "skipped_casual": skipped_casual,
+        "skipped_suppressed": skipped_suppressed,
+    }))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     args = parse_args(argv)
-    if args.recap:
+    mode = args.mode or ("recap" if args.recap else "commitments")
+    if args.mode and args.recap:
+        recap_from_flag = "recap"
+        if args.mode != recap_from_flag:
+            print(
+                f"ERROR: --mode {args.mode} conflicts with --recap",
+                file=__import__("sys").stderr,
+            )
+            return 2
+    if mode == "recap":
         return execute_recap(
             limit=max(1, args.limit),
             ledger_path=Path(args.recap_ledger),
+        )
+    if mode == "full":
+        return execute_full(
+            limit=max(1, args.limit),
+            meeting_id=str(args.meeting_id or ""),
         )
     return execute(
         limit=max(1, args.limit),

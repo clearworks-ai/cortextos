@@ -226,4 +226,66 @@ describe.skipIf(!hasNodeSqlite())('kb-graph/dream', () => {
     expect(status.lastCompletionTs).toBeTruthy();
     db.close();
   });
+
+  it('fileDreamPayload reports skipped unresolvable entities', () => {
+    const db = openLinksDb(dbPath);
+    const jobKey = 'dream:synth:/tmp/skip-ent:abc';
+    db.prepare(
+      `INSERT INTO dream_jobs (job_key, path, content_hash, status, entities_filed, edges_filed, pages_written, error, updated_at)
+       VALUES (?, '/tmp/skip-ent', 'abc', 'approved', 0, 0, 0, NULL, ?)`,
+    ).run(jobKey, new Date().toISOString());
+    const resolver = {
+      resolve: (name: string, _type?: string) =>
+        name === 'Josh'
+          ? { slug: 'people/josh-weiss', method: 'exact' as const, score: 1 }
+          : null,
+    };
+    const r = fileDreamPayload(
+      db,
+      jobKey,
+      {
+        entities: [
+          { name: 'Josh', type: 'people' },
+          { name: 'Bogus Name', type: 'people' },
+        ],
+        edges: [],
+        pages: [],
+      },
+      resolver,
+      ksRoot,
+    );
+    expect(r.entitiesFiled).toBe(1);
+    expect(r.entitiesSkipped).toEqual(['Bogus Name']);
+    db.close();
+  });
+
+  it('fileDreamPayload reports skipped edges with unresolved endpoints', () => {
+    const db = openLinksDb(dbPath);
+    const jobKey = 'dream:synth:/tmp/skip-edge:abc';
+    db.prepare(
+      `INSERT INTO dream_jobs (job_key, path, content_hash, status, entities_filed, edges_filed, pages_written, error, updated_at)
+       VALUES (?, '/tmp/skip-edge', 'abc', 'approved', 0, 0, 0, NULL, ?)`,
+    ).run(jobKey, new Date().toISOString());
+    const resolver = {
+      resolve: (name: string) =>
+        name === 'Josh'
+          ? { slug: 'people/josh-weiss', method: 'exact' as const, score: 1 }
+          : null,
+    };
+    const r = fileDreamPayload(
+      db,
+      jobKey,
+      {
+        entities: [],
+        edges: [{ from: 'Josh', to: 'Bogus Co', type: 'works_at' }],
+        pages: [],
+      },
+      resolver,
+      ksRoot,
+    );
+    expect(r.edgesFiled).toBe(0);
+    expect(r.edgesSkipped.length).toBe(1);
+    expect(r.edgesSkipped[0]).toMatch(/Bogus/);
+    db.close();
+  });
 });

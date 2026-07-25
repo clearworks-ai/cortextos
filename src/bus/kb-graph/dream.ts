@@ -277,6 +277,8 @@ export interface FileResult {
   entitiesFiled: number;
   edgesFiled: number;
   pagesWritten: string[];
+  entitiesSkipped: string[];
+  edgesSkipped: string[];
 }
 
 export function fileDreamPayload(
@@ -288,7 +290,13 @@ export function fileDreamPayload(
 ): FileResult {
   const wikiRoot = join(knowledgeSyncRoot, 'wiki');
   const allowedDirs = onDiskWikiDirs(wikiRoot);
-  const result: FileResult = { entitiesFiled: 0, edgesFiled: 0, pagesWritten: [] };
+  const result: FileResult = {
+    entitiesFiled: 0,
+    edgesFiled: 0,
+    pagesWritten: [],
+    entitiesSkipped: [],
+    edgesSkipped: [],
+  };
   const now = new Date().toISOString();
 
   try {
@@ -296,16 +304,25 @@ export function fileDreamPayload(
 
     for (const ent of payload.entities) {
       const r = resolver.resolve(ent.name, ent.type);
-      if (!r) continue;
+      if (!r) {
+        result.entitiesSkipped.push(ent.name);
+        continue;
+      }
       upsertEntity(db, r.slug, entityTypeFromSlug(r.slug), ent.name);
       result.entitiesFiled += 1;
     }
 
     for (const edge of payload.edges) {
-      if (!ALLOWED_EDGE_TYPES.has(edge.type)) continue;
+      if (!ALLOWED_EDGE_TYPES.has(edge.type)) {
+        result.edgesSkipped.push(`${edge.from} -> ${edge.to} (${edge.type})`);
+        continue;
+      }
       const from = resolver.resolve(edge.from);
       const to = resolver.resolve(edge.to);
-      if (!from || !to) continue;
+      if (!from || !to) {
+        result.edgesSkipped.push(`${edge.from} -> ${edge.to} (${edge.type})`);
+        continue;
+      }
       upsertEntity(db, from.slug, entityTypeFromSlug(from.slug));
       upsertEntity(db, to.slug, entityTypeFromSlug(to.slug));
       const typed = edge.type !== 'mentions';

@@ -33,50 +33,11 @@ import {
   cleanupResponseFile,
 } from './index';
 import { join } from 'path';
-import { mkdirSync, existsSync, readFileSync } from 'fs';
+import { mkdirSync } from 'fs';
 import { execFile } from 'child_process';
+import { readCronActive, isWorkerSession } from './lib/session-context';
 
-/**
- * Check whether the agent is currently in a cron-originated turn by reading
- * the .cron-active marker written by AgentManager.onFire.
- *
- * Returns the cron name if the marker is present AND not expired; null otherwise.
- * Expired markers (past their expiresAt) are treated as absent — a crashed daemon
- * process could leave a stale marker behind, and we must not deny interactive
- * approvals indefinitely.
- */
-function readCronActive(stateDir: string): { cronName: string; firedAt: string } | null {
-  const markerPath = join(stateDir, '.cron-active');
-  if (!existsSync(markerPath)) return null;
-  try {
-    const payload = JSON.parse(readFileSync(markerPath, 'utf-8')) as {
-      cronName?: string;
-      firedAt?: string;
-      expiresAt?: number;
-    };
-    const now = Date.now();
-    if (payload.expiresAt !== undefined && now > payload.expiresAt) {
-      // Stale / expired — treat as absent. Do NOT unlink here; the daemon
-      // cleanup (onFire finally block) owns the file lifecycle.
-      return null;
-    }
-    if (!payload.cronName) return null;
-    return { cronName: payload.cronName, firedAt: payload.firedAt ?? '' };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Worker-session detection. Worker PTYs (comms-check, transcript-scanner,
- * meeting-brief pages, etc.) launch with CTX_WORKER=1 (set in
- * src/pty/agent-pty.ts). They have no human attached — identical to cron in
- * that nobody can approve — so permission prompts must deny-fast instead of
- * forwarding a live Approve/Deny to Telegram and hanging 30 minutes.
- */
-export function isWorkerSession(): boolean {
-  return process.env.CTX_WORKER === '1';
-}
+export { isWorkerSession };
 
 /**
  * Emit a `cron_permission_denied` bus event via `cortextos bus log-event` so

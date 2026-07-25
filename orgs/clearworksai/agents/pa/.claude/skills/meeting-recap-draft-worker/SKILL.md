@@ -14,7 +14,7 @@ DO:
 
 If a Telegram status message would report anything other than what a bash block's actual stdout/exit code says (e.g. "key missing", "degraded"), that is a bug — re-run the literal block instead of writing a status from memory/assumption.
 
-**DRAFT ONLY — the only Gmail path this worker may use is the `gws gmail +send --draft` bash command (Step 5). It saves a Gmail draft; it does NOT send. Never omit `--draft`, never call a Gmail MCP tool (pa has no Gmail MCP configured — canonical path is `gws` + DWD token).**
+**DRAFT ONLY — the only Gmail path this worker may use is the `gws gmail +draft` bash command (Step 5). It saves a Gmail draft; it structurally CANNOT send (the DWD shim's `+draft` has no send path). Never use `+send` or any send-capable command, never call a Gmail MCP tool (pa has no Gmail MCP configured — canonical path is `gws` + DWD token).**
 
 ---
 
@@ -85,7 +85,7 @@ Do NOT append here — append happens in Step 5 only after the draft is actually
 
 ## Step 5 — Create the Gmail draft (one per NEW meeting)
 
-For each NEW meeting, compose the recap then create the draft with the `gws gmail +send --draft` bash block below. `--draft` saves a Gmail draft (it does NOT send).
+For each NEW meeting, compose the recap then create the draft with the `gws gmail +draft` bash block below. `+draft` saves a Gmail draft (it has NO send capability — drafts only, enforced in the gws-dwd shim).
 
 Compose these values first:
 
@@ -99,11 +99,11 @@ Compose these values first:
 Then run (BODY may be multi-line — pass it as a single quoted arg):
 
 ```bash
-gws gmail +send --to josh@clearworks.ai --subject "$SUBJECT" --body "$BODY" --draft
+gws gmail +draft --to josh@clearworks.ai --subject "$SUBJECT" --body "$BODY"
 echo "gws_draft_rc=$?"
 ```
 
-**NEVER omit `--draft`** — that is what makes it a draft, not a send. No Gmail MCP tool.
+**NEVER substitute `+send` for `+draft`** — `+draft` is draft-only by construction (no send endpoint exists in the shim). No Gmail MCP tool.
 
 Only AFTER `gws_draft_rc` is `0` for a meeting:
 

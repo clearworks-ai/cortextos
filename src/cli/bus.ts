@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { spawnSync, execFileSync, execSync } from 'child_process';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { sendMessage, checkInbox, ackInbox } from '../bus/message.js';
 import { validateAgentName, validateTaskId } from '../utils/validate.js';
 import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, checkStaleTasks, archiveTasks, checkHumanTasks, classifyTask, ensureEpicTask, closeEpic, reclaimOrphanTasks, resolveTaskOwner, sweepDueTasks, deliverDueSweepActions, fleetTaskHealth, DEFAULT_SWEEP_MAX_ACTIONS, LIST_TASKS_MAX_LIMIT } from '../bus/task.js';
@@ -21,6 +21,32 @@ import { addCron, removeCron, readCrons, updateCron as updateCronDef, getCronByN
 import { listAgents } from '../bus/agents.js';
 import { nextFireFromCron } from '../daemon/cron-scheduler.js';
 import { queryKnowledgeBase, ingestKnowledgeBase, ensureKBDirs } from '../bus/knowledge-base.js';
+import {
+  assertNodeSqliteAvailable,
+  linksDbPath,
+  jobsDir,
+  openLinksDb,
+  edgeStats,
+  extractEdges,
+  defaultExtractRoots,
+  createSlugResolver,
+  parseRelationalIntent,
+  executeIntent,
+  runGraphCanary,
+  SUPPORTED_PATTERNS,
+  dreamScan,
+  recordVerdict,
+  validateDreamPayload,
+  fileDreamPayload,
+  dreamStatus,
+  type GraphCanaryConfig,
+} from '../bus/kb-graph/index.js';
+import {
+  runWrappedCommand,
+  readJobState,
+  writeHeartbeat,
+  checkMissedFires,
+} from '../bus/reliable-job.js';
 import { parseCalendarEvents, selectUpcomingExternalMeetings, readSurfacedIds, markSurfaced, lookupCrmContext, renderBriefMarkdown, claimEventLease, releaseEventLease, readClaimedIds } from '../bus/meeting-brief.js';
 import type { BriefData, CrmContext } from '../bus/meeting-brief.js';
 import { runScopeGuard } from '../bus/scope-guard.js';
@@ -2332,6 +2358,546 @@ busCommand
     } catch {
       // python printed error already
       process.exit(1);
+    }
+  });
+
+// ---------------------------------------------------------------------------
+// KB graph + reliable-job commands (gbrain-port additive layer)
+// ---------------------------------------------------------------------------
+
+function resolveKbOrg(opts: { org?: string }): { env: ReturnType<typeof resolveEnv>; org: string } {
+  const env = resolveEnv();
+  const org = opts.org || env.org;
+  if (!org) {
+    console.error('ERROR: --org or CTX_ORG required');
+    process.exit(1);
+  }
+  return { env, org };
+}
+
+function defaultWikiRoot(): string {
+  return join(homedir(), 'code', 'knowledge-sync', 'wiki');
+}
+
+function parseIntervalCli(raw: string): number {
+  const ms = parseDurationMs(raw);
+  if (isNaN(ms) || ms <= 0) {
+    console.error(`ERROR: invalid --expected-interval "${raw}" (use 30m|4h|24h|7d)`);
+    process.exit(1);
+  }
+  return ms;
+}
+
+busCommand
+  .command('kb-job-run')
+  .description('Run a command under the reliable-job wrapper (heartbeat + retries + watermarks)')
+  .argument('<jobName>', 'Job name (state file key)')
+  .requiredOption('--expected-interval <dur>', 'Expected interval (30m|4h|24h|7d)')
+  .option('--org <org>', 'Organization name')
+  .option('--retries <n>', 'Max attempts', '3')
+  .option('--backoff-ms <n>', 'Backoff base ms', '5000')
+  .option('--cwd <path>', 'Working directory for the wrapped command')
+  .option('--watermark-files <paths>', 'Comma-separated input files to hash for skip-unchanged')
+  .option('--skip-unchanged', 'Skip run when watermark files unchanged since last success')
+  .option('--api-key-env <vars>', 'Comma-separated env var names forming an API key rotation pool')
+  .option('--state-dir <path>', 'Override jobs state directory')
+  .allowUnknownOption(true)
+  .action(async (jobName: string, opts: {
+    expectedInterval: string;
+    org?: string;
+    retries?: string;
+    backoffMs?: string;
+    cwd?: string;
+    watermarkFiles?: string;
+    skipUnchanged?: boolean;
+    apiKeyEnv?: string;
+    stateDir?: string;
+  }, command: Command) => {
+    const { env, org } = resolveKbOrg(opts);
+    const stateDir = opts.stateDir || jobsDir(env.instanceId, env.frameworkRoot || process.cwd(), org);
+    const intervalMs = parseIntervalCli(opts.expectedInterval);
+
+    // Everything after `--` is the wrapped command
+    const rawArgs = process.argv;
+    const dd = rawArgs.indexOf('--');
+    if (dd < 0 || dd === rawArgs.length - 1) {
+      console.error('ERROR: kb-job-run requires `-- <command> [args...]`');
+      process.exit(1);
+    }
+    const cmdParts = rawArgs.slice(dd + 1);
+    const [cmd, ...args] = cmdParts;
+
+    const apiKeys: string[] = [];
+    if (opts.apiKeyEnv) {
+      for (const v of opts.apiKeyEnv.split(',').map((s) => s.trim()).filter(Boolean)) {
+        const val = process.env[v];
+        if (val) apiKeys.push(val);
+      }
+    }
+
+    const result = await runWrappedCommand({
+      jobName,
+      stateDir,
+      expectedIntervalMs: intervalMs,
+      maxRetries: parseInt(opts.retries || '3', 10),
+      backoffBaseMs: parseInt(opts.backoffMs || '5000', 10),
+      command: cmd,
+      args,
+      cwd: opts.cwd,
+      watermarkFiles: opts.watermarkFiles
+        ? opts.watermarkFiles.split(',').map((s) => s.trim()).filter(Boolean)
+        : undefined,
+      skipUnchanged: !!opts.skipUnchanged,
+      apiKeys: apiKeys.length > 0 ? apiKeys : undefined,
+    });
+
+    void command;
+    process.exit(result.ok ? 0 : (result.exitCode ?? 1));
+  });
+
+busCommand
+  .command('kb-job-status')
+  .description('List reliable-job states; --check exits 1 on missed fires (SILENT-OK when healthy)')
+  .option('--org <org>', 'Organization name')
+  .option('--json', 'JSON output (stdout only)')
+  .option('--check', 'Exit 1 if any job is overdue')
+  .option('--state-dir <path>', 'Override jobs state directory')
+  .action((opts: { org?: string; json?: boolean; check?: boolean; stateDir?: string }) => {
+    const { env, org } = resolveKbOrg(opts);
+    const stateDir = opts.stateDir || jobsDir(env.instanceId, env.frameworkRoot || process.cwd(), org);
+
+    if (opts.check) {
+      const alerts = checkMissedFires(stateDir);
+      if (alerts.length === 0) {
+        if (opts.json) console.log(JSON.stringify({ ok: true, alerts: [] }));
+        else console.log('OK');
+        process.exit(0);
+      }
+      if (opts.json) {
+        console.log(JSON.stringify({ ok: false, alerts }, null, 2));
+      } else {
+        for (const a of alerts) {
+          console.log(
+            `${a.jobName}: overdue ${a.overdueMs}ms last_success=${a.lastSuccessAt ?? 'never'} failures=${a.consecutiveFailures}`,
+          );
+        }
+      }
+      process.exit(1);
+    }
+
+    if (!existsSync(stateDir)) {
+      if (opts.json) console.log(JSON.stringify({ jobs: [] }));
+      else console.log('No jobs.');
+      return;
+    }
+    const files = readdirSync(stateDir).filter((f) => f.endsWith('.json'));
+    const jobs = files
+      .map((f) => readJobState(stateDir, f.replace(/\.json$/, '')))
+      .filter((j): j is NonNullable<typeof j> => !!j);
+    if (opts.json) {
+      console.log(JSON.stringify({ jobs }, null, 2));
+      return;
+    }
+    for (const j of jobs) {
+      console.log(
+        `${j.job_name}: success=${j.last_success_at ?? 'never'} failures=${j.consecutive_failures} runs=${j.total_runs}`,
+      );
+    }
+  });
+
+busCommand
+  .command('kb-job-heartbeat')
+  .description('Record success/failure heartbeat for a prompt-driven job')
+  .argument('<jobName>', 'Job name')
+  .requiredOption('--expected-interval <dur>', 'Expected interval (30m|4h|24h|7d)')
+  .option('--org <org>', 'Organization name')
+  .option('--success', 'Mark success')
+  .option('--failure', 'Mark failure')
+  .option('--error <msg>', 'Error message on failure')
+  .option('--state-dir <path>', 'Override jobs state directory')
+  .action((jobName: string, opts: {
+    expectedInterval: string;
+    org?: string;
+    success?: boolean;
+    failure?: boolean;
+    error?: string;
+    stateDir?: string;
+  }) => {
+    if (!!opts.success === !!opts.failure) {
+      console.error('ERROR: specify exactly one of --success or --failure');
+      process.exit(1);
+    }
+    const { env, org } = resolveKbOrg(opts);
+    const stateDir = opts.stateDir || jobsDir(env.instanceId, env.frameworkRoot || process.cwd(), org);
+    writeHeartbeat(stateDir, jobName, {
+      success: !!opts.success,
+      intervalMs: parseIntervalCli(opts.expectedInterval),
+      error: opts.error,
+    });
+    console.log(opts.success ? 'heartbeat: success' : 'heartbeat: failure');
+  });
+
+busCommand
+  .command('kb-extract-edges')
+  .description('Extract entity mention edges into links.sqlite (deterministic, zero-LLM)')
+  .option('--org <org>', 'Organization name')
+  .option('--roots <paths>', 'Comma-separated corpus roots')
+  .option('--wiki-root <path>', 'Wiki root for page slugs + resolver index')
+  .option('--force', 'Ignore extract watermarks')
+  .option('--json', 'JSON summary on stdout (machine-readable; stderr may carry node:sqlite warning)')
+  .action((opts: { org?: string; roots?: string; wikiRoot?: string; force?: boolean; json?: boolean }) => {
+    try {
+      assertNodeSqliteAvailable();
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+    const { env, org } = resolveKbOrg(opts);
+    const frameworkRoot = env.frameworkRoot || process.cwd();
+    const dbPath = linksDbPath(env.instanceId, frameworkRoot, org);
+    const wikiRoot = opts.wikiRoot || defaultWikiRoot();
+    const roots = opts.roots
+      ? opts.roots.split(',').map((s) => s.trim()).filter(Boolean)
+      : defaultExtractRoots(process.env.CTX_ROOT);
+    if (roots.length === 0) {
+      roots.push(wikiRoot);
+    }
+    const resolver = createSlugResolver(wikiRoot);
+    const result = extractEdges({
+      roots,
+      dbPath,
+      resolver,
+      force: opts.force,
+      wikiRoot,
+    });
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log(
+        `extract: scanned=${result.filesScanned} skipped=${result.filesSkippedUnchanged} edges=${result.edgesUpserted} typed=${result.typedEdges} errors=${result.errors.length}`,
+      );
+      for (const e of result.errors) {
+        console.error(`  error ${e.path}: ${e.error}`);
+      }
+    }
+    if (result.errors.length > 0) process.exit(1);
+  });
+
+busCommand
+  .command('kb-resolve-entity')
+  .description('Resolve a free-form name to a wiki page slug')
+  .argument('<name>', 'Entity name')
+  .option('--type <dir>', 'Top-level wiki dir hint (people, projects, ...)')
+  .option('--wiki-root <path>', 'Wiki root')
+  .option('--json', 'JSON on stdout')
+  .action((name: string, opts: { type?: string; wikiRoot?: string; json?: boolean }) => {
+    const wikiRoot = opts.wikiRoot || defaultWikiRoot();
+    const resolver = createSlugResolver(wikiRoot);
+    const result = resolver.resolve(name, opts.type);
+    if (!result) {
+      console.error('ERROR: empty name');
+      process.exit(1);
+    }
+    if (opts.json) {
+      console.log(JSON.stringify({ name, ...result }, null, 2));
+    } else {
+      const score = result.score !== undefined ? ` ${result.score.toFixed(2)}` : '';
+      console.log(`${result.slug}  (${result.method}${score})`);
+    }
+    if (result.method === 'slugify' && !result.slug.includes('/')) {
+      console.warn('note: entity is unindexed (slugify fallback, no dir prefix)');
+    }
+  });
+
+busCommand
+  .command('kb-graph-query')
+  .description('Relational graph query (deterministic intent parser + edge traversal)')
+  .argument('<query>', 'Natural-language relational question')
+  .option('--org <org>', 'Organization name')
+  .option('--explain', 'Print parsed intent and hop paths')
+  .option('--max-depth <n>', 'Max path depth')
+  .option('--limit <n>', 'Max hits', '25')
+  .option('--wiki-root <path>', 'Wiki root for seed resolution')
+  .option('--json', 'JSON on stdout')
+  .action((query: string, opts: {
+    org?: string;
+    explain?: boolean;
+    maxDepth?: string;
+    limit?: string;
+    wikiRoot?: string;
+    json?: boolean;
+  }) => {
+    try {
+      assertNodeSqliteAvailable();
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+    const { env, org } = resolveKbOrg(opts);
+    const frameworkRoot = env.frameworkRoot || process.cwd();
+    const dbPath = linksDbPath(env.instanceId, frameworkRoot, org);
+    if (!existsSync(dbPath)) {
+      console.error('ERROR: links.sqlite not found — run kb-extract-edges first');
+      process.exit(1);
+    }
+    const intent = parseRelationalIntent(query);
+    if (!intent) {
+      console.error('Unparseable query. Supported patterns:');
+      for (const p of SUPPORTED_PATTERNS) console.error(`  - ${p}`);
+      process.exit(1);
+    }
+    const resolver = createSlugResolver(opts.wikiRoot || defaultWikiRoot());
+    const db = openLinksDb(dbPath);
+    try {
+      const out = executeIntent(db, intent, resolver, {
+        maxDepth: opts.maxDepth ? parseInt(opts.maxDepth, 10) : undefined,
+        limit: opts.limit ? parseInt(opts.limit, 10) : undefined,
+      });
+      if (opts.json) {
+        console.log(JSON.stringify({ intent, seeds: out.seeds, hits: out.hits }, null, 2));
+        return;
+      }
+      if (opts.explain) {
+        console.log(`intent: ${intent.kind} edgeType=${intent.edgeType ?? '-'}`);
+        for (const s of out.seeds) {
+          console.log(
+            `seed "${s.name}": ${s.resolved ? `${s.resolved.slug} (${s.resolved.method})` : 'null'}`,
+          );
+        }
+      }
+      for (const s of out.seeds) {
+        if (!s.resolved) {
+          console.log(`seed "${s.name}" did not resolve to a known entity`);
+        }
+      }
+      if (out.hits.length === 0) {
+        console.log('No hits.');
+        return;
+      }
+      for (const h of out.hits) {
+        const hop = h.path[h.path.length - 1];
+        console.log(`- ${h.slug}  (${hop?.type ?? '?'}, confidence: ${h.confidence})`);
+        if (hop?.context) console.log(`  context: "${hop.context}"`);
+        if (opts.explain) {
+          for (const p of h.path) {
+            console.log(`  ${p.from} -[${p.type}/${p.confidence}]-> ${p.to}`);
+          }
+        }
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+busCommand
+  .command('kb-graph-canary')
+  .description('Content-asserting graph canary (edges, resolve, queries)')
+  .option('--org <org>', 'Organization name')
+  .option('--config <path>', 'Canary JSON config path')
+  .option('--wiki-root <path>', 'Wiki root')
+  .option('--json', 'JSON on stdout')
+  .action((opts: { org?: string; config?: string; wikiRoot?: string; json?: boolean }) => {
+    try {
+      assertNodeSqliteAvailable();
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+    const { env, org } = resolveKbOrg(opts);
+    const frameworkRoot = env.frameworkRoot || process.cwd();
+    const dbPath = linksDbPath(env.instanceId, frameworkRoot, org);
+    const configPath =
+      opts.config || join(dirname(dbPath), 'graph-canary.json');
+    let config: GraphCanaryConfig = { min_edges: 1 };
+    if (existsSync(configPath)) {
+      try {
+        config = JSON.parse(readFileSync(configPath, 'utf-8')) as GraphCanaryConfig;
+      } catch (err) {
+        console.error(`ERROR: invalid canary config: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+    }
+    if (!existsSync(dbPath)) {
+      console.error('FAIL: links.sqlite missing');
+      process.exit(1);
+    }
+    const resolver = createSlugResolver(opts.wikiRoot || defaultWikiRoot());
+    const db = openLinksDb(dbPath);
+    try {
+      const result = runGraphCanary(db, resolver, config);
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else if (result.ok) {
+        const stats = edgeStats(db);
+        console.log(`OK edges=${stats.edges} entities=${stats.entities}`);
+      } else {
+        for (const f of result.failures) console.error(`FAIL: ${f}`);
+      }
+      process.exit(result.ok ? 0 : 1);
+    } finally {
+      db.close();
+    }
+  });
+
+busCommand
+  .command('kb-dream-scan')
+  .description('Scan transcript buffers for pending dream synthesis jobs')
+  .option('--org <org>', 'Organization name')
+  .option('--roots <paths>', 'Comma-separated scan roots')
+  .option('--json', 'JSON on stdout')
+  .action((opts: { org?: string; roots?: string; json?: boolean }) => {
+    try {
+      assertNodeSqliteAvailable();
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+    const { env, org } = resolveKbOrg(opts);
+    const frameworkRoot = env.frameworkRoot || process.cwd();
+    const dbPath = linksDbPath(env.instanceId, frameworkRoot, org);
+    const roots = opts.roots
+      ? opts.roots.split(',').map((s) => s.trim()).filter(Boolean)
+      : [process.env.CTX_ROOT || join(homedir(), '.cortextos', env.instanceId)].filter(Boolean);
+    // Default: scan state under CTX_ROOT (or instance home)
+    const scanRoots = roots.map((r) => {
+      const state = join(r, 'state');
+      return existsSync(state) ? state : r;
+    });
+    const result = dreamScan({ roots: scanRoots, dbPath });
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log(
+        `dream-scan: pending=${result.pending.length} alreadyDone=${result.alreadyDone} rejected=${result.rejected}`,
+      );
+      for (const j of result.pending) {
+        console.log(`  ${j.status} ${j.jobKey}`);
+      }
+    }
+  });
+
+busCommand
+  .command('kb-dream-verdict')
+  .description('Record dream verdict cache entry for a job key')
+  .argument('<jobKey>', 'dream:synth:<path>:<hash>')
+  .requiredOption('--verdict <v>', 'yes or no')
+  .option('--model <id>', 'Model id used for the verdict')
+  .option('--org <org>', 'Organization name')
+  .action((jobKey: string, opts: { verdict: string; model?: string; org?: string }) => {
+    try {
+      assertNodeSqliteAvailable();
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+    if (opts.verdict !== 'yes' && opts.verdict !== 'no') {
+      console.error('ERROR: --verdict must be yes or no');
+      process.exit(1);
+    }
+    const { env, org } = resolveKbOrg(opts);
+    const dbPath = linksDbPath(env.instanceId, env.frameworkRoot || process.cwd(), org);
+    const db = openLinksDb(dbPath);
+    try {
+      recordVerdict(db, jobKey, opts.verdict, opts.model);
+      console.log(`verdict ${opts.verdict} recorded for ${jobKey}`);
+    } finally {
+      db.close();
+    }
+  });
+
+busCommand
+  .command('kb-dream-file')
+  .description('Dual-write dream payload (edges + wiki pages) for a job key')
+  .argument('<jobKey>', 'dream:synth:<path>:<hash>')
+  .requiredOption('--payload <file>', 'JSON payload file from synthesis child')
+  .option('--org <org>', 'Organization name')
+  .option('--knowledge-sync-root <path>', 'knowledge-sync root')
+  .option('--wiki-root <path>', 'Wiki root for resolver')
+  .action((jobKey: string, opts: {
+    payload: string;
+    org?: string;
+    knowledgeSyncRoot?: string;
+    wikiRoot?: string;
+  }) => {
+    try {
+      assertNodeSqliteAvailable();
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+    const { env, org } = resolveKbOrg(opts);
+    if (!existsSync(opts.payload)) {
+      console.error(`ERROR: payload not found: ${opts.payload}`);
+      process.exit(1);
+    }
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(opts.payload, 'utf-8'));
+    } catch (err) {
+      console.error(`ERROR: invalid JSON payload: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+    const validated = validateDreamPayload(raw);
+    if (!validated.ok) {
+      console.error('ERROR: payload validation failed:');
+      for (const e of validated.errors) console.error(`  - ${e}`);
+      process.exit(1);
+    }
+    const dbPath = linksDbPath(env.instanceId, env.frameworkRoot || process.cwd(), org);
+    const ksRoot = opts.knowledgeSyncRoot || join(homedir(), 'code', 'knowledge-sync');
+    const resolver = createSlugResolver(opts.wikiRoot || join(ksRoot, 'wiki'));
+    const db = openLinksDb(dbPath);
+    try {
+      const result = fileDreamPayload(db, jobKey, validated.payload, resolver, ksRoot);
+      console.log(
+        `filed: entities=${result.entitiesFiled} edges=${result.edgesFiled} pages=${result.pagesWritten.length}`,
+      );
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    } finally {
+      db.close();
+    }
+  });
+
+busCommand
+  .command('kb-dream-status')
+  .description('Dream job status; --check fails if never succeeded or stale >48h')
+  .option('--org <org>', 'Organization name')
+  .option('--check', 'Exit 1 when neverSucceeded or lastCompletion >48h ago')
+  .option('--json', 'JSON on stdout')
+  .action((opts: { org?: string; check?: boolean; json?: boolean }) => {
+    try {
+      assertNodeSqliteAvailable();
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+    const { env, org } = resolveKbOrg(opts);
+    const frameworkRoot = env.frameworkRoot || process.cwd();
+    const dbPath = linksDbPath(env.instanceId, frameworkRoot, org);
+    const stateDir = jobsDir(env.instanceId, frameworkRoot, org);
+    const db = openLinksDb(dbPath);
+    try {
+      const status = dreamStatus(db, stateDir);
+      if (opts.json) {
+        console.log(JSON.stringify(status, null, 2));
+      } else {
+        console.log(
+          `dream: pending=${status.pending} approved=${status.approved} filed=${status.filed} failed=${status.failed} last=${status.lastCompletionTs ?? 'never'}`,
+        );
+      }
+      if (opts.check) {
+        const staleMs = 48 * 3600_000;
+        let fail = status.neverSucceeded;
+        if (status.lastCompletionTs) {
+          const age = Date.now() - new Date(status.lastCompletionTs).getTime();
+          if (age > staleMs) fail = true;
+        }
+        if (fail) process.exit(1);
+      }
+    } finally {
+      db.close();
     }
   });
 

@@ -98,20 +98,12 @@ export class FastChecker {
   private cronLivenessLastCheckedAt = 0;
   private cronLivenessLastEscalationAt = 0;
   private cronLivenessOverdueStreak = 0;
-  private reloadCrons?: () => boolean;
 
   constructor(
     agent: AgentProcess,
     paths: BusPaths,
     frameworkRoot: string,
-    options: {
-      pollInterval?: number;
-      log?: LogFn;
-      telegramApi?: TelegramAPI;
-      chatId?: string;
-      allowedUserId?: number;
-      reloadCrons?: () => boolean;
-    } = {},
+    options: { pollInterval?: number; log?: LogFn; telegramApi?: TelegramAPI; chatId?: string; allowedUserId?: number } = {},
   ) {
     this.agent = agent;
     this.paths = paths;
@@ -121,7 +113,6 @@ export class FastChecker {
     this.telegramApi = options.telegramApi;
     this.chatId = options.chatId;
     this.allowedUserId = options.allowedUserId;
-    this.reloadCrons = options.reloadCrons;
 
     // Initialize persistent dedup
     this.dedupFilePath = join(paths.stateDir, '.message-dedup-hashes');
@@ -1178,20 +1169,7 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       return;
     }
 
-    if (this.cronLivenessOverdueStreak === 2) {
-      // Second consecutive: try the cheap recovery first — re-read crons.json
-      // into the live scheduler. No agent restart, no context churn.
-      if (this.reloadCrons) {
-        const reloaded = this.reloadCrons();
-        this.log(`Cron liveness: reload attempted (${reloaded ? 'ok' : 'failed'}) before considering restart`);
-      } else {
-        this.log('Cron liveness: no reload callback wired — skipping to restart tier next cycle');
-      }
-      return;
-    }
-
-    // Third consecutive and beyond: reload did not clear it — escalate via
-    // existing sessionRefresh + circuit.
+    // Second consecutive: escalate via existing sessionRefresh + circuit
     if (now - this.cronLivenessLastEscalationAt < 15 * 60_000) return;
     this.cronLivenessLastEscalationAt = now;
     this.log('Cron liveness: escalating via sessionRefresh');

@@ -9,10 +9,11 @@ import { OpencodePTY, opencodeSessionExists } from '../pty/opencode-pty.js';
 import { MessageDedup, injectMessage as injectMessageIntoPty } from '../pty/inject.js';
 import type { TelegramAPI } from '../telegram/api.js';
 import { TelegramStreamer } from './telegram-streamer.js';
-import { ensureDir } from '../utils/atomic.js';
+import { atomicWriteSync, ensureDir } from '../utils/atomic.js';
 import { writeCortextosEnv } from '../utils/env.js';
 import { getOverdueReminders } from '../bus/reminders.js';
 import { logEvent } from '../bus/event.js';
+import { hardRestart } from '../bus/system.js';
 import { resolvePaths } from '../utils/paths.js';
 import { loadBuffer } from './conversation-buffer.js';
 import {
@@ -21,6 +22,7 @@ import {
   shouldSuppressBackPing,
   writeLastBackPingMs,
 } from './handoff-backping.js';
+import { ensureMissionAnchorFromBuffer, findFreshRecentHandoffDoc } from './restart-context.js';
 
 type LogFn = (msg: string) => void;
 
@@ -105,6 +107,63 @@ function computeDegradeOverride(
   return { runtime: failoverRuntime, model: cheapModel };
 }
 
+export interface SessionRolloverState {
+  lastFreshAtMs: number | null;
+  continuesSinceFresh: number;
+}
+
+interface FreshRolloverContextStatus {
+  usedPercentage: number;
+  writtenAtMs: number;
+}
+
+function freshRolloverEnabled(config: AgentConfig): boolean {
+  return config.fresh_rollover_max_continues !== undefined
+    || config.fresh_rollover_ctx_pct !== undefined;
+}
+
+export function nextSessionRolloverState(
+  previous: SessionRolloverState,
+  mode: 'fresh' | 'continue',
+  nowMs: number = Date.now(),
+): SessionRolloverState {
+  if (mode === 'fresh') {
+    return { lastFreshAtMs: nowMs, continuesSinceFresh: 0 };
+  }
+
+  return {
+    lastFreshAtMs: previous.lastFreshAtMs ?? null,
+    continuesSinceFresh: Math.max(0, previous.continuesSinceFresh) + 1,
+  };
+}
+
+export function decideSessionRefreshMode(
+  config: AgentConfig,
+  rollover: SessionRolloverState,
+  contextStatus: FreshRolloverContextStatus | null,
+  nowMs: number = Date.now(),
+): 'fresh' | 'continue' {
+  if (!freshRolloverEnabled(config)) {
+    return 'continue';
+  }
+
+  const maxContinues = config.fresh_rollover_max_continues ?? 3;
+  if (maxContinues > 0 && rollover.continuesSinceFresh >= maxContinues) {
+    return 'fresh';
+  }
+
+  const ctxThreshold = config.fresh_rollover_ctx_pct ?? 40;
+  if (
+    contextStatus
+    && nowMs - contextStatus.writtenAtMs < 10 * 60_000
+    && contextStatus.usedPercentage >= ctxThreshold
+  ) {
+    return 'fresh';
+  }
+
+  return 'continue';
+}
+
 /**
  * Manages a single agent's lifecycle.
  * Replaces agent-wrapper.sh for one agent.
@@ -169,6 +228,7 @@ export class AgentProcess {
   // a handoff doc marker. start() reads this after spawn to decide whether the
   // daemon should fire runtime-owned lifecycle Telegram directly.
   private lastSpawnWasHandoff = false;
+  private rolloverInProgress = false;
 
   constructor(name: string, env: CtxEnv, config: AgentConfig, log?: LogFn) {
     this.name = name;
@@ -211,6 +271,7 @@ export class AgentProcess {
     const prompt = mode === 'fresh'
       ? this.buildStartupPrompt()
       : this.buildContinuePrompt();
+    this.writeSessionRolloverState(mode);
 
     this.log(`Starting in ${mode} mode`);
     this.status = 'starting';
@@ -454,27 +515,48 @@ export class AgentProcess {
    * conversation directory still has .jsonl files (shouldContinue() is true).
    */
   async sessionRefresh(): Promise<void> {
-    this.log('Session refresh (--continue restart)');
-    // Write .session-refresh marker so the SessionEnd crash-alert hook
-    // (src/hooks/hook-crash-alert.ts) classifies the imminent PTY exit as a
-    // session refresh rather than a crash. The hook's marker handler +
-    // quiet-suppression set + message switch were all wired for this type,
-    // but no writer existed — every --continue rollover at the session-time
-    // cap surfaced as a false-positive 'crash' on chief/analyst + the
-    // crashes.log file.
+    if (this.rolloverInProgress) {
+      this.log('Session refresh already in progress');
+      return;
+    }
+    this.rolloverInProgress = true;
     try {
       const paths = resolvePaths(this.name, this.env.instanceId, this.env.org);
-      writeFileSync(
-        join(paths.stateDir, '.session-refresh'),
-        'session-time-cap rollover\n',
-        'utf-8',
+      const refreshConfig = this.readFreshRolloverConfig();
+      const refreshMode = decideSessionRefreshMode(
+        refreshConfig,
+        this.readSessionRolloverState(),
+        this.readRecentContextStatusForRollover(),
       );
+      this.log(
+        refreshMode === 'fresh'
+          ? 'Session refresh (planned fresh rollover)'
+          : 'Session refresh (--continue restart)',
+      );
+      // Write .session-refresh marker so the SessionEnd crash-alert hook
+      // (src/hooks/hook-crash-alert.ts) classifies the imminent PTY exit as a
+      // session refresh rather than a crash.
+      try {
+        writeFileSync(
+          join(paths.stateDir, '.session-refresh'),
+          refreshMode === 'fresh' ? 'planned fresh rollover\n' : 'session-time-cap rollover\n',
+          'utf-8',
+        );
+      } catch (err) {
+        this.log(`Failed to write .session-refresh marker: ${err}`);
+      }
+      if (refreshMode === 'fresh') {
+        await this.prepareFreshRollover(paths);
+      }
+      await this.stop();
+      await this.start();
+      this.log('Session refreshed');
     } catch (err) {
-      this.log(`Failed to write .session-refresh marker: ${err}`);
+      this.log(`Session refresh failed: ${err}`);
+      throw err;
+    } finally {
+      this.rolloverInProgress = false;
     }
-    await this.stop();
-    await this.start();
-    this.log('Session refreshed');
   }
 
   /**
@@ -555,6 +637,120 @@ export class AgentProcess {
       crashCount: this.crashCount,
       model: this.config.model,
     };
+  }
+
+  private getSessionRolloverPath(): string {
+    return join(this.env.ctxRoot, 'state', this.name, 'session-rollover.json');
+  }
+
+  private readSessionRolloverState(): SessionRolloverState {
+    const rolloverPath = this.getSessionRolloverPath();
+    try {
+      if (!existsSync(rolloverPath)) {
+        return { lastFreshAtMs: null, continuesSinceFresh: 0 };
+      }
+      const parsed = JSON.parse(readFileSync(rolloverPath, 'utf-8'));
+      return {
+        lastFreshAtMs: typeof parsed.lastFreshAtMs === 'number' ? parsed.lastFreshAtMs : null,
+        continuesSinceFresh: typeof parsed.continuesSinceFresh === 'number'
+          ? Math.max(0, Math.floor(parsed.continuesSinceFresh))
+          : 0,
+      };
+    } catch {
+      return { lastFreshAtMs: null, continuesSinceFresh: 0 };
+    }
+  }
+
+  private writeSessionRolloverState(mode: 'fresh' | 'continue'): void {
+    try {
+      const nextState = nextSessionRolloverState(this.readSessionRolloverState(), mode);
+      atomicWriteSync(this.getSessionRolloverPath(), JSON.stringify(nextState));
+    } catch (err) {
+      this.log(`Failed to write session-rollover state: ${err}`);
+    }
+  }
+
+  private readFreshRolloverConfig(): AgentConfig {
+    const merged: AgentConfig = { ...this.config };
+    try {
+      const configPath = join(this.env.agentDir, 'config.json');
+      if (!existsSync(configPath)) {
+        return merged;
+      }
+      const parsed = JSON.parse(readFileSync(configPath, 'utf-8'));
+      if (parsed.fresh_rollover_max_continues !== undefined) {
+        merged.fresh_rollover_max_continues = parsed.fresh_rollover_max_continues;
+      }
+      if (parsed.fresh_rollover_ctx_pct !== undefined) {
+        merged.fresh_rollover_ctx_pct = parsed.fresh_rollover_ctx_pct;
+      }
+    } catch {
+      // Fall back to in-memory config on read error.
+    }
+    return merged;
+  }
+
+  private readRecentContextStatusForRollover(): FreshRolloverContextStatus | null {
+    const statusPath = join(this.env.ctxRoot, 'state', this.name, 'context_status.json');
+    try {
+      if (!existsSync(statusPath)) {
+        return null;
+      }
+      const parsed = JSON.parse(readFileSync(statusPath, 'utf-8'));
+      if (typeof parsed.used_percentage !== 'number') {
+        return null;
+      }
+      const writtenAtMs = new Date(parsed.written_at || 0).getTime();
+      if (!Number.isFinite(writtenAtMs) || Date.now() - writtenAtMs >= 10 * 60_000) {
+        return null;
+      }
+      return {
+        usedPercentage: parsed.used_percentage,
+        writtenAtMs,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private buildPlannedFreshRolloverPrompt(ts: string): string {
+    return `[PLANNED FRESH ROLLOVER] Session refresh is switching to a fresh restart to cap --continue history. Within 5 minutes, write a handoff document to memory/handoffs/handoff-${ts}.md that begins with ## LIVE PRIORITY quoting the newest inbound user message(s) verbatim, ABOVE all stale task state. Then include these sections in order: ## Current Tasks, ## Next Actions, ## Active Crons, ## Key Context, ## Files Modified This Session. Before the restart window closes, write or refresh state/current-mission.txt with the LIVE PRIORITY. Do not call hard-restart yourself; the daemon will complete the fresh restart after the handoff window.`;
+  }
+
+  private async waitForFreshRolloverHandoffDoc(cutoffMs: number): Promise<string | null> {
+    const handoffsDir = join(this.env.agentDir, 'memory', 'handoffs');
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const docPath = findFreshRecentHandoffDoc(handoffsDir, cutoffMs, 0);
+      if (docPath) {
+        return docPath;
+      }
+      if (attempt < 29) {
+        await sleep(10_000);
+      }
+    }
+    return null;
+  }
+
+  private async prepareFreshRollover(paths: { stateDir: string }): Promise<void> {
+    const cutoffMs = Date.now();
+    const ts = new Date(cutoffMs).toISOString().replace(/[:.]/g, '-').slice(0, 19) + 'Z';
+    const injected = await this.injectMessage(this.buildPlannedFreshRolloverPrompt(ts));
+    if (!injected) {
+      this.log('Failed to deliver planned fresh rollover prompt');
+    }
+
+    const docPath = await this.waitForFreshRolloverHandoffDoc(cutoffMs);
+    if (docPath) {
+      try {
+        atomicWriteSync(join(paths.stateDir, '.handoff-doc-path'), docPath);
+        this.log(`Planned fresh rollover found handoff doc → ${docPath}`);
+      } catch (err) {
+        this.log(`Failed to persist planned fresh rollover handoff marker: ${err}`);
+      }
+    }
+
+    ensureMissionAnchorFromBuffer(this.env.agentDir, this.env.ctxRoot, this.name);
+    hardRestart(paths as any, this.name, 'CONTEXT-FORCE-RESTART: F8 fresh rollover');
   }
 
   /**
@@ -1071,6 +1267,12 @@ export class AgentProcess {
     const reminderBlock = this.buildReminderBlock();
     const deliverablesBlock = this.buildDeliverablesBlock();
     const { missionBlock, liveTailBlock } = this.buildResumeContextBlocks();
+    // F3: deterministic re-read signal. Fix 2 tells --continue restarts NOT to
+    // re-read bootstrap — but if a bootstrap file was edited just before this
+    // restart, the agent DOES need to re-read that one. Stat the key files and
+    // name only the ones modified in the last 15min, so staleness is a daemon
+    // check, not a model judgment call.
+    const staleReadBlock = this.buildChangedBootstrapNote();
     // Session refresh (--continue) is never a handoff restart.
     this.lastSpawnWasHandoff = false;
     const shouldPromptTelegram = this.shouldPromptTelegramOnlineMessage();
@@ -1087,7 +1289,31 @@ export class AgentProcess {
     const onlineMessage = emitOnlineMessage
       ? ' After checking inbox, send a Telegram message to the user saying you are back online.'
       : '';
-    return `SESSION CONTINUATION: Your CLI process was restarted with --continue to reload configs. Current UTC time: ${nowUtc}. Your full conversation history is preserved. Re-read AGENTS.md and ALL bootstrap files listed there. External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${reminderBlock}${deliverablesBlock}${missionBlock}${liveTailBlock} Check inbox. Resume normal operations.${onlineMessage}`;
+    return `SESSION CONTINUATION: Your CLI process was restarted with --continue to reload configs. Current UTC time: ${nowUtc}. Your full conversation history is preserved — AGENTS.md, bootstrap files, your skill list and tool registry are ALREADY in context. Do NOT re-read AGENTS.md or bootstrap files, and do NOT re-run list-skills or list-agents, unless you have specific reason to believe they changed since the last restart (re-reading them every restart is a top cause of context bloat). External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${staleReadBlock}${reminderBlock}${deliverablesBlock}${missionBlock}${liveTailBlock} Check inbox. Resume normal operations.${onlineMessage}`;
+  }
+
+  /**
+   * F3: return a note naming bootstrap files modified in the last 15 minutes, so
+   * a --continue restart that follows a config edit re-reads ONLY the changed
+   * files (deterministic, not a model guess). Empty string when nothing changed.
+   */
+  private buildChangedBootstrapNote(): string {
+    try {
+      const dir = this.env.agentDir;
+      const candidates = ['AGENTS.md', 'CLAUDE.md', 'OPERATIONS.md'];
+      const cutoff = Date.now() - 15 * 60_000;
+      const changed: string[] = [];
+      for (const f of candidates) {
+        const p = join(dir, f);
+        try {
+          if (existsSync(p) && statSync(p).mtimeMs > cutoff) changed.push(f);
+        } catch { /* unreadable — skip */ }
+      }
+      if (!changed.length) return '';
+      return ` NOTE: ${changed.join(', ')} changed since your last restart — re-read ONLY ${changed.length === 1 ? 'that file' : 'those files'} now (they are the exception to the do-not-re-read rule above).`;
+    } catch {
+      return '';
+    }
   }
 
   private buildResumeContextBlocks(): { missionBlock: string; liveTailBlock: string } {

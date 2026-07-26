@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, writeFileSync, unlinkSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { deriveMissionFromTrailingInbound, handoffGraceMs } from '../../../src/daemon/fast-checker.js';
+import { handoffGraceMs } from '../../../src/daemon/fast-checker.js';
+import { deriveMissionFromTrailingInbound } from '../../../src/daemon/restart-context.js';
 
 /**
  * Unit tests for the context monitor logic in fast-checker.ts.

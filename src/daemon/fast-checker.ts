@@ -14,99 +14,10 @@ import type { TelegramAPI } from '../telegram/api.js';
 import { KEYS } from '../pty/inject.js';
 import { atomicWriteSync } from '../utils/atomic.js';
 import { stripControlChars, sanitizeForPtyInjection, wrapFenceSafe } from '../utils/validate.js';
-import { loadBuffer } from './conversation-buffer.js';
 import { agentHoldsContextHandoffLease, releaseContextHandoffLease, requestContextHandoffLease } from './context-handoff-lease.js';
+import { ensureMissionAnchorFromBuffer, findFreshRecentHandoffDoc } from './restart-context.js';
 
 type LogFn = (msg: string) => void;
-
-const MAX_MISSION_CHARS = 600;
-
-function truncateMissionText(text: string, maxChars: number = MAX_MISSION_CHARS): string {
-  const normalized = text.replace(/\s+/g, ' ').trim();
-  if (normalized.length <= maxChars) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
-}
-
-export function deriveMissionFromTrailingInbound(
-  entries: ConversationBufferEntry[],
-  agentName: string,
-  maxChars: number = MAX_MISSION_CHARS,
-): string {
-  const trailingInbound: string[] = [];
-
-  for (let idx = entries.length - 1; idx >= 0; idx -= 1) {
-    const entry = entries[idx];
-    const isInboundTelegram = entry.sender !== agentName && entry.via === 'telegram';
-    if (!isInboundTelegram) {
-      break;
-    }
-
-    const trimmedContent = entry.content.trim();
-    if (trimmedContent) {
-      trailingInbound.push(trimmedContent);
-    }
-  }
-
-  if (trailingInbound.length === 0) {
-    return '';
-  }
-
-  return truncateMissionText(trailingInbound.reverse().join('\n\n'), maxChars);
-}
-
-function ensureMissionAnchorFromBuffer(agentDir: string, ctxRoot: string, agentName: string): void {
-  try {
-    const missionPath = join(agentDir, 'state', 'current-mission.txt');
-    if (existsSync(missionPath)) {
-      return;
-    }
-
-    const mission = deriveMissionFromTrailingInbound(loadBuffer(ctxRoot, agentName), agentName);
-    if (!mission) {
-      return;
-    }
-
-    mkdirSync(join(agentDir, 'state'), { recursive: true });
-    writeFileSync(missionPath, mission, 'utf-8');
-  } catch {
-    // Buffer/mission recovery is best-effort and must never block restart handling.
-  }
-}
-
-function findFreshRecentHandoffDoc(
-  handoffsDir: string,
-  cutoffMs: number,
-  ctxHandoffFiredAt: number,
-): string | null {
-  if (!existsSync(handoffsDir)) {
-    return null;
-  }
-
-  const recent = readdirSync(handoffsDir)
-    .filter((fileName) => fileName.startsWith('handoff-') && fileName.endsWith('.md'))
-    .map((fileName) => {
-      const fullPath = join(handoffsDir, fileName);
-      return {
-        fullPath,
-        mtimeMs: statSync(fullPath).mtimeMs,
-      };
-    })
-    .filter(({ mtimeMs }) => {
-      if (mtimeMs < cutoffMs) {
-        return false;
-      }
-      if (ctxHandoffFiredAt > 0 && mtimeMs < ctxHandoffFiredAt) {
-        return false;
-      }
-      return true;
-    })
-    .sort((left, right) => right.mtimeMs - left.mtimeMs);
-
-  return recent[0]?.fullPath ?? null;
-}
 
 /**
  * Post-boot grace window (ms) during which soft context-handoff actions are
@@ -187,12 +98,20 @@ export class FastChecker {
   private cronLivenessLastCheckedAt = 0;
   private cronLivenessLastEscalationAt = 0;
   private cronLivenessOverdueStreak = 0;
+  private reloadCrons?: () => boolean;
 
   constructor(
     agent: AgentProcess,
     paths: BusPaths,
     frameworkRoot: string,
-    options: { pollInterval?: number; log?: LogFn; telegramApi?: TelegramAPI; chatId?: string; allowedUserId?: number } = {},
+    options: {
+      pollInterval?: number;
+      log?: LogFn;
+      telegramApi?: TelegramAPI;
+      chatId?: string;
+      allowedUserId?: number;
+      reloadCrons?: () => boolean;
+    } = {},
   ) {
     this.agent = agent;
     this.paths = paths;
@@ -202,6 +121,7 @@ export class FastChecker {
     this.telegramApi = options.telegramApi;
     this.chatId = options.chatId;
     this.allowedUserId = options.allowedUserId;
+    this.reloadCrons = options.reloadCrons;
 
     // Initialize persistent dedup
     this.dedupFilePath = join(paths.stateDir, '.message-dedup-hashes');
@@ -1258,7 +1178,20 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       return;
     }
 
-    // Second consecutive: escalate via existing sessionRefresh + circuit
+    if (this.cronLivenessOverdueStreak === 2) {
+      // Second consecutive: try the cheap recovery first — re-read crons.json
+      // into the live scheduler. No agent restart, no context churn.
+      if (this.reloadCrons) {
+        const reloaded = this.reloadCrons();
+        this.log(`Cron liveness: reload attempted (${reloaded ? 'ok' : 'failed'}) before considering restart`);
+      } else {
+        this.log('Cron liveness: no reload callback wired — skipping to restart tier next cycle');
+      }
+      return;
+    }
+
+    // Third consecutive and beyond: reload did not clear it — escalate via
+    // existing sessionRefresh + circuit.
     if (now - this.cronLivenessLastEscalationAt < 15 * 60_000) return;
     this.cronLivenessLastEscalationAt = now;
     this.log('Cron liveness: escalating via sessionRefresh');

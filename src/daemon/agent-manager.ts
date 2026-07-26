@@ -535,7 +535,6 @@ export class AgentManager {
       // FastChecker only needs the first ID for its single-recipient typing
       // indicator / quick-checks. Multi-user is enforced by the gates above.
       allowedUserId: allowedUserId ? parseInt(allowedUserId.split(',')[0].trim(), 10) : undefined,
-      reloadCrons: () => this.reloadCrons(name),
     });
 
     // Send Telegram notification on crashes and session refreshes

@@ -98,20 +98,12 @@ export class FastChecker {
   private cronLivenessLastCheckedAt = 0;
   private cronLivenessLastEscalationAt = 0;
   private cronLivenessOverdueStreak = 0;
-  private reloadCrons?: () => boolean;
 
   constructor(
     agent: AgentProcess,
     paths: BusPaths,
     frameworkRoot: string,
-    options: {
-      pollInterval?: number;
-      log?: LogFn;
-      telegramApi?: TelegramAPI;
-      chatId?: string;
-      allowedUserId?: number;
-      reloadCrons?: () => boolean;
-    } = {},
+    options: { pollInterval?: number; log?: LogFn; telegramApi?: TelegramAPI; chatId?: string; allowedUserId?: number } = {},
   ) {
     this.agent = agent;
     this.paths = paths;
@@ -121,7 +113,6 @@ export class FastChecker {
     this.telegramApi = options.telegramApi;
     this.chatId = options.chatId;
     this.allowedUserId = options.allowedUserId;
-    this.reloadCrons = options.reloadCrons;
 
     // Initialize persistent dedup
     this.dedupFilePath = join(paths.stateDir, '.message-dedup-hashes');
@@ -1171,31 +1162,16 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       return;
     }
 
+    // Detection is warn-only. We deliberately do NOT sessionRefresh on an overdue
+    // cron: force-restarting an agent does not make a cron fire, upstream has no
+    // such escalation, and it created a self-reinforcing churn loop (a busy agent
+    // misses a cron -> liveness restarts it -> it misses more -> restarts again).
+    // Missed fires are already recovered by the cron-scheduler catch-up policy on
+    // the next reload. Log persistent overdue for visibility, rate-limited to 15min.
     this.cronLivenessOverdueStreak += 1;
-    if (this.cronLivenessOverdueStreak === 1) {
-      // First detection: soft log only (self-heal expected via mtime tick / reload).
-      this.log('Cron liveness: overdue detected — waiting one more cycle before restart escalation');
-      return;
-    }
-
-    if (this.cronLivenessOverdueStreak === 2) {
-      // Second consecutive: try the cheap recovery first — re-read crons.json
-      // into the live scheduler. No agent restart, no context churn.
-      if (this.reloadCrons) {
-        const reloaded = this.reloadCrons();
-        this.log(`Cron liveness: reload attempted (${reloaded ? 'ok' : 'failed'}) before considering restart`);
-      } else {
-        this.log('Cron liveness: no reload callback wired — skipping to restart tier next cycle');
-      }
-      return;
-    }
-
-    // Third consecutive and beyond: reload did not clear it — escalate via
-    // existing sessionRefresh + circuit.
     if (now - this.cronLivenessLastEscalationAt < 15 * 60_000) return;
     this.cronLivenessLastEscalationAt = now;
-    this.log('Cron liveness: escalating via sessionRefresh');
-    this.agent.sessionRefresh().catch((err) => this.log(`Cron liveness restart failed: ${err}`));
+    this.log('Cron liveness: cron(s) persistently overdue — catch-up handles missed fires, not restarting');
   }
 
   /**

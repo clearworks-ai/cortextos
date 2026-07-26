@@ -15,6 +15,12 @@ const originalProjectRoot = process.env.CTX_PROJECT_ROOT;
 const originalOrg = process.env.CTX_ORG;
 const originalHome = process.env.HOME;
 
+function mockExit(): ReturnType<typeof vi.spyOn> {
+  return vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+    throw new Error(`__PROCESS_EXIT_${code}__`);
+  }) as never);
+}
+
 function sourceLedgerPath(): string {
   return join(tempCtx, 'state', 'comms-event-dedup.json');
 }
@@ -76,16 +82,16 @@ afterEach(() => {
 });
 
 describe('send-message --source-key', () => {
-  it('suppresses a duplicate source event on the bus path', async () => {
+  it('suppresses a duplicate source event on the bus path for --kind comms', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
     await busCommand.parseAsync(
-      ['send-message', 'pa', 'normal', 'Meeting reminder one', '--source-key', 'automator:meeting-evt-F'],
+      ['send-message', 'pa', 'normal', 'Meeting reminder one', '--kind', 'comms', '--source-key', 'automator:meeting-evt-F'],
       { from: 'user' },
     );
     await busCommand.parseAsync(
-      ['send-message', 'pa', 'normal', 'Meeting reminder two', '--source-key', 'automator:meeting-evt-F'],
+      ['send-message', 'pa', 'normal', 'Meeting reminder two', '--kind', 'comms', '--source-key', 'automator:meeting-evt-F'],
       { from: 'user' },
     );
 
@@ -106,5 +112,20 @@ describe('send-message --source-key', () => {
 
     expect(inboxFiles('pa')).toHaveLength(2);
     expect(existsSync(sourceLedgerPath())).toBe(false);
+  });
+
+  it('--kind comms rejects sends without a source key', async () => {
+    const exitSpy = mockExit();
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(
+      busCommand.parseAsync(['send-message', 'pa', 'normal', 'Comms send missing source key', '--kind', 'comms'], { from: 'user' })
+    ).rejects.toThrow('__PROCESS_EXIT_1__');
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(inboxFiles('pa')).toHaveLength(0);
+    expect(
+      errSpy.mock.calls.flat().some(value => typeof value === 'string' && value.includes('requires --source-key'))
+    ).toBe(true);
   });
 });

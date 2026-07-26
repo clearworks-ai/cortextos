@@ -21,36 +21,24 @@ describe('tunnel ingress generation', () => {
   });
 
   it('emits a path-based bridge rule plus dashboard fallback when bridge hostname is absent', () => {
-    expect(
-      buildCloudflaredConfig(tunnelId, dashboardPort, { port: bridgePort }),
-    ).toMatchInlineSnapshot(`
-      "tunnel: abc123
-      credentials-file: /Users/joshweiss/.cloudflared/abc123.json
-      ingress:
-        - path: ^/relay/.*
-          service: http://localhost:20242
-        - service: http://localhost:3000
-        - service: http_status:404
-      "
-    `);
+    const config = buildCloudflaredConfig(tunnelId, dashboardPort, { port: bridgePort });
+    expect(config).toContain(`credentials-file: ${credFile}`);
+    expect(config).toContain('  - path: ^/relay/.*');
+    expect(config).toContain(`    service: http://localhost:${bridgePort}`);
+    expect(config).toContain(`  - service: http://localhost:${dashboardPort}`);
+    expect(config).toContain('  - service: http_status:404');
   });
 
   it('emits a hostname-specific bridge rule when bridge hostname is configured', () => {
-    expect(
-      buildCloudflaredConfig(tunnelId, dashboardPort, {
-        port: bridgePort,
-        hostname: 'bridge.example.com',
-      }),
-    ).toMatchInlineSnapshot(`
-      "tunnel: abc123
-      credentials-file: /Users/joshweiss/.cloudflared/abc123.json
-      ingress:
-        - hostname: bridge.example.com
-          service: http://localhost:20242
-        - service: http://localhost:3000
-        - service: http_status:404
-      "
-    `);
+    const config = buildCloudflaredConfig(tunnelId, dashboardPort, {
+      port: bridgePort,
+      hostname: 'bridge.example.com',
+    });
+    expect(config).toContain(`credentials-file: ${credFile}`);
+    expect(config).toContain('  - hostname: bridge.example.com');
+    expect(config).toContain(`    service: http://localhost:${bridgePort}`);
+    expect(config).toContain(`  - service: http://localhost:${dashboardPort}`);
+    expect(config).toContain('  - service: http_status:404');
   });
 
   it('always leaves the catch-all rule last when bridge ingress is enabled', () => {

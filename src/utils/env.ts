@@ -186,6 +186,35 @@ export function resolveEnv(overrides?: Partial<CtxEnv>): CtxEnv {
 }
 
 /**
+ * Build a child-process environment whose CTX root vars move in LOCKSTEP.
+ *
+ * The sandbox/live isolation guard in resolveEnv() (issue #313, above) throws
+ * in EVERY descendant process when a spawner overrides CTX_FRAMEWORK_ROOT but
+ * lets CTX_AGENT_DIR or CTX_PROJECT_ROOT leak through from the parent shell.
+ * This helper is the one sanctioned way to re-root a child: it sets
+ * CTX_FRAMEWORK_ROOT and CTX_PROJECT_ROOT to the same root and DELETES the
+ * inherited CTX_AGENT_DIR (an agent-scoped dir is meaningless for a
+ * daemon/dashboard child; resolveEnv() re-derives agentDir under the new
+ * projectRoot when it is unset — see the derivation above at the top of
+ * resolveEnv()).
+ */
+export function buildSubprocessCtxEnv(
+  base: NodeJS.ProcessEnv,
+  opts: { root: string; instanceId?: string; ctxRoot?: string; org?: string },
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...base,
+    CTX_FRAMEWORK_ROOT: opts.root,
+    CTX_PROJECT_ROOT: opts.root,
+    ...(opts.instanceId ? { CTX_INSTANCE_ID: opts.instanceId } : {}),
+    ...(opts.ctxRoot ? { CTX_ROOT: opts.ctxRoot } : {}),
+    ...(opts.org ? { CTX_ORG: opts.org } : {}),
+  };
+  delete env.CTX_AGENT_DIR;
+  return env;
+}
+
+/**
  * Write .cortextos-env file for backward compatibility with bash bus scripts.
  * Per D6: maintain this pattern.
  */

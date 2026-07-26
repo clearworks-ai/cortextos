@@ -348,6 +348,18 @@ function parseCommsFilterInput(raw: string): { emails: unknown[]; warning?: stri
   }
 }
 
+type BusSendKind = 'default' | 'comms';
+
+function parseKind(rawKind: string | undefined): BusSendKind {
+  if (rawKind === undefined) {
+    return 'default';
+  }
+  if (rawKind === 'comms') {
+    return 'comms';
+  }
+  throw new Error(`Error: --kind must be 'comms' when set, got '${rawKind}'.`);
+}
+
 export const busCommand = new Command('bus')
   .description('Bus commands for agent messaging, tasks, and events');
 
@@ -364,9 +376,10 @@ busCommand
   .argument('<text>', 'Message text')
   .argument('[reply-to]', 'Reply to message ID (optional positional form)')
   .option('--reply-to <id>', 'Reply to message ID')
-  .option('--source-key <key>', 'Source-event identity key (<namespace>:<id>). When set, this bus message is suppressed if the same source event was already surfaced (shared comms-event-dedup ledger). Invalid keys warn and fail open.')
+  .option('--kind <kind>', "Message kind. Use 'comms' to require a valid --source-key and fail closed.")
+  .option('--source-key <key>', 'Source-event identity key (<namespace>:<id>). When set, this bus message is suppressed if the same source event was already surfaced (shared comms-event-dedup ledger). Invalid keys warn and fail open unless --kind comms is set.')
   .option('--source-ttl-sec <n>', 'Re-surface window in seconds for --source-key (default 2592000 = 30d).')
-  .action((to: string, priority: string, text: string, replyToArg: string | undefined, opts: { replyTo?: string; sourceKey?: string; sourceTtlSec?: string }) => {
+  .action((to: string, priority: string, text: string, replyToArg: string | undefined, opts: { replyTo?: string; kind?: string; sourceKey?: string; sourceTtlSec?: string }) => {
     // Accept reply-to as either positional arg or --reply-to flag (P2 fix #9)
     const effectiveReplyTo = opts.replyTo ?? replyToArg;
     const validPriorities: Priority[] = ['urgent', 'high', 'normal', 'low'];
@@ -384,6 +397,13 @@ busCommand
 
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    let kind: BusSendKind;
+    try {
+      kind = parseKind(opts.kind);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
 
     // Warn if target agent doesn't exist (check project dir)
     const { existsSync } = require('fs');
@@ -408,8 +428,22 @@ busCommand
 
     let recordedSourceEvent = false;
     const sourceKey = opts.sourceKey;
-    if (sourceKey !== undefined) {
+    if (kind === 'comms') {
+      if (!sourceKey) {
+        console.error('Error: send-message --kind comms requires --source-key <namespace>:<id>.');
+        process.exit(1);
+      }
       if (!isValidSourceKey(sourceKey)) {
+        console.error(`Error: send-message --kind comms requires a valid --source-key <namespace>:<id>; got '${sourceKey}'.`);
+        process.exit(1);
+      }
+      if (!env.ctxRoot) {
+        console.error('Error: send-message --kind comms requires CTX_ROOT so source-event dedup can be enforced.');
+        process.exit(1);
+      }
+    }
+    if (sourceKey !== undefined) {
+      if (kind !== 'comms' && !isValidSourceKey(sourceKey)) {
         console.error(`Warning: invalid --source-key '${sourceKey}' — expected <namespace>:<id> (e.g. automator:meeting-<eventId>); failing open.`);
       } else if (env.ctxRoot) {
         let sourceTtlSec: number | undefined;
@@ -1694,17 +1728,25 @@ busCommand
   .option('--plain-text', 'Skip Telegram Markdown parsing entirely. Use this when the message contains unescaped _, *, backtick, or [ that would otherwise trip the Markdown parser. Without this flag, sendMessage still retries once with parse_mode disabled on a parse-entity error — so it is purely an opt-in to save the retry roundtrip.', false)
   .option('--no-dedup', 'Bypass duplicate-content suppression for this send (always deliver).')
   .option('--dedup-window <seconds>', 'Suppression window in seconds (default 21600 = 6h, or env CTX_TELEGRAM_DEDUP_WINDOW_SEC).')
-  .option('--source-key <key>', 'Source-event identity key (<namespace>:<id>, e.g. automator:meeting-<eventId>). When set, the send is gated on first-sight of this SOURCE EVENT via the comms-event-dedup ledger — reworded duplicates of the same event are suppressed BEFORE the byte-hash layer. Invalid keys warn and fall through to byte-hash dedup (fail-open). Ignored with --streaming; bypassed by --no-dedup.')
+  .option('--kind <kind>', "Message kind. Use 'comms' to require a valid --source-key and fail closed.")
+  .option('--source-key <key>', 'Source-event identity key (<namespace>:<id>, e.g. automator:meeting-<eventId>). When set, the send is gated on first-sight of this SOURCE EVENT via the comms-event-dedup ledger — reworded duplicates of the same event are suppressed BEFORE the byte-hash layer. Invalid keys warn and fall through to byte-hash dedup (fail-open) unless --kind comms is set. Ignored with --streaming; bypassed by --no-dedup.')
   .option('--source-ttl-sec <n>', 'Re-surface window in seconds for --source-key (default 2592000 = 30d, same as `bus event-dedup`). Meeting-reminder workers should pass 43200 (12h).')
   .option('--streaming', 'Stream the reply into ONE Telegram message: <message> is the initial placeholder, then newline-delimited tokens from stdin are appended via editMessageText (≤1 edit/sec, identical-content guard, final edit applies markdown→HTML). Closes the stream when stdin ends. Spec: Item 1 of .planning/larry-ux-parity-spec.md.', false)
   .option('--confirm-claim', 'Assert that the agent has verified the completion claim in this message off-ledger (no receipt recorded). Bypasses the require-confirm hold for deploy/merge claims when CTX_CLAIM_GATE=enforce. Has NO effect on block-rung claims (external-send); those require a real receipt or state/claim-gate-override.json.', false)
-  .action(async (chatId: string, message: string, opts: { dedup?: boolean; dedupWindow?: string; image?: string; file?: string; plainText?: boolean; streaming?: boolean; confirmClaim?: boolean; sourceKey?: string; sourceTtlSec?: string }) => {
+  .action(async (chatId: string, message: string, opts: { dedup?: boolean; dedupWindow?: string; image?: string; file?: string; plainText?: boolean; streaming?: boolean; confirmClaim?: boolean; kind?: string; sourceKey?: string; sourceTtlSec?: string }) => {
     // Codex agents emit literal '\n'/'\t' inside single-quoted bash where bash
     // does not expand escapes, so they arrive at argv as 2-char literals and
     // Telegram renders them as visible text. Normalize before send + log.
     message = message.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
     // Resolve bot token: agent .env first, then process.env
     const env = resolveEnv();
+    let kind: BusSendKind;
+    try {
+      kind = parseKind(opts.kind);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
     let botToken = '';
 
     // 1. Check agent .env (most specific)
@@ -1731,11 +1773,26 @@ busCommand
 
     let recordedSourceEvent = false;
     const sourceKey = opts.sourceKey;
+    if (kind === 'comms') {
+      if (!sourceKey) {
+        console.error('Error: send-telegram --kind comms requires --source-key <namespace>:<id>.');
+        process.exit(1);
+      }
+      if (!isValidSourceKey(sourceKey)) {
+        console.error(`Error: send-telegram --kind comms requires a valid --source-key <namespace>:<id>; got '${sourceKey}'.`);
+        process.exit(1);
+      }
+      if (!env.ctxRoot) {
+        console.error('Error: send-telegram --kind comms requires CTX_ROOT so source-event dedup can be enforced.');
+        process.exit(1);
+      }
+    }
     if (sourceKey !== undefined) {
-      if (opts.dedup !== false) {
-        if (opts.streaming) {
+      const sourceDedupEnabled = kind === 'comms' || opts.dedup !== false;
+      if (sourceDedupEnabled) {
+        if (opts.streaming && kind !== 'comms') {
           console.error('Warning: --source-key is ignored with --streaming.');
-        } else if (!isValidSourceKey(sourceKey)) {
+        } else if (kind !== 'comms' && !isValidSourceKey(sourceKey)) {
           console.error(`Warning: invalid --source-key '${sourceKey}' — expected <namespace>:<id> (e.g. automator:meeting-<eventId>); failing open to byte-hash dedup.`);
         } else if (env.ctxRoot) {
           let sourceTtlSec: number | undefined;

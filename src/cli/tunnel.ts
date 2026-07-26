@@ -17,6 +17,8 @@ interface TunnelConfig {
   tunnelName?: string;
   tunnelUrl?: string;
   port?: number;
+  bridgePort?: number;
+  bridgeHostname?: string;
   createdAt?: string;
 }
 
@@ -165,14 +167,43 @@ function createTunnel(): CloudflaredTunnel {
   }
 }
 
-function writeCloudflaredConfig(tunnelId: string, port: number): void {
+export function buildCloudflaredConfig(
+  tunnelId: string,
+  port: number,
+  bridge?: { port: number; hostname?: string },
+): string {
   const credFile = join(homedir(), '.cloudflared', `${tunnelId}.json`);
   const config = [
     `tunnel: ${tunnelId}`,
     `credentials-file: ${credFile}`,
     `ingress:`,
-    `  - service: http://localhost:${port}`,
-  ].join('\n') + '\n';
+  ];
+
+  if (!bridge) {
+    return [
+      ...config,
+      `  - service: http://localhost:${port}`,
+    ].join('\n') + '\n';
+  }
+
+  if (bridge.hostname) {
+    config.push(`  - hostname: ${bridge.hostname}`);
+  } else {
+    config.push('  - path: ^/relay/.*');
+  }
+  config.push(`    service: http://localhost:${bridge.port}`);
+  config.push(`  - service: http://localhost:${port}`);
+  config.push('  - service: http_status:404');
+
+  return config.join('\n') + '\n';
+}
+
+function writeCloudflaredConfig(
+  tunnelId: string,
+  port: number,
+  bridge?: { port: number; hostname?: string },
+): void {
+  const config = buildCloudflaredConfig(tunnelId, port, bridge);
   writeFileSync(CLOUDFLARED_CONFIG, config, 'utf-8');
 }
 
@@ -303,10 +334,29 @@ function unloadService(): void {
 const startCommand = new Command('start')
   .option('--instance <id>', 'Instance ID')
   .option('--port <port>', 'Dashboard port', '3000')
+  .option('--bridge-port <port>', 'Webhook bridge port')
+  .option('--bridge-hostname <hostname>', 'Webhook bridge hostname')
   .description('Create (or reuse) the Cloudflare tunnel and start it as a launchd service')
-  .action(async (options: { instance?: string; port: string }) => {
+  .action(async (options: { instance?: string; port: string; bridgePort?: string; bridgeHostname?: string }) => {
     const instanceId = resolveInstanceId(options.instance);
     const port = parseInt(options.port, 10);
+    const existingConfig = readTunnelConfig(instanceId);
+    const parsedBridgePort = options.bridgePort ? parseInt(options.bridgePort, 10) : undefined;
+    const resolvedBridgePort = parsedBridgePort ?? existingConfig.bridgePort;
+    const resolvedBridgeHostname = options.bridgeHostname ?? existingConfig.bridgeHostname;
+
+    if (options.bridgeHostname && !resolvedBridgePort) {
+      throw new Error('--bridge-hostname requires --bridge-port or a saved bridgePort in tunnel.json');
+    }
+    if (parsedBridgePort !== undefined && (!Number.isInteger(parsedBridgePort) || parsedBridgePort < 1 || parsedBridgePort > 65535)) {
+      throw new Error('--bridge-port must be a valid TCP port (1-65535)');
+    }
+    const bridge = resolvedBridgePort
+      ? {
+          port: resolvedBridgePort,
+          ...(resolvedBridgeHostname ? { hostname: resolvedBridgeHostname } : {}),
+        }
+      : undefined;
 
     checkPlatform();
     console.log('\ncortextOS Tunnel\n');
@@ -332,7 +382,7 @@ const startCommand = new Command('start')
     const tunnelUrl = `https://${tunnel.id}.cfargotunnel.com`;
 
     // 4. Write cloudflared config.yaml
-    writeCloudflaredConfig(tunnel.id, port);
+    writeCloudflaredConfig(tunnel.id, port, bridge);
     console.log(`  Config: ${CLOUDFLARED_CONFIG}`);
 
     // 5. Write launchd plist
@@ -371,10 +421,13 @@ const startCommand = new Command('start')
 
     // 8. Persist tunnel config
     writeTunnelConfig(instanceId, {
+      ...existingConfig,
       tunnelId: tunnel.id,
       tunnelName: tunnel.name,
       tunnelUrl,
       port,
+      ...(resolvedBridgePort ? { bridgePort: resolvedBridgePort } : {}),
+      ...(resolvedBridgeHostname ? { bridgeHostname: resolvedBridgeHostname } : {}),
       createdAt: new Date().toISOString(),
     });
 

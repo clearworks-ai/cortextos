@@ -97,3 +97,10 @@ keeps distinct occurrences distinct.
 - No edit-in-place / message-update UX (research's stretch goal; MVP = suppress).
 - No changes to `comms-filter`, `event-dedup`, `ci-alert-gate`, or `src/telegram/dedup.ts`.
 - No daemon back-ping paths (that was PR #108, a different emitter).
+
+---
+## Addendum 2026-07-25 — Part B re-add (Josh-confirmed)
+Scope narrowed to re-adding #131 Part B (`--kind comms` fail-closed source-key guard) per
+spec `03-specs/03-readd-source-key-failclosed.md`. Part A (comms-filter --surface auto-send)
+stays permanently reverted. Josh confirmed re-add + that he did NOT accept the dupe tradeoff.
+Planner=Fable (daytime run-lock). Dispatch: codexer under GATE.

@@ -905,6 +905,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--recap", action="store_true", help="Emit recap JSON (summary + gated next steps); no POST, no watermark")
     parser.add_argument("--recap-ledger", default=str(STATE_DIR / "meeting-recap-drafts-surfaced.txt"))
     parser.add_argument(
+        "--full-ledger",
+        default="",
+        help="Full mode only: path to ledger of already-filed meeting ids (skip + count skipped_ledger)",
+    )
+    parser.add_argument(
         "--mode",
         choices=["commitments", "recap", "full"],
         default=None,
@@ -946,6 +951,11 @@ def load_recap_ledger(path: Path) -> set[str]:
                 if parts:
                     ledger_ids.add(parts[0])
     return ledger_ids
+
+
+def load_ledger(path: Path) -> set[str]:
+    """Alias of load_recap_ledger — shared ledger format (id as first token)."""
+    return load_recap_ledger(path)
 
 
 def is_suppressed_meeting(transcript: dict[str, Any]) -> bool:

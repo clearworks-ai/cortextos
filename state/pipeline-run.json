@@ -1,1 +1,1 @@
-{"ts":1784698550,"exempt":true,"reason":"codexer heartbeat ACK — standby confirmation, no build dispatched"}
+{"ts":1785045077,"exempt":true,"reason":"task triage/status update only (cxportal task moved to someday, queue reorder) - no code change, not a build"}

@@ -541,13 +541,24 @@ export class AgentManager {
     if (telegramApi && chatId) {
       const tgApi = telegramApi;
       const tgChatId = chatId;
+      // Emitter-B scope guard (restart-telegram-noise-dual-emitter fix):
+      // claude-code and hermes runtimes already get crash/recovery Telegram
+      // coverage — with dedup — from hook-crash-alert.ts's SessionEnd hook.
+      // Sending the crashed/recovered pair here too double-emits every crash.
+      // Only codex-app-server and opencode lack that hook, so daemon-side
+      // crash/recovery alerts remain their sole source. Mirrors the runtime
+      // reasoning in agent-process.ts maybeSendRuntimeLifecycleNotification()
+      // (lines ~1505-1517). 'halted' is exempt: distinct terminal transition
+      // with no hook equivalent — it must fire for ALL runtimes.
+      const daemonOwnsCrashAlerts =
+        config.runtime === 'codex-app-server' || config.runtime === 'opencode';
       let prevStatus: string | null = null;
       // Per-agent cooldown: collapse a crash-burst into one alert per 10 minutes.
       // halted and recovered are state transitions (not repeats) and always send.
       const CRASH_ALERT_COOLDOWN_MS = 10 * 60 * 1000;
       let lastCrashAlertAt: number | null = null;
       agentProcess.onStatusChanged((status) => {
-        if (status.status === 'crashed') {
+        if (status.status === 'crashed' && daemonOwnsCrashAlerts) {
           const now = Date.now();
           if (lastCrashAlertAt !== null && now - lastCrashAlertAt < CRASH_ALERT_COOLDOWN_MS) {
             // Duplicate crash within cooldown window — skip this alert.
@@ -558,7 +569,7 @@ export class AgentManager {
           }
         } else if (status.status === 'halted') {
           tgApi.sendMessage(tgChatId, `Agent ${name} HALTED — exceeded crash limit. Restart manually with: cortextos start ${name}`).catch(() => {});
-        } else if (status.status === 'running' && prevStatus === 'crashed') {
+        } else if (status.status === 'running' && prevStatus === 'crashed' && daemonOwnsCrashAlerts) {
           tgApi.sendMessage(tgChatId, `Agent ${name} recovered and is back online`).catch(() => {});
         }
         prevStatus = status.status;

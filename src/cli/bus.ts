@@ -4362,6 +4362,11 @@ busCommand
   .description('PreToolUse hook: detects and blocks repeated tool loops (same-args repetition + ping-pong alternation)')
   .action(() => runHook('hook-loop-detector'));
 
+busCommand
+  .command('hook-retrieval-enforcer')
+  .description('UserPromptSubmit hook: selective/cached documented-past retrieval injection (fleet-context-diet)')
+  .action(() => runHook('hook-retrieval-enforcer'));
+
 // --- OAuth token rotation commands ---
 
 busCommand

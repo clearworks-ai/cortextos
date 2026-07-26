@@ -7,8 +7,9 @@
 
   <key>ProgramArguments</key>
   <array>
-    <!-- Uses uv run so the cryptography package is available without a venv -->
-    <string>/opt/homebrew/bin/uv</string>
+    <!-- Uses uv run so the cryptography package is available without a venv.
+         uv lives at ~/.local/bin/uv on this machine (not Homebrew). -->
+    <string>/Users/joshweiss/.local/bin/uv</string>
     <string>run</string>
     <string>--with</string>
     <string>cryptography</string>

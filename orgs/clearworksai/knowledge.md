@@ -60,53 +60,13 @@ Obsidian vault: `/Users/joshweiss/code/knowledge-sync/wiki/`
 Raw vault: `/Users/joshweiss/code/knowledge-sync/raw/`
 Outputs vault: `/Users/joshweiss/code/knowledge-sync/outputs/`
 
-## Knowledge Base — Clearpath Intelligence API (authoritative)
+## Knowledge Base — MMRAG (the cortextOS index)
 
-**This org does NOT use the cortextOS built-in Chroma/Gemini KB.** The knowledge base IS Clearpath's intelligence stack. Agents must call Clearpath's API for any RAG operation.
+**MMRAG (`cortextos bus kb-query` / `kb-ingest`, backed by `mmrag.py` + local ChromaDB) is the ONE knowledge index the fleet actually reads.** The `documented-past-retrieval` hook injects its hits into every agent turn. Fed by frank2 synthesis crons (nightly wiki, weekly session-archaeology/synthesis) — vault docs + Josh's personal sessions. NOT fed: meeting transcripts, agent transcripts, CRM email.
 
-**Architecture:**
-- **DB:** Supabase Postgres + pgvector (moved off Railway Postgres 2026-03-30)
-- **Embeddings:** Gemini `gemini-embedding-exp-03-07`, 3072 dimensions — handles text, images, audio in one model. (The rest of Clearpath still uses OpenAI embeddings for non-multimodal paths; intelligence stack is Gemini.)
-- **ORM:** Drizzle over the Supabase connection string, same storage.ts patterns.
-- **Auth:** `X-Api-Key` header → resolved to orgId by storage layer → every query org-scoped → cross-org returns 404.
+**Clearpath's intelligence stack (`clrpath.ai/api/intelligence/*`, Supabase+pgvector+Gemini embeddings) is LEGACY/RETIRED — Clearpath itself is an old app, not in active use.** Its only writer (academy agent's nightly cron) has been offline for months; no agent calls `/ask`. Do not route KB reads/writes there. Confirmed directly by Josh 2026-07-25 after a prior stale version of this section wrongly called it "authoritative."
 
-**Base URL: `https://clrpath.ai`** — do NOT use the Railway URL. It 301-redirects to the custom domain and DROPS the `X-Api-Key` header in the redirect, giving a bogus 401. This has burned prior agents repeatedly.
-
-**Env vars (in `orgs/clearworksai/secrets.env`):**
-- `CLEARPATH_BASE_URL=https://clrpath.ai`
-- `CLEARPATH_API_KEY=cpk_...` (org-scoped to Clearworks.AI Internal)
-- `CLEARPATH_ORG_ID=0ce7b73b-9161-47a6-a800-a0c8f15a4ae4`
-- `CLEARPATH_USER_ID=53388948`
-
-**Ingest:**
-```
-POST https://clrpath.ai/api/intelligence/ingest
-Headers: X-Api-Key: $CLEARPATH_API_KEY
-Body:    { "text": "...", "title": "...", "sourceType": "..." }
-   or:    { "url": "...",  "title": "...", "sourceType": "..." }
-```
-- URL inputs: server fetches the page first.
-- Content chunked → each chunk embedded via Gemini (3072-d) → inserted into intelligence table, scoped to the org resolved from the API key.
-- Response: chunk count.
-
-**Query:**
-```
-POST https://clrpath.ai/api/intelligence/ask
-Headers: X-Api-Key: $CLEARPATH_API_KEY
-Body:    { "query": "...", "orgId": "$CLEARPATH_ORG_ID" }
-```
-- pgvector cosine similarity, top-k chunks returned as context. Some endpoint variants synthesize an answer via an LLM call.
-
-**Code locations in `~/code/clearpath/server/`:**
-- `routes/intelligence/intelligence-extraction.ts`, `intelligence-ask.ts` — ingest / ask endpoints
-- `routes/embeddings.ts` — admin + `/api/intelligence/ingest` (media pipeline entry point; accepts text/URL/files incl. images, PDFs, audio, video)
-- `storage/embeddings.ts`, `storage/intelligence.ts` — vector ops
-- `services/retrieval.ts` — retrieval logic
-- `services/embedding.ts`, `services/embedding-pipeline.ts` — Gemini client + chunking + backfill
-- `db.ts` — Supabase connection
-- `shared/schema.ts` — `intelligenceEmbeddings` Drizzle schema + vector column
-
-**Future:** we will wire this into the cortextOS dashboard as a KB page pointing at the same Supabase/pgvector store. Not built yet.
+Known gaps (open, not yet fixed): agent transcripts (~9.4GB under `~/.claude/projects/`) never indexed; wiki-synthesis cron has failed silently before — needs a canary, not blind trust. See `feedback_reliability_not_deletion.md` and `project_kb_underfed_mmrag_2026-07-24.md` in shared memory.
 
 ## Clearpath Org IDs (UUIDs, not slugs)
 

@@ -3,6 +3,8 @@ import type { TelegramAPI } from '../../../src/telegram/api.js';
 
 // Capture the PTY exit handler so tests can simulate exits at controlled times
 let capturedOnExit: ((exitCode: number, signal?: number) => void) | null = null;
+const mockAtomicWriteSync = vi.fn();
+const mockHardRestart = vi.fn();
 
 const mockPty = {
   spawn: vi.fn().mockResolvedValue(undefined),
@@ -27,7 +29,7 @@ vi.mock('../../../src/pty/inject.js', () => ({
 
 vi.mock('../../../src/utils/atomic.js', () => ({
   ensureDir: vi.fn(),
-  atomicWriteSync: vi.fn(),
+  atomicWriteSync: (...args: unknown[]) => mockAtomicWriteSync(...args),
 }));
 
 vi.mock('../../../src/utils/env.js', () => ({
@@ -40,12 +42,27 @@ vi.mock('../../../src/bus/reminders.js', () => ({
 }));
 
 vi.mock('../../../src/utils/paths.js', () => ({
-  resolvePaths: vi.fn().mockReturnValue({ stateDir: '/tmp/test-ctx/state/alice' }),
+  resolvePaths: vi.fn().mockReturnValue({
+    ctxRoot: '/tmp/test-ctx',
+    inbox: '/tmp/test-ctx/inbox',
+    inflight: '/tmp/test-ctx/inflight',
+    processed: '/tmp/test-ctx/processed',
+    logDir: '/tmp/test-ctx/logs/alice',
+    stateDir: '/tmp/test-ctx/state/alice',
+    taskDir: '/tmp/test-ctx/tasks',
+    approvalDir: '/tmp/test-ctx/approvals',
+    analyticsDir: '/tmp/test-ctx/analytics',
+    deliverablesDir: '/tmp/test-ctx/orgs/acme/deliverables',
+  }),
 }));
 
 const mockLogEvent = vi.fn();
 vi.mock('../../../src/bus/event.js', () => ({
   logEvent: (...args: unknown[]) => mockLogEvent(...args),
+}));
+
+vi.mock('../../../src/bus/system.js', () => ({
+  hardRestart: (...args: unknown[]) => mockHardRestart(...args),
 }));
 
 const fsMocks = {
@@ -55,6 +72,7 @@ const fsMocks = {
   appendFileSync: vi.fn(),
   statSync: vi.fn(),
   unlinkSync: vi.fn(),
+  readdirSync: vi.fn(),
 };
 
 vi.mock('fs', async () => {
@@ -84,10 +102,11 @@ vi.mock('fs', async () => {
     get appendFileSync() { return fsMocks.appendFileSync; },
     get statSync() { return fsMocks.statSync; },
     get unlinkSync() { return fsMocks.unlinkSync; },
+    get readdirSync() { return fsMocks.readdirSync; },
   };
 });
 
-const { AgentProcess } = await import('../../../src/daemon/agent-process.js');
+const { AgentProcess, decideSessionRefreshMode, nextSessionRolloverState } = await import('../../../src/daemon/agent-process.js');
 
 const mockEnv = {
   instanceId: 'test',
@@ -115,6 +134,9 @@ beforeEach(() => {
   fsMocks.appendFileSync.mockReset();
   fsMocks.statSync.mockReset();
   fsMocks.unlinkSync.mockReset();
+  fsMocks.readdirSync.mockReset().mockImplementation(() => { throw new Error('missing'); });
+  mockAtomicWriteSync.mockReset();
+  mockHardRestart.mockReset();
 });
 
 describe('AgentProcess - BUG-011 fix (stop awaits PTY exit)', () => {
@@ -348,6 +370,23 @@ describe('AgentProcess - BUG-011 fix (stop awaits PTY exit)', () => {
     const markerWriteOrder = fsMocks.writeFileSync.mock.invocationCallOrder[writeIdx];
     expect(markerWriteOrder).toBeLessThan(stopSpy.mock.invocationCallOrder[0]);
   });
+
+  it('sessionRefresh() still stops and starts when the marker write fails', async () => {
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+
+    const stopSpy = vi.spyOn(ap, 'stop').mockResolvedValue();
+    const startSpy = vi.spyOn(ap, 'start').mockResolvedValue();
+    fsMocks.writeFileSync.mockImplementation((path: unknown) => {
+      if (String(path).endsWith('.session-refresh')) {
+        throw new Error('disk full');
+      }
+    });
+
+    await expect(ap.sessionRefresh()).resolves.toBeUndefined();
+    expect(stopSpy).toHaveBeenCalled();
+    expect(startSpy).toHaveBeenCalled();
+  });
 });
 
 describe('AgentProcess - BUG-048 fix (session timer re-reads config)', () => {
@@ -444,6 +483,285 @@ describe('AgentProcess - BUG-048 fix (session timer re-reads config)', () => {
     ).length;
     expect(rescheduleCount).toBeLessThan(5);
     expect(refreshSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('AgentProcess - F8 fresh rollover', () => {
+  it('decision helper stays opt-in and upgrades to fresh on count or context threshold', () => {
+    expect(
+      decideSessionRefreshMode(
+        {},
+        { lastFreshAtMs: null, continuesSinceFresh: 99 },
+        { usedPercentage: 95, writtenAtMs: 1_000 },
+        2_000,
+      ),
+    ).toBe('continue');
+
+    expect(
+      decideSessionRefreshMode(
+        { fresh_rollover_max_continues: 3 },
+        { lastFreshAtMs: null, continuesSinceFresh: 3 },
+        null,
+        2_000,
+      ),
+    ).toBe('fresh');
+
+    expect(
+      decideSessionRefreshMode(
+        { fresh_rollover_ctx_pct: 45 },
+        { lastFreshAtMs: null, continuesSinceFresh: 0 },
+        { usedPercentage: 45, writtenAtMs: 2_000 },
+        2_001,
+      ),
+    ).toBe('fresh');
+
+    expect(
+      decideSessionRefreshMode(
+        { fresh_rollover_ctx_pct: 45 },
+        { lastFreshAtMs: null, continuesSinceFresh: 0 },
+        { usedPercentage: 80, writtenAtMs: 0 },
+        10 * 60_000 + 1,
+      ),
+    ).toBe('continue');
+  });
+
+  it('nextSessionRolloverState resets on fresh and increments on continue', () => {
+    const continued = nextSessionRolloverState(
+      { lastFreshAtMs: 100, continuesSinceFresh: 2 },
+      'continue',
+      500,
+    );
+    expect(continued).toEqual({ lastFreshAtMs: 100, continuesSinceFresh: 3 });
+
+    const fresh = nextSessionRolloverState(continued, 'fresh', 900);
+    expect(fresh).toEqual({ lastFreshAtMs: 900, continuesSinceFresh: 0 });
+  });
+
+  it('start() writes fresh session-rollover state after mode determination', async () => {
+    fsMocks.existsSync.mockImplementation((p: unknown) =>
+      String(p).endsWith('/state/alice/session-rollover.json'),
+    );
+    fsMocks.readFileSync.mockImplementation((p: unknown) => {
+      if (String(p).endsWith('/state/alice/session-rollover.json')) {
+        return JSON.stringify({ lastFreshAtMs: 100, continuesSinceFresh: 1 });
+      }
+      return '';
+    });
+
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+
+    expect(mockAtomicWriteSync).toHaveBeenCalledWith(
+      '/tmp/test-ctx/state/alice/session-rollover.json',
+      expect.stringContaining('"continuesSinceFresh":0'),
+    );
+  });
+
+  it('sessionRefresh() escalates to planned fresh rollover and marks hard restart before stop', async () => {
+    const now = Date.now();
+    fsMocks.existsSync.mockImplementation((p: unknown) => {
+      const path = String(p);
+      return path.endsWith('/state/alice/session-rollover.json')
+        || path.endsWith('/state/alice/context_status.json')
+        || path.endsWith('/state/alice/current-mission.txt')
+        || path.endsWith('/memory/handoffs');
+    });
+    fsMocks.readFileSync.mockImplementation((p: unknown) => {
+      const path = String(p);
+      if (path.endsWith('/state/alice/session-rollover.json')) {
+        return JSON.stringify({ lastFreshAtMs: 100, continuesSinceFresh: 1 });
+      }
+      if (path.endsWith('/state/alice/context_status.json')) {
+        return JSON.stringify({ used_percentage: 55, written_at: new Date(now).toISOString() });
+      }
+      if (path.endsWith('/state/alice/current-mission.txt')) {
+        return 'keep shipping';
+      }
+      if (path.endsWith('config.json')) {
+        return JSON.stringify({ fresh_rollover_max_continues: 1 });
+      }
+      return '';
+    });
+    fsMocks.readdirSync.mockImplementation((p: unknown) => {
+      if (String(p).includes('/memory/handoffs')) {
+        return ['handoff-2026-07-26T00-00-00Z.md'];
+      }
+      throw new Error('missing');
+    });
+    fsMocks.statSync.mockImplementation((p: unknown) => {
+      if (String(p).includes('/memory/handoffs/handoff-2026-07-26T00-00-00Z.md')) {
+        return { mtimeMs: now + 1 };
+      }
+      return { mtimeMs: now };
+    });
+
+    const ap = new AgentProcess('alice', mockEnv, { fresh_rollover_max_continues: 1 });
+    await ap.start();
+
+    const stopSpy = vi.spyOn(ap, 'stop').mockResolvedValue();
+    const startSpy = vi.spyOn(ap, 'start').mockResolvedValue();
+    const injectSpy = vi.spyOn(ap, 'injectMessage').mockResolvedValue(true);
+
+    await ap.sessionRefresh({ plannedCap: true });
+
+    expect(injectSpy).toHaveBeenCalledWith(expect.stringContaining('[PLANNED FRESH ROLLOVER]'));
+    expect(mockHardRestart).toHaveBeenCalledWith(
+      expect.objectContaining({ stateDir: '/tmp/test-ctx/state/alice', logDir: '/tmp/test-ctx/logs/alice' }),
+      'alice',
+      'CONTEXT-FORCE-RESTART: F8 fresh rollover',
+    );
+    expect(mockAtomicWriteSync).toHaveBeenCalledWith(
+      '/tmp/test-ctx/state/alice/.handoff-doc-path',
+      expect.stringContaining('handoff-2026-07-26T00-00-00Z.md'),
+    );
+    expect(stopSpy).toHaveBeenCalled();
+    expect(startSpy).toHaveBeenCalled();
+  });
+
+  // FIX-B: recovery callers (loop-stall, Tier-3) do not pass plannedCap and must
+  // never inject the cooperative-handoff prompt or the 5-min poll.
+  it('FIX-B: sessionRefresh without plannedCap never escalates to fresh even at counter>=max', async () => {
+    const now = Date.now();
+    fsMocks.existsSync.mockImplementation((p: unknown) => {
+      const path = String(p);
+      return path.endsWith('/state/alice/session-rollover.json')
+        || path.endsWith('/state/alice/context_status.json');
+    });
+    fsMocks.readFileSync.mockImplementation((p: unknown) => {
+      const path = String(p);
+      if (path.endsWith('/state/alice/session-rollover.json')) {
+        return JSON.stringify({ lastFreshAtMs: 100, continuesSinceFresh: 5 });
+      }
+      if (path.endsWith('/state/alice/context_status.json')) {
+        return JSON.stringify({ used_percentage: 85, written_at: new Date(now).toISOString() });
+      }
+      if (path.endsWith('config.json')) {
+        return JSON.stringify({ fresh_rollover_max_continues: 1 });
+      }
+      return '';
+    });
+
+    const ap = new AgentProcess('alice', mockEnv, { fresh_rollover_max_continues: 1 });
+    await ap.start();
+
+    const stopSpy = vi.spyOn(ap, 'stop').mockResolvedValue();
+    const startSpy = vi.spyOn(ap, 'start').mockResolvedValue();
+    const injectSpy = vi.spyOn(ap, 'injectMessage').mockResolvedValue(true);
+
+    // No plannedCap — simulates loop-stall or Tier-3 recovery caller
+    await ap.sessionRefresh();
+
+    // Must NOT inject the fresh rollover prompt
+    expect(injectSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('[PLANNED FRESH ROLLOVER]'),
+    );
+    // Must NOT call hardRestart (that's prepareFreshRollover's job)
+    expect(mockHardRestart).not.toHaveBeenCalled();
+    // Must still stop and start (plain --continue path)
+    expect(stopSpy).toHaveBeenCalled();
+    expect(startSpy).toHaveBeenCalled();
+  });
+
+  it('FIX-B: sessionRefresh with plannedCap but .force-fresh pre-armed stays on continue path', async () => {
+    const now = Date.now();
+    fsMocks.existsSync.mockImplementation((p: unknown) => {
+      const path = String(p);
+      // .force-fresh is already armed (Tier-3 pre-armed it)
+      return path.endsWith('/state/alice/session-rollover.json')
+        || path.endsWith('/state/alice/context_status.json')
+        || path.endsWith('/state/alice/.force-fresh');
+    });
+    fsMocks.readFileSync.mockImplementation((p: unknown) => {
+      const path = String(p);
+      if (path.endsWith('/state/alice/session-rollover.json')) {
+        return JSON.stringify({ lastFreshAtMs: 100, continuesSinceFresh: 5 });
+      }
+      if (path.endsWith('/state/alice/context_status.json')) {
+        return JSON.stringify({ used_percentage: 85, written_at: new Date(now).toISOString() });
+      }
+      if (path.endsWith('config.json')) {
+        return JSON.stringify({ fresh_rollover_max_continues: 1 });
+      }
+      return '';
+    });
+
+    const ap = new AgentProcess('alice', mockEnv, { fresh_rollover_max_continues: 1 });
+    await ap.start();
+
+    const stopSpy = vi.spyOn(ap, 'stop').mockResolvedValue();
+    const startSpy = vi.spyOn(ap, 'start').mockResolvedValue();
+    const injectSpy = vi.spyOn(ap, 'injectMessage').mockResolvedValue(true);
+
+    // plannedCap=true but .force-fresh already exists — should short-circuit to continue
+    await ap.sessionRefresh({ plannedCap: true });
+
+    expect(injectSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('[PLANNED FRESH ROLLOVER]'),
+    );
+    expect(mockHardRestart).not.toHaveBeenCalled();
+    expect(stopSpy).toHaveBeenCalled();
+    expect(startSpy).toHaveBeenCalled();
+  });
+
+  it('FIX-A: prepareFreshRollover calls hardRestart with full BusPaths including logDir', async () => {
+    const now = Date.now();
+    fsMocks.existsSync.mockImplementation((p: unknown) => {
+      const path = String(p);
+      return path.endsWith('/state/alice/session-rollover.json')
+        || path.endsWith('/state/alice/current-mission.txt')
+        || path.endsWith('/memory/handoffs');
+    });
+    fsMocks.readFileSync.mockImplementation((p: unknown) => {
+      const path = String(p);
+      if (path.endsWith('/state/alice/session-rollover.json')) {
+        return JSON.stringify({ lastFreshAtMs: 100, continuesSinceFresh: 1 });
+      }
+      if (path.endsWith('/state/alice/current-mission.txt')) {
+        return 'keep shipping';
+      }
+      if (path.endsWith('config.json')) {
+        return JSON.stringify({ fresh_rollover_max_continues: 1 });
+      }
+      return '';
+    });
+    // Provide a handoff doc immediately so waitForFreshRolloverHandoffDoc resolves without polling
+    fsMocks.readdirSync.mockImplementation((p: unknown) => {
+      if (String(p).includes('/memory/handoffs')) {
+        return ['handoff-2026-07-26T00-00-00Z.md'];
+      }
+      throw new Error('missing');
+    });
+    fsMocks.statSync.mockImplementation((p: unknown) => {
+      if (String(p).includes('/memory/handoffs/handoff-2026-07-26T00-00-00Z.md')) {
+        return { mtimeMs: now + 1 };
+      }
+      return { mtimeMs: now };
+    });
+
+    const ap = new AgentProcess('alice', mockEnv, { fresh_rollover_max_continues: 1 });
+    await ap.start();
+
+    vi.spyOn(ap, 'stop').mockResolvedValue();
+    vi.spyOn(ap, 'start').mockResolvedValue();
+    vi.spyOn(ap, 'injectMessage').mockResolvedValue(true);
+
+    await ap.sessionRefresh({ plannedCap: true });
+
+    // FIX-A: hardRestart must receive full BusPaths with logDir — not just { stateDir }
+    expect(mockHardRestart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stateDir: '/tmp/test-ctx/state/alice',
+        logDir: '/tmp/test-ctx/logs/alice',
+        ctxRoot: '/tmp/test-ctx',
+      }),
+      'alice',
+      'CONTEXT-FORCE-RESTART: F8 fresh rollover',
+    );
+    // Confirm no 'as any' type escape — the received argument must have ALL BusPaths fields
+    const receivedPaths = mockHardRestart.mock.calls[0][0];
+    expect(receivedPaths).toHaveProperty('inbox');
+    expect(receivedPaths).toHaveProperty('taskDir');
+    expect(receivedPaths).toHaveProperty('approvalDir');
   });
 });
 

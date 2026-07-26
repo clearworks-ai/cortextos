@@ -216,6 +216,10 @@ export interface AgentConfig {
   ctx_warning_threshold?: number;
   /** Context window % at which to inject handoff prompt and hard-restart. Default: 80. */
   ctx_handoff_threshold?: number;
+  /** Opt-in fresh rollover cap for planned session refreshes. When enabled, the Nth continue since the last fresh restart rolls over fresh instead. */
+  fresh_rollover_max_continues?: number;
+  /** Opt-in context % floor for planned fresh rollover. A recent context_status above this threshold upgrades sessionRefresh() from continue to fresh. */
+  fresh_rollover_ctx_pct?: number;
   /**
    * Fallback context window cap (tokens) for codex-app-server agents when the
    * server's `thread/tokenUsage/updated` event reports `modelContextWindow=null`.

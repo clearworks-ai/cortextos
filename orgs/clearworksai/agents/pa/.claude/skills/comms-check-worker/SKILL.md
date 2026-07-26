@@ -33,32 +33,43 @@ cortextos bus update-task $TASK_ID in_progress 2>/dev/null
 cortextos bus update-cron-fire comms-check --interval 4h 2>/dev/null
 ```
 
-Dedup is now DETERMINISTIC and upstream of your reasoning: in Step 2 the Josh-inbox
-Gmail fetch is piped through `cortextos bus comms-filter --surface --chat 6690120787`,
-which records each gmail message id and sends the fixed `[EMAIL]` surface template for
-first-seen items in the SAME command. You never get to freelance a raw email-notify
-send by hand. No surfaced.txt file, no manual per-thread holds, no honor-system pipe.
+Dedup is DETERMINISTIC and upstream of your reasoning: in Step 2 you filter the Josh-inbox
+Gmail fetch through `cortextos bus comms-filter --namespace gmail`, which records each gmail
+message id and emits only first-seen items (NO auto-send — the `--surface` auto-send path was
+reverted with PR#131 on 2026-07-25 because it bypassed your exclusion rules).
+
+Every EXACT sender/subject exclusion (the ones that leaked on 2026-07-25 — info@raisedonors.com,
+receipts@openrouter.ai) is now enforced INSIDE the Gmail query itself (Step 2.2a) via `-from:`/
+`-subject:` operators — this is Gmail's own deterministic search engine, the same mechanism
+already proven for the railway carve-out, not a new code gate. It cannot be skipped by judgment
+because the excluded mail never comes back from the fetch. Step 2b is judgment-only for the
+handful of checks that genuinely can't be expressed as an exact query term (cold-inbound spam
+phrasing, "is this a known relationship" calls). Send Telegram only for surviving real mail (Step 2d).
 
 ---
 
 ## Step 2 — Run checks in parallel
 
-**HARD EXCLUSIONS** (skip entirely, mark as seen in dedup, no Telegram):
-- Subject starts with 'Accepted:', 'Declined:', or 'Tentative:' — calendar noise. Do an explicit fire-once record-then-skip: `cortextos bus event-dedup --source "gmail:${MSG_ID}" --fire-once >/dev/null` then skip. Calendar accepts/confirms are fire-once events: one inbound acceptance email (e.g. 'Alloi Interview #4 confirmed: Bassem Dawod accepted') = at most one lifetime handling, never re-surfaced regardless of rewording or re-run. The source key is the acceptance EMAIL's message id (calendar accepts arrive as emails), not a text hash.
-- from:noreply@skool.com, from:events@tailscale.com, from:hello@mindstream.news, any newsletter/digest
-- from:sanebox.com (SaneBox filter)
-- Any webinar or Skool event invite
-- Mercury bank notifications, vendor "any thoughts on our demo" sales follow-ups
-- Any zcal booking confirmation or calendar meeting notification — these go on the calendar automatically. Do an explicit fire-once record-then-skip: `cortextos bus event-dedup --source "gmail:${MSG_ID}" --fire-once >/dev/null` then skip. Fire-once = at most one lifetime handling, never re-surfaced regardless of rewording or re-run; the source key is the confirmation EMAIL's message id, not a text hash.
-- from:notify.railway.app (and any Railway "Deployment crashed" / deploy alert) — DO NOT surface to Josh and DO NOT route to Larry. Railway/CI infra alerts reach Larry directly via the repo-health cron + Railway CLI/MCP; routing them here just re-pings Larry every cycle for the same stale email. Skip entirely, mark as seen.
-- CI / GitHub Actions failure alerts for any cortextos repo (`clearworks-ai/cortextos` or `grandamenium/cortextos`) — DO NOT surface to Josh and DO NOT route to Larry. Larry gets CI health directly via the repo-health cron + `gh` CLI; routing build/type-check/test-run failures here just re-pings Larry every cycle, often for a stale or already-superseded run. Skip entirely, mark as seen. (Durable replacement in flight: PR #40 adds `cortextos bus ci-alert-gate` for a deterministic surface/skip decision; until it merges, do not emit CI-failure alerts from this worker at all.)
+**HARD EXCLUSIONS — ENFORCED AT THE QUERY (Step 2.2a), not by judgment:**
+Every sender/domain/subject-prefix below is baked into the Gmail search query itself, so this
+mail never comes back from the fetch — nothing to misjudge:
+- `noreply@skool.com`, `events@tailscale.com`, `hello@mindstream.news`
+- `sanebox.com` (SaneBox filter)
+- `notify.railway.app` (any Railway deploy/crash alert) — Larry gets Railway health via the repo-health cron + Railway CLI/MCP; this worker never routes it anywhere
+- `info@raisedonors.com`, `receipts@openrouter.ai` — the two that leaked 2026-07-25
+- generic transactional patterns: `noreply`, `no-reply`, `donotreply`, `do-not-reply`, `mailer-daemon`
+- bulk-mail platform domains: `beehiiv.com`, `mailchimp.com`, `substack.com`, `convertkit.com`
+- subject prefixes: `Accepted:`, `Declined:`, `Tentative:` (calendar noise), `out of office`, `auto-reply`, `automatic reply`, `OOO:`, `vacation reply`
+- CI / GitHub Actions failure alerts for any cortextos repo — routed via GATE D below (`cortextos bus ci-alert-gate`, shipped), never by judgment.
 
-**OOO / AUTO-REPLY EXCLUSIONS** (skip silently — these are never actionable):
-After reading headers for any email, check subject and sender patterns BEFORE surfacing:
-- Subject contains (case-insensitive): "out of office", "auto-reply", "auto reply", "automatic reply", "away from", "i am out", "i'm out", "OOO:", "vacation reply", "on leave", "currently unavailable", "be back", "returning on"
-- Header Auto-Submitted contains "auto-replied" or "auto-generated"
-- From address contains "noreply", "no-reply", "donotreply", "do-not-reply", "mailer-daemon"
-- If ANY of these match: skip silently. OOO replies require zero action.
+For calendar accepts / zcal confirmations specifically (query catches the subject prefix, but
+zcal confirmation subjects vary), still record fire-once so re-wordings never resurface:
+`cortextos bus event-dedup --source "gmail:${MSG_ID}" --fire-once >/dev/null` then skip.
+
+**REMAINING JUDGMENT CALLS** (cannot be expressed as an exact query term — apply in Step 2b):
+- Webinar/Skool event invites and Mercury bank notifications by BODY content (not sender)
+- Vendor "any thoughts on our demo" sales follow-ups by content
+- Header `Auto-Submitted: auto-replied`/`auto-generated` (some auto-replies don't match the subject-prefix list above)
 
 **COLD INBOUND SPAM EXCLUSIONS** (skip silently — unsolicited sales outreach is not actionable):
 After reading subject/body, skip if the email matches cold outreach patterns:
@@ -76,18 +87,18 @@ Run these 4 checks (Bash):
 
 2. **JOSH INBOX** — TWO STEPS. Do NOT pipe the raw fetch straight into `comms-filter --surface` — that sends atomically on first-seen, before you ever get a chance to apply the exclusion rules above, which is exactly how non-human mail (automated reports, receipts) slipped through on 2026-07-25.
 
-   a. Fetch raw candidates only, do not send yet:
-      `gws gmail +triage --query 'is:unread newer_than:5h -category:promotions -category:social -from:notify.railway.app' --format json > /tmp/josh-inbox-raw.json`
+   a. Fetch candidates — every HARD EXCLUSION above is a `-from:`/`-subject:` term in this query, so excluded mail is never in the result set to begin with:
+      `gws gmail +triage --query 'is:unread newer_than:5h -category:promotions -category:social -from:notify.railway.app -from:noreply@skool.com -from:events@tailscale.com -from:hello@mindstream.news -from:sanebox.com -from:info@raisedonors.com -from:receipts@openrouter.ai -from:noreply -from:no-reply -from:donotreply -from:do-not-reply -from:mailer-daemon -from:beehiiv.com -from:mailchimp.com -from:substack.com -from:convertkit.com -subject:"Accepted:" -subject:"Declined:" -subject:"Tentative:" -subject:"out of office" -subject:"auto-reply" -subject:"automatic reply" -subject:"OOO:" -subject:"vacation reply"' --format json > /tmp/josh-inbox-raw.json`
 
-   b. Apply every HARD EXCLUSION / OOO-AUTO-REPLY / COLD-INBOUND-SPAM rule above to each item's `from`/`subject`/`snippet` YOURSELF, and drop non-surviving items. Also treat as HARD EXCLUSIONS (automated/non-human, skip silently):
-      - Any transactional receipt/invoice/report sender: `receipts@*`, `billing@*`, `info@raisedonors.com`, or subject matching "Receipt", "Invoice #", "Report" from a non-human/automated sender
-      - Any bulk-mail platform domain: `*.beehiiv.com`, `*.mailchimp.com`, `*.substack.com`, `*.convertkit.com` — unless the sender is a known human relationship
+   b. Apply only the REMAINING JUDGMENT CALLS listed above (content-based webinar/Mercury/demo-followup checks, cold-inbound spam heuristics, Auto-Submitted header) to each item's `from`/`subject`/`snippet`/headers, and drop non-surviving items. Everything sender/subject-exact is already gone from the fetch — this step is judgment-only for the handful of checks that genuinely need it.
       Write the surviving items (same `{ "emails": [...] }` shape as the input) to `/tmp/josh-inbox-filtered.json`.
 
-   c. Pipe ONLY the filtered file into the deterministic surface command — this stays the ONLY allowed send path; dedup+send is still atomic and you never hand-compose the Telegram text:
-      `cat /tmp/josh-inbox-filtered.json | cortextos bus comms-filter --namespace gmail --surface --chat 6690120787`
+   c. Pipe ONLY the filtered file through the dedup filter — first-seen only, NO auto-send (the `--surface` auto-send path was reverted with PR#131 on 2026-07-25 because it bypassed your exclusion rules and leaked marketing/receipt mail):
+      `cat /tmp/josh-inbox-filtered.json | cortextos bus comms-filter --namespace gmail > /tmp/josh-inbox-firstseen.json`
 
-   If you need follow-on reasoning, use the JSON emitted by the deterministic command, then `gws gmail +read --id <id> --headers` for those surfaced ids only.
+   d. For each item in `/tmp/josh-inbox-firstseen.json`, surface it YOURSELF with one Telegram. You have already applied every HARD / OOO / COLD-INBOUND exclusion in step 2b, so only real human mail reaches here:
+      `cortextos bus send-telegram 6690120787 "New email — From: <from> | Subject: <subject> | <one-line snippet>"`
+      Use `gws gmail +read --id <id> --headers` first if you need more detail for a surfaced id.
 
 3. **GITHUB CI FAILURES**: `gws gmail +triage --query 'from:notifications@github.com subject:"Run failed" newer_than:6h' --format json`
    Group by repo.
@@ -123,12 +134,12 @@ Run these 4 checks (Bash):
 
 ## Step 3 — Dedup already happened (no per-item gate to run)
 
-There is no manual dedup step here anymore. In Step 2 the Josh-inbox Gmail fetch is piped through
-`cortextos bus comms-filter --surface --chat 6690120787`, which keys on the SOURCE EVENT identity
-(namespace + message id) and atomically records-and-sends only first-seen emails. Rewording the
-same inbound does NOT make it new — the id is immutable, so the command has already handled it
-before you see the output. Nothing you do in reasoning can re-surface a previously announced email,
-and you are forbidden from hand-composing a replacement send from raw `is:unread` mail.
+There is no manual dedup step here anymore. In Step 2 the Josh-inbox Gmail fetch is filtered through
+`cortextos bus comms-filter --namespace gmail`, which keys on the SOURCE EVENT identity
+(namespace + message id) and emits only first-seen emails. Rewording the same inbound does NOT make
+it new — the id is immutable, so a previously-seen email never reappears in the filter output. You
+surface surviving first-seen items yourself (Step 2d) AFTER applying the exclusion rules; do not
+re-send anything the filter already suppressed.
 
 For the fire-once carve-outs (calendar accepts / zcal confirmations) the exclusion rules in
 Step 2 still call `cortextos bus event-dedup --source "gmail:${MSG_ID}" --fire-once` to

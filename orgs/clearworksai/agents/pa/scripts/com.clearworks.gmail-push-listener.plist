@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.clearworks.gmail-push-listener</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <!-- Uses uv run so the cryptography package is available without a venv.
+         uv lives at ~/.local/bin/uv on this machine (not Homebrew). -->
+    <string>/Users/joshweiss/.local/bin/uv</string>
+    <string>run</string>
+    <string>--with</string>
+    <string>cryptography</string>
+    <string>/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/scripts/gmail_push_listener.py</string>
+  </array>
+
+  <!-- Keep the process alive across crashes and reboots -->
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- Start immediately when the LaunchAgent is loaded -->
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Throttle respawns (seconds between restarts) to avoid rapid crash loops -->
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/joshweiss/Library/Logs/gmail-push-listener.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/joshweiss/Library/Logs/gmail-push-listener.err.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- Include Homebrew and user-local bins so cortextos + uv are on PATH -->
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/joshweiss/.local/bin</string>
+    <key>HOME</key>
+    <string>/Users/joshweiss</string>
+    <!-- Force Python stdout/stderr unbuffered for real-time log tailing -->
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+  </dict>
+</dict>
+</plist>

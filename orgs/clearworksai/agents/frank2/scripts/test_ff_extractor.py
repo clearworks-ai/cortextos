@@ -169,6 +169,81 @@ class FirefliesExtractorTests(unittest.TestCase):
         self.assertTrue(commitments[0].id.startswith("ff_"))
         self.assertFalse(commitments[0].id.startswith("ffin_"))
 
+    def test_refine_drops_fuzzy_duplicate_against_open_backlog(self) -> None:
+        transcript = self.make_transcript("I'll send the proposal to Acme tomorrow.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Send the proposal to Acme",
+                owner="Josh",
+                due_date="tomorrow",
+                status="pending",
+            )
+        ]
+        client_record = {
+            "context": "This meeting maps to Acme. Open next action: Send proposal to Acme.",
+            "open_items": ["Send proposal to Acme"],
+            "relevance_fragments": ("Send proposal to Acme",),
+        }
+
+        commitments = MODULE.refine_items(transcript, items, client_record=client_record)
+
+        self.assertEqual(commitments, [])
+
+    def test_refine_caps_p0_at_three(self) -> None:
+        transcript = self.make_transcript("I'll send the follow-up items this week.")
+        items = [
+            MODULE.ExtractedItem(action="Send alpha proposal", owner="Josh", due_date="tomorrow", status="pending"),
+            MODULE.ExtractedItem(action="Send beta deck", owner="Josh", due_date="2026-06-09", status="pending"),
+            MODULE.ExtractedItem(action="Send gamma quote", owner="Josh", due_date="Wednesday", status="pending"),
+            MODULE.ExtractedItem(action="Send delta budget", owner="Josh", due_date="Thursday", status="pending"),
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        priorities = [commitment.priority for commitment in commitments]
+        self.assertEqual(priorities.count("P0"), 3)
+        self.assertEqual(priorities.count("P1"), 1)
+        self.assertEqual(
+            {commitment.action_text for commitment in commitments if commitment.priority == "P1"},
+            {"Send delta budget"},
+        )
+
+    def test_refine_drops_boundary_ties_to_next_priority(self) -> None:
+        transcript = self.make_transcript("I'll send the follow-up items tomorrow.")
+        items = [
+            MODULE.ExtractedItem(action="Send alpha proposal", owner="Josh", due_date="tomorrow", status="pending"),
+            MODULE.ExtractedItem(action="Send beta deck", owner="Josh", due_date="tomorrow", status="pending"),
+            MODULE.ExtractedItem(action="Send gamma quote", owner="Josh", due_date="tomorrow", status="pending"),
+            MODULE.ExtractedItem(action="Send delta budget", owner="Josh", due_date="tomorrow", status="pending"),
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual([commitment.priority for commitment in commitments].count("P0"), 0)
+        self.assertEqual([commitment.priority for commitment in commitments].count("P1"), 4)
+
+    def test_commitment_entries_include_priority_and_relevance(self) -> None:
+        transcript = self.make_transcript("I'll send the findings deck to Mark.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Send findings deck to Mark",
+                owner="Josh",
+                due_date="",
+                status="pending",
+            )
+        ]
+        client_record = {
+            "context": "This meeting maps to MSIA. Open next action: send findings deck to Mark.",
+            "open_items": [],
+            "relevance_fragments": ("Send findings deck to Mark",),
+        }
+
+        commitments = MODULE.refine_items(transcript, items, client_record=client_record)
+        entries = MODULE.commitment_entries(commitments, enriched=True)
+
+        self.assertEqual(entries[0]["priority"], "P1")
+        self.assertGreater(entries[0]["relevanceScore"], 0.9)
+
 
 class FakeResponse:
     def __init__(self, body: bytes, status: int = 200) -> None:
@@ -425,7 +500,18 @@ class RunStdoutContractTests(unittest.TestCase):
         for entry in items:
             self.assertEqual(
                 set(entry),
-                {"id", "text", "direction", "source", "sourceRef", "owner", "deadline", "sourceQuote"},
+                {
+                    "id",
+                    "text",
+                    "direction",
+                    "source",
+                    "sourceRef",
+                    "owner",
+                    "deadline",
+                    "sourceQuote",
+                    "priority",
+                    "relevanceScore",
+                },
             )
 
     def test_no_fresh_transcripts_prints_empty_items(self) -> None:

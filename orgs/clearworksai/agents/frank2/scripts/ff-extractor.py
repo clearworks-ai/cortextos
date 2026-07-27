@@ -13,8 +13,9 @@ import tempfile
 import unicodedata
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta, timezone
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -166,6 +167,18 @@ COUNTERPARTY_RE = re.compile(
     r"\b(?:call|email|text|send|share|follow up with|ask|tell|schedule with|meet with)\s+([A-Z][A-Za-z0-9&.-]*(?:\s+[A-Z][A-Za-z0-9&.-]*){0,3})\b"
     r"|\b(?:to|with|for)\s+([A-Z][A-Za-z0-9&.-]*(?:\s+[A-Z][A-Za-z0-9&.-]*){0,3})\b"
 )
+MARKDOWN_TABLE_SEPARATOR = re.compile(r"^[\s:|-]+$")
+PRIORITY_ORDER = ("P0", "P1", "P2", "P3")
+PRIORITY_INDEX = {priority: index for index, priority in enumerate(PRIORITY_ORDER)}
+FUZZY_DEDUP_THRESHOLD = 0.6
+P0_CAP = 3
+P1_CAP = 7
+P0_DUE_WINDOW_DAYS = 3
+P1_DUE_WINDOW_DAYS = 10
+RELEVANCE_P0_MIN = 0.12
+RELEVANCE_P1_MIN = 0.08
+RELEVANCE_P1_PROMOTION = 0.45
+RELEVANCE_P2_MIN = 0.2
 
 Urlopen = Callable[..., Any]
 
@@ -185,9 +198,12 @@ class RefinedCommitment:
     source: str
     source_ref: str
     direction: str
+    action_text: str = ""
     owner: str = ""
     deadline: str = ""
     source_quote: str = ""
+    priority: str = "P3"
+    relevance_score: float = 0.0
 
 
 def now_utc_iso() -> str:
@@ -317,6 +333,25 @@ def markdown_key_value(lines: list[str], key: str) -> str:
     return ""
 
 
+def markdown_open_items(lines: list[str]) -> list[str]:
+    items: list[str] = []
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line.startswith("|"):
+            continue
+        cells = [collapse_ws(cell) for cell in line.strip("|").split("|")]
+        if not cells:
+            continue
+        if all(MARKDOWN_TABLE_SEPARATOR.fullmatch(cell or "-") for cell in cells):
+            continue
+        if normalize_action(cells[0]) == "item":
+            continue
+        item_text = cells[0]
+        if item_text:
+            items.append(item_text)
+    return items
+
+
 def clearworks_identity_context() -> str:
     company_line = first_meaningful_line(COMPANY_PATH)
     company_one_liner = ""
@@ -375,6 +410,8 @@ def client_context_records(clients_dir: Path = CLIENTS_DIR) -> list[dict[str, An
         next_action = markdown_key_value(current_state_lines, "Next action")
         engagement = markdown_key_value(delivery_lines, "Engagement") or "unknown"
         service_type = markdown_key_value(delivery_lines, "Service type")
+        relationship_context = markdown_key_value(delivery_lines, "Relationship context")
+        open_items = markdown_open_items(sections.get("open items", []))
         detail_parts = [
             f"This meeting's attendees map to client={client_name}.",
             f"Deal stage={stage}.",
@@ -383,8 +420,11 @@ def client_context_records(clients_dir: Path = CLIENTS_DIR) -> list[dict[str, An
         ]
         if service_type:
             detail_parts.append(f"Service={service_type}.")
+        if relationship_context:
+            detail_parts.append(f"Relationship={relationship_context}.")
         if next_action:
             detail_parts.append(f"Open next action: {next_action}.")
+        relevance_fragments = [client_name, engagement, service_type, relationship_context, next_action]
         records.append(
             {
                 "path": path,
@@ -393,6 +433,8 @@ def client_context_records(clients_dir: Path = CLIENTS_DIR) -> list[dict[str, An
                 "names": names,
                 "emails": emails,
                 "context": collapse_ws(f"{identity} {' '.join(detail_parts)}"),
+                "open_items": open_items,
+                "relevance_fragments": tuple(fragment for fragment in relevance_fragments if fragment),
             }
         )
     return records
@@ -423,15 +465,15 @@ def transcript_identity_haystack(transcript: dict[str, Any]) -> str:
     return normalize_action(" ".join(parts))
 
 
-def client_context_for_transcript(
+def matched_client_context_record_for_transcript(
     transcript: dict[str, Any],
     *,
     clients_dir: Path = CLIENTS_DIR,
-) -> str:
+) -> dict[str, Any] | None:
     haystack = transcript_identity_haystack(transcript)
     emails = transcript_emails(transcript)
     best_score = 0
-    best_context = ""
+    best_record: dict[str, Any] | None = None
     for record in client_context_records(clients_dir):
         score = 0
         email_hits = emails & record["emails"]
@@ -446,8 +488,19 @@ def client_context_for_transcript(
                 score += 3
         if score > best_score:
             best_score = score
-            best_context = record["context"]
-    return best_context if best_score >= 3 else ""
+            best_record = record
+    return best_record if best_score >= 3 else None
+
+
+def client_context_for_transcript(
+    transcript: dict[str, Any],
+    *,
+    clients_dir: Path = CLIENTS_DIR,
+) -> str:
+    record = matched_client_context_record_for_transcript(transcript, clients_dir=clients_dir)
+    if record is None:
+        return ""
+    return str(record.get("context") or "")
 
 
 def parse_transcript_datetime(raw_value: Any) -> datetime | None:
@@ -714,6 +767,26 @@ def normalized_tokens(value: str) -> set[str]:
     return {token for token in TOKEN_RE.findall(normalize_action(value)) if token and token not in STOPWORDS}
 
 
+def title_similarity(left: str, right: str) -> float:
+    left_normalized = normalize_action(left)
+    right_normalized = normalize_action(right)
+    if not left_normalized or not right_normalized:
+        return 0.0
+    return SequenceMatcher(None, left_normalized, right_normalized).ratio()
+
+
+def keyword_overlap(left: str, right: str) -> float:
+    left_tokens = normalized_tokens(left)
+    right_tokens = normalized_tokens(right)
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
+
+
+def fuzzy_similarity(left: str, right: str) -> float:
+    return (0.7 * title_similarity(left, right)) + (0.3 * keyword_overlap(left, right))
+
+
 def is_josh_owner(owner: str) -> bool:
     normalized = normalize_action(owner)
     return normalized in {"josh", "josh weiss", "me", "i", "myself"}
@@ -847,6 +920,142 @@ def build_commitment_text(action: str, due: str | None) -> str:
     return action
 
 
+def deadline_distance_days(deadline: str, meeting_day: date) -> int | None:
+    if not deadline:
+        return None
+    try:
+        return (date.fromisoformat(deadline) - meeting_day).days
+    except ValueError:
+        return None
+
+
+def relevance_score_for_commitment(action_text: str, client_record: dict[str, Any] | None) -> float:
+    if client_record is None:
+        return 0.0
+    fragments = [collapse_ws(str(fragment)) for fragment in client_record.get("relevance_fragments", ()) if fragment]
+    if not fragments:
+        context = collapse_ws(str(client_record.get("context") or ""))
+        if context:
+            fragments = [context]
+    if not fragments:
+        return 0.0
+    return max(fuzzy_similarity(action_text, fragment) for fragment in fragments)
+
+
+def priority_for_commitment(
+    *,
+    action_text: str,
+    deadline: str,
+    meeting_day: date,
+    client_record: dict[str, Any] | None,
+) -> tuple[str, float]:
+    relevance_score = relevance_score_for_commitment(action_text, client_record)
+    due_distance = deadline_distance_days(deadline, meeting_day)
+    has_context = client_record is not None and bool(client_record.get("context"))
+    if due_distance is not None and due_distance <= P0_DUE_WINDOW_DAYS and (not has_context or relevance_score >= RELEVANCE_P0_MIN):
+        return "P0", relevance_score
+    if (
+        due_distance is not None
+        and due_distance <= P1_DUE_WINDOW_DAYS
+        and (not has_context or relevance_score >= RELEVANCE_P1_MIN)
+    ) or relevance_score >= RELEVANCE_P1_PROMOTION:
+        return "P1", relevance_score
+    if due_distance is not None or relevance_score >= RELEVANCE_P2_MIN:
+        return "P2", relevance_score
+    return "P3", relevance_score
+
+
+def scored_commitment(
+    commitment: RefinedCommitment,
+    *,
+    meeting_day: date,
+    client_record: dict[str, Any] | None,
+) -> RefinedCommitment:
+    priority, relevance_score = priority_for_commitment(
+        action_text=commitment.action_text or commitment.text,
+        deadline=commitment.deadline,
+        meeting_day=meeting_day,
+        client_record=client_record,
+    )
+    return replace(commitment, priority=priority, relevance_score=round(relevance_score, 4))
+
+
+def priority_group_sort_key(commitment: RefinedCommitment, meeting_day: date) -> tuple[float, int, str, str]:
+    due_distance = deadline_distance_days(commitment.deadline, meeting_day)
+    due_sort = due_distance if due_distance is not None else 999_999
+    text_sort = normalize_action(commitment.action_text or commitment.text)
+    return (-commitment.relevance_score, due_sort, text_sort, commitment.id)
+
+
+def tie_break_key(commitment: RefinedCommitment, meeting_day: date) -> tuple[float, int]:
+    due_distance = deadline_distance_days(commitment.deadline, meeting_day)
+    due_sort = due_distance if due_distance is not None else 999_999
+    return (round(commitment.relevance_score, 4), due_sort)
+
+
+def deduped_commitments(
+    commitments: list[RefinedCommitment],
+    *,
+    backlog_items: list[str],
+    meeting_day: date,
+) -> list[RefinedCommitment]:
+    kept: list[RefinedCommitment] = []
+    comparison_corpus = list(backlog_items)
+    ordered = sorted(
+        commitments,
+        key=lambda commitment: (
+            PRIORITY_INDEX.get(commitment.priority, len(PRIORITY_ORDER)),
+            priority_group_sort_key(commitment, meeting_day),
+        ),
+    )
+    for commitment in ordered:
+        candidate_text = commitment.action_text or commitment.text
+        if any(fuzzy_similarity(candidate_text, existing) >= FUZZY_DEDUP_THRESHOLD for existing in comparison_corpus):
+            continue
+        kept.append(commitment)
+        comparison_corpus.append(candidate_text)
+    return kept
+
+
+def apply_priority_cap(
+    commitments: list[RefinedCommitment],
+    *,
+    cap: int,
+    meeting_day: date,
+) -> tuple[list[RefinedCommitment], list[RefinedCommitment]]:
+    if len(commitments) <= cap:
+        ordered = sorted(commitments, key=lambda commitment: priority_group_sort_key(commitment, meeting_day))
+        return ordered, []
+    ordered = sorted(commitments, key=lambda commitment: priority_group_sort_key(commitment, meeting_day))
+    cutoff_key = tie_break_key(ordered[cap - 1], meeting_day)
+    if tie_break_key(ordered[cap], meeting_day) == cutoff_key:
+        keep: list[RefinedCommitment] = []
+        split_at = 0
+        for index, commitment in enumerate(ordered):
+            if tie_break_key(commitment, meeting_day) == cutoff_key:
+                split_at = index
+                break
+            keep.append(commitment)
+        else:
+            split_at = len(ordered)
+        return keep, ordered[split_at:]
+    return ordered[:cap], ordered[cap:]
+
+
+def enforce_priority_caps(commitments: list[RefinedCommitment], *, meeting_day: date) -> list[RefinedCommitment]:
+    buckets = {priority: [] for priority in PRIORITY_ORDER}
+    for commitment in commitments:
+        buckets.setdefault(commitment.priority, []).append(commitment)
+
+    kept_p0, demoted_p0 = apply_priority_cap(buckets["P0"], cap=P0_CAP, meeting_day=meeting_day)
+    p1_pool = buckets["P1"] + [replace(commitment, priority="P1") for commitment in demoted_p0]
+    kept_p1, demoted_p1 = apply_priority_cap(p1_pool, cap=P1_CAP, meeting_day=meeting_day)
+    p2_pool = buckets["P2"] + [replace(commitment, priority="P2") for commitment in demoted_p1]
+    kept_p2 = sorted(p2_pool, key=lambda commitment: priority_group_sort_key(commitment, meeting_day))
+    kept_p3 = sorted(buckets["P3"], key=lambda commitment: priority_group_sort_key(commitment, meeting_day))
+    return kept_p0 + kept_p1 + kept_p2 + kept_p3
+
+
 def refine_outbound_item(
     item: ExtractedItem,
     *,
@@ -874,6 +1083,7 @@ def refine_outbound_item(
         source="ff",
         source_ref=source_ref,
         direction="outbound",
+        action_text=item.action,
         owner="Josh",
         deadline=due or "",
         source_quote=support or "",
@@ -913,6 +1123,7 @@ def refine_inbound_item(
         source="ff-inbound",
         source_ref=source_ref,
         direction="inbound",
+        action_text=item.action,
         owner=item.owner,
         deadline=due or "",
         source_quote=quote,
@@ -922,6 +1133,8 @@ def refine_inbound_item(
 def refine_items(
     transcript: dict[str, Any],
     extracted_items: list[ExtractedItem],
+    *,
+    client_record: dict[str, Any] | None = None,
 ) -> list[RefinedCommitment]:
     meeting_id = str(transcript.get("id") or "")
     title = collapse_ws(str(transcript.get("title") or "Untitled Meeting"))
@@ -955,17 +1168,25 @@ def refine_items(
             continue
         seen_ids.add(commitment.id)
         commitments.append(commitment)
-    return commitments
+
+    scored = [
+        scored_commitment(commitment, meeting_day=meeting_day, client_record=client_record) for commitment in commitments
+    ]
+    backlog_items = list(client_record.get("open_items", [])) if client_record is not None else []
+    return enforce_priority_caps(
+        deduped_commitments(scored, backlog_items=backlog_items, meeting_day=meeting_day),
+        meeting_day=meeting_day,
+    )
 
 
 def commitment_entries(
     commitments: list[RefinedCommitment],
     *,
     enriched: bool,
-) -> list[dict[str, str]]:
-    entries: list[dict[str, str]] = []
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
     for item in commitments:
-        entry: dict[str, str] = {
+        entry: dict[str, Any] = {
             "id": item.id,
             "text": item.text,
             "direction": item.direction,
@@ -976,6 +1197,8 @@ def commitment_entries(
             entry["owner"] = item.owner
             entry["deadline"] = item.deadline
             entry["sourceQuote"] = item.source_quote
+            entry["priority"] = item.priority
+            entry["relevanceScore"] = item.relevance_score
         entries.append(entry)
     return entries
 
@@ -1066,14 +1289,16 @@ def run(
         if is_casual_transcript(transcript_text, openrouter_api_key=openrouter_api_key, urlopen=urlopen):
             processed.append(transcript)
             continue
+        client_record = matched_client_context_record_for_transcript(transcript)
+        client_context = str(client_record.get("context") or "") if client_record is not None else ""
         extraction_text = build_transcript_text(transcript.get("sentences", []), limit=EXTRACTOR_MAX_CHARS)
         extracted = extract_action_items(
             extraction_text,
-            client_context=client_context_for_transcript(transcript),
+            client_context=client_context,
             openrouter_api_key=openrouter_api_key,
             urlopen=urlopen,
         )
-        all_commitments.extend(refine_items(transcript, extracted))
+        all_commitments.extend(refine_items(transcript, extracted, client_record=client_record))
         processed.append(transcript)
 
     items = commitment_entries(all_commitments, enriched=True)
@@ -1215,7 +1440,8 @@ def build_recap_meeting(
         return None
     
     # Extract action items for next steps
-    client_context = client_context_for_transcript(transcript)
+    client_record = matched_client_context_record_for_transcript(transcript)
+    client_context = str(client_record.get("context") or "") if client_record is not None else ""
     extracted = extract_action_items(
         build_transcript_text(sentences, limit=EXTRACTOR_MAX_CHARS),
         client_context=client_context,
@@ -1258,7 +1484,7 @@ def build_recap_meeting(
             "action_items": collapse_ws(str(summary.get("action_items") or "")),
         },
         "client_context": client_context,
-        "next_steps": commitment_entries(refine_items(transcript, extracted), enriched=True),
+        "next_steps": commitment_entries(refine_items(transcript, extracted, client_record=client_record), enriched=True),
     }
 
 

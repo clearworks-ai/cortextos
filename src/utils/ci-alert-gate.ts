@@ -25,6 +25,7 @@ export interface CiAlertInput {
   runs: CiRun[];
   headSha?: string;
   compareStatus?: CompareStatus;
+  branchExists?: boolean;
   ghError?: boolean;
 }
 
@@ -131,6 +132,10 @@ export function evaluateCiAlert(input: CiAlertInput): CiAlertDecision {
     return decision(false, 'skip: gh context unavailable (fail-safe)');
   }
 
+  if (input.branchExists === false) {
+    return decision(false, 'skip: branch deleted');
+  }
+
   if (input.prState === 'MERGED') {
     return decision(false, 'skip: PR merged');
   }
@@ -195,6 +200,17 @@ export function gatherCiAlertContext(
   });
 
   try {
+    runGh(['api', `repos/${repo}/branches/${branch}`, '--jq', '.name']);
+  } catch {
+    return {
+      prState: 'NOTFOUND',
+      runs: [],
+      headSha: opts.headSha,
+      branchExists: false,
+    };
+  }
+
+  try {
     const prState = normalizePrState(
       runGh([
         'pr',
@@ -239,6 +255,7 @@ export function gatherCiAlertContext(
       runs,
       headSha: opts.headSha,
       compareStatus,
+      branchExists: true,
     };
   } catch {
     return fallback();

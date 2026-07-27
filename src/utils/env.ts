@@ -17,6 +17,42 @@ const opRefCache = new Map<string, string>();
 /** One-shot flag so the no-token warning fires once per process, not per key/file. */
 let warnedNoOpToken = false;
 
+export interface SubprocessCtxEnvOptions {
+  root: string;
+  instanceId?: string;
+  ctxRoot?: string;
+  org?: string;
+}
+
+export function buildSubprocessCtxEnv(
+  inherited: Record<string, string | undefined>,
+  opts: SubprocessCtxEnvOptions,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(inherited)) {
+    if (value !== undefined) {
+      env[key] = value;
+    }
+  }
+
+  delete env.CTX_AGENT_DIR;
+
+  env.CTX_FRAMEWORK_ROOT = opts.root;
+  env.CTX_PROJECT_ROOT = opts.root;
+
+  if (opts.instanceId !== undefined) {
+    env.CTX_INSTANCE_ID = opts.instanceId;
+  }
+  if (opts.ctxRoot !== undefined) {
+    env.CTX_ROOT = opts.ctxRoot;
+  }
+  if (opts.org !== undefined) {
+    env.CTX_ORG = opts.org;
+  }
+
+  return env;
+}
+
 /**
  * Resolve the cortextOS environment context.
  * Equivalent of bash _ctx-env.sh - reads from env vars, .cortextos-env, .env files.

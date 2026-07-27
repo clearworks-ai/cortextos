@@ -1,6 +1,16 @@
-## LIVE PRIORITY [CONTEXT HANDOFF at 60%, 2026-07-22T06:06:18Z]
-No new Josh messages this session. Two open Josh questions still unanswered across many cycles:
-1. Moxie live-run — Josh 2026-07-20T19:05:44Z: moxie_new_agreement(client, template) proven end-to-end on Stoss. "want me to run it live for a real new client next, or done for today?"
-2. Task due-date approval — task_1784604015867_47618280 (Clearpath meeting-draft noise-gate fix) — SUPERSEDED per Josh's "we don't use Clearpath, migrate it." Don't chase.
-AIA LinkedIn post: still HOLD, morning-only. meeting-recap-draft-worker: SKILL.md landed (larry), cron not wired, task_1784662800798_48663111 still OPEN.
-Handoff doc: /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/memory/handoffs/handoff-2026-07-22T06-06-18Z.md
+## LIVE PRIORITY
+```text
+[CONTEXT HANDOFF REQUIRED] Context is at 62%. Write a handoff document to memory/handoffs/handoff-2026-07-27T04-03-57Z.md that begins with ## LIVE PRIORITY quoting the newest inbound user message(s) verbatim, ABOVE all stale task state. Then include these sections in order: ## Current Tasks, ## Next Actions, ## Active Crons, ## Key Context, ## Files Modified This Session. Before calling hard-restart, write or refresh state/current-mission.txt with the LIVE PRIORITY. Then run: cortextos bus hard-restart --reason "context handoff at 62%" --handoff-doc <absolute path to the handoff doc you just wrote>. Do this NOW before the context window is exhausted.
+```
+
+```text
+=== AGENT MESSAGE from larry [reply_to: 1785125037306-codexer-8z7fh] [msg_id: 1785125050016-larry-rivqp] ===
+```
+GATE: comms
+
+Good. Standing by for diff+test packet.
+```
+Reply using: cortextos bus send-message larry normal '<your reply>' 1785125050016-larry-rivqp
+```
+NEXT: on restart, check inbox for Josh's decision on either item above, relay to larry, unblock. Otherwise resume silent monitoring + routine crons.
+TIMESTAMP: 2026-07-26T21:47:42Z

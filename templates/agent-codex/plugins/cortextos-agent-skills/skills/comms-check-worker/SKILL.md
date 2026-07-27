@@ -1,5 +1,13 @@
 # Comms Check Worker
 
+<!-- PUSH LISTENER NOTE (added feat/gmail-push-comms):
+     gmail_push_listener.py is the PRIMARY trigger for this worker. It polls
+     Gmail history every 60s, debounces 120s, then spawns this worker on new
+     actionable inbox messages. This cron fires every 4h as a missed-event
+     safety-net sweep. The shared comms-event-dedup ledger makes double-fire
+     harmless — whichever trigger fires first wins; the other is a no-op.
+-->
+
 You are a SHORT-LIVED WORKER SESSION. Your only job is comms triage. Complete it and stop.
 
 DO NOT:
@@ -22,7 +30,7 @@ DO:
 ```bash
 TASK_ID=$(cortextos bus create-task "Cron: comms-check" --desc "Comms check: Gmail, iMessage, GitHub CI" --assignee "${CTX_PARENT_AGENT:-frank2}" 2>/dev/null)
 cortextos bus update-task $TASK_ID in_progress 2>/dev/null
-cortextos bus update-cron-fire comms-check --interval 15m 2>/dev/null
+cortextos bus update-cron-fire comms-check --interval 4h 2>/dev/null
 ```
 
 Dedup is now DETERMINISTIC and upstream of your reasoning: in Step 2 the Josh-inbox
@@ -69,7 +77,7 @@ Run these 4 checks (Bash):
 2. **JOSH INBOX** — TWO STEPS. Do NOT pipe the raw fetch straight into `comms-filter --surface` — that sends atomically on first-seen, before you ever get a chance to apply the exclusion rules above, which is exactly how non-human mail (automated reports, receipts) slipped through on 2026-07-25.
 
    a. Fetch raw candidates only, do not send yet:
-      `gws gmail +triage --query 'is:unread newer_than:1h -category:promotions -category:social -from:notify.railway.app' --format json > /tmp/josh-inbox-raw.json`
+      `gws gmail +triage --query 'is:unread newer_than:5h -category:promotions -category:social -from:notify.railway.app' --format json > /tmp/josh-inbox-raw.json`
 
    b. Apply every HARD EXCLUSION / OOO-AUTO-REPLY / COLD-INBOUND-SPAM rule above to each item's `from`/`subject`/`snippet` YOURSELF, and drop non-surviving items. Also treat as HARD EXCLUSIONS (automated/non-human, skip silently):
       - Any transactional receipt/invoice/report sender: `receipts@*`, `billing@*`, `info@raisedonors.com`, or subject matching "Receipt", "Invoice #", "Report" from a non-human/automated sender

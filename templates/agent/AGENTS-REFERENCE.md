@@ -2,7 +2,7 @@
 
 Low-frequency reference extracted from `AGENTS.md`.
 
-Do NOT read this file at boot. Open only when the active task needs one of the sections below.
+Open this file only when the active task needs one of the sections below.
 
 ## §session-end-template
 

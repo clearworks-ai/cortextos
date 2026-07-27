@@ -2,7 +2,7 @@
 
 Low-frequency reference extracted from `AGENTS.md`.
 
-Do NOT read this file at boot. Open only when the active task needs one of the sections below.
+Open this file only when the active task needs one of the sections below.
 
 ## §session-end-template
 
@@ -19,6 +19,12 @@ cat >> "memory/$TODAY.md" << MEMEOF
 
 MEMEOF
 ```
+
+## §context-handoff-config
+
+**Configuration knobs (config.json):**
+- `ctx_warning_threshold` - default 30.
+- `ctx_handoff_threshold` - default 60.
 
 ## §time-commands
 

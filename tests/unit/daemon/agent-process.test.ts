@@ -3,6 +3,8 @@ import type { TelegramAPI } from '../../../src/telegram/api.js';
 
 // Capture the PTY exit handler so tests can simulate exits at controlled times
 let capturedOnExit: ((exitCode: number, signal?: number) => void) | null = null;
+const mockAtomicWriteSync = vi.fn();
+const mockHardRestart = vi.fn();
 
 const mockPty = {
   spawn: vi.fn().mockResolvedValue(undefined),
@@ -27,7 +29,7 @@ vi.mock('../../../src/pty/inject.js', () => ({
 
 vi.mock('../../../src/utils/atomic.js', () => ({
   ensureDir: vi.fn(),
-  atomicWriteSync: vi.fn(),
+  atomicWriteSync: (...args: unknown[]) => mockAtomicWriteSync(...args),
 }));
 
 vi.mock('../../../src/utils/env.js', () => ({
@@ -48,6 +50,10 @@ vi.mock('../../../src/bus/event.js', () => ({
   logEvent: (...args: unknown[]) => mockLogEvent(...args),
 }));
 
+vi.mock('../../../src/bus/system.js', () => ({
+  hardRestart: (...args: unknown[]) => mockHardRestart(...args),
+}));
+
 const fsMocks = {
   existsSync: vi.fn().mockReturnValue(false),
   readFileSync: vi.fn(),
@@ -55,6 +61,7 @@ const fsMocks = {
   appendFileSync: vi.fn(),
   statSync: vi.fn(),
   unlinkSync: vi.fn(),
+  readdirSync: vi.fn(),
 };
 
 vi.mock('fs', async () => {
@@ -84,10 +91,11 @@ vi.mock('fs', async () => {
     get appendFileSync() { return fsMocks.appendFileSync; },
     get statSync() { return fsMocks.statSync; },
     get unlinkSync() { return fsMocks.unlinkSync; },
+    get readdirSync() { return fsMocks.readdirSync; },
   };
 });
 
-const { AgentProcess } = await import('../../../src/daemon/agent-process.js');
+const { AgentProcess, decideSessionRefreshMode, nextSessionRolloverState } = await import('../../../src/daemon/agent-process.js');
 
 const mockEnv = {
   instanceId: 'test',
@@ -115,6 +123,9 @@ beforeEach(() => {
   fsMocks.appendFileSync.mockReset();
   fsMocks.statSync.mockReset();
   fsMocks.unlinkSync.mockReset();
+  fsMocks.readdirSync.mockReset().mockImplementation(() => { throw new Error('missing'); });
+  mockAtomicWriteSync.mockReset();
+  mockHardRestart.mockReset();
 });
 
 describe('AgentProcess - BUG-011 fix (stop awaits PTY exit)', () => {
@@ -348,6 +359,23 @@ describe('AgentProcess - BUG-011 fix (stop awaits PTY exit)', () => {
     const markerWriteOrder = fsMocks.writeFileSync.mock.invocationCallOrder[writeIdx];
     expect(markerWriteOrder).toBeLessThan(stopSpy.mock.invocationCallOrder[0]);
   });
+
+  it('sessionRefresh() still stops and starts when the marker write fails', async () => {
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+
+    const stopSpy = vi.spyOn(ap, 'stop').mockResolvedValue();
+    const startSpy = vi.spyOn(ap, 'start').mockResolvedValue();
+    fsMocks.writeFileSync.mockImplementation((path: unknown) => {
+      if (String(path).endsWith('.session-refresh')) {
+        throw new Error('disk full');
+      }
+    });
+
+    await expect(ap.sessionRefresh()).resolves.toBeUndefined();
+    expect(stopSpy).toHaveBeenCalled();
+    expect(startSpy).toHaveBeenCalled();
+  });
 });
 
 describe('AgentProcess - BUG-048 fix (session timer re-reads config)', () => {
@@ -444,6 +472,139 @@ describe('AgentProcess - BUG-048 fix (session timer re-reads config)', () => {
     ).length;
     expect(rescheduleCount).toBeLessThan(5);
     expect(refreshSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('AgentProcess - F8 fresh rollover', () => {
+  it('decision helper stays opt-in and upgrades to fresh on count or context threshold', () => {
+    expect(
+      decideSessionRefreshMode(
+        {},
+        { lastFreshAtMs: null, continuesSinceFresh: 99 },
+        { usedPercentage: 95, writtenAtMs: 1_000 },
+        2_000,
+      ),
+    ).toBe('continue');
+
+    expect(
+      decideSessionRefreshMode(
+        { fresh_rollover_max_continues: 3 },
+        { lastFreshAtMs: null, continuesSinceFresh: 3 },
+        null,
+        2_000,
+      ),
+    ).toBe('fresh');
+
+    expect(
+      decideSessionRefreshMode(
+        { fresh_rollover_ctx_pct: 45 },
+        { lastFreshAtMs: null, continuesSinceFresh: 0 },
+        { usedPercentage: 45, writtenAtMs: 2_000 },
+        2_001,
+      ),
+    ).toBe('fresh');
+
+    expect(
+      decideSessionRefreshMode(
+        { fresh_rollover_ctx_pct: 45 },
+        { lastFreshAtMs: null, continuesSinceFresh: 0 },
+        { usedPercentage: 80, writtenAtMs: 0 },
+        10 * 60_000 + 1,
+      ),
+    ).toBe('continue');
+  });
+
+  it('nextSessionRolloverState resets on fresh and increments on continue', () => {
+    const continued = nextSessionRolloverState(
+      { lastFreshAtMs: 100, continuesSinceFresh: 2 },
+      'continue',
+      500,
+    );
+    expect(continued).toEqual({ lastFreshAtMs: 100, continuesSinceFresh: 3 });
+
+    const fresh = nextSessionRolloverState(continued, 'fresh', 900);
+    expect(fresh).toEqual({ lastFreshAtMs: 900, continuesSinceFresh: 0 });
+  });
+
+  it('start() writes fresh session-rollover state after mode determination', async () => {
+    fsMocks.existsSync.mockImplementation((p: unknown) =>
+      String(p).endsWith('/state/alice/session-rollover.json'),
+    );
+    fsMocks.readFileSync.mockImplementation((p: unknown) => {
+      if (String(p).endsWith('/state/alice/session-rollover.json')) {
+        return JSON.stringify({ lastFreshAtMs: 100, continuesSinceFresh: 1 });
+      }
+      return '';
+    });
+
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+
+    expect(mockAtomicWriteSync).toHaveBeenCalledWith(
+      '/tmp/test-ctx/state/alice/session-rollover.json',
+      expect.stringContaining('"continuesSinceFresh":0'),
+    );
+  });
+
+  it('sessionRefresh() escalates to planned fresh rollover and marks hard restart before stop', async () => {
+    const now = Date.now();
+    fsMocks.existsSync.mockImplementation((p: unknown) => {
+      const path = String(p);
+      return path.endsWith('/state/alice/session-rollover.json')
+        || path.endsWith('/state/alice/context_status.json')
+        || path.endsWith('/state/alice/current-mission.txt')
+        || path.endsWith('/memory/handoffs');
+    });
+    fsMocks.readFileSync.mockImplementation((p: unknown) => {
+      const path = String(p);
+      if (path.endsWith('/state/alice/session-rollover.json')) {
+        return JSON.stringify({ lastFreshAtMs: 100, continuesSinceFresh: 1 });
+      }
+      if (path.endsWith('/state/alice/context_status.json')) {
+        return JSON.stringify({ used_percentage: 55, written_at: new Date(now).toISOString() });
+      }
+      if (path.endsWith('/state/alice/current-mission.txt')) {
+        return 'keep shipping';
+      }
+      if (path.endsWith('config.json')) {
+        return JSON.stringify({ fresh_rollover_max_continues: 1 });
+      }
+      return '';
+    });
+    fsMocks.readdirSync.mockImplementation((p: unknown) => {
+      if (String(p).includes('/memory/handoffs')) {
+        return ['handoff-2026-07-26T00-00-00Z.md'];
+      }
+      throw new Error('missing');
+    });
+    fsMocks.statSync.mockImplementation((p: unknown) => {
+      if (String(p).includes('/memory/handoffs/handoff-2026-07-26T00-00-00Z.md')) {
+        return { mtimeMs: now + 1 };
+      }
+      return { mtimeMs: now };
+    });
+
+    const ap = new AgentProcess('alice', mockEnv, { fresh_rollover_max_continues: 1 });
+    await ap.start();
+
+    const stopSpy = vi.spyOn(ap, 'stop').mockResolvedValue();
+    const startSpy = vi.spyOn(ap, 'start').mockResolvedValue();
+    const injectSpy = vi.spyOn(ap, 'injectMessage').mockResolvedValue(true);
+
+    await ap.sessionRefresh();
+
+    expect(injectSpy).toHaveBeenCalledWith(expect.stringContaining('[PLANNED FRESH ROLLOVER]'));
+    expect(mockHardRestart).toHaveBeenCalledWith(
+      { stateDir: '/tmp/test-ctx/state/alice' },
+      'alice',
+      'CONTEXT-FORCE-RESTART: F8 fresh rollover',
+    );
+    expect(mockAtomicWriteSync).toHaveBeenCalledWith(
+      '/tmp/test-ctx/state/alice/.handoff-doc-path',
+      expect.stringContaining('handoff-2026-07-26T00-00-00Z.md'),
+    );
+    expect(stopSpy).toHaveBeenCalled();
+    expect(startSpy).toHaveBeenCalled();
   });
 });
 

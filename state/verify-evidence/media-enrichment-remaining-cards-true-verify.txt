@@ -1,0 +1,18 @@
+True-verify: repcards media enrichment + contentVersion bump
+Date: 2026-07-27
+Branch: feat/media-enrichment-remaining-cards
+Repo: clearworks-ai/repcards
+
+## Commits
+af804bb feat(content): add media to all 25 cards — contentVersion 3
+a516fab chore(tests): bump contentVersion fixture assertions to 3
+
+## Verification
+npm test in /Users/joshweiss/code/repcards: PASS — 134/134 tests
+Codexer confirmed: "npm test PASS in /Users/joshweiss/code/repcards (24/24 files, 134/134 tests)"
+
+## Scope check
+- 25/25 cards have media array with unique YouTube URL
+- contentVersion = 3 in seed-cards.json
+- No duplicate URLs (verified programmatically)
+- Test assertions match contentVersion 3

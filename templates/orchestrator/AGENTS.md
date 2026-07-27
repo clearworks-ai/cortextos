@@ -63,6 +63,33 @@ Run these steps before any restart (hard or soft) and on context exhaustion.
 
 ---
 
+## Context Handoff Lifecycle
+
+Claude Code agents track context window usage through the `hook-context-status.ts` status-line bridge, which writes `state/<agent>/context_status.json`. The daemon's FastChecker reads that file on every poll to manage the handoff lifecycle. You don't trigger this directly - the daemon does - but you must respond when the lifecycle injects prompts into your input stream.
+
+**Three thresholds, three behaviours:**
+
+| Tier | When | What you see | What you do |
+|---|---|---|---|
+| Tier 1 - warning | usage >= `ctx_warning_threshold` (default 30%) | Injected line: `[CONTEXT] Window at NN%. Handoff triggers at HH%.` | Wrap up the current sub-task; avoid starting large new work. No restart yet. |
+| Tier 2 - handoff | usage >= `ctx_handoff_threshold` (default 60%) | Injected line: `[CONTEXT HANDOFF REQUIRED] Context is at NN%. Write a handoff document to memory/handoffs/handoff-<ts>.md ...` followed by an absolute target path | Write the handoff doc to that exact path with these sections: `## Current Tasks`, `## Next Actions`, `## Active Crons`, `## Key Context`, `## Files Modified This Session`. Then run: `cortextos bus hard-restart --reason "context handoff at NN%" --handoff-doc <absolute path>`. |
+| Tier 3 - force restart | 5 min after Tier 2 fires with no `hard-restart` call | Daemon force-kills the session and brings a fresh one up | Nothing - the daemon already acted. On the next session start, resume from the handoff doc if one was found. |
+
+**On resume after a handoff:**
+
+1. Read the handoff doc path injected into the fresh session's first message before doing anything else.
+2. Send ONE brief conversational Telegram, for example `back - picking up the review lane`. No cron list, no status report.
+3. Resume from `## Next Actions` in the handoff doc.
+
+**Avoid these mistakes:**
+- Try to free context by truncating files mid-task.
+- Run `hard-restart` without `--handoff-doc` when responding to a `[CONTEXT HANDOFF REQUIRED]` injection.
+- Set `ctx_handoff_threshold` to `undefined` thinking it disables monitoring. Use an explicit value <= 0 only when intentionally opting out.
+
+Full details: read AGENTS-REFERENCE.md §context-handoff-config when needed - do NOT read at boot.
+
+---
+
 ## Time Awareness
 
 You are always time-aware. Your timezone is set in `config.json` and injected as `CTX_TIMEZONE` and `TZ` at startup.
@@ -121,9 +148,6 @@ When your work depends on another task or agent completing first, block your tas
 
 Full details: read AGENTS-REFERENCE.md §blocked-human-approval-commands when needed - do NOT read at boot.
 
-CONSEQUENCE: Leaving work in limbo without blocking it makes the dependency invisible in the dashboard.
-TARGET: Every dependency blocker is reflected in task state as soon as you discover it.
-
 ### HUMAN TASK (capability - only a human can do this)
 
 When you CANNOT do something yourself (needs payment, physical access, login, sudo), create a `[HUMAN]` task with clear instructions, block your own task against it, and notify the orchestrator so it surfaces in briefing.
@@ -133,7 +157,7 @@ Full details: read AGENTS-REFERENCE.md §blocked-human-approval-commands when ne
 When the human task is marked complete, you receive an inbox message. Unblock and resume immediately.
 
 CONSEQUENCE: Leaving work undone without creating a human task = invisible blocker = system failure.
-TARGET: Every human-dependent blocker has a `[HUMAN]` task within 1 heartbeat of discovery.
+TARGET: Every human-dependent blocker has a [HUMAN] task within 1 heartbeat of discovery.
 
 ### APPROVAL (permission - you can do it, but need sign-off first)
 
@@ -178,7 +202,7 @@ Use this when: you make a significant decision, learn something about the user, 
 Full details: read AGENTS-REFERENCE.md §memory-templates when needed - do NOT read at boot.
 
 CONSEQUENCE: Without daily memory, session crashes and compactions lose all context. You start from zero.
-TARGET: Session start, every heartbeat, session end. Each entry must have enough context to reconstruct your mental state cold - not just what happened, but where things stand and why.
+TARGET: Session start, every heartbeat, session end. Each entry must have enough context to reconstruct your mental state cold — not just what happened, but where things stand and why.
 
 ### Layer 2: Long-Term Memory - Consolidated Knowledge (MEMORY.md)
 
@@ -231,7 +255,7 @@ Messages arrive in real time via the fast-checker daemon:
 Reply using: cortextos bus send-telegram <chat_id> "<reply>"
 ```
 
-**CRITICAL: When a Telegram message arrives, you MUST reply BEFORE doing any work.** The user is waiting. Acknowledge immediately, then execute. Never leave the user as the last person to have sent a message - always follow up when work is done, when something changes, or when you are waiting on something. The user should never have to ask "are you still there?"
+**CRITICAL: When a Telegram message arrives, you MUST reply BEFORE doing any work.** The user is waiting. Acknowledge immediately, then execute. Never leave the user as the last person to have sent a message — always follow up when work is done, when something changes, or when you are waiting on something. The user should never have to ask "are you still there?"
 
 Photos include a `local_file:` path. Callbacks include `callback_data:` and `message_id:`. Process all immediately and reply using the command shown.
 
@@ -262,7 +286,7 @@ Crons are **daemon-managed**. The cortextOS daemon reads `${CTX_ROOT}/state/${CT
 cortextos bus list-crons $CTX_AGENT_NAME
 ```
 
-**Add a recurring cron at runtime:** Use the `cron-management` skill. Do NOT use CronCreate or `/loop` for persistent scheduling - those are session-only and will not survive a restart.
+**Add a recurring cron at runtime:** Use the `cron-management` skill. Do NOT use CronCreate or `/loop` for persistent scheduling — those are session-only and will not survive a restart.
 
 **Add a one-shot reminder:** Use `cortextos bus add-cron $CTX_AGENT_NAME --name <name> --schedule <ISO> --prompt "<text>"` (one-time fire).
 

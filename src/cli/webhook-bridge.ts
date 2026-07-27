@@ -20,7 +20,7 @@ const RATE_LIMIT_WINDOW_MS = 60_000;
 const PLIST_LABEL = 'com.cortextos.webhook-bridge';
 const PLIST_PATH = join(homedir(), 'Library', 'LaunchAgents', `${PLIST_LABEL}.plist`);
 const SOURCE_NAME = 'webhook-hub';
-const ALLOWED_INTEGRATIONS = ['zoom-officehours'] as const;
+const ALLOWED_INTEGRATIONS = ['zoom-officehours', 'fireflies'] as const;
 
 interface BridgeConfig {
   port?: number;
@@ -242,15 +242,20 @@ function appendInboundLog(ctxRoot: string, target: string, messageId: string, te
 }
 
 function buildRelayMessage(integration: string, event: string, envelope: RelayEnvelope): string {
+  const meetingId = envelope.meeting_id === undefined || envelope.meeting_id === null
+    ? ''
+    : String(envelope.meeting_id).trim();
+
+  if (integration === 'fireflies' && meetingId) {
+    return `WEBHOOK ${integration} ${event} — meeting ${meetingId}. Spawn meeting-commitments-worker with FF_MEETING_ID=${meetingId} set so the single-meeting fast path runs now instead of waiting for the 2h poll: cd frank2 agent dir, source env, then python3 scripts/ff-extractor.py --mode full --meeting-id ${meetingId}.`;
+  }
+
   const registrant = typeof envelope.registrant === 'object' && envelope.registrant !== null
     ? envelope.registrant as Record<string, unknown>
     : null;
   const firstName = typeof registrant?.first_name === 'string' ? registrant.first_name.trim() : '';
   const lastName = typeof registrant?.last_name === 'string' ? registrant.last_name.trim() : '';
   const email = typeof registrant?.email === 'string' ? registrant.email.trim() : '';
-  const meetingId = envelope.meeting_id === undefined || envelope.meeting_id === null
-    ? ''
-    : String(envelope.meeting_id).trim();
 
   if (registrant && (firstName || lastName || email || meetingId)) {
     const name = [firstName, lastName].filter(Boolean).join(' ').trim() || 'Unknown registrant';

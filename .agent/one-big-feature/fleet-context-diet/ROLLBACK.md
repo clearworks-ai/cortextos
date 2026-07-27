@@ -1,23 +1,133 @@
-# fleet-context-diet — rollback / re-enable runbook (2026-07-25)
+# fleet-context-diet — rollback / re-enable runbook (2026-07-26)
 
-All diet changes are per-agent and reversible with one edit + one agent restart. No fleet bounce needed to revert a single agent.
+This document covers the spec04 front-context cuts. For earlier specs (MCP diet, plugin diet, PTY fix),
+see the main repo's `.agent/one-big-feature/fleet-context-diet/ROLLBACK.md`.
 
-## MCP diet (per-agent `.mcp.json`)
-Each active agent has `orgs/<org>/agents/<agent>/.mcp.json` disabling the 10 global MCP servers via `{"command":"false"}`, except keep-lists (crm=mailchimp,resend; muse=+omi; larry=+railway,sequential-thinking). Own servers (ophir→monarchmoney, auditmaster→cxportal-audit) preserved.
+---
 
-**Re-enable ONE server for ONE agent:** remove that server's `{"command":"false"}` entry from the agent's `.mcp.json`, then `cortextos restart <agent>`. It re-inherits that server from `~/.claude.json`.
+## Spec 04 — front-context cuts rollback (PR fix/front-context-cuts-ship)
 
-**Full revert for an agent:** each file has a sibling `.mcp.json.bak` (pre-diet state). `cp .mcp.json.bak .mcp.json && cortextos restart <agent>`.
+Branch: `fix/front-context-cuts-ship` (NOT merged into main — Josh merges after morning review)
 
-**Watch for:** an agent reaching for a tool it lost (e.g. larry needing codebase-memory-mcp or filesystem MCP for a code op — note built-in Read/Write/Edit are NOT MCP and always remain). If it hits a missing `mcp__<server>__*`, re-enable that one server.
+### CUT 2: wal-protocol.js empty-envelope suppression
 
-## Plugin diet (per-agent `.claude/settings.json` `enabledPlugins`)
-8 heavy design/planning plugins disabled fleet-wide (frontend-design, playwright, ui-ux-pro-max, visual-explainer, superpowers, impeccable, planning-with-files, context-mode). larry keeps context7 enabled.
-**Re-enable:** set the plugin key to `true` in the agent's `enabledPlugins`, restart that agent.
+**What changed:** Added `if (!additionalContext) { process.exit(0); }` before the stdout.write in
+`~/.claude/hooks/wal-protocol.js` (line ~51). Empty PostToolUse hook no longer emits a ~760B envelope.
 
-## Verification
-`python3 bin/verify-fleet-context.py snapshot <label>` then `diff <baseline> <label>` — proves mcp-reinjection + floor deltas per agent. `/tmp/fleet-ctx-baseline.json` is the pre-diet reference.
-Authoritative per-agent check that a server is actually gone: grep the agent's newest transcript for `mcp__<server>__` (fable proved `claude mcp list` gives a false "connected" and cannot be trusted for this).
+**Rollback:** Remove the early-exit block:
+```bash
+# Edit ~/.claude/hooks/wal-protocol.js
+# Remove these 4 lines (after the if (isDownloadsWrite) block, before process.stdout.write):
+#
+#     // CUT-2: suppress empty envelope — saves ~760B / PostToolUse fire (was ~3.2k/restart)
+#     if (!additionalContext) {
+#       process.exit(0);
+#     }
+```
 
-## PTY fix (the crash/flap root — PR #811)
-If the daemon ever throws `Cannot find module '.../dist/pty-host-entry.js'`, the pty-host path resolution regressed — the leak fix is off and agents will fail to spawn (daemon ptmx reads 0 because there are NO ptys, a false "healthy"). Rebuild from a branch containing PR #811 and bounce. Verify by BOTH: agents `running` in `cortextos status` AND `lsof -p <daemon> | grep -c ptmx` staying ~0 WHILE `ps aux | grep -c pty-host-entry` is >0.
+**Verify after rollback:** `printf '{"tool_name":"Bash","tool_input":{}}' | node ~/.claude/hooks/wal-protocol.js` should produce ~760 bytes of JSON.
+
+---
+
+### CUT 4: settings.json caveman-mode-tracker dedup
+
+**What changed:** Removed the standalone second UserPromptSubmit hook group running
+`/Users/joshweiss/.hermes/node/bin/node /Users/joshweiss/.claude/hooks/caveman-mode-tracker.js`
+from `~/.claude/settings.json`. Plugin-provided registration in
+`~/.claude/plugins/cache/caveman/.../plugin.json` is untouched.
+
+**Backup:** `~/.claude/settings.json.bak-caveman-dedup-spec04-<timestamp>` (created before edit)
+
+**Rollback:** Restore from backup or re-add the second UserPromptSubmit group:
+```bash
+# Option A — restore from backup
+cp ~/.claude/settings.json.bak-caveman-dedup-spec04-* ~/.claude/settings.json
+
+# Option B — re-add manually to ~/.claude/settings.json hooks.UserPromptSubmit array:
+# {
+#   "hooks": [
+#     {
+#       "type": "command",
+#       "command": "\"/Users/joshweiss/.hermes/node/bin/node\" \"/Users/joshweiss/.claude/hooks/caveman-mode-tracker.js\"",
+#       "timeout": 5,
+#       "statusMessage": "Tracking caveman mode..."
+#     }
+#   ]
+# }
+```
+
+**Watch for:** caveman per-prompt reminders stopping entirely (would mean the plugin registration
+silently failed and this standalone was the live one). Check new transcripts for `CAVEMAN MODE ACTIVE (`
+with count == 1 per prompt. If count drops to 0, restore from backup.
+
+**Plugin update churn note:** If `caveman@caveman` plugin updates and re-adds a standalone mode-tracker
+to settings.json, this fix would be undone. Check `~/.claude/settings.json` after plugin updates.
+
+---
+
+### CUT 1: skills-disabled-2026-07-26 (11 skills moved)
+
+**What moved:**
+- `~/.claude/skills/best-practices` → `~/.claude/skills-disabled-2026-07-26/best-practices`
+- `~/.claude/skills/brainstorming` → `~/.claude/skills-disabled-2026-07-26/brainstorming`
+- `~/.claude/skills/brand-guidelines` → `~/.claude/skills-disabled-2026-07-26/brand-guidelines`
+- `~/.claude/skills/cold-email` → `~/.claude/skills-disabled-2026-07-26/cold-email`
+- `~/.claude/skills/copywriting` → `~/.claude/skills-disabled-2026-07-26/copywriting`
+- `~/.claude/skills/email-sequence` → `~/.claude/skills-disabled-2026-07-26/email-sequence`
+- `~/.claude/skills/gemini` → `~/.claude/skills-disabled-2026-07-26/gemini`
+- `~/.claude/skills/lesson-learned` → `~/.claude/skills-disabled-2026-07-26/lesson-learned`
+- `~/.claude/skills/performance` → `~/.claude/skills-disabled-2026-07-26/performance`
+- `~/.claude/skills/perplexity` → `~/.claude/skills-disabled-2026-07-26/perplexity`
+- `~/.claude/skills/seo` → `~/.claude/skills-disabled-2026-07-26/seo`
+
+All 11 are symlinks pointing into `~/.agents/skills/<name>`. Zero 7-day transcript hits confirmed
+by spec04-skill-usage-checker.py (5063 transcripts scanned, mtime ≤7d).
+
+**Rollback (all):**
+```bash
+for name in best-practices brainstorming brand-guidelines cold-email copywriting email-sequence gemini lesson-learned performance perplexity seo; do
+  mv ~/.claude/skills-disabled-2026-07-26/$name ~/.claude/skills/$name
+done
+```
+
+**Rollback (one skill):**
+```bash
+mv ~/.claude/skills-disabled-2026-07-26/<skill-name> ~/.claude/skills/<skill-name>
+```
+
+**Trigger for individual re-enable:** an agent transcript shows `Skill not found` or similar error
+referencing a moved skill name. No agent restart needed — skill listing regenerates on next session start.
+
+---
+
+### CUT 3: agents-disabled-2026-07-26 (2 agency agents moved)
+
+**What moved:**
+- `~/.claude/agents/agency/finance-fpa-analyst.md` → `~/.claude/agents-disabled-2026-07-26/finance-fpa-analyst.md`
+- `~/.claude/agents/agency/sales-proposal-strategist.md` → `~/.claude/agents-disabled-2026-07-26/sales-proposal-strategist.md`
+- `~/.claude/agents/agency/` directory removed (was empty after move)
+
+Zero 7-day invocations confirmed in codexer's audit (/tmp/fleet-context-diet-spec04-audit.md).
+
+**Rollback:**
+```bash
+mkdir -p ~/.claude/agents/agency
+mv ~/.claude/agents-disabled-2026-07-26/finance-fpa-analyst.md ~/.claude/agents/agency/
+mv ~/.claude/agents-disabled-2026-07-26/sales-proposal-strategist.md ~/.claude/agents/agency/
+```
+
+---
+
+## Honest savings estimate
+
+Target was ~15k/restart. Realistic achievable:
+- CUT 2: ~3.2k/restart (17 empty PostToolUse attachments × ~760B eliminated per larry restart cycle)
+- CUT 4: ~0 token savings (dedup only — was paying once, now still paying once from plugin)
+- CUT 1: 11 skills × ~100-200 chars each = ~1-2k reduction in skill_listing
+- CUT 3: 2 agent types removed from agent_listing_delta; residual ~0.3-0.7k (built-ins dominate)
+
+**Total realistic: ~4-6k/restart floor drop** (not the 15k spec assumed, which required full
+skill_listing removal — a Claude-Code-native feature not per-agent scopeable without upstream changes).
+
+The ~13k connector cut (claude.ai Gmail/Drive/Calendar) remains a human task for Josh (account-level
+in claude.ai Settings).

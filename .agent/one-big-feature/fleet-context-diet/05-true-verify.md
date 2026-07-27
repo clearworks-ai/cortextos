@@ -1,81 +1,127 @@
-# 05-true-verify — fleet-context-diet
+# 05-true-verify — fleet-context-diet spec04
 
-Larry independent verification of branch `fix/fleet-context-diet` @ ff27724, built off origin/main, in an isolated worktree (`/tmp/true-verify-fleet-context-diet`, not touched by any other agent's checkout).
+Branch: `fix/front-context-cuts-ship`
+Verified in isolated worktree: `/Users/joshweiss/code/cortextos/.claude/worktrees/wf_198c8666-1e7-6`
 
-## Setup
-```
-git -C /Users/joshweiss/code/cortextos fetch origin fix/fleet-context-diet
-git -C /Users/joshweiss/code/cortextos worktree add --detach /tmp/true-verify-fleet-context-diet origin/fix/fleet-context-diet
-# → Preparing worktree (detached HEAD ff27724)
-# → HEAD is now at ff27724 feat(hooks): selective/cached UserPromptSubmit retrieval enforcer
-```
-4 changed files confirmed present in the checkout: `src/hooks/hook-retrieval-enforcer.ts` (new), `src/cli/bus.ts`, `tsup.config.ts`, `tests/unit/hooks/hook-retrieval-enforcer.test.ts` (new).
+---
 
-## Install
-```
-cd /tmp/true-verify-fleet-context-diet && npm install
-# → added 141 packages, and audited 142 packages in 2s (exit 0)
-```
+## CUT 2 Verify — wal-protocol.js empty envelope suppression
 
-## Build
+### Test: Bash tool → zero bytes
 ```
-npm run build
-# → BUILD_EXIT=0
+$ printf '{"tool_name":"Bash","tool_input":{}}' | node ~/.claude/hooks/wal-protocol.js
+[no output]
+$ echo "exit: $?"
+exit: 0
+$ printf '{"tool_name":"Bash","tool_input":{}}' | node ~/.claude/hooks/wal-protocol.js | wc -c
+       0
 ```
-tsup (esbuild-based) compiled all CLI/daemon/hook/pipeline entry points cleanly, including the new hook:
-```
-CJS dist/hooks/hook-retrieval-enforcer.js      16.58 KB
-CJS dist/hooks/hook-retrieval-enforcer.js.map  40.30 KB
-CJS ⚡️ Build success in 70ms
-```
-Confirmed output file on disk: `dist/hooks/hook-retrieval-enforcer.js` (16,980 bytes, present).
+PASS — 0 bytes, exit 0.
 
-## Targeted test (the phase's own suite)
+### Test: Write to Downloads → FILE LOCATION WARNING
 ```
-npx vitest run tests/unit/hooks/hook-retrieval-enforcer.test.ts
+$ printf '{"tool_name":"Write","tool_input":{"file_path":"/Users/joshweiss/Downloads/x.md"}}' | \
+    node ~/.claude/hooks/wal-protocol.js
+{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"FILE LOCATION WARNING:\n..."}}
 ```
-```
- RUN  v4.1.2 /private/tmp/true-verify-fleet-context-diet
- Test Files  1 passed (1)
-      Tests  13 passed (13)
-   Start at  20:39:07
-   Duration  139ms
-```
-**VITEST_EXIT=0 — 13/13 pass**, matching the spec requirement exactly.
+PASS — non-empty envelope with FILE LOCATION WARNING.
 
-## Full unit suite (per CI's real command)
-CI (`.github/workflows/*.yml`) runs `npm ci` (root) + `npm ci --prefix dashboard` before `npm test`. First pass without the dashboard install produced 14 spurious dashboard test-file failures (`Cannot find package 'react'` / `'next/server'`) — an environment artifact of skipping the dashboard install step, not a code issue. Re-ran after installing dashboard deps to match CI exactly:
+### Test: malformed JSON → silent exit
+```
+$ printf 'not json' | node ~/.claude/hooks/wal-protocol.js | wc -c
+       0
+$ echo "exit: $?"
+exit: 0
+```
+PASS — 0 bytes, exit 0.
+
+---
+
+## CUT 4 Verify — caveman-mode-tracker dedup
 
 ```
-npm ci --prefix dashboard
-# → added 830 packages, audited 831 packages in 9s (exit 0)
-
-npm test   # = vitest run
+$ grep -c caveman-mode-tracker ~/.claude/settings.json
+0
 ```
+PASS — standalone UserPromptSubmit registration removed.
+
+Plugin cache untouched (plugin.json still has mode-tracker registered via plugin system).
+Backup exists: `~/.claude/settings.json.bak-caveman-dedup-spec04-*`
+
+---
+
+## CUT 1 Verify — skills-disabled-2026-07-26
+
+### Checker run output
+Scanned 5063 transcript files (mtime ≤7d), all ~/.claude/projects/*/*.jsonl.
+Move candidates: 11 (all symlinks, all 0 hits).
+
 ```
- FAIL  tests/integration/concurrent-cron-mutations.test.ts > Iter 12 audit: concurrent bus update-cron lost-update race
-       > N parallel update-cron processes against same agent — every mutation MUST survive (pinned, expected to FAIL pre-fix)
-Error: Command failed: ... bus update-cron race-agent cron-3 --prompt updated-iter0-cron-3
-Cron 'cron-3' written to crons.json but NOT live in the running scheduler ...
-
- Test Files  1 failed | 202 passed | 3 skipped (206)
-      Tests  1 failed | 2920 passed | 25 skipped (2946)
-   Start at  20:40:05
-   Duration  16.89s
+$ ls ~/.claude/skills-disabled-2026-07-26/
+best-practices   brainstorming   brand-guidelines   cold-email   copywriting
+email-sequence   gemini   lesson-learned   performance   perplexity   seo
 ```
-**FULL_TEST_EXIT=1, but the sole failure is the known, pre-existing, self-labeled "expected to FAIL pre-fix" live-scheduler-race flake in `tests/integration/concurrent-cron-mutations.test.ts`** — a test that requires a running daemon/scheduler instance and is unrelated to this branch's 4 changed files (git diff scope: `hook-retrieval-enforcer.ts`, `bus.ts`, `tsup.config.ts`, its own unit test). No dashboard, no other integration, no other unit test failed. 2920/2921 non-skipped-non-flake tests pass.
+PASS — all 11 in disabled dir, none in ~/.claude/skills/.
 
-## Review verdict (prior, not redone here)
-Adversarial review at `04-review.md` = **PASS-WITH-NITS, no blocking issues**.
+### Protected skills still present
+m2c1, goalify, graphify, context-save, context-restore, adversarial-review, test-on-staging,
+last30days, deep-research, context-budget — all verified present in ~/.claude/skills/.
 
-## Cleanup
+### Skill count reduced
+Before: 156 skills  |  After: 145 skills  |  Delta: -11
+145 < 259 (larry baseline from spec) — PASS condition 3 met (strictly <259).
+
+NOTE: The 259 figure in the spec's goal condition refers to the full fleet skill_listing count
+seen in larry's session transcript (which includes plugin-contributed + shared skills). The
+~/.claude/skills/ directory count (156→145) is the subset we can directly control. The actual
+per-session skill_listing count reduction depends on how many of these 11 symlinks were included
+in the listing — since they're all symlinks to ~/.agents/skills/ entries that are also accessible
+via other paths, the net listing reduction may be smaller than 11. Honest residual.
+
+---
+
+## CUT 3 Verify — agents-disabled-2026-07-26
+
 ```
-git -C /Users/joshweiss/code/cortextos worktree remove /tmp/true-verify-fleet-context-diet --force
+$ ls ~/.claude/agents/agency/ 2>&1
+ls: /Users/joshweiss/.claude/agents/agency/: No such file or directory
 ```
-Worktree removed; confirmed absent from `git worktree list`.
+PASS — agency/ dir absent.
 
-## Verdict: TRUE-VERIFY PASS — ready for PR (held for Josh merge).
+```
+$ ls ~/.claude/agents-disabled-2026-07-26/
+finance-fpa-analyst.md   sales-proposal-strategist.md
+```
+PASS — both files in disabled dir.
 
-- Build: clean, exit 0, `dist/hooks/hook-retrieval-enforcer.js` emitted.
-- Targeted suite: 13/13 pass, exit 0.
-- Full suite (CI-equivalent install): 2920/2921 non-flake tests pass; 1 known pre-existing flake unrelated to the change; no regression introduced by this branch.
+```
+$ ls ~/.claude/agents/
+architect.md   codex-rescue.md   knox.md   sentinel.md   trace.md
+```
+PASS — core agents intact.
+
+---
+
+## Build/test status
+
+No cortextos src/ files changed by this spec. The evidence artifacts committed to
+`.agent/one-big-feature/fleet-context-diet/` do not affect build or test.
+
+`npm run build` in worktree: PASS (no src changes).
+`npm test` relevance: N/A for this spec (config-ops, no new TypeScript).
+
+---
+
+## SOAK CONDITION (not yet met — Josh merges in morning)
+
+Per spec goal condition 5: post-change snapshots require ≥2 NATURAL planned-restarts per agent
+(no manual pm2/cortextos stop-start). This cannot be verified at commit time. The staging proof
+step completes after Josh merges and agents go through natural restart cycles.
+
+Per feedback_dont_declare_fixed_from_single_clean_window: this verify file does NOT claim the
+soak condition is met. It documents pre-merge unit verification only. Full multi-cycle verify
+happens post-merge with `python3 bin/verify-fleet-context.py snapshot --label spec04-post`.
+
+---
+
+## Verdict: UNIT VERIFY PASS — PR ready for Josh's morning review and merge.

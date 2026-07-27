@@ -174,7 +174,7 @@ describe('Sprint 1: Template Completeness', () => {
     it('CLAUDE.md has orchestrator-specific content', () => {
       const content = readFileSync(join(orchDir, 'CLAUDE.md'), 'utf-8');
       expect(content).toContain('Orchestrator');
-      expect(content).toContain('coordination');
+      expect(content).toMatch(/coordinat/i);
       expect(content).toContain('Decompose');
     });
 

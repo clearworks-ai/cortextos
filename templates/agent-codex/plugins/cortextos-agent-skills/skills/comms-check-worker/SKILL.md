@@ -77,7 +77,7 @@ Run these 4 checks (Bash):
 2. **JOSH INBOX** — TWO STEPS. Do NOT pipe the raw fetch straight into `comms-filter --surface` — that sends atomically on first-seen, before you ever get a chance to apply the exclusion rules above, which is exactly how non-human mail (automated reports, receipts) slipped through on 2026-07-25.
 
    a. Fetch raw candidates only, do not send yet:
-      `gws gmail +triage --query 'is:unread newer_than:5h -category:promotions -category:social -from:notify.railway.app' --format json > /tmp/josh-inbox-raw.json`
+      `gws gmail +triage --query 'is:unread newer_than:5h -category:promotions -category:social -from:notify.railway.app -from:notifications@github.com' --format json > /tmp/josh-inbox-raw.json`
 
    b. Apply every HARD EXCLUSION / OOO-AUTO-REPLY / COLD-INBOUND-SPAM rule above to each item's `from`/`subject`/`snippet` YOURSELF, and drop non-surviving items. Also treat as HARD EXCLUSIONS (automated/non-human, skip silently):
       - Any transactional receipt/invoice/report sender: `receipts@*`, `billing@*`, `info@raisedonors.com`, or subject matching "Receipt", "Invoice #", "Report" from a non-human/automated sender

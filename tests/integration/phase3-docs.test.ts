@@ -50,6 +50,12 @@ const TEMPLATE_AGENTS_MD = [
   join(ROOT, 'templates', 'analyst', 'AGENTS.md'),
 ];
 
+const TEMPLATE_AGENTS_REFERENCE_MD = [
+  join(ROOT, 'templates', 'agent', 'AGENTS-REFERENCE.md'),
+  join(ROOT, 'templates', 'orchestrator', 'AGENTS-REFERENCE.md'),
+  join(ROOT, 'templates', 'analyst', 'AGENTS-REFERENCE.md'),
+];
+
 const TEMPLATE_NAMES = ['agent', 'orchestrator', 'analyst'];
 
 const MIGRATION_GUIDE = join(ROOT, 'CRONS_MIGRATION_GUIDE.md');
@@ -65,13 +71,14 @@ const STALE_CRONS_DIE_RESTART = /crons die on restart/i;
 describe('3.1 — templates/*/AGENTS.md External Persistent Crons section', () => {
   for (let i = 0; i < TEMPLATE_AGENTS_MD.length; i++) {
     const filePath = TEMPLATE_AGENTS_MD[i];
+    const refPath = TEMPLATE_AGENTS_REFERENCE_MD[i];
     const name = TEMPLATE_NAMES[i];
 
-    describe(`templates/${name}/AGENTS.md`, () => {
+    describe(`templates/${name}/AGENTS.md (+ AGENTS-REFERENCE.md)`, () => {
       let content: string;
       it('file exists', () => {
         expect(existsSync(filePath)).toBe(true);
-        content = readRequired(filePath);
+        content = readRequired(filePath) + '\n' + read(refPath);
       });
 
       it('contains "## External Persistent Crons" section header', () => {

@@ -63,61 +63,39 @@ If `EXTRACTOR_RC` nonzero OR `DEGRADED=1` → log silently and skip directly to 
 
 ---
 
-## Step 3 — Parse results
+## Step 3 — Trust ladder + draft execution
 
-Read `/tmp/ff-recap.json`. Contract (owned by ff-extractor.py `--recap`): `meetings` array of `{id, title, date, organizer, attendees, summary:{overview,bullets,action_items}, next_steps:[{id,text,direction,source,sourceRef}]}`. `next_steps` is already noise-gated (VAGUE_ACTION_PREFIXES / SUPPRESSED_NAMES / GENERIC_OWNERS inside the extractor).
+Read `/tmp/ff-recap.json`. Contract (owned by ff-extractor.py `--recap`): `meetings` array of `{id, title, date, organizer, attendees, summary:{overview,bullets,action_items}, client_context, next_steps:[{id,text,direction,source,sourceRef,...}]}`. `client_context` is the L0 context layer from `knowledge/clients/*.md`. `next_steps` is already noise-gated by the extractor.
 
-Belt-and-suspenders post-filter before drafting: **EXCLUDE any meeting or next-step mentioning Marcos Santa Ana (hard no — never draft).**
+Run the helper below from the `pa` agent dir. It owns all recap routing logic:
+- L1 default: client-facing recaps -> Gmail draft only
+- L2 conditional: internal-only + confidence > 0.9 -> auto-file, no draft
+- L3 hardcoded VIP list: never auto-send/auto-file; stays draft-only
+- Voice guidance comes from `orgs/clearworksai/knowledge/voice.md`
+- VIP file comes from `orgs/clearworksai/knowledge/vip-clients.txt`
+
+```bash
+cd /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa
+VOICE='/Users/joshweiss/code/cortextos/orgs/clearworksai/knowledge/voice.md'
+VIP='/Users/joshweiss/code/cortextos/orgs/clearworksai/knowledge/vip-clients.txt'
+python3 scripts/meeting_recap_draft.py \
+  --payload /tmp/ff-recap.json \
+  --ledger "$LEDGER" \
+  --voice "$VOICE" \
+  --vip-list "$VIP" \
+  > /tmp/meeting-recap-draft-plan.json
+PLAN_RC=$?
+echo "plan_rc=$PLAN_RC"
+cat /tmp/meeting-recap-draft-plan.json
+```
+
+If `PLAN_RC` is nonzero, or the helper reports draft failures, log `recap_degraded_no_gmail` via `cortextos bus log-event action recap_degraded_no_gmail warn 2>/dev/null`, then continue to Step 4. No Telegram.
+
+The helper is the only place allowed to call `gws gmail +draft`. Do not substitute `+send`. Do not call Gmail MCP tools.
 
 ---
 
-## Step 4 — Dedup check (mandatory)
-
-Dedup key = the Fireflies meeting `id`. For each meeting:
-
-```bash
-grep -qF "$MEETING_ID" "$LEDGER" && echo SKIP || echo NEW
-```
-
-Do NOT append here — append happens in Step 5 only after the draft is actually created. Ledger is append-only; never delete lines.
-
----
-
-## Step 5 — Create the Gmail draft (one per NEW meeting)
-
-For each NEW meeting, compose the recap then create the draft with the `gws gmail +draft` bash block below. `+draft` saves a Gmail draft (it has NO send capability — drafts only, enforced in the gws-dwd shim).
-
-Compose these values first:
-
-- **SUBJECT:** `Recap: <title> — <date YYYY-MM-DD>`
-- **TO:** `josh@clearworks.ai` (default self-draft — Josh reviews/edits/sends. Do NOT auto-address meeting attendees.)
-- **BODY:**
-  1. One recap paragraph from `summary.overview` (fallback: `summary.bullets`, then `summary.action_items`; if all empty, one neutral line naming the meeting + attendees).
-  2. Blank line, then `Next steps:` followed by a numbered list of `next_steps[].text`. Render inbound items (`direction == "inbound"`, text prefixed `[inbound] Owner: ...`) as `Owner: action`; render outbound items as `Josh: action`. If `next_steps` is empty, write `Next steps: none captured.`
-  3. Footer line: `— drafted automatically from the Fireflies transcript (<sourceRef meeting id>); review before sending.`
-
-Then run (BODY may be multi-line — pass it as a single quoted arg):
-
-```bash
-gws gmail +draft --to josh@clearworks.ai --subject "$SUBJECT" --body "$BODY"
-echo "gws_draft_rc=$?"
-```
-
-**NEVER substitute `+send` for `+draft`** — `+draft` is draft-only by construction (no send endpoint exists in the shim). No Gmail MCP tool.
-
-Only AFTER `gws_draft_rc` is `0` for a meeting:
-
-```bash
-echo "$MEETING_ID $(date -u +%s)" >> "$LEDGER"
-```
-
-If `gws_draft_rc` is nonzero (or `gws` is unavailable): do NOT append the ledger (the meeting retries next run), log `recap_degraded_no_gmail` via `cortextos bus log-event action recap_degraded_no_gmail warn 2>/dev/null`, continue to Step 6.
-
-If `meetings` is empty or everything was deduped/excluded: SILENT-OK — log silently, no drafts, no Telegram.
-
----
-
-## Step 6 — Complete and exit
+## Step 4 — Complete and exit
 
 ```bash
 cortextos bus complete-task $TASK_ID --result "Meeting recap drafts checked" 2>/dev/null

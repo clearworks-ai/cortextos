@@ -23,6 +23,12 @@ LOGGER = logging.getLogger(__name__)
 UTC = timezone.utc
 SCRIPT_PATH = Path(__file__).resolve()
 AGENT_DIR = SCRIPT_PATH.parent.parent
+ORG_DIR = AGENT_DIR.parent.parent
+KNOWLEDGE_DIR = ORG_DIR / "knowledge"
+CLIENTS_DIR = KNOWLEDGE_DIR / "clients"
+COMPANY_PATH = KNOWLEDGE_DIR / "company.md"
+OFFER_PATH = KNOWLEDGE_DIR / "offer.md"
+STATE_PATH = KNOWLEDGE_DIR / "STATE.md"
 STATE_DIR = AGENT_DIR / "state"
 DEFAULT_WATERMARK_PATH = STATE_DIR / "ff-extractor-watermark.json"
 DEFAULT_TRANSCRIPT_LIMIT = 20
@@ -86,11 +92,16 @@ Rules:
 ACTION_ITEMS_PROMPT = """Extract action items from this meeting transcript.
 Identify every task, commitment, follow-up, or to-do mentioned. Be specific — "send the proposal" is better than "follow up."
 Only include forward-looking work or business commitments that still need to be done AFTER the meeting ends. Exclude personal or social errands (e.g. saying goodbye, returning home, travel logistics), small talk, and anything that was already completed during the meeting itself.
+Client context:
+{client_context}
+
 For each action item:
 - Clear, actionable description of what needs to be done
 - Owner: person responsible (or "Unassigned" if not specified)
 - Due date or timeframe if mentioned
 - Status: pending
+- Only surface items material to an active Clearworks engagement or a dated commitment; drop the rest.
+- If client context is empty, keep only explicit Clearworks work or dated commitments that still need follow-through.
 No artificial limit on count. Zero acceptable if none found.
 IMPORTANT: Return ONLY a valid JSON array with objects using exactly these fields:
 "action","owner","dueDate","status".
@@ -102,6 +113,8 @@ PUNCT_RE = re.compile(r"[^\w\s-]+", re.UNICODE)
 SPACE_RE = re.compile(r"\s+")
 TOKEN_RE = re.compile(r"[a-z0-9]+")
 CONTROL_RE = re.compile(r"[\x00-\x1f]")
+EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+SECTION_HEADING_RE = re.compile(r"^##\s+(.+)$")
 WEEKDAY_TO_INDEX = {
     "monday": 0,
     "tuesday": 1,
@@ -185,6 +198,13 @@ def collapse_ws(value: str) -> str:
     return SPACE_RE.sub(" ", value).strip()
 
 
+def strip_markdown_prefix(value: str) -> str:
+    stripped = value.strip()
+    stripped = re.sub(r"^[-*]\s+", "", stripped)
+    stripped = re.sub(r"^\d+\.\s+", "", stripped)
+    return collapse_ws(stripped)
+
+
 def normalize_action(value: str) -> str:
     normalized = unicodedata.normalize("NFC", value)
     normalized = PUNCT_RE.sub(" ", normalized.lower())
@@ -246,6 +266,188 @@ def build_transcript_text(sentences: Iterable[dict[str, Any]], *, limit: int) ->
             break
         lines.append(line)
     return "\n".join(lines)
+
+
+def markdown_sections(path: Path) -> dict[str, list[str]]:
+    if not path.exists():
+        return {}
+    sections: dict[str, list[str]] = {}
+    current: str | None = None
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        match = SECTION_HEADING_RE.match(raw_line)
+        if match:
+            current = normalize_action(match.group(1))
+            sections[current] = []
+            continue
+        if current is not None:
+            sections[current].append(raw_line.rstrip())
+    return sections
+
+
+def first_meaningful_line(path: Path) -> str:
+    if not path.exists():
+        return ""
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        if raw_line.lstrip().startswith("#"):
+            continue
+        line = strip_markdown_prefix(raw_line)
+        if not line or normalize_action(line).startswith("todo"):
+            continue
+        return line
+    return ""
+
+
+def first_section_line(path: Path, section_name: str) -> str:
+    for raw_line in markdown_sections(path).get(normalize_action(section_name), []):
+        line = strip_markdown_prefix(raw_line)
+        if line and not normalize_action(line).startswith("todo"):
+            return line
+    return ""
+
+
+def markdown_key_value(lines: list[str], key: str) -> str:
+    target = normalize_action(key)
+    for raw_line in lines:
+        line = strip_markdown_prefix(raw_line)
+        if ":" not in line:
+            continue
+        label, value = line.split(":", 1)
+        if normalize_action(label) == target:
+            return collapse_ws(value)
+    return ""
+
+
+def clearworks_identity_context() -> str:
+    company_line = first_meaningful_line(COMPANY_PATH)
+    company_one_liner = ""
+    if COMPANY_PATH.exists():
+        for raw_line in COMPANY_PATH.read_text(encoding="utf-8").splitlines():
+            line = strip_markdown_prefix(raw_line)
+            if line.lower().startswith("one-line:"):
+                company_one_liner = collapse_ws(line.split(":", 1)[1])
+                break
+    offer_line = first_section_line(OFFER_PATH, "ICP / who we say yes to") or first_section_line(
+        OFFER_PATH, "What we sell"
+    )
+    state_line = first_section_line(STATE_PATH, "Active work") or first_section_line(
+        STATE_PATH, "Next priorities"
+    )
+    parts = [
+        company_one_liner or company_line or "Clearworks is an AI ops and consulting firm.",
+        offer_line,
+        state_line,
+    ]
+    return collapse_ws(" ".join(part for part in parts if part))[:420]
+
+
+def client_name_from_path(path: Path) -> str:
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        if raw_line.startswith("# Client:"):
+            return collapse_ws(raw_line.split(":", 1)[1])
+    return collapse_ws(path.stem.replace("-", " ").title())
+
+
+def client_context_records(clients_dir: Path = CLIENTS_DIR) -> list[dict[str, Any]]:
+    if not clients_dir.exists():
+        return []
+    identity = clearworks_identity_context()
+    records: list[dict[str, Any]] = []
+    for path in sorted(clients_dir.glob("*.md")):
+        if path.name == "_template.md":
+            continue
+        sections = markdown_sections(path)
+        contacts_lines = sections.get("contacts", [])
+        current_state_lines = sections.get("current state", [])
+        delivery_lines = sections.get("what we re delivering", [])
+        client_name = client_name_from_path(path)
+        names: set[str] = {normalize_action(client_name)}
+        emails: set[str] = set()
+        for raw_line in contacts_lines:
+            line = strip_markdown_prefix(raw_line)
+            if not line:
+                continue
+            emails.update(match.lower() for match in EMAIL_RE.findall(line))
+            head = re.split(r"\s+[—-]\s+", line, maxsplit=1)[0]
+            if head:
+                names.add(normalize_action(head))
+        stage = markdown_key_value(current_state_lines, "Deal stage") or "unknown"
+        status = markdown_key_value(current_state_lines, "CRM status") or "unknown"
+        next_action = markdown_key_value(current_state_lines, "Next action")
+        engagement = markdown_key_value(delivery_lines, "Engagement") or "unknown"
+        service_type = markdown_key_value(delivery_lines, "Service type")
+        detail_parts = [
+            f"This meeting's attendees map to client={client_name}.",
+            f"Deal stage={stage}.",
+            f"CRM status={status}.",
+            f"Engagement={engagement}.",
+        ]
+        if service_type:
+            detail_parts.append(f"Service={service_type}.")
+        if next_action:
+            detail_parts.append(f"Open next action: {next_action}.")
+        records.append(
+            {
+                "path": path,
+                "client_name": client_name,
+                "client_name_normalized": normalize_action(client_name),
+                "names": names,
+                "emails": emails,
+                "context": collapse_ws(f"{identity} {' '.join(detail_parts)}"),
+            }
+        )
+    return records
+
+
+def transcript_emails(transcript: dict[str, Any]) -> set[str]:
+    emails: set[str] = set()
+    organizer = collapse_ws(str(transcript.get("organizer_email") or ""))
+    if organizer:
+        emails.add(organizer.lower())
+    participants = transcript.get("participants") or []
+    if isinstance(participants, list):
+        for participant in participants:
+            for match in EMAIL_RE.findall(str(participant)):
+                emails.add(match.lower())
+    return emails
+
+
+def transcript_identity_haystack(transcript: dict[str, Any]) -> str:
+    parts = [str(transcript.get("title") or "")]
+    participants = transcript.get("participants") or []
+    if isinstance(participants, list):
+        parts.extend(str(participant) for participant in participants)
+    parts.append(str(transcript.get("organizer_email") or ""))
+    speakers = transcript.get("speakers") or []
+    if isinstance(speakers, list):
+        parts.extend(str(speaker.get("name") or "") for speaker in speakers if isinstance(speaker, dict))
+    return normalize_action(" ".join(parts))
+
+
+def client_context_for_transcript(
+    transcript: dict[str, Any],
+    *,
+    clients_dir: Path = CLIENTS_DIR,
+) -> str:
+    haystack = transcript_identity_haystack(transcript)
+    emails = transcript_emails(transcript)
+    best_score = 0
+    best_context = ""
+    for record in client_context_records(clients_dir):
+        score = 0
+        email_hits = emails & record["emails"]
+        if email_hits:
+            score += 10 * len(email_hits)
+        if record["client_name_normalized"] and record["client_name_normalized"] in haystack:
+            score += 2
+        for name in record["names"]:
+            if len(name) < 4:
+                continue
+            if name in haystack:
+                score += 3
+        if score > best_score:
+            best_score = score
+            best_context = record["context"]
+    return best_context if best_score >= 3 else ""
 
 
 def parse_transcript_datetime(raw_value: Any) -> datetime | None:
@@ -491,13 +693,17 @@ def is_casual_transcript(
 def extract_action_items(
     transcript_text: str,
     *,
+    client_context: str = "",
     openrouter_api_key: str,
     urlopen: Urlopen = urllib.request.urlopen,
 ) -> list[ExtractedItem]:
     response_text = openrouter_request(
         openrouter_api_key,
         model=EXTRACTOR_MODEL,
-        prompt=ACTION_ITEMS_PROMPT.format(transcript=transcript_text),
+        prompt=ACTION_ITEMS_PROMPT.format(
+            transcript=transcript_text,
+            client_context=client_context or "",
+        ),
         max_tokens=2400,
         urlopen=urlopen,
     )
@@ -861,7 +1067,12 @@ def run(
             processed.append(transcript)
             continue
         extraction_text = build_transcript_text(transcript.get("sentences", []), limit=EXTRACTOR_MAX_CHARS)
-        extracted = extract_action_items(extraction_text, openrouter_api_key=openrouter_api_key, urlopen=urlopen)
+        extracted = extract_action_items(
+            extraction_text,
+            client_context=client_context_for_transcript(transcript),
+            openrouter_api_key=openrouter_api_key,
+            urlopen=urlopen,
+        )
         all_commitments.extend(refine_items(transcript, extracted))
         processed.append(transcript)
 
@@ -1004,8 +1215,10 @@ def build_recap_meeting(
         return None
     
     # Extract action items for next steps
+    client_context = client_context_for_transcript(transcript)
     extracted = extract_action_items(
         build_transcript_text(sentences, limit=EXTRACTOR_MAX_CHARS),
+        client_context=client_context,
         openrouter_api_key=openrouter_api_key,
         urlopen=urlopen,
     )
@@ -1044,6 +1257,7 @@ def build_recap_meeting(
             "bullets": collapse_ws(str(summary.get("shorthand_bullet") or "")),
             "action_items": collapse_ws(str(summary.get("action_items") or "")),
         },
+        "client_context": client_context,
         "next_steps": commitment_entries(refine_items(transcript, extracted), enriched=True),
     }
 

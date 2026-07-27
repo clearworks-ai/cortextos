@@ -97,6 +97,7 @@ function mockExit(): ReturnType<typeof vi.spyOn> {
 beforeEach(() => {
   tempRoot = mkdtempSync(join(tmpdir(), 'webhook-bridge-'));
   setupRegistry(tempRoot, 'crm');
+  setupRegistry(tempRoot, 'pa');
   savedEnv = {
     CTX_FRAMEWORK_ROOT: process.env.CTX_FRAMEWORK_ROOT,
     CTX_PROJECT_ROOT: process.env.CTX_PROJECT_ROOT,
@@ -268,6 +269,40 @@ describe('webhook-bridge server', () => {
       from_name: 'webhook-hub',
       agent: 'crm',
     });
+
+    await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  });
+
+  it('relays fireflies meetings to pa with explicit single-meeting worker context', async () => {
+    const server = buildServer();
+    const baseUrl = await listen(server);
+
+    const response = await sendRequest(baseUrl, '/relay/fireflies', {
+      method: 'POST',
+      headers: { 'x-webhook-bridge-secret': 'top-secret' },
+      body: JSON.stringify({
+        integration: 'fireflies',
+        target: 'pa',
+        event: 'transcription.completed',
+        meeting_id: 'meeting-123',
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.json?.ok).toBe(true);
+
+    const inboxDir = join(tempRoot, 'inbox', 'pa');
+    const inboxFiles = readdirSync(inboxDir);
+    expect(inboxFiles).toHaveLength(1);
+
+    const inboxPayload = JSON.parse(readFileSync(join(inboxDir, inboxFiles[0]), 'utf-8')) as {
+      text: string;
+    };
+    expect(inboxPayload.text).toContain('WEBHOOK fireflies transcription.completed');
+    expect(inboxPayload.text).toContain('meeting-123');
+    expect(inboxPayload.text).toContain('meeting-commitments-worker');
+    expect(inboxPayload.text).toContain('FF_MEETING_ID=meeting-123');
+    expect(inboxPayload.text).toContain('--mode full --meeting-id meeting-123');
 
     await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
   });

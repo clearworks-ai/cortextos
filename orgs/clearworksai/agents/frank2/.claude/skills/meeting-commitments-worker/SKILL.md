@@ -35,6 +35,8 @@ There is no cutoff/timestamp logic here anymore. The old `state/meeting-commitme
 
 The extractor owns the full pipeline: Haiku casualness gate + Sonnet extraction + first-person/concreteness refinement, then a POST to `$BRIEFS_INGEST_URL` (header `x-api-key: $TASKS_INGEST_TOKEN`) that turns commitments into durable tasks with server-side dedup by deterministic id. Do not query the Fireflies API directly from this SKILL — the extractor is the only Fireflies touchpoint.
 
+If `FF_MEETING_ID` is set by the caller, run the extractor once for that single Fireflies meeting id instead of rescanning the latest 20. That is the webhook-triggered cadence path. If it is unset, keep the current poll fallback.
+
 Working directory MUST be the frank2 agent dir (`/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2`) so `scripts/` and `state/` resolve.
 
 ```bash
@@ -48,12 +50,22 @@ source /Users/joshweiss/code/cortextos/orgs/clearworksai/secrets.env 2>/dev/null
 set +a
 
 DEGRADED=0
-if [[ -z "$BRIEFS_INGEST_URL" || -z "$TASKS_INGEST_TOKEN" ]]; then
-  # Env guard: ingest not configured — extract + print only, no POST, watermark NOT advanced
-  DEGRADED=1
-  python3 scripts/ff-extractor.py --limit 20 --dry-run > /tmp/ff-commitments.json
+if [[ -n "$FF_MEETING_ID" ]]; then
+  if [[ -z "$BRIEFS_INGEST_URL" || -z "$TASKS_INGEST_TOKEN" ]]; then
+    # Env guard: ingest not configured — extract + print only, no POST, watermark NOT advanced
+    DEGRADED=1
+    python3 scripts/ff-extractor.py --meeting-id "$FF_MEETING_ID" --dry-run > /tmp/ff-commitments.json
+  else
+    python3 scripts/ff-extractor.py --meeting-id "$FF_MEETING_ID" > /tmp/ff-commitments.json
+  fi
 else
-  python3 scripts/ff-extractor.py --limit 20 > /tmp/ff-commitments.json
+  if [[ -z "$BRIEFS_INGEST_URL" || -z "$TASKS_INGEST_TOKEN" ]]; then
+    # Env guard: ingest not configured — extract + print only, no POST, watermark NOT advanced
+    DEGRADED=1
+    python3 scripts/ff-extractor.py --limit 20 --dry-run > /tmp/ff-commitments.json
+  else
+    python3 scripts/ff-extractor.py --limit 20 > /tmp/ff-commitments.json
+  fi
 fi
 EXTRACTOR_RC=$?
 echo "extractor_rc=$EXTRACTOR_RC degraded=$DEGRADED"

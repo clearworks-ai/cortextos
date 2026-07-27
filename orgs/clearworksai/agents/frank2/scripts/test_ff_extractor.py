@@ -412,6 +412,33 @@ class RunStdoutContractTests(unittest.TestCase):
                     exit_code = MODULE.run(
                         limit=5,
                         dry_run=dry_run,
+                        meeting_id="",
+                        watermark_path=watermark_path,
+                        urlopen=self.make_urlopen(transcripts, calls),
+                    )
+            self.assertEqual(exit_code, 0)
+            watermark_exists = watermark_path.exists()
+        printed = json.loads(stdout.getvalue())
+        printed["_watermark_exists"] = watermark_exists
+        return printed, calls, watermark_path
+
+    def run_and_capture_meeting_id(
+        self,
+        transcripts: list[dict[str, object]],
+        *,
+        dry_run: bool,
+        meeting_id: str,
+    ) -> tuple[dict[str, object], list[str], Path]:
+        calls: list[str] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            watermark_path = Path(tmp) / "watermark.json"
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, self.ENV):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run(
+                        limit=5,
+                        dry_run=dry_run,
+                        meeting_id=meeting_id,
                         watermark_path=watermark_path,
                         urlopen=self.make_urlopen(transcripts, calls),
                     )
@@ -423,7 +450,10 @@ class RunStdoutContractTests(unittest.TestCase):
 
     def assert_items_shape(self, items: list[dict[str, object]]) -> None:
         for entry in items:
-            self.assertEqual(set(entry), {"id", "text", "direction", "source", "sourceRef"})
+            self.assertTrue(
+                {"id", "text", "direction", "source", "sourceRef"}.issubset(entry),
+                entry,
+            )
 
     def test_no_fresh_transcripts_prints_empty_items(self) -> None:
         printed, calls, _ = self.run_and_capture([], dry_run=False)
@@ -462,6 +492,7 @@ class RunStdoutContractTests(unittest.TestCase):
                     exit_code = MODULE.run(
                         limit=5,
                         dry_run=True,
+                        meeting_id="",
                         watermark_path=watermark_path,
                         urlopen=self.make_urlopen([self.make_transcript()], calls),
                     )
@@ -486,6 +517,7 @@ class RunStdoutContractTests(unittest.TestCase):
                     MODULE.run(
                         limit=5,
                         dry_run=False,
+                        meeting_id="",
                         watermark_path=watermark_path,
                         urlopen=self.make_urlopen([self.make_transcript()], []),
                     )
@@ -509,7 +541,13 @@ class RunStdoutContractTests(unittest.TestCase):
             stdout = io.StringIO()
             with unittest.mock.patch.dict(os.environ, self.ENV):
                 with contextlib.redirect_stdout(stdout):
-                    exit_code = MODULE.run(limit=5, dry_run=False, watermark_path=watermark_path, urlopen=casual_urlopen)
+                    exit_code = MODULE.run(
+                        limit=5,
+                        dry_run=False,
+                        meeting_id="",
+                        watermark_path=watermark_path,
+                        urlopen=casual_urlopen,
+                    )
             self.assertEqual(exit_code, 0)
 
         printed = json.loads(stdout.getvalue())
@@ -527,6 +565,47 @@ class RunStdoutContractTests(unittest.TestCase):
         self.assertEqual(sources, {"ff", "ff-inbound"})
         self.assertTrue(any("briefs.example" in url for url in calls))
         self.assertTrue(printed["_watermark_exists"])
+
+    def test_meeting_id_path_processes_only_selected_transcript(self) -> None:
+        keep = self.make_transcript()
+        drop = dict(keep)
+        drop["id"] = "meeting_999"
+        drop["title"] = "Internal Sync"
+
+        printed, calls, _ = self.run_and_capture_meeting_id(
+            [drop, keep],
+            dry_run=False,
+            meeting_id="meeting_123",
+        )
+
+        self.assertTrue(printed["posted"])
+        self.assertEqual(printed["meetings"], 1)
+        self.assertEqual(len(printed["items"]), 2)
+        self.assertTrue(all(str(entry["sourceRef"]).startswith("meeting_123 ·") for entry in printed["items"]))
+        self.assertTrue(any("briefs.example" in url for url in calls))
+
+    def test_meeting_id_path_does_not_rewind_watermark(self) -> None:
+        target = self.make_transcript()
+        newer = dict(target)
+        newer["id"] = "meeting_999"
+        newer["date"] = "2026-06-09T16:00:00Z"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            watermark_path = Path(tmp) / "watermark.json"
+            MODULE.save_watermark(watermark_path, newer)
+            before = watermark_path.read_text(encoding="utf-8")
+            with unittest.mock.patch.dict(os.environ, self.ENV):
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run(
+                        limit=5,
+                        dry_run=False,
+                        meeting_id="meeting_123",
+                        watermark_path=watermark_path,
+                        urlopen=self.make_urlopen([target, newer], []),
+                    )
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(watermark_path.read_text(encoding="utf-8"), before)
 
 
 class FailureContractTests(unittest.TestCase):
@@ -567,6 +646,7 @@ class FailureContractTests(unittest.TestCase):
                     exit_code = MODULE.execute(
                         limit=5,
                         dry_run=False,
+                        meeting_id="",
                         watermark_path=Path(tmp) / "watermark.json",
                         urlopen=failing_urlopen,
                     )
@@ -584,6 +664,7 @@ class FailureContractTests(unittest.TestCase):
                     exit_code = MODULE.execute(
                         limit=5,
                         dry_run=True,
+                        meeting_id="",
                         watermark_path=Path(tmp) / "watermark.json",
                     )
 
@@ -592,6 +673,101 @@ class FailureContractTests(unittest.TestCase):
         self.assertTrue(printed["dry_run"])
         self.assertEqual(printed["items"], [])
         self.assertIn("missing required env: OPENROUTER_API_KEY", printed["error"])
+
+
+class ClientContextTests(unittest.TestCase):
+    def test_extract_action_items_includes_client_context_in_prompt(self) -> None:
+        captured_prompt: dict[str, str] = {}
+
+        def fake_urlopen(request: object, timeout: int | None = None) -> FakeResponse:
+            body = json.loads(request.data.decode("utf-8"))
+            captured_prompt["content"] = body["messages"][0]["content"]
+            return FakeResponse(
+                json.dumps({"choices": [{"message": {"content": "[]"}}]}).encode("utf-8")
+            )
+
+        MODULE.extract_action_items(
+            "Josh Weiss: I'll send the findings deck after this call.",
+            client_context="Clearworks maps this meeting to client=MSIA. Deal stage=won. Open next action: send findings deck.",
+            openrouter_api_key="or-test",
+            urlopen=fake_urlopen,
+        )
+
+        self.assertIn("Client context:\n", captured_prompt["content"])
+        self.assertIn("Only surface items material to an active Clearworks engagement", captured_prompt["content"])
+
+    def test_extract_action_items_context_can_reduce_and_focus_results(self) -> None:
+        captured_prompts: list[str] = []
+
+        def fake_urlopen(request: object, timeout: int | None = None) -> FakeResponse:
+            body = json.loads(request.data.decode("utf-8"))
+            prompt = body["messages"][0]["content"]
+            captured_prompts.append(prompt)
+            if "client=MSIA" in prompt and "Deal stage=won" in prompt:
+                response_items = [
+                    {
+                        "action": "Send findings deck to Mark",
+                        "owner": "Josh",
+                        "dueDate": "Friday",
+                        "status": "pending",
+                    },
+                    {
+                        "action": "Book follow-up with MSIA",
+                        "owner": "Josh",
+                        "dueDate": "Monday",
+                        "status": "pending",
+                    },
+                ]
+            else:
+                response_items = [
+                    {
+                        "action": "Send findings deck to Mark",
+                        "owner": "Josh",
+                        "dueDate": "Friday",
+                        "status": "pending",
+                    },
+                    {
+                        "action": "Book follow-up with MSIA",
+                        "owner": "Josh",
+                        "dueDate": "Monday",
+                        "status": "pending",
+                    },
+                    {
+                        "action": "Think about referral strategy",
+                        "owner": "Josh",
+                        "dueDate": "",
+                        "status": "pending",
+                    },
+                    {
+                        "action": "Explore broader positioning ideas",
+                        "owner": "Josh",
+                        "dueDate": "",
+                        "status": "pending",
+                    },
+                ]
+            return FakeResponse(
+                json.dumps({"choices": [{"message": {"content": json.dumps(response_items)}}]}).encode("utf-8")
+            )
+
+        transcript = "Josh Weiss: I'll send the findings deck and set the MSIA follow-up."
+        without_context = MODULE.extract_action_items(
+            transcript,
+            client_context="",
+            openrouter_api_key="or-test",
+            urlopen=fake_urlopen,
+        )
+        with_context = MODULE.extract_action_items(
+            transcript,
+            client_context="Clearworks maps this meeting to client=MSIA. Deal stage=won. Open next action: send findings deck.",
+            openrouter_api_key="or-test",
+            urlopen=fake_urlopen,
+        )
+
+        self.assertEqual(len(without_context), 4)
+        self.assertEqual(len(with_context), 2)
+        self.assertLess(len(with_context), len(without_context))
+        self.assertIn("client=MSIA", captured_prompts[1])
+        self.assertTrue(all("MSIA" in item.action or "findings" in item.action.lower() for item in with_context))
 
 
 class RecapModeTests(unittest.TestCase):

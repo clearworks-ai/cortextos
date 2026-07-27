@@ -96,6 +96,7 @@ IMPORTANT: Return ONLY a valid JSON array with objects using exactly these field
 "action","owner","dueDate","status".
 Example: [{{"action":"Send proposal to client","owner":"John","dueDate":"2026-02-20","status":"pending"}}]
 
+{client_context_block}
 TRANSCRIPT:
 {transcript}"""
 PUNCT_RE = re.compile(r"[^\w\s-]+", re.UNICODE)
@@ -343,6 +344,25 @@ def select_recent_transcripts(
     return fresh[:limit]
 
 
+def select_commitment_transcripts(
+    transcripts: list[dict[str, Any]],
+    watermark_timestamp: datetime | None,
+    watermark_meeting_id: str | None,
+    *,
+    limit: int,
+    meeting_id: str,
+) -> list[dict[str, Any]]:
+    ordered = sorted(transcripts, key=transcript_sort_key)
+    if meeting_id:
+        return [transcript for transcript in ordered if str(transcript.get("id") or "") == meeting_id]
+    return select_recent_transcripts(
+        ordered,
+        watermark_timestamp,
+        watermark_meeting_id,
+        limit=limit,
+    )
+
+
 def fireflies_graphql(
     api_key: str,
     query: str,
@@ -491,13 +511,27 @@ def is_casual_transcript(
 def extract_action_items(
     transcript_text: str,
     *,
+    client_context: str = "",
     openrouter_api_key: str,
     urlopen: Urlopen = urllib.request.urlopen,
 ) -> list[ExtractedItem]:
+    normalized_client_context = collapse_ws(client_context)
+    client_context_block = ""
+    if normalized_client_context:
+        client_context_block = (
+            "Client context:\n"
+            f"{normalized_client_context}\n\n"
+            "Only surface items material to an active Clearworks engagement. "
+            "Use the client context to prioritize the named client, deal stage, and open next action. "
+            "Ignore generic brainstorms or broader ideas that do not materially advance the engagement.\n"
+        )
     response_text = openrouter_request(
         openrouter_api_key,
         model=EXTRACTOR_MODEL,
-        prompt=ACTION_ITEMS_PROMPT.format(transcript=transcript_text),
+        prompt=ACTION_ITEMS_PROMPT.format(
+            client_context_block=client_context_block,
+            transcript=transcript_text,
+        ),
         max_tokens=2400,
         urlopen=urlopen,
     )
@@ -813,11 +847,18 @@ def execute(
     *,
     limit: int,
     dry_run: bool,
+    meeting_id: str,
     watermark_path: Path,
     urlopen: Urlopen = urllib.request.urlopen,
 ) -> int:
     try:
-        return run(limit=limit, dry_run=dry_run, watermark_path=watermark_path, urlopen=urlopen)
+        return run(
+            limit=limit,
+            dry_run=dry_run,
+            meeting_id=meeting_id,
+            watermark_path=watermark_path,
+            urlopen=urlopen,
+        )
     except (RuntimeError, ValueError, urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError) as exc:
         reason = collapse_ws(str(exc)) or exc.__class__.__name__
         LOGGER.error("ff-extractor failed: %s", reason)
@@ -829,6 +870,7 @@ def run(
     *,
     limit: int,
     dry_run: bool,
+    meeting_id: str,
     watermark_path: Path,
     urlopen: Urlopen = urllib.request.urlopen,
 ) -> int:
@@ -845,9 +887,18 @@ def run(
 
     watermark_timestamp, watermark_meeting_id = load_watermark(watermark_path)
     recent = fetch_recent_transcripts(fireflies_api_key, limit=limit, urlopen=urlopen)
-    fresh = select_recent_transcripts(recent, watermark_timestamp, watermark_meeting_id, limit=limit)
+    fresh = select_commitment_transcripts(
+        recent,
+        watermark_timestamp,
+        watermark_meeting_id,
+        limit=limit,
+        meeting_id=meeting_id,
+    )
     if not fresh:
-        print(json.dumps({"meetings": 0, "commitments": 0, "posted": False, "dry_run": dry_run, "items": []}))
+        payload = {"meetings": 0, "commitments": 0, "posted": False, "dry_run": dry_run, "items": []}
+        if meeting_id:
+            payload["meeting_id"] = meeting_id
+        print(json.dumps(payload))
         return 0
 
     all_commitments: list[RefinedCommitment] = []
@@ -893,7 +944,8 @@ def run(
         print(json.dumps({"meetings": len(processed), "commitments": 0, "posted": False, "noop": True, "items": items}))
 
     newest = max(processed, key=transcript_sort_key)
-    save_watermark(watermark_path, newest)
+    if is_newer_than_watermark(newest, watermark_timestamp, watermark_meeting_id):
+        save_watermark(watermark_path, newest)
     return 0
 
 
@@ -913,7 +965,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--meeting-id",
         default="",
-        help="Only honored in full mode: filter to one Fireflies transcript id",
+        help="Filter to one Fireflies transcript id (full mode and webhook-triggered commitments mode)",
     )
     return parser.parse_args(argv)
 
@@ -1184,6 +1236,7 @@ def main(argv: list[str] | None = None) -> int:
     return execute(
         limit=max(1, args.limit),
         dry_run=args.dry_run,
+        meeting_id=str(args.meeting_id or ""),
         watermark_path=Path(args.watermark_path),
     )
 

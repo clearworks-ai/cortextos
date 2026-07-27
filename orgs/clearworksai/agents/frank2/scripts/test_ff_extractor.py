@@ -676,6 +676,29 @@ class FailureContractTests(unittest.TestCase):
 
 
 class ClientContextTests(unittest.TestCase):
+    def write_context_sources(self, root: Path) -> tuple[Path, Path, Path]:
+        company = root / "company.md"
+        offer = root / "offer.md"
+        state = root / "STATE.md"
+        company.write_text(
+            "# Company\n\nOne-line: We fix integration failure, not tool failure.\n",
+            encoding="utf-8",
+        )
+        offer.write_text(
+            "# Offer\n\n## ICP / who we say yes to\n\nMission-driven teams with tool sprawl.\n",
+            encoding="utf-8",
+        )
+        state.write_text(
+            "# STATE\n\n## Active work\n\n- Active client delivery and follow-through.\n",
+            encoding="utf-8",
+        )
+        return company, offer, state
+
+    def write_client_file(self, clients_dir: Path, *, slug: str, body: str) -> Path:
+        path = clients_dir / f"{slug}.md"
+        path.write_text(body, encoding="utf-8")
+        return path
+
     def test_extract_action_items_includes_client_context_in_prompt(self) -> None:
         captured_prompt: dict[str, str] = {}
 
@@ -768,6 +791,152 @@ class ClientContextTests(unittest.TestCase):
         self.assertLess(len(with_context), len(without_context))
         self.assertIn("client=MSIA", captured_prompts[1])
         self.assertTrue(all("MSIA" in item.action or "findings" in item.action.lower() for item in with_context))
+
+    def test_client_context_matches_exact_email(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            clients_dir = root / "clients"
+            clients_dir.mkdir()
+            company, offer, state = self.write_context_sources(root)
+            self.write_client_file(
+                clients_dir,
+                slug="msia",
+                body="""# Client: MSIA
+
+## Contacts
+
+- Mark Lurie - Owner - mark@msia.org
+
+## Current state
+
+- Deal stage: won
+- CRM status: active_client
+- Next action: send findings deck
+
+## What we're delivering
+
+- Engagement: Busywork audit
+- Service type: AI ops audit
+""",
+            )
+            transcript = {
+                "title": "MSIA audit review",
+                "organizer_email": "josh@clearworks.ai",
+                "participants": ["mark@msia.org", "josh@clearworks.ai"],
+                "speakers": [{"name": "Mark Lurie"}],
+            }
+            with unittest.mock.patch.object(MODULE, "COMPANY_PATH", company):
+                with unittest.mock.patch.object(MODULE, "OFFER_PATH", offer):
+                    with unittest.mock.patch.object(MODULE, "STATE_PATH", state):
+                        context = MODULE.client_context_for_transcript(transcript, clients_dir=clients_dir)
+            self.assertIn("client=MSIA", context)
+            self.assertIn("Deal stage=won", context)
+            self.assertIn("Open next action: send findings deck.", context)
+
+    def test_client_context_matches_contact_name_without_email(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            clients_dir = root / "clients"
+            clients_dir.mkdir()
+            company, offer, state = self.write_context_sources(root)
+            self.write_client_file(
+                clients_dir,
+                slug="jsp",
+                body="""# Client: Jewish Studio Project
+
+## Contacts
+
+- Rachel Gross - COO - rachel@jsp.org
+
+## Current state
+
+- Deal stage: qualified
+- CRM status: prospect
+
+## What we're delivering
+
+- Engagement: AI Starter
+""",
+            )
+            transcript = {
+                "title": "JSP discovery sync",
+                "organizer_email": "josh@clearworks.ai",
+                "participants": ["Rachel Gross", "Josh Weiss"],
+                "speakers": [{"name": "Rachel Gross"}],
+            }
+            with unittest.mock.patch.object(MODULE, "COMPANY_PATH", company):
+                with unittest.mock.patch.object(MODULE, "OFFER_PATH", offer):
+                    with unittest.mock.patch.object(MODULE, "STATE_PATH", state):
+                        context = MODULE.client_context_for_transcript(transcript, clients_dir=clients_dir)
+            self.assertIn("client=Jewish Studio Project", context)
+            self.assertIn("Engagement=AI Starter", context)
+
+    def test_client_context_returns_empty_when_unmatched(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            clients_dir = Path(tmp) / "clients"
+            clients_dir.mkdir()
+            self.write_client_file(
+                clients_dir,
+                slug="ocg",
+                body="""# Client: OCG
+
+## Contacts
+
+- Mathew Owens - COO - mpo@owenscg.com
+
+## Current state
+
+- Deal stage: won
+- CRM status: active_client
+
+## What we're delivering
+
+- Engagement: Busywork audit
+""",
+            )
+            transcript = {
+                "title": "Internal ops check-in",
+                "organizer_email": "josh@clearworks.ai",
+                "participants": ["josh@clearworks.ai", "ops@clearworks.ai"],
+                "speakers": [{"name": "Josh Weiss"}],
+            }
+            self.assertEqual(MODULE.client_context_for_transcript(transcript, clients_dir=clients_dir), "")
+
+    def test_extract_action_items_renders_empty_client_context(self):
+        captured_prompt: dict[str, str] = {}
+
+        def fake_urlopen(request, timeout=None):
+            body = json.loads(request.data.decode("utf-8"))
+            captured_prompt["content"] = body["messages"][0]["content"]
+            response = {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                [
+                                    {
+                                        "action": "Send notes",
+                                        "owner": "Josh",
+                                        "dueDate": "Friday",
+                                        "status": "pending",
+                                    }
+                                ]
+                            )
+                        }
+                    }
+                ]
+            }
+            return FakeResponse(json.dumps(response).encode("utf-8"))
+
+        items = MODULE.extract_action_items(
+            "Josh Weiss: I'll send notes on Friday.",
+            client_context="",
+            openrouter_api_key="or-test",
+            urlopen=fake_urlopen,
+        )
+        self.assertEqual(len(items), 1)
+        self.assertIn("Client context:\n", captured_prompt["content"])
+        self.assertIn("Only surface items material to an active Clearworks engagement", captured_prompt["content"])
 
 
 class RecapModeTests(unittest.TestCase):
@@ -1016,6 +1185,7 @@ class RecapModeTests(unittest.TestCase):
             self.assertIn("overview", meeting["summary"])
             self.assertIn("bullets", meeting["summary"])
             self.assertIn("action_items", meeting["summary"])
+            self.assertIn("client_context", meeting)
             self.assertIn("next_steps", meeting)
             
             # Verify next_steps have the expected structure from refine_items

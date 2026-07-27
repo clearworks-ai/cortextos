@@ -4328,11 +4328,6 @@ busCommand
   .action(() => runHook('hook-context-status'));
 
 busCommand
-  .command('hook-retrieval-enforcer')
-  .description('UserPromptSubmit hook: selective/cached documented-past retrieval injection')
-  .action(() => runHook('hook-retrieval-enforcer'));
-
-busCommand
   .command('hook-ask-telegram')
   .description('PreToolUse hook: forward AskUserQuestion to Telegram (cross-platform)')
   .action(() => runHook('hook-ask-telegram'));
@@ -4366,6 +4361,11 @@ busCommand
   .command('hook-loop-detector')
   .description('PreToolUse hook: detects and blocks repeated tool loops (same-args repetition + ping-pong alternation)')
   .action(() => runHook('hook-loop-detector'));
+
+busCommand
+  .command('hook-retrieval-enforcer')
+  .description('UserPromptSubmit hook: selective/cached documented-past retrieval injection (fleet-context-diet)')
+  .action(() => runHook('hook-retrieval-enforcer'));
 
 // --- OAuth token rotation commands ---
 

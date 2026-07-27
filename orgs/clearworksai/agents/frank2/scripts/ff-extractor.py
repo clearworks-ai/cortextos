@@ -1548,10 +1548,11 @@ def execute_full(
     *,
     limit: int,
     meeting_id: str,
+    full_ledger_path: Path | None = None,
     urlopen: Urlopen = urllib.request.urlopen,
 ) -> int:
     try:
-        return run_full(limit=limit, meeting_id=meeting_id, urlopen=urlopen)
+        return run_full(limit=limit, meeting_id=meeting_id, full_ledger_path=full_ledger_path, urlopen=urlopen)
     except (RuntimeError, ValueError, urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError) as exc:
         reason = collapse_ws(str(exc)) or exc.__class__.__name__
         LOGGER.error("ff-extractor full failed: %s", reason)
@@ -1563,11 +1564,13 @@ def run_full(
     *,
     limit: int,
     meeting_id: str,
+    full_ledger_path: Path | None = None,
     urlopen: Urlopen = urllib.request.urlopen,
 ) -> int:
     fireflies_api_key = require_env("FIREFLIES_API_KEY")
     openrouter_api_key = require_env("OPENROUTER_API_KEY")
 
+    ledger_ids = load_ledger(full_ledger_path) if full_ledger_path else set()
     recent = fetch_recent_transcripts(fireflies_api_key, limit=limit, urlopen=urlopen)
     recent_sorted = sorted(recent, key=transcript_sort_key, reverse=True)
 
@@ -1575,12 +1578,17 @@ def run_full(
         recent_sorted = [t for t in recent_sorted if str(t.get("id") or "") == meeting_id]
 
     meetings: list[dict[str, Any]] = []
+    skipped_ledger = 0
     skipped_suppressed = 0
     skipped_casual = 0
 
     for transcript in recent_sorted:
         tid = str(transcript.get("id") or "")
         if not tid:
+            continue
+
+        if tid in ledger_ids:
+            skipped_ledger += 1
             continue
 
         if is_suppressed_meeting(transcript):
@@ -1603,6 +1611,7 @@ def run_full(
     print(json.dumps({
         "mode": "full",
         "meetings": meetings,
+        "skipped_ledger": skipped_ledger,
         "skipped_casual": skipped_casual,
         "skipped_suppressed": skipped_suppressed,
     }))
@@ -1630,6 +1639,7 @@ def main(argv: list[str] | None = None) -> int:
         return execute_full(
             limit=max(1, args.limit),
             meeting_id=str(args.meeting_id or ""),
+            full_ledger_path=Path(args.full_ledger) if args.full_ledger else None,
         )
     return execute(
         limit=max(1, args.limit),

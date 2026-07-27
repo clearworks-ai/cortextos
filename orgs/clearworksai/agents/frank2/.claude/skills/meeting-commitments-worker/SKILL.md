@@ -77,7 +77,9 @@ The extractor exits nonzero on failure. If `EXTRACTOR_RC` is nonzero: log silent
 
 ## Step 3 — Parse results
 
-The extractor stdout JSON always contains an `items` array of `{id, text, direction, source, sourceRef}` (contract owned by `ff-extractor.py`). Read `/tmp/ff-commitments.json` and iterate `items`.
+The extractor stdout JSON always contains an `items` array. The persisted POST wire contract is still owned by `ff-extractor.py` and remains `{id, text, direction, source, sourceRef}` only, but the stdout `items[]` rows now include enriched metadata for this worker too: `priority`, `relevanceScore`, `owner`, `deadline`, `sourceQuote`.
+
+Read `/tmp/ff-commitments.json` and iterate `items`.
 
 Keep the existing exclusion rules as a belt-and-suspenders post-filter before surfacing:
 
@@ -87,11 +89,15 @@ Keep the existing exclusion rules as a belt-and-suspenders post-filter before su
 
 ---
 
-## Step 4 — Dedup check (mandatory)
+## Step 4 — Immediate-surface gate + dedup (mandatory)
+
+Only `priority == "P0"` is eligible for immediate Telegram surfacing on this worker path. `P1`/`P2`/`P3` were already persisted (or dry-run printed) by the extractor, so do NOT surface them here and do NOT write them to the surfaced ledger.
 
 Dedup key is the deterministic commitment `id` from the extractor (`ff_…` / `ffin_…`). For each item:
 
 ```bash
+# skip non-immediate items before ledger writes
+[[ "$PRIORITY" != "P0" ]] && echo SKIP_NON_P0 && continue
 grep -qF "$ID" state/meeting-commitments-surfaced.txt && echo SKIP || echo NEW
 # If NEW:
 echo "$ID $(date -u +%s)" >> state/meeting-commitments-surfaced.txt
@@ -103,7 +109,7 @@ Old-format lines (`TRANSCRIPT_ID:RECIPIENT:first_3_words`) remain in the file ha
 
 ## Step 5 — Surface new commitments
 
-For NEW commitments only, send ONE Telegram to 6690120787, grouped by `direction`. Use `sourceRef` for the meeting title.
+For NEW `P0` commitments only, send ONE Telegram to 6690120787, grouped by `direction`. Use `sourceRef` for the meeting title.
 
 Outbound items (Josh committed to them):
 ```
@@ -117,7 +123,7 @@ Inbound items (they committed to Josh):
 1. [commitment text]
 ```
 
-If `items` is empty or everything was deduped: log silently, no Telegram.
+If `items` is empty, everything is non-`P0`, or every `P0` item was deduped: log silently, no Telegram.
 
 If `DEGRADED=1`, prepend one line to the message noting commitments were NOT persisted to the tasks board (missing `BRIEFS_INGEST_URL`/`TASKS_INGEST_TOKEN` in frank2/.env — these may not be set yet).
 

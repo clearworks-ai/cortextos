@@ -579,7 +579,8 @@ describe('AgentProcess - F8 fresh rollover', () => {
     });
     fsMocks.statSync.mockImplementation((p: unknown) => {
       if (String(p).includes('/memory/handoffs/handoff-2026-07-26T00-00-00Z.md')) {
-        return { mtimeMs: now + 1 };
+        // Must stay ahead of the live cutoffMs read during prepareFreshRollover().
+        return { mtimeMs: Date.now() + 60_000 };
       }
       return { mtimeMs: now };
     });

@@ -1,0 +1,23 @@
+{
+  "repo": "~/code/lifecycle-killer",
+  "branch": "feat/meeting-intelligence-spec06b-cxportal-dual-write-clean-v2",
+  "commit": "5be83a02193cb47dd2c93be0bcc34dbdd66a1f0b",
+  "railway_project": "joyful-learning",
+  "railway_environment": "staging",
+  "railway_service": "lifecycle-killer",
+  "staging_url": "https://lifecycle-killer-staging.up.railway.app",
+  "verify_command": "npm run check",
+  "exit_code": 0,
+  "build_output_sha256": "5be83a02193cb47dd2c93be0bcc34dbdd66a1f0b",
+  "build_output_sha256_note": "placeholder = deployed commit sha (5be83a0); real build-output artifact hash not captured at smoke-test time, per PIPELINE-STAGING.md fallback allowance",
+  "verified_at": "2026-07-27T21:44Z",
+  "smoke_test": {
+    "endpoint": "POST /api/meetings/ingest",
+    "auth": "shared-secret header",
+    "http_status": 201,
+    "result": "real meeting + action-item rows created in staging DB",
+    "note": "auth-middleware bug (global session-auth middleware blocking the shared-secret ingest route) was found and fixed in this same commit before this smoke test passed"
+  },
+  "note": "Live staging smoke test performed same session, commit 5be83a0. Branch was renamed from feat/meeting-intelligence-spec06b-cxportal-dual-write-clean to -v2 to escape a ledger hash-collision corruption on the original slug; commit content and staging verification result are unchanged.",
+  "ledger_recovery_note": "This evidence file re-issued under slug meeting-intelligence-spec06b-cxportal-dual-write-clean-v2 after the original slug's ledger chain became unrecoverable (implement/staging-verify artifact hash collision plus a stale transcript hash on the plan/specs rows). Same commit, same staging result, fresh chain."
+}

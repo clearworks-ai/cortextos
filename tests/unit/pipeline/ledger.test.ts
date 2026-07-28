@@ -925,6 +925,61 @@ describe('pipeline ledger', () => {
     expect(verified.rows.map((row) => row.stage)).toEqual(['research', 'plan']);
   });
 
+  it('resolves prior rows by stage and timestamp when artifact hashes collide', () => {
+    const sessionId = 'plan-session-collision';
+    const transcript = join(projectsRoot, 'larry', sessionId, 'subagents', 'agent-plan.jsonl');
+    writeWriteEditTranscript(transcript, sessionId, planPath, '# draft\n', '# draft\n', '# master plan\n');
+    writeFileSync(planPath, '# master plan\n', 'utf-8');
+
+    const researchRow = emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'research',
+      artifactPath: researchPath,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 100,
+    });
+    const planRow = emitLedgerRow({
+      slug: 'hard-spec-gate',
+      stage: 'plan',
+      artifactPath: planPath,
+      runner: 'fable-lean',
+      sessionId,
+      transcriptPath: transcript,
+      transcriptRoot: projectsRoot,
+      ledgerPath,
+      secretPath,
+      nowSeconds: 200,
+    });
+
+    const reviewCollision = signRow(secret, {
+      slug: 'hard-spec-gate',
+      stage: 'review',
+      ts: 300,
+      artifact_sha256: researchRow.artifact_sha256,
+      prev_sha256: planRow.artifact_sha256,
+    });
+    writeFileSync(
+      ledgerPath,
+      `${readLedgerRows(ledgerPath).map((row) => JSON.stringify(row)).join('\n')}\n${JSON.stringify(reviewCollision)}\n`,
+      'utf-8',
+    );
+
+    const verified = verifyChainDetailed({
+      slug: 'hard-spec-gate',
+      throughStage: 'plan',
+      maxAgeSeconds: 86_400,
+      ledgerPath,
+      secretPath,
+      transcriptRoot: projectsRoot,
+      nowSeconds: 350,
+    });
+    expect(verified.ok).toBe(true);
+    if (!verified.ok) return;
+    expect(verified.rows.map((row) => row.stage)).toEqual(['research', 'plan']);
+    expect(verified.rows[0]?.artifact_sha256).toBe(researchRow.artifact_sha256);
+  });
+
   it('rejects genuine backward time travel as OUT_OF_ORDER', () => {
     const sessionId = 'plan-session-backwards';
     const transcript = join(projectsRoot, 'larry', sessionId, 'subagents', 'agent-plan.jsonl');

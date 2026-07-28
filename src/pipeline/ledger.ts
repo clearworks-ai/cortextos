@@ -956,8 +956,18 @@ export function emitLedgerRow(opts: {
   return row;
 }
 
+function resolvePreviousRow(rows: LedgerRow[], cursor: LedgerRow): LedgerRow | undefined {
+  const allowed = new Set(allowedPreviousStages(cursor.stage));
+  return rows
+    .filter((row) =>
+      row.slug === cursor.slug &&
+      row.artifact_sha256 === cursor.prev_sha256 &&
+      row.ts <= cursor.ts &&
+      allowed.has(row.stage))
+    .sort((a, b) => b.ts - a.ts)[0];
+}
+
 function buildChain(rows: LedgerRow[], terminal: LedgerRow, secret: string): LedgerVerifyResult {
-  const byArtifact = new Map(rows.map((row) => [row.artifact_sha256, row]));
   const chain: LedgerRow[] = [];
   let cursor: LedgerRow | undefined = terminal;
   let lastRank = Number.POSITIVE_INFINITY;
@@ -994,8 +1004,37 @@ function buildChain(rows: LedgerRow[], terminal: LedgerRow, secret: string): Led
     lastTs = cursor.ts;
 
     if (cursor.prev_sha256 === GENESIS) break;
-    const prev = byArtifact.get(cursor.prev_sha256);
+    const prev = resolvePreviousRow(rows, cursor);
     if (!prev) {
+      const cur = cursor;
+      const conflicting = rows
+        .filter((row) =>
+          row.slug === cur.slug &&
+          row.artifact_sha256 === cur.prev_sha256)
+        .sort((a, b) => b.ts - a.ts)[0];
+      if (conflicting) {
+        if (!verifyRowSignature(conflicting, secret)) {
+          return {
+            ok: false,
+            code: 'BAD_SIG',
+            detail: `Invalid signature on ${conflicting.slug}:${conflicting.stage}`,
+          };
+        }
+        if (conflicting.ts > cursor.ts) {
+          return {
+            ok: false,
+            code: 'OUT_OF_ORDER',
+            detail: `Non-increasing timestamps in ${cursor.slug} chain`,
+          };
+        }
+        if (!allowedPreviousStages(cursor.stage).includes(conflicting.stage)) {
+          return {
+            ok: false,
+            code: 'OUT_OF_ORDER',
+            detail: `Invalid ${conflicting.stage} -> ${cursor.stage} transition for ${cursor.slug}`,
+          };
+        }
+      }
       return {
         ok: false,
         code: 'CHAIN_BREAK',

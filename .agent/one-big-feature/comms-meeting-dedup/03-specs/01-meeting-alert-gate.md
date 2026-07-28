@@ -1,5 +1,12 @@
 # Spec 01 — `src/utils/meeting-alert-gate.ts` + `bus meeting-alert-gate` command
 
+> **STATUS: DONE / SHIPPED** — merged to `main` as PR #109 (commit `d3b1825`,
+> "fix(comms): deterministic meeting-alert-gate — one meeting = one Telegram ping").
+> Live on main: util `src/utils/meeting-alert-gate.ts`, its test
+> `tests/unit/utils/meeting-alert-gate.test.ts`, the `bus meeting-alert-gate`
+> command (`src/cli/bus.ts`), and the import (`src/cli/bus.ts` ~line 69). Spec
+> retained below as the authoritative provenance record of the shipped design.
+
 **Pattern to mirror:** `src/utils/ci-alert-gate.ts` (pure evaluate fn, typed decision) and
 its CLI handler at `src/cli/bus.ts:2972-2996`. Ledger reuse:
 `checkAndRecordSourceEvent` from `src/utils/event-dedup.ts:91-131`

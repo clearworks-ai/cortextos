@@ -1,0 +1,44 @@
+# Spec 08 — Wire the Fireflies webhook to the on-demand extractor (spec03 is dead code without this)
+
+**Repo:** `/Users/joshweiss/code/cortextos` (webhook-bridge piece) **+** `/Users/joshweiss/code/briefs` (webhook-handler call-out piece — separate repo, flag for cross-repo GATE dispatch same as spec 01).
+**Status this run:** materialized, NOT dispatched.
+
+**Source:** larry gap-analysis, `orgs/clearworksai/agents/larry/memory/handoffs/handoff-2026-07-27T19-16-50Z.md:32` and `handoff-2026-07-27T19-03-26Z.md:60-64`. Not a verbatim Google Doc line — this is a build gap larry found while verifying spec03's "done" claim: spec03 gave `ff-extractor.py` the *capability* to run against a single meeting id, but nothing calls it that way yet.
+
+## Verified live (2026-07-27)
+
+- `cortextos/src/cli/webhook-bridge.ts:23` — `const ALLOWED_INTEGRATIONS = ['zoom-officehours'] as const;`. Only integration currently accepted by the `/relay/:integration` POST route (`webhook-bridge.ts:430-467`); a `fireflies` relay call today would 403 with `unknown_integration` (line 464-467).
+- `cortextos/src/cli/webhook-bridge.ts:244-261` — `buildRelayMessage()` is the only place that turns a relay payload into a bus message; it currently has one branch (registrant-shaped, for `zoom-officehours`) and a generic JSON-dump fallback. Needs a `fireflies`-aware branch.
+- `briefs/src/briefs.ts:2551-2599` — `/api/fireflies/webhook/:id` handler. Path-id + optional HMAC signature checked (2552-2585), payload parsed (2587), then `checkAndRecordFirefliesMeetingId(config.dataDir, meetingId)` at **line 2593** — this is the "existing first-seen dedup check" the task refers to. If `dedupResult.proceed` is `false` (duplicate), it returns 200 at **2594-2598** and stops. If `proceed` is `true` (first-seen), execution falls through to line 2601 onward, which does its own internal transcript-fetch + Haiku/Sonnet classify + `mergeCommitmentsIntoTasks` (this file's own independent pipeline — separate from `ff-extractor.py`'s pipeline in frank2). **Nothing in this file calls out to the webhook-bridge today.**
+- `briefs/src/fireflies-webhook-ledger.ts:70-83` — `checkAndRecordFirefliesMeetingId` is the dedup ledger itself (file-backed `seenMeetingIds` map, atomic tmp+rename write at line 64-67). Do not touch this file — the dedup logic is correct and out of scope.
+- `orgs/clearworksai/skills/meeting-intelligence-engineer/SKILL.md:136` — confirms the exact CLI shape spec03 built: `python3 scripts/ff-extractor.py --mode full --meeting-id <FIREFLIES_ID>`. Note: per `ff-extractor.py:1353-1356` (`parse_args`), `--meeting-id` is "Only honored in full mode" — i.e. `--mode full --meeting-id <id>`, not the default `commitments` mode. The dispatch text in this run's build message says "commitments mode" loosely; the actual invocation must be `--mode full`.
+- `pa`'s `meeting-commitments` cron (`orgs/clearworksai/agents/pa/.claude/skills/meeting-commitments-worker/SKILL.md`) is still a plain 2h poll (`python3 scripts/ff-extractor.py --limit 20` in default `commitments` mode, no `FF_MEETING_ID`, no conditional-spawn) — confirmed no `FF_MEETING_ID` reference anywhere in the repo outside handoff notes and the SKILL.md doc line above.
+- `cortextos/src/cli/tunnel.ts` — a `cloudflared` launchd tunnel already exists for exposing local services (config at `~/.cloudflared/config.yaml`, tunnel config at `~/.cortextos/<instance>/tunnel.json` with `bridgePort`/`bridgeHostname` fields) — this is how a Railway-hosted `briefs` app can reach the local `webhook-bridge` (which binds `127.0.0.1` per `webhook-bridge.ts:16`) over the public internet. Confirm the tunnel is live and points at the webhook-bridge port before wiring briefs.ts's call-out; do not build a second tunnel.
+
+## Build
+
+Three parts, in dependency order:
+
+1. **`cortextos/src/cli/webhook-bridge.ts`** — extend `ALLOWED_INTEGRATIONS` (line 23) to `['zoom-officehours', 'fireflies'] as const`. Add a `fireflies`-shaped branch to `buildRelayMessage()` (currently lines 244-261): given `envelope.meeting_id` and no `registrant`, emit a bus message directed at whichever agent owns `meeting-commitments-worker` (`pa`, confirmed above) that names the spawn intent explicitly, e.g. `WEBHOOK fireflies transcription.completed — meeting <meeting_id>. Spawn meeting-commitments-worker with FF_MEETING_ID=<meeting_id> set (single-meeting mode: cd frank2 agent dir, set -a env source, then python3 scripts/ff-extractor.py --mode full --meeting-id <meeting_id>) instead of waiting for the 2h poll.` Mirror the existing conditional-spawn message pattern already live for `pre-meeting-brief-page` (referenced in `02-master-plan.md:33`) rather than inventing new spawn machinery.
+
+2. **`briefs/src/briefs.ts`** — after the existing first-seen dedup check confirms `proceed === true` (i.e. immediately after the duplicate early-return block at lines 2594-2598, before the transcript-fetch logic that resumes at line 2601), add a fire-and-forget HTTP POST to the webhook-bridge's public tunnel URL: `POST <bridge-hostname>/relay/fireflies` with header `x-webhook-bridge-secret: <WEBHOOK_BRIDGE_SECRET>` and JSON body `{ integration: "fireflies", event: "transcription.completed", target: "pa", meeting_id: meetingId }`. Do **not** change `checkAndRecordFirefliesMeetingId` or the ledger file — the dedup logic itself is correct and already spec01's work. Do **not** remove or alter this file's own existing classify/persist pipeline (lines 2601+) — that stays as-is; this is purely an additive call-out. Failure of the bridge call (network error, tunnel down) must not block or fail the webhook response — wrap in try/catch, log, continue.
+   - New config needed: a bridge base URL + shared secret must be readable by the briefs app (Railway env vars) — same `WEBHOOK_BRIDGE_SECRET` value already used locally by `webhook-bridge.ts` (`resolveBridgeRuntimeContext`, `webhook-bridge.ts:118`), plus a new `WEBHOOK_BRIDGE_URL` (or similarly named) env var pointing at the tunnel hostname. Add both to `briefs/src/server.ts`'s `readConfig()` (mirroring the existing `firefliesWebhookSecret` pattern at server.ts:34) and to `BriefsConfig` in `briefs.ts`.
+
+3. **Verify the bridge → spawn path actually reaches `pa`**: once 1 and 2 land, a real (or simulated) webhook POST to `briefs`'s `/api/fireflies/webhook/:id` should result in a bus message landing in `pa`'s inbox referencing the specific meeting id, which `pa`'s fast-checker/session picks up and runs the `meeting-commitments-worker` SKILL against that one meeting via `--mode full --meeting-id`. This does not require changing `pa`'s existing 2h-poll cron — the poll stays as a safety-net fallback; this spec adds the event-triggered fast path alongside it (per spec01's framing: "collapse the two pollers" is a *separate*, later step — not in scope here).
+
+## Explicit non-goals
+
+- Do not touch `fireflies-webhook-ledger.ts` or the dedup semantics in `briefs.ts:2593-2599` — already correct, already spec01's scope.
+- Do not touch the Haiku casualness gate or outbound/inbound direction split in `ff-extractor.py` (per spec03's own non-goal, still binding).
+- Do not retire `pa`'s 2h poll cron in this spec — that's spec01's "collapse the two pollers" step, deliberately out of scope until the event-triggered path is proven live.
+- Do not build a new tunnel — reuse the existing `cortextos tunnel` (cloudflared) if already running; if not running, that's a blocker to report back, not a new subsystem to invent.
+
+## Dependencies
+
+Depends on spec03 (already merged/build per handoff — `--mode full --meeting-id` exists) and spec01's ledger (`fireflies-webhook-ledger.ts`, already live). Independent of specs 02/04/05/06/07.
+
+## Test plan
+
+- Unit: `webhook-bridge.ts` — POST `/relay/fireflies` with a valid secret + `{integration:"fireflies", event:"transcription.completed", target:"pa", meeting_id:"abc123"}` returns 200 and the emitted bus message text contains `FF_MEETING_ID` context and `abc123`. A request with `integration` absent from `ALLOWED_INTEGRATIONS` (regression check on `zoom-officehours` still working) still 403s appropriately if malformed.
+- Unit: `briefs.ts` — mock the bridge HTTP call; confirm it fires exactly once on first-seen (`proceed: true`) and zero times on duplicate (`proceed: false`), and that a bridge-call failure (rejected promise) does not change the HTTP response code returned to Fireflies.
+- Integration/live proof: trigger a real or simulated Fireflies webhook POST once the tunnel + both changes are deployed; confirm a bus message lands in `pa`'s inbox within seconds (not the next 2h tick) and that `meeting-commitments-worker` runs with `--mode full --meeting-id <the specific id>` (check `pa`'s inbound-messages log and a fresh `/tmp/ff-commitments.json` or task creation for that one meeting).

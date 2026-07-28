@@ -20,7 +20,7 @@ const RATE_LIMIT_WINDOW_MS = 60_000;
 const PLIST_LABEL = 'com.cortextos.webhook-bridge';
 const PLIST_PATH = join(homedir(), 'Library', 'LaunchAgents', `${PLIST_LABEL}.plist`);
 const SOURCE_NAME = 'webhook-hub';
-const ALLOWED_INTEGRATIONS = ['zoom-officehours', 'fireflies'] as const;
+const ALLOWED_INTEGRATIONS = ['zoom-officehours', 'fireflies', 'ops-check-lead'] as const;
 
 interface BridgeConfig {
   port?: number;
@@ -248,6 +248,79 @@ function buildRelayMessage(integration: string, event: string, envelope: RelayEn
 
   if (integration === 'fireflies' && meetingId) {
     return `WEBHOOK ${integration} ${event} — meeting ${meetingId}. Spawn meeting-commitments-worker with FF_MEETING_ID=${meetingId} set so the single-meeting fast path runs now instead of waiting for the 2h poll: cd frank2 agent dir, source env, then python3 scripts/ff-extractor.py --mode full --meeting-id ${meetingId}.`;
+  }
+
+  if (integration === 'ops-check-lead') {
+    const contact = typeof envelope.contact === 'object' && envelope.contact !== null
+      ? envelope.contact as Record<string, unknown>
+      : null;
+    const firmographic = typeof envelope.firmographic === 'object' && envelope.firmographic !== null
+      ? envelope.firmographic as Record<string, unknown>
+      : null;
+    const openText = typeof envelope.openText === 'object' && envelope.openText !== null
+      ? envelope.openText as Record<string, unknown>
+      : null;
+    const computed = typeof envelope.computed === 'object' && envelope.computed !== null
+      ? envelope.computed as Record<string, unknown>
+      : null;
+    const topGaps = Array.isArray(computed?.topGaps)
+      ? computed.topGaps.filter((gap): gap is Record<string, unknown> => typeof gap === 'object' && gap !== null)
+      : [];
+
+    const name = typeof contact?.name === 'string' && contact.name.trim()
+      ? contact.name.trim()
+      : 'Unknown lead';
+    const email = typeof contact?.email === 'string' && contact.email.trim()
+      ? contact.email.trim()
+      : 'unknown-email';
+    const company = typeof contact?.company === 'string' && contact.company.trim()
+      ? contact.company.trim()
+      : 'unknown company';
+    const score = computed?.score === undefined || computed.score === null
+      ? 'unknown'
+      : String(computed.score).trim() || 'unknown';
+    const band = typeof computed?.band === 'string' && computed.band.trim()
+      ? computed.band.trim()
+      : 'unknown';
+    const gapIds = topGaps
+      .map((gap) => (typeof gap.id === 'string' ? gap.id.trim() : ''))
+      .filter(Boolean);
+    const keepsUpAtNight = typeof openText?.keepsUpAtNight === 'string' && openText.keepsUpAtNight.trim()
+      ? openText.keepsUpAtNight.trim()
+      : typeof openText?.keepsYouUp === 'string' && openText.keepsYouUp.trim()
+        ? openText.keepsYouUp.trim()
+        : 'n/a';
+    const processDescription = typeof openText?.processDescription === 'string' && openText.processDescription.trim()
+      ? openText.processDescription.trim()
+      : 'n/a';
+    const industry = typeof firmographic?.industry === 'string' && firmographic.industry.trim()
+      ? firmographic.industry.trim()
+      : 'n/a';
+    const teamSize = typeof firmographic?.teamSize === 'string' && firmographic.teamSize.trim()
+      ? firmographic.teamSize.trim()
+      : 'n/a';
+    const role = typeof firmographic?.role === 'string' && firmographic.role.trim()
+      ? firmographic.role.trim()
+      : 'n/a';
+    const submittedAt = typeof envelope.occurred_at === 'string' && envelope.occurred_at.trim()
+      ? envelope.occurred_at.trim()
+      : 'unknown';
+
+    return [
+      `WEBHOOK ${integration} ${event} — new ops-check lead-magnet submission from ${name} <${email}> at ${company}.`,
+      'Run crm/upsert-contact.py for this lead. Dedup by email. Tag as prospect and lead-magnet. Notes must include the ops-check score, band, top gaps, and both open-text answers.',
+      `Score: ${score}`,
+      `Band: ${band}`,
+      `Top gaps (ids): ${gapIds.join(', ') || 'n/a'}`,
+      `Firmographic: industry=${industry}; teamSize=${teamSize}; role=${role}`,
+      `Keeps them up: ${keepsUpAtNight}`,
+      `Process: ${processDescription}`,
+      `Submitted at: ${submittedAt}`,
+      'Full payload:',
+      '```json',
+      JSON.stringify(envelope, null, 2),
+      '```',
+    ].join('\n');
   }
 
   const registrant = typeof envelope.registrant === 'object' && envelope.registrant !== null

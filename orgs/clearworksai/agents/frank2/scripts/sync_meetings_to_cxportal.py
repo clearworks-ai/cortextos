@@ -26,6 +26,7 @@ SECTION_RE = re.compile(r"^##\s+(.+)$")
 COMMITMENT_RE = re.compile(r"^- \[(x| )\]\s+(.+?)(?:\s+by:\s*([^\n]+))?(?:\s+due:\s*([^\n]+))?", re.IGNORECASE)
 INLINE_ATTENDEES_RE = re.compile(r"\*\*Attendees:\*\*\s*(.+?)\s*$")
 PROSE_COMMITMENT_RE = re.compile(r"^- \*\*([^*:]+):\*\*\s+(.+)$")
+NEGATION_RE = re.compile(r"\b(non|not|no)\b")
 
 
 def load_meeting_records(meetings_dir: Path) -> list[dict[str, Any]]:
@@ -55,7 +56,10 @@ def load_meeting_records(meetings_dir: Path) -> list[dict[str, Any]]:
             section_match = SECTION_RE.match(line)
             if section_match:
                 current_section = section_match.group(1).strip().lower()
-                if "action item" in current_section or "commitment" in current_section or "follow-up" in current_section:
+                is_commitment_section = not NEGATION_RE.search(current_section) and (
+                    "action item" in current_section or "commitment" in current_section or "follow-up" in current_section
+                )
+                if is_commitment_section:
                     current_commitments = []
                 continue
             
@@ -82,7 +86,10 @@ def load_meeting_records(meetings_dir: Path) -> list[dict[str, Any]]:
                     if attendee and attendee not in meeting["attendees"]:
                         meeting["attendees"].append(attendee)
             
-            elif "action item" in current_section or "commitment" in current_section or "follow-up" in current_section:
+            is_commitment_section = not NEGATION_RE.search(current_section) and (
+                "action item" in current_section or "commitment" in current_section or "follow-up" in current_section
+            )
+            if is_commitment_section:
                 # Try checkbox pattern first
                 commitment_match = COMMITMENT_RE.match(line)
                 if commitment_match:

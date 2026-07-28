@@ -17,8 +17,8 @@ def test_inline_attendees_and_prose_commitments():
     meetings_dir = Path("/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm/crm/meetings")
     
     if not meetings_dir.exists():
-        print(f"SKIP: meetings directory not found: {meetings_dir}")
-        return True
+        print(f"FAIL: meetings directory not found: {meetings_dir}")
+        return False
     
     records = load_meeting_records(meetings_dir)
     

@@ -307,6 +307,100 @@ describe('webhook-bridge server', () => {
     await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
   });
 
+  it('relays ops-check leads to crm with an instructive lead-magnet upsert message', async () => {
+    const server = buildServer();
+    const baseUrl = await listen(server);
+
+    const response = await sendRequest(baseUrl, '/relay/ops-check-lead', {
+      method: 'POST',
+      headers: { 'x-webhook-bridge-secret': 'top-secret' },
+      body: JSON.stringify({
+        integration: 'ops-check-lead',
+        target: 'crm',
+        event: 'lead.submitted',
+        occurred_at: '2026-07-28T21:15:00Z',
+        contact: {
+          name: 'Jordan Example',
+          email: 'jordan@example.com',
+          company: 'Example Co',
+        },
+        firmographic: {
+          industry: 'AEC',
+          teamSize: '11-50',
+          role: 'COO',
+        },
+        openText: {
+          keepsUpAtNight: 'Manual work is everywhere.',
+          processDescription: 'Email, spreadsheets, and Slack.',
+        },
+        computed: {
+          score: 64,
+          band: 'Yellow',
+          topGaps: [{ id: 'connected_systems', name: 'Connected systems', contribution: 12 }],
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.json?.ok).toBe(true);
+
+    const inboxDir = join(tempRoot, 'inbox', 'crm');
+    const inboxFiles = readdirSync(inboxDir);
+    expect(inboxFiles).toHaveLength(1);
+
+    const inboxPayload = JSON.parse(readFileSync(join(inboxDir, inboxFiles[0]), 'utf-8')) as {
+      text: string;
+    };
+    expect(inboxPayload.text).toContain('WEBHOOK ops-check-lead lead.submitted');
+    expect(inboxPayload.text).toContain('jordan@example.com');
+    expect(inboxPayload.text).toContain('Score: 64');
+    expect(inboxPayload.text).toContain('Band: Yellow');
+    expect(inboxPayload.text).toContain('lead-magnet');
+    expect(inboxPayload.text).toContain('upsert-contact.py');
+    expect(inboxPayload.text).toContain('Manual work is everywhere.');
+    expect(inboxPayload.text).toContain('Email, spreadsheets, and Slack.');
+    expect(inboxPayload.text).toContain('```json');
+    expect(inboxPayload.text).toContain('"integration": "ops-check-lead"');
+
+    await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  });
+
+  it('relays degenerate ops-check leads without throwing while still allowing the integration', async () => {
+    const server = buildServer();
+    const baseUrl = await listen(server);
+
+    const response = await sendRequest(baseUrl, '/relay/ops-check-lead', {
+      method: 'POST',
+      headers: { 'x-webhook-bridge-secret': 'top-secret' },
+      body: JSON.stringify({
+        integration: 'ops-check-lead',
+        target: 'crm',
+        event: 'lead.submitted',
+        contact: {
+          name: 'Jordan Example',
+          email: 'jordan@example.com',
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.json?.ok).toBe(true);
+
+    const inboxDir = join(tempRoot, 'inbox', 'crm');
+    const inboxFiles = readdirSync(inboxDir);
+    expect(inboxFiles).toHaveLength(1);
+
+    const inboxPayload = JSON.parse(readFileSync(join(inboxDir, inboxFiles[0]), 'utf-8')) as {
+      text: string;
+    };
+    expect(inboxPayload.text).toContain('WEBHOOK ops-check-lead lead.submitted');
+    expect(inboxPayload.text).toContain('Score: unknown');
+    expect(inboxPayload.text).toContain('Keeps them up: n/a');
+    expect(inboxPayload.text).toContain('```json');
+
+    await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  });
+
   it('rate-limits the 121st relay request in a fixed window and resets in the next window', async () => {
     let nowMs = 0;
     const server = buildServer(() => nowMs);

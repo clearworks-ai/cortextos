@@ -1,0 +1,1023 @@
+diff --git a/orgs/clearworksai/agents/frank2/scripts/ff-extractor.py b/orgs/clearworksai/agents/frank2/scripts/ff-extractor.py
+index bf12033..c9b221f 100644
+--- a/orgs/clearworksai/agents/frank2/scripts/ff-extractor.py
++++ b/orgs/clearworksai/agents/frank2/scripts/ff-extractor.py
+@@ -13,8 +13,9 @@ import tempfile
+ import unicodedata
+ import urllib.error
+ import urllib.request
+-from dataclasses import dataclass
++from dataclasses import dataclass, replace
+ from datetime import date, datetime, time, timedelta, timezone
++from difflib import SequenceMatcher
+ from pathlib import Path
+ from typing import Any, Callable, Iterable
+ 
+@@ -23,6 +24,12 @@ LOGGER = logging.getLogger(__name__)
+ UTC = timezone.utc
+ SCRIPT_PATH = Path(__file__).resolve()
+ AGENT_DIR = SCRIPT_PATH.parent.parent
++ORG_DIR = AGENT_DIR.parent.parent
++KNOWLEDGE_DIR = ORG_DIR / "knowledge"
++CLIENTS_DIR = KNOWLEDGE_DIR / "clients"
++COMPANY_PATH = KNOWLEDGE_DIR / "company.md"
++OFFER_PATH = KNOWLEDGE_DIR / "offer.md"
++STATE_PATH = KNOWLEDGE_DIR / "STATE.md"
+ STATE_DIR = AGENT_DIR / "state"
+ DEFAULT_WATERMARK_PATH = STATE_DIR / "ff-extractor-watermark.json"
+ DEFAULT_TRANSCRIPT_LIMIT = 20
+@@ -86,23 +93,29 @@ Rules:
+ ACTION_ITEMS_PROMPT = """Extract action items from this meeting transcript.
+ Identify every task, commitment, follow-up, or to-do mentioned. Be specific — "send the proposal" is better than "follow up."
+ Only include forward-looking work or business commitments that still need to be done AFTER the meeting ends. Exclude personal or social errands (e.g. saying goodbye, returning home, travel logistics), small talk, and anything that was already completed during the meeting itself.
++Client context:
++{client_context}
++
+ For each action item:
+ - Clear, actionable description of what needs to be done
+ - Owner: person responsible (or "Unassigned" if not specified)
+ - Due date or timeframe if mentioned
+ - Status: pending
++- Only surface items material to an active Clearworks engagement or a dated commitment; drop the rest.
++- If client context is empty, keep only explicit Clearworks work or dated commitments that still need follow-through.
+ No artificial limit on count. Zero acceptable if none found.
+ IMPORTANT: Return ONLY a valid JSON array with objects using exactly these fields:
+ "action","owner","dueDate","status".
+ Example: [{{"action":"Send proposal to client","owner":"John","dueDate":"2026-02-20","status":"pending"}}]
+ 
+-{client_context_block}
+ TRANSCRIPT:
+ {transcript}"""
+ PUNCT_RE = re.compile(r"[^\w\s-]+", re.UNICODE)
+ SPACE_RE = re.compile(r"\s+")
+ TOKEN_RE = re.compile(r"[a-z0-9]+")
+ CONTROL_RE = re.compile(r"[\x00-\x1f]")
++EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
++SECTION_HEADING_RE = re.compile(r"^##\s+(.+)$")
+ WEEKDAY_TO_INDEX = {
+     "monday": 0,
+     "tuesday": 1,
+@@ -154,6 +167,18 @@ COUNTERPARTY_RE = re.compile(
+     r"\b(?:call|email|text|send|share|follow up with|ask|tell|schedule with|meet with)\s+([A-Z][A-Za-z0-9&.-]*(?:\s+[A-Z][A-Za-z0-9&.-]*){0,3})\b"
+     r"|\b(?:to|with|for)\s+([A-Z][A-Za-z0-9&.-]*(?:\s+[A-Z][A-Za-z0-9&.-]*){0,3})\b"
+ )
++MARKDOWN_TABLE_SEPARATOR = re.compile(r"^[\s:|-]+$")
++PRIORITY_ORDER = ("P0", "P1", "P2", "P3")
++PRIORITY_INDEX = {priority: index for index, priority in enumerate(PRIORITY_ORDER)}
++FUZZY_DEDUP_THRESHOLD = 0.6
++P0_CAP = 3
++P1_CAP = 7
++P0_DUE_WINDOW_DAYS = 3
++P1_DUE_WINDOW_DAYS = 10
++RELEVANCE_P0_MIN = 0.12
++RELEVANCE_P1_MIN = 0.08
++RELEVANCE_P1_PROMOTION = 0.45
++RELEVANCE_P2_MIN = 0.2
+ 
+ Urlopen = Callable[..., Any]
+ 
+@@ -173,9 +198,12 @@ class RefinedCommitment:
+     source: str
+     source_ref: str
+     direction: str
++    action_text: str = ""
+     owner: str = ""
+     deadline: str = ""
+     source_quote: str = ""
++    priority: str = "P3"
++    relevance_score: float = 0.0
+ 
+ 
+ def now_utc_iso() -> str:
+@@ -186,6 +214,13 @@ def collapse_ws(value: str) -> str:
+     return SPACE_RE.sub(" ", value).strip()
+ 
+ 
++def strip_markdown_prefix(value: str) -> str:
++    stripped = value.strip()
++    stripped = re.sub(r"^[-*]\s+", "", stripped)
++    stripped = re.sub(r"^\d+\.\s+", "", stripped)
++    return collapse_ws(stripped)
++
++
+ def normalize_action(value: str) -> str:
+     normalized = unicodedata.normalize("NFC", value)
+     normalized = PUNCT_RE.sub(" ", normalized.lower())
+@@ -249,6 +284,225 @@ def build_transcript_text(sentences: Iterable[dict[str, Any]], *, limit: int) ->
+     return "\n".join(lines)
+ 
+ 
++def markdown_sections(path: Path) -> dict[str, list[str]]:
++    if not path.exists():
++        return {}
++    sections: dict[str, list[str]] = {}
++    current: str | None = None
++    for raw_line in path.read_text(encoding="utf-8").splitlines():
++        match = SECTION_HEADING_RE.match(raw_line)
++        if match:
++            current = normalize_action(match.group(1))
++            sections[current] = []
++            continue
++        if current is not None:
++            sections[current].append(raw_line.rstrip())
++    return sections
++
++
++def first_meaningful_line(path: Path) -> str:
++    if not path.exists():
++        return ""
++    for raw_line in path.read_text(encoding="utf-8").splitlines():
++        if raw_line.lstrip().startswith("#"):
++            continue
++        line = strip_markdown_prefix(raw_line)
++        if not line or normalize_action(line).startswith("todo"):
++            continue
++        return line
++    return ""
++
++
++def first_section_line(path: Path, section_name: str) -> str:
++    for raw_line in markdown_sections(path).get(normalize_action(section_name), []):
++        line = strip_markdown_prefix(raw_line)
++        if line and not normalize_action(line).startswith("todo"):
++            return line
++    return ""
++
++
++def markdown_key_value(lines: list[str], key: str) -> str:
++    target = normalize_action(key)
++    for raw_line in lines:
++        line = strip_markdown_prefix(raw_line)
++        if ":" not in line:
++            continue
++        label, value = line.split(":", 1)
++        if normalize_action(label) == target:
++            return collapse_ws(value)
++    return ""
++
++
++def markdown_open_items(lines: list[str]) -> list[str]:
++    items: list[str] = []
++    for raw_line in lines:
++        line = raw_line.strip()
++        if not line.startswith("|"):
++            continue
++        cells = [collapse_ws(cell) for cell in line.strip("|").split("|")]
++        if not cells:
++            continue
++        if all(MARKDOWN_TABLE_SEPARATOR.fullmatch(cell or "-") for cell in cells):
++            continue
++        if normalize_action(cells[0]) == "item":
++            continue
++        item_text = cells[0]
++        if item_text:
++            items.append(item_text)
++    return items
++
++
++def clearworks_identity_context() -> str:
++    company_line = first_meaningful_line(COMPANY_PATH)
++    company_one_liner = ""
++    if COMPANY_PATH.exists():
++        for raw_line in COMPANY_PATH.read_text(encoding="utf-8").splitlines():
++            line = strip_markdown_prefix(raw_line)
++            if line.lower().startswith("one-line:"):
++                company_one_liner = collapse_ws(line.split(":", 1)[1])
++                break
++    offer_line = first_section_line(OFFER_PATH, "ICP / who we say yes to") or first_section_line(
++        OFFER_PATH, "What we sell"
++    )
++    state_line = first_section_line(STATE_PATH, "Active work") or first_section_line(
++        STATE_PATH, "Next priorities"
++    )
++    parts = [
++        company_one_liner or company_line or "Clearworks is an AI ops and consulting firm.",
++        offer_line,
++        state_line,
++    ]
++    return collapse_ws(" ".join(part for part in parts if part))[:420]
++
++
++def client_name_from_path(path: Path) -> str:
++    for raw_line in path.read_text(encoding="utf-8").splitlines():
++        if raw_line.startswith("# Client:"):
++            return collapse_ws(raw_line.split(":", 1)[1])
++    return collapse_ws(path.stem.replace("-", " ").title())
++
++
++def client_context_records(clients_dir: Path = CLIENTS_DIR) -> list[dict[str, Any]]:
++    if not clients_dir.exists():
++        return []
++    identity = clearworks_identity_context()
++    records: list[dict[str, Any]] = []
++    for path in sorted(clients_dir.glob("*.md")):
++        if path.name == "_template.md":
++            continue
++        sections = markdown_sections(path)
++        contacts_lines = sections.get("contacts", [])
++        current_state_lines = sections.get("current state", [])
++        delivery_lines = sections.get("what we re delivering", [])
++        client_name = client_name_from_path(path)
++        names: set[str] = {normalize_action(client_name)}
++        emails: set[str] = set()
++        for raw_line in contacts_lines:
++            line = strip_markdown_prefix(raw_line)
++            if not line:
++                continue
++            emails.update(match.lower() for match in EMAIL_RE.findall(line))
++            head = re.split(r"\s+[—-]\s+", line, maxsplit=1)[0]
++            if head:
++                names.add(normalize_action(head))
++        stage = markdown_key_value(current_state_lines, "Deal stage") or "unknown"
++        status = markdown_key_value(current_state_lines, "CRM status") or "unknown"
++        next_action = markdown_key_value(current_state_lines, "Next action")
++        engagement = markdown_key_value(delivery_lines, "Engagement") or "unknown"
++        service_type = markdown_key_value(delivery_lines, "Service type")
++        relationship_context = markdown_key_value(delivery_lines, "Relationship context")
++        open_items = markdown_open_items(sections.get("open items", []))
++        detail_parts = [
++            f"This meeting's attendees map to client={client_name}.",
++            f"Deal stage={stage}.",
++            f"CRM status={status}.",
++            f"Engagement={engagement}.",
++        ]
++        if service_type:
++            detail_parts.append(f"Service={service_type}.")
++        if relationship_context:
++            detail_parts.append(f"Relationship={relationship_context}.")
++        if next_action:
++            detail_parts.append(f"Open next action: {next_action}.")
++        relevance_fragments = [client_name, engagement, service_type, relationship_context, next_action]
++        records.append(
++            {
++                "path": path,
++                "client_name": client_name,
++                "client_name_normalized": normalize_action(client_name),
++                "names": names,
++                "emails": emails,
++                "context": collapse_ws(f"{identity} {' '.join(detail_parts)}"),
++                "open_items": open_items,
++                "relevance_fragments": tuple(fragment for fragment in relevance_fragments if fragment),
++            }
++        )
++    return records
++
++
++def transcript_emails(transcript: dict[str, Any]) -> set[str]:
++    emails: set[str] = set()
++    organizer = collapse_ws(str(transcript.get("organizer_email") or ""))
++    if organizer:
++        emails.add(organizer.lower())
++    participants = transcript.get("participants") or []
++    if isinstance(participants, list):
++        for participant in participants:
++            for match in EMAIL_RE.findall(str(participant)):
++                emails.add(match.lower())
++    return emails
++
++
++def transcript_identity_haystack(transcript: dict[str, Any]) -> str:
++    parts = [str(transcript.get("title") or "")]
++    participants = transcript.get("participants") or []
++    if isinstance(participants, list):
++        parts.extend(str(participant) for participant in participants)
++    parts.append(str(transcript.get("organizer_email") or ""))
++    speakers = transcript.get("speakers") or []
++    if isinstance(speakers, list):
++        parts.extend(str(speaker.get("name") or "") for speaker in speakers if isinstance(speaker, dict))
++    return normalize_action(" ".join(parts))
++
++
++def matched_client_context_record_for_transcript(
++    transcript: dict[str, Any],
++    *,
++    clients_dir: Path = CLIENTS_DIR,
++) -> dict[str, Any] | None:
++    haystack = transcript_identity_haystack(transcript)
++    emails = transcript_emails(transcript)
++    best_score = 0
++    best_record: dict[str, Any] | None = None
++    for record in client_context_records(clients_dir):
++        score = 0
++        email_hits = emails & record["emails"]
++        if email_hits:
++            score += 10 * len(email_hits)
++        if record["client_name_normalized"] and record["client_name_normalized"] in haystack:
++            score += 2
++        for name in record["names"]:
++            if len(name) < 4:
++                continue
++            if name in haystack:
++                score += 3
++        if score > best_score:
++            best_score = score
++            best_record = record
++    return best_record if best_score >= 3 else None
++
++
++def client_context_for_transcript(
++    transcript: dict[str, Any],
++    *,
++    clients_dir: Path = CLIENTS_DIR,
++) -> str:
++    record = matched_client_context_record_for_transcript(transcript, clients_dir=clients_dir)
++    if record is None:
++        return ""
++    return str(record.get("context") or "")
++
++
+ def parse_transcript_datetime(raw_value: Any) -> datetime | None:
+     if isinstance(raw_value, (int, float)):
+         timestamp = float(raw_value)
+@@ -344,25 +598,6 @@ def select_recent_transcripts(
+     return fresh[:limit]
+ 
+ 
+-def select_commitment_transcripts(
+-    transcripts: list[dict[str, Any]],
+-    watermark_timestamp: datetime | None,
+-    watermark_meeting_id: str | None,
+-    *,
+-    limit: int,
+-    meeting_id: str,
+-) -> list[dict[str, Any]]:
+-    ordered = sorted(transcripts, key=transcript_sort_key)
+-    if meeting_id:
+-        return [transcript for transcript in ordered if str(transcript.get("id") or "") == meeting_id]
+-    return select_recent_transcripts(
+-        ordered,
+-        watermark_timestamp,
+-        watermark_meeting_id,
+-        limit=limit,
+-    )
+-
+-
+ def fireflies_graphql(
+     api_key: str,
+     query: str,
+@@ -515,22 +750,12 @@ def extract_action_items(
+     openrouter_api_key: str,
+     urlopen: Urlopen = urllib.request.urlopen,
+ ) -> list[ExtractedItem]:
+-    normalized_client_context = collapse_ws(client_context)
+-    client_context_block = ""
+-    if normalized_client_context:
+-        client_context_block = (
+-            "Client context:\n"
+-            f"{normalized_client_context}\n\n"
+-            "Only surface items material to an active Clearworks engagement. "
+-            "Use the client context to prioritize the named client, deal stage, and open next action. "
+-            "Ignore generic brainstorms or broader ideas that do not materially advance the engagement.\n"
+-        )
+     response_text = openrouter_request(
+         openrouter_api_key,
+         model=EXTRACTOR_MODEL,
+         prompt=ACTION_ITEMS_PROMPT.format(
+-            client_context_block=client_context_block,
+             transcript=transcript_text,
++            client_context=client_context or "",
+         ),
+         max_tokens=2400,
+         urlopen=urlopen,
+@@ -542,6 +767,26 @@ def normalized_tokens(value: str) -> set[str]:
+     return {token for token in TOKEN_RE.findall(normalize_action(value)) if token and token not in STOPWORDS}
+ 
+ 
++def title_similarity(left: str, right: str) -> float:
++    left_normalized = normalize_action(left)
++    right_normalized = normalize_action(right)
++    if not left_normalized or not right_normalized:
++        return 0.0
++    return SequenceMatcher(None, left_normalized, right_normalized).ratio()
++
++
++def keyword_overlap(left: str, right: str) -> float:
++    left_tokens = normalized_tokens(left)
++    right_tokens = normalized_tokens(right)
++    if not left_tokens or not right_tokens:
++        return 0.0
++    return len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
++
++
++def fuzzy_similarity(left: str, right: str) -> float:
++    return (0.7 * title_similarity(left, right)) + (0.3 * keyword_overlap(left, right))
++
++
+ def is_josh_owner(owner: str) -> bool:
+     normalized = normalize_action(owner)
+     return normalized in {"josh", "josh weiss", "me", "i", "myself"}
+@@ -675,6 +920,142 @@ def build_commitment_text(action: str, due: str | None) -> str:
+     return action
+ 
+ 
++def deadline_distance_days(deadline: str, meeting_day: date) -> int | None:
++    if not deadline:
++        return None
++    try:
++        return (date.fromisoformat(deadline) - meeting_day).days
++    except ValueError:
++        return None
++
++
++def relevance_score_for_commitment(action_text: str, client_record: dict[str, Any] | None) -> float:
++    if client_record is None:
++        return 0.0
++    fragments = [collapse_ws(str(fragment)) for fragment in client_record.get("relevance_fragments", ()) if fragment]
++    if not fragments:
++        context = collapse_ws(str(client_record.get("context") or ""))
++        if context:
++            fragments = [context]
++    if not fragments:
++        return 0.0
++    return max(fuzzy_similarity(action_text, fragment) for fragment in fragments)
++
++
++def priority_for_commitment(
++    *,
++    action_text: str,
++    deadline: str,
++    meeting_day: date,
++    client_record: dict[str, Any] | None,
++) -> tuple[str, float]:
++    relevance_score = relevance_score_for_commitment(action_text, client_record)
++    due_distance = deadline_distance_days(deadline, meeting_day)
++    has_context = client_record is not None and bool(client_record.get("context"))
++    if due_distance is not None and due_distance <= P0_DUE_WINDOW_DAYS and (not has_context or relevance_score >= RELEVANCE_P0_MIN):
++        return "P0", relevance_score
++    if (
++        due_distance is not None
++        and due_distance <= P1_DUE_WINDOW_DAYS
++        and (not has_context or relevance_score >= RELEVANCE_P1_MIN)
++    ) or relevance_score >= RELEVANCE_P1_PROMOTION:
++        return "P1", relevance_score
++    if due_distance is not None or relevance_score >= RELEVANCE_P2_MIN:
++        return "P2", relevance_score
++    return "P3", relevance_score
++
++
++def scored_commitment(
++    commitment: RefinedCommitment,
++    *,
++    meeting_day: date,
++    client_record: dict[str, Any] | None,
++) -> RefinedCommitment:
++    priority, relevance_score = priority_for_commitment(
++        action_text=commitment.action_text or commitment.text,
++        deadline=commitment.deadline,
++        meeting_day=meeting_day,
++        client_record=client_record,
++    )
++    return replace(commitment, priority=priority, relevance_score=round(relevance_score, 4))
++
++
++def priority_group_sort_key(commitment: RefinedCommitment, meeting_day: date) -> tuple[float, int, str, str]:
++    due_distance = deadline_distance_days(commitment.deadline, meeting_day)
++    due_sort = due_distance if due_distance is not None else 999_999
++    text_sort = normalize_action(commitment.action_text or commitment.text)
++    return (-commitment.relevance_score, due_sort, text_sort, commitment.id)
++
++
++def tie_break_key(commitment: RefinedCommitment, meeting_day: date) -> tuple[float, int]:
++    due_distance = deadline_distance_days(commitment.deadline, meeting_day)
++    due_sort = due_distance if due_distance is not None else 999_999
++    return (round(commitment.relevance_score, 4), due_sort)
++
++
++def deduped_commitments(
++    commitments: list[RefinedCommitment],
++    *,
++    backlog_items: list[str],
++    meeting_day: date,
++) -> list[RefinedCommitment]:
++    kept: list[RefinedCommitment] = []
++    comparison_corpus = list(backlog_items)
++    ordered = sorted(
++        commitments,
++        key=lambda commitment: (
++            PRIORITY_INDEX.get(commitment.priority, len(PRIORITY_ORDER)),
++            priority_group_sort_key(commitment, meeting_day),
++        ),
++    )
++    for commitment in ordered:
++        candidate_text = commitment.action_text or commitment.text
++        if any(fuzzy_similarity(candidate_text, existing) >= FUZZY_DEDUP_THRESHOLD for existing in comparison_corpus):
++            continue
++        kept.append(commitment)
++        comparison_corpus.append(candidate_text)
++    return kept
++
++
++def apply_priority_cap(
++    commitments: list[RefinedCommitment],
++    *,
++    cap: int,
++    meeting_day: date,
++) -> tuple[list[RefinedCommitment], list[RefinedCommitment]]:
++    if len(commitments) <= cap:
++        ordered = sorted(commitments, key=lambda commitment: priority_group_sort_key(commitment, meeting_day))
++        return ordered, []
++    ordered = sorted(commitments, key=lambda commitment: priority_group_sort_key(commitment, meeting_day))
++    cutoff_key = tie_break_key(ordered[cap - 1], meeting_day)
++    if tie_break_key(ordered[cap], meeting_day) == cutoff_key:
++        keep: list[RefinedCommitment] = []
++        split_at = 0
++        for index, commitment in enumerate(ordered):
++            if tie_break_key(commitment, meeting_day) == cutoff_key:
++                split_at = index
++                break
++            keep.append(commitment)
++        else:
++            split_at = len(ordered)
++        return keep, ordered[split_at:]
++    return ordered[:cap], ordered[cap:]
++
++
++def enforce_priority_caps(commitments: list[RefinedCommitment], *, meeting_day: date) -> list[RefinedCommitment]:
++    buckets = {priority: [] for priority in PRIORITY_ORDER}
++    for commitment in commitments:
++        buckets.setdefault(commitment.priority, []).append(commitment)
++
++    kept_p0, demoted_p0 = apply_priority_cap(buckets["P0"], cap=P0_CAP, meeting_day=meeting_day)
++    p1_pool = buckets["P1"] + [replace(commitment, priority="P1") for commitment in demoted_p0]
++    kept_p1, demoted_p1 = apply_priority_cap(p1_pool, cap=P1_CAP, meeting_day=meeting_day)
++    p2_pool = buckets["P2"] + [replace(commitment, priority="P2") for commitment in demoted_p1]
++    kept_p2 = sorted(p2_pool, key=lambda commitment: priority_group_sort_key(commitment, meeting_day))
++    kept_p3 = sorted(buckets["P3"], key=lambda commitment: priority_group_sort_key(commitment, meeting_day))
++    return kept_p0 + kept_p1 + kept_p2 + kept_p3
++
++
+ def refine_outbound_item(
+     item: ExtractedItem,
+     *,
+@@ -702,6 +1083,7 @@ def refine_outbound_item(
+         source="ff",
+         source_ref=source_ref,
+         direction="outbound",
++        action_text=item.action,
+         owner="Josh",
+         deadline=due or "",
+         source_quote=support or "",
+@@ -741,6 +1123,7 @@ def refine_inbound_item(
+         source="ff-inbound",
+         source_ref=source_ref,
+         direction="inbound",
++        action_text=item.action,
+         owner=item.owner,
+         deadline=due or "",
+         source_quote=quote,
+@@ -750,6 +1133,8 @@ def refine_inbound_item(
+ def refine_items(
+     transcript: dict[str, Any],
+     extracted_items: list[ExtractedItem],
++    *,
++    client_record: dict[str, Any] | None = None,
+ ) -> list[RefinedCommitment]:
+     meeting_id = str(transcript.get("id") or "")
+     title = collapse_ws(str(transcript.get("title") or "Untitled Meeting"))
+@@ -783,17 +1168,25 @@ def refine_items(
+             continue
+         seen_ids.add(commitment.id)
+         commitments.append(commitment)
+-    return commitments
++
++    scored = [
++        scored_commitment(commitment, meeting_day=meeting_day, client_record=client_record) for commitment in commitments
++    ]
++    backlog_items = list(client_record.get("open_items", [])) if client_record is not None else []
++    return enforce_priority_caps(
++        deduped_commitments(scored, backlog_items=backlog_items, meeting_day=meeting_day),
++        meeting_day=meeting_day,
++    )
+ 
+ 
+ def commitment_entries(
+     commitments: list[RefinedCommitment],
+     *,
+     enriched: bool,
+-) -> list[dict[str, str]]:
+-    entries: list[dict[str, str]] = []
++) -> list[dict[str, Any]]:
++    entries: list[dict[str, Any]] = []
+     for item in commitments:
+-        entry: dict[str, str] = {
++        entry: dict[str, Any] = {
+             "id": item.id,
+             "text": item.text,
+             "direction": item.direction,
+@@ -804,6 +1197,8 @@ def commitment_entries(
+             entry["owner"] = item.owner
+             entry["deadline"] = item.deadline
+             entry["sourceQuote"] = item.source_quote
++            entry["priority"] = item.priority
++            entry["relevanceScore"] = item.relevance_score
+         entries.append(entry)
+     return entries
+ 
+@@ -847,18 +1242,11 @@ def execute(
+     *,
+     limit: int,
+     dry_run: bool,
+-    meeting_id: str,
+     watermark_path: Path,
+     urlopen: Urlopen = urllib.request.urlopen,
+ ) -> int:
+     try:
+-        return run(
+-            limit=limit,
+-            dry_run=dry_run,
+-            meeting_id=meeting_id,
+-            watermark_path=watermark_path,
+-            urlopen=urlopen,
+-        )
++        return run(limit=limit, dry_run=dry_run, watermark_path=watermark_path, urlopen=urlopen)
+     except (RuntimeError, ValueError, urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError) as exc:
+         reason = collapse_ws(str(exc)) or exc.__class__.__name__
+         LOGGER.error("ff-extractor failed: %s", reason)
+@@ -870,7 +1258,6 @@ def run(
+     *,
+     limit: int,
+     dry_run: bool,
+-    meeting_id: str,
+     watermark_path: Path,
+     urlopen: Urlopen = urllib.request.urlopen,
+ ) -> int:
+@@ -887,18 +1274,9 @@ def run(
+ 
+     watermark_timestamp, watermark_meeting_id = load_watermark(watermark_path)
+     recent = fetch_recent_transcripts(fireflies_api_key, limit=limit, urlopen=urlopen)
+-    fresh = select_commitment_transcripts(
+-        recent,
+-        watermark_timestamp,
+-        watermark_meeting_id,
+-        limit=limit,
+-        meeting_id=meeting_id,
+-    )
++    fresh = select_recent_transcripts(recent, watermark_timestamp, watermark_meeting_id, limit=limit)
+     if not fresh:
+-        payload = {"meetings": 0, "commitments": 0, "posted": False, "dry_run": dry_run, "items": []}
+-        if meeting_id:
+-            payload["meeting_id"] = meeting_id
+-        print(json.dumps(payload))
++        print(json.dumps({"meetings": 0, "commitments": 0, "posted": False, "dry_run": dry_run, "items": []}))
+         return 0
+ 
+     all_commitments: list[RefinedCommitment] = []
+@@ -911,9 +1289,16 @@ def run(
+         if is_casual_transcript(transcript_text, openrouter_api_key=openrouter_api_key, urlopen=urlopen):
+             processed.append(transcript)
+             continue
++        client_record = matched_client_context_record_for_transcript(transcript)
++        client_context = str(client_record.get("context") or "") if client_record is not None else ""
+         extraction_text = build_transcript_text(transcript.get("sentences", []), limit=EXTRACTOR_MAX_CHARS)
+-        extracted = extract_action_items(extraction_text, openrouter_api_key=openrouter_api_key, urlopen=urlopen)
+-        all_commitments.extend(refine_items(transcript, extracted))
++        extracted = extract_action_items(
++            extraction_text,
++            client_context=client_context,
++            openrouter_api_key=openrouter_api_key,
++            urlopen=urlopen,
++        )
++        all_commitments.extend(refine_items(transcript, extracted, client_record=client_record))
+         processed.append(transcript)
+ 
+     items = commitment_entries(all_commitments, enriched=True)
+@@ -944,8 +1329,7 @@ def run(
+         print(json.dumps({"meetings": len(processed), "commitments": 0, "posted": False, "noop": True, "items": items}))
+ 
+     newest = max(processed, key=transcript_sort_key)
+-    if is_newer_than_watermark(newest, watermark_timestamp, watermark_meeting_id):
+-        save_watermark(watermark_path, newest)
++    save_watermark(watermark_path, newest)
+     return 0
+ 
+ 
+@@ -956,6 +1340,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+     parser.add_argument("--watermark-path", default=str(DEFAULT_WATERMARK_PATH))
+     parser.add_argument("--recap", action="store_true", help="Emit recap JSON (summary + gated next steps); no POST, no watermark")
+     parser.add_argument("--recap-ledger", default=str(STATE_DIR / "meeting-recap-drafts-surfaced.txt"))
++    parser.add_argument(
++        "--full-ledger",
++        default="",
++        help="Full mode only: path to ledger of already-filed meeting ids (skip + count skipped_ledger)",
++    )
+     parser.add_argument(
+         "--mode",
+         choices=["commitments", "recap", "full"],
+@@ -965,7 +1354,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+     parser.add_argument(
+         "--meeting-id",
+         default="",
+-        help="Filter to one Fireflies transcript id (full mode and webhook-triggered commitments mode)",
++        help="Only honored in full mode: filter to one Fireflies transcript id",
+     )
+     return parser.parse_args(argv)
+ 
+@@ -1000,6 +1389,11 @@ def load_recap_ledger(path: Path) -> set[str]:
+     return ledger_ids
+ 
+ 
++def load_ledger(path: Path) -> set[str]:
++    """Alias of load_recap_ledger — shared ledger format (id as first token)."""
++    return load_recap_ledger(path)
++
++
+ def is_suppressed_meeting(transcript: dict[str, Any]) -> bool:
+     suppressed_normalized = [normalize_action(name) for name in SUPPRESSED_NAMES]
+     haystacks = [
+@@ -1046,8 +1440,11 @@ def build_recap_meeting(
+         return None
+     
+     # Extract action items for next steps
++    client_record = matched_client_context_record_for_transcript(transcript)
++    client_context = str(client_record.get("context") or "") if client_record is not None else ""
+     extracted = extract_action_items(
+         build_transcript_text(sentences, limit=EXTRACTOR_MAX_CHARS),
++        client_context=client_context,
+         openrouter_api_key=openrouter_api_key,
+         urlopen=urlopen,
+     )
+@@ -1086,7 +1483,8 @@ def build_recap_meeting(
+             "bullets": collapse_ws(str(summary.get("shorthand_bullet") or "")),
+             "action_items": collapse_ws(str(summary.get("action_items") or "")),
+         },
+-        "next_steps": commitment_entries(refine_items(transcript, extracted), enriched=True),
++        "client_context": client_context,
++        "next_steps": commitment_entries(refine_items(transcript, extracted, client_record=client_record), enriched=True),
+     }
+ 
+ 
+@@ -1150,10 +1548,11 @@ def execute_full(
+     *,
+     limit: int,
+     meeting_id: str,
++    full_ledger_path: Path | None = None,
+     urlopen: Urlopen = urllib.request.urlopen,
+ ) -> int:
+     try:
+-        return run_full(limit=limit, meeting_id=meeting_id, urlopen=urlopen)
++        return run_full(limit=limit, meeting_id=meeting_id, full_ledger_path=full_ledger_path, urlopen=urlopen)
+     except (RuntimeError, ValueError, urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError) as exc:
+         reason = collapse_ws(str(exc)) or exc.__class__.__name__
+         LOGGER.error("ff-extractor full failed: %s", reason)
+@@ -1165,11 +1564,13 @@ def run_full(
+     *,
+     limit: int,
+     meeting_id: str,
++    full_ledger_path: Path | None = None,
+     urlopen: Urlopen = urllib.request.urlopen,
+ ) -> int:
+     fireflies_api_key = require_env("FIREFLIES_API_KEY")
+     openrouter_api_key = require_env("OPENROUTER_API_KEY")
+ 
++    ledger_ids = load_ledger(full_ledger_path) if full_ledger_path else set()
+     recent = fetch_recent_transcripts(fireflies_api_key, limit=limit, urlopen=urlopen)
+     recent_sorted = sorted(recent, key=transcript_sort_key, reverse=True)
+ 
+@@ -1177,6 +1578,7 @@ def run_full(
+         recent_sorted = [t for t in recent_sorted if str(t.get("id") or "") == meeting_id]
+ 
+     meetings: list[dict[str, Any]] = []
++    skipped_ledger = 0
+     skipped_suppressed = 0
+     skipped_casual = 0
+ 
+@@ -1185,6 +1587,10 @@ def run_full(
+         if not tid:
+             continue
+ 
++        if tid in ledger_ids:
++            skipped_ledger += 1
++            continue
++
+         if is_suppressed_meeting(transcript):
+             skipped_suppressed += 1
+             continue
+@@ -1205,6 +1611,7 @@ def run_full(
+     print(json.dumps({
+         "mode": "full",
+         "meetings": meetings,
++        "skipped_ledger": skipped_ledger,
+         "skipped_casual": skipped_casual,
+         "skipped_suppressed": skipped_suppressed,
+     }))
+@@ -1232,11 +1639,11 @@ def main(argv: list[str] | None = None) -> int:
+         return execute_full(
+             limit=max(1, args.limit),
+             meeting_id=str(args.meeting_id or ""),
++            full_ledger_path=Path(args.full_ledger) if args.full_ledger else None,
+         )
+     return execute(
+         limit=max(1, args.limit),
+         dry_run=args.dry_run,
+-        meeting_id=str(args.meeting_id or ""),
+         watermark_path=Path(args.watermark_path),
+     )
+ 
+diff --git a/orgs/clearworksai/agents/frank2/scripts/sync_meetings_to_cxportal.py b/orgs/clearworksai/agents/frank2/scripts/sync_meetings_to_cxportal.py
+new file mode 100755
+index 0000000..12c07b7
+--- /dev/null
++++ b/orgs/clearworksai/agents/frank2/scripts/sync_meetings_to_cxportal.py
+@@ -0,0 +1,201 @@
++#!/usr/bin/env python3
++"""Push CRM meeting data to cxportal ingest endpoint."""
++
++from __future__ import annotations
++
++import argparse
++import json
++import os
++import re
++import urllib.error
++import urllib.request
++from datetime import datetime
++from pathlib import Path
++from typing import Any
++
++
++SCRIPT_PATH = Path(__file__).resolve()
++AGENT_DIR = SCRIPT_PATH.parent.parent
++ORG_DIR = AGENT_DIR.parent
++CRM_DIR = AGENT_DIR / "crm" / "crm"
++MEETINGS_DIR = CRM_DIR / "meetings"
++ORG_ID = os.environ.get("CXPORTAL_ORG_ID", "")
++INGEST_URL = os.environ.get("CXPORTAL_INGEST_URL", "")
++INGEST_SECRET = os.environ.get("CXPORTAL_INGEST_SECRET", "")
++SECTION_RE = re.compile(r"^##\s+(.+)$")
++COMMITMENT_RE = re.compile(r"^- \[(x| )\]\s+(.+?)(?:\s+by:\s*([^\n]+))?(?:\s+due:\s*([^\n]+))?", re.IGNORECASE)
++
++
++def load_meeting_records(meetings_dir: Path) -> list[dict[str, Any]]:
++    """Load meeting records from CRM meetings/*.md files."""
++    records: list[dict[str, Any]] = []
++    
++    if not meetings_dir.exists():
++        return records
++    
++    for path in sorted(meetings_dir.glob("*.md")):
++        lines = path.read_text(encoding="utf-8").splitlines()
++        if not lines:
++            continue
++            
++        meeting: dict[str, Any] = {
++            "title": lines[0].lstrip("#").strip(),
++            "source": "crm",
++            "sourceId": path.stem,
++            "attendees": [],
++            "commitments": [],
++        }
++        
++        current_section: str | None = None
++        current_commitments: list[dict[str, str]] = []
++        
++        for line in lines[1:]:
++            section_match = SECTION_RE.match(line)
++            if section_match:
++                current_section = section_match.group(1).strip().lower()
++                if current_section in ("commitments", "action items", "follow-up"):
++                    current_commitments = []
++                continue
++            
++            if not current_section:
++                continue
++                
++            if current_section == "attendees":
++                if line.strip() and not line.strip().startswith("#"):
++                    attendee = line.strip().lstrip("-").strip()
++                    if attendee:
++                        meeting["attendees"].append(attendee)
++            
++            elif current_section in ("commitments", "action items", "follow-up"):
++                commitment_match = COMMITMENT_RE.match(line)
++                if commitment_match:
++                    status, text, owner, due = commitment_match.groups()
++                    current_commitments.append({
++                        "description": text.strip(),
++                        "status": "done" if status.lower() == "x" else "open",
++                        "ownerName": owner.strip() if owner else None,
++                        "dueDate": due.strip() if due else None,
++                        "origin": "crm",
++                    })
++            elif current_commitments and line.strip():
++                # Multi-line commitment description
++                if current_commitments:
++                    current_commitments[-1]["description"] += " " + line.strip()
++        
++        meeting["commitments"] = current_commitments
++        records.append(meeting)
++    
++    return records
++
++
++def post_to_cxportal(meeting: dict[str, Any], org_id: str, ingest_url: str, ingest_secret: str) -> dict[str, Any] | None:
++    """Post meeting data to cxportal ingest endpoint."""
++    if not org_id or not ingest_url or not ingest_secret:
++        return None
++    
++    try:
++        payload = {
++            "orgId": org_id,
++            "meeting": {
++                "title": meeting["title"],
++                "status": "completed",
++                "source": meeting["source"],
++                "sourceId": meeting["sourceId"],
++                "extract": {
++                    "attendees": meeting.get("attendees", []),
++                },
++            },
++            "actionItems": [
++                {
++                    "description": item["description"],
++                    "ownerName": item.get("ownerName"),
++                    "dueDate": item.get("dueDate"),
++                    "status": item["status"],
++                    "origin": item.get("origin", "crm"),
++                }
++                for item in meeting.get("commitments", [])
++            ],
++        }
++        
++        request = urllib.request.Request(
++            ingest_url,
++            data=json.dumps(payload).encode("utf-8"),
++            method="POST",
++        )
++        request.add_header("Content-Type", "application/json")
++        request.add_header("x-meeting-ingest-secret", ingest_secret)
++        
++        with urllib.request.urlopen(request, timeout=30) as response:
++            status = getattr(response, "status", 200)
++            response_data = json.loads(response.read().decode("utf-8"))
++        
++        if status not in (200, 201):
++            print(f"ERROR: cxportal returned {status}: {response_data}")
++            return None
++        
++        return response_data
++        
++    except Exception as exc:
++        print(f"ERROR: Failed to post meeting {meeting['sourceId']}: {exc}")
++        return None
++
++
++def main(argv: list[str] | None = None) -> int:
++    parser = argparse.ArgumentParser(description="Push CRM meetings to cxportal")
++    parser.add_argument("--dry-run", action="store_true", help="Show what would be posted without POSTing")
++    parser.add_argument("--meetings-dir", default=str(MEETINGS_DIR), help="Path to CRM meetings directory")
++    
++    args = parser.parse_args(argv)
++    
++    if not ORG_ID:
++        print("ERROR: CXPORTAL_ORG_ID environment variable is required")
++        return 1
++    
++    if not INGEST_URL:
++        print("ERROR: CXPORTAL_INGEST_URL environment variable is required")
++        return 1
++    
++    if not INGEST_SECRET:
++        print("ERROR: CXPORTAL_INGEST_SECRET environment variable is required")
++        return 1
++    
++    meetings_dir = Path(args.meetings_dir)
++    meetings = load_meeting_records(meetings_dir)
++    
++    if not meetings:
++        print("No meeting records found in CRM")
++        return 0
++    
++    print(f"Found {len(meetings)} meeting records in CRM")
++    
++    if args.dry_run:
++        print("Dry run - would post the following:")
++        for meeting in meetings:
++            print(f"  - {meeting['title']} ({meeting['sourceId']})")
++            print(f"    Attendees: {meeting.get('attendees', [])}")
++            print(f"    Commitments: {len(meeting.get('commitments', []))}")
++        return 0
++    
++    posted = 0
++    failed = 0
++    
++    for meeting in meetings:
++        result = post_to_cxportal(
++            meeting=meeting,
++            org_id=ORG_ID,
++            ingest_url=INGEST_URL,
++            ingest_secret=INGEST_SECRET,
++        )
++        
++        if result:
++            posted += 1
++            print(f"✓ Posted meeting: {meeting['title']} ({meeting['sourceId']})")
++        else:
++            failed += 1
++    
++    print(f"\nResults: {posted} posted, {failed} failed")
++    return 0 if failed == 0 else 1
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+\ No newline at end of file

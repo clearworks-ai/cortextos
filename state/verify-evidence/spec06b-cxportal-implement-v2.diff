@@ -1,0 +1,525 @@
+diff --git a/scripts/sync_commitments_from_cxportal.py b/scripts/sync_commitments_from_cxportal.py
+new file mode 100644
+index 0000000..a9e0e7d
+--- /dev/null
++++ b/scripts/sync_commitments_from_cxportal.py
+@@ -0,0 +1,293 @@
++#!/usr/bin/env python3
++"""Sync commitment status changes from cxportal back to CRM.
++
++This script queries the cxportal database for commitment status changes
++and updates the corresponding CRM meeting files.
++"""
++
++from __future__ import annotations
++
++import argparse
++import os
++import re
++from datetime import datetime, timedelta
++from pathlib import Path
++from typing import Any
++
++# Try to import from lifecycle-keeper environment, otherwise use placeholder
++try:
++    import psycopg2
++    from psycopg2.extras import RealDictCursor
++    DB_AVAILABLE = True
++except ImportError:
++    DB_AVAILABLE = False
++    print("WARNING: psycopg2 not available - using stub implementation")
++
++
++CRM_DIR = Path(__file__).parent.parent / "crm" / "crm"
++MEETINGS_DIR = CRM_DIR / "meetings"
++STATE_DIR = Path(__file__).parent.parent / "state"
++LAST_SYNC_FILE = STATE_DIR / "last_commitment_sync.txt"
++SECTION_RE = re.compile(r"^##\s+(.+)$")
++COMMITMENT_RE = re.compile(r"^- \[(x| )\]\s+(.+?)(?:\s+by:\s*([^\n]+))?(?:\s+due:\s*([^\n]+))?", re.IGNORECASE)
++
++
++def get_last_sync_time() -> datetime:
++    """Get the timestamp of the last successful sync."""
++    if LAST_SYNC_FILE.exists():
++        try:
++            timestamp_str = LAST_SYNC_FILE.read_text().strip()
++            return datetime.fromisoformat(timestamp_str)
++        except:
++            pass
++    # Default to 30 days ago if no sync record exists
++    return datetime.now() - timedelta(days=30)
++
++
++def save_last_sync_time(timestamp: datetime) -> None:
++    """Save the timestamp of the last successful sync."""
++    LAST_SYNC_FILE.parent.mkdir(parents=True, exist_ok=True)
++    LAST_SYNC_FILE.write_text(timestamp.isoformat())
++
++
++def load_crm_meeting(meeting_id: str) -> dict[str, Any] | None:
++    """Load a CRM meeting file by ID."""
++    meeting_file = MEETINGS_DIR / f"{meeting_id}.md"
++    if not meeting_file.exists():
++        return None
++    
++    lines = meeting_file.read_text(encoding="utf-8").splitlines()
++    if not lines:
++        return None
++    
++    meeting: dict[str, Any] = {
++        "title": lines[0].lstrip("#").strip(),
++        "path": meeting_file,
++        "commitments": [],
++    }
++    
++    current_section: str | None = None
++    current_commitments: list[dict[str, str]] = []
++    
++    for line in lines[1:]:
++        section_match = SECTION_RE.match(line)
++        if section_match:
++            current_section = section_match.group(1).strip().lower()
++            if current_section in ("commitments", "action items", "follow-up"):
++                current_commitments = []
++            continue
++        
++        if not current_section:
++            continue
++            
++        if current_section in ("commitments", "action items", "follow-up"):
++            commitment_match = COMMITMENT_RE.match(line)
++            if commitment_match:
++                status, text, owner, due = commitment_match.groups()
++                current_commitments.append({
++                    "description": text.strip(),
++                    "status": "done" if status.lower() == "x" else "open",
++                    "ownerName": owner.strip() if owner else None,
++                    "dueDate": due.strip() if due else None,
++                    "line": line,  # Store original line for updating
++                })
++            elif current_commitments and line.strip():
++                # Multi-line commitment description
++                if current_commitments:
++                    current_commitments[-1]["description"] += " " + line.strip()
++                    current_commitments[-1]["line"] += "\n" + line
++    
++    meeting["commitments"] = current_commitments
++    return meeting
++
++
++def update_crm_commitment_status(meeting_id: str, commitment_description: str, new_status: str) -> bool:
++    """Update commitment status in CRM meeting file."""
++    meeting = load_crm_meeting(meeting_id)
++    if not meeting:
++        return False
++    
++    lines = meeting["path"].read_text(encoding="utf-8").splitlines()
++    updated_lines = []
++    
++    current_section: str | None = None
++    commitment_match = False
++    
++    for line in lines:
++        section_match = SECTION_RE.match(line)
++        if section_match:
++            current_section = section_match.group(1).strip().lower()
++            updated_lines.append(line)
++            commitment_match = False
++            continue
++        
++        if not current_section:
++            updated_lines.append(line)
++            continue
++        
++        if current_section in ("commitments", "action items", "follow-up"):
++            cm_match = COMMITMENT_RE.match(line)
++            if cm_match:
++                status, text, owner, due = cm_match.groups()
++                if text.strip().lower() == commitment_description.lower():
++                    # Found matching commitment, update status
++                    new_status_marker = "x" if new_status.lower() == "done" else " "
++                    updated_lines.append(f"- [{new_status_marker}] {text.strip()}")
++                    if owner:
++                        updated_lines.append(f"  by: {owner.strip()}")
++                    if due:
++                        updated_lines.append(f"  due: {due.strip()}")
++                    commitment_match = True
++                    continue
++            if not commitment_match:
++                updated_lines.append(line)
++        else:
++            updated_lines.append(line)
++    
++    # Write updated content
++    meeting["path"].write_text("\n".join(updated_lines), encoding="utf-8")
++    return True
++
++
++def query_cxportal_commitment_changes(last_sync: datetime | None = None) -> list[dict[str, Any]]:
++    """
++    Query cxportal database for commitment status changes.
++    
++    This function queries meeting_action_items for items that have been
++    marked as done since the last sync run, and joins with meetings
++    to get the source CRM meeting ID.
++    
++    Args:
++        last_sync: Only return items updated after this timestamp
++    
++    Returns:
++        List of dicts with meeting_id, commitment_description, status, updated_at
++    """
++    if not DB_AVAILABLE:
++        print("WARNING: Database not available - returning empty changes")
++        return []
++    
++    database_url = os.environ.get("DATABASE_URL")
++    if not database_url:
++        print("WARNING: DATABASE_URL not set - returning empty changes")
++        return []
++    
++    try:
++        conn = psycopg2.connect(database_url)
++        cursor = conn.cursor(cursor_factory=RealDictCursor)
++        
++        # Query for action items that have been marked as done since last sync
++        query = """
++            SELECT 
++                m.source_id as meeting_id,
++                mai.description as commitment_description,
++                mai.status,
++                mai.updated_at
++            FROM meeting_action_items mai
++            JOIN meetings m ON mai.meeting_id = m.id
++            WHERE 
++                mai.status = 'done'
++                AND m.source = 'fireflies'
++                AND m.source_id IS NOT NULL
++        """
++        
++        params = []
++        if last_sync:
++            query += " AND mai.updated_at > %s"
++            params.append(last_sync)
++        
++        query += " ORDER BY mai.updated_at DESC"
++        
++        cursor.execute(query, params)
++        results = cursor.fetchall()
++        
++        cursor.close()
++        conn.close()
++        
++        return [
++            {
++                "meeting_id": row["meeting_id"],
++                "commitment_description": row["commitment_description"],
++                "status": row["status"],
++                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
++            }
++            for row in results
++        ]
++        
++    except Exception as exc:
++        print(f"ERROR: Failed to query cxportal database: {exc}")
++        return []
++
++
++def sync_commitment_changes(changes: list[dict[str, Any]], dry_run: bool = False) -> dict[str, int]:
++    """Sync commitment changes from cxportal to CRM."""
++    results = {
++        "updated": 0,
++        "failed": 0,
++        "skipped": 0,
++    }
++    
++    for change in changes:
++        meeting_id = change["meeting_id"]
++        description = change["commitment_description"]
++        status = change["status"]
++        
++        if dry_run:
++            print(f"Would update: {meeting_id} - '{description}' -> {status}")
++            results["updated"] += 1
++            continue
++        
++        success = update_crm_commitment_status(meeting_id, description, status)
++        if success:
++            print(f"✓ Updated: {meeting_id} - '{description}' -> {status}")
++            results["updated"] += 1
++        else:
++            print(f"✗ Failed: {meeting_id} - '{description}'")
++            results["failed"] += 1
++    
++    return results
++
++
++def main(argv: list[str] | None = None) -> int:
++    parser = argparse.ArgumentParser(description="Sync commitment status from cxportal to CRM")
++    parser.add_argument("--dry-run", action="store_true", help="Show what would be synced without updating files")
++    parser.add_argument("--since", help="Only sync changes since this ISO timestamp")
++    parser.add_argument("--full-sync", action="store_true", help="Sync all done commitments (not just recent changes)")
++    
++    args = parser.parse_args(argv)
++    
++    # Determine sync time window
++    if args.full_sync:
++        # Sync all done commitments regardless of timestamp
++        last_sync = None
++    elif args.since:
++        try:
++            last_sync = datetime.fromisoformat(args.since)
++        except:
++            print(f"ERROR: Invalid timestamp format: {args.since}")
++            return 1
++    else:
++        # Use last sync time from state file, default to 30 days ago
++        last_sync = get_last_sync_time()
++    
++    print(f"Querying cxportal for commitment status changes since {last_sync or 'beginning'}...")
++    changes = query_cxportal_commitment_changes(last_sync)
++    
++    if not changes:
++        print("No commitment status changes found")
++        return 0
++    
++    print(f"Found {len(changes)} commitment status changes")
++    
++    results = sync_commitment_changes(changes, dry_run=args.dry_run)
++    
++    # Update last sync time if we made changes
++    if not args.dry_run and results["updated"] > 0:
++        save_last_sync_time(datetime.now())
++    
++    print(f"\nSync results: {results['updated']} updated, {results['failed']} failed, {results['skipped']} skipped")
++    return 0 if results["failed"] == 0 else 1
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+\ No newline at end of file
+diff --git a/server/auth.ts b/server/auth.ts
+index 6b68416..68610ac 100644
+--- a/server/auth.ts
++++ b/server/auth.ts
+@@ -308,3 +308,28 @@ export const requireRole = (...roles: string[]): RequestHandler => (req, res, ne
+   if (!roles.includes(userRole)) return res.status(403).json({ message: "Insufficient permissions" });
+   next();
+ };
++
++export const requireMeetingIngestSecret: RequestHandler = (req, res, next) => {
++  const secretHeader = req.headers['x-meeting-ingest-secret'];
++  const providedSecret = Array.isArray(secretHeader) ? secretHeader[0] : secretHeader;
++  const expectedSecret = process.env.MEETING_INGEST_SECRET;
++  
++  if (!expectedSecret) {
++    console.error('MEETING_INGEST_SECRET environment variable is not set');
++    return res.status(500).json({ message: "Server configuration error" });
++  }
++  
++  if (!providedSecret) {
++    return res.status(401).json({ message: "Missing secret header" });
++  }
++  
++  try {
++    if (!timingSafeEqual(Buffer.from(providedSecret), Buffer.from(expectedSecret))) {
++      return res.status(401).json({ message: "Invalid secret" });
++    }
++  } catch {
++    return res.status(401).json({ message: "Invalid secret" });
++  }
++  
++  next();
++};
+diff --git a/server/routes.ts b/server/routes.ts
+index 686456b..0864e25 100644
+--- a/server/routes.ts
++++ b/server/routes.ts
+@@ -10,7 +10,7 @@ import { storage } from "./storage";
+ import { MeetingImmutableError } from "./storage";
+ import { db } from "./db";
+ import rateLimit, { ipKeyGenerator } from "express-rate-limit";
+-import { requireAuth, requireRole } from "./auth";
++import { requireAuth, requireRole, requireMeetingIngestSecret } from "./auth";
+ import {
+   CLEARWORKS_INTAKE_PROGRESS_LABELS,
+   CLEARWORKS_INTAKE_SECTIONS,
+@@ -1235,13 +1235,13 @@ export async function registerRoutes(
+   // Require authentication for all data API routes
+   // Auth routes (/api/auth/*, /api/user) are excluded
+   app.use("/api", (req, res, next) => {
+-    if (req.path.startsWith("/auth/") || req.path === "/user" || req.path.startsWith("/share/") || req.path.startsWith("/intake/") || req.path.startsWith("/surveys/respond/") || req.path.startsWith("/assessments/webhook/")) return next();
++    if (req.path.startsWith("/auth/") || req.path === "/user" || req.path.startsWith("/share/") || req.path.startsWith("/intake/") || req.path.startsWith("/surveys/respond/") || req.path.startsWith("/assessments/webhook/") || req.path.startsWith("/meetings/ingest")) return next();
+     requireAuth(req, res, next);
+   });
+ 
+   // Validate that the requesting user belongs to the orgId in the request
+   app.use("/api", (req, res, next) => {
+-    if (req.path.startsWith("/auth/") || req.path === "/user" || req.path.startsWith("/share/") || req.path.startsWith("/intake/") || req.path.startsWith("/surveys/respond/") || req.path.startsWith("/assessments/webhook/")) return next();
++    if (req.path.startsWith("/auth/") || req.path === "/user" || req.path.startsWith("/share/") || req.path.startsWith("/intake/") || req.path.startsWith("/surveys/respond/") || req.path.startsWith("/assessments/webhook/") || req.path.startsWith("/meetings/ingest")) return next();
+     requireOrgAccess(req, res, next);
+   });
+ 
+@@ -3436,6 +3436,101 @@ export async function registerRoutes(
+     res.json(result);
+   });
+ 
++  // ── Meetings: ingest endpoint for extractor dual-write ────────────────
++  const meetingIngestSchema = z.object({
++    orgId: z.string().min(1),
++    meeting: z.object({
++      title: z.string(),
++      scheduledDate: z.string().optional(),
++      completedDate: z.string().optional(),
++      status: z.string().default("scheduled"),
++      source: z.string().default("fireflies"),
++      sourceId: z.string(),
++      firefliesTranscriptId: z.string().optional(),
++      videoUrl: z.string().url().optional(),
++      aiSummary: z.string().optional(),
++      transcriptContent: z.string().optional(),
++      extract: z.any().optional(),
++    }),
++    actionItems: z.array(z.object({
++      description: z.string(),
++      ownerName: z.string().optional(),
++      ownerContactId: z.number().optional(),
++      dueDate: z.string().optional(),
++      status: z.string().default("open"),
++      origin: z.string().default("fireflies"),
++      actionHash: z.string().optional(),
++    })).optional(),
++  });
++
++  app.post("/api/meetings/ingest", requireMeetingIngestSecret, async (req, res) => {
++    try {
++      const body = meetingIngestSchema.parse(req.body);
++      const orgId = body.orgId;
++      
++      // Map Fireflies attendees to engagement
++      let engagementId: number | null = null;
++      const attendeeEmails = body.meeting.extract?.attendees || [];
++      if (attendeeEmails.length > 0) {
++        engagementId = await storage.findEngagementByAttendeeEmails(orgId, attendeeEmails);
++      }
++      
++      // Create meeting
++      const meetingData = {
++        orgId,
++        engagementId,
++        title: body.meeting.title,
++        scheduledDate: body.meeting.scheduledDate ? new Date(body.meeting.scheduledDate) : null,
++        completedDate: body.meeting.completedDate ? new Date(body.meeting.completedDate) : null,
++        status: body.meeting.status,
++        source: body.meeting.source,
++        sourceId: body.meeting.sourceId,
++        firefliesTranscriptId: body.meeting.firefliesTranscriptId || null,
++        videoUrl: body.meeting.videoUrl || null,
++        aiSummary: body.meeting.aiSummary || null,
++        transcriptContent: body.meeting.transcriptContent || null,
++        extract: body.meeting.extract || null,
++      };
++      
++      const meeting = await storage.createMeeting(meetingData);
++      logAudit(req, "ingest", "meeting", meeting.id, { 
++        source: body.meeting.source, 
++        sourceId: body.meeting.sourceId,
++        engagementId: engagementId || undefined
++      });
++      
++      // Create action items if provided
++      let createdActionItems: any[] = [];
++      if (body.actionItems && body.actionItems.length > 0) {
++        for (const actionItem of body.actionItems) {
++          const actionItemData = {
++            orgId,
++            meetingId: meeting.id,
++            description: actionItem.description,
++            ownerName: actionItem.ownerName || null,
++            ownerContactId: actionItem.ownerContactId || null,
++            dueDate: actionItem.dueDate ? new Date(actionItem.dueDate).toISOString().split('T')[0] : null,
++            status: actionItem.status,
++            origin: actionItem.origin,
++            actionHash: actionItem.actionHash || null,
++          };
++          const created = await storage.createActionItem(orgId, actionItemData);
++          createdActionItems.push(created);
++        }
++      }
++      
++      res.status(201).json({ 
++        meeting,
++        actionItems: createdActionItems,
++        engagementId: engagementId || undefined
++      });
++    } catch (err) {
++      if (err instanceof ZodError) return handleValidationError(res, err);
++      console.error('Meeting ingest error:', err);
++      res.status(500).json({ message: "Failed to ingest meeting data" });
++    }
++  });
++
+   app.post("/api/meetings", async (req, res) => {
+     try {
+       const orgId = getRequestedBodyOrgId(req);
+diff --git a/server/storage.ts b/server/storage.ts
+index c23e579..ad54664 100644
+--- a/server/storage.ts
++++ b/server/storage.ts
+@@ -647,6 +647,7 @@ export interface IStorage {
+   createMeetingContact(contact: InsertMeetingContact): Promise<MeetingContact>;
+   deleteMeetingContact(id: number): Promise<void>;
+   getMeetingLinkedPeople(orgId: string, meetingId: number): Promise<ClientPerson[]>;
++  findEngagementByAttendeeEmails(orgId: string, emails: string[]): Promise<number | null>;
+   replaceMeetingLinkedPeople(orgId: string, meetingId: number, personIds: number[]): Promise<void>;
+   getMeetingSeriesByOrg(orgId: string): Promise<MeetingSeries[]>;
+   getMeetingSeries(orgId: string, id: number): Promise<MeetingSeries | undefined>;
+@@ -2455,6 +2456,48 @@ export class DatabaseStorage implements IStorage {
+       .orderBy(asc(clientPeople.lastName), asc(clientPeople.firstName));
+   }
+ 
++  async findEngagementByAttendeeEmails(orgId: string, emails: string[]): Promise<number | null> {
++    if (emails.length === 0) return null;
++    
++    // Case-insensitive email match against clientPeople
++    const lowercasedEmails = emails.map(e => e.toLowerCase().trim());
++    
++    const matchingPeople = await db.select()
++      .from(clientPeople)
++      .where(
++        and(
++          eq(clientPeople.orgId, orgId),
++          sql`${clientPeople.email} IS NOT NULL`,
++          sql`LOWER(${clientPeople.email}) = ANY(${lowercasedEmails})`
++        )
++      );
++    
++    if (matchingPeople.length === 0) return null;
++    
++    // Return the most common engagementId among matching people
++    const engagementCounts = new Map<number, number>();
++    for (const person of matchingPeople) {
++      if (person.engagementId) {
++        const count = engagementCounts.get(person.engagementId) || 0;
++        engagementCounts.set(person.engagementId, count + 1);
++      }
++    }
++    
++    if (engagementCounts.size === 0) return null;
++    
++    // Find the engagementId with the highest count
++    let maxCount = 0;
++    let bestEngagementId: number | null = null;
++    for (const [engagementId, count] of Array.from(engagementCounts.entries())) {
++      if (count > maxCount) {
++        maxCount = count;
++        bestEngagementId = engagementId;
++      }
++    }
++    
++    return bestEngagementId;
++  }
++
+   async replaceMeetingLinkedPeople(orgId: string, meetingId: number, personIds: number[]): Promise<void> {
+     const uniqueIds = Array.from(new Set(personIds));
+     await db.transaction(async (tx) => {

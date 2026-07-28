@@ -1,6 +1,4 @@
-## LIVE PRIORITY [CONTEXT HANDOFF at 60%, 2026-07-22T06:06:18Z]
-No new Josh messages this session. Two open Josh questions still unanswered across many cycles:
-1. Moxie live-run — Josh 2026-07-20T19:05:44Z: moxie_new_agreement(client, template) proven end-to-end on Stoss. "want me to run it live for a real new client next, or done for today?"
-2. Task due-date approval — task_1784604015867_47618280 (Clearpath meeting-draft noise-gate fix) — SUPERSEDED per Josh's "we don't use Clearpath, migrate it." Don't chase.
-AIA LinkedIn post: still HOLD, morning-only. meeting-recap-draft-worker: SKILL.md landed (larry), cron not wired, task_1784662800798_48663111 still OPEN.
-Handoff doc: /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/memory/handoffs/handoff-2026-07-22T06-06-18Z.md
+LIVE PRIORITY (2026-07-28T03:00Z handoff): No new user directive, pure context-management restart.
+PR#159 and cxportal-onboarding-redesign both RESOLVED this session (turned out already-shipped, larry closed both cleanly).
+Next: (1) larry works his own 3-item queue starting sync-meetings-cxportal-parser-fix-v3, (2) FILE the epic-stub-not-auto-closing pattern as a real task for larry (7 false alarms now, stop just flagging in chat), (3) 3 PRs (#153/154/156) + PR#164 still await Josh merge, (4) untouched overdue/stalled items in task-health need triage next cycle (521/DoorDash, Zoom webhook v2, pa Gmail MCP, HA HomeKit, Multica PoC, meeting-intelligence mega-build).
+Full detail: memory/handoffs/handoff-2026-07-28T03-00-22Z.md

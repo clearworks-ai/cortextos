@@ -113,10 +113,10 @@ def load_meeting_records(meetings_dir: Path) -> list[dict[str, Any]]:
                             "dueDate": None,
                             "origin": "crm",
                         })
-            elif current_commitments and line.strip():
-                # Multi-line commitment description
-                if current_commitments:
-                    current_commitments[-1]["description"] += " " + line.strip()
+                    elif current_commitments and line.strip():
+                        # Multi-line commitment description
+                        if current_commitments:
+                            current_commitments[-1]["description"] += " " + line.strip()
         
         meeting["commitments"] = current_commitments
         records.append(meeting)

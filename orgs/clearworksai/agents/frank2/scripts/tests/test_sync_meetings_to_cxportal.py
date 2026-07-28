@@ -2,6 +2,7 @@
 """Tests for sync_meetings_to_cxportal.py parser fixes."""
 
 import sys
+import tempfile
 from pathlib import Path
 
 # Add scripts directory to path for imports
@@ -70,6 +71,60 @@ def test_inline_attendees_and_prose_commitments():
     return True
 
 
+def test_commitment_description_no_leakage():
+    """Test that commitment descriptions do not leak text from later non-commitment sections."""
+    # Create a temporary meeting file with commitment section followed by unrelated section
+    with tempfile.TemporaryDirectory() as tmpdir:
+        meetings_dir = Path(tmpdir)
+        test_file = meetings_dir / "test-commitment-leakage.md"
+        
+        test_content = """# Test Meeting
+
+**Attendees:** Josh Weiss (Clearworks), Test User (Test)
+
+## Action items
+
+- **Josh:** Complete the task
+- **Test:** Review the work
+
+## CRM updates applied
+
+- CRM update 1
+- CRM update 2
+- CRM update 3
+"""
+        
+        test_file.write_text(test_content)
+        
+        records = load_meeting_records(meetings_dir)
+        
+        if not records:
+            print("FAIL: No records loaded")
+            return False
+        
+        test_meeting = records[0]
+        commitments = test_meeting.get("commitments", [])
+        
+        print(f"Found {len(commitments)} commitments")
+        
+        # Check each commitment description for leakage
+        for i, commitment in enumerate(commitments):
+            description = commitment.get("description", "")
+            print(f"Commitment {i+1} description: '{description}'")
+            
+            # These should NOT appear in commitment descriptions
+            leakage_patterns = ["CRM update", "CRM updates applied"]
+            for pattern in leakage_patterns:
+                if pattern.lower() in description.lower():
+                    print(f"FAIL: Commitment {i+1} contains leaked text from later section: '{pattern}'")
+                    return False
+        
+        print("PASS: No description leakage detected")
+        return True
+
+
 if __name__ == "__main__":
-    success = test_inline_attendees_and_prose_commitments()
+    success1 = test_inline_attendees_and_prose_commitments()
+    success2 = test_commitment_description_no_leakage()
+    success = success1 and success2
     sys.exit(0 if success else 1)

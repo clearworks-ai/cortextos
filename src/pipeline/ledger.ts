@@ -1006,10 +1006,11 @@ function buildChain(rows: LedgerRow[], terminal: LedgerRow, secret: string): Led
     if (cursor.prev_sha256 === GENESIS) break;
     const prev = resolvePreviousRow(rows, cursor);
     if (!prev) {
+      const cur = cursor;
       const conflicting = rows
         .filter((row) =>
-          row.slug === cursor.slug &&
-          row.artifact_sha256 === cursor.prev_sha256)
+          row.slug === cur.slug &&
+          row.artifact_sha256 === cur.prev_sha256)
         .sort((a, b) => b.ts - a.ts)[0];
       if (conflicting) {
         if (!verifyRowSignature(conflicting, secret)) {

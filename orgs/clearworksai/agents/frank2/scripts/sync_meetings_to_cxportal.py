@@ -55,7 +55,7 @@ def load_meeting_records(meetings_dir: Path) -> list[dict[str, Any]]:
             section_match = SECTION_RE.match(line)
             if section_match:
                 current_section = section_match.group(1).strip().lower()
-                if current_section in ("commitments", "action items", "follow-up"):
+                if "action item" in current_section or "commitment" in current_section or "follow-up" in current_section:
                     current_commitments = []
                 continue
             
@@ -65,8 +65,12 @@ def load_meeting_records(meetings_dir: Path) -> list[dict[str, Any]]:
                 if inline_attendees_match:
                     attendees_text = inline_attendees_match.group(1).strip()
                     if attendees_text:
-                        # Split on comma and clean up each entry
-                        for attendee in attendees_text.split(","):
+                        # Split on semicolon first (primary delimiter), fall back to comma
+                        if ";" in attendees_text:
+                            delimiter = ";"
+                        else:
+                            delimiter = ","
+                        for attendee in attendees_text.split(delimiter):
                             attendee = attendee.strip()
                             if attendee and attendee not in meeting["attendees"]:
                                 meeting["attendees"].append(attendee)
@@ -78,7 +82,7 @@ def load_meeting_records(meetings_dir: Path) -> list[dict[str, Any]]:
                     if attendee and attendee not in meeting["attendees"]:
                         meeting["attendees"].append(attendee)
             
-            elif current_section in ("commitments", "action items", "follow-up"):
+            elif "action item" in current_section or "commitment" in current_section or "follow-up" in current_section:
                 # Try checkbox pattern first
                 commitment_match = COMMITMENT_RE.match(line)
                 if commitment_match:

@@ -131,10 +131,7 @@ describe('AgentProcess codex-app-server runtime', () => {
   });
 
   it('sends back-online Telegram directly from daemon on fresh start (issue #392)', async () => {
-    const ap = new AgentProcess('codex-app-agent', mockEnv, {
-      runtime: 'codex-app-server',
-      emit_system_telegram_pings: true,
-    });
+    const ap = new AgentProcess('codex-app-agent', mockEnv, { runtime: 'codex-app-server' });
     const sendMessage = vi.fn().mockResolvedValue(undefined);
     const api = { sendChatAction: vi.fn().mockResolvedValue(undefined), sendMessage };
 
@@ -157,10 +154,7 @@ describe('AgentProcess codex-app-server runtime', () => {
     );
     fsMocks.readFileSync.mockReturnValue(handoffDocPath);
 
-    const ap = new AgentProcess('codex-app-agent', mockEnv, {
-      runtime: 'codex-app-server',
-      emit_system_telegram_pings: true,
-    });
+    const ap = new AgentProcess('codex-app-agent', mockEnv, { runtime: 'codex-app-server' });
     const sendMessage = vi.fn().mockResolvedValue(undefined);
     const api = { sendChatAction: vi.fn().mockResolvedValue(undefined), sendMessage };
 

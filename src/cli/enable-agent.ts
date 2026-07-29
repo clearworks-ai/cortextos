@@ -4,15 +4,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { IPCClient } from '../daemon/ipc-server.js';
 import { TelegramAPI, formatValidateError } from '../telegram/api.js';
-import {
-  archiveClaudeProjectDirForLaunchDir,
-  findAgentDirAndOrg,
-  normalizeConfiguredWorkingDirectory,
-  readAgentConfigSafe,
-  validateClaudeWorkingDirectoryPolicy,
-} from '../utils/agent-session-isolation.js';
 import { resolveInstanceId } from './resolve-instance-id.js';
-import { readEnabledAgentsMap, mutateEnabledAgentsMap } from '../bus/enabled-agents-io.js';
 
 /**
  * BUG-035 fix: discover the cortextOS framework root without depending on
@@ -132,9 +124,8 @@ export const enableAgentCommand = new Command('enable')
   .argument('<agent>', 'Agent name to enable')
   .option('--instance <id>', 'Instance ID')
   .option('--org <org>', 'Organization name')
-  .option('--allow-external-cwd', 'Allow a non-agent-dir working_directory for Claude agents')
   .description('Enable an agent (register and start)')
-  .action(async (agent: string, options: { instance?: string; org?: string; allowExternalCwd?: boolean }) => {
+  .action(async (agent: string, options: { instance?: string; org?: string }) => {
     const instanceId = resolveInstanceId(options.instance);
     // Becky bug preflight: verify .env has BOT_TOKEN and CHAT_ID before registering.
     // Without this, the agent starts, inherits parent-process credentials silently,
@@ -161,7 +152,6 @@ export const enableAgentCommand = new Command('enable')
     }
 
     const orgDir = options.org ? join(projectRoot, 'orgs', options.org) : null;
-    const agentLocation = findAgentDirAndOrg(projectRoot, agent, options.org);
 
     // Locate agent dir — try org-scoped path first, then flat agents/ fallback
     let agentEnvPath: string | null = null;
@@ -232,42 +222,16 @@ export const enableAgentCommand = new Command('enable')
       console.error('  Continuing enable. Investigate the validator if this recurs.');
     }
 
-    if (!agentLocation) {
-      console.error(`Error: Could not locate agent directory for "${agent}" under ${projectRoot}.`);
-      process.exit(1);
-    }
+    const agents = readEnabledAgents(instanceId);
+    agents[agent] = {
+      enabled: true,
+      status: 'configured',
+      ...(options.org ? { org: options.org } : {}),
+    };
+    writeEnabledAgents(instanceId, agents);
 
-    // ctxRoot needed both for the advisory read and for mutateEnabledAgentsMap.
+    // Create per-agent state directories
     const ctxRoot = join(homedir(), '.cortextos', instanceId);
-
-    // Advisory pre-read for validateClaudeWorkingDirectoryPolicy (not the committed state).
-    // Uses the shared locked reader for consistency with the daemon's read path.
-    const agentsSnapshot = readEnabledAgentsMap(ctxRoot);
-
-    const config = readAgentConfigSafe(agentLocation.agentDir);
-    const validation = validateClaudeWorkingDirectoryPolicy({
-      agentName: agent,
-      agentDir: agentLocation.agentDir,
-      config,
-      projectRoot,
-      enabledAgents: agentsSnapshot,
-      allowExternalCwd: options.allowExternalCwd,
-    });
-    if (!validation.ok) {
-      console.error(`Error: ${validation.error}`);
-      process.exit(1);
-    }
-
-    // Transactional enable: read + mutate + write in a single lock acquisition.
-    // This closes the TOCTOU window where a concurrent CLI call could interleave
-    // between the read and write, causing one enable to overwrite the other.
-    mutateEnabledAgentsMap(ctxRoot, (agents) => {
-      agents[agent] = {
-        enabled: true,
-        status: 'configured',
-        ...(options.org ? { org: options.org } : {}),
-      };
-    });
     const agentDirs = [
       join(ctxRoot, 'inbox', agent),
       join(ctxRoot, 'inflight', agent),
@@ -301,28 +265,15 @@ export const disableAgentCommand = new Command('disable')
   .description('Disable an agent (stop and deregister)')
   .action(async (agent: string, options: { instance?: string }) => {
     const instanceId = resolveInstanceId(options.instance);
-    const ctxRoot = join(homedir(), '.cortextos', instanceId);
-    const projectRoot = discoverProjectRoot();
-
-    // Pre-read org for launchDir resolution (advisory, not the committed state).
-    const agentsSnapshot = readEnabledAgentsMap(ctxRoot);
-    const agentLocation = findAgentDirAndOrg(projectRoot, agent, agentsSnapshot[agent]?.org);
-    const agentConfig = agentLocation ? readAgentConfigSafe(agentLocation.agentDir) : {};
-    const launchDir = agentLocation
-      ? normalizeConfiguredWorkingDirectory(agentLocation.agentDir, agentConfig.working_directory)
-      : null;
-
-    // Transactional disable: read + mutate + write in a single lock acquisition.
-    mutateEnabledAgentsMap(ctxRoot, (agents) => {
-      if (agents[agent]) {
-        agents[agent].enabled = false;
-      }
-    });
+    const agents = readEnabledAgents(instanceId);
+    if (agents[agent]) {
+      agents[agent].enabled = false;
+    }
+    writeEnabledAgents(instanceId, agents);
 
     // Try to stop via daemon IPC
     const ipc = new IPCClient(instanceId);
     const running = await ipc.isDaemonRunning();
-    let archiveSessionStore = !running;
     if (running) {
       // BUG-036 fix: write .user-disable marker BEFORE the stop, so the
       // SessionEnd crash-alert hook in src/hooks/hook-crash-alert.ts knows
@@ -333,20 +284,11 @@ export const disableAgentCommand = new Command('disable')
 
       const response = await ipc.send({ type: 'stop-agent', agent, source: 'cortextos disable' });
       if (response.success) {
-        archiveSessionStore = true;
         console.log(`Agent "${agent}" disabled and stopped.`);
       } else {
         console.log(`Agent "${agent}" disabled. Stop failed: ${response.error}`);
       }
     } else {
       console.log(`Agent "${agent}" disabled.`);
-    }
-
-    if (archiveSessionStore && launchDir) {
-      try {
-        archiveClaudeProjectDirForLaunchDir(launchDir);
-      } catch (err) {
-        console.error(`Warning: failed to archive Claude project state for "${agent}": ${err instanceof Error ? err.message : String(err)}`);
-      }
     }
   });

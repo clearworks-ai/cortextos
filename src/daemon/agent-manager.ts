@@ -122,11 +122,6 @@ export class AgentManager {
     // re-discover and re-start any agent dir on disk regardless of user intent.
     const instanceEnabled = this.readInstanceEnableList();
 
-    // Boot-start retry delay: 2 s between the first attempt and the one retry.
-    // Short enough to not delay startup noticeably; long enough to outlast a
-    // transient PTY-spawn race under 12-agent bulk contention.
-    const BOOT_RETRY_DELAY_MS = 2_000;
-
     for (const { name, dir, org, config } of agentDirs) {
       // Per-agent config.json `enabled: false` (existing behavior, unchanged)
       if (config.enabled === false) {
@@ -139,51 +134,15 @@ export class AgentManager {
         console.log(`[agent-manager] Skipping disabled agent: ${name} (enabled-agents.json)`);
         continue;
       }
-
-      // BUG-BOOT-SILENT: previously an unhandled throw from startAgent (e.g. a
-      // transient PTY spawn error under 12-agent bulk contention) propagated out
-      // of this loop, aborting all remaining agents silently. Fix: per-agent
-      // try/catch so one failure never drops the agents that follow it. On
-      // failure we log clearly (agent name + error) and retry once after a short
-      // delay. If the retry also fails, the agent is logged as failed and the
-      // boot-time self-heal pass below will make a final attempt.
-      //
       // BUG-043 fix: pass the per-agent org so startAgent can use it instead
       // of falling back to `this.org` (the daemon's startup org).
-      try {
-        await this.startAgent(name, dir, config, org);
-      } catch (firstErr) {
-        console.error(
-          `[agent-manager] Boot-start failed for ${name} (attempt 1/2): ` +
-          `${firstErr instanceof Error ? firstErr.message : String(firstErr)}. ` +
-          `Retrying in ${BOOT_RETRY_DELAY_MS}ms...`,
-        );
-        await new Promise(r => setTimeout(r, BOOT_RETRY_DELAY_MS));
-        try {
-          await this.startAgent(name, dir, config, org);
-          console.log(`[agent-manager] Boot-start retry succeeded for ${name}`);
-        } catch (retryErr) {
-          console.error(
-            `[agent-manager] Boot-start failed for ${name} (attempt 2/2 — giving up): ` +
-            `${retryErr instanceof Error ? retryErr.message : String(retryErr)}. ` +
-            `Boot-time self-heal pass will attempt recovery.`,
-          );
-        }
-      }
+      await this.startAgent(name, dir, config, org);
     }
 
     // Boot-time self-heal: after the bulk start loop settles, reconcile the
-    // enabled-agent list against what actually made it into the live registry.
-    // Any enabled agent that is still missing from the registry (failed both
-    // attempts above, or was DEDUPED into pendingRestarts without a drainer)
-    // gets one final startAgent() call here. This guarantees an agent like
-    // "sage" comes back regardless of the root cause of the initial failure.
-    //
-    // We read the same `agentDirs` list computed above so there is no extra
-    // filesystem scan; the `instanceEnabled` filter is re-applied for safety.
-    // This pass does NOT retry agents that are already in the registry (i.e.
-    // successfully started) — it is additive only and does not touch the
-    // happy path.
+    // enabled-agent list against the live registry and give any still-missing
+    // enabled agent one final start attempt. Guarantees an agent like "sage"
+    // comes back regardless of the initial failure cause. Additive only.
     await this.bootSelfHeal(agentDirs, instanceEnabled);
 
     // Successful startup pass — clear .daemon-crashed markers from disk
@@ -195,18 +154,62 @@ export class AgentManager {
   }
 
   /**
+   * Read the instance-level enabled-agents.json registry.
+   * Returns an empty object if the file is missing or unreadable —
+   * agents not present in the file default to enabled, matching the existing
+   * default-on behavior of `discoverAndStart`.
+   */
+  private readInstanceEnableList(): Record<string, { enabled?: boolean; org?: string; status?: string }> {
+    // Locked read via the shared I/O module — closes the sage-drop TOCTOU
+    // (a CLI enable/disable overlapping daemon boot could otherwise expose a
+    // half-written or empty map, silently dropping an enabled agent). The
+    // shared reader holds the config-dir lock and falls back to .bak.
+    return readEnabledAgentsMap(this.ctxRoot);
+  }
+
+  private isPidAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (err) {
+      return (err as NodeJS.ErrnoException).code === 'EPERM';
+    }
+  }
+
+  /**
+   * If `name` is registered but its process is not actually alive (no pid, or
+   * a pid that is no longer running), tear the phantom registry entry down and
+   * return true so the caller can proceed with a fresh start. A genuinely-alive
+   * pid keeps the entry (returns false).
+   */
+  private reconcileDeadRegistryEntry(name: string): boolean {
+    const entry = this.agents.get(name);
+    if (!entry) return false;
+
+    const pid = entry.process.getStatus().pid;
+    if (pid && this.isPidAlive(pid)) return false;
+
+    console.warn(`[agent-manager] Reconciled dead registry entry for ${name} (pid ${pid ?? 'none'} not alive)`);
+    entry.poller?.stop();
+    entry.activityPoller?.stop();
+    entry.checker.stop();
+    this.agents.delete(name);
+    this.pendingRestarts.delete(name);
+
+    const scheduler = this.cronSchedulers.get(name);
+    if (scheduler) {
+      scheduler.stop();
+      this.cronSchedulers.delete(name);
+    }
+    return true;
+  }
+
+  /**
    * Boot-time self-heal pass: start any enabled agent that is still absent
-   * from the live registry after the main bulk-start loop.
-   *
-   * Called exactly once per daemon boot, at the end of discoverAndStart().
-   * Deliberately separate from discoverAndStart() so it can be unit-tested
-   * in isolation with an injectable failing startAgent.
-   *
-   * Safe-by-design:
-   *  - Only calls startAgent() for agents NOT already in this.agents — agents
-   *    that started successfully are never touched.
-   *  - Does not alter per-agent crash-limiter semantics or IPC-triggered ops.
-   *  - Best-effort: any error from the heal attempt is logged but never thrown.
+   * from the live registry after the main bulk-start loop. Closes the
+   * sage-drop failure mode where an agent failed both start attempts (or was
+   * deduped into pendingRestarts without a drainer) and never recovered.
+   * Additive only — never touches agents that already started.
    */
   async bootSelfHeal(
     agentDirs: Array<{ name: string; dir: string; org: string; config: AgentConfig }>,
@@ -215,13 +218,9 @@ export class AgentManager {
     const missing: string[] = [];
 
     for (const { name, dir, org, config } of agentDirs) {
-      // Re-apply the same enable filters as the main loop — never start a
-      // disabled agent here either.
       if (config.enabled === false) continue;
       const entry = instanceEnabled[name];
       if (entry && entry.enabled === false) continue;
-
-      // Already running — happy path, nothing to do.
       if (this.agents.has(name)) continue;
 
       missing.push(name);
@@ -249,58 +248,6 @@ export class AgentManager {
         `Recovered ${missing.length} agent(s): ${missing.join(', ')}.`,
       );
     }
-  }
-
-  /**
-   * Read the instance-level enabled-agents.json registry.
-   *
-   * ROOT CAUSE OF SAGE-DROP TOCTOU: The old implementation did a bare
-   * existsSync + JSON.parse(readFileSync(...)) with NO lock. If a CLI
-   * `cortextos enable/disable` overlapped daemon boot, the daemon could
-   * read a half-written or empty enabled-agents.json, see sage as absent,
-   * skip it in discoverAndStart AND in bootSelfHeal (which re-read the
-   * same corrupt map), so sage was dropped and never recovered. FIX: route
-   * through readEnabledAgentsMap which acquires the config-dir lock and
-   * uses the .bak fallback, so the daemon only ever observes a fully-
-   * committed map and sage survives a concurrent CLI write.
-   */
-  private readInstanceEnableList(): Record<string, { enabled?: boolean; org?: string; status?: string }> {
-    // Locked read via shared I/O module — closes the sage-drop TOCTOU.
-    return readEnabledAgentsMap(this.ctxRoot);
-  }
-
-  private isPidAlive(pid: number): boolean {
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch (err) {
-      return (err as NodeJS.ErrnoException).code === 'EPERM';
-    }
-  }
-
-  private reconcileDeadRegistryEntry(name: string): boolean {
-    const entry = this.agents.get(name);
-    if (!entry) return false;
-
-    const pid = entry.process.getStatus().pid;
-    // A registered entry whose process reports no pid is a dead-but-registered
-    // phantom (process died abnormally, registry entry survived) — reconcile it.
-    // Only a genuinely-alive pid may keep the entry.
-    if (pid && this.isPidAlive(pid)) return false;
-
-    console.warn(`[agent-manager] Reconciled dead registry entry for ${name} (pid ${pid ?? 'none'} not alive)`);
-    entry.poller?.stop();
-    entry.activityPoller?.stop();
-    entry.checker.stop();
-    this.agents.delete(name);
-    this.pendingRestarts.delete(name);
-
-    const scheduler = this.cronSchedulers.get(name);
-    if (scheduler) {
-      scheduler.stop();
-      this.cronSchedulers.delete(name);
-    }
-    return true;
   }
 
   /**
@@ -542,20 +489,10 @@ export class AgentManager {
       const tgApi = telegramApi;
       const tgChatId = chatId;
       let prevStatus: string | null = null;
-      // Per-agent cooldown: collapse a crash-burst into one alert per 10 minutes.
-      // halted and recovered are state transitions (not repeats) and always send.
-      const CRASH_ALERT_COOLDOWN_MS = 10 * 60 * 1000;
-      let lastCrashAlertAt: number | null = null;
       agentProcess.onStatusChanged((status) => {
         if (status.status === 'crashed') {
-          const now = Date.now();
-          if (lastCrashAlertAt !== null && now - lastCrashAlertAt < CRASH_ALERT_COOLDOWN_MS) {
-            // Duplicate crash within cooldown window — skip this alert.
-          } else {
-            lastCrashAlertAt = now;
-            const crashNum = status.crashCount ?? '?';
-            tgApi.sendMessage(tgChatId, `Agent ${name} crashed (crash #${crashNum}) — auto-restarting`).catch(() => {});
-          }
+          const crashNum = status.crashCount ?? '?';
+          tgApi.sendMessage(tgChatId, `Agent ${name} crashed (crash #${crashNum}) — auto-restarting`).catch(() => {});
         } else if (status.status === 'halted') {
           tgApi.sendMessage(tgChatId, `Agent ${name} HALTED — exceeded crash limit. Restart manually with: cortextos start ${name}`).catch(() => {});
         } else if (status.status === 'running' && prevStatus === 'crashed') {
@@ -565,20 +502,10 @@ export class AgentManager {
       });
     }
 
-    const registryEntry = { process: agentProcess, checker } as {
-      process: AgentProcess;
-      checker: FastChecker;
-      poller?: TelegramPoller;
-      activityPoller?: TelegramPoller;
-      telegramRejectCount?: number;
-      telegramLastRejectAlertAt?: number;
-    };
-    this.agents.set(name, registryEntry);
-    let registryReady = false;
+    this.agents.set(name, { process: agentProcess, checker });
 
-    try {
-      // Start agent
-      await agentProcess.start();
+    // Start agent
+    await agentProcess.start();
 
     // Subtask 2.2: Auto-migrate crons from config.json → crons.json before
     // starting the scheduler, so the scheduler always has a populated crons.json
@@ -592,37 +519,37 @@ export class AgentManager {
     // The scheduler reads crons.json, fires crons, and injects prompts into
     // the agent PTY via injectAgent().  This is the Phase 2 daemon-managed
     // external cron system — agents no longer need to call CronCreate on boot.
-      this.startAgentCronScheduler(name);
+    this.startAgentCronScheduler(name);
 
     // Start fast checker in background
-      checker.start().catch(err => {
-        console.error(`[${name}] Fast checker error:`, err);
-      });
+    checker.start().catch(err => {
+      console.error(`[${name}] Fast checker error:`, err);
+    });
 
     // Register Telegram slash commands at startup (fix for issue #1)
-      if (telegramApi && botToken) {
-        const scanDirs = [agentDir, this.frameworkRoot].filter(Boolean);
-        const commands = collectTelegramCommands(scanDirs);
-        registerTelegramCommands(botToken, commands).then((result) => {
-          if (result.status === 'ok') {
-            log(`Telegram commands registered (${result.count} commands)`);
-          } else if (result.status !== 'empty') {
-            // Surface failures instead of swallowing them silently: a failed
-            // registration means the agent's slash menu is missing until the next
-            // restart, so operators need to see it (non-fatal to agent startup).
-            log(`Telegram command registration failed after retries: ${result.error}`);
-          }
-        }).catch((err) => {
-          log(`Telegram command registration error: ${String(err)}`);
-        });
-      }
+    if (telegramApi && botToken) {
+      const scanDirs = [agentDir, this.frameworkRoot].filter(Boolean);
+      const commands = collectTelegramCommands(scanDirs);
+      registerTelegramCommands(botToken, commands).then((result) => {
+        if (result.status === 'ok') {
+          log(`Telegram commands registered (${result.count} commands)`);
+        } else if (result.status !== 'empty') {
+          // Surface failures instead of swallowing them silently: a failed
+          // registration means the agent's slash menu is missing until the next
+          // restart, so operators need to see it (non-fatal to agent startup).
+          log(`Telegram command registration failed after retries: ${result.error}`);
+        }
+      }).catch((err) => {
+        log(`Telegram command registration error: ${String(err)}`);
+      });
+    }
 
     // Start Telegram poller if credentials are available and not explicitly disabled.
     // Set telegram_polling: false in config.json to prevent a specialist agent from
     // running its own poller (only the designated orchestrator agent should poll).
-      if (telegramApi && chatId && config.telegram_polling !== false) {
-        const stateDir = join(this.ctxRoot, 'state', name);
-        const poller = new TelegramPoller(telegramApi, stateDir);
+    if (telegramApi && chatId && config.telegram_polling !== false) {
+      const stateDir = join(this.ctxRoot, 'state', name);
+      const poller = new TelegramPoller(telegramApi, stateDir);
 
       const REJECT_ALERT_THRESHOLD = 3;
       const REJECT_ALERT_COOLDOWN_MS = 30 * 60 * 1000;
@@ -733,7 +660,7 @@ export class AgentManager {
         const text = stripControlChars(msg.text || '');
         const lastSent = FastChecker.readLastSent(stateDir, effectiveChatId);
 
-        const recentHistory = buildRecentHistory(this.ctxRoot, name, effectiveChatId, 6, text) ?? undefined;
+        const recentHistory = buildRecentHistory(this.ctxRoot, name, effectiveChatId, 6) ?? undefined;
         const formatted = FastChecker.formatTelegramTextMessage(
           from,
           effectiveChatId,
@@ -880,25 +807,7 @@ export class AgentManager {
       // — follow-up task_1776054009969_099 tracks migrating to a dedicated
       // singleton or Telegram webhook if the coupling ever causes real
       // operator pain. Non-orchestrator agents skip this entirely.
-        await this.maybeStartActivityChannelPoller(name, org, agentDir, log);
-      }
-
-      registryReady = true;
-    } finally {
-      if (!registryReady && this.agents.get(name) === registryEntry) {
-        registryEntry.poller?.stop();
-        registryEntry.activityPoller?.stop();
-        registryEntry.checker.stop();
-        await registryEntry.process.stop().catch(() => undefined);
-        this.agents.delete(name);
-        this.pendingRestarts.delete(name);
-
-        const scheduler = this.cronSchedulers.get(name);
-        if (scheduler) {
-          scheduler.stop();
-          this.cronSchedulers.delete(name);
-        }
-      }
+      await this.maybeStartActivityChannelPoller(name, org, agentDir, log);
     }
   }
 
@@ -1192,8 +1101,6 @@ export class AgentManager {
       agentDir: dir,
       org: this.org,
       projectRoot: this.frameworkRoot,
-      parentAgent: parent,
-      worker: true,
     };
 
     const config = model ? { model } : {};
@@ -1302,21 +1209,6 @@ export class AgentManager {
   }
 
   /**
-   * Live next-fire schedule for an agent (used by reload-crons verify protocol).
-   * Empty when no scheduler is wired (Hermes / unknown / start-window fail).
-   */
-  getCronNextFireTimes(agentName: string): Array<{ name: string; nextFireAt: number }> {
-    return this.cronSchedulers.get(agentName)?.getNextFireTimes() ?? [];
-  }
-
-  /** Runtime label for reload-crons CLI short-circuit (hermes vs claude/opencode). */
-  getAgentRuntime(agentName: string): string | undefined {
-    const entry = this.agents.get(agentName);
-    if (!entry) return undefined;
-    return entry.process['config']?.runtime as string | undefined;
-  }
-
-  /**
    * Wire a daemon-level CronScheduler for the named agent.
    *
    * The scheduler reads `crons.json` (via `readCrons()`), computes fire times,
@@ -1353,38 +1245,9 @@ export class AgentManager {
       // dedup-rejected and treated as a dispatch failure.
       const firedAt = new Date().toISOString();
       const injection = `[CRON FIRED ${firedAt}] ${cron.name}: ${prompt}`;
-
-      // Write the .cron-active marker BEFORE injecting so the permission hook
-      // can immediately detect a cron-originated tool call and deny-fast (no
-      // 30-min interactive wait). The marker contains a JSON payload with the
-      // cron name and an expiry timestamp so a stale marker from a crashed
-      // daemon process does not permanently disable interactive approvals.
-      // The try/finally guarantees the marker is cleared even if injectAgent
-      // throws — leaving a stale marker behind would deny ALL permission
-      // requests for the agent indefinitely.
-      const agentStateDir = join(this.ctxRoot, 'state', agentName);
-      const cronActiveMarker = join(agentStateDir, '.cron-active');
-      const CRON_BUDGET_MS = 10 * 60 * 1000; // 10 min max budget per cron fire
-      try {
-        mkdirSync(agentStateDir, { recursive: true });
-        writeFileSync(
-          cronActiveMarker,
-          JSON.stringify({ cronName: cron.name, firedAt, expiresAt: Date.now() + CRON_BUDGET_MS }),
-          'utf-8',
-        );
-      } catch { /* best-effort — don't block the cron fire if the marker can't be written */ }
-
-      try {
-        const injected = this.injectAgent(agentName, injection);
-        if (!injected) {
-          throw new Error(`injectAgent returned false for agent "${agentName}" — agent may not be running`);
-        }
-      } finally {
-        // Always clear the marker after the cron injection completes (or fails).
-        // The hook reads this synchronously, so clearing immediately after inject
-        // means the deny-fast window is the time the cron's first tool call takes
-        // to reach the permission hook — typically milliseconds.
-        try { unlinkSync(cronActiveMarker); } catch { /* ignore if already gone */ }
+      const injected = this.injectAgent(agentName, injection);
+      if (!injected) {
+        throw new Error(`injectAgent returned false for agent "${agentName}" — agent may not be running`);
       }
     };
 
@@ -1455,10 +1318,6 @@ export class AgentManager {
 
         for (const name of dirs) {
           const dir = join(agentsBase, name);
-          if (!existsSync(join(dir, 'config.json'))) {
-            console.log(`[agent-manager] skipping non-agent dir (no config.json): ${dir}`);
-            continue;
-          }
           const config = this.loadAgentConfig(dir);
           agents.push({ name, dir, org, config });
         }

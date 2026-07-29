@@ -1,6 +1,6 @@
 import { createServer, Server, Socket } from 'net';
-import { existsSync, unlinkSync, chmodSync } from 'fs';
-import { resolve as pathResolve } from 'path';
+import { existsSync, unlinkSync, chmodSync, readFileSync } from 'fs';
+import { join, resolve as pathResolve } from 'path';
 import type { IPCRequest, IPCResponse, CronSummaryRow, CronDefinition } from '../types/index.js';
 import { AgentManager } from './agent-manager.js';
 import { getIpcPath } from '../utils/paths.js';
@@ -9,7 +9,6 @@ import type { ExecutionLogStatusFilter } from '../bus/crons.js';
 import { nextFireFromCron } from './cron-scheduler.js';
 import { parseDurationMs } from '../bus/cron-state.js';
 import { computeHealth, aggregateFleetHealth } from '../utils/cron-health.js';
-import { readEnabledAgentsMap } from '../bus/enabled-agents-io.js';
 
 const WORKER_NAME_REGEX = /^[a-z0-9_-]+$/;
 
@@ -153,10 +152,16 @@ export function computeNextFire(
  */
 function listAllCrons(): CronSummaryRow[] {
   const ctxRoot = process.env.CTX_ROOT ?? process.cwd();
+  const enabledFile = join(ctxRoot, 'config', 'enabled-agents.json');
 
-  // Serialized locked read via shared I/O module — dashboard/IPC snapshots
-  // cannot observe a torn map written by a concurrent daemon/CLI enable.
-  const enabledAgents = readEnabledAgentsMap(ctxRoot);
+  let enabledAgents: Record<string, { enabled?: boolean; org?: string }> = {};
+  if (existsSync(enabledFile)) {
+    try {
+      enabledAgents = JSON.parse(readFileSync(enabledFile, 'utf-8'));
+    } catch {
+      // corrupt — fall through with empty map
+    }
+  }
 
   const rows: CronSummaryRow[] = [];
   const now = Date.now();
@@ -217,10 +222,16 @@ export function computeFleetHealth(
   }
 
   const ctxRoot = process.env.CTX_ROOT ?? process.cwd();
+  const enabledFile = join(ctxRoot, 'config', 'enabled-agents.json');
 
-  // Serialized locked read — ensures computeFleetHealth cannot see a partially-
-  // written map from a concurrent CLI enable/disable during daemon boot.
-  const enabledAgents = readEnabledAgentsMap(ctxRoot);
+  let enabledAgents: Record<string, { enabled?: boolean; org?: string }> = {};
+  if (existsSync(enabledFile)) {
+    try {
+      enabledAgents = JSON.parse(readFileSync(enabledFile, 'utf-8'));
+    } catch {
+      // corrupt — continue with empty
+    }
+  }
 
   const cutoff24h = nowMs - 24 * 60 * 60 * 1000;
   const rows = listAllCrons();
@@ -291,15 +302,22 @@ export function isValidSchedule(schedule: string): boolean {
 
 /**
  * Read the list of enabled agent names from enabled-agents.json.
- * Serialized via the shared locked I/O module to prevent observation of a
- * torn map from a concurrent CLI enable/disable.
  */
 function getEnabledAgents(): string[] {
   const ctxRoot = process.env.CTX_ROOT ?? process.cwd();
-  const data = readEnabledAgentsMap(ctxRoot);
-  return Object.entries(data)
-    .filter(([, v]) => v.enabled !== false)
-    .map(([k]) => k);
+  const enabledFile = join(ctxRoot, 'config', 'enabled-agents.json');
+  if (!existsSync(enabledFile)) return [];
+  try {
+    const data = JSON.parse(readFileSync(enabledFile, 'utf-8')) as Record<
+      string,
+      { enabled?: boolean }
+    >;
+    return Object.entries(data)
+      .filter(([, v]) => v.enabled !== false)
+      .map(([k]) => k);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -724,24 +742,17 @@ export class IPCServer {
           if (!agentToReload) {
             response = { success: false, error: 'reload-crons requires agent name' };
           } else {
+            // crons.json was already written atomically by the CLI. reloadCrons
+            // reloads the scheduler synchronously (lazy-creating one if the agent
+            // is mid-start-window), so the new entries are live immediately.
             const ok = this.agentManager.reloadCrons(agentToReload);
-            if (!ok) {
-              response = {
-                success: false,
-                code: 'AGENT_NOT_SCHEDULED',
-                error: `Agent '${agentToReload}' is not scheduled in this daemon (stopped, unknown, or wrong instance)`,
-              };
-            } else {
-              const runtime = this.agentManager.getAgentRuntime(agentToReload);
-              response = {
-                success: true,
-                data: {
-                  message: `Crons reloaded for ${agentToReload}`,
-                  nextFireTimes: this.agentManager.getCronNextFireTimes(agentToReload),
-                  ...(runtime === 'hermes' ? { runtime: 'hermes' as const } : {}),
-                },
-              };
-            }
+            response = ok
+              ? { success: true, data: `Crons reloaded for ${agentToReload}` }
+              : {
+                  success: false,
+                  code: 'AGENT_NOT_SCHEDULED',
+                  error: `Agent '${agentToReload}' is not scheduled in this daemon (stopped, unknown, or wrong instance)`,
+                };
           }
           break;
         }
@@ -810,12 +821,7 @@ export class IPCServer {
           );
           if (result.ok) {
             // Trigger scheduler reload for this agent
-            if (request.agent) {
-              const reloaded = this.agentManager.reloadCrons(request.agent);
-              if (!reloaded) {
-                console.warn(`[ipc] add-cron: reloadCrons returned false for ${request.agent}`);
-              }
-            }
+            if (request.agent) this.agentManager.reloadCrons(request.agent);
             response = { success: true, data: { ok: true } };
           } else {
             response = { success: false, error: result.error ?? 'add-cron failed', data: result };
@@ -830,12 +836,7 @@ export class IPCServer {
             request.data?.patch as Partial<CronDefinition> | undefined,
           );
           if (result.ok) {
-            if (request.agent) {
-              const reloaded = this.agentManager.reloadCrons(request.agent);
-              if (!reloaded) {
-                console.warn(`[ipc] update-cron: reloadCrons returned false for ${request.agent}`);
-              }
-            }
+            if (request.agent) this.agentManager.reloadCrons(request.agent);
             response = { success: true, data: { ok: true } };
           } else {
             response = { success: false, error: result.error ?? 'update-cron failed', data: result };
@@ -849,12 +850,7 @@ export class IPCServer {
             request.data?.name as string | undefined,
           );
           if (result.ok) {
-            if (request.agent) {
-              const reloaded = this.agentManager.reloadCrons(request.agent);
-              if (!reloaded) {
-                console.warn(`[ipc] remove-cron: reloadCrons returned false for ${request.agent}`);
-              }
-            }
+            if (request.agent) this.agentManager.reloadCrons(request.agent);
             response = { success: true, data: { ok: true } };
           } else {
             response = { success: false, error: result.error ?? 'remove-cron failed', data: result };

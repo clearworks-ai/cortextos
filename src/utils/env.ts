@@ -1,12 +1,11 @@
 import { execFileSync } from 'child_process';
-import { readFileSync, existsSync, writeFileSync, realpathSync } from 'fs';
-import { join, basename, dirname, resolve as resolvePath, sep } from 'path';
+import { readFileSync, existsSync, writeFileSync } from 'fs';
+import { join, basename, resolve as resolvePath, sep } from 'path';
 import { homedir } from 'os';
 import type { CtxEnv } from '../types/index.js';
 import { ensureDir } from './atomic.js';
 import { validateAgentName, validateOrgName } from './validate.js';
 import { stripBom } from './strip-bom.js';
-import { resolveActiveInstance } from './resolve-active-instance.js';
 
 /** A value is a 1Password secret reference iff it starts with op:// */
 const OP_REF_PATTERN = /^op:\/\//;
@@ -22,7 +21,7 @@ let warnedNoOpToken = false;
  * Equivalent of bash _ctx-env.sh - reads from env vars, .cortextos-env, .env files.
  */
 export function resolveEnv(overrides?: Partial<CtxEnv>): CtxEnv {
-  // Priority: overrides > env vars > .cortextos-env file > ACTIVE_INSTANCE marker > 'default'
+  // Priority: overrides > env vars > .cortextos-env file > defaults
 
   // Try reading .cortextos-env from cwd
   let envFile: Record<string, string> = {};
@@ -31,16 +30,11 @@ export function resolveEnv(overrides?: Partial<CtxEnv>): CtxEnv {
     envFile = parseEnvFile(cortextosEnvPath);
   }
 
-  // Instance resolution mirrors resolveInstanceId() in cli/resolve-instance-id.ts:
-  // explicit override > CTX_INSTANCE_ID env var > .cortextos-env > ACTIVE_INSTANCE
-  // marker > 'default'. This ensures bare CLI invocations (no --instance flag, no
-  // CTX_INSTANCE_ID env) resolve to the same instance the daemon is actually running
-  // on, rather than always defaulting to 'default'.
   const instanceId =
     overrides?.instanceId ||
     process.env.CTX_INSTANCE_ID ||
     envFile.CTX_INSTANCE_ID ||
-    resolveActiveInstance('default');
+    'default';
 
   const ctxRoot =
     overrides?.ctxRoot ||
@@ -88,11 +82,6 @@ export function resolveEnv(overrides?: Partial<CtxEnv>): CtxEnv {
   // Resolve timezone and orchestrator from org context.json
   let timezone = overrides?.timezone || process.env.CTX_TIMEZONE || '';
   let orchestrator = overrides?.orchestrator || process.env.CTX_ORCHESTRATOR || '';
-  const parentAgent =
-    overrides?.parentAgent ||
-    process.env.CTX_PARENT_AGENT ||
-    envFile.CTX_PARENT_AGENT ||
-    '';
 
   if ((!timezone || !orchestrator) && org && projectRoot) {
     try {
@@ -114,27 +103,9 @@ export function resolveEnv(overrides?: Partial<CtxEnv>): CtxEnv {
   // agent shell while only CTX_FRAMEWORK_ROOT was overridden — agentDir then silently
   // points at the live install. Equality check on projectRoot vs frameworkRoot catches
   // the same divergence on the projectRoot axis.
-  // realpath-aware resolution: a path reached through a symlink (e.g.
-  // ~/cortextos -> ~/code/cortextos) is the same install, not a leak.
-  // For not-yet-created paths, canonicalize the deepest existing ancestor
-  // and re-append the remainder so both sides compare consistently.
-  const toCanonical = (p: string): string => {
-    let base = resolvePath(p);
-    let suffix = '';
-    while (true) {
-      try {
-        return suffix ? join(realpathSync(base), suffix) : realpathSync(base);
-      } catch {
-        const parent = dirname(base);
-        if (parent === base) return suffix ? join(base, suffix) : base;
-        suffix = suffix ? join(basename(base), suffix) : basename(base);
-        base = parent;
-      }
-    }
-  };
   if (agentDir && frameworkRoot) {
-    const fwRootResolved = toCanonical(frameworkRoot);
-    const agentDirResolved = toCanonical(agentDir);
+    const fwRootResolved = resolvePath(frameworkRoot);
+    const agentDirResolved = resolvePath(agentDir);
     if (agentDirResolved !== fwRootResolved && !agentDirResolved.startsWith(fwRootResolved + sep)) {
       throw new Error(
         `Resolved CTX_AGENT_DIR '${agentDir}' is not under CTX_FRAMEWORK_ROOT '${frameworkRoot}'. ` +
@@ -144,7 +115,7 @@ export function resolveEnv(overrides?: Partial<CtxEnv>): CtxEnv {
       );
     }
   }
-  if (projectRoot && frameworkRoot && toCanonical(projectRoot) !== toCanonical(frameworkRoot)) {
+  if (projectRoot && frameworkRoot && resolvePath(projectRoot) !== resolvePath(frameworkRoot)) {
     throw new Error(
       `CTX_PROJECT_ROOT '${projectRoot}' must equal CTX_FRAMEWORK_ROOT '${frameworkRoot}'. ` +
       `A divergence indicates a sandbox/live environment leak — likely one of the two was ` +
@@ -171,18 +142,44 @@ export function resolveEnv(overrides?: Partial<CtxEnv>): CtxEnv {
     }
   }
 
-  return {
-    instanceId,
-    ctxRoot,
-    frameworkRoot,
-    agentName,
-    agentDir,
-    org,
-    projectRoot,
-    timezone,
-    orchestrator,
-    ...(parentAgent ? { parentAgent } : {}),
-  };
+  return { instanceId, ctxRoot, frameworkRoot, agentName, agentDir, org, projectRoot, timezone, orchestrator };
+}
+
+/**
+ * Resolve another agent's directory from the caller's environment.
+ *
+ * Commands that take a target agent argument (e.g. manage-cycle) must
+ * operate on the TARGET agent's files, not the caller's — writing to the
+ * caller's dir creates a second, diverging registry the target never reads
+ * (manage-cycle create was a silent no-op for autoresearch). Targets
+ * are resolved as a sibling of the caller's agentDir first (matches every
+ * deployment layout), then via the same projectRoot conventions resolveEnv
+ * uses. Returns null when no candidate directory exists on disk, so callers
+ * can fail loudly instead of writing into a directory no agent reads.
+ * Throws on invalid agent names (path-traversal guard).
+ */
+export function resolveTargetAgentDir(env: CtxEnv, targetAgent: string): string | null {
+  validateAgentName(targetAgent);
+  if (targetAgent === env.agentName && env.agentDir) {
+    return env.agentDir;
+  }
+  const candidates: string[] = [];
+  if (env.agentDir) {
+    candidates.push(join(env.agentDir, '..', targetAgent));
+  }
+  if (env.projectRoot && env.org) {
+    candidates.push(join(env.projectRoot, 'orgs', env.org, 'agents', targetAgent));
+  }
+  if (env.projectRoot) {
+    candidates.push(join(env.projectRoot, 'agents', targetAgent));
+  }
+  for (const candidate of candidates) {
+    const dir = resolvePath(candidate);
+    if (existsSync(dir)) {
+      return dir;
+    }
+  }
+  return null;
 }
 
 /**
@@ -199,7 +196,6 @@ export function writeCortextosEnv(agentDir: string, env: CtxEnv): void {
     `CTX_ORG=${env.org}`,
     `CTX_AGENT_DIR=${env.agentDir}`,
     `CTX_PROJECT_ROOT=${env.projectRoot}`,
-    ...(env.parentAgent ? [`CTX_PARENT_AGENT=${env.parentAgent}`] : []),
   ].join('\n');
 
   writeFileSync(join(agentDir, '.cortextos-env'), content + '\n', 'utf-8');
@@ -249,6 +245,25 @@ export function parseEnvFile(filePath: string): Record<string, string> {
   }
   return result;
 }
+
+/**
+ * Source a .env file into process.env (for agent environment).
+ */
+export function sourceEnvFile(filePath: string): void {
+  if (!existsSync(filePath)) return;
+  const vars = resolveOpRefs(parseEnvFile(filePath));
+  for (const [key, value] of Object.entries(vars)) {
+    if (!process.env[key]) {
+      process.env[key] = value;
+    }
+  }
+}
+
+// --- 1Password op:// secret reference resolution (fork product feature) ---
+// Agent .env / org secrets.env may store `KEY=op://vault/item/field` references
+// instead of raw secrets. These are resolved at load time via the `op` CLI using
+// OP_SERVICE_ACCOUNT_TOKEN, cached per-process. Preserved across the upstream
+// re-baseline: dropping it would break headless 1Password secret loading.
 
 export function isOpRef(value: string): boolean {
   return OP_REF_PATTERN.test(value);
@@ -394,17 +409,4 @@ export function loadEnvFileInto(filePath: string, target: Record<string, string>
 export function resetOpRefStateForTest(): void {
   opRefCache.clear();
   warnedNoOpToken = false;
-}
-
-/**
- * Source a .env file into process.env (for agent environment).
- */
-export function sourceEnvFile(filePath: string): void {
-  if (!existsSync(filePath)) return;
-  const vars = resolveOpRefs(parseEnvFile(filePath));
-  for (const [key, value] of Object.entries(vars)) {
-    if (!process.env[key]) {
-      process.env[key] = value;
-    }
-  }
 }

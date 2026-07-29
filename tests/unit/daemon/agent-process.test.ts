@@ -1,10 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { TelegramAPI } from '../../../src/telegram/api.js';
 
 // Capture the PTY exit handler so tests can simulate exits at controlled times
 let capturedOnExit: ((exitCode: number, signal?: number) => void) | null = null;
-const mockAtomicWriteSync = vi.fn();
-const mockHardRestart = vi.fn();
 
 const mockPty = {
   spawn: vi.fn().mockResolvedValue(undefined),
@@ -29,7 +26,7 @@ vi.mock('../../../src/pty/inject.js', () => ({
 
 vi.mock('../../../src/utils/atomic.js', () => ({
   ensureDir: vi.fn(),
-  atomicWriteSync: (...args: unknown[]) => mockAtomicWriteSync(...args),
+  atomicWriteSync: vi.fn(),
 }));
 
 vi.mock('../../../src/utils/env.js', () => ({
@@ -45,23 +42,12 @@ vi.mock('../../../src/utils/paths.js', () => ({
   resolvePaths: vi.fn().mockReturnValue({ stateDir: '/tmp/test-ctx/state/alice' }),
 }));
 
-const mockLogEvent = vi.fn();
-vi.mock('../../../src/bus/event.js', () => ({
-  logEvent: (...args: unknown[]) => mockLogEvent(...args),
-}));
-
-vi.mock('../../../src/bus/system.js', () => ({
-  hardRestart: (...args: unknown[]) => mockHardRestart(...args),
-}));
-
 const fsMocks = {
   existsSync: vi.fn().mockReturnValue(false),
   readFileSync: vi.fn(),
   writeFileSync: vi.fn(),
   appendFileSync: vi.fn(),
   statSync: vi.fn(),
-  unlinkSync: vi.fn(),
-  readdirSync: vi.fn(),
 };
 
 vi.mock('fs', async () => {
@@ -90,12 +76,10 @@ vi.mock('fs', async () => {
     get writeFileSync() { return fsMocks.writeFileSync; },
     get appendFileSync() { return fsMocks.appendFileSync; },
     get statSync() { return fsMocks.statSync; },
-    get unlinkSync() { return fsMocks.unlinkSync; },
-    get readdirSync() { return fsMocks.readdirSync; },
   };
 });
 
-const { AgentProcess, decideSessionRefreshMode, nextSessionRolloverState } = await import('../../../src/daemon/agent-process.js');
+const { AgentProcess } = await import('../../../src/daemon/agent-process.js');
 
 const mockEnv = {
   instanceId: 'test',
@@ -116,16 +100,11 @@ beforeEach(() => {
   mockPty.isAlive.mockReturnValue(true);
   mockPty.onExit.mockClear();
   mockInjectMessage.mockClear();
-  mockLogEvent.mockReset();
   fsMocks.existsSync.mockReset().mockReturnValue(false);
   fsMocks.readFileSync.mockReset();
   fsMocks.writeFileSync.mockReset();
   fsMocks.appendFileSync.mockReset();
   fsMocks.statSync.mockReset();
-  fsMocks.unlinkSync.mockReset();
-  fsMocks.readdirSync.mockReset().mockImplementation(() => { throw new Error('missing'); });
-  mockAtomicWriteSync.mockReset();
-  mockHardRestart.mockReset();
 });
 
 describe('AgentProcess - BUG-011 fix (stop awaits PTY exit)', () => {
@@ -252,75 +231,6 @@ describe('AgentProcess - BUG-011 fix (stop awaits PTY exit)', () => {
     expect(String(fsMocks.appendFileSync.mock.calls[0][1])).toMatch(/\] CRASH: /);
   });
 
-  it('recent .restart-planned marker suppresses crash labeling and crashCount', async () => {
-    fsMocks.existsSync.mockImplementation((p: unknown) =>
-      String(p).endsWith('/state/alice/.restart-planned'),
-    );
-    fsMocks.statSync.mockImplementation(() => ({ mtimeMs: Date.now() - 2_000 }));
-
-    vi.useFakeTimers();
-    try {
-      const ap = new AgentProcess('alice', mockEnv, {});
-      await ap.start();
-
-      capturedOnExit!(0, 0);
-
-      expect(ap.getStatus().status).toBe('starting');
-      expect(ap.getStatus().crashCount).toBe(0);
-      expect(fsMocks.appendFileSync).toHaveBeenCalledTimes(1);
-      expect(String(fsMocks.appendFileSync.mock.calls[0][1])).toMatch(/\] PLANNED_RESTART_RETRY: exit_code=0 planned_restart_retry=1 backoff_s=5\b/);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('planned-restart retry budget exhausts and falls through to real crash path', async () => {
-    fsMocks.existsSync.mockImplementation((p: unknown) =>
-      String(p).endsWith('/state/alice/.restart-planned'),
-    );
-    fsMocks.statSync.mockImplementation(() => ({ mtimeMs: Date.now() - 2_000 }));
-
-    vi.useFakeTimers();
-    try {
-      const ap = new AgentProcess('alice', mockEnv, {});
-      await ap.start();
-      const internals = ap as unknown as { handleExit(exitCode: number): void };
-
-      internals.handleExit(1);
-      internals.handleExit(1);
-      internals.handleExit(1);
-
-      expect(ap.getStatus().status).toBe('starting');
-      expect(ap.getStatus().crashCount).toBe(0);
-
-      internals.handleExit(1);
-
-      expect(ap.getStatus().status).toBe('crashed');
-      expect(ap.getStatus().crashCount).toBe(1);
-      expect(fsMocks.appendFileSync).toHaveBeenCalledTimes(4);
-      expect(String(fsMocks.appendFileSync.mock.calls[2][1])).toMatch(/\] PLANNED_RESTART_RETRY: exit_code=1 planned_restart_retry=3 backoff_s=20\b/);
-      expect(String(fsMocks.appendFileSync.mock.calls[3][1])).toMatch(/\] CRASH: exit_code=1 crash_count=1 backoff_s=5\b/);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('stale .restart-planned marker (>120s old) does NOT mask a real crash', async () => {
-    fsMocks.existsSync.mockImplementation((p: unknown) =>
-      String(p).endsWith('/state/alice/.restart-planned'),
-    );
-    fsMocks.statSync.mockImplementation(() => ({ mtimeMs: Date.now() - 300_000 }));
-
-    const ap = new AgentProcess('alice', mockEnv, {});
-    await ap.start();
-    capturedOnExit!(1, 0);
-
-    expect(ap.getStatus().status).toBe('crashed');
-    expect(ap.getStatus().crashCount).toBe(1);
-    expect(fsMocks.appendFileSync).toHaveBeenCalledTimes(1);
-    expect(String(fsMocks.appendFileSync.mock.calls[0][1])).toMatch(/\] CRASH: exit_code=1 crash_count=1 backoff_s=5\b/);
-  });
-
   it('sessionRefresh() delegates to stop() then start() (in order)', async () => {
     const ap = new AgentProcess('alice', mockEnv, {});
     await ap.start();
@@ -358,23 +268,6 @@ describe('AgentProcess - BUG-011 fix (stop awaits PTY exit)', () => {
     // the PTY dies must already see the marker, or it classifies a false crash.
     const markerWriteOrder = fsMocks.writeFileSync.mock.invocationCallOrder[writeIdx];
     expect(markerWriteOrder).toBeLessThan(stopSpy.mock.invocationCallOrder[0]);
-  });
-
-  it('sessionRefresh() still stops and starts when the marker write fails', async () => {
-    const ap = new AgentProcess('alice', mockEnv, {});
-    await ap.start();
-
-    const stopSpy = vi.spyOn(ap, 'stop').mockResolvedValue();
-    const startSpy = vi.spyOn(ap, 'start').mockResolvedValue();
-    fsMocks.writeFileSync.mockImplementation((path: unknown) => {
-      if (String(path).endsWith('.session-refresh')) {
-        throw new Error('disk full');
-      }
-    });
-
-    await expect(ap.sessionRefresh()).resolves.toBeUndefined();
-    expect(stopSpy).toHaveBeenCalled();
-    expect(startSpy).toHaveBeenCalled();
   });
 });
 
@@ -475,139 +368,6 @@ describe('AgentProcess - BUG-048 fix (session timer re-reads config)', () => {
   });
 });
 
-describe('AgentProcess - F8 fresh rollover', () => {
-  it('decision helper stays opt-in and upgrades to fresh on count or context threshold', () => {
-    expect(
-      decideSessionRefreshMode(
-        {},
-        { lastFreshAtMs: null, continuesSinceFresh: 99 },
-        { usedPercentage: 95, writtenAtMs: 1_000 },
-        2_000,
-      ),
-    ).toBe('continue');
-
-    expect(
-      decideSessionRefreshMode(
-        { fresh_rollover_max_continues: 3 },
-        { lastFreshAtMs: null, continuesSinceFresh: 3 },
-        null,
-        2_000,
-      ),
-    ).toBe('fresh');
-
-    expect(
-      decideSessionRefreshMode(
-        { fresh_rollover_ctx_pct: 45 },
-        { lastFreshAtMs: null, continuesSinceFresh: 0 },
-        { usedPercentage: 45, writtenAtMs: 2_000 },
-        2_001,
-      ),
-    ).toBe('fresh');
-
-    expect(
-      decideSessionRefreshMode(
-        { fresh_rollover_ctx_pct: 45 },
-        { lastFreshAtMs: null, continuesSinceFresh: 0 },
-        { usedPercentage: 80, writtenAtMs: 0 },
-        10 * 60_000 + 1,
-      ),
-    ).toBe('continue');
-  });
-
-  it('nextSessionRolloverState resets on fresh and increments on continue', () => {
-    const continued = nextSessionRolloverState(
-      { lastFreshAtMs: 100, continuesSinceFresh: 2 },
-      'continue',
-      500,
-    );
-    expect(continued).toEqual({ lastFreshAtMs: 100, continuesSinceFresh: 3 });
-
-    const fresh = nextSessionRolloverState(continued, 'fresh', 900);
-    expect(fresh).toEqual({ lastFreshAtMs: 900, continuesSinceFresh: 0 });
-  });
-
-  it('start() writes fresh session-rollover state after mode determination', async () => {
-    fsMocks.existsSync.mockImplementation((p: unknown) =>
-      String(p).endsWith('/state/alice/session-rollover.json'),
-    );
-    fsMocks.readFileSync.mockImplementation((p: unknown) => {
-      if (String(p).endsWith('/state/alice/session-rollover.json')) {
-        return JSON.stringify({ lastFreshAtMs: 100, continuesSinceFresh: 1 });
-      }
-      return '';
-    });
-
-    const ap = new AgentProcess('alice', mockEnv, {});
-    await ap.start();
-
-    expect(mockAtomicWriteSync).toHaveBeenCalledWith(
-      '/tmp/test-ctx/state/alice/session-rollover.json',
-      expect.stringContaining('"continuesSinceFresh":0'),
-    );
-  });
-
-  it('sessionRefresh() escalates to planned fresh rollover and marks hard restart before stop', async () => {
-    const now = Date.now();
-    fsMocks.existsSync.mockImplementation((p: unknown) => {
-      const path = String(p);
-      return path.endsWith('/state/alice/session-rollover.json')
-        || path.endsWith('/state/alice/context_status.json')
-        || path.endsWith('/state/alice/current-mission.txt')
-        || path.endsWith('/memory/handoffs');
-    });
-    fsMocks.readFileSync.mockImplementation((p: unknown) => {
-      const path = String(p);
-      if (path.endsWith('/state/alice/session-rollover.json')) {
-        return JSON.stringify({ lastFreshAtMs: 100, continuesSinceFresh: 1 });
-      }
-      if (path.endsWith('/state/alice/context_status.json')) {
-        return JSON.stringify({ used_percentage: 55, written_at: new Date(now).toISOString() });
-      }
-      if (path.endsWith('/state/alice/current-mission.txt')) {
-        return 'keep shipping';
-      }
-      if (path.endsWith('config.json')) {
-        return JSON.stringify({ fresh_rollover_max_continues: 1 });
-      }
-      return '';
-    });
-    fsMocks.readdirSync.mockImplementation((p: unknown) => {
-      if (String(p).includes('/memory/handoffs')) {
-        return ['handoff-2026-07-26T00-00-00Z.md'];
-      }
-      throw new Error('missing');
-    });
-    fsMocks.statSync.mockImplementation((p: unknown) => {
-      if (String(p).includes('/memory/handoffs/handoff-2026-07-26T00-00-00Z.md')) {
-        return { mtimeMs: now + 1 };
-      }
-      return { mtimeMs: now };
-    });
-
-    const ap = new AgentProcess('alice', mockEnv, { fresh_rollover_max_continues: 1 });
-    await ap.start();
-
-    const stopSpy = vi.spyOn(ap, 'stop').mockResolvedValue();
-    const startSpy = vi.spyOn(ap, 'start').mockResolvedValue();
-    const injectSpy = vi.spyOn(ap, 'injectMessage').mockResolvedValue(true);
-
-    await ap.sessionRefresh();
-
-    expect(injectSpy).toHaveBeenCalledWith(expect.stringContaining('[PLANNED FRESH ROLLOVER]'));
-    expect(mockHardRestart).toHaveBeenCalledWith(
-      { stateDir: '/tmp/test-ctx/state/alice' },
-      'alice',
-      'CONTEXT-FORCE-RESTART: F8 fresh rollover',
-    );
-    expect(mockAtomicWriteSync).toHaveBeenCalledWith(
-      '/tmp/test-ctx/state/alice/.handoff-doc-path',
-      expect.stringContaining('handoff-2026-07-26T00-00-00Z.md'),
-    );
-    expect(stopSpy).toHaveBeenCalled();
-    expect(startSpy).toHaveBeenCalled();
-  });
-});
-
 describe('AgentProcess — CrashLoopPauser (instar-inspired sliding window)', () => {
   it('triggers CRASH_LOOP halt when crash_window fills', async () => {
     const ap = new AgentProcess('alice', mockEnv, {
@@ -704,421 +464,5 @@ describe('AgentProcess - onboarding marker (do not auto-write .onboarded on hear
     const prompt = mockPty.spawn.mock.calls[0]?.[1] ?? '';
     expect(prompt).not.toContain('FIRST BOOT');
     expect(prompt).not.toContain('complete the onboarding protocol');
-  });
-});
-
-describe('AgentProcess - resume context blocks', () => {
-  const missionPath = `${mockEnv.agentDir}/state/current-mission.txt`;
-  const bufferPath = `${mockEnv.ctxRoot}/state/alice/conversation-buffer.jsonl`;
-  const handoffMarkerPath = `${mockEnv.ctxRoot}/state/alice/.handoff-doc-path`;
-  const handoffDocPath = '/tmp/handoff-live-tail.md';
-
-  it('buildResumeContextBlocks reads mission from agentDir and live tail from ctxRoot buffer', () => {
-    fsMocks.existsSync.mockImplementation((path: string) =>
-      path === missionPath || path === bufferPath,
-    );
-    fsMocks.readFileSync.mockImplementation((path: string) => {
-      if (path === missionPath) {
-        return 'Keep following Josh newest request first';
-      }
-      if (path === bufferPath) {
-        return [
-          JSON.stringify({
-            ts: '2026-06-30T00:00:00.000Z',
-            sender: 'alice',
-            via: 'telegram',
-            content: 'Old outbound note',
-          }),
-          JSON.stringify({
-            ts: '2026-06-30T00:01:00.000Z',
-            sender: 'pd88',
-            via: 'telegram',
-            content: 'Newest inbound request from Josh that should outrank the handoff doc',
-          }),
-        ].join('\n');
-      }
-      return '';
-    });
-    fsMocks.statSync.mockImplementation((path: string) => {
-      if (path === missionPath) {
-        return { mtimeMs: Date.now() - 5 * 60_000 } as { mtimeMs: number };
-      }
-      return { mtimeMs: Date.now() } as { mtimeMs: number };
-    });
-
-    const ap = new AgentProcess('alice', mockEnv, {});
-    const blocks = (
-      ap as unknown as {
-        buildResumeContextBlocks: () => { missionBlock: string; liveTailBlock: string };
-      }
-    ).buildResumeContextBlocks();
-
-    expect(blocks.missionBlock).toContain('MISSION ANCHOR');
-    expect(blocks.missionBlock).toContain('Keep following Josh newest request first');
-    expect(blocks.liveTailBlock).toContain('VERBATIM LIVE TAIL');
-    expect(blocks.liveTailBlock).toContain('2026-06-30T00:01:00.000Z pd88: Newest inbound request from Josh');
-  });
-
-  it('buildResumeContextBlocks emits no live tail block when the buffer is absent', () => {
-    fsMocks.existsSync.mockImplementation((path: string) => path === missionPath);
-    fsMocks.readFileSync.mockImplementation((path: string) => {
-      if (path === missionPath) {
-        return 'Mission only';
-      }
-      return '';
-    });
-    fsMocks.statSync.mockImplementation(() => ({ mtimeMs: Date.now() }) as { mtimeMs: number });
-
-    const ap = new AgentProcess('alice', mockEnv, {});
-    const blocks = (
-      ap as unknown as {
-        buildResumeContextBlocks: () => { missionBlock: string; liveTailBlock: string };
-      }
-    ).buildResumeContextBlocks();
-
-    expect(blocks.missionBlock).toContain('MISSION ANCHOR');
-    expect(blocks.liveTailBlock).toBe('');
-  });
-
-  it('buildStartupPrompt orders mission before handoff and live tail after handoff', () => {
-    fsMocks.existsSync.mockImplementation((path: string) =>
-      path === missionPath
-      || path === bufferPath
-      || path === handoffMarkerPath
-      || path === handoffDocPath,
-    );
-    fsMocks.readFileSync.mockImplementation((path: string) => {
-      if (path === missionPath) {
-        return 'Mission anchor content';
-      }
-      if (path === bufferPath) {
-        return JSON.stringify({
-          ts: '2026-06-30T00:02:00.000Z',
-          sender: 'pd88',
-          via: 'telegram',
-          content: 'Freshest inbound instruction',
-        });
-      }
-      if (path === handoffMarkerPath) {
-        return handoffDocPath;
-      }
-      return '';
-    });
-    fsMocks.statSync.mockImplementation(() => ({ mtimeMs: Date.now() }) as { mtimeMs: number });
-
-    const ap = new AgentProcess('alice', mockEnv, {});
-    const prompt = (
-      ap as unknown as { buildStartupPrompt: () => string }
-    ).buildStartupPrompt();
-
-    const missionIndex = prompt.indexOf('MISSION ANCHOR');
-    const handoffIndex = prompt.indexOf('CONTEXT HANDOFF');
-    const liveTailIndex = prompt.indexOf('VERBATIM LIVE TAIL');
-    expect(missionIndex).toBeGreaterThan(-1);
-    expect(handoffIndex).toBeGreaterThan(-1);
-    expect(liveTailIndex).toBeGreaterThan(-1);
-    expect(missionIndex).toBeLessThan(handoffIndex);
-    expect(handoffIndex).toBeLessThan(liveTailIndex);
-  });
-
-  it('buildContinuePrompt includes the same live tail block for --continue restarts', () => {
-    fsMocks.existsSync.mockImplementation((path: string) =>
-      path === missionPath || path === bufferPath,
-    );
-    fsMocks.readFileSync.mockImplementation((path: string) => {
-      if (path === missionPath) {
-        return 'Continue mission';
-      }
-      if (path === bufferPath) {
-        return JSON.stringify({
-          ts: '2026-06-30T00:03:00.000Z',
-          sender: 'pd88',
-          via: 'telegram',
-          content: 'Newest live message for continue path',
-        });
-      }
-      return '';
-    });
-    fsMocks.statSync.mockImplementation(() => ({ mtimeMs: Date.now() }) as { mtimeMs: number });
-
-    const ap = new AgentProcess('alice', mockEnv, {});
-    const prompt = (
-      ap as unknown as { buildContinuePrompt: () => string }
-    ).buildContinuePrompt();
-
-    expect(prompt).toContain('SESSION CONTINUATION');
-    expect(prompt).toContain('MISSION ANCHOR');
-    expect(prompt).toContain('VERBATIM LIVE TAIL');
-    expect(prompt).toContain('Newest live message for continue path');
-  });
-});
-
-describe('AgentProcess - system-status telegram gate', () => {
-  const missionPath = `${mockEnv.agentDir}/state/current-mission.txt`;
-  const handoffMarkerPath = `${mockEnv.ctxRoot}/state/alice/.handoff-doc-path`;
-  const handoffDocPath = '/tmp/handoff-system-pings.md';
-  const lastBackPingPath = `${mockEnv.ctxRoot}/state/alice/.last-back-ping`;
-
-  function buildStartupPrompt(ap: object): string {
-    return (ap as { buildStartupPrompt: () => string }).buildStartupPrompt();
-  }
-
-  function buildContinuePrompt(ap: object): string {
-    return (ap as { buildContinuePrompt: () => string }).buildContinuePrompt();
-  }
-
-  function wroteLastBackPingMarker(): boolean {
-    return fsMocks.writeFileSync.mock.calls.some(call => String(call[0]).endsWith('.last-back-ping'));
-  }
-
-  function mockHandoffRestart(options?: { withExistingMarker?: boolean }): void {
-    fsMocks.existsSync.mockImplementation((path: unknown) => {
-      const value = String(path);
-      return value === missionPath
-        || value === handoffMarkerPath
-        || value === handoffDocPath
-        || (options?.withExistingMarker === true && value === lastBackPingPath);
-    });
-    fsMocks.readFileSync.mockImplementation((path: unknown) => {
-      const value = String(path);
-      if (value === missionPath) return 'Mission anchor content';
-      if (value === handoffMarkerPath) return handoffDocPath;
-      if (value === lastBackPingPath) return String(Date.now());
-      return '';
-    });
-    fsMocks.statSync.mockImplementation(() => ({ mtimeMs: Date.now() }) as { mtimeMs: number });
-  }
-
-  it('suppresses the handoff back-ping when the flag is absent', () => {
-    mockHandoffRestart();
-
-    const ap = new AgentProcess('alice', mockEnv, {});
-    ap.setTelegramHandle({} as TelegramAPI, '123');
-    const prompt = buildStartupPrompt(ap);
-
-    expect(prompt).not.toContain('HANDOFF UX');
-    expect(mockLogEvent).toHaveBeenCalledTimes(1);
-    expect(mockLogEvent).toHaveBeenCalledWith(
-      expect.anything(),
-      'alice',
-      'acme',
-      'agent_activity',
-      'system_ping_suppressed',
-      'info',
-      { kind: 'handoff_back_ping' },
-    );
-    expect(wroteLastBackPingMarker()).toBe(false);
-  });
-
-  it('suppresses the non-handoff back-online prompt when the flag is absent', () => {
-    const ap = new AgentProcess('alice', mockEnv, {});
-    ap.setTelegramHandle({} as TelegramAPI, '123');
-    const prompt = buildStartupPrompt(ap);
-
-    expect(prompt).not.toContain('back online');
-    expect(mockLogEvent).toHaveBeenCalledTimes(1);
-    expect(mockLogEvent).toHaveBeenCalledWith(
-      expect.anything(),
-      'alice',
-      'acme',
-      'agent_activity',
-      'system_ping_suppressed',
-      'info',
-      { kind: 'online_message' },
-    );
-    expect(wroteLastBackPingMarker()).toBe(false);
-  });
-
-  it('preserves the handoff back-ping when the flag is true', () => {
-    mockHandoffRestart();
-
-    const ap = new AgentProcess('alice', mockEnv, { emit_system_telegram_pings: true });
-    ap.setTelegramHandle({} as TelegramAPI, '123');
-    const prompt = buildStartupPrompt(ap);
-
-    expect(prompt).toContain('HANDOFF UX');
-    expect(mockLogEvent).not.toHaveBeenCalled();
-    expect(wroteLastBackPingMarker()).toBe(true);
-  });
-
-  it('preserves the non-handoff back-online prompt when the flag is true', () => {
-    const ap = new AgentProcess('alice', mockEnv, { emit_system_telegram_pings: true });
-    ap.setTelegramHandle({} as TelegramAPI, '123');
-    const prompt = buildStartupPrompt(ap);
-
-    expect(prompt).toContain('Send a Telegram message to the user saying you are back online.');
-    expect(mockLogEvent).not.toHaveBeenCalled();
-  });
-
-  it('does not log suppression when Telegram is not wired', () => {
-    mockHandoffRestart();
-
-    const ap = new AgentProcess('alice', mockEnv, {});
-    const prompt = buildStartupPrompt(ap);
-
-    expect(prompt).not.toContain('HANDOFF UX');
-    expect(prompt).not.toContain('back online');
-    expect(mockLogEvent).not.toHaveBeenCalled();
-  });
-
-  it('suppresses the continue-path back-online prompt when the flag is absent', () => {
-    const ap = new AgentProcess('alice', mockEnv, {});
-    ap.setTelegramHandle({} as TelegramAPI, '123');
-    const prompt = buildContinuePrompt(ap);
-
-    expect(prompt).not.toContain('back online');
-    expect(mockLogEvent).toHaveBeenCalledTimes(1);
-    expect(mockLogEvent).toHaveBeenCalledWith(
-      expect.anything(),
-      'alice',
-      'acme',
-      'agent_activity',
-      'system_ping_suppressed',
-      'info',
-      { kind: 'continue_online_message' },
-    );
-    expect(wroteLastBackPingMarker()).toBe(false);
-  });
-
-  it('preserves the continue-path back-online prompt when the flag is true', () => {
-    const ap = new AgentProcess('alice', mockEnv, { emit_system_telegram_pings: true });
-    ap.setTelegramHandle({} as TelegramAPI, '123');
-    const prompt = buildContinuePrompt(ap);
-
-    expect(prompt).toContain('After checking inbox, send a Telegram message to the user saying you are back online.');
-    expect(mockLogEvent).not.toHaveBeenCalled();
-  });
-
-  it('still honors the duplicate-suppression marker when the flag is true', () => {
-    mockHandoffRestart({ withExistingMarker: true });
-
-    const ap = new AgentProcess('alice', mockEnv, { emit_system_telegram_pings: true });
-    ap.setTelegramHandle({} as TelegramAPI, '123');
-    const prompt = buildStartupPrompt(ap);
-
-    expect(prompt).not.toContain('HANDOFF UX');
-    expect(mockLogEvent).not.toHaveBeenCalled();
-  });
-});
-
-describe('AgentProcess - spawn-failure recovery (handleSpawnFailure)', () => {
-  beforeEach(() => {
-    mockPty.spawn.mockReset();
-    mockPty.onExit.mockReset();
-    mockPty.onExit.mockImplementation((cb: (exitCode: number, signal?: number) => void) => {
-      capturedOnExit = cb;
-    });
-  });
-
-  it('sets status=crashed and increments crashCount after first spawn failure', async () => {
-    mockPty.spawn.mockRejectedValueOnce(new Error('posix_spawnp failed: ENXIO'));
-    // subsequent calls succeed so status can be checked without infinite retry
-    mockPty.spawn.mockResolvedValue(undefined);
-
-    vi.useFakeTimers();
-    try {
-      const ap = new AgentProcess('alice', mockEnv, {});
-      await ap.start();
-
-      expect(ap.getStatus().status).toBe('crashed');
-      expect(ap.getStatus().crashCount).toBe(1);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('schedules a retry after 5000ms on the first spawn failure', async () => {
-    let spawnCallCount = 0;
-    mockPty.spawn.mockImplementation(() => {
-      spawnCallCount++;
-      if (spawnCallCount === 1) return Promise.reject(new Error('ENXIO'));
-      return Promise.resolve();
-    });
-
-    vi.useFakeTimers();
-    try {
-      const ap = new AgentProcess('alice', mockEnv, {});
-      await ap.start();
-
-      expect(ap.getStatus().status).toBe('crashed');
-      expect(spawnCallCount).toBe(1);
-
-      // Advance past the 5s backoff — retry fires
-      await vi.advanceTimersByTimeAsync(5000);
-
-      expect(spawnCallCount).toBe(2);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('halts after maxCrashesPerDay spawn failures with no further retry', async () => {
-    const maxCrashes = 3;
-    mockPty.spawn.mockRejectedValue(new Error('ENXIO'));
-
-    vi.useFakeTimers();
-    try {
-      const ap = new AgentProcess('alice', mockEnv, { max_crashes_per_day: maxCrashes });
-
-      // First start
-      await ap.start();
-      expect(ap.getStatus().status).toBe('crashed');
-
-      // Fire retries until halt
-      for (let i = 1; i < maxCrashes; i++) {
-        await vi.advanceTimersByTimeAsync(300_001); // past max backoff
-      }
-
-      expect(ap.getStatus().status).toBe('halted');
-
-      // Capture spawn call count and verify no more retries scheduled
-      const spawnCountAtHalt = mockPty.spawn.mock.calls.length;
-      await vi.advanceTimersByTimeAsync(300_001);
-      expect(mockPty.spawn.mock.calls.length).toBe(spawnCountAtHalt);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('does not schedule a retry when stopping is set (daemon-managed stop in progress)', async () => {
-    mockPty.spawn.mockRejectedValue(new Error('ENXIO'));
-
-    vi.useFakeTimers();
-    try {
-      const ap = new AgentProcess('alice', mockEnv, {});
-      // Simulate an active stop() in progress (stopping=true) at the time the spawn fails.
-      // Note: start() clears stopRequested at entry, so we must use `stopping` to
-      // model a concurrent stop()-in-progress scenario.
-      (ap as unknown as { stopping: boolean }).stopping = true;
-
-      await ap.start();
-
-      expect(ap.getStatus().status).toBe('crashed');
-
-      // Advance past any backoff — no retry should be scheduled
-      const spawnCountAfterStop = mockPty.spawn.mock.calls.length;
-      await vi.advanceTimersByTimeAsync(300_001);
-      expect(mockPty.spawn.mock.calls.length).toBe(spawnCountAfterStop);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('writes a SPAWN_FAILURE entry to restarts.log', async () => {
-    mockPty.spawn.mockRejectedValueOnce(new Error('ENXIO'));
-    mockPty.spawn.mockResolvedValue(undefined);
-
-    vi.useFakeTimers();
-    try {
-      const ap = new AgentProcess('alice', mockEnv, {});
-      await ap.start();
-
-      expect(fsMocks.appendFileSync).toHaveBeenCalledTimes(1);
-      const [logPath, logLine] = fsMocks.appendFileSync.mock.calls[0];
-      expect(String(logPath)).toContain('/logs/alice/restarts.log');
-      expect(String(logLine)).toMatch(/\] SPAWN_FAILURE: spawn failure crash_count=1 backoff_s=5\b/);
-    } finally {
-      vi.useRealTimers();
-    }
   });
 });

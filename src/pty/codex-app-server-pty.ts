@@ -6,7 +6,6 @@ import type { AgentConfig, CtxEnv } from '../types/index.js';
 import { OutputBuffer } from './output-buffer.js';
 import type { TelegramAPI } from '../telegram/api.js';
 import { ensureDir, atomicWriteSync } from '../utils/atomic.js';
-import { loadEnvFileInto } from '../utils/env.js';
 import { resolvePaths } from '../utils/paths.js';
 import { logEvent } from '../bus/event.js';
 import { WsUnixJsonRpcClient, type JsonRpcResponse } from '../utils/ws-unix-client.js';
@@ -28,10 +27,7 @@ interface IPtySpawnOptions {
   env?: Record<string, string>;
 }
 
-// hostSpawn returns Promise<IPty> (forked child pty-host, zero ptmx fds in this
-// process); test mocks return IPty synchronously. Callers tolerate both.
 type SpawnFn = (file: string, args: string[], options: IPtySpawnOptions) => IPty | Promise<IPty>;
-type PtyDisposable = { dispose(): void };
 
 interface ThreadState {
   threadId: string;
@@ -111,8 +107,6 @@ export class CodexAppServerPTY {
   } | null = null;
   private _spawnFn: SpawnFn | null = null;
   private _appServerPty: IPty | null = null;
-  private _onDataDisposable: PtyDisposable | null = null;
-  private _onExitDisposable: PtyDisposable | null = null;
   private _rpc: WsUnixJsonRpcClient | null = null;
   private _onExitHandler: ((exitCode: number, signal?: number) => void) | null = null;
   private _outputBuffer: OutputBuffer;
@@ -129,13 +123,6 @@ export class CodexAppServerPTY {
   private _telegramApi: TelegramAPI | null = null;
   private _chatId: string | null = null;
   private _typingLastSent = 0;
-  // Streaming hook (spec: Item 1 of .planning/larry-ux-parity-spec.md).
-  // When set, every agentMessage delta is forwarded here as a user-facing
-  // prose token. Tool-use / plan deltas land on different events and are
-  // intentionally not piped — only `item/agentMessage/delta` calls this.
-  private _onAssistantTextDelta: ((delta: string) => void) | null = null;
-  private _onAssistantTurnStart: (() => void) | null = null;
-  private _onAssistantTurnEnd: (() => void) | null = null;
 
   constructor(env: CtxEnv, config: AgentConfig, logPath?: string) {
     this._env = env;
@@ -205,7 +192,6 @@ export class CodexAppServerPTY {
       this._rpc = null;
     }
     if (this._appServerPty) {
-      this.disposePtyListeners();
       try {
         this._appServerPty.kill();
       } catch {
@@ -237,24 +223,6 @@ export class CodexAppServerPTY {
   setTelegramHandle(api: TelegramAPI, chatId: string): void {
     this._telegramApi = api;
     this._chatId = chatId;
-  }
-
-  /**
-   * Register streaming hooks. `onTextDelta` is fired once per assistant
-   * prose token (the `delta` field of `item/agentMessage/delta`). The
-   * optional turn-start/turn-end callbacks bracket each Codex turn so the
-   * consumer can open/close a Telegram message per turn. Pass null to
-   * unwire. Safe to call before or after spawn().
-   * Spec: Item 1 of .planning/larry-ux-parity-spec.md.
-   */
-  setAssistantStreamHooks(hooks: {
-    onTextDelta?: ((delta: string) => void) | null;
-    onTurnStart?: (() => void) | null;
-    onTurnEnd?: (() => void) | null;
-  }): void {
-    this._onAssistantTextDelta = hooks.onTextDelta ?? null;
-    this._onAssistantTurnStart = hooks.onTurnStart ?? null;
-    this._onAssistantTurnEnd = hooks.onTurnEnd ?? null;
   }
 
   private async handleInput(content: string): Promise<void> {
@@ -430,9 +398,6 @@ export class CodexAppServerPTY {
 
     for (let attempt = 0; attempt < delays.length; attempt += 1) {
       try {
-        const port = await this.acquireFreePort();
-        this._socketPath = `127.0.0.1:${port}`;
-        this._socketListenArg = `ws://127.0.0.1:${port}`;
         this.removeSocket();
         await this.startAppServer();
         return;
@@ -449,39 +414,19 @@ export class CodexAppServerPTY {
     throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
   }
 
-  private async acquireFreePort(): Promise<number> {
-    const net = require('net') as typeof import('net');
-    return await new Promise<number>((resolve, reject) => {
-      const server = net.createServer();
-      server.once('error', reject);
-      server.listen(0, '127.0.0.1', () => {
-        const address = server.address();
-        const port = typeof address === 'object' && address ? address.port : 0;
-        server.close(() => {
-          if (port) {
-            resolve(port);
-            return;
-          }
-          reject(new Error('Failed to acquire free port'));
-        });
-      });
-    });
-  }
-
   private startAppServer(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      // Allocate the codex app-server PTY in a forked child (pty-host) so this
-      // process holds zero /dev/ptmx fds. Do NOT reintroduce an in-process
-      // node-pty load — that is the ptmx leak that exhausts kern.tty.ptmx_max.
       if (!this._spawnFn) {
+        // Route through pty-host (forked child, zero ptmx leak) — NOT in-process
+        // require('node-pty'), which leaks ~3 fds/spawn on the daemon (proven
+        // 2026-07-28). hostSpawn is async; Promise.resolve tolerates sync test fns.
         this._spawnFn = hostSpawn;
       }
 
       const spawnFn = this._spawnFn!;
-      // Promise.resolve tolerates both the async hostSpawn and a synchronous
-      // test-injected mock without changing the surrounding ready-detection flow.
       Promise.resolve(spawnFn('codex', [
         'app-server',
+        '--enable', 'goals',
         '--listen', this._socketListenArg,
       ], {
         name: 'xterm-256color',
@@ -491,47 +436,27 @@ export class CodexAppServerPTY {
         env: this.buildEnv(),
       })).then((pty) => {
         this._appServerPty = pty;
-        this._onDataDisposable = pty.onData((data) => {
+        pty.onData((data) => {
           this._outputBuffer.push(data);
           if (data.includes('Error:')) {
             reject(new Error(data.trim()));
           }
         });
-        this._onExitDisposable = pty.onExit(({ exitCode, signal }) => {
+        pty.onExit(({ exitCode, signal }) => {
           if (this._appServerPty !== pty) return;
           this._appServerPty = null;
           this._alive = false;
-          this.disposePtyListeners();
           this.rejectTurnCompletion(new Error('Codex app-server exited'));
           this._onExitHandler?.(exitCode, signal);
         });
 
         this.waitForSocket().then(resolve, reject);
-      }, reject);
+      }).catch(reject);
     });
   }
 
   private async waitForSocket(timeoutMs = 10000): Promise<void> {
     const start = Date.now();
-    // TCP address (host:port) — probe by attempting a connection
-    const colonIdx = this._socketPath.lastIndexOf(':');
-    const isTcp = colonIdx > 0 && !this._socketPath.startsWith('/') && !this._socketPath.startsWith('.');
-    if (isTcp) {
-      const host = this._socketPath.slice(0, colonIdx);
-      const port = parseInt(this._socketPath.slice(colonIdx + 1), 10);
-      while (Date.now() - start < timeoutMs) {
-        const ready = await new Promise<boolean>((resolve) => {
-          const { createConnection } = require('net') as typeof import('net');
-          const probe = createConnection(port, host);
-          probe.once('connect', () => { probe.destroy(); resolve(true); });
-          probe.once('error', () => resolve(false));
-        });
-        if (ready) return;
-        await sleep(100);
-      }
-      throw new Error(`Timed out waiting for app-server TCP port: ${this._socketPath}`);
-    }
-    // Unix socket — check file existence
     while (Date.now() - start < timeoutMs) {
       if (existsSync(this._socketPath)) return;
       await sleep(100);
@@ -783,22 +708,16 @@ export class CodexAppServerPTY {
         }
         this.maybeFireTyping();
         this._outputBuffer.push('[codex-app-server] turn started\n');
-        try { this._onAssistantTurnStart?.(); } catch { /* hook errors must not break the RPC pump */ }
         break;
       case 'turn/completed':
         this._activeTurnId = null;
         this.writeIdleFlag();
         this._outputBuffer.push('[codex-app-server] turn completed\n');
-        try { this._onAssistantTurnEnd?.(); } catch { /* hook errors must not break the RPC pump */ }
         this.resolveTurnCompletion();
         break;
       case 'item/agentMessage/delta':
         if (typeof params.delta === 'string') {
           this._outputBuffer.push(params.delta);
-          // Streaming hook: forward user-facing prose deltas only.
-          // Tool-use / plan deltas land on different methods (turn/plan/updated,
-          // item/plan/delta) so they are already excluded here.
-          try { this._onAssistantTextDelta?.(params.delta); } catch { /* hook errors must not break the RPC pump */ }
         }
         this.maybeFireTyping();
         break;
@@ -1008,15 +927,29 @@ export class CodexAppServerPTY {
   }
 
   private resolveSocketPath(): { path: string; listenArg: string; cwd: string } {
-    // codex 0.118.0 does not support unix:// transport — use ws://127.0.0.1:<port> instead.
-    // The constructor only needs a placeholder; the real free port is acquired
-    // fresh inside startAppServerWithRetry() before every spawn attempt.
-    return { path: '127.0.0.1:0', listenArg: 'ws://127.0.0.1:0', cwd: this._stateDir };
+    const defaultPath = join(this._stateDir, SOCKET_BASENAME);
+    if (Buffer.byteLength(defaultPath) < SOCKET_PATH_WARN_BYTES) {
+      return { path: defaultPath, listenArg: `unix://./${SOCKET_BASENAME}`, cwd: this._stateDir };
+    }
+
+    const fallbackBasename = `cas-${randomBytes(4).toString('hex')}.sock`;
+    const fallback = join('/tmp', fallbackBasename);
+    const pointer: SocketPointer = {
+      socketPath: fallback,
+      fallback: true,
+      reason: 'state socket path exceeded 100 bytes',
+      updatedAt: new Date().toISOString(),
+    };
+    try {
+      ensureDir(this._stateDir);
+      writeFileSync(this._socketPointerPath, `${JSON.stringify(pointer, null, 2)}\n`, 'utf-8');
+    } catch {
+      // Non-fatal; spawn will still use fallback path.
+    }
+    return { path: fallback, listenArg: `unix://./${fallbackBasename}`, cwd: '/tmp' };
   }
 
   private removeSocket(): void {
-    // No-op for TCP addresses — only remove Unix socket files.
-    if (this._socketPath.includes(':')) return;
     try {
       if (existsSync(this._socketPath)) unlinkSync(this._socketPath);
     } catch {
@@ -1027,7 +960,6 @@ export class CodexAppServerPTY {
   private cleanupSpawnAttempt(): void {
     const pty = this._appServerPty;
     this._appServerPty = null;
-    this.disposePtyListeners();
     if (pty) {
       try {
         pty.kill();
@@ -1071,9 +1003,9 @@ export class CodexAppServerPTY {
     env['CTX_PROJECT_ROOT'] = this._env.projectRoot;
 
     if (this._env.org && this._env.projectRoot) {
-      loadEnvFileInto(join(this._env.projectRoot, 'orgs', this._env.org, 'secrets.env'), env);
+      this.loadEnvFile(join(this._env.projectRoot, 'orgs', this._env.org, 'secrets.env'), env);
     }
-    loadEnvFileInto(join(this._env.agentDir, '.env'), env);
+    this.loadEnvFile(join(this._env.agentDir, '.env'), env);
 
     if (env['CHAT_ID']) env['CTX_TELEGRAM_CHAT_ID'] = env['CHAT_ID'];
     if (this._config.timezone) {
@@ -1084,19 +1016,20 @@ export class CodexAppServerPTY {
     return env;
   }
 
-  private disposePtyListeners(): void {
+  private loadEnvFile(path: string, env: Record<string, string>): void {
+    if (!existsSync(path)) return;
     try {
-      this._onDataDisposable?.dispose();
+      for (const line of readFileSync(path, 'utf-8').split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx > 0) {
+          env[trimmed.slice(0, eqIdx).trim()] = trimmed.slice(eqIdx + 1).trim();
+        }
+      }
     } catch {
-      // Listener may already be gone.
+      // Ignore env file read errors.
     }
-    try {
-      this._onExitDisposable?.dispose();
-    } catch {
-      // Listener may already be gone.
-    }
-    this._onDataDisposable = null;
-    this._onExitDisposable = null;
   }
 
   private getPackageVersion(): string {

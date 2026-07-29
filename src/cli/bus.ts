@@ -528,7 +528,10 @@ busCommand
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
     const parseList = (raw?: string) => (raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : []);
-    const resolvedAssignee = resolveTaskOwner(env.agentName, opts.assignee);
+    const resolvedAssignee = resolveTaskOwner(env.agentName, opts.assignee, {
+      title,
+      project: opts.project,
+    });
     const taskId = createTask(paths, env.agentName, env.org, title, {
       description: opts.desc,
       assignee: opts.assignee,

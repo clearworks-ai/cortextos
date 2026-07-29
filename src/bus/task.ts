@@ -42,6 +42,7 @@ const RECLAIM_HUMAN_TITLE_RE = /^\[HUMAN\]/i;
 const SYSTEM_TITLE_RE = /^cron:/i;
 export const EPHEMERAL_WORKER_RE = /-\d{10,}$/;
 const DEFAULT_ORPHAN_OWNER = 'frank2';
+const DEFAULT_BUILD_ORPHAN_OWNER = 'larry';
 /** Priority-scaled default due windows (days). Someday/backlog gets 30. */
 export const DEFAULT_DUE_DAYS: Record<Priority, number> = {
   urgent: 1,
@@ -137,10 +138,21 @@ export function isEphemeralWorkerName(name: string): boolean {
   return EPHEMERAL_WORKER_RE.test(name);
 }
 
-export function resolveTaskOwner(agentName: string, explicitAssignee?: string): string {
+export function resolveTaskOwner(
+  agentName: string,
+  explicitAssignee?: string,
+  taskInfo?: { title?: string; project?: string },
+): string {
   if (explicitAssignee) return explicitAssignee;
   if (!isEphemeralWorkerName(agentName)) return agentName;
-  return (process.env.CTX_PARENT_AGENT || '').trim() || DEFAULT_ORPHAN_OWNER;
+  const parentAgent = (process.env.CTX_PARENT_AGENT || '').trim();
+  if (parentAgent) return parentAgent;
+  const taskClass = classifyTask({
+    created_by: agentName,
+    title: taskInfo?.title,
+    project: taskInfo?.project,
+  } as Task);
+  return taskClass === 'build' ? DEFAULT_BUILD_ORPHAN_OWNER : DEFAULT_ORPHAN_OWNER;
 }
 
 export function computeDefaultDueDate(
@@ -177,7 +189,11 @@ function resolveReclaimOwner(
     const parent = workerParents.get(creator);
     if (parent) return { owner: parent, parentKnown: true };
   }
-  return { owner: defaultOwner, parentKnown: false };
+  const taskClass = classifyTask(task);
+  return {
+    owner: taskClass === 'build' ? DEFAULT_BUILD_ORPHAN_OWNER : defaultOwner,
+    parentKnown: false,
+  };
 }
 
 export function reclaimOrphanTasks(
@@ -515,7 +531,10 @@ export function createTask(
     blockedBy = [],
     blocks = [],
   } = options;
-  const assignee = resolveTaskOwner(agentName, explicitAssignee);
+  const assignee = resolveTaskOwner(agentName, explicitAssignee, {
+    title,
+    project: requestedProject,
+  });
 
   validatePriority(priority);
   let effectiveDueDate: string;

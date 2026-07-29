@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, findTaskFile, archiveTasks, classifyTask, ensureEpicTask, closeEpic, resolveTaskOwner, sweepDueTasks, deliverDueSweepActions, fleetTaskHealth, STALL_ESCALATE_MS } from '../../../src/bus/task';
+import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, findTaskFile, archiveTasks, classifyTask, ensureEpicTask, closeEpic, reclaimOrphanTasks, resolveTaskOwner, sweepDueTasks, deliverDueSweepActions, fleetTaskHealth, STALL_ESCALATE_MS } from '../../../src/bus/task';
 import type { BusPaths, Task } from '../../../src/types';
 import * as lockMod from '../../../src/utils/lock';
 import { resolvePaths } from '../../../src/utils/paths';
@@ -131,14 +131,74 @@ describe('Task Management', () => {
       else process.env.CTX_PARENT_AGENT = originalParentAgent;
     });
 
-    it('resolves ephemeral worker ownership to CTX_PARENT_AGENT', () => {
-      process.env.CTX_PARENT_AGENT = 'frank2';
+    it('keeps system-class worker tasks on frank2 when no parent is known', () => {
+      delete process.env.CTX_PARENT_AGENT;
       expect(resolveTaskOwner('transcript-scanner-1783880818')).toBe('frank2');
     });
 
-    it('keeps an explicit assignee even when the creator is a worker', () => {
+    it('routes build-class worker tasks to larry when no parent is known', () => {
+      delete process.env.CTX_PARENT_AGENT;
+      expect(resolveTaskOwner('codex-rescue-1783880818', undefined, {
+        title: 'Fix flaky test in ledger buildChain',
+      })).toBe('larry');
+    });
+
+    it('resolves build-class worker ownership to CTX_PARENT_AGENT when present', () => {
       process.env.CTX_PARENT_AGENT = 'frank2';
-      expect(resolveTaskOwner('transcript-scanner-1783880818', 'pa')).toBe('pa');
+      expect(resolveTaskOwner('codex-rescue-1783880818', undefined, {
+        title: 'Fix flaky test in ledger buildChain',
+      })).toBe('frank2');
+    });
+
+    it('keeps an explicit assignee even when the creator is a build worker', () => {
+      process.env.CTX_PARENT_AGENT = 'frank2';
+      expect(resolveTaskOwner('codex-rescue-1783880818', 'pa', {
+        title: 'Fix flaky test in ledger buildChain',
+      })).toBe('pa');
+    });
+  });
+
+  describe('reclaimOrphanTasks', () => {
+    it('reassigns build-class orphan workers to larry', () => {
+      const taskId = createTask(paths, 'paul', 'acme', 'Fix flaky test in ledger buildChain', {
+        assignee: 'codex-rescue-1783880818',
+      });
+
+      const report = reclaimOrphanTasks(paths, {
+        dryRun: false,
+        workerParents: new Map(),
+      });
+
+      expect(report.reassigned).toHaveLength(1);
+      expect(report.reassigned[0]).toMatchObject({
+        id: taskId,
+        from: 'codex-rescue-1783880818',
+        to: 'larry',
+        reason: 'ephemeral_worker',
+        parentKnown: false,
+      });
+      expect(readTaskJson(taskId).assigned_to).toBe('larry');
+    });
+
+    it('keeps system-class orphan workers on frank2', () => {
+      const taskId = createTask(paths, 'transcript-scanner-1783880818', 'acme', 'Poll inbox', {
+        assignee: 'codex-rescue-1783880818',
+      });
+
+      const report = reclaimOrphanTasks(paths, {
+        dryRun: false,
+        workerParents: new Map(),
+      });
+
+      expect(report.reassigned).toHaveLength(1);
+      expect(report.reassigned[0]).toMatchObject({
+        id: taskId,
+        from: 'codex-rescue-1783880818',
+        to: 'frank2',
+        reason: 'ephemeral_worker',
+        parentKnown: false,
+      });
+      expect(readTaskJson(taskId).assigned_to).toBe('frank2');
     });
   });
 

@@ -169,6 +169,81 @@ class FirefliesExtractorTests(unittest.TestCase):
         self.assertTrue(commitments[0].id.startswith("ff_"))
         self.assertFalse(commitments[0].id.startswith("ffin_"))
 
+    def test_refine_drops_fuzzy_duplicate_against_open_backlog(self) -> None:
+        transcript = self.make_transcript("I'll send the proposal to Acme tomorrow.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Send the proposal to Acme",
+                owner="Josh",
+                due_date="tomorrow",
+                status="pending",
+            )
+        ]
+        client_record = {
+            "context": "This meeting maps to Acme. Open next action: Send proposal to Acme.",
+            "open_items": ["Send proposal to Acme"],
+            "relevance_fragments": ("Send proposal to Acme",),
+        }
+
+        commitments = MODULE.refine_items(transcript, items, client_record=client_record)
+
+        self.assertEqual(commitments, [])
+
+    def test_refine_caps_p0_at_three(self) -> None:
+        transcript = self.make_transcript("I'll send the follow-up items this week.")
+        items = [
+            MODULE.ExtractedItem(action="Send alpha proposal", owner="Josh", due_date="tomorrow", status="pending"),
+            MODULE.ExtractedItem(action="Send beta deck", owner="Josh", due_date="2026-06-09", status="pending"),
+            MODULE.ExtractedItem(action="Send gamma quote", owner="Josh", due_date="Wednesday", status="pending"),
+            MODULE.ExtractedItem(action="Send delta budget", owner="Josh", due_date="Thursday", status="pending"),
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        priorities = [commitment.priority for commitment in commitments]
+        self.assertEqual(priorities.count("P0"), 3)
+        self.assertEqual(priorities.count("P1"), 1)
+        self.assertEqual(
+            {commitment.action_text for commitment in commitments if commitment.priority == "P1"},
+            {"Send delta budget"},
+        )
+
+    def test_refine_drops_boundary_ties_to_next_priority(self) -> None:
+        transcript = self.make_transcript("I'll send the follow-up items tomorrow.")
+        items = [
+            MODULE.ExtractedItem(action="Send alpha proposal", owner="Josh", due_date="tomorrow", status="pending"),
+            MODULE.ExtractedItem(action="Send beta deck", owner="Josh", due_date="tomorrow", status="pending"),
+            MODULE.ExtractedItem(action="Send gamma quote", owner="Josh", due_date="tomorrow", status="pending"),
+            MODULE.ExtractedItem(action="Send delta budget", owner="Josh", due_date="tomorrow", status="pending"),
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual([commitment.priority for commitment in commitments].count("P0"), 0)
+        self.assertEqual([commitment.priority for commitment in commitments].count("P1"), 4)
+
+    def test_commitment_entries_include_priority_and_relevance(self) -> None:
+        transcript = self.make_transcript("I'll send the findings deck to Mark.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Send findings deck to Mark",
+                owner="Josh",
+                due_date="",
+                status="pending",
+            )
+        ]
+        client_record = {
+            "context": "This meeting maps to MSIA. Open next action: send findings deck to Mark.",
+            "open_items": [],
+            "relevance_fragments": ("Send findings deck to Mark",),
+        }
+
+        commitments = MODULE.refine_items(transcript, items, client_record=client_record)
+        entries = MODULE.commitment_entries(commitments, enriched=True)
+
+        self.assertEqual(entries[0]["priority"], "P1")
+        self.assertGreater(entries[0]["relevanceScore"], 0.9)
+
 
 class FakeResponse:
     def __init__(self, body: bytes, status: int = 200) -> None:
@@ -451,7 +526,18 @@ class RunStdoutContractTests(unittest.TestCase):
     def assert_items_shape(self, items: list[dict[str, object]]) -> None:
         for entry in items:
             self.assertTrue(
-                {"id", "text", "direction", "source", "sourceRef"}.issubset(entry),
+                {
+                    "id",
+                    "text",
+                    "direction",
+                    "source",
+                    "sourceRef",
+                    "owner",
+                    "deadline",
+                    "sourceQuote",
+                    "priority",
+                    "relevanceScore",
+                }.issubset(entry),
                 entry,
             )
 
@@ -676,6 +762,29 @@ class FailureContractTests(unittest.TestCase):
 
 
 class ClientContextTests(unittest.TestCase):
+    def write_context_sources(self, root: Path) -> tuple[Path, Path, Path]:
+        company = root / "company.md"
+        offer = root / "offer.md"
+        state = root / "STATE.md"
+        company.write_text(
+            "# Company\n\nOne-line: We fix integration failure, not tool failure.\n",
+            encoding="utf-8",
+        )
+        offer.write_text(
+            "# Offer\n\n## ICP / who we say yes to\n\nMission-driven teams with tool sprawl.\n",
+            encoding="utf-8",
+        )
+        state.write_text(
+            "# STATE\n\n## Active work\n\n- Active client delivery and follow-through.\n",
+            encoding="utf-8",
+        )
+        return company, offer, state
+
+    def write_client_file(self, clients_dir: Path, *, slug: str, body: str) -> Path:
+        path = clients_dir / f"{slug}.md"
+        path.write_text(body, encoding="utf-8")
+        return path
+
     def test_extract_action_items_includes_client_context_in_prompt(self) -> None:
         captured_prompt: dict[str, str] = {}
 
@@ -768,6 +877,152 @@ class ClientContextTests(unittest.TestCase):
         self.assertLess(len(with_context), len(without_context))
         self.assertIn("client=MSIA", captured_prompts[1])
         self.assertTrue(all("MSIA" in item.action or "findings" in item.action.lower() for item in with_context))
+
+    def test_client_context_matches_exact_email(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            clients_dir = root / "clients"
+            clients_dir.mkdir()
+            company, offer, state = self.write_context_sources(root)
+            self.write_client_file(
+                clients_dir,
+                slug="msia",
+                body="""# Client: MSIA
+
+## Contacts
+
+- Mark Lurie - Owner - mark@msia.org
+
+## Current state
+
+- Deal stage: won
+- CRM status: active_client
+- Next action: send findings deck
+
+## What we're delivering
+
+- Engagement: Busywork audit
+- Service type: AI ops audit
+""",
+            )
+            transcript = {
+                "title": "MSIA audit review",
+                "organizer_email": "josh@clearworks.ai",
+                "participants": ["mark@msia.org", "josh@clearworks.ai"],
+                "speakers": [{"name": "Mark Lurie"}],
+            }
+            with unittest.mock.patch.object(MODULE, "COMPANY_PATH", company):
+                with unittest.mock.patch.object(MODULE, "OFFER_PATH", offer):
+                    with unittest.mock.patch.object(MODULE, "STATE_PATH", state):
+                        context = MODULE.client_context_for_transcript(transcript, clients_dir=clients_dir)
+            self.assertIn("client=MSIA", context)
+            self.assertIn("Deal stage=won", context)
+            self.assertIn("Open next action: send findings deck.", context)
+
+    def test_client_context_matches_contact_name_without_email(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            clients_dir = root / "clients"
+            clients_dir.mkdir()
+            company, offer, state = self.write_context_sources(root)
+            self.write_client_file(
+                clients_dir,
+                slug="jsp",
+                body="""# Client: Jewish Studio Project
+
+## Contacts
+
+- Rachel Gross - COO - rachel@jsp.org
+
+## Current state
+
+- Deal stage: qualified
+- CRM status: prospect
+
+## What we're delivering
+
+- Engagement: AI Starter
+""",
+            )
+            transcript = {
+                "title": "JSP discovery sync",
+                "organizer_email": "josh@clearworks.ai",
+                "participants": ["Rachel Gross", "Josh Weiss"],
+                "speakers": [{"name": "Rachel Gross"}],
+            }
+            with unittest.mock.patch.object(MODULE, "COMPANY_PATH", company):
+                with unittest.mock.patch.object(MODULE, "OFFER_PATH", offer):
+                    with unittest.mock.patch.object(MODULE, "STATE_PATH", state):
+                        context = MODULE.client_context_for_transcript(transcript, clients_dir=clients_dir)
+            self.assertIn("client=Jewish Studio Project", context)
+            self.assertIn("Engagement=AI Starter", context)
+
+    def test_client_context_returns_empty_when_unmatched(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            clients_dir = Path(tmp) / "clients"
+            clients_dir.mkdir()
+            self.write_client_file(
+                clients_dir,
+                slug="ocg",
+                body="""# Client: OCG
+
+## Contacts
+
+- Mathew Owens - COO - mpo@owenscg.com
+
+## Current state
+
+- Deal stage: won
+- CRM status: active_client
+
+## What we're delivering
+
+- Engagement: Busywork audit
+""",
+            )
+            transcript = {
+                "title": "Internal ops check-in",
+                "organizer_email": "josh@clearworks.ai",
+                "participants": ["josh@clearworks.ai", "ops@clearworks.ai"],
+                "speakers": [{"name": "Josh Weiss"}],
+            }
+            self.assertEqual(MODULE.client_context_for_transcript(transcript, clients_dir=clients_dir), "")
+
+    def test_extract_action_items_renders_empty_client_context(self):
+        captured_prompt: dict[str, str] = {}
+
+        def fake_urlopen(request, timeout=None):
+            body = json.loads(request.data.decode("utf-8"))
+            captured_prompt["content"] = body["messages"][0]["content"]
+            response = {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                [
+                                    {
+                                        "action": "Send notes",
+                                        "owner": "Josh",
+                                        "dueDate": "Friday",
+                                        "status": "pending",
+                                    }
+                                ]
+                            )
+                        }
+                    }
+                ]
+            }
+            return FakeResponse(json.dumps(response).encode("utf-8"))
+
+        items = MODULE.extract_action_items(
+            "Josh Weiss: I'll send notes on Friday.",
+            client_context="",
+            openrouter_api_key="or-test",
+            urlopen=fake_urlopen,
+        )
+        self.assertEqual(len(items), 1)
+        self.assertIn("Client context:\n", captured_prompt["content"])
+        self.assertIn("Only surface items material to an active Clearworks engagement", captured_prompt["content"])
 
 
 class RecapModeTests(unittest.TestCase):
@@ -1016,6 +1271,7 @@ class RecapModeTests(unittest.TestCase):
             self.assertIn("overview", meeting["summary"])
             self.assertIn("bullets", meeting["summary"])
             self.assertIn("action_items", meeting["summary"])
+            self.assertIn("client_context", meeting)
             self.assertIn("next_steps", meeting)
             
             # Verify next_steps have the expected structure from refine_items

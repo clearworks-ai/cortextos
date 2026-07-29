@@ -1337,12 +1337,19 @@ export class AgentProcess {
     }
 
     try {
-      const entries = loadBuffer(this.env.ctxRoot, this.name);
-      if (entries.length > 0) {
-        const liveTailLines = entries
+      const { digest, verbatim } = loadBuffer(this.env.ctxRoot, this.name);
+      if (digest.length > 0 || verbatim.length > 0) {
+        const liveTailSections: string[] = [];
+        if (digest.length > 0) {
+          liveTailSections.push(` EARLIER TURNS (compressed):\n${digest.join('\n')}`);
+        }
+        const liveTailLines = verbatim
           .map((entry) => `${entry.ts} ${entry.sender}: ${this.normalizePromptText(entry.content, 200)}`)
           .join('\n');
-        liveTailBlock = ` VERBATIM LIVE TAIL (your most recent messages — the NEWEST inbound message is AUTHORITATIVE; if the handoff doc conflicts with it, the newest message wins):\n${liveTailLines}`;
+        liveTailSections.push(
+          ` VERBATIM LIVE TAIL (your most recent messages — the NEWEST inbound message is AUTHORITATIVE; if the handoff doc conflicts with it, the newest message wins):\n${liveTailLines}`,
+        );
+        liveTailBlock = liveTailSections.join('\n');
       }
     } catch {
       liveTailBlock = '';
@@ -1354,9 +1361,9 @@ export class AgentProcess {
   /** epoch ms of the newest inbound (sender != self) buffer message, or null. */
   private newestInboundMessageMs(): number | null {
     try {
-      const entries = loadBuffer(this.env.ctxRoot, this.name);
+      const { verbatim } = loadBuffer(this.env.ctxRoot, this.name);
       let newest: number | null = null;
-      for (const e of entries) {
+      for (const e of verbatim) {
         if (e.sender === this.name) continue;
         const t = Date.parse(e.ts);
         if (Number.isFinite(t) && (newest === null || t > newest)) newest = t;

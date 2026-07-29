@@ -30,7 +30,7 @@ export const MULTICA_TO_BUS_STATUS: Record<MulticaIssueStatus, TaskStatus> = {
   cancelled: 'cancelled',
 };
 
-export const BUS_TO_MULTICA_PRIORITY: Record<Priority, MulticaPriority> = {
+export const BUS_TO_MULTICA_PRIORITY: Record<Priority, Exclude<MulticaPriority, 'none'>> = {
   urgent: 'urgent',
   high: 'high',
   normal: 'medium',

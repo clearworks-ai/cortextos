@@ -49,6 +49,8 @@ import {
 } from '../bus/reliable-job.js';
 import { parseCalendarEvents, selectUpcomingExternalMeetings, readSurfacedIds, markSurfaced, lookupCrmContext, renderBriefMarkdown, claimEventLease, releaseEventLease, readClaimedIds } from '../bus/meeting-brief.js';
 import type { BriefData, CrmContext } from '../bus/meeting-brief.js';
+import { runMulticaSync } from '../bus/multica/index.js';
+import type { SyncDirection } from '../bus/multica/types.js';
 import { runScopeGuard } from '../bus/scope-guard.js';
 import { checkUsageApi, refreshOAuthToken, rotateOAuth, loadAccounts, ALERT_5H, ALERT_7D } from '../bus/oauth.js';
 import { resolvePaths } from '../utils/paths.js';
@@ -1248,6 +1250,37 @@ busCommand
     }
 
     console.log(JSON.stringify(output));
+  });
+
+busCommand
+  .command('multica-sync')
+  .description('Two-way sync between cortextOS bus tasks and Multica issues (push open tasks out, poll Multica status/assignee changes back in)')
+  .option('--dry-run', 'Preview the sync plan without pushing, polling writes, or ledger mutation')
+  .option('--direction <d>', 'Sync direction: out | in | both', 'both')
+  .action(async (opts: { dryRun?: boolean; direction: string }) => {
+    if (!['out', 'in', 'both'].includes(opts.direction)) {
+      console.error(`Invalid --direction '${opts.direction}'. Must be one of: out, in, both`);
+      process.exit(1);
+    }
+
+    const env = resolveEnv();
+    const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    const summary = await runMulticaSync(paths, {
+      direction: opts.direction as SyncDirection,
+      dryRun: opts.dryRun === true,
+    });
+
+    if (!opts.dryRun) {
+      logEvent(paths, env.agentName, env.org, 'agent_activity', 'multica_sync_completed', 'info', {
+        direction: summary.direction,
+        pushed_creates: summary.pushed_creates,
+        pushed_updates: summary.pushed_updates,
+        wrote_back: summary.wrote_back,
+        errors: summary.errors,
+      });
+    }
+
+    console.log(JSON.stringify(summary));
   });
 
 busCommand

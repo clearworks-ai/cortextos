@@ -1,5 +1,26 @@
 # Spec 03 — Re-add #131 Part B: `--kind comms` fail-closed source-key guard (NO auto-send)
 
+> **STATUS: DONE / SHIPPED on `main` via commit `eccdd62`**
+> ("feat(bus): re-add --source-key dedup with fail-closed --kind comms").
+> The Part B guard described below is live on main:
+> - `type BusSendKind = 'default' | 'comms'` + `parseKind` (`src/cli/bus.ts:351,353`);
+> - `--kind comms` fail-closed block on `send-message` (`kind === 'comms'` at
+>   `src/cli/bus.ts:431`, with the missing/invalid/`CTX_ROOT` errors at ~433/437/441);
+> - `--kind comms` fail-closed block on `send-telegram` (~`src/cli/bus.ts:1776`, errors
+>   at ~1782/1786);
+> - `const sourceDedupEnabled = kind === 'comms' || opts.dedup !== false;` (~`:1791`);
+> - both contract tests `tests/unit/cli/send-message-source-key.test.ts` and
+>   `tests/unit/cli/send-telegram-source-key.test.ts` present on main.
+> Part A (`comms-filter --surface` auto-send) is correctly ABSENT — stays dead.
+>
+> **PR #159 (branch `feat/comms-meeting-dedup`) is STALE / SUPERSEDED.** That branch is
+> ~20 commits behind main and 4 ahead, `mergeable: CONFLICTING` / `mergeStateStatus:
+> DIRTY`. Because the fail-closed guard already exists on the main base, `gh pr diff 159`
+> no longer shows the Part B `bus.ts` hunks as net-new — the diff is now dominated by
+> unrelated drift (other workstreams' planning docs, knowledge files, agent state). PR
+> #159 should be CLOSED (superseded by `eccdd62`), not rebased/merged. Spec retained
+> below as the authoritative provenance record of the shipped Part B contract.
+
 **Slug:** comms-meeting-dedup
 **Repo:** /Users/joshweiss/code/cortextos
 **Framework:** one-big-feature

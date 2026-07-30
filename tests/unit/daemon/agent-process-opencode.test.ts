@@ -6,6 +6,7 @@ const mockOpencodePty = {
   spawn: vi.fn().mockResolvedValue(undefined),
   kill: vi.fn(),
   write: vi.fn(),
+  injectMessage: vi.fn().mockResolvedValue(true),
   getPid: vi.fn().mockReturnValue(13579),
   isAlive: vi.fn().mockReturnValue(true),
   onExit: vi.fn().mockImplementation((cb: (exitCode: number, signal?: number) => void) => {
@@ -44,7 +45,21 @@ vi.mock('../../../src/pty/opencode-pty.js', () => ({
 
 vi.mock('../../../src/pty/inject.js', () => ({
   injectMessage: vi.fn(),
-  MessageDedup: class { isDuplicate() { return false; } },
+  MessageDedup: class {
+    private seen = new Set<string>();
+
+    isDuplicate(content: string) {
+      if (this.seen.has(content)) {
+        return true;
+      }
+      this.seen.add(content);
+      return false;
+    }
+
+    remove(content: string) {
+      this.seen.delete(content);
+    }
+  },
 }));
 
 vi.mock('../../../src/utils/atomic.js', () => ({
@@ -105,6 +120,8 @@ beforeEach(() => {
     pty.spawn.mockClear();
     pty.kill.mockClear();
     pty.write.mockClear();
+    pty.injectMessage.mockClear();
+    pty.injectMessage.mockResolvedValue(true);
     pty.getPid.mockClear();
     pty.isAlive.mockReset().mockReturnValue(true);
     pty.onExit.mockClear();
@@ -153,7 +170,10 @@ describe('AgentProcess opencode runtime', () => {
   });
 
   it('prompts Telegram-enabled opencode agents to send back-online Telegram on fresh start', async () => {
-    const ap = new AgentProcess('opencode-agent', mockEnv, { runtime: 'opencode' });
+    const ap = new AgentProcess('opencode-agent', mockEnv, {
+      runtime: 'opencode',
+      emit_system_telegram_pings: true,
+    });
 
     ap.setTelegramHandle({ sendChatAction: vi.fn().mockResolvedValue(undefined) } as any, '12345');
     await ap.start();
@@ -163,7 +183,10 @@ describe('AgentProcess opencode runtime', () => {
   });
 
   it('sends daemon-direct back-online Telegram for opencode fresh start', async () => {
-    const ap = new AgentProcess('opencode-agent', mockEnv, { runtime: 'opencode' });
+    const ap = new AgentProcess('opencode-agent', mockEnv, {
+      runtime: 'opencode',
+      emit_system_telegram_pings: true,
+    });
     const sendMessage = vi.fn().mockResolvedValue(undefined);
     const api = { sendChatAction: vi.fn().mockResolvedValue(undefined), sendMessage };
 
@@ -175,7 +198,10 @@ describe('AgentProcess opencode runtime', () => {
 
   it('prompts Telegram-enabled opencode agents to send back-online Telegram on continue start', async () => {
     mockOpencodeSessionExists.mockReturnValue(true);
-    const ap = new AgentProcess('opencode-agent', mockEnv, { runtime: 'opencode' });
+    const ap = new AgentProcess('opencode-agent', mockEnv, {
+      runtime: 'opencode',
+      emit_system_telegram_pings: true,
+    });
 
     ap.setTelegramHandle({ sendChatAction: vi.fn().mockResolvedValue(undefined) } as any, '12345');
     await ap.start();
@@ -187,7 +213,10 @@ describe('AgentProcess opencode runtime', () => {
 
   it('sends daemon-direct back-online Telegram for opencode continue start', async () => {
     mockOpencodeSessionExists.mockReturnValue(true);
-    const ap = new AgentProcess('opencode-agent', mockEnv, { runtime: 'opencode' });
+    const ap = new AgentProcess('opencode-agent', mockEnv, {
+      runtime: 'opencode',
+      emit_system_telegram_pings: true,
+    });
     const sendMessage = vi.fn().mockResolvedValue(undefined);
     const api = { sendChatAction: vi.fn().mockResolvedValue(undefined), sendMessage };
 
@@ -198,7 +227,7 @@ describe('AgentProcess opencode runtime', () => {
     expect(sendMessage).toHaveBeenCalledWith('12345', 'Agent opencode-agent is back online');
   });
 
-  it('sends daemon msg1 and relies on the handoff prompt for opencode msg2', async () => {
+  it('sends daemon msg1 and daemon msg2 for opencode handoff restart', async () => {
     const handoffDocPath = '/tmp/opencode-handoff.md';
     fsMocks.existsSync.mockImplementation((path: string) =>
       typeof path === 'string'
@@ -212,7 +241,10 @@ describe('AgentProcess opencode runtime', () => {
         : handoffDocPath,
     );
 
-    const ap = new AgentProcess('opencode-agent', mockEnv, { runtime: 'opencode' });
+    const ap = new AgentProcess('opencode-agent', mockEnv, {
+      runtime: 'opencode',
+      emit_system_telegram_pings: true,
+    });
     const sendMessage = vi.fn().mockResolvedValue(undefined);
     const api = { sendChatAction: vi.fn().mockResolvedValue(undefined), sendMessage };
 
@@ -221,16 +253,14 @@ describe('AgentProcess opencode runtime', () => {
 
     const prompt = mockOpencodePty.spawn.mock.calls[0]?.[1] ?? '';
     expect(prompt).toContain('CONTEXT HANDOFF');
-    expect(prompt).toContain('VERY FIRST tool call MUST be a Bash call running');
-    expect(prompt).toContain("cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID 'back");
+    expect(prompt).not.toContain('VERY FIRST tool call MUST be a Bash call running');
+    expect(prompt).not.toContain("cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID 'back");
     // msg1: hook parity — codex/opencode don't run Claude Code hooks, so the
     // daemon emits the planned-restart lifecycle notif itself.
     expect(sendMessage).toHaveBeenCalledWith('12345', '🔄 opencode-agent restarted (planned): context handoff at 92%');
-    // msg2: opencode receives the same prompt-level first-action requirement as
-    // codex, so the daemon must not synthesize a weaker generic handoff ping.
-    expect(sendMessage).not.toHaveBeenCalledWith('12345', 'Agent opencode-agent is back online (context handoff)');
+    expect(sendMessage).toHaveBeenCalledWith('12345', 'Agent opencode-agent is back online (context handoff)');
     expect(sendMessage).not.toHaveBeenCalledWith('12345', 'Agent opencode-agent is back online');
-    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledTimes(2);
   });
 
   it('sends msg1 (planned-restart) but NOT msg2 on codex handoff restart (codex self-sends its own back-online)', async () => {
@@ -247,7 +277,10 @@ describe('AgentProcess opencode runtime', () => {
         : handoffDocPath,
     );
 
-    const ap = new AgentProcess('codex-agent', mockEnv, { runtime: 'codex-app-server' });
+    const ap = new AgentProcess('codex-agent', mockEnv, {
+      runtime: 'codex-app-server',
+      emit_system_telegram_pings: true,
+    });
     const sendMessage = vi.fn().mockResolvedValue(undefined);
     const api = { sendChatAction: vi.fn().mockResolvedValue(undefined), sendMessage };
 
@@ -278,4 +311,27 @@ describe('AgentProcess opencode runtime', () => {
     capturedOnExit!(0, 0);
     await stopPromise;
   }, 10000);
+
+  // NOTE (re-baseline merge): origin/main's test here was
+  //   'rolls back dedup when opencode injection fails so the same content can retry'
+  // and asserted ap.injectMessage() returns a Promise<boolean> whose delivery is
+  // awaited so a FAILED pty write rolls the content back out of the dedup window.
+  // The re-baseline reworked the PTY layer so injectMessage is a synchronous
+  // fire-and-forget (AgentPTY/OpencodePTY.injectMessage now return void; the daemon
+  // injectMessage returns a plain boolean = "accepted, not deduped"). There is no
+  // delivery Promise to roll back, so that behavior legitimately no longer exists.
+  // This test is updated to assert the re-baseline's synchronous inject/dedup
+  // contract instead: first send is accepted, an immediate identical resend is
+  // deduped.
+  it('accepts a fresh inject then dedups an immediate identical resend (sync contract)', async () => {
+    const ap = new AgentProcess('opencode-agent', mockEnv, { runtime: 'opencode' });
+    await ap.start();
+
+    expect(ap.injectMessage('retry-me')).toBe(true);
+    expect(mockOpencodePty.injectMessage).toHaveBeenCalledTimes(1);
+
+    // Identical content within the dedup window is dropped before it reaches the PTY.
+    expect(ap.injectMessage('retry-me')).toBe(false);
+    expect(mockOpencodePty.injectMessage).toHaveBeenCalledTimes(1);
+  });
 });

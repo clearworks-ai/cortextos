@@ -1,5 +1,13 @@
 # Spec 02 — Wire the gate into comms-check-worker SKILL.md
 
+> **STATUS: DONE / SHIPPED** — all three edits are live on `main` in
+> `orgs/clearworksai/agents/pa/.claude/skills/comms-check-worker/SKILL.md`:
+> Step 4c section (SKILL.md ~line 174), the Step 5 "Meeting reminders / meeting
+> updates" bullet (~line 221), and the zcal cross-reference appended to the
+> "Meeting confirmations / zcal bookings" bullet (~line 228). Depends on Spec 01,
+> which is also live (PR #109). Spec retained below as the authoritative
+> provenance record of the shipped wiring.
+
 **File:** `orgs/clearworksai/agents/pa/.claude/skills/comms-check-worker/SKILL.md`
 **Depends on:** Spec 01 (the `cortextos bus meeting-alert-gate` command must exist).
 **Enforcement shape to mirror:** GATE D for CI failures (SKILL.md:93-99) — a hard bash

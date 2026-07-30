@@ -24,6 +24,9 @@ INGEST_URL = os.environ.get("CXPORTAL_INGEST_URL", "")
 INGEST_SECRET = os.environ.get("CXPORTAL_INGEST_SECRET", "")
 SECTION_RE = re.compile(r"^##\s+(.+)$")
 COMMITMENT_RE = re.compile(r"^- \[(x| )\]\s+(.+?)(?:\s+by:\s*([^\n]+))?(?:\s+due:\s*([^\n]+))?", re.IGNORECASE)
+INLINE_ATTENDEES_RE = re.compile(r"\*\*Attendees:\*\*\s*(.+?)\s*$")
+PROSE_COMMITMENT_RE = re.compile(r"^- \*\*([^*:]+):\*\*\s+(.+)$")
+NEGATION_RE = re.compile(r"\b(non|not|no)\b")
 
 
 def load_meeting_records(meetings_dir: Path) -> list[dict[str, Any]]:
@@ -53,20 +56,41 @@ def load_meeting_records(meetings_dir: Path) -> list[dict[str, Any]]:
             section_match = SECTION_RE.match(line)
             if section_match:
                 current_section = section_match.group(1).strip().lower()
-                if current_section in ("commitments", "action items", "follow-up"):
+                is_commitment_section = not NEGATION_RE.search(current_section) and (
+                    "action item" in current_section or "commitment" in current_section or "follow-up" in current_section
+                )
+                if is_commitment_section:
                     current_commitments = []
                 continue
             
             if not current_section:
+                # Check for inline attendees before any section
+                inline_attendees_match = INLINE_ATTENDEES_RE.search(line)
+                if inline_attendees_match:
+                    attendees_text = inline_attendees_match.group(1).strip()
+                    if attendees_text:
+                        # Split on semicolon first (primary delimiter), fall back to comma
+                        if ";" in attendees_text:
+                            delimiter = ";"
+                        else:
+                            delimiter = ","
+                        for attendee in attendees_text.split(delimiter):
+                            attendee = attendee.strip()
+                            if attendee and attendee not in meeting["attendees"]:
+                                meeting["attendees"].append(attendee)
                 continue
                 
             if current_section == "attendees":
                 if line.strip() and not line.strip().startswith("#"):
                     attendee = line.strip().lstrip("-").strip()
-                    if attendee:
+                    if attendee and attendee not in meeting["attendees"]:
                         meeting["attendees"].append(attendee)
             
-            elif current_section in ("commitments", "action items", "follow-up"):
+            is_commitment_section = not NEGATION_RE.search(current_section) and (
+                "action item" in current_section or "commitment" in current_section or "follow-up" in current_section
+            )
+            if is_commitment_section:
+                # Try checkbox pattern first
                 commitment_match = COMMITMENT_RE.match(line)
                 if commitment_match:
                     status, text, owner, due = commitment_match.groups()
@@ -77,10 +101,22 @@ def load_meeting_records(meetings_dir: Path) -> list[dict[str, Any]]:
                         "dueDate": due.strip() if due else None,
                         "origin": "crm",
                     })
-            elif current_commitments and line.strip():
-                # Multi-line commitment description
-                if current_commitments:
-                    current_commitments[-1]["description"] += " " + line.strip()
+                else:
+                    # Try prose-style pattern
+                    prose_match = PROSE_COMMITMENT_RE.match(line)
+                    if prose_match:
+                        owner, description = prose_match.groups()
+                        current_commitments.append({
+                            "description": description.strip(),
+                            "status": "open",
+                            "ownerName": owner.strip(),
+                            "dueDate": None,
+                            "origin": "crm",
+                        })
+                    elif current_commitments and line.strip():
+                        # Multi-line commitment description
+                        if current_commitments:
+                            current_commitments[-1]["description"] += " " + line.strip()
         
         meeting["commitments"] = current_commitments
         records.append(meeting)

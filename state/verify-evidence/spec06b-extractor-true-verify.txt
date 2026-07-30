@@ -1,0 +1,146 @@
+=== npm run build ===
+
+> cortextos@0.1.1 build
+> tsup
+
+CLI Building entry: {"cli":"src/cli/index.ts","daemon":"src/daemon/index.ts","pipeline/bypass-audit":"src/pipeline/bypass-audit.ts","pipeline/stage-emit":"src/pipeline/stage-emit.ts","pipeline/staging-verify/cli":"src/pipeline/staging-verify/cli.ts","pipeline/pr-target":"src/pipeline/pr-target.ts","hooks/hook-permission-telegram":"src/hooks/hook-permission-telegram.ts","hooks/hook-ask-telegram":"src/hooks/hook-ask-telegram.ts","hooks/hook-planmode-telegram":"src/hooks/hook-planmode-telegram.ts","hooks/hook-crash-alert":"src/hooks/hook-crash-alert.ts","hooks/hook-compact-telegram":"src/hooks/hook-compact-telegram.ts","hooks/hook-extract-facts":"src/hooks/hook-extract-facts.ts","hooks/hook-idle-flag":"src/hooks/hook-idle-flag.ts","hooks/hook-context-status":"src/hooks/hook-context-status.ts","hooks/hook-tool-result-router":"src/hooks/hook-tool-result-router.ts","hooks/hook-loop-detector":"src/hooks/hook-loop-detector.ts","hooks/hook-retrieval-enforcer":"src/hooks/hook-retrieval-enforcer.ts","pty/pty-host-entry":"src/pty/pty-host-entry.ts"}
+CLI Using tsconfig: tsconfig.json
+CLI tsup v8.5.1
+CLI Using tsup config: /Users/joshweiss/code/cortextos/tsup.config.ts
+CLI Target: node20
+CLI Cleaning output folder
+CJS Build start
+CJS dist/pipeline/staging-verify/cli.js        69.52 KB
+CJS dist/pipeline/stage-emit.js                46.18 KB
+CJS dist/pipeline/pr-target.js                 7.27 KB
+CJS dist/hooks/hook-ask-telegram.js            28.19 KB
+CJS dist/daemon.js                             467.71 KB
+CJS dist/hooks/hook-crash-alert.js             18.13 KB
+CJS dist/pipeline/bypass-audit.js              56.96 KB
+CJS dist/hooks/hook-extract-facts.js           6.20 KB
+CJS dist/hooks/hook-planmode-telegram.js       32.24 KB
+CJS dist/hooks/hook-compact-telegram.js        9.43 KB
+CJS dist/hooks/hook-context-status.js          2.54 KB
+CJS dist/hooks/hook-idle-flag.js               736.00 B
+CJS dist/hooks/hook-retrieval-enforcer.js      16.58 KB
+CJS dist/hooks/hook-tool-result-router.js      15.80 KB
+CJS dist/hooks/hook-loop-detector.js           17.77 KB
+CJS dist/hooks/hook-permission-telegram.js     33.36 KB
+CJS dist/pty/pty-host-entry.js                 1.93 KB
+CJS dist/cli.js                                737.37 KB
+CJS dist/pipeline/staging-verify/cli.js.map    133.15 KB
+CJS dist/pipeline/stage-emit.js.map            86.76 KB
+CJS dist/hooks/hook-ask-telegram.js.map        66.82 KB
+CJS dist/pipeline/bypass-audit.js.map          122.19 KB
+CJS dist/pipeline/pr-target.js.map             11.17 KB
+CJS dist/hooks/hook-crash-alert.js.map         50.17 KB
+CJS dist/hooks/hook-planmode-telegram.js.map   70.92 KB
+CJS dist/hooks/hook-extract-facts.js.map       22.70 KB
+CJS dist/hooks/hook-context-status.js.map      7.33 KB
+CJS dist/hooks/hook-idle-flag.js.map           1.40 KB
+CJS dist/hooks/hook-tool-result-router.js.map  57.84 KB
+CJS dist/hooks/hook-retrieval-enforcer.js.map  40.30 KB
+CJS dist/hooks/hook-permission-telegram.js.map 73.49 KB
+CJS dist/hooks/hook-loop-detector.js.map       49.81 KB
+CJS dist/pty/pty-host-entry.js.map             4.85 KB
+CJS dist/daemon.js.map                         1.10 MB
+CJS dist/hooks/hook-compact-telegram.js.map    39.31 KB
+CJS dist/cli.js.map                            1.60 MB
+CJS ⚡️ Build success in 66ms
+BUILD_EXIT_CODE=0
+
+=== npm test ===
+       | ^
+     17|
+     18| // -------------------------------------------------------------------…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/14]⎯
+
+ FAIL  dashboard/src/app/api/tasks/[id]/__tests__/route.test.ts [ dashboard/src/app/api/tasks/[id]/__tests__/route.test.ts ]
+Error: Cannot find package 'next/server' imported from /Users/joshweiss/code/cortextos/dashboard/src/app/api/tasks/[id]/__tests__/route.test.ts
+ ❯ dashboard/src/app/api/tasks/[id]/__tests__/route.test.ts:2:1
+      1| import { beforeAll, beforeEach, describe, expect, it, vi } from 'vites…
+      2| import { NextRequest } from 'next/server';
+       | ^
+      3|
+      4| const spawnSync = vi.fn();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/14]⎯
+
+ FAIL  dashboard/src/app/api/workflows/health/__tests__/health-route.test.ts [ dashboard/src/app/api/workflows/health/__tests__/health-route.test.ts ]
+Error: Cannot find package 'next/server' imported from /Users/joshweiss/code/cortextos/dashboard/src/app/api/workflows/health/__tests__/health-route.test.ts
+ ❯ dashboard/src/app/api/workflows/health/__tests__/health-route.test.ts:18:1
+     16| import os from 'os';
+     17| import path from 'path';
+     18| import { NextRequest } from 'next/server';
+       | ^
+     19|
+     20| // -------------------------------------------------------------------…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/14]⎯
+
+ FAIL  dashboard/src/app/api/workflows/crons/__tests__/executions-export.test.ts [ dashboard/src/app/api/workflows/crons/__tests__/executions-export.test.ts ]
+Error: Cannot find package 'next/server' imported from /Users/joshweiss/code/cortextos/dashboard/src/app/api/workflows/crons/__tests__/executions-export.test.ts
+ ❯ dashboard/src/app/api/workflows/crons/__tests__/executions-export.test.ts:20:1
+     18| import os from 'os';
+     19| import path from 'path';
+     20| import { NextRequest } from 'next/server';
+       | ^
+     21| import type { CronExecutionLogEntry } from '../../../../../../../src/t…
+     22|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/14]⎯
+
+ FAIL  dashboard/src/app/api/workflows/crons/__tests__/fire-route.test.ts [ dashboard/src/app/api/workflows/crons/__tests__/fire-route.test.ts ]
+Error: Cannot find package 'next/server' imported from /Users/joshweiss/code/cortextos/dashboard/src/app/api/workflows/crons/__tests__/fire-route.test.ts
+ ❯ dashboard/src/app/api/workflows/crons/__tests__/fire-route.test.ts:19:1
+     17|
+     18| import { describe, it, expect, vi, beforeEach } from 'vitest';
+     19| import { NextRequest } from 'next/server';
+       | ^
+     20|
+     21| // -------------------------------------------------------------------…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/14]⎯
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/integration/concurrent-cron-mutations.test.ts > Iter 12 audit: concurrent bus update-cron lost-update race > N parallel update-cron processes against same agent — every mutation MUST survive (pinned, expected to FAIL pre-fix)
+Error: Command failed: /Users/joshweiss/.hermes/node/bin/node /Users/joshweiss/code/cortextos/dist/cli.js bus update-cron race-agent cron-3 --prompt updated-iter0-cron-3
+Cron 'cron-3' written to crons.json but NOT live in the running scheduler (Agent 'race-agent' is not scheduled in this daemon (stopped, unknown, or wrong instance)). Daemon down, wrong instance, or agent not scheduled. Fix: cortextos bus reload-crons race-agent after starting the daemon, or restart the daemon.
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/14]⎯
+
+ FAIL  tests/integration/phase5-e2e-simulation.test.ts > Scenario 7: Dashboard polling accuracy throughout simulation > dashboard /api/workflows/crons and /api/workflows/health reflect accurate state at every poll
+Error: Cannot find package 'next/server' imported from /Users/joshweiss/code/cortextos/tests/integration/phase5-e2e-simulation.test.ts
+ ❯ tests/integration/phase5-e2e-simulation.test.ts:1233:29
+    1231|       import('../../dashboard/src/app/api/workflows/health/route.js'),
+    1232|     ]);
+    1233|     const { NextRequest } = await import('next/server');
+       |                             ^
+    1234|
+    1235|     // We'll poll at simulated T=0, T=10h, T=20h (3 checkpoints in 24h…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/14]⎯
+
+
+ Test Files  14 failed | 193 passed | 1 skipped (208)
+      Tests  2 failed | 2794 passed | 50 skipped (2846)
+   Start at  15:05:48
+   Duration  20.45s (transform 7.85s, setup 1.74s, import 13.50s, tests 130.98s, environment 15ms)
+
+TEST_EXIT_CODE=1
+
+=== Notes (real, not fabricated) ===
+14 test files failed / 2 individual test assertions failed, out of 208 files / 2846 tests total.
+All 14 failures pre-exist and are unrelated to this diff's scope (this diff only touches
+ff-extractor.py and orgs/clearworksai/agents/frank2/scripts/sync_meetings_to_cxportal.py,
+both plain Python files outside src/, tests/, and dashboard/):
+  - 13 files fail with: Error: Cannot find package 'next/server' imported from <file>
+    (pre-existing environment gap: 'next' package resolution broken for these dashboard/
+    integration test files in this checkout, unrelated to meeting-intelligence work).
+  - 1 test fails: tests/integration/concurrent-cron-mutations.test.ts, test literally named
+    '(pinned, expected to FAIL pre-fix)' — a documented, intentionally-pinned pre-existing
+    failure, unrelated to this diff.
+Real exit codes reported as-is: build=0, test=1.

@@ -12,6 +12,14 @@ import { ensureDir } from '../utils/atomic.js';
 import { writeCortextosEnv } from '../utils/env.js';
 import { getOverdueReminders } from '../bus/reminders.js';
 import { resolvePaths } from '../utils/paths.js';
+import { logEvent } from '../bus/event.js';
+import { loadBuffer } from './conversation-buffer.js';
+import {
+  HANDOFF_BACKPING_SUPPRESS_MS,
+  readLastBackPingMs,
+  shouldSuppressBackPing,
+  writeLastBackPingMs,
+} from './handoff-backping.js';
 import { ensureMissionAnchorFromBuffer } from './restart-context.js';
 
 type LogFn = (msg: string) => void;
@@ -866,35 +874,210 @@ export class AgentProcess {
     const reminderBlock = this.buildReminderBlock();
     const deliverablesBlock = this.buildDeliverablesBlock();
     const handoffBlock = this.consumeHandoffBlock();
+    const { missionBlock, liveTailBlock } = this.buildResumeContextBlocks();
     const isHandoffRestart = handoffBlock.length > 0;
     this.lastSpawnWasHandoff = isHandoffRestart;
     // HANDOFF UX: the pickup message MUST be the first action after reading the handoff doc —
     // before cron restoration, before heartbeat, before anything else. Placing this instruction
     // immediately after the handoffBlock in the prompt ensures it is not buried.
     const shouldPromptTelegram = this.shouldPromptTelegramOnlineMessage();
-    const handoffUxOverride = isHandoffRestart && shouldPromptTelegram
-      ? ' HANDOFF UX: This is a context handoff restart — your memory is intact via the handoff doc. CRITICAL: After reading the handoff document, your VERY FIRST tool call MUST be a Bash call running: cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID \'back — [what you were just working on]\' — replace the brackets with one brief plain-English sentence about your current state. Do this BEFORE running heartbeat, BEFORE any other tool call. No cron IDs, no status report, no cold-boot phrasing. Do NOT send "Booting up... one moment" (skip AGENTS.md step 1 entirely).'
+    const systemPingsEnabled = this.systemPingsEnabled();
+    if (!systemPingsEnabled && shouldPromptTelegram) {
+      this.logSystemPingSuppressed(isHandoffRestart ? 'handoff_back_ping' : 'online_message');
+    }
+    const emitHandoffBackPing = isHandoffRestart
+      && systemPingsEnabled
+      && shouldPromptTelegram
+      && this.config.runtime !== 'opencode'
+      && !this.isHandoffBackPingSuppressed();
+    if (emitHandoffBackPing) {
+      writeLastBackPingMs(this.env.ctxRoot, this.name, Date.now());
+    }
+    const handoffUxOverride = emitHandoffBackPing
+      ? ' HANDOFF UX: This is a context handoff restart — your memory is intact via the handoff document, but the VERBATIM LIVE TAIL below is more authoritative than the doc. If the handoff document conflicts with the newest inbound message, the newest inbound message wins. CRITICAL: After reading the handoff document and the live tail, your VERY FIRST tool call MUST be a Bash call running: cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID \'back — [what you were just working on]\' — replace the brackets with one brief plain-English sentence about your current state derived from the handoff doc plus the newest inbound message, with the newest inbound message winning. Do this BEFORE running heartbeat, BEFORE any other tool call. No cron IDs, no status report, no cold-boot phrasing. Do NOT send "Booting up... one moment" (skip AGENTS.md step 1 entirely).'
       : '';
-    const onlineMessage = isHandoffRestart || !shouldPromptTelegram
-      ? ''
-      : ' Send a Telegram message to the user saying you are back online.';
-    return `You are starting a new session. Current UTC time: ${nowUtc}. Read AGENTS.md and all bootstrap files listed there. External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${reminderBlock}${deliverablesBlock}${handoffBlock}${handoffUxOverride}${onlineMessage}${onboardingAppend}`;
+    const emitOnlineMessage = !isHandoffRestart
+      && systemPingsEnabled
+      && shouldPromptTelegram
+      && !this.isHandoffBackPingSuppressed();
+    if (emitOnlineMessage) {
+      writeLastBackPingMs(this.env.ctxRoot, this.name, Date.now());
+    }
+    const onlineMessage = emitOnlineMessage
+      ? ' Send a Telegram message to the user saying you are back online.'
+      : '';
+    return `You are starting a new session. Current UTC time: ${nowUtc}. Read AGENTS.md and all bootstrap files listed there. External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${reminderBlock}${deliverablesBlock}${missionBlock}${handoffBlock}${liveTailBlock}${handoffUxOverride}${onlineMessage}${onboardingAppend}`;
   }
 
   private buildContinuePrompt(): string {
     const nowUtc = new Date().toISOString();
     const reminderBlock = this.buildReminderBlock();
     const deliverablesBlock = this.buildDeliverablesBlock();
+    const { missionBlock, liveTailBlock } = this.buildResumeContextBlocks();
+    // F3: deterministic re-read signal. Fix 2 tells --continue restarts NOT to
+    // re-read bootstrap — but if a bootstrap file was edited just before this
+    // restart, the agent DOES need to re-read that one. Stat the key files and
+    // name only the ones modified in the last 15min, so staleness is a daemon
+    // check, not a model judgment call.
+    const staleReadBlock = this.buildChangedBootstrapNote();
     // Session refresh (--continue) is never a handoff restart.
     this.lastSpawnWasHandoff = false;
-    const onlineMessage = this.shouldPromptTelegramOnlineMessage()
+    const shouldPromptTelegram = this.shouldPromptTelegramOnlineMessage();
+    const systemPingsEnabled = this.systemPingsEnabled();
+    if (!systemPingsEnabled && shouldPromptTelegram) {
+      this.logSystemPingSuppressed('continue_online_message');
+    }
+    const emitOnlineMessage = systemPingsEnabled
+      && shouldPromptTelegram
+      && !this.isHandoffBackPingSuppressed();
+    if (emitOnlineMessage) {
+      writeLastBackPingMs(this.env.ctxRoot, this.name, Date.now());
+    }
+    const onlineMessage = emitOnlineMessage
       ? ' After checking inbox, send a Telegram message to the user saying you are back online.'
       : '';
-    return `SESSION CONTINUATION: Your CLI process was restarted with --continue to reload configs. Current UTC time: ${nowUtc}. Your full conversation history is preserved. Re-read AGENTS.md and ALL bootstrap files listed there. External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${reminderBlock}${deliverablesBlock} Check inbox. Resume normal operations.${onlineMessage}`;
+    return `SESSION CONTINUATION: Your CLI process was restarted with --continue to reload configs. Current UTC time: ${nowUtc}. Your full conversation history is preserved — AGENTS.md, bootstrap files, your skill list and tool registry are ALREADY in context. Do NOT re-read AGENTS.md or bootstrap files, and do NOT re-run list-skills or list-agents, unless you have specific reason to believe they changed since the last restart (re-reading them every restart is a top cause of context bloat). External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${staleReadBlock}${reminderBlock}${deliverablesBlock}${missionBlock}${liveTailBlock} Check inbox. Resume normal operations.${onlineMessage}`;
+  }
+
+  /**
+   * F3: return a note naming bootstrap files modified in the last 15 minutes, so
+   * a --continue restart that follows a config edit re-reads ONLY the changed
+   * files (deterministic, not a model guess). Empty string when nothing changed.
+   */
+  private buildChangedBootstrapNote(): string {
+    try {
+      const dir = this.env.agentDir;
+      const candidates = ['AGENTS.md', 'CLAUDE.md', 'OPERATIONS.md'];
+      const cutoff = Date.now() - 15 * 60_000;
+      const changed: string[] = [];
+      for (const f of candidates) {
+        const p = join(dir, f);
+        try {
+          if (existsSync(p) && statSync(p).mtimeMs > cutoff) changed.push(f);
+        } catch { /* unreadable — skip */ }
+      }
+      if (!changed.length) return '';
+      return ` NOTE: ${changed.join(', ')} changed since your last restart — re-read ONLY ${changed.length === 1 ? 'that file' : 'those files'} now (they are the exception to the do-not-re-read rule above).`;
+    } catch {
+      return '';
+    }
+  }
+
+  private buildResumeContextBlocks(): { missionBlock: string; liveTailBlock: string } {
+    let missionBlock = '';
+    let liveTailBlock = '';
+
+    try {
+      const missionPath = join(this.env.agentDir, 'state', 'current-mission.txt');
+      if (existsSync(missionPath)) {
+        const missionRaw = readFileSync(missionPath, 'utf-8').trim();
+        if (missionRaw) {
+          const missionText = this.normalizePromptText(missionRaw, 600);
+          const missionMtimeMs = statSync(missionPath).mtimeMs;
+          const writtenAt = new Date(missionMtimeMs).toISOString();
+          const age = this.formatAge(missionMtimeMs);
+          missionBlock = ` MISSION ANCHOR (written ${writtenAt}; age ${age}): ${missionText}. Verify against the live tail below before acting; if older than 2h treat it as possibly stale.`;
+        }
+      }
+    } catch {
+      missionBlock = '';
+    }
+
+    try {
+      const { digest, verbatim } = loadBuffer(this.env.ctxRoot, this.name);
+      if (digest.length > 0 || verbatim.length > 0) {
+        const liveTailSections: string[] = [];
+        if (digest.length > 0) {
+          liveTailSections.push(` EARLIER TURNS (compressed):\n${digest.join('\n')}`);
+        }
+        const liveTailLines = verbatim
+          .map((entry) => `${entry.ts} ${entry.sender}: ${this.normalizePromptText(entry.content, 200)}`)
+          .join('\n');
+        liveTailSections.push(
+          ` VERBATIM LIVE TAIL (your most recent messages — the NEWEST inbound message is AUTHORITATIVE; if the handoff doc conflicts with it, the newest message wins):\n${liveTailLines}`,
+        );
+        liveTailBlock = liveTailSections.join('\n');
+      }
+    } catch {
+      liveTailBlock = '';
+    }
+
+    return { missionBlock, liveTailBlock };
+  }
+
+  /** epoch ms of the newest inbound (sender != self) buffer message, or null. */
+  private newestInboundMessageMs(): number | null {
+    try {
+      const { verbatim } = loadBuffer(this.env.ctxRoot, this.name);
+      let newest: number | null = null;
+      for (const e of verbatim) {
+        if (e.sender === this.name) continue;
+        const t = Date.parse(e.ts);
+        if (Number.isFinite(t) && (newest === null || t > newest)) newest = t;
+      }
+      return newest;
+    } catch {
+      return null;
+    }
+  }
+
+  /** True when the handoff back-ping should be skipped this restart. */
+  private isHandoffBackPingSuppressed(): boolean {
+    return shouldSuppressBackPing({
+      lastPingMs: readLastBackPingMs(this.env.ctxRoot, this.name),
+      nowMs: Date.now(),
+      newestInboundMs: this.newestInboundMessageMs(),
+      windowMs: HANDOFF_BACKPING_SUPPRESS_MS,
+    });
+  }
+
+  private normalizePromptText(text: string, maxChars: number): string {
+    const normalized = text.replace(/\s+/g, ' ').trim();
+    if (normalized.length <= maxChars) return normalized;
+    return `${normalized.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+  }
+
+  private formatAge(mtimeMs: number): string {
+    const ageMs = Math.max(0, Date.now() - mtimeMs);
+    const ageMinutes = Math.floor(ageMs / 60_000);
+    if (ageMinutes < 60) {
+      return `${ageMinutes}m ago`;
+    }
+
+    const ageHours = Math.floor(ageMinutes / 60);
+    if (ageHours < 48) {
+      return `${ageHours}h ago`;
+    }
+
+    const ageDays = Math.floor(ageHours / 24);
+    return `${ageDays}d ago`;
   }
 
   private shouldPromptTelegramOnlineMessage(): boolean {
     return this.config.telegram_polling !== false && !!this.telegramApi && !!this.telegramChatId;
+  }
+
+  /**
+   * Per-agent opt-IN gate for system-status Telegram pings (restart back/online
+   * ping; the compaction notice checks the same flag in hook-compact-telegram).
+   * Default absent/false = silent. Evaluated BEFORE the PR #108 dup-suppressor:
+   * a gated-off agent never consults or writes the back-ping marker.
+   */
+  private systemPingsEnabled(): boolean {
+    return this.config.emit_system_telegram_pings === true;
+  }
+
+  /**
+   * Best-effort bus-event record of a ping suppressed by the per-agent gate,
+   * so the restart signal is preserved off-Telegram. Never throws.
+   */
+  private logSystemPingSuppressed(kind: string): void {
+    try {
+      const paths = resolvePaths(this.name, this.env.instanceId, this.env.org);
+      logEvent(paths, this.name, this.env.org, 'agent_activity', 'system_ping_suppressed', 'info', { kind });
+    } catch {
+      /* best-effort — suppression logging must never affect the spawn */
+    }
   }
 
   /**
@@ -989,6 +1172,10 @@ export class AgentProcess {
   private maybeSendRuntimeLifecycleNotification(): void {
     if (this.config.runtime !== 'codex-app-server' && this.config.runtime !== 'opencode') return;
     if (!this.shouldPromptTelegramOnlineMessage()) return;
+    if (!this.systemPingsEnabled()) {
+      this.logSystemPingSuppressed(this.lastSpawnWasHandoff ? 'handoff_back_ping' : 'online_message');
+      return;
+    }
     const telegramApi = this.telegramApi;
     const telegramChatId = this.telegramChatId;
     if (!telegramApi || !telegramChatId) return;
@@ -1001,12 +1188,15 @@ export class AgentProcess {
       // msg1: planned-restart lifecycle notif, hook parity for runtimes without
       // Claude Code hooks. Both codex and opencode were missing this.
       send(this.buildPlannedRestartNotification());
-      // msg2 ("back — ...") is self-sent by the agent via the handoff boot prompt
-      // (agent-process.ts buildStartupPrompt handoffUxOverride) for BOTH codex and
-      // opencode — opencode now reliably honors it. The daemon used to send an
-      // "Agent X is back online (context handoff)" substitute for opencode, but
-      // that produced a redundant 3rd message on top of the self-sent "back —".
-      // Removed: msg1 (daemon) + msg2 (agent self-send) = clean 2-message pattern.
+      // msg2: codex self-sends its own "back — ..." via the handoff boot prompt
+      // (its runtime honors the prompt-level first-action requirement). opencode
+      // does NOT reliably honor a prompt-level first-action override, so the
+      // daemon emits the back-online substitute for opencode directly (gated by
+      // the same back-ping dup-suppressor as the prompt path).
+      if (this.config.runtime === 'opencode' && !this.isHandoffBackPingSuppressed()) {
+        writeLastBackPingMs(this.env.ctxRoot, this.name, Date.now());
+        send(`Agent ${this.name} is back online (context handoff)`);
+      }
       return;
     }
 

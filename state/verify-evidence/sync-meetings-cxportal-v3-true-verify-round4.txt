@@ -1,0 +1,30 @@
+True-verify: sync_meetings_to_cxportal.py round-4 fix (commit b563246 on sync-meetings-cxportal-parser-fix-v3)
+
+Independently re-ran (not opencode self-report):
+
+1. pytest tests/test_sync_meetings_to_cxportal.py -v -> 2 passed
+   (test_inline_attendees_and_prose_commitments, test_commitment_description_no_leakage)
+
+2. Dry-run against real CRM meetings dir (5 real files):
+   Found 5 meeting records in CRM
+   - 2026-06-23-msia-audit-draft-review: 2 attendees, 0 commitments
+   - 2026-06-24-agent-system-development-and-it-upgrades: 3 attendees, 0 commitments
+   - 2026-06-24-alloi-it-services-discussion: 4 attendees, 4 commitments
+   - 2026-06-24-mohsin-abbas-partnership-exploration: 2 attendees, 0 commitments
+   - 2026-06-24-rachel-jsp-checkin: 2 attendees, 0 commitments
+   Matches expected ground truth (5/5 attendees, only alloi file has commitments).
+
+3. Directly inspected commitment DESCRIPTION CONTENT (not just counts) via
+   load_meeting_records() for the alloi file -- the exact check that caught the
+   round-3 corruption bug in review. All 4 descriptions are clean, no leaked text
+   from later non-commitment sections:
+     - Send 1:30pm Zoom for VPN troubleshooting (today)
+     - Prepare IT proposal (VPN + backup + network + support) by Friday 6/26 11am, send calendar invite
+     - Join Marcos + IT team on VPN troubleshoot; coordinate w/ Nathan on Ignite cloud option
+     - Support Nathan in prep; participate in follow-up coordination
+   (Commitment #4 previously had the entire ## CRM updates applied bullet list
+   glued onto it in round 3 -- confirmed gone.)
+
+Verdict: PASS. Safe to merge. Negation-guard header-scope issue (NEGATION_RE
+matching whole header string) remains a documented known limitation, non-blocking,
+does not affect any of the 5 real test files today.

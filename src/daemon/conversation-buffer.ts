@@ -24,6 +24,13 @@ import type { ConversationBufferEntry } from '../types/index.js';
  * enough to read on every session start without bloating context.
  */
 export const DEFAULT_BUFFER_LIMIT = 20;
+export const VERBATIM_BUFFER_TAIL_LIMIT = 5;
+const DIGEST_PREVIEW_LIMIT = 120;
+
+export type LoadedConversationBuffer = ConversationBufferEntry[] & {
+  verbatim: ConversationBufferEntry[];
+  digest: string[];
+};
 
 interface BufferPaths {
   dir: string;
@@ -109,26 +116,57 @@ export function appendToBuffer(
 }
 
 /**
- * Load the last `limit` entries from the buffer.
+ * Load the last `limit` entries from the buffer and split them into:
+ * - `verbatim`: the newest five entries, preserved exactly
+ * - `digest`: one-line summaries for any older entries still inside the cap
  *
  * Called from the session-start protocol (AGENTS.md step 7.5) so the
  * agent boots with literal recent turns in context — not just the
  * compressed handoff doc.
  *
- * Returns [] when the buffer file doesn't exist yet (first boot) or
- * is unreadable.
+ * Returns empty arrays when the buffer file doesn't exist yet (first boot)
+ * or is unreadable.
  */
 export function loadBuffer(
   ctxRoot: string,
   agentName: string,
   limit: number = DEFAULT_BUFFER_LIMIT,
-): ConversationBufferEntry[] {
+): LoadedConversationBuffer {
   try {
     const { buffer } = resolveBufferPaths(ctxRoot, agentName);
     const entries = readBufferEntries(buffer);
-    if (entries.length <= limit) return entries;
-    return entries.slice(entries.length - limit);
+    const cappedEntries = entries.length <= limit
+      ? entries
+      : entries.slice(entries.length - limit);
+
+    if (cappedEntries.length <= VERBATIM_BUFFER_TAIL_LIMIT) {
+      return createLoadedConversationBuffer(cappedEntries, cappedEntries, []);
+    }
+
+    const splitIndex = cappedEntries.length - VERBATIM_BUFFER_TAIL_LIMIT;
+    return createLoadedConversationBuffer(
+      cappedEntries,
+      cappedEntries.slice(splitIndex),
+      cappedEntries.slice(0, splitIndex).map(toDigestLine),
+    );
   } catch {
-    return [];
+    return createLoadedConversationBuffer([], [], []);
   }
+}
+
+export function toDigestLine(entry: ConversationBufferEntry): string {
+  const preview = entry.content.slice(0, DIGEST_PREVIEW_LIMIT);
+  const suffix = entry.content.length > DIGEST_PREVIEW_LIMIT ? '…' : '';
+  return `${entry.sender} (${entry.ts}): ${preview}${suffix}`;
+}
+
+function createLoadedConversationBuffer(
+  entries: ConversationBufferEntry[],
+  verbatim: ConversationBufferEntry[],
+  digest: string[],
+): LoadedConversationBuffer {
+  const loaded = entries.slice() as LoadedConversationBuffer;
+  loaded.verbatim = verbatim;
+  loaded.digest = digest;
+  return loaded;
 }

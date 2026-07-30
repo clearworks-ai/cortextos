@@ -1,0 +1,68 @@
+
+> cortextos@0.1.1 build
+> tsup
+
+CLI Building entry: {"cli":"src/cli/index.ts","daemon":"src/daemon/index.ts","pipeline/bypass-audit":"src/pipeline/bypass-audit.ts","pipeline/stage-emit":"src/pipeline/stage-emit.ts","pipeline/staging-verify/cli":"src/pipeline/staging-verify/cli.ts","pipeline/pr-target":"src/pipeline/pr-target.ts","hooks/hook-permission-telegram":"src/hooks/hook-permission-telegram.ts","hooks/hook-ask-telegram":"src/hooks/hook-ask-telegram.ts","hooks/hook-planmode-telegram":"src/hooks/hook-planmode-telegram.ts","hooks/hook-crash-alert":"src/hooks/hook-crash-alert.ts","hooks/hook-compact-telegram":"src/hooks/hook-compact-telegram.ts","hooks/hook-extract-facts":"src/hooks/hook-extract-facts.ts","hooks/hook-idle-flag":"src/hooks/hook-idle-flag.ts","hooks/hook-context-status":"src/hooks/hook-context-status.ts","hooks/hook-tool-result-router":"src/hooks/hook-tool-result-router.ts","hooks/hook-loop-detector":"src/hooks/hook-loop-detector.ts","hooks/hook-retrieval-enforcer":"src/hooks/hook-retrieval-enforcer.ts","pty/pty-host-entry":"src/pty/pty-host-entry.ts"}
+CLI Using tsconfig: tsconfig.json
+CLI tsup v8.5.1
+CLI Using tsup config: /Users/joshweiss/code/cortextos/tsup.config.ts
+CLI Target: node20
+CLI Cleaning output folder
+CJS Build start
+CJS dist/pipeline/bypass-audit.js              56.96 KB
+CJS dist/pipeline/pr-target.js                 7.27 KB
+CJS dist/hooks/hook-ask-telegram.js            28.19 KB
+CJS dist/pipeline/staging-verify/cli.js        69.52 KB
+CJS dist/hooks/hook-permission-telegram.js     33.36 KB
+CJS dist/hooks/hook-planmode-telegram.js       32.24 KB
+CJS dist/daemon.js                             467.71 KB
+CJS dist/hooks/hook-compact-telegram.js        9.43 KB
+CJS dist/hooks/hook-extract-facts.js           6.20 KB
+CJS dist/hooks/hook-crash-alert.js             18.13 KB
+CJS dist/hooks/hook-idle-flag.js               736.00 B
+CJS dist/hooks/hook-context-status.js          2.54 KB
+CJS dist/hooks/hook-loop-detector.js           17.77 KB
+CJS dist/hooks/hook-tool-result-router.js      15.80 KB
+CJS dist/pipeline/stage-emit.js                46.18 KB
+CJS dist/hooks/hook-retrieval-enforcer.js      16.58 KB
+CJS dist/pty/pty-host-entry.js                 1.93 KB
+CJS dist/cli.js                                737.37 KB
+CJS dist/pipeline/bypass-audit.js.map          122.19 KB
+CJS dist/hooks/hook-ask-telegram.js.map        66.82 KB
+CJS dist/pipeline/pr-target.js.map             11.17 KB
+CJS dist/hooks/hook-permission-telegram.js.map 73.49 KB
+CJS dist/hooks/hook-compact-telegram.js.map    39.31 KB
+CJS dist/hooks/hook-planmode-telegram.js.map   70.92 KB
+CJS dist/hooks/hook-idle-flag.js.map           1.40 KB
+CJS dist/hooks/hook-crash-alert.js.map         50.17 KB
+CJS dist/hooks/hook-context-status.js.map      7.33 KB
+CJS dist/hooks/hook-tool-result-router.js.map  57.84 KB
+CJS dist/pipeline/staging-verify/cli.js.map    133.15 KB
+CJS dist/hooks/hook-extract-facts.js.map       22.70 KB
+CJS dist/pty/pty-host-entry.js.map             4.85 KB
+CJS dist/hooks/hook-retrieval-enforcer.js.map  40.30 KB
+CJS dist/pipeline/stage-emit.js.map            86.76 KB
+CJS dist/hooks/hook-loop-detector.js.map       49.81 KB
+CJS dist/daemon.js.map                         1.10 MB
+CJS dist/cli.js.map                            1.60 MB
+CJS ⚡️ Build success in 73ms
+EXIT_CODE:0
+============================= test session starts ==============================
+platform darwin -- Python 3.14.3, pytest-9.1.1, pluggy-1.6.0 -- /opt/homebrew/opt/python@3.14/bin/python3.14
+cachedir: .pytest_cache
+rootdir: /Users/joshweiss/code/cortextos
+plugins: anyio-4.13.0
+collecting ... collected 9 items
+
+orgs/clearworksai/agents/frank2/scripts/tests/test_ff_extractor.py::TestEnrichment::test_enriched_inbound_quote_from_non_josh PASSED [ 11%]
+orgs/clearworksai/agents/frank2/scripts/tests/test_ff_extractor.py::TestEnrichment::test_enriched_outbound PASSED [ 22%]
+orgs/clearworksai/agents/frank2/scripts/tests/test_ff_extractor.py::TestWireStability::test_post_body_keys_only_wire_five PASSED [ 33%]
+orgs/clearworksai/agents/frank2/scripts/tests/test_ff_extractor.py::TestModeRouting::test_mode_commitments_with_recap_conflict PASSED [ 44%]
+orgs/clearworksai/agents/frank2/scripts/tests/test_ff_extractor.py::TestModeRouting::test_mode_full PASSED [ 55%]
+orgs/clearworksai/agents/frank2/scripts/tests/test_ff_extractor.py::TestModeRouting::test_no_flags_commitments PASSED [ 66%]
+orgs/clearworksai/agents/frank2/scripts/tests/test_ff_extractor.py::TestModeRouting::test_recap_flag PASSED [ 77%]
+orgs/clearworksai/agents/frank2/scripts/tests/test_ff_extractor.py::TestFullModeIsolation::test_full_mode_watermark_untouched_and_no_post PASSED [ 88%]
+orgs/clearworksai/agents/frank2/scripts/tests/test_ff_extractor.py::TestFullModeIsolation::test_meeting_id_filter PASSED [100%]
+
+============================== 9 passed in 0.03s ===============================
+PYTEST_EXIT:0

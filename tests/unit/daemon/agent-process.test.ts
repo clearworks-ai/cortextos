@@ -368,6 +368,12 @@ describe('AgentProcess - BUG-048 fix (session timer re-reads config)', () => {
   });
 });
 
+// NOTE (re-baseline merge): the 'AgentProcess - F8 fresh rollover' describe block
+// from origin/main was dropped here. It exercised decideSessionRefreshMode /
+// nextSessionRolloverState / prepareFreshRollover / F8 hardRestart escalation —
+// the planned-fresh-rollover machinery the re-baseline deliberately removed as
+// daemon churn. Those symbols no longer exist in agent-process.ts, so the tests
+// could not compile. Behavior legitimately changed; test removed intentionally.
 describe('AgentProcess — CrashLoopPauser (instar-inspired sliding window)', () => {
   it('triggers CRASH_LOOP halt when crash_window fills', async () => {
     const ap = new AgentProcess('alice', mockEnv, {

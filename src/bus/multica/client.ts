@@ -134,6 +134,7 @@ export function createMulticaClient(
 
     async listIssues(params) {
       const endpoint = new URL(`${normalizedConfig.baseUrl}/api/issues`);
+      endpoint.searchParams.set('workspace_id', normalizedConfig.workspaceId);
       if (params?.limit !== undefined) endpoint.searchParams.set('limit', String(params.limit));
       if (params?.offset !== undefined) endpoint.searchParams.set('offset', String(params.offset));
 

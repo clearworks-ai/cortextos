@@ -1,0 +1,355 @@
+diff --git a/src/bus/multica/client.ts b/src/bus/multica/client.ts
+index fe16117..1bbfc23 100644
+--- a/src/bus/multica/client.ts
++++ b/src/bus/multica/client.ts
+@@ -134,6 +134,7 @@ export function createMulticaClient(
+ 
+     async listIssues(params) {
+       const endpoint = new URL(`${normalizedConfig.baseUrl}/api/issues`);
++      endpoint.searchParams.set('workspace_id', normalizedConfig.workspaceId);
+       if (params?.limit !== undefined) endpoint.searchParams.set('limit', String(params.limit));
+       if (params?.offset !== undefined) endpoint.searchParams.set('offset', String(params.offset));
+ 
+diff --git a/src/bus/multica/index.ts b/src/bus/multica/index.ts
+index 6d28d57..f74b5dd 100644
+--- a/src/bus/multica/index.ts
++++ b/src/bus/multica/index.ts
+@@ -26,7 +26,7 @@ function formatUnexpectedError(error: unknown): string {
+ 
+ export async function runMulticaSync(
+   paths: BusPaths,
+-  options: { direction: SyncDirection; dryRun?: boolean },
++  options: { direction: SyncDirection; dryRun?: boolean; limit?: number },
+ ): Promise<SyncSummary> {
+   const dryRun = options.dryRun === true;
+   const summary = createEmptySummary(options.direction, dryRun);
+@@ -41,7 +41,10 @@ export async function runMulticaSync(
+     const store = createSyncStateStore();
+ 
+     if (options.direction === 'out' || options.direction === 'both') {
+-      const pushResult = await runOutboundPush(paths, client, store, config, { dryRun });
++      const pushResult = await runOutboundPush(paths, client, store, config, {
++        dryRun,
++        limit: options.limit,
++      });
+       summary.pushed_creates = pushResult.pushed_creates;
+       summary.pushed_updates = pushResult.pushed_updates;
+       summary.skipped += pushResult.skipped;
+diff --git a/src/bus/multica/push.ts b/src/bus/multica/push.ts
+index fded047..9924837 100644
+--- a/src/bus/multica/push.ts
++++ b/src/bus/multica/push.ts
+@@ -6,6 +6,7 @@ import type { MulticaClient, MulticaConfig, SyncStateStore } from './types.js';
+ 
+ export interface OutboundPushOptions {
+   dryRun?: boolean;
++  limit?: number;
+   provenanceFor?: (task: Task) => 'meeting-pipeline' | 'bus';
+ }
+ 
+@@ -37,6 +38,7 @@ export async function runOutboundPush(
+   options: OutboundPushOptions = {},
+ ): Promise<OutboundPushResult> {
+   const dryRun = options.dryRun === true;
++  const limit = options.limit;
+   // Callers can opt specific tasks into meeting-pipeline provenance without
+   // adding any detection heuristic to this module.
+   const provenanceFor = options.provenanceFor ?? (() => 'bus' as const);
+@@ -58,6 +60,10 @@ export async function runOutboundPush(
+   // Archived or compacted tasks never appear in the task universe. Leave their
+   // ledger links untouched here; future ledger GC is a separate concern.
+   for (const task of universe) {
++    if (hasReachedPushLimit(result, limit)) {
++      break;
++    }
++
+     const link = state.links[task.id];
+ 
+     if (!link && !OPEN_TASK_STATUSES.has(task.status)) {
+@@ -113,6 +119,9 @@ export async function runOutboundPush(
+         idempotency_key: idempotencyKey,
+         error: null,
+       });
++      if (hasReachedPushLimit(result, limit)) {
++        break;
++      }
+       continue;
+     }
+ 
+@@ -143,6 +152,9 @@ export async function runOutboundPush(
+         idempotency_key: idempotencyKey,
+         error: null,
+       });
++      if (hasReachedPushLimit(result, limit)) {
++        break;
++      }
+     } catch (error) {
+       result.errors += 1;
+       const message = truncateErrorMessage(error);
+@@ -178,6 +190,15 @@ function incrementPushCount(
+   result.pushed_updates += 1;
+ }
+ 
++function hasReachedPushLimit(
++  result: OutboundPushResult,
++  limit: number | undefined,
++): boolean {
++  return typeof limit === 'number'
++    && Number.isFinite(limit)
++    && result.pushed_creates + result.pushed_updates >= limit;
++}
++
+ function truncateErrorMessage(error: unknown): string {
+   const message = error instanceof Error ? error.message : String(error);
+   return message.length <= 300 ? message : `${message.slice(0, 297)}...`;
+diff --git a/src/cli/bus.ts b/src/cli/bus.ts
+index a67042e..7f95e09 100644
+--- a/src/cli/bus.ts
++++ b/src/cli/bus.ts
+@@ -1257,17 +1257,28 @@ busCommand
+   .description('Two-way sync between cortextOS bus tasks and Multica issues (push open tasks out, poll Multica status/assignee changes back in)')
+   .option('--dry-run', 'Preview the sync plan without pushing, polling writes, or ledger mutation')
+   .option('--direction <d>', 'Sync direction: out | in | both', 'both')
+-  .action(async (opts: { dryRun?: boolean; direction: string }) => {
++  .option('--limit <n>', 'Cap the number of outbound issues pushed this run (creates + updates)')
++  .action(async (opts: { dryRun?: boolean; direction: string; limit?: string }) => {
+     if (!['out', 'in', 'both'].includes(opts.direction)) {
+       console.error(`Invalid --direction '${opts.direction}'. Must be one of: out, in, both`);
+       process.exit(1);
+     }
+ 
++    const parsedLimit = opts.limit === undefined ? undefined : Number.parseInt(opts.limit, 10);
++    if (
++      opts.limit !== undefined
++      && (!/^\d+$/.test(opts.limit) || parsedLimit === undefined || parsedLimit <= 0)
++    ) {
++      console.error(`Invalid --limit '${opts.limit}'. Must be a positive integer`);
++      process.exit(1);
++    }
++
+     const env = resolveEnv();
+     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+     const summary = await runMulticaSync(paths, {
+       direction: opts.direction as SyncDirection,
+       dryRun: opts.dryRun === true,
++      limit: parsedLimit,
+     });
+ 
+     if (!opts.dryRun) {
+diff --git a/tests/unit/bus/multica/client.test.ts b/tests/unit/bus/multica/client.test.ts
+index 12d8e9f..d78157e 100644
+--- a/tests/unit/bus/multica/client.test.ts
++++ b/tests/unit/bus/multica/client.test.ts
+@@ -106,7 +106,7 @@ describe('multica client', () => {
+     await expect(client.listIssues()).rejects.toMatchObject({
+       name: 'MulticaHttpError',
+       status: 0,
+-      endpoint: 'https://multica.example.com/api/issues',
++      endpoint: 'https://multica.example.com/api/issues?workspace_id=workspace-123',
+     });
+   });
+ 
+@@ -137,8 +137,13 @@ describe('multica client', () => {
+     const client = createMulticaClient(config, fetchMock as unknown as typeof fetch);
+ 
+     const issues = await client.listIssues({ limit: 10, offset: 5 });
++    const [endpoint] = fetchMock.mock.calls[0] as [string, RequestInit];
++    const url = new URL(endpoint);
+ 
+     expect(issues).toHaveLength(1);
++    expect(url.searchParams.get('workspace_id')).toBe(config.workspaceId);
++    expect(url.searchParams.get('limit')).toBe('10');
++    expect(url.searchParams.get('offset')).toBe('5');
+     expect(issues[0].status).toBe('todo');
+     expect(issues[0].priority).toBe('high');
+     expect(warnSpy).toHaveBeenCalledTimes(1);
+diff --git a/tests/unit/bus/multica/push.test.ts b/tests/unit/bus/multica/push.test.ts
+new file mode 100644
+index 0000000..576b883
+--- /dev/null
++++ b/tests/unit/bus/multica/push.test.ts
+@@ -0,0 +1,184 @@
++import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
++import { join } from 'node:path';
++import { tmpdir } from 'node:os';
++
++import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++
++import { createTask } from '../../../../src/bus/task.js';
++import { hashMappedFields, taskToIssuePayload } from '../../../../src/bus/multica/mapping.js';
++import { runOutboundPush } from '../../../../src/bus/multica/push.js';
++import { createSyncStateStore } from '../../../../src/bus/multica/sync-state.js';
++import type { MulticaClient, MulticaConfig } from '../../../../src/bus/multica/types.js';
++import type { BusPaths, Task } from '../../../../src/types/index.js';
++
++const config: MulticaConfig = {
++  baseUrl: 'https://multica.example.com',
++  webhookToken: 'webhook-token',
++  webhookSecret: 'webhook-secret',
++  readApiToken: 'read-token',
++  workspaceId: 'workspace-123',
++  memberIdJosh: 'member-josh',
++};
++
++function buildPaths(root: string): BusPaths {
++  return {
++    ctxRoot: root,
++    inbox: join(root, 'inbox', 'paul'),
++    inflight: join(root, 'inflight', 'paul'),
++    processed: join(root, 'processed', 'paul'),
++    logDir: join(root, 'logs', 'paul'),
++    stateDir: join(root, 'state', 'paul'),
++    taskDir: join(root, 'tasks'),
++    approvalDir: join(root, 'approvals'),
++    analyticsDir: join(root, 'analytics'),
++    heartbeatDir: join(root, 'heartbeats'),
++  };
++}
++
++function makeTimestamp(index: number): string {
++  return new Date(Date.UTC(2026, 6, 29, 7, 0, index)).toISOString().replace(/\.\d{3}Z$/, 'Z');
++}
++
++function readTask(paths: BusPaths, taskId: string): Task {
++  return JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8')) as Task;
++}
++
++function writeTask(paths: BusPaths, task: Task): void {
++  writeFileSync(join(paths.taskDir, `${task.id}.json`), JSON.stringify(task));
++}
++
++function createOrderedTask(
++  paths: BusPaths,
++  index: number,
++  title: string,
++  overrides: Partial<Task> = {},
++): Task {
++  const taskId = createTask(paths, 'paul', 'clearworksai', title, {
++    assignee: 'human',
++    description: `${title} description`,
++  });
++  const task = readTask(paths, taskId);
++  const timestamp = makeTimestamp(index);
++  const nextTask: Task = {
++    ...task,
++    ...overrides,
++    created_at: timestamp,
++    updated_at: timestamp,
++  };
++  writeTask(paths, nextTask);
++  return nextTask;
++}
++
++function createRecordingClient() {
++  const pushedTaskIds: string[] = [];
++  const client: MulticaClient = {
++    async pushIssue(payload) {
++      pushedTaskIds.push(payload.bus_task_id);
++      return { status: 200 };
++    },
++    async listIssues() {
++      return [];
++    },
++    async getTaskRuns() {
++      return [];
++    },
++  };
++
++  return { client, pushedTaskIds };
++}
++
++describe('multica outbound push', () => {
++  let testDir: string;
++  let paths: BusPaths;
++
++  beforeEach(() => {
++    testDir = mkdtempSync(join(tmpdir(), 'multica-push-test-'));
++    paths = buildPaths(testDir);
++  });
++
++  afterEach(() => {
++    rmSync(testDir, { recursive: true, force: true });
++  });
++
++  it('caps outbound pushes at the provided limit without counting skipped tasks', async () => {
++    const { client, pushedTaskIds } = createRecordingClient();
++    const store = createSyncStateStore(join(testDir, 'sync-state.json'));
++
++    const skippedTask = createOrderedTask(paths, 0, 'Already synced task');
++    const skippedHash = hashMappedFields(taskToIssuePayload(skippedTask, config));
++    store.upsertLink(skippedTask.id, {
++      multica_issue_id: 'issue-skip',
++      last_pushed_hash: skippedHash,
++      last_pushed_status: skippedTask.status,
++      idempotency_key: 'skip-key',
++    });
++
++    for (let index = 1; index <= 10; index += 1) {
++      createOrderedTask(paths, index, `Create task ${index}`);
++    }
++
++    for (let index = 11; index <= 22; index += 1) {
++      const task = createOrderedTask(paths, index, `Update task ${index}`);
++      store.upsertLink(task.id, {
++        multica_issue_id: `issue-${index}`,
++        last_pushed_hash: `stale-hash-${index}`,
++        last_pushed_status: task.status,
++        idempotency_key: `old-key-${index}`,
++      });
++    }
++
++    const result = await runOutboundPush(paths, client, store, config, { limit: 20 });
++
++    expect(result.pushed_creates).toBe(10);
++    expect(result.pushed_updates).toBe(10);
++    expect(result.pushed_creates + result.pushed_updates).toBe(20);
++    expect(result.skipped).toBe(1);
++    expect(pushedTaskIds).toHaveLength(20);
++    expect(result.plan.filter((entry) => entry.outcome === 'pushed')).toHaveLength(20);
++    expect(result.plan).toContainEqual(expect.objectContaining({
++      bus_task_id: skippedTask.id,
++      action: 'skip',
++      reason: 'hash_unchanged',
++      outcome: 'skipped',
++    }));
++  });
++
++  it('pushes every pushable task when no limit is provided', async () => {
++    const { client, pushedTaskIds } = createRecordingClient();
++    const store = createSyncStateStore(join(testDir, 'sync-state.json'));
++
++    createOrderedTask(paths, 0, 'Create task 1');
++    createOrderedTask(paths, 1, 'Create task 2');
++    const updateTask = createOrderedTask(paths, 2, 'Update task 1');
++    store.upsertLink(updateTask.id, {
++      multica_issue_id: 'issue-1',
++      last_pushed_hash: 'stale-hash',
++      last_pushed_status: updateTask.status,
++      idempotency_key: 'old-key-1',
++    });
++
++    const result = await runOutboundPush(paths, client, store, config);
++
++    expect(result.pushed_creates).toBe(2);
++    expect(result.pushed_updates).toBe(1);
++    expect(result.pushed_creates + result.pushed_updates).toBe(3);
++    expect(result.skipped).toBe(0);
++    expect(pushedTaskIds).toHaveLength(3);
++  });
++
++  it('pushes nothing when the limit is zero', async () => {
++    const { client, pushedTaskIds } = createRecordingClient();
++    const store = createSyncStateStore(join(testDir, 'sync-state.json'));
++
++    createOrderedTask(paths, 0, 'Create task 1');
++    createOrderedTask(paths, 1, 'Create task 2');
++
++    const result = await runOutboundPush(paths, client, store, config, { limit: 0 });
++
++    expect(result.pushed_creates).toBe(0);
++    expect(result.pushed_updates).toBe(0);
++    expect(result.skipped).toBe(0);
++    expect(result.plan).toEqual([]);
++    expect(pushedTaskIds).toHaveLength(0);
++  });
++});

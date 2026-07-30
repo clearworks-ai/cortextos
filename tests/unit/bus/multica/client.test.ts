@@ -106,7 +106,7 @@ describe('multica client', () => {
     await expect(client.listIssues()).rejects.toMatchObject({
       name: 'MulticaHttpError',
       status: 0,
-      endpoint: 'https://multica.example.com/api/issues',
+      endpoint: 'https://multica.example.com/api/issues?workspace_id=workspace-123',
     });
   });
 
@@ -137,8 +137,13 @@ describe('multica client', () => {
     const client = createMulticaClient(config, fetchMock as unknown as typeof fetch);
 
     const issues = await client.listIssues({ limit: 10, offset: 5 });
+    const [endpoint] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const url = new URL(endpoint);
 
     expect(issues).toHaveLength(1);
+    expect(url.searchParams.get('workspace_id')).toBe(config.workspaceId);
+    expect(url.searchParams.get('limit')).toBe('10');
+    expect(url.searchParams.get('offset')).toBe('5');
     expect(issues[0].status).toBe('todo');
     expect(issues[0].priority).toBe('high');
     expect(warnSpy).toHaveBeenCalledTimes(1);

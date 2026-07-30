@@ -6,6 +6,7 @@ import type { MulticaClient, MulticaConfig, SyncStateStore } from './types.js';
 
 export interface OutboundPushOptions {
   dryRun?: boolean;
+  limit?: number;
   provenanceFor?: (task: Task) => 'meeting-pipeline' | 'bus';
 }
 
@@ -37,6 +38,7 @@ export async function runOutboundPush(
   options: OutboundPushOptions = {},
 ): Promise<OutboundPushResult> {
   const dryRun = options.dryRun === true;
+  const limit = options.limit;
   // Callers can opt specific tasks into meeting-pipeline provenance without
   // adding any detection heuristic to this module.
   const provenanceFor = options.provenanceFor ?? (() => 'bus' as const);
@@ -58,6 +60,10 @@ export async function runOutboundPush(
   // Archived or compacted tasks never appear in the task universe. Leave their
   // ledger links untouched here; future ledger GC is a separate concern.
   for (const task of universe) {
+    if (hasReachedPushLimit(result, limit)) {
+      break;
+    }
+
     const link = state.links[task.id];
 
     if (!link && !OPEN_TASK_STATUSES.has(task.status)) {
@@ -113,6 +119,9 @@ export async function runOutboundPush(
         idempotency_key: idempotencyKey,
         error: null,
       });
+      if (hasReachedPushLimit(result, limit)) {
+        break;
+      }
       continue;
     }
 
@@ -143,6 +152,9 @@ export async function runOutboundPush(
         idempotency_key: idempotencyKey,
         error: null,
       });
+      if (hasReachedPushLimit(result, limit)) {
+        break;
+      }
     } catch (error) {
       result.errors += 1;
       const message = truncateErrorMessage(error);
@@ -176,6 +188,15 @@ function incrementPushCount(
   }
 
   result.pushed_updates += 1;
+}
+
+function hasReachedPushLimit(
+  result: OutboundPushResult,
+  limit: number | undefined,
+): boolean {
+  return typeof limit === 'number'
+    && Number.isFinite(limit)
+    && result.pushed_creates + result.pushed_updates >= limit;
 }
 
 function truncateErrorMessage(error: unknown): string {

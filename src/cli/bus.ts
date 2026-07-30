@@ -1257,9 +1257,19 @@ busCommand
   .description('Two-way sync between cortextOS bus tasks and Multica issues (push open tasks out, poll Multica status/assignee changes back in)')
   .option('--dry-run', 'Preview the sync plan without pushing, polling writes, or ledger mutation')
   .option('--direction <d>', 'Sync direction: out | in | both', 'both')
-  .action(async (opts: { dryRun?: boolean; direction: string }) => {
+  .option('--limit <n>', 'Cap the number of outbound issues pushed this run (creates + updates)')
+  .action(async (opts: { dryRun?: boolean; direction: string; limit?: string }) => {
     if (!['out', 'in', 'both'].includes(opts.direction)) {
       console.error(`Invalid --direction '${opts.direction}'. Must be one of: out, in, both`);
+      process.exit(1);
+    }
+
+    const parsedLimit = opts.limit === undefined ? undefined : Number.parseInt(opts.limit, 10);
+    if (
+      opts.limit !== undefined
+      && (!/^\d+$/.test(opts.limit) || parsedLimit === undefined || parsedLimit <= 0)
+    ) {
+      console.error(`Invalid --limit '${opts.limit}'. Must be a positive integer`);
       process.exit(1);
     }
 
@@ -1268,6 +1278,7 @@ busCommand
     const summary = await runMulticaSync(paths, {
       direction: opts.direction as SyncDirection,
       dryRun: opts.dryRun === true,
+      limit: parsedLimit,
     });
 
     if (!opts.dryRun) {

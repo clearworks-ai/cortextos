@@ -13,8 +13,6 @@ import type { MulticaConfig } from '../../../../src/bus/multica/types.js';
 
 const config: MulticaConfig = {
   baseUrl: 'https://multica.example.com',
-  webhookToken: 'webhook-token',
-  webhookSecret: 'webhook-secret',
   readApiToken: 'read-token',
   workspaceId: 'workspace-123',
   memberIdJosh: 'member-josh',

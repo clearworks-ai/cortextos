@@ -2,8 +2,6 @@ import type { TaskStatus } from '../../types/index.js';
 
 export const MULTICA_SECRET_KEYS = [
   'MULTICA_BASE_URL',
-  'MULTICA_WEBHOOK_TOKEN',
-  'MULTICA_WEBHOOK_SECRET',
   'MULTICA_READ_API_TOKEN',
   'MULTICA_WORKSPACE_ID',
   'MULTICA_MEMBER_ID_JOSH',
@@ -66,6 +64,7 @@ export interface MulticaPushPayload {
   provenance: MulticaProvenance;
   bus_task_id: string;
   action: MulticaPushAction;
+  // The envelope fields stay local to cortextOS bookkeeping; only issue is sent on the wire.
   issue: {
     workspace_id: string;
     title: string;
@@ -81,9 +80,7 @@ export interface MulticaPushPayload {
 
 export interface MulticaConfig {
   baseUrl: string;
-  webhookToken: string;
-  webhookSecret: string;
-  readApiToken: string | null;
+  readApiToken: string;
   workspaceId: string;
   memberIdJosh: string;
 }
@@ -117,10 +114,8 @@ export interface SyncStateStore {
 }
 
 export interface MulticaClient {
-  pushIssue(
-    payload: MulticaPushPayload,
-    idempotencyKey: string,
-  ): Promise<{ status: number }>;
+  createIssue(payload: MulticaPushPayload): Promise<MulticaIssue>;
+  updateIssue(issueId: string, payload: MulticaPushPayload): Promise<MulticaIssue>;
   listIssues(params?: { limit?: number; offset?: number }): Promise<MulticaIssue[]>;
   getTaskRuns(issueId: string): Promise<MulticaTaskRun[]>;
 }

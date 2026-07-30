@@ -8,13 +8,11 @@ import { createTask } from '../../../../src/bus/task.js';
 import { hashMappedFields, taskToIssuePayload } from '../../../../src/bus/multica/mapping.js';
 import { runOutboundPush } from '../../../../src/bus/multica/push.js';
 import { createSyncStateStore } from '../../../../src/bus/multica/sync-state.js';
-import type { MulticaClient, MulticaConfig } from '../../../../src/bus/multica/types.js';
+import type { MulticaClient, MulticaConfig, MulticaIssue, MulticaPushPayload } from '../../../../src/bus/multica/types.js';
 import type { BusPaths, Task } from '../../../../src/types/index.js';
 
 const config: MulticaConfig = {
   baseUrl: 'https://multica.example.com',
-  webhookToken: 'webhook-token',
-  webhookSecret: 'webhook-secret',
   readApiToken: 'read-token',
   workspaceId: 'workspace-123',
   memberIdJosh: 'member-josh',
@@ -69,12 +67,36 @@ function createOrderedTask(
   return nextTask;
 }
 
+function makeIssueResponse(payload: MulticaPushPayload, issueId: string): MulticaIssue {
+  return {
+    id: issueId,
+    identifier: `CLE-${issueId}`,
+    workspace_id: payload.issue.workspace_id,
+    project_id: payload.issue.project_id,
+    title: payload.issue.title,
+    description: payload.issue.description,
+    status: payload.issue.status,
+    priority: payload.issue.priority,
+    assignee_type: payload.issue.assignee_type,
+    assignee_id: payload.issue.assignee_id,
+    context_refs: [],
+    due_date: payload.issue.due_date,
+    created_at: '2026-07-29T07:00:00Z',
+    updated_at: '2026-07-29T07:00:00Z',
+  };
+}
+
 function createRecordingClient() {
-  const pushedTaskIds: string[] = [];
+  const createdTaskIds: string[] = [];
+  const updatedCalls: Array<{ issueId: string; busTaskId: string }> = [];
   const client: MulticaClient = {
-    async pushIssue(payload) {
-      pushedTaskIds.push(payload.bus_task_id);
-      return { status: 200 };
+    async createIssue(payload) {
+      createdTaskIds.push(payload.bus_task_id);
+      return makeIssueResponse(payload, `created-${payload.bus_task_id}`);
+    },
+    async updateIssue(issueId, payload) {
+      updatedCalls.push({ issueId, busTaskId: payload.bus_task_id });
+      return makeIssueResponse(payload, issueId);
     },
     async listIssues() {
       return [];
@@ -84,7 +106,7 @@ function createRecordingClient() {
     },
   };
 
-  return { client, pushedTaskIds };
+  return { client, createdTaskIds, updatedCalls };
 }
 
 describe('multica outbound push', () => {
@@ -101,7 +123,7 @@ describe('multica outbound push', () => {
   });
 
   it('caps outbound pushes at the provided limit without counting skipped tasks', async () => {
-    const { client, pushedTaskIds } = createRecordingClient();
+    const { client, createdTaskIds, updatedCalls } = createRecordingClient();
     const store = createSyncStateStore(join(testDir, 'sync-state.json'));
 
     const skippedTask = createOrderedTask(paths, 0, 'Already synced task');
@@ -133,7 +155,8 @@ describe('multica outbound push', () => {
     expect(result.pushed_updates).toBe(10);
     expect(result.pushed_creates + result.pushed_updates).toBe(20);
     expect(result.skipped).toBe(1);
-    expect(pushedTaskIds).toHaveLength(20);
+    expect(createdTaskIds).toHaveLength(10);
+    expect(updatedCalls).toHaveLength(10);
     expect(result.plan.filter((entry) => entry.outcome === 'pushed')).toHaveLength(20);
     expect(result.plan).toContainEqual(expect.objectContaining({
       bus_task_id: skippedTask.id,
@@ -144,7 +167,7 @@ describe('multica outbound push', () => {
   });
 
   it('pushes every pushable task when no limit is provided', async () => {
-    const { client, pushedTaskIds } = createRecordingClient();
+    const { client, createdTaskIds, updatedCalls } = createRecordingClient();
     const store = createSyncStateStore(join(testDir, 'sync-state.json'));
 
     createOrderedTask(paths, 0, 'Create task 1');
@@ -163,11 +186,12 @@ describe('multica outbound push', () => {
     expect(result.pushed_updates).toBe(1);
     expect(result.pushed_creates + result.pushed_updates).toBe(3);
     expect(result.skipped).toBe(0);
-    expect(pushedTaskIds).toHaveLength(3);
+    expect(createdTaskIds).toHaveLength(2);
+    expect(updatedCalls).toHaveLength(1);
   });
 
   it('pushes nothing when the limit is zero', async () => {
-    const { client, pushedTaskIds } = createRecordingClient();
+    const { client, createdTaskIds, updatedCalls } = createRecordingClient();
     const store = createSyncStateStore(join(testDir, 'sync-state.json'));
 
     createOrderedTask(paths, 0, 'Create task 1');
@@ -179,6 +203,100 @@ describe('multica outbound push', () => {
     expect(result.pushed_updates).toBe(0);
     expect(result.skipped).toBe(0);
     expect(result.plan).toEqual([]);
-    expect(pushedTaskIds).toHaveLength(0);
+    expect(createdTaskIds).toHaveLength(0);
+    expect(updatedCalls).toHaveLength(0);
+  });
+
+  it('self-heals stale null-id links by creating a real issue', async () => {
+    const { client, createdTaskIds, updatedCalls } = createRecordingClient();
+    const store = createSyncStateStore(join(testDir, 'sync-state.json'));
+    const task = createOrderedTask(paths, 0, 'Webhook-era stale task');
+    const currentHash = hashMappedFields(taskToIssuePayload(task, config));
+    store.upsertLink(task.id, {
+      multica_issue_id: null,
+      last_pushed_hash: currentHash,
+      last_pushed_status: task.status,
+      idempotency_key: 'stale-key',
+    });
+
+    const result = await runOutboundPush(paths, client, store, config);
+    const link = store.linkFor(task.id);
+
+    expect(result.plan).toContainEqual(expect.objectContaining({
+      bus_task_id: task.id,
+      action: 'create',
+      reason: 'new_task',
+      outcome: 'pushed',
+    }));
+    expect(createdTaskIds).toEqual([task.id]);
+    expect(updatedCalls).toEqual([]);
+    expect(link?.multica_issue_id).toBe(`created-${task.id}`);
+  });
+
+  it('persists the created issue id into the sync link', async () => {
+    const { client } = createRecordingClient();
+    const store = createSyncStateStore(join(testDir, 'sync-state.json'));
+    const task = createOrderedTask(paths, 0, 'Fresh create task');
+
+    const result = await runOutboundPush(paths, client, store, config);
+    const link = store.linkFor(task.id);
+
+    expect(result.plan).toContainEqual(expect.objectContaining({
+      bus_task_id: task.id,
+      action: 'create',
+      outcome: 'pushed',
+    }));
+    expect(link?.multica_issue_id).toBe(`created-${task.id}`);
+    expect(link?.last_pushed_hash).toBe(hashMappedFields(taskToIssuePayload(task, config)));
+    expect(link?.last_pushed_status).toBe(task.status);
+    expect(link?.idempotency_key).toBeTruthy();
+  });
+
+  it('updates using the stored issue id and re-persists it', async () => {
+    const { client, updatedCalls } = createRecordingClient();
+    const store = createSyncStateStore(join(testDir, 'sync-state.json'));
+    const task = createOrderedTask(paths, 0, 'Stored id update task');
+    store.upsertLink(task.id, {
+      multica_issue_id: 'issue-77',
+      last_pushed_hash: 'stale-hash',
+      last_pushed_status: task.status,
+      idempotency_key: 'old-key',
+    });
+
+    const result = await runOutboundPush(paths, client, store, config);
+    const link = store.linkFor(task.id);
+
+    expect(result.plan).toContainEqual(expect.objectContaining({
+      bus_task_id: task.id,
+      action: 'update',
+      outcome: 'pushed',
+    }));
+    expect(updatedCalls).toEqual([{ issueId: 'issue-77', busTaskId: task.id }]);
+    expect(link?.multica_issue_id).toBe('issue-77');
+    expect(link?.last_pushed_hash).toBe(hashMappedFields(taskToIssuePayload(task, config, 'bus', 'update')));
+  });
+
+  it('retains genuine hash-based skips only when a real issue id exists', async () => {
+    const { client, createdTaskIds, updatedCalls } = createRecordingClient();
+    const store = createSyncStateStore(join(testDir, 'sync-state.json'));
+    const task = createOrderedTask(paths, 0, 'Already current task');
+    const currentHash = hashMappedFields(taskToIssuePayload(task, config, 'bus', 'update'));
+    store.upsertLink(task.id, {
+      multica_issue_id: 'issue-88',
+      last_pushed_hash: currentHash,
+      last_pushed_status: task.status,
+      idempotency_key: 'same-key',
+    });
+
+    const result = await runOutboundPush(paths, client, store, config);
+
+    expect(result.plan).toContainEqual(expect.objectContaining({
+      bus_task_id: task.id,
+      action: 'skip',
+      reason: 'hash_unchanged',
+      outcome: 'skipped',
+    }));
+    expect(createdTaskIds).toEqual([]);
+    expect(updatedCalls).toEqual([]);
   });
 });

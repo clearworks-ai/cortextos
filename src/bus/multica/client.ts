@@ -1,4 +1,3 @@
-import { createHmac } from 'node:crypto';
 import { join } from 'node:path';
 
 import { loadEnvFileInto } from '../../utils/env.js';
@@ -17,8 +16,7 @@ import {
 
 const REQUIRED_CONFIG_KEYS = [
   'MULTICA_BASE_URL',
-  'MULTICA_WEBHOOK_TOKEN',
-  'MULTICA_WEBHOOK_SECRET',
+  'MULTICA_READ_API_TOKEN',
   'MULTICA_WORKSPACE_ID',
   'MULTICA_MEMBER_ID_JOSH',
 ] as const;
@@ -39,10 +37,6 @@ export class MulticaHttpError extends Error {
     this.endpoint = endpoint;
     this.cause = cause;
   }
-}
-
-export function sign(rawBody: string, secret: string): string {
-  return `sha256=${createHmac('sha256', secret).update(rawBody).digest('hex')}`;
 }
 
 export function resolveMulticaConfig(
@@ -79,13 +73,11 @@ export function resolveMulticaConfig(
   }
 
   const baseUrl = normalizeRequiredValue(resolved.MULTICA_BASE_URL);
-  const webhookToken = normalizeRequiredValue(resolved.MULTICA_WEBHOOK_TOKEN);
-  const webhookSecret = normalizeRequiredValue(resolved.MULTICA_WEBHOOK_SECRET);
+  const readApiToken = normalizeRequiredValue(resolved.MULTICA_READ_API_TOKEN);
   const workspaceId = normalizeRequiredValue(resolved.MULTICA_WORKSPACE_ID);
   const memberIdJosh = normalizeRequiredValue(resolved.MULTICA_MEMBER_ID_JOSH);
-  const readApiToken = normalizeOptionalValue(resolved.MULTICA_READ_API_TOKEN);
 
-  if (!baseUrl || !webhookToken || !webhookSecret || !workspaceId || !memberIdJosh) {
+  if (!baseUrl || !readApiToken || !workspaceId || !memberIdJosh) {
     const stillMissing = REQUIRED_CONFIG_KEYS.filter((key) => {
       const value = normalizeRequiredValue(resolved[key]);
       return value === null;
@@ -96,8 +88,6 @@ export function resolveMulticaConfig(
 
   return {
     baseUrl: baseUrl.replace(/\/+$/, ''),
-    webhookToken,
-    webhookSecret,
     readApiToken,
     workspaceId,
     memberIdJosh,
@@ -114,22 +104,28 @@ export function createMulticaClient(
   };
 
   return {
-    async pushIssue(payload, idempotencyKey) {
-      const endpoint = `${normalizedConfig.baseUrl}/api/webhooks/autopilots/${encodeURIComponent(normalizedConfig.webhookToken)}`;
-      const rawBody = JSON.stringify(payload);
-      const headers = new Headers({
-        'Content-Type': 'application/json',
-        'X-Hub-Signature-256': sign(rawBody, normalizedConfig.webhookSecret),
-        'Idempotency-Key': idempotencyKey,
-      });
+    async createIssue(payload) {
+      const endpoint = new URL(`${normalizedConfig.baseUrl}/api/issues`);
+      endpoint.searchParams.set('workspace_id', normalizedConfig.workspaceId);
+      const responsePayload = await requestJson(
+        endpoint.toString(),
+        fetchImpl,
+        buildWriteInit(normalizedConfig, 'POST', JSON.stringify(payload.issue)),
+      );
+      return parseIssueObject(responsePayload, endpoint.toString());
+    },
 
-      const response = await request(endpoint, fetchImpl, {
-        method: 'POST',
-        headers,
-        body: rawBody,
-      });
-
-      return { status: response.status };
+    async updateIssue(issueId, payload) {
+      const endpoint = new URL(
+        `${normalizedConfig.baseUrl}/api/issues/${encodeURIComponent(issueId)}`,
+      );
+      endpoint.searchParams.set('workspace_id', normalizedConfig.workspaceId);
+      const responsePayload = await requestJson(
+        endpoint.toString(),
+        fetchImpl,
+        buildWriteInit(normalizedConfig, 'PUT', JSON.stringify(payload.issue)),
+      );
+      return parseIssueObject(responsePayload, endpoint.toString());
     },
 
     async listIssues(params) {
@@ -151,14 +147,25 @@ export function createMulticaClient(
 }
 
 function buildReadInit(config: MulticaConfig): RequestInit {
-  if (!config.readApiToken) {
-    return {};
-  }
-
   return {
     headers: {
       Authorization: `Bearer ${config.readApiToken}`,
     },
+  };
+}
+
+function buildWriteInit(
+  config: MulticaConfig,
+  method: 'POST' | 'PUT',
+  body: string,
+): RequestInit {
+  return {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${config.readApiToken}`,
+    },
+    body,
   };
 }
 
@@ -192,6 +199,14 @@ async function requestJson(
   } catch (error) {
     throw new MulticaHttpError('Failed to parse Multica JSON response', response.status, endpoint, error);
   }
+}
+
+function parseIssueObject(payload: unknown, endpoint: string): MulticaIssue {
+  const parsed = toMulticaIssue(payload);
+  if (parsed === null) {
+    throw new MulticaHttpError('Multica returned an unparseable issue payload', 0, endpoint);
+  }
+  return parsed;
 }
 
 function parseIssueArray(payload: unknown, endpoint: string): MulticaIssue[] {
@@ -329,8 +344,4 @@ function normalizeRequiredValue(value: string | undefined): string | null {
     return null;
   }
   return trimmed;
-}
-
-function normalizeOptionalValue(value: string | undefined): string | null {
-  return normalizeRequiredValue(value);
 }

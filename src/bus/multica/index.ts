@@ -26,7 +26,7 @@ function formatUnexpectedError(error: unknown): string {
 
 export async function runMulticaSync(
   paths: BusPaths,
-  options: { direction: SyncDirection; dryRun?: boolean },
+  options: { direction: SyncDirection; dryRun?: boolean; limit?: number },
 ): Promise<SyncSummary> {
   const dryRun = options.dryRun === true;
   const summary = createEmptySummary(options.direction, dryRun);
@@ -41,7 +41,10 @@ export async function runMulticaSync(
     const store = createSyncStateStore();
 
     if (options.direction === 'out' || options.direction === 'both') {
-      const pushResult = await runOutboundPush(paths, client, store, config, { dryRun });
+      const pushResult = await runOutboundPush(paths, client, store, config, {
+        dryRun,
+        limit: options.limit,
+      });
       summary.pushed_creates = pushResult.pushed_creates;
       summary.pushed_updates = pushResult.pushed_updates;
       summary.skipped += pushResult.skipped;

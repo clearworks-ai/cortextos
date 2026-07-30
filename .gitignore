@@ -61,6 +61,7 @@ dashboard/screenshots/
 dashboard/test-*.py
 .gstack/
 graphify-out/
+.codex-handoff/
 
 # Public community agent templates may intentionally include their own docs,
 # AGENTS.md, memory skill, and scaffold files.

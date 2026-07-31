@@ -110,7 +110,7 @@ describe('multica mapping', () => {
         assignee_type: 'member',
         assignee_id: 'member-josh',
         project_id: null,
-        due_date: '2026-08-01T12:00:00Z',
+        due_date: '2026-08-01',
       },
     });
 
@@ -131,6 +131,22 @@ describe('multica mapping', () => {
     expect(agentPayload.provenance).toBe('meeting-pipeline');
     expect(agentPayload.action).toBe('update');
     expect(agentPayload.issue.priority).not.toBe('none');
+  });
+
+  it('truncates ISO due dates to YYYY-MM-DD and preserves null due dates', () => {
+    expect(taskToIssuePayload(
+      makeTask({
+        due_date: '2026-08-01T23:06:17Z',
+      }),
+      config,
+    ).issue.due_date).toBe('2026-08-01');
+
+    expect(taskToIssuePayload(
+      makeTask({
+        due_date: null,
+      }),
+      config,
+    ).issue.due_date).toBeNull();
   });
 
   it('produces deterministic field hashes and idempotency keys', () => {

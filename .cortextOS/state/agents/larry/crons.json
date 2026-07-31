@@ -1,0 +1,13 @@
+{
+  "updated_at": "2026-07-31T00:12:29.323Z",
+  "crons": [
+    {
+      "name": "crm-interactions-to-notes",
+      "prompt": "Run `python3 orgs/clearworksai/agents/crm/crm/interactions-to-notes.py`. Stay silent if the run succeeds normally. If it errors or creates more than 200 new notes, report the count and the failure context to larry.",
+      "schedule": "20 09 * * *",
+      "enabled": true,
+      "created_at": "2026-07-31T00:12:29.322Z",
+      "description": "Render CRM interactions into markdown notes before nightly reconcile."
+    }
+  ]
+}

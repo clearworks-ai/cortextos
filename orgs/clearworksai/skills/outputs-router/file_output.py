@@ -59,6 +59,17 @@ def validate_arguments(args):
         print(f"Error: Source path '{args.source}' does not exist", file=sys.stderr)
         sys.exit(1)
 
+    if args.client:
+        if os.path.isabs(args.client):
+            print("Error: --client must be a relative path, not absolute", file=sys.stderr)
+            sys.exit(1)
+        if ".." in args.client.split(os.sep):
+            print("Error: --client cannot contain '..' path components", file=sys.stderr)
+            sys.exit(1)
+        if os.path.sep in args.client or (os.altsep and os.altsep in args.client):
+            print("Error: --client must be a flat slug, not a subpath", file=sys.stderr)
+            sys.exit(1)
+
 
 def get_destination_path(args):
     base_dest = CONTENT_TYPE_MAPPING[args.content_type]
@@ -68,7 +79,16 @@ def get_destination_path(args):
         dest_dir = base_dest
 
     filename = os.path.basename(args.source)
-    return os.path.join(dest_dir, filename)
+    dest_path = os.path.join(dest_dir, filename)
+
+    # Defense-in-depth: ensure resolved dest_path stays under base_dest
+    resolved_base = os.path.abspath(base_dest)
+    resolved_dest = os.path.abspath(dest_path)
+    if not os.path.commonpath([resolved_base, resolved_dest]) == resolved_base:
+        print("Error: Destination path escapes base directory", file=sys.stderr)
+        sys.exit(1)
+
+    return dest_path
 
 
 def inject_frontmatter(file_path, args):

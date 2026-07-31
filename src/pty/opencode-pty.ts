@@ -148,7 +148,7 @@ export class OpencodePTY extends AgentPTY {
     }
   }
 
-  override injectMessage(content: string): Promise<boolean> {
+  override injectMessage(content: string): void {
     // OpenCode v1.17.9's TUI does not reliably surface content delivered with
     // bracketed paste (`ESC[200~ ... ESC[201~`): sandbox validation showed the
     // shared injector could repaint the screen without the inbound message
@@ -179,33 +179,39 @@ export class OpencodePTY extends AgentPTY {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`[opencode-pty] shell-mode reset (Escape) failed before injection (pty likely torn down): ${msg}`);
-      return Promise.resolve(false);
+      return;
     }
 
     if (mode === 'shell') {
-      return new Promise((resolve) => {
+      setTimeout(() => {
+        try {
+          this.write('exit');
+          this.write(KEYS.ENTER);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(`[opencode-pty] shell exit-recovery failed before injection (pty likely torn down): ${msg}`);
+          return;
+        }
         setTimeout(() => {
           try {
-            this.write('exit');
-            this.write(KEYS.ENTER);
+            this.typeAndSubmit(safeContent);
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            console.warn(`[opencode-pty] shell exit-recovery failed before injection (pty likely torn down): ${msg}`);
-            resolve(false);
-            return;
+            console.warn(`[opencode-pty] deferred injection failed after shell exit (pty likely torn down): ${msg}`);
           }
-          setTimeout(() => {
-            void this.typeAndSubmit(safeContent).then(resolve);
-          }, INJECTION_SHELL_EXIT_SETTLE_MS).unref?.();
-        }, INJECTION_SHELL_RESET_DELAY_MS).unref?.();
-      });
+        }, INJECTION_SHELL_EXIT_SETTLE_MS).unref?.();
+      }, INJECTION_SHELL_RESET_DELAY_MS).unref?.();
+      return;
     }
 
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        void this.typeAndSubmit(safeContent).then(resolve);
-      }, INJECTION_SHELL_RESET_DELAY_MS).unref?.();
-    });
+    setTimeout(() => {
+      try {
+        this.typeAndSubmit(safeContent);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[opencode-pty] deferred injection failed (pty likely torn down): ${msg}`);
+      }
+    }, INJECTION_SHELL_RESET_DELAY_MS).unref?.();
   }
 
   /**
@@ -243,30 +249,19 @@ export class OpencodePTY extends AgentPTY {
     return SHELL_PROMPT_TAIL_PATTERN.test(lastNonEmpty) ? 'shell' : 'chat';
   }
 
-  private typeAndSubmit(safeContent: string): Promise<boolean> {
+  private typeAndSubmit(safeContent: string): void {
     const maxChunk = 4096;
-    try {
-      for (let i = 0; i < safeContent.length; i += maxChunk) {
-        this.write(safeContent.slice(i, i + maxChunk));
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`[opencode-pty] deferred injection failed (pty likely torn down): ${msg}`);
-      return Promise.resolve(false);
+    for (let i = 0; i < safeContent.length; i += maxChunk) {
+      this.write(safeContent.slice(i, i + maxChunk));
     }
-
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        try {
-          this.write(KEYS.ENTER);
-          resolve(true);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.warn(`[opencode-pty] deferred Enter failed (pty likely torn down): ${msg}`);
-          resolve(false);
-        }
-      }, 300).unref?.();
-    });
+    setTimeout(() => {
+      try {
+        this.write(KEYS.ENTER);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[opencode-pty] deferred Enter failed (pty likely torn down): ${msg}`);
+      }
+    }, 300).unref?.();
   }
 
   private prepareInjectedContent(content: string): string {

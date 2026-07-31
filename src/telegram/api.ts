@@ -269,8 +269,6 @@ export class TelegramAPI {
    * Determine whether `chunk` ends inside an unclosed code span:
    * 'pre' for <pre><code>...</code></pre> blocks, 'code' for inline
    * <code>...</code> spans, or null when all code spans are closed.
-   * Scans open/close markers in document order; <pre><code> variants are
-   * matched first so a block opener is never mistaken for an inline one.
    */
   private unclosedCodeContext(chunk: string): 'pre' | 'code' | null {
     const re = /<pre><code>|<\/code><\/pre>|<code>|<\/code>/g;
@@ -672,14 +670,6 @@ export class TelegramAPI {
 
   /**
    * Edit a message's text.
-   *
-   * `opts.parseMode` mirrors sendMessage: 'HTML' converts markdown→HTML
-   * (so formatting survives the edit), null sends raw text. When omitted,
-   * the call defaults to plain text — Telegram does not auto-apply the
-   * parse mode used at sendMessage time, so callers that want formatting
-   * preserved across edits MUST opt in explicitly. Used by TelegramStreamer
-   * to send interim edits as plain text (avoids parse errors on incomplete
-   * markdown mid-stream) and the final edit as HTML.
    */
   async editMessageText(
     chatId: string | number,
@@ -688,6 +678,8 @@ export class TelegramAPI {
     replyMarkup?: object,
     opts?: { parseMode?: 'HTML' | null },
   ): Promise<any> {
+    // parseMode 'HTML' renders markdown->HTML for the streaming edit path
+    // (telegram-streamer). Preserved from fork across the upstream re-baseline.
     const parseMode = opts?.parseMode ?? null;
     const body = parseMode === 'HTML' ? this.markdownToHtml(text, false) : text;
     const payload: Record<string, unknown> = {

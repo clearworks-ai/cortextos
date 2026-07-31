@@ -71,6 +71,10 @@ export function detectRateLimitInLog(logPath: string): boolean {
     const fd = readFileSync(logPath);
     const slice = fd.slice(Math.max(0, fd.length - readBytes)).toString('utf-8');
     const text = slice.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').toLowerCase();
+    // Match only structured API error codes and specific limit phrases — NOT
+    // the loose 'rate limit' / 'rate-limit' substrings, which false-positive on
+    // prose titles (e.g. "crash loop caused by rate limiting"). Fork false-positive
+    // guard is stricter than upstream here; keep it.
     return (
       text.includes('overloaded_error') ||
       text.includes('rate_limit_error') ||

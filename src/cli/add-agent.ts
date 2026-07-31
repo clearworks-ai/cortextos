@@ -2,10 +2,8 @@ import { Command } from 'commander';
 import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, chmodSync, symlinkSync, lstatSync, unlinkSync } from 'fs';
 import { join, resolve } from 'path';
 import { homedir } from 'os';
-import type { AgentConfig, OrgContext } from '../types';
+import { OrgContext } from '../types';
 import { validateAgentName, validateOrgName } from '../utils/validate';
-import { readEnabledAgents } from './enable-agent.js';
-import { validateClaudeWorkingDirectoryPolicy } from '../utils/agent-session-isolation.js';
 import { resolveInstanceId } from './resolve-instance-id.js';
 
 const VALID_RUNTIMES = ['claude-code', 'hermes', 'codex-app-server', 'opencode'] as const;
@@ -24,11 +22,8 @@ export const addAgentCommand = new Command('add-agent')
   .option('--org <org>', 'Organization name')
   .option('--instance <id>', 'Instance ID')
   .option('--runtime <runtime>', `Agent runtime (${VALID_RUNTIMES.join(', ')})`, 'claude-code')
-  .option('--working-directory <path>', 'Override the agent working_directory in config.json')
-  .option('--allow-external-cwd', 'Allow a non-agent-dir working_directory for Claude agents')
   .description('Add a new agent to the organization')
-  .action(async (name: string, options: { template: string; org?: string; instance?: string; runtime: string; workingDirectory?: string; allowExternalCwd?: boolean }) => {
-    const instanceId = resolveInstanceId(options.instance);
+  .action(async (name: string, options: { template: string; org?: string; instance?: string; runtime: string }) => {
     if (!VALID_RUNTIMES.includes(options.runtime as RuntimeKind)) {
       console.error(`Error: --runtime must be one of: ${VALID_RUNTIMES.join(', ')} (got "${options.runtime}")`);
       process.exit(1);
@@ -97,23 +92,6 @@ export const addAgentCommand = new Command('add-agent')
     const agentDir = join(projectRoot, 'orgs', org, 'agents', name);
     if (existsSync(agentDir)) {
       console.error(`Agent "${name}" already exists at ${agentDir}`);
-      process.exit(1);
-    }
-
-    const intendedConfig: AgentConfig = {
-      runtime: options.runtime as AgentConfig['runtime'],
-      working_directory: options.workingDirectory ?? '',
-    };
-    const validation = validateClaudeWorkingDirectoryPolicy({
-      agentName: name,
-      agentDir,
-      config: intendedConfig,
-      projectRoot,
-      enabledAgents: readEnabledAgents(instanceId),
-      allowExternalCwd: options.allowExternalCwd,
-    });
-    if (!validation.ok) {
-      console.error(`Error: ${validation.error}`);
       process.exit(1);
     }
 
@@ -201,7 +179,6 @@ export const addAgentCommand = new Command('add-agent')
         startup_delay: 0,
         max_session_seconds: 255600,
         enabled: true,
-        working_directory: options.workingDirectory ?? '',
         crons: [],
       }, null, 2) + '\n', 'utf-8');
     }
@@ -214,7 +191,6 @@ export const addAgentCommand = new Command('add-agent')
       try {
         const existingCfg = JSON.parse(readFileSync(configPath, 'utf-8'));
         existingCfg.runtime = options.runtime;
-        existingCfg.working_directory = options.workingDirectory ?? '';
         writeFileSync(configPath, JSON.stringify(existingCfg, null, 2) + '\n', 'utf-8');
       } catch (err) {
         console.error(`Warning: failed to set runtime field in config.json: ${(err as Error).message}`);
@@ -230,11 +206,9 @@ export const addAgentCommand = new Command('add-agent')
         '# BOT_TOKEN: Create a Telegram bot with @BotFather and paste the token here',
         '# CHAT_ID: Send a message to your bot, then run:',
         '#   curl -s "https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates" | jq \'.result[-1].message.chat.id\'',
-        '# ALLOWED_USER: Your Telegram user ID (same value as CHAT_ID for personal bots)',
         '#',
         'BOT_TOKEN=',
         'CHAT_ID=',
-        'ALLOWED_USER=',
         '',
         '# Claude Code v2.1.111+ gives Sonnet 4.6 a 1M context window by default.',
         '# On plans WITHOUT "extra usage" billing, compaction fails at 100% ctx with:',
@@ -344,6 +318,7 @@ export const addAgentCommand = new Command('add-agent')
     }
 
     // Register in enabled-agents.json
+    const instanceId = resolveInstanceId(options.instance);
     const ctxRoot = join(homedir(), '.cortextos', instanceId);
     const enabledPath = join(ctxRoot, 'config', 'enabled-agents.json');
     const configDir = join(ctxRoot, 'config');

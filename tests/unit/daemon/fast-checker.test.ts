@@ -1,30 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 vi.mock('child_process', () => ({ execFile: vi.fn() }));
-vi.mock('../../../src/bus/system', () => ({ hardRestart: vi.fn() }));
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync, readdirSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { FastChecker } from '../../../src/daemon/fast-checker';
-import { hardRestart } from '../../../src/bus/system';
 import type { BusPaths, TelegramCallbackQuery } from '../../../src/types';
 
 // Minimal mock for AgentProcess
-function createMockAgent(
-  name = 'test-agent',
-  config: Record<string, unknown> = {},
-  agentDir = '/tmp/test-agent',
-) {
+function createMockAgent(name = 'test-agent') {
   return {
     name,
     isBootstrapped: vi.fn().mockReturnValue(true),
     injectMessage: vi.fn().mockReturnValue(true),
     write: vi.fn(),
-    getAgentDir: vi.fn().mockReturnValue(agentDir),
-    getCtxRoot: vi.fn().mockReturnValue(agentDir),
-    getConfig: vi.fn().mockReturnValue(config),
-    getOutputBuffer: vi.fn().mockReturnValue({ getRecent: vi.fn().mockReturnValue('') }),
-    sessionRefresh: vi.fn().mockResolvedValue(undefined),
   } as any;
 }
 
@@ -73,26 +62,6 @@ function createTestPaths(testDir: string): BusPaths {
   return paths;
 }
 
-function writeInboxMessage(
-  paths: BusPaths,
-  overrides: Partial<{ id: string; from: string; to: string; text: string; fileName: string }> = {},
-): void {
-  const id = overrides.id ?? 'msg-1';
-  const from = overrides.from ?? 'larry';
-  const to = overrides.to ?? 'test-agent';
-  const text = overrides.text ?? 'dispatch payload';
-  const fileName = overrides.fileName ?? `2-1000-from-${from}-abcde.json`;
-  writeFileSync(join(paths.inbox, fileName), JSON.stringify({
-    id,
-    from,
-    to,
-    priority: 'normal',
-    timestamp: '2026-07-05T22:00:00.000Z',
-    text,
-    reply_to: null,
-  }));
-}
-
 describe('FastChecker', () => {
   let testDir: string;
   let paths: BusPaths;
@@ -103,7 +72,6 @@ describe('FastChecker', () => {
   });
 
   afterEach(() => {
-    vi.clearAllMocks();
     rmSync(testDir, { recursive: true, force: true });
   });
 
@@ -351,241 +319,6 @@ describe('FastChecker', () => {
     });
   });
 
-  describe('opencode inbox delivery confirmation', () => {
-    beforeEach(() => {
-      vi.useFakeTimers();
-    });
-
-    afterEach(() => {
-      vi.useRealTimers();
-    });
-
-    it('ACKs once on confirmed success and sends no error reply', async () => {
-      const agent = createMockAgent('test-agent', { runtime: 'opencode' });
-      agent.injectMessage.mockResolvedValue(true);
-      writeInboxMessage(paths);
-
-      const checker = new FastChecker(agent, paths, '/tmp/framework');
-      const pollPromise = (checker as any).pollCycle();
-      await vi.runAllTimersAsync();
-      await pollPromise;
-
-      expect(agent.injectMessage).toHaveBeenCalledTimes(1);
-      expect(readdirSync(paths.processed).filter((name) => name.endsWith('.json'))).toHaveLength(1);
-      expect(readdirSync(paths.inbox).filter((name) => name.endsWith('.json'))).toHaveLength(0);
-      expect(existsSync(join(paths.ctxRoot, 'inbox', 'larry'))).toBe(false);
-    });
-
-    it('requeues a failed opencode dispatch and retries the same content next cycle', async () => {
-      const agent = createMockAgent('test-agent', { runtime: 'opencode' });
-      agent.injectMessage
-        .mockResolvedValueOnce(false)
-        .mockResolvedValueOnce(true);
-      writeInboxMessage(paths, { id: 'retry-msg' });
-
-      const checker = new FastChecker(agent, paths, '/tmp/framework');
-      await (checker as any).pollCycle();
-      expect(readdirSync(paths.inbox).filter((name) => name.endsWith('.json'))).toHaveLength(1);
-      expect(readdirSync(paths.processed).filter((name) => name.endsWith('.json'))).toHaveLength(0);
-
-      const retryPoll = (checker as any).pollCycle();
-      await vi.runAllTimersAsync();
-      await retryPoll;
-
-      expect(agent.injectMessage).toHaveBeenCalledTimes(2);
-      expect(readdirSync(paths.processed).filter((name) => name.endsWith('.json'))).toHaveLength(1);
-      expect(readdirSync(paths.inbox).filter((name) => name.endsWith('.json'))).toHaveLength(0);
-      expect(existsSync(join(paths.ctxRoot, 'inbox', 'larry'))).toBe(false);
-    });
-
-    it('sends one explicit error reply and dead-letters after 3 failed attempts', async () => {
-      const agent = createMockAgent('test-agent', { runtime: 'opencode' });
-      agent.injectMessage.mockResolvedValue(false);
-      writeInboxMessage(paths, { id: 'dead-letter-msg' });
-
-      const checker = new FastChecker(agent, paths, '/tmp/framework');
-      await (checker as any).pollCycle();
-      await (checker as any).pollCycle();
-      await (checker as any).pollCycle();
-
-      expect(agent.injectMessage).toHaveBeenCalledTimes(3);
-      expect(readdirSync(paths.processed).filter((name) => name.endsWith('.json'))).toHaveLength(1);
-      expect(readdirSync(paths.inbox).filter((name) => name.endsWith('.json'))).toHaveLength(0);
-
-      const senderInbox = join(paths.ctxRoot, 'inbox', 'larry');
-      expect(readdirSync(senderInbox).filter((name) => name.endsWith('.json'))).toHaveLength(1);
-      const replyFile = readdirSync(senderInbox).find((name) => name.endsWith('.json'))!;
-      const reply = JSON.parse(readFileSync(join(senderInbox, replyFile), 'utf-8'));
-      expect(reply.text).toContain('[opencode] dispatch injection failed after 3 attempts');
-      expect(reply.text).toContain('dead-letter-msg');
-      expect(reply.reply_to).toBe('dead-letter-msg');
-    });
-  });
-
-  describe('stall watchdog', () => {
-    it('reads progress from the instance-resolved idle flag and cron state', () => {
-      const agent = createMockAgent('test-agent', {}, testDir);
-      const checker = new FastChecker(agent, paths, '/tmp/framework');
-
-      writeFileSync(join(paths.stateDir, 'last_idle.flag'), '1710000000');
-      writeFileSync(join(paths.stateDir, 'cron-state.json'), JSON.stringify({
-        updated_at: '2026-06-10T00:00:00.000Z',
-        crons: [
-          { name: 'heartbeat', last_fire: '2026-06-10T00:00:05.000Z', interval: '6h' },
-        ],
-      }));
-
-      expect((checker as any).getLastProgressAt()).toBe(Date.parse('2026-06-10T00:00:05.000Z'));
-    });
-
-    it('fires a loop_stall restart when pending work sits with no progress', () => {
-      const agent = createMockAgent('test-agent', {
-        stall_watchdog_enabled: true,
-        stall_watchdog_threshold_minutes: 1,
-      }, testDir);
-      const checker = new FastChecker(agent, paths, '/tmp/framework');
-      const now = Date.now();
-
-      (checker as any).stallLastProgressObservedAt = now - 2 * 60_000;
-      (checker as any).stallLastProgressSignalAt = 0;
-      (checker as any).stallLastToolActivityAt = 0;
-      (checker as any).stallLastOutboundSize = 0;
-      (checker as any).lastWorkInjectedAt = now - 2 * 60_000;
-
-      expect((checker as any).evaluateStallWatchdog(0)).toBe(true);
-      expect(hardRestart).toHaveBeenCalledWith(
-        paths,
-        'test-agent',
-        expect.stringContaining('WATCHDOG-HARD-RESTART: loop_stall'),
-      );
-      expect(agent.sessionRefresh).toHaveBeenCalledTimes(1);
-    });
-
-    it('does not restart a long live turn while tool activity keeps advancing', () => {
-      const agent = createMockAgent('test-agent', {
-        stall_watchdog_enabled: true,
-        stall_watchdog_threshold_minutes: 1,
-      }, testDir);
-      const checker = new FastChecker(agent, paths, '/tmp/framework');
-      const now = Date.now();
-
-      (checker as any).stallLastProgressObservedAt = now - 2 * 60_000;
-      (checker as any).stallLastProgressSignalAt = 0;
-      (checker as any).stallLastToolActivityAt = now - 3 * 60_000;
-      (checker as any).stallLastOutboundSize = 0;
-      (checker as any).lastWorkInjectedAt = now - 2 * 60_000;
-      writeFileSync(join(paths.stateDir, 'last_tool_activity.flag'), String(now));
-
-      expect((checker as any).evaluateStallWatchdog(1)).toBe(false);
-      expect(hardRestart).not.toHaveBeenCalled();
-      expect(agent.sessionRefresh).not.toHaveBeenCalled();
-    });
-
-    it('never restarts a quiet idle agent with no pending work', () => {
-      const agent = createMockAgent('test-agent', {
-        stall_watchdog_enabled: true,
-        stall_watchdog_threshold_minutes: 1,
-      }, testDir);
-      const checker = new FastChecker(agent, paths, '/tmp/framework');
-
-      (checker as any).stallLastProgressObservedAt = Date.now() - 2 * 60_000;
-      (checker as any).stallLastProgressSignalAt = 0;
-      (checker as any).stallLastToolActivityAt = 0;
-      (checker as any).stallLastOutboundSize = 0;
-
-      expect((checker as any).evaluateStallWatchdog(0)).toBe(false);
-      expect(hardRestart).not.toHaveBeenCalled();
-    });
-
-    it('excludes stdout growth as a progress signal', () => {
-      const agent = createMockAgent('test-agent', {
-        stall_watchdog_enabled: true,
-        stall_watchdog_threshold_minutes: 1,
-      }, testDir);
-      const checker = new FastChecker(agent, paths, '/tmp/framework');
-      const now = Date.now();
-
-      writeFileSync(join(paths.logDir, 'stdout.log'), 'spinner noise keeps growing\n');
-      (checker as any).stallLastProgressObservedAt = now - 2 * 60_000;
-      (checker as any).stallLastProgressSignalAt = 0;
-      (checker as any).stallLastToolActivityAt = 0;
-      (checker as any).stallLastOutboundSize = 0;
-      (checker as any).lastWorkInjectedAt = now - 2 * 60_000;
-
-      expect((checker as any).evaluateStallWatchdog(0)).toBe(true);
-      expect(hardRestart).toHaveBeenCalledTimes(1);
-    });
-
-    it('stays inert when stall_watchdog_enabled is false', () => {
-      const agent = createMockAgent('test-agent', {
-        stall_watchdog_enabled: false,
-        stall_watchdog_threshold_minutes: 1,
-      }, testDir);
-      const checker = new FastChecker(agent, paths, '/tmp/framework');
-
-      (checker as any).stallLastProgressObservedAt = Date.now() - 10 * 60_000;
-      (checker as any).lastWorkInjectedAt = Date.now() - 10 * 60_000;
-
-      expect((checker as any).evaluateStallWatchdog(1)).toBe(false);
-      expect(hardRestart).not.toHaveBeenCalled();
-    });
-
-    it('opens the stall circuit breaker instead of restart-looping', () => {
-      const agent = createMockAgent('test-agent', {
-        stall_watchdog_enabled: true,
-        stall_watchdog_threshold_minutes: 1,
-      }, testDir);
-      const api = createMockTelegramApi();
-      const checker = new FastChecker(agent, paths, '/tmp/framework', {
-        telegramApi: api,
-        chatId: '12345',
-      });
-      const now = Date.now();
-
-      (checker as any).stallLastProgressObservedAt = now - 2 * 60_000;
-      (checker as any).stallLastProgressSignalAt = 0;
-      (checker as any).stallLastToolActivityAt = 0;
-      (checker as any).stallLastOutboundSize = 0;
-      (checker as any).lastWorkInjectedAt = now - 2 * 60_000;
-      (checker as any).stallCircuitRestarts = [
-        now - 14 * 60_000,
-        now - 10 * 60_000,
-        now - 5 * 60_000,
-      ];
-
-      expect((checker as any).evaluateStallWatchdog(1)).toBe(true);
-      expect(hardRestart).not.toHaveBeenCalled();
-      expect(api.sendMessage).toHaveBeenCalledTimes(1);
-      expect((checker as any).stallCircuitBrokenAt).not.toBeNull();
-    });
-
-    it('pollCycle still reaches the stall path when context_status is stale', async () => {
-      const agent = createMockAgent('test-agent', {
-        stall_watchdog_enabled: true,
-        stall_watchdog_threshold_minutes: 1,
-        ctx_handoff_threshold: 80,
-      }, testDir);
-      const checker = new FastChecker(agent, paths, '/tmp/framework');
-      const now = Date.now();
-
-      writeFileSync(join(paths.stateDir, 'context_status.json'), JSON.stringify({
-        used_percentage: 95,
-        exceeds_200k_tokens: false,
-        written_at: new Date(now - 11 * 60_000).toISOString(),
-      }));
-      (checker as any).stallLastProgressObservedAt = now - 2 * 60_000;
-      (checker as any).stallLastProgressSignalAt = 0;
-      (checker as any).stallLastToolActivityAt = 0;
-      (checker as any).stallLastOutboundSize = 0;
-      (checker as any).lastWorkInjectedAt = now - 2 * 60_000;
-
-      await (checker as any).pollCycle();
-
-      expect(hardRestart).toHaveBeenCalledTimes(1);
-      expect(agent.injectMessage).not.toHaveBeenCalledWith(expect.stringContaining('[CONTEXT HANDOFF REQUIRED]'));
-    });
-  });
-
   describe('formatTelegramTextMessage', () => {
     it('includes last-sent context when provided', () => {
       const result = FastChecker.formatTelegramTextMessage(
@@ -650,40 +383,6 @@ describe('FastChecker', () => {
     it('instruction uses single quotes to prevent shell variable expansion of $-numbers', () => {
       const result = FastChecker.formatTelegramTextMessage('alice', '999', 'Hello', '/opt/cortextos');
       expect(result).toContain("send-telegram 999 '<your reply>'");
-    });
-
-    it('labels the body with the NEW MESSAGE marker', () => {
-      const result = FastChecker.formatTelegramTextMessage('alice', '999', 'Hello there', '/opt/cortextos');
-      expect(result).toContain('[NEW MESSAGE — respond to THIS now:]');
-      expect(result.indexOf('[NEW MESSAGE — respond to THIS now:]'))
-        .toBeLessThan(result.indexOf('Hello there'));
-    });
-
-    it('marker sits between recent-history block and the body', () => {
-      const result = FastChecker.formatTelegramTextMessage(
-        'alice',
-        '999',
-        'live new ask',
-        '/opt/cortextos',
-        undefined,
-        undefined,
-        '[alice]: older question\n[frank2]: my reply',
-      );
-      const historyIdx = result.indexOf('[Recent conversation:]');
-      const markerIdx = result.indexOf('[NEW MESSAGE — respond to THIS now:]');
-      const bodyIdx = result.indexOf('live new ask');
-      expect(historyIdx).toBeGreaterThanOrEqual(0);
-      expect(markerIdx).toBeGreaterThan(historyIdx);
-      expect(bodyIdx).toBeGreaterThan(markerIdx);
-    });
-
-    it('marker precedes slash-command bodies without fencing them', () => {
-      const result = FastChecker.formatTelegramTextMessage('alice', '999', '/restart', '/opt/cortextos');
-      const markerIdx = result.indexOf('[NEW MESSAGE — respond to THIS now:]');
-      const bodyIdx = result.indexOf('/restart');
-      expect(markerIdx).toBeGreaterThanOrEqual(0);
-      expect(bodyIdx).toBeGreaterThan(markerIdx);
-      expect(result).not.toContain('```\n/restart');
     });
   });
 
@@ -1102,54 +801,11 @@ describe('FastChecker', () => {
   });
 
   describe('heartbeat watchdog', () => {
-    let originalFrameworkRoot: string | undefined;
+    beforeEach(() => { vi.useFakeTimers(); });
+    afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
 
-    beforeEach(() => {
-      vi.useFakeTimers();
-      originalFrameworkRoot = process.env.CTX_FRAMEWORK_ROOT;
-      delete process.env.CTX_FRAMEWORK_ROOT;
-    });
-
-    afterEach(() => {
-      if (originalFrameworkRoot === undefined) {
-        delete process.env.CTX_FRAMEWORK_ROOT;
-      } else {
-        process.env.CTX_FRAMEWORK_ROOT = originalFrameworkRoot;
-      }
-      vi.useRealTimers();
-      vi.clearAllMocks();
-    });
-
-    it('uses process.execPath plus dist/cli.js when CTX_FRAMEWORK_ROOT is set', async () => {
+    it('fires exec after bootstrap at 50-min interval', async () => {
       const { execFile } = await import('child_process');
-      process.env.CTX_FRAMEWORK_ROOT = '/tmp/fw-root';
-      const agent = createMockAgent('my-agent');
-      const checker = new FastChecker(agent, paths, '/tmp/framework');
-      checker.start();
-      await vi.advanceTimersByTimeAsync(50 * 60 * 1000);
-      expect(execFile).toHaveBeenCalledWith(
-        process.execPath,
-        [
-          join('/tmp/fw-root', 'dist', 'cli.js'),
-          'bus',
-          'update-heartbeat',
-          expect.stringContaining('[watchdog] my-agent alive — idle session'),
-        ],
-        expect.objectContaining({ timeout: 5_000 }),
-        expect.any(Function),
-      );
-      expect(execFile).not.toHaveBeenCalledWith(
-        'cortextos',
-        expect.any(Array),
-        expect.any(Function),
-      );
-      checker.stop();
-      checker.wake();
-    });
-
-    it('falls back to bare cortextos when CTX_FRAMEWORK_ROOT is unset', async () => {
-      const { execFile } = await import('child_process');
-      delete process.env.CTX_FRAMEWORK_ROOT;
       const agent = createMockAgent('my-agent');
       const checker = new FastChecker(agent, paths, '/tmp/framework');
       checker.start();
@@ -1185,7 +841,11 @@ describe('FastChecker', () => {
       const checker = new FastChecker(agent, paths, '/tmp/framework');
       checker.start();
       await vi.advanceTimersByTimeAsync(20 * 1000);
-      expect(execFile).not.toHaveBeenCalled();
+      expect(execFile).not.toHaveBeenCalledWith(
+        'cortextos',
+        expect.arrayContaining([expect.stringContaining('[watchdog]')]),
+        expect.any(Function),
+      );
       checker.stop();
       checker.wake();
     });
@@ -1272,7 +932,6 @@ describe('FastChecker', () => {
         injectMessage: vi.fn().mockReturnValue(true),
         write: vi.fn(),
         getAgentDir: () => testDir,
-        getCtxRoot: () => testDir,
         getConfig: () => config,
         getOutputBuffer: () => ({ getRecent: () => '' }),
         sessionRefresh: vi.fn().mockResolvedValue(undefined),

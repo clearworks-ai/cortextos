@@ -92,11 +92,25 @@ function seedCrons(agent: string, count: number): string[] {
 }
 
 async function runUpdate(agent: string, name: string, newPrompt: string): Promise<void> {
-  await execFileAsync(
-    process.execPath,
-    [DIST_CLI, 'bus', 'update-cron', agent, name, '--prompt', newPrompt],
-    { env: { ...process.env, CTX_ROOT: tmpRoot } },
-  );
+  // This test pins the crons.json lost-update RACE — it inspects the file on
+  // disk afterward, not the CLI's exit status. `bus update-cron` writes the
+  // file FIRST and only then verifies the cron is live in a running daemon,
+  // exiting non-zero (and, if a host ACTIVE_INSTANCE marker is set, warning on
+  // instance mismatch) when no daemon is running. Both are expected in this
+  // daemon-less test env and are orthogonal to the write-survival check, so we
+  // isolate the child from any host instance marker and swallow the non-zero
+  // exit — the write has already happened by then.
+  try {
+    await execFileAsync(
+      process.execPath,
+      [DIST_CLI, 'bus', 'update-cron', agent, name, '--prompt', newPrompt],
+      { env: { ...process.env, CTX_ROOT: tmpRoot, CTX_INSTANCE_ID: 'default' } },
+    );
+  } catch {
+    // Daemon-liveness verify exits non-zero without a running daemon — the
+    // crons.json write completed before that check; the disk assertion is the
+    // real gate.
+  }
 }
 
 describe.skipIf(!existsSync(DIST_CLI))('Iter 12 audit: concurrent bus update-cron lost-update race', () => {

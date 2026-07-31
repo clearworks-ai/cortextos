@@ -1,21 +1,16 @@
-import { readdirSync, readFileSync, existsSync, writeFileSync, unlinkSync, statSync, mkdirSync, renameSync } from 'fs';
+import { readdirSync, readFileSync, existsSync, writeFileSync, unlinkSync, statSync } from 'fs';
 import { execFile } from 'child_process';
 import { join } from 'path';
 import { createHash } from 'crypto';
 import { hardRestart } from '../bus/system.js';
-import type { InboxMessage, BusPaths, TelegramMessage, TelegramCallbackQuery, ConversationBufferEntry } from '../types/index.js';
-import { checkInbox, ackInbox, sendMessage } from '../bus/message.js';
+import type { InboxMessage, BusPaths, TelegramMessage, TelegramCallbackQuery } from '../types/index.js';
+import { checkInbox, ackInbox } from '../bus/message.js';
 import { updateApproval } from '../bus/approval.js';
-import { readCronState } from '../bus/cron-state.js';
-import { readCrons } from '../bus/crons.js';
-import { evaluateCronLiveness } from './cron-liveness.js';
 import { AgentProcess } from './agent-process.js';
 import type { TelegramAPI } from '../telegram/api.js';
 import { KEYS } from '../pty/inject.js';
-import { atomicWriteSync } from '../utils/atomic.js';
 import { stripControlChars, sanitizeForPtyInjection, wrapFenceSafe } from '../utils/validate.js';
 import { agentHoldsContextHandoffLease, releaseContextHandoffLease, requestContextHandoffLease } from './context-handoff-lease.js';
-import { ensureMissionAnchorFromBuffer, findFreshRecentHandoffDoc } from './restart-context.js';
 
 type LogFn = (msg: string) => void;
 
@@ -56,7 +51,6 @@ export class FastChecker {
 
   // External Telegram handler (set by daemon)
   private telegramMessages: Array<{ formatted: string; ackIds: string[] }> = [];
-  private inboxInjectionFailures = new Map<string, number>();
 
   // Persistent dedup: message hashes to prevent duplicate delivery
   private seenHashes: Set<string> = new Set();
@@ -80,24 +74,8 @@ export class FastChecker {
   private ctxCircuitRestarts: number[] = []; // timestamps of recent context-triggered restarts
   private ctxHandoffFires: number[] = [];    // timestamps of recent Tier-2 handoff fires (cooperative-restart loop backstop)
   private ctxCircuitBrokenAt: number | null = null; // when circuit tripped (null = healthy)
-  // Mission-aware deferral state (Item 3, larry-ux-parity-spec)
-  private ctxDeferLastLoggedAt: number = 0;  // dedup: re-check cadence for restart_deferred events
-  private ctxEmergencyAlertedAt: number = 0; // dedup: only one Telegram alert per emergency burst
   // Persisted to disk so --continue restarts don't reset the circuit breaker
   private ctxCircuitFile: string = '';
-  // Stall watchdog state
-  private stallLastProgressSignalAt: number = 0;
-  private stallLastToolActivityAt: number = 0;
-  private stallLastOutboundSize: number = -1;
-  private stallLastOutboundProgressAt: number = 0;
-  private stallLastProgressObservedAt: number = 0;
-  private lastWorkInjectedAt: number = 0;
-  private stallCircuitRestarts: number[] = [];
-  private stallCircuitBrokenAt: number | null = null;
-  private stallCircuitFile: string = '';
-  private cronLivenessLastCheckedAt = 0;
-  private cronLivenessLastEscalationAt = 0;
-  private cronLivenessOverdueStreak = 0;
 
   constructor(
     agent: AgentProcess,
@@ -121,8 +99,6 @@ export class FastChecker {
     // Load persisted circuit breaker state so --continue restarts don't reset it
     this.ctxCircuitFile = join(paths.stateDir, '.ctx-circuit.json');
     this.loadCtxCircuit();
-    this.stallCircuitFile = join(paths.stateDir, '.stall-circuit.json');
-    this.loadStallCircuit();
   }
 
   /**
@@ -153,14 +129,9 @@ export class FastChecker {
     const agentName = this.agent.name;
     this.heartbeatTimer = setInterval(() => {
       const ts = new Date().toISOString();
-      const frameworkRoot = process.env.CTX_FRAMEWORK_ROOT;
-      if (frameworkRoot) {
-        const cliPath = join(frameworkRoot, 'dist', 'cli.js');
-        execFile(process.execPath, [cliPath, 'bus', 'update-heartbeat', `[watchdog] ${agentName} alive — idle session ${ts}`], { timeout: 5_000 }, (err) => { if (err) this.log(`Heartbeat watchdog error: ${err.message}`); });
-      } else {
-        // legacy PATH fallback (unit-test / CTX_FRAMEWORK_ROOT unset)
-        execFile('cortextos', ['bus', 'update-heartbeat', `[watchdog] ${agentName} alive — idle session ${ts}`], (err) => { if (err) this.log(`Heartbeat watchdog error: ${err.message}`); });
-      }
+      execFile('cortextos', ['bus', 'update-heartbeat', `[watchdog] ${agentName} alive — idle session ${ts}`], (err) => {
+        if (err) this.log(`Heartbeat watchdog error: ${err.message}`);
+      });
     }, HEARTBEAT_INTERVAL_MS);
 
     while (this.running) {
@@ -214,54 +185,40 @@ export class FastChecker {
    */
   private async pollCycle(): Promise<void> {
     let messageBlock = '';
-    const queuedTelegramCount = this.telegramMessages.length;
-    const drainedTelegramMessages: Array<{ formatted: string; ackIds: string[] }> = [];
+    const ackIds: string[] = [];
 
     // Process queued Telegram messages
     let hasTelegramMessage = false;
     while (this.telegramMessages.length > 0) {
       const msg = this.telegramMessages.shift()!;
-      drainedTelegramMessages.push(msg);
       messageBlock += msg.formatted;
       hasTelegramMessage = true;
     }
 
     // Check agent inbox
     const inboxMessages = checkInbox(this.paths);
-    const unreadInboxCount = inboxMessages.length + queuedTelegramCount;
     for (const msg of inboxMessages) {
       messageBlock += this.formatInboxMessage(msg);
+      ackIds.push(msg.id);
     }
 
     // Inject if there's anything
     if (messageBlock) {
-      const injected = await this.agent.injectMessage(messageBlock);
+      const injected = this.agent.injectMessage(messageBlock);
       if (injected) {
         // ACK inbox messages
-        for (const msg of inboxMessages) {
-          ackInbox(this.paths, msg.id);
-          this.inboxInjectionFailures.delete(msg.id);
+        for (const id of ackIds) {
+          ackInbox(this.paths, id);
         }
         this.log(`Injected ${messageBlock.length} bytes`);
-        this.lastWorkInjectedAt = Date.now();
-        this.noteObservedProgress(this.lastWorkInjectedAt);
         // Only update typing timestamp for Telegram messages, not inbox/cron.
         // Inbox messages (agent-to-agent, session continuations) must not
         // restart the typing indicator after Stop has cleared it.
         if (hasTelegramMessage) {
-          this.lastMessageInjectedAt = this.lastWorkInjectedAt;
+          this.lastMessageInjectedAt = Date.now();
         }
         // Cooldown after injection
         await sleep(5000);
-      } else {
-        if (drainedTelegramMessages.length > 0) {
-          this.telegramMessages.unshift(...drainedTelegramMessages);
-        }
-        if (this.agent.getConfig().runtime === 'opencode') {
-          for (const msg of inboxMessages) {
-            await this.handleFailedOpencodeDispatch(msg);
-          }
-        }
       }
     }
 
@@ -270,71 +227,8 @@ export class FastChecker {
       await this.sendTyping(this.telegramApi, this.chatId);
     }
 
-    if (this.evaluateStallWatchdog(unreadInboxCount)) {
-      return;
-    }
-
-    // Throttled cron-liveness (once/min) — escalate overdue fired-but-missed crons
-    await this.checkCronLiveness(Date.now());
-
     // Context monitor: check usage thresholds and fire warnings/handoffs
     await this.checkContextStatus();
-  }
-
-  private async handleFailedOpencodeDispatch(msg: InboxMessage): Promise<void> {
-    const attempts = (this.inboxInjectionFailures.get(msg.id) ?? 0) + 1;
-    this.inboxInjectionFailures.set(msg.id, attempts);
-
-    if (attempts < 3) {
-      if (!this.requeueInflightMessage(msg.id)) {
-        this.log(`Failed to requeue opencode inbox message ${msg.id} after injection miss ${attempts}/3`);
-      }
-      return;
-    }
-
-    try {
-      sendMessage(
-        this.paths,
-        this.agent.name,
-        msg.from,
-        'normal',
-        `[opencode] dispatch injection failed after 3 attempts (id ${msg.id}) — not delivered`,
-        msg.id,
-      );
-      ackInbox(this.paths, msg.id);
-      this.inboxInjectionFailures.delete(msg.id);
-    } catch (err) {
-      this.log(`Failed to send opencode delivery error for ${msg.id}: ${err instanceof Error ? err.message : String(err)}`);
-      if (!this.requeueInflightMessage(msg.id)) {
-        this.log(`Failed to requeue opencode inbox message ${msg.id} after delivery error send failure`);
-      }
-    }
-  }
-
-  private requeueInflightMessage(messageId: string): boolean {
-    let files: string[];
-    try {
-      files = readdirSync(this.paths.inflight).filter((fileName) => fileName.endsWith('.json'));
-    } catch {
-      return false;
-    }
-
-    for (const fileName of files) {
-      const filePath = join(this.paths.inflight, fileName);
-      try {
-        const content = readFileSync(filePath, 'utf-8');
-        const msg = JSON.parse(content) as InboxMessage;
-        if (msg.id === messageId) {
-          renameSync(filePath, join(this.paths.inbox, fileName));
-          return true;
-        }
-      } catch {
-        // Ignore corrupt files here — the standard inbox/error recovery paths
-        // handle them independently.
-      }
-    }
-
-    return false;
   }
 
   /**
@@ -398,8 +292,7 @@ Reply using: cortextos bus send-message ${safeFrom} normal '<your reply>' ${msg.
       ? sanitizeForPtyInjection(text).trim()
       : wrapFenceSafe(text);
     return `=== TELEGRAM from [USER: ${sanitizeForPtyInjection(from)}] (chat_id:${chatId}) ===
-${replyCx}${historyCx}[NEW MESSAGE — respond to THIS now:]
-${body}
+${replyCx}${historyCx}${body}
 ${lastSentCtx}Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
 
 `;
@@ -710,7 +603,7 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       const [, decision, hexId] = permMatch;
       const hookDecision = decision === 'continue' ? 'deny' : decision;
       const responseFile = join(this.paths.stateDir, `hook-response-${hexId}.json`);
-      atomicWriteSync(responseFile, JSON.stringify({ decision: hookDecision }), /* keepBak= */ true);
+      writeFileSync(responseFile, JSON.stringify({ decision: hookDecision }) + '\n', 'utf-8');
 
       if (this.telegramApi) {
         try { await this.telegramApi.answerCallbackQuery(callbackQueryId, 'Got it'); } catch { /* ignore */ }
@@ -728,7 +621,7 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     if (restartMatch) {
       const [, decision, hexId] = restartMatch;
       const responseFile = join(this.paths.stateDir, `restart-response-${hexId}.json`);
-      atomicWriteSync(responseFile, JSON.stringify({ decision }), /* keepBak= */ true);
+      writeFileSync(responseFile, JSON.stringify({ decision }) + '\n', 'utf-8');
 
       if (this.telegramApi) {
         try { await this.telegramApi.answerCallbackQuery(callbackQueryId, 'Got it'); } catch { /* ignore */ }
@@ -921,7 +814,7 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
         `message_id: ${messageId}`,
         `Reply using: cortextos bus send-telegram ${chatId} '<your reply>'`,
       ].join('\n');
-      const injected = await this.agent.injectMessage(msg);
+      const injected = this.agent.injectMessage(msg);
       if (injected && this.telegramApi) {
         try { await this.telegramApi.answerCallbackQuery(callbackQueryId, 'Got it'); } catch { /* ignore */ }
       }
@@ -1023,7 +916,7 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
         // daemon containment headers.
         if (content) {
           const urgentMsg = `=== URGENT SIGNAL ===\n${wrapFenceSafe(content)}\n\n`;
-          void this.agent.injectMessage(urgentMsg);
+          this.agent.injectMessage(urgentMsg);
         }
       } catch (err) {
         this.log(`Error processing urgent signal: ${err}`);
@@ -1032,11 +925,11 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
   }
 
   /**
-   * Refresh cached config fields from config.json with mtime-based caching.
-   * Re-reads from disk only when the file has changed so dashboard updates take
-   * effect within one poll cycle without a daemon restart.
+   * Read ctx thresholds from config.json with mtime-based caching (BUG-048 pattern).
+   * Re-reads from disk only when the file has changed so dashboard updates take effect
+   * within one poll cycle without a daemon restart.
    */
-  private refreshConfigCache(): void {
+  private getCtxThresholds(): { warn: number; handoff: number } {
     try {
       const configPath = join(this.agent.getAgentDir(), 'config.json');
       const mtime = statSync(configPath).mtimeMs;
@@ -1045,18 +938,9 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
         const config = this.agent.getConfig();
         config.ctx_warning_threshold = cfg.ctx_warning_threshold;
         config.ctx_handoff_threshold = cfg.ctx_handoff_threshold;
-        config.stall_watchdog_enabled = cfg.stall_watchdog_enabled;
-        config.stall_watchdog_threshold_minutes = cfg.stall_watchdog_threshold_minutes;
         this.ctxConfigMtime = mtime;
       }
     } catch { /* keep stale values */ }
-  }
-
-  /**
-   * Read ctx thresholds from config.json with mtime-based caching (BUG-048 pattern).
-   */
-  private getCtxThresholds(): { warn: number; handoff: number } {
-    this.refreshConfigCache();
     const config = this.agent.getConfig();
     return {
       // Context-handoff is ON by default for every runtime/agent: an unset
@@ -1066,319 +950,6 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       warn: config.ctx_warning_threshold ?? 30,
       handoff: config.ctx_handoff_threshold ?? 60,
     };
-  }
-
-  private getStallWatchdogSettings(): { enabled: boolean; thresholdMs: number } {
-    this.refreshConfigCache();
-    const config = this.agent.getConfig();
-    const thresholdMinutes = config.stall_watchdog_threshold_minutes ?? 20;
-    return {
-      enabled: config.stall_watchdog_enabled === true,
-      thresholdMs: Math.max(1, thresholdMinutes) * 60_000,
-    };
-  }
-
-  private readTimestampFileMs(filePath: string): number {
-    try {
-      if (!existsSync(filePath)) return 0;
-      const raw = readFileSync(filePath, 'utf-8').trim();
-      const numeric = Number(raw);
-      if (Number.isFinite(numeric) && numeric > 0) {
-        return numeric >= 1_000_000_000_000 ? numeric : numeric * 1000;
-      }
-      const parsed = Date.parse(raw);
-      if (!Number.isNaN(parsed)) return parsed;
-      return statSync(filePath).mtimeMs;
-    } catch {
-      return 0;
-    }
-  }
-
-  private getLastIdleAt(): number {
-    return this.readTimestampFileMs(join(this.paths.stateDir, 'last_idle.flag'));
-  }
-
-  private getLastToolActivityAt(): number {
-    return this.readTimestampFileMs(join(this.paths.stateDir, 'last_tool_activity.flag'));
-  }
-
-  private getLastCronFireAt(): number {
-    const state = readCronState(this.paths.stateDir);
-    return state.crons.reduce((latest, record) => {
-      const ts = Date.parse(record.last_fire);
-      return Number.isNaN(ts) ? latest : Math.max(latest, ts);
-    }, 0);
-  }
-
-  /**
-   * Overdue-cron detector (cron-register-reliability Phase 6).
-   * reload first, restart second, circuit third — uses existing restart machinery.
-   */
-  private async checkCronLiveness(now: number): Promise<void> {
-    if (now - this.cronLivenessLastCheckedAt < 60_000) return;
-    const lastCheck = this.cronLivenessLastCheckedAt || now;
-    this.cronLivenessLastCheckedAt = now;
-
-    // Skip Hermes — no daemon-side scheduler
-    if (this.agent.getConfig().runtime === 'hermes') return;
-    // Skip when agent process not running
-    const maybeIsRunning = (this.agent as { isRunning?: () => boolean }).isRunning;
-    if (typeof maybeIsRunning === 'function') {
-      try {
-        if (!maybeIsRunning.call(this.agent)) return;
-      } catch { /* continue */ }
-    }
-
-    let crons;
-    try {
-      crons = readCrons(this.agent.name);
-    } catch {
-      return;
-    }
-    const state = readCronState(this.paths.stateDir);
-    const stateByName = new Map(state.crons.map((c) => [c.name, c.last_fire]));
-
-    let anyOverdue = false;
-    for (const cron of crons) {
-      if (cron.enabled === false) continue;
-      const result = evaluateCronLiveness({
-        cron,
-        stateLastFire: stateByName.get(cron.name),
-        nowMs: now,
-        lastCheckMs: lastCheck,
-      });
-      if (result.wakeSkip) {
-        this.cronLivenessOverdueStreak = 0;
-        return;
-      }
-      if (result.overdue) {
-        anyOverdue = true;
-        this.log(`Cron liveness: ${result.reason}`);
-      }
-    }
-
-    if (!anyOverdue) {
-      this.cronLivenessOverdueStreak = 0;
-      return;
-    }
-
-    // Detection is warn-only. We deliberately do NOT sessionRefresh on an overdue
-    // cron: force-restarting an agent does not make a cron fire, upstream has no
-    // such escalation, and it created a self-reinforcing churn loop (a busy agent
-    // misses a cron -> liveness restarts it -> it misses more -> restarts again).
-    // Missed fires are already recovered by the cron-scheduler catch-up policy on
-    // the next reload. Log persistent overdue for visibility, rate-limited to 15min.
-    this.cronLivenessOverdueStreak += 1;
-    if (now - this.cronLivenessLastEscalationAt < 15 * 60_000) return;
-    this.cronLivenessLastEscalationAt = now;
-    this.log('Cron liveness: cron(s) persistently overdue — catch-up handles missed fires, not restarting');
-  }
-
-  /**
-   * P1 progress accessor: existing Stop hook + persisted cron fire state.
-   */
-  private getLastProgressAt(): number {
-    return Math.max(this.getLastIdleAt(), this.getLastCronFireAt());
-  }
-
-  private readOutboundLogSize(): number {
-    const outboundPath = join(this.paths.logDir, 'outbound-messages.jsonl');
-    try {
-      return existsSync(outboundPath) ? statSync(outboundPath).size : 0;
-    } catch {
-      return 0;
-    }
-  }
-
-  private noteObservedProgress(now: number): void {
-    this.stallLastProgressObservedAt = now;
-  }
-
-  private seedStallBaselines(now: number): void {
-    if (this.stallLastProgressObservedAt !== 0) return;
-    this.stallLastProgressSignalAt = this.getLastProgressAt();
-    this.stallLastToolActivityAt = this.getLastToolActivityAt();
-    this.stallLastOutboundSize = this.readOutboundLogSize();
-    this.stallLastProgressObservedAt = now;
-  }
-
-  private updateObservedProgress(now: number): {
-    lastProgressAt: number;
-    lastIdleAt: number;
-    lastCronFireAt: number;
-    lastCompletionAt: number;
-    progressed: boolean;
-  } {
-    this.seedStallBaselines(now);
-
-    const lastIdleAt = this.getLastIdleAt();
-    const lastCronFireAt = this.getLastCronFireAt();
-    const lastProgressAt = Math.max(lastIdleAt, lastCronFireAt);
-    const lastToolActivityAt = this.getLastToolActivityAt();
-    const outboundSize = this.readOutboundLogSize();
-
-    let progressed = false;
-
-    if (lastProgressAt > this.stallLastProgressSignalAt) {
-      this.stallLastProgressSignalAt = lastProgressAt;
-      progressed = true;
-    }
-
-    if (lastToolActivityAt > this.stallLastToolActivityAt) {
-      this.stallLastToolActivityAt = lastToolActivityAt;
-      progressed = true;
-    }
-
-    if (this.stallLastOutboundSize === -1) {
-      this.stallLastOutboundSize = outboundSize;
-    } else if (outboundSize > this.stallLastOutboundSize) {
-      this.stallLastOutboundProgressAt = now;
-      this.stallLastOutboundSize = outboundSize;
-      progressed = true;
-    } else {
-      this.stallLastOutboundSize = outboundSize;
-    }
-
-    if (progressed) {
-      this.noteObservedProgress(now);
-    }
-
-    return {
-      lastProgressAt,
-      lastIdleAt,
-      lastCronFireAt,
-      lastCompletionAt: Math.max(lastIdleAt, this.stallLastOutboundProgressAt),
-      progressed,
-    };
-  }
-
-  private hasPendingWork(
-    unreadInboxCount: number,
-    lastCompletionAt: number,
-    lastCronFireAt: number,
-  ): boolean {
-    if (unreadInboxCount > 0) return true;
-    if (this.lastWorkInjectedAt > lastCompletionAt) return true;
-    return lastCronFireAt > lastCompletionAt;
-  }
-
-  private loadStallCircuit(): void {
-    try {
-      if (!existsSync(this.stallCircuitFile)) return;
-      const data = JSON.parse(readFileSync(this.stallCircuitFile, 'utf-8'));
-      this.stallCircuitRestarts = Array.isArray(data.restarts) ? data.restarts : [];
-      this.stallCircuitBrokenAt = typeof data.brokenAt === 'number' ? data.brokenAt : null;
-    } catch {
-      // Start fresh on error
-    }
-  }
-
-  private saveStallCircuit(): void {
-    try {
-      writeFileSync(this.stallCircuitFile, JSON.stringify({
-        restarts: this.stallCircuitRestarts,
-        brokenAt: this.stallCircuitBrokenAt,
-      }), 'utf-8');
-    } catch {
-      // Non-critical
-    }
-  }
-
-  private forceLoopStallRestart(reason: string): void {
-    const now = Date.now();
-
-    this.stallCircuitRestarts = this.stallCircuitRestarts.filter(t => now - t < 15 * 60_000);
-    if (this.stallCircuitRestarts.length >= 3) {
-      this.stallCircuitBrokenAt = now;
-      this.saveStallCircuit();
-      const msg = `Loop-stall circuit breaker TRIPPED for ${this.agent.name}: 3 watchdog restarts in 15min. Auto-restarts paused for 30min.`;
-      this.log(msg);
-      if (this.telegramApi && this.chatId) {
-        this.telegramApi.sendMessage(this.chatId, msg).catch(() => {});
-      }
-      return;
-    }
-
-    this.stallCircuitRestarts.push(now);
-    this.saveStallCircuit();
-    hardRestart(this.paths, this.agent.name, `WATCHDOG-HARD-RESTART: ${reason}`);
-    this.agent.sessionRefresh().catch(err => this.log(`Loop-stall restart failed: ${err}`));
-  }
-
-  private evaluateStallWatchdog(unreadInboxCount: number): boolean {
-    const now = Date.now();
-    const { enabled, thresholdMs } = this.getStallWatchdogSettings();
-    if (!enabled) return false;
-
-    if (this.stallCircuitBrokenAt !== null) {
-      if (now - this.stallCircuitBrokenAt >= 30 * 60_000) {
-        this.stallCircuitBrokenAt = null;
-        this.stallCircuitRestarts = [];
-        this.saveStallCircuit();
-        this.log('Loop-stall circuit breaker reset after 30min pause');
-      } else {
-        return false;
-      }
-    }
-
-    const { lastProgressAt, lastCronFireAt, lastCompletionAt } = this.updateObservedProgress(now);
-    const pendingWork = this.hasPendingWork(unreadInboxCount, lastCompletionAt, lastCronFireAt);
-    if (!pendingWork) return false;
-
-    if (now - this.stallLastProgressObservedAt < thresholdMs) return false;
-
-    const ageMinutes = Math.floor((now - this.stallLastProgressObservedAt) / 60_000);
-    this.log(
-      `Loop-stall watchdog firing after ${ageMinutes} min without progress ` +
-      `(last_progress=${lastProgressAt || 0}, last_completion=${lastCompletionAt || 0}, last_tool=${this.stallLastToolActivityAt || 0}, last_work_injected=${this.lastWorkInjectedAt || 0})`,
-    );
-    this.forceLoopStallRestart(`loop_stall — no progress for ${ageMinutes} min with pending work`);
-    return true;
-  }
-
-  /**
-   * Mission-aware handoff deferral (Item 3, larry-ux-parity-spec).
-   *
-   * Checks `${CTX_AGENT_DIR}/state/current-mission.txt`. If the mission file
-   * exists, has been touched in the last 2h, and context is still under the
-   * 90% absolute cap, the threshold-triggered handoff is deferred — the agent
-   * is in the middle of a planned multi-step task and should finish it.
-   *
-   * The 2h mtime window catches stale mission files (agent forgot to remove
-   * it on completion); the 90% cap prevents indefinite deferral and runaway
-   * context exhaustion.
-   *
-   * Returns the first line of the mission file as `mission` so callers can
-   * surface a human-readable summary in log events and Telegram alerts.
-   */
-  private shouldDeferHandoff(agentDir: string, ctxPct: number): { defer: boolean; reason: string; mission?: string } {
-    const missionPath = join(agentDir, 'state', 'current-mission.txt');
-    if (!existsSync(missionPath)) {
-      return { defer: false, reason: 'no_mission_file' };
-    }
-    // Hard cap: 90% absolute context — defer never wins over imminent overflow.
-    if (ctxPct >= 90) {
-      let mission: string | undefined;
-      try {
-        mission = readFileSync(missionPath, 'utf-8').split('\n')[0]?.trim() || undefined;
-      } catch { /* non-fatal */ }
-      return { defer: false, reason: 'ctx_over_90', mission };
-    }
-    let mtimeMs: number;
-    let firstLine: string;
-    try {
-      mtimeMs = statSync(missionPath).mtimeMs;
-      firstLine = readFileSync(missionPath, 'utf-8').split('\n')[0]?.trim() || '';
-    } catch {
-      // Mission file exists but unreadable — treat as missing and proceed with handoff.
-      return { defer: false, reason: 'mission_unreadable' };
-    }
-    const ageMs = Date.now() - mtimeMs;
-    const twoHoursMs = 2 * 60 * 60_000;
-    if (ageMs >= twoHoursMs) {
-      return { defer: false, reason: 'mission_stale', mission: firstLine || undefined };
-    }
-    return { defer: true, reason: 'mission_active', mission: firstLine || undefined };
   }
 
   /**
@@ -1529,54 +1100,12 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       this.ctxWarningFiredAt = now;
       const pctRound = Math.round(effectivePct);
       const statusSuffix = effectivePct >= handoff ? 'Handoff in progress.' : `Handoff triggers at ${handoff}%.`;
-      void this.agent.injectMessage(`[CONTEXT] Window at ${pctRound}%. ${statusSuffix}`);
+      this.agent.injectMessage(`[CONTEXT] Window at ${pctRound}%. ${statusSuffix}`);
       this.log(`Context warning fired at ${pctRound}%`);
     }
 
     // Tier 2: handoff (fires once per session lifecycle)
     if (effectivePct >= handoff && this.ctxHandoffFiredAt === 0 && !withinHandoffGrace) {
-      // Item 3 (larry-ux-parity-spec): defer when a mission is in-progress.
-      // Skip the handoff trigger entirely while state/current-mission.txt is fresh
-      // (mtime < 2h) and ctx is under the 90% absolute cap. Logs a restart_deferred
-      // event every 5min so the dashboard can show the deferral. Once the mission
-      // file is removed (mission complete) or ages out / ctx crosses 90%, the next
-      // poll cycle falls through to the normal handoff path below. Runs BEFORE the
-      // fleet lease is requested so a deferring agent never occupies a lease slot.
-      const defer = this.shouldDeferHandoff(this.agent.getAgentDir(), effectivePct);
-      if (defer.defer) {
-        if (now - this.ctxDeferLastLoggedAt >= 5 * 60_000) {
-          this.ctxDeferLastLoggedAt = now;
-          const meta = {
-            agent: this.agent.name,
-            ctx_pct: Math.round(effectivePct),
-            mission: defer.mission ?? '',
-            reason: defer.reason,
-          };
-          execFile(
-            'cortextos',
-            ['bus', 'log-event', 'action', 'restart_deferred', 'info', '--meta', JSON.stringify(meta)],
-            (err) => { if (err) this.log(`restart_deferred log-event failed: ${err.message}`); },
-          );
-          this.log(`Handoff deferred at ${Math.round(effectivePct)}% — mission active: "${defer.mission ?? '(no summary)'}"`);
-        }
-        return; // re-check on next poll cycle (1s) — defer until mission clears or ctx ≥ 90%
-      }
-
-      // Emergency mid-mission restart: ctx ≥ 90% AND a mission file is still present.
-      // Surface a one-shot Telegram alert so Josh knows the in-flight work is being cut short.
-      if (effectivePct >= 90 && defer.mission && this.telegramApi && this.chatId
-          && now - this.ctxEmergencyAlertedAt > 10 * 60_000) {
-        this.ctxEmergencyAlertedAt = now;
-        const summary = defer.mission.slice(0, 500);
-        this.telegramApi.sendMessage(
-          this.chatId,
-          `${this.agent.name} restarting mid-mission at ${Math.round(effectivePct)}% — mission was: ${summary}`,
-        ).catch((err) => this.log(`Emergency-restart Telegram alert failed: ${err}`));
-      }
-
-      // Fleet-wide concurrency cap (upstream #685): acquire a handoff lease before
-      // restarting so no more than N agents hand off at once. Requested only after the
-      // mission-deferral gate above clears, so a deferring agent never holds a slot.
       const lease = requestContextHandoffLease({
         ctxRoot: this.paths.ctxRoot,
         agentName: this.agent.name,
@@ -1592,14 +1121,6 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
         return;
       }
       this.ctxHandoffLeaseId = lease.leaseId;
-
-      // Persist the mission anchor now that we hold the lease and are committing to the
-      // handoff, so the fresh session resumes from it.
-      ensureMissionAnchorFromBuffer(
-        this.agent.getAgentDir(),
-        this.agent.getCtxRoot(),
-        this.agent.name,
-      );
       this.ctxHandoffFiredAt = now;
 
       // Cooperative-restart loop backstop. A handoff normally fires ONCE per session and
@@ -1637,8 +1158,8 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
         writeFileSync(statusPath, JSON.stringify({ used_percentage: 0, exceeds_200k_tokens: false, written_at: new Date().toISOString() }));
       } catch { /* non-fatal */ }
       const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + 'Z';
-      const handoffPrompt = `[CONTEXT HANDOFF REQUIRED] Context is at ${Math.round(effectivePct)}%. Write a handoff document to memory/handoffs/handoff-${ts}.md that begins with ## LIVE PRIORITY quoting the newest inbound user message(s) verbatim, ABOVE all stale task state. Then include these sections in order: ## Current Tasks, ## Next Actions, ## Active Crons, ## Key Context, ## Files Modified This Session. Before calling hard-restart, write or refresh state/current-mission.txt with the LIVE PRIORITY. Then run: cortextos bus hard-restart --reason "context handoff at ${Math.round(effectivePct)}%" --handoff-doc <absolute path to the handoff doc you just wrote>. Do this NOW before the context window is exhausted.`;
-      void this.agent.injectMessage(handoffPrompt);
+      const handoffPrompt = `[CONTEXT HANDOFF REQUIRED] Context is at ${Math.round(effectivePct)}%. Write a handoff document to memory/handoffs/handoff-${ts}.md with these sections: ## Current Tasks, ## Next Actions, ## Active Crons, ## Key Context, ## Files Modified This Session. Then run: cortextos bus hard-restart --reason "context handoff at ${Math.round(effectivePct)}%" --handoff-doc <absolute path to the handoff doc you just wrote>. Do this NOW before the context window is exhausted.`;
+      this.agent.injectMessage(handoffPrompt);
       this.log(`Handoff prompt injected at ${Math.round(effectivePct)}%`);
       // Pre-arm .force-fresh so the next restart is always a clean fresh session.
       // If the agent cooperates and calls hard-restart, it also writes .force-fresh — no-op.
@@ -1673,27 +1194,24 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     this.ctxCircuitRestarts.push(now);
     this.saveCtxCircuit();
 
-    ensureMissionAnchorFromBuffer(
-      this.agent.getAgentDir(),
-      this.agent.getCtxRoot(),
-      this.agent.name,
-    );
-
     // If the agent wrote a handoff doc in the last 15 minutes but didn't get to call
     // hard-restart --handoff-doc (e.g. Tier 3 force-restart cut it short), pick it up
     // so the new session still receives handoff context.
     try {
       const handoffsDir = join(this.agent.getAgentDir(), 'memory', 'handoffs');
-      const cutoff = now - 15 * 60_000;
-      const docPath = findFreshRecentHandoffDoc(
-        handoffsDir,
-        cutoff,
-        this.ctxHandoffFiredAt,
-      );
-      if (docPath) {
-        const markerPath = join(this.paths.stateDir, '.handoff-doc-path');
-        writeFileSync(markerPath, docPath, 'utf-8');
-        this.log(`Tier 3 restart: found recent handoff doc, writing marker → ${docPath}`);
+      if (existsSync(handoffsDir)) {
+        const cutoff = now - 15 * 60_000;
+        const recent = readdirSync(handoffsDir)
+          .filter(f => f.startsWith('handoff-') && f.endsWith('.md'))
+          .map(f => ({ f, mtime: statSync(join(handoffsDir, f)).mtimeMs }))
+          .filter(({ mtime }) => mtime >= cutoff)
+          .sort((a, b) => b.mtime - a.mtime);
+        if (recent.length > 0) {
+          const docPath = join(handoffsDir, recent[0].f);
+          const markerPath = join(this.paths.stateDir, '.handoff-doc-path');
+          writeFileSync(markerPath, docPath, 'utf-8');
+          this.log(`Tier 3 restart: found recent handoff doc, writing marker → ${docPath}`);
+        }
       }
     } catch { /* non-fatal — proceed without handoff context */ }
 

@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createServer } from 'net';
 
 const fsMocks = {
   existsSync: vi.fn().mockReturnValue(false),
@@ -28,16 +27,14 @@ vi.mock('../../../src/utils/atomic.js', () => ({
   atomicWriteSync: atomicWriteSyncMock,
 }));
 
-const mockAppServerPty = {
-  pid: 88,
-  write: vi.fn(),
-  onData: vi.fn().mockReturnValue({ dispose() {} }),
-  onExit: vi.fn().mockReturnValue({ dispose() {} }),
-  kill: vi.fn(),
-};
-
 vi.mock('node-pty', () => ({
-  spawn: vi.fn().mockReturnValue(mockAppServerPty),
+  spawn: vi.fn().mockReturnValue({
+    pid: 88,
+    write: vi.fn(),
+    onData: vi.fn(),
+    onExit: vi.fn(),
+    kill: vi.fn(),
+  }),
 }));
 
 const requestMock = vi.fn();
@@ -80,10 +77,6 @@ const mockEnv = {
 };
 
 beforeEach(() => {
-  mockAppServerPty.write.mockClear();
-  mockAppServerPty.onData.mockClear();
-  mockAppServerPty.onExit.mockClear();
-  mockAppServerPty.kill.mockClear();
   fsMocks.existsSync.mockReset().mockReturnValue(false);
   fsMocks.readFileSync.mockReset();
   fsMocks.writeFileSync.mockReset();
@@ -98,184 +91,28 @@ beforeEach(() => {
   messageHandler = null;
 });
 
-describe('CodexAppServerPTY listener disposal', () => {
-  function createPtyHarness() {
-    let onExitHandler: ((e: { exitCode: number; signal?: number }) => void) | null = null;
-    const onDataDisposable = { dispose: vi.fn() };
-    const onExitDisposable = { dispose: vi.fn() };
-    const pty = {
-      pid: 88,
-      write: vi.fn(),
-      onData: vi.fn().mockImplementation((_handler: (data: string) => void) => onDataDisposable),
-      onExit: vi.fn().mockImplementation((handler: (e: { exitCode: number; signal?: number }) => void) => {
-        onExitHandler = handler;
-        return onExitDisposable;
-      }),
-      kill: vi.fn(),
-    };
-    return { pty, onDataDisposable, onExitDisposable, getOnExitHandler: () => onExitHandler };
-  }
-
-  async function startReadyPty() {
-    const harness = createPtyHarness();
-    const pty = new CodexAppServerPTY(mockEnv, {});
-    const internals = pty as unknown as {
-      startAppServer(): Promise<void>;
-      waitForSocket(timeoutMs?: number): Promise<void>;
-      _spawnFn: ((file: string, args: string[], options: unknown) => unknown) | null;
-      _onDataDisposable: { dispose(): void } | null;
-      _onExitDisposable: { dispose(): void } | null;
-    };
-    internals._spawnFn = vi.fn().mockReturnValue(harness.pty);
-    vi.spyOn(internals, 'waitForSocket').mockResolvedValue(undefined);
-    await internals.startAppServer();
-    return { pty, internals, harness };
-  }
-
-  it('captures the app-server PTY listener disposables on start', async () => {
-    const { internals, harness } = await startReadyPty();
-
-    expect(internals._onDataDisposable).toBe(harness.onDataDisposable);
-    expect(internals._onExitDisposable).toBe(harness.onExitDisposable);
-  });
-
-  it('disposes both app-server PTY listeners exactly once on kill()', async () => {
-    const { pty, harness } = await startReadyPty();
-
-    pty.kill();
-    pty.kill();
-
-    expect(harness.onDataDisposable.dispose).toHaveBeenCalledTimes(1);
-    expect(harness.onExitDisposable.dispose).toHaveBeenCalledTimes(1);
-    expect(harness.pty.kill).toHaveBeenCalledTimes(1);
-  });
-
-  it('disposes both app-server PTY listeners on onExit and does not double-dispose on later kill()', async () => {
-    const { pty, harness } = await startReadyPty();
-
-    harness.getOnExitHandler()!({ exitCode: 0 });
-
-    expect(harness.onDataDisposable.dispose).toHaveBeenCalledTimes(1);
-    expect(harness.onExitDisposable.dispose).toHaveBeenCalledTimes(1);
-    expect(() => pty.kill()).not.toThrow();
-    expect(harness.onDataDisposable.dispose).toHaveBeenCalledTimes(1);
-    expect(harness.onExitDisposable.dispose).toHaveBeenCalledTimes(1);
-    expect(harness.pty.kill).not.toHaveBeenCalled();
-  });
-});
-
 describe('CodexAppServerPTY socket path policy', () => {
-  // codex 0.118.0 dropped unix:// transport — these tests verify the TCP fallback
-  // (ws://127.0.0.1:<port>) and the per-spawn ephemeral port refresh.
-  it('uses a TCP loopback address by default', () => {
+  it('uses codex.sock in the agent state dir by default', () => {
     const pty = new CodexAppServerPTY(mockEnv, {});
-    expect((pty as unknown as { _socketPath: string })._socketPath).toMatch(/^127\.0\.0\.1:\d+$/);
-    expect((pty as unknown as { _socketListenArg: string })._socketListenArg).toMatch(/^ws:\/\/127\.0\.0\.1:\d+$/);
+    expect((pty as unknown as { _socketPath: string })._socketPath).toBe('/tmp/ctx/state/codex-app-agent/codex.sock');
+    expect((pty as unknown as { _socketListenArg: string })._socketListenArg).toBe('unix://./codex.sock');
   });
 
-  it('still returns a TCP address when the state path is long', () => {
+  it('falls back to /tmp/cas-*.sock when the state socket path is too long', () => {
     const longEnv = {
       ...mockEnv,
       ctxRoot: `/tmp/${'x'.repeat(120)}`,
     };
     const pty = new CodexAppServerPTY(longEnv, {});
-    expect((pty as unknown as { _socketPath: string })._socketPath).toMatch(/^127\.0\.0\.1:\d+$/);
-    expect((pty as unknown as { _socketListenArg: string })._socketListenArg).toMatch(/^ws:\/\/127\.0\.0\.1:\d+$/);
-  });
-
-  it('acquireFreePort returns a bindable loopback port', async () => {
-    const pty = new CodexAppServerPTY(mockEnv, {});
-    const internals = pty as unknown as { acquireFreePort(): Promise<number> };
-    const port = await internals.acquireFreePort();
-
-    expect(port).toBeGreaterThan(0);
-
-    await new Promise<void>((resolve, reject) => {
-      const server = createServer();
-      server.once('error', reject);
-      server.listen(port, '127.0.0.1', () => {
-        server.close(() => resolve());
-      });
-    });
-  });
-
-  it('refreshes the listen port across sequential spawn cycles', async () => {
-    const pty = new CodexAppServerPTY(mockEnv, {});
-    const internals = pty as unknown as {
-      _socketListenArg: string;
-      acquireFreePort(): Promise<number>;
-      removeSocket(): void;
-      startAppServer(): Promise<void>;
-      startAppServerWithRetry(): Promise<void>;
-    };
-
-    const acquireFreePortMock = vi
-      .spyOn(internals, 'acquireFreePort')
-      .mockResolvedValueOnce(41001)
-      .mockResolvedValueOnce(41002);
-    const startAppServerMock = vi
-      .spyOn(internals, 'startAppServer')
-      .mockImplementation(async () => undefined);
-    const removeSocketMock = vi
-      .spyOn(internals, 'removeSocket')
-      .mockImplementation(() => undefined);
-
-    await internals.startAppServerWithRetry();
-    const firstListenArg = internals._socketListenArg;
-
-    await internals.startAppServerWithRetry();
-    const secondListenArg = internals._socketListenArg;
-
-    expect(firstListenArg).toBe('ws://127.0.0.1:41001');
-    expect(secondListenArg).toBe('ws://127.0.0.1:41002');
-    expect(secondListenArg).not.toBe(firstListenArg);
-    expect(acquireFreePortMock).toHaveBeenCalledTimes(2);
-    expect(startAppServerMock).toHaveBeenCalledTimes(2);
-    expect(removeSocketMock).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe('CodexAppServerPTY env loading via shared loader', () => {
-  it('preserves org-to-agent precedence through loadEnvFileInto', () => {
-    const orgEnvFile = '/tmp/fw/orgs/acme/secrets.env';
-    const agentEnvFile = '/tmp/fw/orgs/acme/agents/codex-app-agent/.env';
-
-    fsMocks.existsSync.mockImplementation((path) => path === orgEnvFile || path === agentEnvFile);
-    fsMocks.readFileSync.mockImplementation((path) => {
-      if (path === orgEnvFile) {
-        return 'SHARED=org\nORG_ONLY=o\n';
-      }
-      if (path === agentEnvFile) {
-        return 'SHARED=agent\nAGENT_ONLY=a\n';
-      }
-      return '';
-    });
-
-    const pty = new CodexAppServerPTY(mockEnv, {});
-    const buildEnv = (pty as unknown as { buildEnv(): Record<string, string> }).buildEnv.bind(pty);
-    const env = buildEnv();
-
-    expect(env.SHARED).toBe('agent');
-    expect(env.ORG_ONLY).toBe('o');
-    expect(env.AGENT_ONLY).toBe('a');
-  });
-
-  it('delivers quoted agent values without literal quotes', () => {
-    const agentEnvFile = '/tmp/fw/orgs/acme/agents/codex-app-agent/.env';
-
-    fsMocks.existsSync.mockImplementation((path) => path === agentEnvFile);
-    fsMocks.readFileSync.mockImplementation((path) => {
-      if (path === agentEnvFile) {
-        return 'QUOTED=\"hello world\"\n';
-      }
-      return '';
-    });
-
-    const pty = new CodexAppServerPTY(mockEnv, {});
-    const buildEnv = (pty as unknown as { buildEnv(): Record<string, string> }).buildEnv.bind(pty);
-    const env = buildEnv();
-
-    expect(env.QUOTED).toBe('hello world');
+    const socketPath = (pty as unknown as { _socketPath: string })._socketPath;
+    expect(socketPath).toMatch(/\/cas-[a-f0-9]{8}\.sock$/);
+    expect((pty as unknown as { _socketListenArg: string })._socketListenArg).toMatch(/^unix:\/\/\.\/cas-[a-f0-9]{8}\.sock$/);
+    expect((pty as unknown as { _socketCwd: string })._socketCwd).toBe('/tmp');
+    expect(fsMocks.writeFileSync).toHaveBeenCalledWith(
+      expect.stringContaining('codex-app-server-socket.json'),
+      expect.stringContaining('"fallback": true'),
+      'utf-8',
+    );
   });
 });
 

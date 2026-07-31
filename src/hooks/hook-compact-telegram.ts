@@ -1,9 +1,16 @@
 /**
  * hook-compact-telegram.ts — PreCompact hook.
- * Sends a Telegram notification when Claude Code begins context compaction —
+ * Sends a Telegram notification when Claude Code begins context compaction,
+ * so the user knows why the agent goes quiet for a moment (#18) —
  * but ONLY for agents that opt in via `emit_system_telegram_pings: true` in
  * their config.json. All other agents log a bus event instead (silence-pings).
- * Never blocks compaction: 5s abort + catch-all.
+ *
+ * This hook fires and returns immediately — it never blocks the compaction.
+ * Registered in settings.json under the "PreCompact" event.
+ *
+ * Safety: fetch is raced against a 5s abort signal so this process always
+ * exits well within the 10s settings.json timeout. A timed-out or failed
+ * Telegram call must never abort compaction.
  */
 import { loadEnv } from './index.js';
 import { logSuppressedSystemPing, readEmitSystemPingsFlag } from './system-pings.js';
@@ -31,8 +38,10 @@ async function main(): Promise<void> {
   if (!env.botToken || !env.chatId) return;
 
   const agentName = env.agentName || 'agent';
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 5000);
+
   try {
     const url = `https://api.telegram.org/bot${env.botToken}/sendMessage`;
     await fetch(url, {

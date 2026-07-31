@@ -51,6 +51,7 @@ def _resolve_mmrag_dir():
 
 
 MMRAG_DIR = _resolve_mmrag_dir()
+REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_FILE = Path(os.environ.get("MMRAG_CONFIG", str(MMRAG_DIR / "config.json")))
 CHROMADB_DIR = Path(os.environ.get("MMRAG_CHROMADB_DIR", str(MMRAG_DIR / "chromadb")))
 MEDIA_DIR = MMRAG_DIR / "media"
@@ -134,6 +135,7 @@ DEFAULT_RECONCILE_COLLECTION = "shared-clearworksai"
 DEFAULT_RECONCILE_ROOTS = (
     Path.home() / "code" / "knowledge-sync" / "wiki",
     Path.home() / "code" / "knowledge-sync" / "raw",
+    REPO_ROOT / "orgs" / "clearworksai" / "knowledge",
 )
 REBUILD_MIN_COUNT_RATIO = 0.25
 REBUILD_MAX_SIZE_FACTOR = 20
@@ -1174,7 +1176,7 @@ def _is_supported_file(file_path: Path) -> bool:
 
 
 def _parse_reconcile_roots(roots_arg):
-    """Parse comma-delimited roots, or fall back to the canonical knowledge-sync roots."""
+    """Parse comma-delimited roots, or fall back to the canonical reconcile roots."""
     if not roots_arg:
         return [root.resolve() for root in DEFAULT_RECONCILE_ROOTS]
     roots = []
@@ -3120,7 +3122,7 @@ def _build_chunk_output_entry(result, *, show_full=False):
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return REPO_ROOT
 
 
 def _fleet_agents_dir() -> Path:
@@ -3788,7 +3790,7 @@ def main():
     p_reconcile.add_argument("--collection", "-c",
                              help="Collection name (default: shared-clearworksai, or all shared/agent collections with --purge-ignored)")
     p_reconcile.add_argument("--roots",
-                             help="Comma-separated roots to walk (default: ~/code/knowledge-sync/wiki,~/code/knowledge-sync/raw)")
+                             help="Comma-separated roots to walk (default: knowledge-sync wiki/raw plus cortextos/orgs/clearworksai/knowledge)")
     p_reconcile.add_argument("--dry-run", action="store_true", help="Show what would change without mutating the collection")
     p_reconcile.add_argument("--json", "-j", action="store_true", help="Output reconcile results as JSON")
     p_reconcile.add_argument("--yes", action="store_true", help="Confirm destructive reconcile changes")

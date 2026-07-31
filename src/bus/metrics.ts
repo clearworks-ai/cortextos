@@ -468,6 +468,9 @@ export function checkUpstream(
  * and build a list of Telegram bot commands to register.
  * The actual API call is separate (requires bot token).
  */
+// Telegram's setMyCommands rejects the whole batch (BOT_COMMANDS_TOO_MUCH) above this count.
+const TELEGRAM_MAX_COMMANDS = 100;
+
 export function collectTelegramCommands(scanDirs: string[]): { command: string; description: string }[] {
   const seen = new Set<string>();
   const commands: { command: string; description: string }[] = [];
@@ -493,7 +496,11 @@ export function collectTelegramCommands(scanDirs: string[]): { command: string; 
     }
   }
 
-  return commands;
+  // scanDirs is ordered agent-specific first, framework-wide last, so truncating
+  // here keeps each agent's own skills over generic community ones.
+  return commands.length > TELEGRAM_MAX_COMMANDS
+    ? commands.slice(0, TELEGRAM_MAX_COMMANDS)
+    : commands;
 }
 
 /**

@@ -10,9 +10,11 @@ vi.mock('child_process', async (importOriginal) => {
 });
 
 import {
+  buildSubprocessCtxEnv,
   isOpRef,
   loadEnvFileInto,
   resetOpRefStateForTest,
+  resolveEnv,
   resolveOpRefs,
   sourceEnvFile,
 } from '../../../src/utils/env';
@@ -313,6 +315,80 @@ describe('env op:// resolution', () => {
 
       const logOutput = `${stringifyCalls(warnSpy)}\n${stringifyCalls(errorSpy)}`;
       expect(logOutput).not.toContain(sentinel);
+    });
+  });
+
+  describe('buildSubprocessCtxEnv', () => {
+    it('strips inherited CTX_AGENT_DIR and re-roots both CTX roots', () => {
+      const result = buildSubprocessCtxEnv(
+        {
+          CTX_AGENT_DIR: '/live/agents/sage',
+          CTX_FRAMEWORK_ROOT: '/live',
+          CTX_PROJECT_ROOT: '/live',
+          PATH: '/usr/bin',
+        },
+        { root: '/wt' },
+      );
+
+      expect(result.CTX_FRAMEWORK_ROOT).toBe('/wt');
+      expect(result.CTX_PROJECT_ROOT).toBe('/wt');
+      expect('CTX_AGENT_DIR' in result).toBe(false);
+      expect(result.PATH).toBe('/usr/bin');
+    });
+
+    it('only overrides optional keys when opts provide them', () => {
+      const base = {
+        CTX_INSTANCE_ID: 'live-instance',
+        CTX_ROOT: '/live/root',
+        CTX_ORG: 'live-org',
+      };
+
+      const inherited = buildSubprocessCtxEnv(base, { root: '/wt' });
+      expect(inherited.CTX_INSTANCE_ID).toBe('live-instance');
+      expect(inherited.CTX_ROOT).toBe('/live/root');
+      expect(inherited.CTX_ORG).toBe('live-org');
+
+      const overridden = buildSubprocessCtxEnv(base, {
+        root: '/wt',
+        instanceId: 'sandbox-instance',
+        ctxRoot: '/sandbox/root',
+        org: 'sandbox-org',
+      });
+      expect(overridden.CTX_INSTANCE_ID).toBe('sandbox-instance');
+      expect(overridden.CTX_ROOT).toBe('/sandbox/root');
+      expect(overridden.CTX_ORG).toBe('sandbox-org');
+    });
+
+    it('passes the sandbox guard end-to-end by re-deriving agentDir under the new root', () => {
+      const liveRoot = mkdtempSync(join(tmpdir(), 'env-live-root-'));
+      const worktreeRoot = mkdtempSync(join(tmpdir(), 'env-worktree-root-'));
+      tempDirs.push(liveRoot, worktreeRoot);
+
+      const env = buildSubprocessCtxEnv(
+        {
+          CTX_AGENT_DIR: join(liveRoot, 'orgs', 'acme', 'agents', 'sage'),
+          CTX_FRAMEWORK_ROOT: liveRoot,
+          CTX_PROJECT_ROOT: liveRoot,
+          CTX_AGENT_NAME: 'sage',
+          CTX_ORG: 'acme',
+          CTX_INSTANCE_ID: 'default',
+          CTX_ROOT: join(worktreeRoot, '.ctx'),
+        },
+        {
+          root: worktreeRoot,
+          instanceId: 'default',
+          ctxRoot: join(worktreeRoot, '.ctx'),
+          org: 'acme',
+        },
+      );
+
+      Object.assign(process.env, env);
+
+      const resolved = resolveEnv();
+
+      expect(resolved.frameworkRoot).toBe(worktreeRoot);
+      expect(resolved.projectRoot).toBe(worktreeRoot);
+      expect(resolved.agentDir).toBe(join(worktreeRoot, 'orgs', 'acme', 'agents', 'sage'));
     });
   });
 });

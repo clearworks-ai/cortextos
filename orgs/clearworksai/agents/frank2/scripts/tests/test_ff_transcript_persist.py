@@ -41,6 +41,19 @@ class TranscriptPersistTests(unittest.TestCase):
             "sentences": [{"speaker_name": "Josh Weiss", "text": text}],
         }
 
+    def make_transcript_window(self, count: int = 12) -> list[dict[str, object]]:
+        transcripts: list[dict[str, object]] = []
+        for index in range(1, count + 1):
+            transcripts.append(
+                self.make_transcript(
+                    f"Transcript body {index}.",
+                    meeting_id=f"MTG{index:02d}",
+                    title=f"Meeting {index}",
+                    meeting_date=f"2026-07-{index:02d}T16:00:00Z",
+                )
+            )
+        return transcripts
+
     def test_transcript_filename_uses_date_and_meeting_id(self) -> None:
         transcript = self.make_transcript("Discussed onboarding.")
         self.assertEqual(
@@ -66,6 +79,122 @@ class TranscriptPersistTests(unittest.TestCase):
 
         self.assertIn(huge_sentence, body)
         self.assertGreater(len(body), 50050)
+
+    def test_select_transcripts_caps_at_limit(self) -> None:
+        transcripts = self.make_transcript_window()
+
+        original_fetch_recent_transcripts = MODULE.FF.fetch_recent_transcripts
+        try:
+            MODULE.FF.fetch_recent_transcripts = lambda *args, **kwargs: transcripts
+            selected = MODULE.select_transcripts(
+                api_key="token",
+                limit=3,
+                meeting_id="",
+                backfill=False,
+            )
+        finally:
+            MODULE.FF.fetch_recent_transcripts = original_fetch_recent_transcripts
+
+        self.assertEqual(len(selected), 3)
+        self.assertEqual([transcript["id"] for transcript in selected], ["MTG01", "MTG02", "MTG03"])
+
+    def test_run_persist_dry_run_respects_limit(self) -> None:
+        transcripts = self.make_transcript_window()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ledger_path = Path(tmpdir) / "ledger.txt"
+            transcripts_dir = Path(tmpdir) / "transcripts"
+            output = []
+
+            original_require_env = MODULE.FF.require_env
+            original_fetch_recent_transcripts = MODULE.FF.fetch_recent_transcripts
+            try:
+                MODULE.FF.require_env = lambda _name: "token"
+                MODULE.FF.fetch_recent_transcripts = lambda *args, **kwargs: transcripts
+                with unittest.mock.patch("builtins.print", side_effect=output.append):
+                    rc = MODULE.run_persist(
+                        dry_run=True,
+                        limit=3,
+                        meeting_id="",
+                        backfill=False,
+                        ledger_path=ledger_path,
+                        transcripts_dir=transcripts_dir,
+                    )
+            finally:
+                MODULE.FF.require_env = original_require_env
+                MODULE.FF.fetch_recent_transcripts = original_fetch_recent_transcripts
+
+            self.assertEqual(rc, 0)
+            self.assertFalse(transcripts_dir.exists())
+            payload = json.loads(output[0])
+            self.assertEqual(payload["persisted"], 3)
+            self.assertEqual(len(payload["files"]), 3)
+
+    def test_run_persist_live_respects_limit(self) -> None:
+        transcripts = self.make_transcript_window()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ledger_path = Path(tmpdir) / "ledger.txt"
+            transcripts_dir = Path(tmpdir) / "transcripts"
+            output = []
+
+            original_require_env = MODULE.FF.require_env
+            original_fetch_recent_transcripts = MODULE.FF.fetch_recent_transcripts
+            try:
+                MODULE.FF.require_env = lambda _name: "token"
+                MODULE.FF.fetch_recent_transcripts = lambda *args, **kwargs: transcripts
+                with unittest.mock.patch("builtins.print", side_effect=output.append):
+                    rc = MODULE.run_persist(
+                        dry_run=False,
+                        limit=3,
+                        meeting_id="",
+                        backfill=False,
+                        ledger_path=ledger_path,
+                        transcripts_dir=transcripts_dir,
+                    )
+            finally:
+                MODULE.FF.require_env = original_require_env
+                MODULE.FF.fetch_recent_transcripts = original_fetch_recent_transcripts
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(list(transcripts_dir.glob("*.md"))), 3)
+            self.assertEqual(len(MODULE.FF.load_ledger(ledger_path)), 3)
+            payload = json.loads(output[0])
+            self.assertEqual(payload["persisted"], 3)
+
+    def test_select_transcripts_backfill_not_capped(self) -> None:
+        transcripts = self.make_transcript_window()
+
+        original_fetch_backfill_transcripts = MODULE.fetch_backfill_transcripts
+        try:
+            MODULE.fetch_backfill_transcripts = lambda *args, **kwargs: transcripts
+            selected = MODULE.select_transcripts(
+                api_key="token",
+                limit=3,
+                meeting_id="",
+                backfill=True,
+            )
+        finally:
+            MODULE.fetch_backfill_transcripts = original_fetch_backfill_transcripts
+
+        self.assertEqual(len(selected), 12)
+        self.assertEqual([transcript["id"] for transcript in selected][:3], ["MTG01", "MTG02", "MTG03"])
+
+    def test_select_transcripts_meeting_id_filter_still_works(self) -> None:
+        transcripts = self.make_transcript_window()
+
+        original_fetch_recent_transcripts = MODULE.FF.fetch_recent_transcripts
+        try:
+            MODULE.FF.fetch_recent_transcripts = lambda *args, **kwargs: transcripts
+            selected = MODULE.select_transcripts(
+                api_key="token",
+                limit=3,
+                meeting_id="MTG07",
+                backfill=False,
+            )
+        finally:
+            MODULE.FF.fetch_recent_transcripts = original_fetch_recent_transcripts
+
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0]["id"], "MTG07")
 
     def test_run_persist_dry_run_writes_nothing(self) -> None:
         transcript = self.make_transcript("Dry run only.")

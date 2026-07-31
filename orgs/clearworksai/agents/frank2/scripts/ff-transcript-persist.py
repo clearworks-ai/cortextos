@@ -222,8 +222,10 @@ def select_transcripts(
         transcripts = FF.fetch_recent_transcripts(api_key, limit=limit, urlopen=urlopen)
     ordered = sorted(transcripts, key=FF.transcript_sort_key)
     if meeting_id:
-        return [transcript for transcript in ordered if str(transcript.get("id") or "") == meeting_id]
-    return ordered
+        ordered = [transcript for transcript in ordered if str(transcript.get("id") or "") == meeting_id]
+    if backfill:
+        return ordered
+    return ordered[:limit]
 
 
 def persist_one(

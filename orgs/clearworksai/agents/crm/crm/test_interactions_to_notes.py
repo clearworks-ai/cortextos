@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -48,10 +49,67 @@ class InteractionToNotesTests(unittest.TestCase):
         self.assertIn('type: "meeting"', rendered)
         self.assertIn("On 2026-07-30T08:15:00Z, acme-client had a positive meeting interaction.", rendered)
         self.assertIn("Reviewed the launch plan and agreed to send the revised brief.", rendered)
-        self.assertIn("## Commitments", rendered)
-        self.assertIn("- Send revised brief by Friday", rendered)
-        self.assertIn("## Follow-ups created", rendered)
-        self.assertIn("- followup-acme-2026-08-01-a1b2c3d4", rendered)
+        self.assertIn("**Deal state:** unknown", rendered)
+        self.assertIn("## Open items", rendered)
+        self.assertIn(
+            "| Send revised brief by Friday | unknown | unknown | — | commitments | open |",
+            rendered,
+        )
+        self.assertIn(
+            "| followup-acme-2026-08-01-a1b2c3d4 | clearworks | ours | — | followups_created | created |",
+            rendered,
+        )
+
+    def test_open_items_owner_side_split(self) -> None:
+        payload = self.make_record()
+        payload["commitments"] = ["Josh: send deck", "Dulce: send IT needs", "circle back next week"]
+        payload["followups_created"] = []
+
+        rendered = MODULE.render_note(MODULE.InteractionRecord.from_payload(payload))
+
+        self.assertIn("| send deck | Josh | ours | — | commitments | open |", rendered)
+        self.assertIn("| send IT needs | Dulce | theirs | — | commitments | open |", rendered)
+        self.assertIn("| circle back next week | unknown | unknown | — | commitments | open |", rendered)
+
+    def test_open_items_omitted_when_empty(self) -> None:
+        payload = self.make_record()
+        payload["commitments"] = []
+        payload["followups_created"] = []
+
+        rendered = MODULE.render_note(MODULE.InteractionRecord.from_payload(payload))
+
+        self.assertNotIn("## Open items", rendered)
+        self.assertNotIn("| Item | Owner | Side | Deadline | Source | Status |", rendered)
+        self.assertIn("**Deal state:** unknown", rendered)
+
+    def test_deal_state_never_fabricated(self) -> None:
+        positive_meeting = MODULE.InteractionRecord.from_payload(self.make_record())
+        signed_payload = self.make_record()
+        signed_payload["summary"] = "Client signed and approved the next step."
+        no_change_payload = self.make_record()
+        no_change_payload["summary"] = "Status quo for now, no change since last week."
+
+        self.assertIn("**Deal state:** unknown", MODULE.render_note(positive_meeting))
+        self.assertIn(
+            "**Deal state:** unknown -> closed-won",
+            MODULE.render_note(MODULE.InteractionRecord.from_payload(signed_payload)),
+        )
+        self.assertIn(
+            "**Deal state:** unchanged",
+            MODULE.render_note(MODULE.InteractionRecord.from_payload(no_change_payload)),
+        )
+
+    def test_table_cells_escape_pipes(self) -> None:
+        payload = self.make_record()
+        payload["commitments"] = ["Josh: fix prod | staging split"]
+        payload["followups_created"] = []
+
+        rendered = MODULE.render_note(MODULE.InteractionRecord.from_payload(payload))
+        row = next(line for line in rendered.splitlines() if "fix prod" in line)
+        cells = [cell.strip() for cell in re.split(r"(?<!\\)\|", row)[1:-1]]
+
+        self.assertIn(r"fix prod \| staging split", row)
+        self.assertEqual(len(cells), 6)
 
     def test_transform_is_idempotent_and_skips_malformed_lines(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

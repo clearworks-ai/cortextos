@@ -20,6 +20,15 @@ INTERACTIONS_PATH = Path(
 )
 DEFAULT_OUTPUT_ROOT = Path.home() / "code" / "knowledge-sync" / "raw" / "resources" / "crm-interactions"
 SAFE_STEM_RE = re.compile(r"[^A-Za-z0-9._-]+")
+COMMITMENT_OWNER_RE = re.compile(r"^([A-Za-z][A-Za-z .'\-]{0,40}):\s+(.+)$")
+OUR_SIDE_OWNERS = frozenset({"josh", "clearworks", "clearworks.ai"})
+OPEN_ITEM_EMPTY_VALUE = "—"
+DEAL_STATE_KEYWORDS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("closed won", "signed"), "closed-won"),
+    (("closed lost", "passed on", "not moving forward"), "closed-lost"),
+    (("proposal sent", "sent the proposal", "sent proposal"), "proposal"),
+    (("on hold", "paused"), "on-hold"),
+)
 
 
 @dataclass(frozen=True)
@@ -118,15 +127,13 @@ def render_note(record: InteractionRecord) -> str:
         f"# CRM interaction for {record.contact_id}",
         "",
         _summary_paragraph(record),
+        "",
+        f"**Deal state:** {derive_deal_state(record)}",
     ]
 
-    if record.commitments:
-        lines.extend(["", "## Commitments", ""])
-        lines.extend(f"- {item}" for item in record.commitments)
-
-    if record.followups_created:
-        lines.extend(["", "## Follow-ups created", ""])
-        lines.extend(f"- {item}" for item in record.followups_created)
+    open_items_section = _render_open_items_section(record)
+    if open_items_section:
+        lines.extend(["", *open_items_section])
 
     return "\n".join(lines) + "\n"
 
@@ -149,6 +156,75 @@ def _ensure_sentence(text: str) -> str:
     if stripped[-1] in ".!?":
         return stripped
     return f"{stripped}."
+
+
+def _render_open_items_section(record: InteractionRecord) -> list[str]:
+    rows = [*_commitment_rows(record.commitments), *_followup_rows(record.followups_created)]
+    if not rows:
+        return []
+
+    lines = [
+        "## Open items",
+        "",
+        "| Item | Owner | Side | Deadline | Source | Status |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    lines.extend(
+        f"| {_escape_table_cell(item)} | {_escape_table_cell(owner)} | {_escape_table_cell(side)} | "
+        f"{_escape_table_cell(deadline)} | {_escape_table_cell(source)} | {_escape_table_cell(status)} |"
+        for item, owner, side, deadline, source, status in rows
+    )
+    return lines
+
+
+def _commitment_rows(commitments: tuple[str, ...]) -> list[tuple[str, str, str, str, str, str]]:
+    rows: list[tuple[str, str, str, str, str, str]] = []
+    for commitment in commitments:
+        owner, item = _parse_commitment(commitment)
+        rows.append((item, owner, _owner_side(owner), OPEN_ITEM_EMPTY_VALUE, "commitments", "open"))
+    return rows
+
+
+def _followup_rows(followups_created: tuple[str, ...]) -> list[tuple[str, str, str, str, str, str]]:
+    return [
+        (followup_id, "clearworks", "ours", OPEN_ITEM_EMPTY_VALUE, "followups_created", "created")
+        for followup_id in followups_created
+    ]
+
+
+def _parse_commitment(commitment: str) -> tuple[str, str]:
+    match = COMMITMENT_OWNER_RE.match(commitment)
+    if match:
+        return match.group(1), match.group(2)
+    return "unknown", commitment
+
+
+def _owner_side(owner: str) -> str:
+    if owner == "unknown":
+        return "unknown"
+    if owner.lower() in OUR_SIDE_OWNERS:
+        return "ours"
+    return "theirs"
+
+
+def _escape_table_cell(value: str) -> str:
+    return re.sub(r"\s*[\r\n]+\s*", " ", value).replace("|", r"\|")
+
+
+def derive_deal_state(record: InteractionRecord) -> str:
+    summary = record.summary.lower()
+    if any(_summary_contains_keyword(summary, keyword) for keyword in ("no change", "unchanged", "status quo")):
+        return "unchanged"
+
+    for keywords, state in DEAL_STATE_KEYWORDS:
+        if any(_summary_contains_keyword(summary, keyword) for keyword in keywords):
+            return f"unknown -> {state}"
+    return "unknown"
+
+
+def _summary_contains_keyword(summary: str, keyword: str) -> bool:
+    pattern = r"\b" + re.escape(keyword).replace(r"\ ", r"\s+") + r"\b"
+    return re.search(pattern, summary, flags=re.IGNORECASE) is not None
 
 
 def transform_interactions(

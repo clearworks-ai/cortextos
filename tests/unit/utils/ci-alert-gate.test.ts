@@ -1,9 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+
+const execFileSyncMock = vi.hoisted(() => vi.fn());
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>();
+  return { ...actual, execFileSync: execFileSyncMock };
+});
+
 import type { CiAlertInput } from '../../../src/utils/ci-alert-gate.js';
-import { evaluateCiAlert } from '../../../src/utils/ci-alert-gate.js';
+import { evaluateCiAlert, gatherCiAlertContext } from '../../../src/utils/ci-alert-gate.js';
 import { checkAndRecordSourceEvent, isValidSourceKey } from '../../../src/utils/event-dedup.js';
 
 interface CiAlertCase {
@@ -14,6 +21,23 @@ interface CiAlertCase {
 }
 
 const cases: CiAlertCase[] = [
+  {
+    name: 'deleted branch skips before failed run can surface',
+    input: {
+      prState: 'OPEN',
+      branchExists: false,
+      runs: [
+        {
+          headSha: 'abc',
+          status: 'completed',
+          conclusion: 'failure',
+          createdAt: '2026-07-03T05:25:00Z',
+        },
+      ],
+    },
+    expectedSurface: false,
+    expectedReason: 'skip: branch deleted',
+  },
   {
     name: 'stale failure superseded by newer green run skips (PR #39 scenario)',
     input: {
@@ -183,6 +207,10 @@ const cases: CiAlertCase[] = [
   },
 ];
 
+beforeEach(() => {
+  execFileSyncMock.mockReset();
+});
+
 describe('evaluateCiAlert', () => {
   for (const testCase of cases) {
     it(testCase.name, () => {
@@ -192,6 +220,47 @@ describe('evaluateCiAlert', () => {
       expect(result.reason.length).toBeGreaterThan(0);
     });
   }
+});
+
+describe('gatherCiAlertContext', () => {
+  it('returns branchExists false early and skips later gh calls when branch lookup throws', () => {
+    execFileSyncMock.mockImplementation((_command: string, args?: readonly string[]) => {
+      const argList = args ?? [];
+      if (argList[0] === 'api' && argList[1] === 'repos/clearworks-ai/cortextos/branches/feat/deleted') {
+        throw new Error('branch missing');
+      }
+      return '';
+    });
+
+    const result = gatherCiAlertContext('clearworks-ai/cortextos', 'feat/deleted', {
+      headSha: 'abc123',
+    });
+
+    expect(result).toEqual({
+      prState: 'NOTFOUND',
+      runs: [],
+      headSha: 'abc123',
+      branchExists: false,
+    });
+
+    expect(execFileSyncMock).toHaveBeenCalledTimes(1);
+    expect(execFileSyncMock).toHaveBeenCalledWith(
+      'gh',
+      ['api', 'repos/clearworks-ai/cortextos/branches/feat/deleted', '--jq', '.name'],
+      expect.objectContaining({
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+    );
+
+    const ghArgs = execFileSyncMock.mock.calls.map(([, args]) => args);
+    expect(ghArgs).not.toContainEqual(
+      expect.arrayContaining(['pr', 'list'])
+    );
+    expect(ghArgs).not.toContainEqual(
+      expect.arrayContaining(['run', 'list'])
+    );
+  });
 });
 
 describe('ci-alert-gate run-id dedup contract', () => {

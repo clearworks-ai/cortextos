@@ -17,6 +17,17 @@
     "timeout": 2
   },
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cortextos bus hook-retrieval-enforcer",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
     "PermissionRequest": [
       {
         "matcher": "ExitPlanMode",

@@ -4,6 +4,7 @@ import type { ConversationBufferEntry } from '../types/index.js';
 import { loadBuffer } from './conversation-buffer.js';
 
 const MAX_MISSION_CHARS = 600;
+const MISSION_STALE_MS = 2 * 60 * 60 * 1000; // refresh anchor when existing file is older than 2h
 
 function truncateMissionText(text: string, maxChars: number = MAX_MISSION_CHARS): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
@@ -44,8 +45,14 @@ export function deriveMissionFromTrailingInbound(
 export function ensureMissionAnchorFromBuffer(agentDir: string, ctxRoot: string, agentName: string): void {
   try {
     const missionPath = join(agentDir, 'state', 'current-mission.txt');
+    // Refresh when the file is absent OR the existing anchor is stale (older than
+    // MISSION_STALE_MS). A present-but-stale file previously blocked all refreshes,
+    // leaving agents to resume onto days-old missions.
     if (existsSync(missionPath)) {
-      return;
+      const ageMs = Date.now() - statSync(missionPath).mtimeMs;
+      if (ageMs <= MISSION_STALE_MS) {
+        return;
+      }
     }
 
     const mission = deriveMissionFromTrailingInbound(loadBuffer(ctxRoot, agentName), agentName);

@@ -8,16 +8,13 @@ import {
   MulticaHttpError,
   createMulticaClient,
   resolveMulticaConfig,
-  sign,
 } from '../../../../src/bus/multica/client.js';
 import { taskToIssuePayload } from '../../../../src/bus/multica/mapping.js';
 import type { Task } from '../../../../src/types/index.js';
-import type { MulticaConfig } from '../../../../src/bus/multica/types.js';
+import type { MulticaConfig, MulticaIssue, MulticaPushPayload } from '../../../../src/bus/multica/types.js';
 
 const config: MulticaConfig = {
   baseUrl: 'https://multica.example.com/',
-  webhookToken: 'webhook-token',
-  webhookSecret: 'webhook-secret',
   readApiToken: 'read-token',
   workspaceId: 'workspace-123',
   memberIdJosh: 'member-josh',
@@ -46,6 +43,36 @@ function makeTask(overrides: Partial<Task> = {}): Task {
   };
 }
 
+function makePayload(): MulticaPushPayload {
+  return taskToIssuePayload(makeTask(), {
+    ...config,
+    baseUrl: config.baseUrl.replace(/\/+$/, ''),
+  });
+}
+
+function makeIssueResponse(
+  payload: MulticaPushPayload,
+  overrides: Partial<MulticaIssue> = {},
+): MulticaIssue {
+  return {
+    id: 'issue-real-1',
+    identifier: 'CLE-34',
+    workspace_id: payload.issue.workspace_id,
+    project_id: payload.issue.project_id,
+    title: payload.issue.title,
+    description: payload.issue.description,
+    status: payload.issue.status,
+    priority: payload.issue.priority,
+    assignee_type: payload.issue.assignee_type,
+    assignee_id: payload.issue.assignee_id,
+    context_refs: [],
+    due_date: payload.issue.due_date,
+    created_at: '2026-07-29T07:00:00Z',
+    updated_at: '2026-07-29T07:00:00Z',
+    ...overrides,
+  };
+}
+
 describe('multica client', () => {
   let tempRoot: string | null = null;
 
@@ -57,44 +84,72 @@ describe('multica client', () => {
     }
   });
 
-  it('signs with the expected Multica header prefix', () => {
-    expect(sign('{"a":1}', 'testsecret')).toBe(
-      'sha256=0f4a604a9e9ad182034b3224fb61724a9ef127c2d5de3554995cc31f9cc3c499',
-    );
-  });
-
-  it('pushIssue signs the exact request body and includes the idempotency key', async () => {
-    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+  it('createIssue posts the flat issue body to the real REST endpoint', async () => {
+    const payload = makePayload();
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify(makeIssueResponse(payload)),
+      { status: 201 },
+    ));
     const client = createMulticaClient(config, fetchMock as unknown as typeof fetch);
-    const payload = taskToIssuePayload(makeTask(), {
-      ...config,
-      baseUrl: config.baseUrl.replace(/\/+$/, ''),
-    });
 
-    await client.pushIssue(payload, 'idempotency-123');
+    const issue = await client.createIssue(payload);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [endpoint, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(endpoint).toBe('https://multica.example.com/api/webhooks/autopilots/webhook-token');
-    expect(init.body).toBe(JSON.stringify(payload));
+    expect(endpoint).toBe('https://multica.example.com/api/issues?workspace_id=workspace-123');
+    expect(init.method).toBe('POST');
+    expect(init.body).toBe(JSON.stringify(payload.issue));
 
     const headers = new Headers(init.headers);
-    expect(headers.get('Idempotency-Key')).toBe('idempotency-123');
-    expect(headers.get('X-Hub-Signature-256')).toBe(
-      sign(JSON.stringify(payload), config.webhookSecret),
-    );
+    expect(headers.get('Authorization')).toBe('Bearer read-token');
+    expect(headers.get('Content-Type')).toBe('application/json');
+    expect(issue.id).toBe('issue-real-1');
+  });
+
+  it('updateIssue puts the flat issue body to the real REST endpoint', async () => {
+    const payload = makePayload();
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify(makeIssueResponse(payload, {
+        title: 'Bridge task updated',
+        updated_at: '2026-07-29T08:00:00Z',
+      })),
+      { status: 200 },
+    ));
+    const client = createMulticaClient(config, fetchMock as unknown as typeof fetch);
+
+    const issue = await client.updateIssue('issue-real-1', payload);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [endpoint, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(endpoint).toBe('https://multica.example.com/api/issues/issue-real-1?workspace_id=workspace-123');
+    expect(init.method).toBe('PUT');
+    expect(init.body).toBe(JSON.stringify(payload.issue));
+
+    const headers = new Headers(init.headers);
+    expect(headers.get('Authorization')).toBe('Bearer read-token');
+    expect(headers.get('Content-Type')).toBe('application/json');
+    expect(issue.title).toBe('Bridge task updated');
+  });
+
+  it('createIssue rejects unparseable success bodies as typed errors', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 201 }));
+    const client = createMulticaClient(config, fetchMock as unknown as typeof fetch);
+
+    await expect(client.createIssue(makePayload())).rejects.toMatchObject({
+      name: 'MulticaHttpError',
+      endpoint: 'https://multica.example.com/api/issues?workspace_id=workspace-123',
+    });
   });
 
   it.each([401, 400, 413])('surfaces HTTP %s failures as typed errors', async (status) => {
     const fetchMock = vi.fn(async () => new Response('nope', { status }));
     const client = createMulticaClient(config, fetchMock as unknown as typeof fetch);
 
-    await expect(client.pushIssue(taskToIssuePayload(makeTask(), config), 'idempotency-123')).rejects
-      .toMatchObject({
-        name: 'MulticaHttpError',
-        status,
-        endpoint: 'https://multica.example.com/api/webhooks/autopilots/webhook-token',
-      });
+    await expect(client.createIssue(makePayload())).rejects.toMatchObject({
+      name: 'MulticaHttpError',
+      status,
+      endpoint: 'https://multica.example.com/api/issues?workspace_id=workspace-123',
+    });
   });
 
   it('wraps transport failures with status 0', async () => {
@@ -106,7 +161,7 @@ describe('multica client', () => {
     await expect(client.listIssues()).rejects.toMatchObject({
       name: 'MulticaHttpError',
       status: 0,
-      endpoint: 'https://multica.example.com/api/issues',
+      endpoint: 'https://multica.example.com/api/issues?workspace_id=workspace-123',
     });
   });
 
@@ -137,8 +192,13 @@ describe('multica client', () => {
     const client = createMulticaClient(config, fetchMock as unknown as typeof fetch);
 
     const issues = await client.listIssues({ limit: 10, offset: 5 });
+    const [endpoint] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const url = new URL(endpoint);
 
     expect(issues).toHaveLength(1);
+    expect(url.searchParams.get('workspace_id')).toBe(config.workspaceId);
+    expect(url.searchParams.get('limit')).toBe('10');
+    expect(url.searchParams.get('offset')).toBe('5');
     expect(issues[0].status).toBe('todo');
     expect(issues[0].priority).toBe('high');
     expect(warnSpy).toHaveBeenCalledTimes(1);
@@ -175,8 +235,6 @@ describe('multica client', () => {
     mkdirSync(orgDir, { recursive: true });
     writeFileSync(join(orgDir, 'secrets.env'), [
       'MULTICA_BASE_URL="https://multica.example.com/"',
-      'MULTICA_WEBHOOK_TOKEN="token-from-file"',
-      'MULTICA_WEBHOOK_SECRET="secret-from-file"',
       'MULTICA_WORKSPACE_ID="workspace-from-file"',
       'MULTICA_MEMBER_ID_JOSH="member-from-file"',
       'MULTICA_READ_API_TOKEN="read-from-file"',
@@ -188,8 +246,6 @@ describe('multica client', () => {
 
     expect(resolved).toEqual({
       baseUrl: 'https://multica.example.com',
-      webhookToken: 'token-from-file',
-      webhookSecret: 'secret-from-file',
       readApiToken: 'read-from-file',
       workspaceId: 'workspace-from-file',
       memberIdJosh: 'member-from-file',
@@ -207,6 +263,26 @@ describe('multica client', () => {
     expect(resolved).toBeNull();
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(warnSpy.mock.calls[0][0]).toContain('MULTICA_BASE_URL');
+  });
+
+  it('returns null and warns when the read token is missing', () => {
+    tempRoot = mkdtempSync(join(tmpdir(), 'multica-client-test-'));
+    const orgDir = join(tempRoot, 'orgs', 'clearworksai');
+    mkdirSync(orgDir, { recursive: true });
+    writeFileSync(join(orgDir, 'secrets.env'), [
+      'MULTICA_BASE_URL="https://multica.example.com/"',
+      'MULTICA_WORKSPACE_ID="workspace-from-file"',
+      'MULTICA_MEMBER_ID_JOSH="member-from-file"',
+    ].join('\n'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const resolved = resolveMulticaConfig({
+      CTX_ROOT: tempRoot,
+    });
+
+    expect(resolved).toBeNull();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toContain('MULTICA_READ_API_TOKEN');
   });
 
   it('exports the typed error class for callers to catch', () => {

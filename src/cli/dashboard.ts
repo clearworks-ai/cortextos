@@ -4,6 +4,7 @@ import { join } from 'path';
 import { homedir, platform } from 'os';
 import { randomBytes } from 'crypto';
 import { resolveInstanceId } from './resolve-instance-id.js';
+import { buildSubprocessCtxEnv } from '../utils/env.js';
 
 const IS_WINDOWS = platform() === 'win32';
 
@@ -129,14 +130,15 @@ export const dashboardCommand = new Command('dashboard')
     // ─── Start server ─────────────────────────────────────────────────────────
 
     const dashEnv = {
-      ...process.env,
+      ...buildSubprocessCtxEnv(process.env, {
+        root: process.cwd(),
+        instanceId,
+        ctxRoot,
+      }),
       PORT: options.port,
       AUTH_SECRET: authSecret,
       ADMIN_USERNAME: adminUsername,
       ADMIN_PASSWORD: adminPassword,
-      CTX_ROOT: ctxRoot,
-      CTX_FRAMEWORK_ROOT: process.cwd(),
-      CTX_INSTANCE_ID: instanceId,
       AUTH_TRUST_HOST: process.env.AUTH_TRUST_HOST || 'true',
     };
 

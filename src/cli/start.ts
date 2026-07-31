@@ -5,6 +5,7 @@ import { homedir, platform } from 'os';
 import { execSync, spawn, spawnSync } from 'child_process';
 import { IPCClient } from '../daemon/ipc-server.js';
 import { resolveInstanceId } from './resolve-instance-id.js';
+import { buildSubprocessCtxEnv } from '../utils/env.js';
 
 const IS_WINDOWS = platform() === 'win32';
 const SAFE_CMD = /^[@a-z0-9._/-]+$/i;
@@ -59,14 +60,15 @@ export const startCommand = new Command('start')
         } catch { /* ignore */ }
       }
 
-      const daemonEnv = {
-        ...process.env,
-        CTX_INSTANCE_ID: instanceId,
-        CTX_ROOT: ctxRoot,
-        CTX_FRAMEWORK_ROOT: projectRoot,
-        CTX_PROJECT_ROOT: projectRoot,
-        ...(org ? { CTX_ORG: org } : {}),
-      };
+      // Lockstep CTX re-root: strips an inherited CTX_AGENT_DIR so a daemon
+      // started from a worktree/sandbox checkout inside a live agent shell
+      // doesn't trip the env.ts sandbox-leak guard in every child process.
+      const daemonEnv = buildSubprocessCtxEnv(process.env, {
+        root: projectRoot,
+        instanceId,
+        ctxRoot,
+        ...(org ? { org } : {}),
+      });
 
       if (options.foreground) {
         // Run in foreground (blocking) — useful for debugging

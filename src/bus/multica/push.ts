@@ -1,11 +1,11 @@
 import type { BusPaths, Task } from '../../types/index.js';
 import { listTasks, OPEN_TASK_STATUSES } from '../task.js';
-import { MulticaHttpError } from './client.js';
 import { hashMappedFields, idempotencyKeyFor, taskToIssuePayload } from './mapping.js';
 import type { MulticaClient, MulticaConfig, SyncStateStore } from './types.js';
 
 export interface OutboundPushOptions {
   dryRun?: boolean;
+  limit?: number;
   provenanceFor?: (task: Task) => 'meeting-pipeline' | 'bus';
 }
 
@@ -37,6 +37,7 @@ export async function runOutboundPush(
   options: OutboundPushOptions = {},
 ): Promise<OutboundPushResult> {
   const dryRun = options.dryRun === true;
+  const limit = options.limit;
   // Callers can opt specific tasks into meeting-pipeline provenance without
   // adding any detection heuristic to this module.
   const provenanceFor = options.provenanceFor ?? (() => 'bus' as const);
@@ -58,6 +59,10 @@ export async function runOutboundPush(
   // Archived or compacted tasks never appear in the task universe. Leave their
   // ledger links untouched here; future ledger GC is a separate concern.
   for (const task of universe) {
+    if (hasReachedPushLimit(result, limit)) {
+      break;
+    }
+
     const link = state.links[task.id];
 
     if (!link && !OPEN_TASK_STATUSES.has(task.status)) {
@@ -75,15 +80,12 @@ export async function runOutboundPush(
       continue;
     }
 
-    const action = link === undefined || (
-      link.multica_issue_id === null && link.last_pushed_hash === null
-    )
-      ? 'create'
-      : 'update';
+    const existingIssueId = link?.multica_issue_id ?? null;
+    const action = existingIssueId === null ? 'create' : 'update';
     const payload = taskToIssuePayload(task, config, provenanceFor(task), action);
     const fieldHash = hashMappedFields(payload);
 
-    if (link?.last_pushed_hash === fieldHash) {
+    if (existingIssueId !== null && link?.last_pushed_hash === fieldHash) {
       result.skipped += 1;
       result.plan.push({
         bus_task_id: task.id,
@@ -113,20 +115,19 @@ export async function runOutboundPush(
         idempotency_key: idempotencyKey,
         error: null,
       });
+      if (hasReachedPushLimit(result, limit)) {
+        break;
+      }
       continue;
     }
 
     try {
-      const { status } = await client.pushIssue(payload, idempotencyKey);
-      if (status < 200 || status >= 300) {
-        throw new MulticaHttpError(
-          `Multica push returned unexpected status ${status}`,
-          status,
-          'pushIssue',
-        );
-      }
+      const issue = existingIssueId === null
+        ? await client.createIssue(payload)
+        : await client.updateIssue(existingIssueId, payload);
 
       store.upsertLink(task.id, {
+        multica_issue_id: issue.id,
         last_pushed_hash: fieldHash,
         last_pushed_status: task.status,
         idempotency_key: idempotencyKey,
@@ -143,6 +144,9 @@ export async function runOutboundPush(
         idempotency_key: idempotencyKey,
         error: null,
       });
+      if (hasReachedPushLimit(result, limit)) {
+        break;
+      }
     } catch (error) {
       result.errors += 1;
       const message = truncateErrorMessage(error);
@@ -157,8 +161,8 @@ export async function runOutboundPush(
         error: message,
       });
       console.warn(`[multica-sync] outbound push failed for ${task.id} (${task.status}): ${message}`);
-      // If the push succeeded but the ledger write failed, the next run
-      // recomputes the same idempotency key and Multica dedupes the re-push.
+      // REST creates have no server-side idempotency today. If a create succeeds
+      // but the ledger write fails, the next run can create a duplicate issue.
       continue;
     }
   }
@@ -176,6 +180,15 @@ function incrementPushCount(
   }
 
   result.pushed_updates += 1;
+}
+
+function hasReachedPushLimit(
+  result: OutboundPushResult,
+  limit: number | undefined,
+): boolean {
+  return typeof limit === 'number'
+    && Number.isFinite(limit)
+    && result.pushed_creates + result.pushed_updates >= limit;
 }
 
 function truncateErrorMessage(error: unknown): string {

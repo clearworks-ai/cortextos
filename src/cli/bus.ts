@@ -49,6 +49,8 @@ import {
 } from '../bus/reliable-job.js';
 import { parseCalendarEvents, selectUpcomingExternalMeetings, readSurfacedIds, markSurfaced, lookupCrmContext, renderBriefMarkdown, claimEventLease, releaseEventLease, readClaimedIds } from '../bus/meeting-brief.js';
 import type { BriefData, CrmContext } from '../bus/meeting-brief.js';
+import { runMulticaSync } from '../bus/multica/index.js';
+import type { SyncDirection } from '../bus/multica/types.js';
 import { runScopeGuard } from '../bus/scope-guard.js';
 import { checkUsageApi, refreshOAuthToken, rotateOAuth, loadAccounts, ALERT_5H, ALERT_7D } from '../bus/oauth.js';
 import { resolvePaths } from '../utils/paths.js';
@@ -915,61 +917,66 @@ busCommand
   .option('--timezone <tz>', 'Timezone for day/night mode detection')
   .option('--interval <i>', 'Loop interval from cron config')
   .action((status: string, opts: { task?: string; timezone?: string; interval?: string }) => {
-    const env = resolveEnv();
-    const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    try {
+      const env = resolveEnv();
+      const paths = resolvePaths(env.agentName, env.instanceId, env.org);
 
-    // Read display name from IDENTITY.md so agents self-report their user-facing name
-    let displayName: string | undefined;
-    const frameworkRoot = process.env.CTX_FRAMEWORK_ROOT || process.env.CTX_PROJECT_ROOT || '';
-    if (frameworkRoot) {
-      const identityPaths = [
-        join(frameworkRoot, 'orgs', env.org, 'agents', env.agentName, 'IDENTITY.md'),
-        join(frameworkRoot, 'agents', env.agentName, 'IDENTITY.md'),
-      ];
-      for (const idPath of identityPaths) {
-        if (existsSync(idPath)) {
-          try {
-            const lines = readFileSync(idPath, 'utf-8').split('\n');
-            // "## Name" section takes priority (user-configured display name)
-            const nameIdx = lines.findIndex(l => l.trim() === '## Name');
-            if (nameIdx >= 0) {
-              for (let i = nameIdx + 1; i < lines.length; i++) {
-                const line = lines[i].trim();
-                if (!line || line.startsWith('<!--')) continue;
-                if (line.startsWith('#')) break;
-                displayName = line;
-                break;
+      // Read display name from IDENTITY.md so agents self-report their user-facing name
+      let displayName: string | undefined;
+      const frameworkRoot = process.env.CTX_FRAMEWORK_ROOT || process.env.CTX_PROJECT_ROOT || '';
+      if (frameworkRoot) {
+        const identityPaths = [
+          join(frameworkRoot, 'orgs', env.org, 'agents', env.agentName, 'IDENTITY.md'),
+          join(frameworkRoot, 'agents', env.agentName, 'IDENTITY.md'),
+        ];
+        for (const idPath of identityPaths) {
+          if (existsSync(idPath)) {
+            try {
+              const lines = readFileSync(idPath, 'utf-8').split('\n');
+              // "## Name" section takes priority (user-configured display name)
+              const nameIdx = lines.findIndex(l => l.trim() === '## Name');
+              if (nameIdx >= 0) {
+                for (let i = nameIdx + 1; i < lines.length; i++) {
+                  const line = lines[i].trim();
+                  if (!line || line.startsWith('<!--')) continue;
+                  if (line.startsWith('#')) break;
+                  displayName = line;
+                  break;
+                }
               }
+              // Fallback: first non-empty, non-comment top-level heading value
+              if (!displayName) {
+                const h1 = lines.find(l => l.startsWith('# ') && !l.startsWith('## '));
+                if (h1) displayName = h1.replace(/^#\s+/, '').trim();
+              }
+            } catch {
+              // Skip
             }
-            // Fallback: first non-empty, non-comment top-level heading value
-            if (!displayName) {
-              const h1 = lines.find(l => l.startsWith('# ') && !l.startsWith('## '));
-              if (h1) displayName = h1.replace(/^#\s+/, '').trim();
-            }
-          } catch {
-            // Skip
+            break;
           }
-          break;
         }
       }
-    }
 
-    updateHeartbeat(paths, env.agentName, status, {
-      org: env.org,
-      timezone: opts.timezone,
-      loopInterval: opts.interval,
-      currentTask: opts.task,
-      displayName,
-    });
-    // Auto-emit a heartbeat event so the activity feed surfaces any live agent
-    // even if the agent itself forgets to call log-event. This makes the
-    // dashboard "agents" list derive from heartbeats, not just explicit events.
-    try {
-      logEvent(paths, env.agentName, env.org, 'heartbeat', 'heartbeat', 'info', JSON.stringify({ status, task: opts.task ?? '' }));
-    } catch {
-      // Non-fatal: heartbeat write already succeeded
+      updateHeartbeat(paths, env.agentName, status, {
+        org: env.org,
+        timezone: opts.timezone,
+        loopInterval: opts.interval,
+        currentTask: opts.task,
+        displayName,
+      });
+      // Auto-emit a heartbeat event so the activity feed surfaces any live agent
+      // even if the agent itself forgets to call log-event. This makes the
+      // dashboard "agents" list derive from heartbeats, not just explicit events.
+      try {
+        logEvent(paths, env.agentName, env.org, 'heartbeat', 'heartbeat', 'info', JSON.stringify({ status, task: opts.task ?? '' }));
+      } catch {
+        // Non-fatal: heartbeat write already succeeded
+      }
+      console.log(`Heartbeat updated: ${env.agentName}`);
+    } catch (err) {
+      console.error(`update-heartbeat failed: ${(err as Error).message}`);
+      process.exit(1);
     }
-    console.log(`Heartbeat updated: ${env.agentName}`);
   });
 
 busCommand
@@ -1248,6 +1255,48 @@ busCommand
     }
 
     console.log(JSON.stringify(output));
+  });
+
+busCommand
+  .command('multica-sync')
+  .description('Two-way sync between cortextOS bus tasks and Multica issues (push open tasks out, poll Multica status/assignee changes back in)')
+  .option('--dry-run', 'Preview the sync plan without pushing, polling writes, or ledger mutation')
+  .option('--direction <d>', 'Sync direction: out | in | both', 'both')
+  .option('--limit <n>', 'Cap the number of outbound issues pushed this run (creates + updates)')
+  .action(async (opts: { dryRun?: boolean; direction: string; limit?: string }) => {
+    if (!['out', 'in', 'both'].includes(opts.direction)) {
+      console.error(`Invalid --direction '${opts.direction}'. Must be one of: out, in, both`);
+      process.exit(1);
+    }
+
+    const parsedLimit = opts.limit === undefined ? undefined : Number.parseInt(opts.limit, 10);
+    if (
+      opts.limit !== undefined
+      && (!/^\d+$/.test(opts.limit) || parsedLimit === undefined || parsedLimit <= 0)
+    ) {
+      console.error(`Invalid --limit '${opts.limit}'. Must be a positive integer`);
+      process.exit(1);
+    }
+
+    const env = resolveEnv();
+    const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    const summary = await runMulticaSync(paths, {
+      direction: opts.direction as SyncDirection,
+      dryRun: opts.dryRun === true,
+      limit: parsedLimit,
+    });
+
+    if (!opts.dryRun) {
+      logEvent(paths, env.agentName, env.org, 'agent_activity', 'multica_sync_completed', 'info', {
+        direction: summary.direction,
+        pushed_creates: summary.pushed_creates,
+        pushed_updates: summary.pushed_updates,
+        wrote_back: summary.wrote_back,
+        errors: summary.errors,
+      });
+    }
+
+    console.log(JSON.stringify(summary));
   });
 
 busCommand

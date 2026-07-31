@@ -71,7 +71,7 @@ export function taskToIssuePayload(
       assignee_type: assignment.assignee_type,
       assignee_id: assignment.assignee_id,
       project_id: assignment.project_id,
-      due_date: task.due_date,
+      due_date: task.due_date ? task.due_date.slice(0, 10) : null,
     },
   };
 }

@@ -124,6 +124,9 @@ export class AgentProcess {
   // Rate-limit exits (Anthropic 429 / usage-limit) back off without charging
   // the daily crash counter, so a rate-limited agent is not falsely HALTED.
   private rateLimitCount: number = 0;
+  // Image-poison recovery circuit breaker: tracks recent recovery attempts
+  // to prevent infinite loops when force-fresh fails to clear poisoned history
+  private imagePoisonRecoveries: number[] = [];
   private sessionStart: Date | null = null;
   private status: AgentStatus['status'] = 'stopped';
   private stopping: boolean = false;
@@ -714,6 +717,29 @@ export class AgentProcess {
     // the error signature to avoid false positives that would skip a real
     // crash counter increment.
     if (exitCode === 0 && this.detectImagePoisonCrash(recentOutput)) {
+      const now = Date.now();
+      // Filter recoveries to last 15 minutes
+      this.imagePoisonRecoveries = this.imagePoisonRecoveries.filter(t => now - t < 15 * 60_000);
+      this.imagePoisonRecoveries.push(now);
+
+      // Circuit breaker: 3rd recovery within 15min → stop auto-recovery, alert
+      if (this.imagePoisonRecoveries.length >= 3) {
+        this.log(`Image-poison recovery circuit breaker tripped: ${this.imagePoisonRecoveries.length} recoveries in 15min. Force-fresh is failing to clear poisoned history. Auto-recovery paused. Manual intervention required.`);
+        this.status = 'crashed';
+        this.notifyStatusChange();
+
+        // Send Telegram alert
+        const telegramApi = this.telegramApi;
+        const telegramChatId = this.telegramChatId;
+        if (telegramApi && telegramChatId) {
+          const alertMsg = `🚨 IMAGE-POISON RECOVERY CIRCUIT BREAKER: Agent ${this.name} has hit ${this.imagePoisonRecoveries.length} image-poison recoveries in 15min. Force-fresh is failing to clear poisoned history. Auto-recovery paused. Manual intervention required. Check logs/${this.name}/restarts.log for details.`;
+          telegramApi
+            .sendMessage(telegramChatId, alertMsg)
+            .catch(() => { /* non-fatal: notification is observability only */ });
+        }
+        return;
+      }
+
       this.log('Image-poison crash detected (API 400, unsupported image format). Arming .force-fresh and restarting without counting against max_crashes_per_day.');
       this.armForceFresh('image-poison auto-recovery');
       this.appendCrashToRestartsLog(exitCode, 5000, 'IMAGE_POISON_RECOVERY');
@@ -809,7 +835,6 @@ export class AgentProcess {
     const forceFreshPath = join(this.env.ctxRoot, 'state', this.name, '.force-fresh');
     if (existsSync(forceFreshPath)) {
       try {
-        const { unlinkSync } = require('fs');
         unlinkSync(forceFreshPath);
       } catch { /* ignore */ }
       return false;

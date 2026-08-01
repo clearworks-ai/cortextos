@@ -27,7 +27,10 @@ RSYNC_STATUS=$?
 MIRRORED=$(find "$DST" -maxdepth 1 -name '*.md' | wc -l | tr -d ' ')
 
 # Count deletions from rsync output
-DELETED=$(echo "$RSYNC_OUTPUT" | grep -c "^*deleting" || echo "0")
+DELETED=$(echo "$RSYNC_OUTPUT" | grep -c "^*deleting" 2>/dev/null || true)
+if [[ -z "$DELETED" ]]; then
+  DELETED=0
+fi
 
 # Emit final JSON line
 echo "{\"mirrored\":$MIRRORED,\"deleted\":$DELETED,\"source_count\":$SOURCE_COUNT,\"exit\":0}"

@@ -1,0 +1,29 @@
+{
+  "client_home": "raw/areas/clearworks/clients",
+  "rules": [
+    {"prefix": "auditmaster/alloi",        "type": "client",  "client": "alloi"},
+    {"prefix": "auditmaster/msia",         "type": "client",  "client": "msia"},
+    {"prefix": "auditmaster/studio-pch",   "type": "client",  "client": "studio-pch"},
+    {"prefix": "auditmaster/rrk",          "type": "client",  "client": "rrk"},
+    {"prefix": "auditmaster/ocg",          "type": "client",  "client": "ocg"},
+    {"prefix": "auditmaster/logic-tcg",    "type": "client",  "client": "logic-tcg"},
+    {"prefix": "auditmaster/talent-pipeline", "type": "session"},
+    {"prefix": "auditmaster/_design-language", "type": "sop"},
+    {"prefix": "auditmaster/_execution-layer", "type": "sop"},
+    {"prefix": "auditmaster/_sample-audit",    "type": "sop"},
+    {"prefix": "auditmaster/teaching",         "type": "sop"},
+    {"prefix": "auditmaster/skills",           "type": "sop"},
+    {"prefix": "auditmaster/clearworks-assessment", "type": "sop"},
+    {"prefix": "auditmaster/cxportal",         "type": "sop"},
+    {"prefix": "auditmaster/",  "top_level_only": true, "ext_in": [".png", ".svg"], "type": "diagram"},
+    {"prefix": "auditmaster/",  "top_level_only": true, "type": "sop"},
+    {"prefix": "frank2/",       "type": "diagram"},
+    {"prefix": "larry/",        "type": "session"},
+    {"prefix": "pa/",           "type": "media"},
+    {"prefix": "muse/",         "type": "sop"}
+  ],
+  "exclude": {
+    "dir_parts": ["__pycache__", ".git"],
+    "name_globs": ["*.pyc", "*.bak*", ".gitignore", ".DS_Store"]
+  }
+}

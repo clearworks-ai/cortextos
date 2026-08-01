@@ -1,0 +1,19 @@
+=== true-verify: p1-3-org-brain-foldin ===
+--- branch/commit ---
+85ece42 P1.3 org-brain fold-in: git-rm tracked knowledge/, relative symlink into knowledge-sync org-brain, drop redundant reconcile root
+--- tracked knowledge/ removed from git ---
+       0
+--- symlink present + target ---
+lrwx------@ 1 joshweiss  staff  54 Jul 31 19:41 orgs/clearworksai/knowledge -> ../../../knowledge-sync/raw/areas/clearworks/org-brain
+../../../knowledge-sync/raw/areas/clearworks/org-brain
+--- symlink resolves + file count at target ---
+     206
+--- mmrag.py DEFAULT_RECONCILE_ROOTS diff (1-line) ---
+--- a/knowledge-base/scripts/mmrag.py
++++ b/knowledge-base/scripts/mmrag.py
+@@ -135,7 +135,6 @@ DEFAULT_RECONCILE_COLLECTION = "shared-clearworksai"
+ DEFAULT_RECONCILE_ROOTS = (
+     Path.home() / "code" / "knowledge-sync" / "wiki",
+     Path.home() / "code" / "knowledge-sync" / "raw",
+-    REPO_ROOT / "orgs" / "clearworksai" / "knowledge",
+--- no leftover hardcoded old knowledge/ refs ---

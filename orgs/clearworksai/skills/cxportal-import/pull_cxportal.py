@@ -333,7 +333,8 @@ def run_pull(
                 if entity_config.get("parent"):
                     # Handle parent-dependent entities
                     parent_entity = entity_config["parent"]
-                    if parent_entity not in org_status:
+                    cache_key = f"{org_id}:{parent_entity}"
+                    if cache_key not in parent_cache:
                         # Need to pull parent first
                         parent_config = ENTITIES[parent_entity]
                         parent_records = call_mcp_tool(
@@ -345,11 +346,9 @@ def run_pull(
                         }
 
                         # Store parent records for child processing
-                        cache_key = f"{org_id}:{parent_entity}"
                         parent_cache[cache_key] = parent_records
 
                     # Process child entity from parent data
-                    cache_key = f"{org_id}:{parent_entity}"
                     parent_data = parent_cache.get(cache_key, {})
 
                     if entity_name == "interviews":

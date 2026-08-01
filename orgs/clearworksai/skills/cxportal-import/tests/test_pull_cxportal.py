@@ -226,6 +226,76 @@ class TestIntegration(unittest.TestCase):
         self.assertFalse(ENTITIES["budget-signals"]["enabled"])
         self.assertFalse(ENTITIES["wins"]["enabled"])
 
+    @patch("pull_cxportal.get_token")
+    @patch("pull_cxportal.list_organizations")
+    @patch("pull_cxportal.call_mcp_tool")
+    def test_parent_child_entity_chain_pulls_records(
+        self, mock_call_mcp_tool, mock_list_organizations, mock_get_token
+    ):
+        """Test that interviews and surveys pull records when engagements have data"""
+        mock_get_token.return_value = "test-token"
+        mock_list_organizations.return_value = [
+            {"id": "test-org-1", "name": "Test Org"},
+        ]
+
+        # Mock MCP tool responses
+        def mock_tool_side_effect(tool_name, arguments, token):
+            if tool_name == "list_engagements":
+                return {"engagements": [{"id": "eng-1", "title": "Test Engagement"}]}
+            elif tool_name == "list_interviews":
+                return {"interviews": [{"id": "int-1", "title": "Test Interview"}]}
+            elif tool_name == "list_surveys":
+                return {
+                    "surveys": [{"id": "survey-1", "title": "Test Survey"}],
+                }
+            elif tool_name == "get_survey_responses":
+                return {"responses": [{"id": "resp-1", "answer": "Test Answer"}]}
+            elif tool_name == "list_pain_points":
+                return {"pain_points": []}
+            elif tool_name == "list_client_goals":
+                return {"goals": []}
+            elif tool_name == "list_recommendations":
+                return {"recommendations": []}
+            elif tool_name == "list_business_reviews":
+                return {"business_reviews": []}
+            elif tool_name == "list_assessment_events":
+                return {"assessment_events": []}
+            elif tool_name == "list_systems_inventory":
+                return {"systems_inventory": []}
+            return {}
+
+        mock_call_mcp_tool.side_effect = mock_tool_side_effect
+
+        # Run pull
+        from pull_cxportal import run_pull
+
+        result = run_pull(
+            orgmap=self.orgmap,
+            ks_base=self.ks_base,
+            dry_run=False,
+        )
+
+        # Assert that interviews and surveys pulled records (regression test for parent-cache bug)
+        self.assertTrue(result["green"], "Pull should succeed")
+        self.assertEqual(result["files_created"], 9, "Should create 9 entity files (all enabled entities)")
+        
+        # Check that interviews and surveys have records
+        alloi_status = result["orgs"]["alloi"]
+        self.assertGreater(alloi_status["interviews"]["records"], 0, "Interviews should have records")
+        self.assertGreater(alloi_status["surveys"]["records"], 0, "Surveys should have records")
+        
+        # Verify files were actually written
+        interviews_file = self.ks_base / "alloi" / "cxportal" / "interviews.md"
+        surveys_file = self.ks_base / "alloi" / "cxportal" / "surveys.md"
+        self.assertTrue(interviews_file.exists(), "Interviews file should exist")
+        self.assertTrue(surveys_file.exists(), "Surveys file should exist")
+        
+        # Verify content contains records
+        interviews_content = interviews_file.read_text()
+        surveys_content = surveys_file.read_text()
+        self.assertIn("Test Interview", interviews_content, "Interviews file should contain interview data")
+        self.assertIn("Test Survey", surveys_content, "Surveys file should contain survey data")
+
 
 class TestErrorHandling(unittest.TestCase):
     """Test error handling scenarios"""

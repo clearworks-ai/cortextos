@@ -16,6 +16,8 @@ orgs/*
 !orgs/clearworksai/
 orgs/clearworksai/*
 !orgs/clearworksai/secrets.env.example
+!orgs/clearworksai/skills/
+!orgs/clearworksai/skills/**
 # But community subdirectories ARE part of the framework
 !community/
 !community/**

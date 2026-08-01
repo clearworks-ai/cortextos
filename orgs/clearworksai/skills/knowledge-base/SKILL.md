@@ -5,6 +5,12 @@ description: "A company knowledge base is the single place your AI agents read f
 
 # Company Knowledge Base · Brain
 
+## I/O Contract
+- INPUT: `cortextos bus kb-query` first; then the consolidated files home. Never Altari's assumed layout.
+- OUTPUT: artifact filed BY CONTENT TYPE into the knowledge-sync taxonomy via the P1.0 router
+  (provenance in frontmatter) or KB writeback PLUS a structured row — agent-executable task ->
+  Multica/bus (P3); human decision -> approval queue (P4). No orphan files, no freeform Telegram.
+
 **Category:** Foundation
 **Version:** 1.0
 **Part of:** SkillTree · altari.ai/skilltree

@@ -5,6 +5,12 @@ description: "The Meeting Intelligence Engineer makes sure no call evaporates. I
 
 # Meeting Intelligence Engineer · every call captured, structured, remembered
 
+## I/O Contract
+- INPUT: `cortextos bus kb-query` first; then the consolidated files home. Never Altari's assumed layout.
+- OUTPUT: artifact filed BY CONTENT TYPE into the knowledge-sync taxonomy via the P1.0 router
+  (provenance in frontmatter) or KB writeback PLUS a structured row — agent-executable task ->
+  Multica/bus (P3); human decision -> approval queue (P4). No orphan files, no freeform Telegram.
+
 **Category:** Deals / Call Cycle
 **Version:** 1.0
 **Part of:** SkillTree · altari.ai/skilltree
@@ -24,7 +30,7 @@ None required. The Meeting Intelligence Engineer works from pasted transcripts o
 The Meeting Intelligence Engineer looks for a `knowledge/` folder in your project (the SkillTree "Brain" knowledge base convention):
 - **`knowledge/meetings/`** · where transcripts get filed
 - **`knowledge/clients/*.md`** · where meeting outcomes get written back
-- **`knowledge/company.md`** · for context on who's who internally
+- **`orgs/clearworksai/knowledge.md`** · for context on who's who internally
 
 If those don't exist, it creates the folders it needs and asks 2-3 quick questions before starting. It never blocks on missing files.
 
@@ -63,7 +69,7 @@ You work for the user's company as described in their `knowledge/` files (or as 
 > **Stack note:** if `knowledge/stack.md` exists, use the tools it names. Any vendors mentioned in this file are defaults, not requirements · adapt every step to the user’s actual stack.
 
 
-1. **Load business context.** Read `knowledge/company.md` and skim `knowledge/clients/` if they exist · you need to know the client roster to file meetings against the right names. If neither exists, ask 2-3 quick questions: "Who are your active clients or top deals right now, do you use a notetaker (Fireflies, Otter, Grain), and where do call notes live today?" Never block on missing files.
+1. **Load business context.** Read `orgs/clearworksai/knowledge.md` and skim `knowledge/clients/` if they exist · you need to know the client roster to file meetings against the right names. If neither exists, ask 2-3 quick questions: "Who are your active clients or top deals right now, do you use a notetaker (Fireflies, Otter, Grain), and where do call notes live today?" Never block on missing files.
 
 2. **Check for a notetaker key.** Look in `.env` for `FIREFLIES_API_KEY` or similar. If present, offer: "I can pull transcripts automatically · want me to grab the latest?" If absent, work from whatever the user pastes.
 

@@ -145,6 +145,20 @@ green = (
     edges_stats["errors"] == 0
 )
 
+# Debug: write MIRROR_OUT and mirror_data to debug file before composing row
+debug_path = ledger_path.rsplit(".", 1)[0] + "-debug.jsonl"
+try:
+    with open(debug_path, "a") as debug_f:
+        debug_f.write(json.dumps({
+            "ts": ts,
+            "debug_type": "mirror_data",
+            "MIRROR_OUT_raw": mirror_raw,
+            "mirror_status": mirror_status,
+            "mirror_data": mirror_data
+        }) + "\n")
+except Exception as debug_e:
+    pass  # Don't fail if debug write fails
+
 # Compose row
 row = {
     "ts": ts,

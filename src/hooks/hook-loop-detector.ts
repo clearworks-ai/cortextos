@@ -118,14 +118,6 @@ function saveState(stateDir: string, state: LoopDetectorState): void {
   }
 }
 
-function recordToolActivity(stateDir: string, nowMs: number): void {
-  try {
-    atomicWriteSync(join(stateDir, 'last_tool_activity.flag'), String(nowMs));
-  } catch {
-    // Best-effort; never block a tool call on telemetry.
-  }
-}
-
 export function countRepetitions(
   history: ToolCallRecord[],
   toolName: string,
@@ -280,8 +272,6 @@ async function main(): Promise<void> {
     blockCall(decision.reason);
     return;
   }
-
-  recordToolActivity(stateDir, Date.now());
 
   if (decision.action === 'escape' && decision.alertMessage) {
     process.stderr.write(decision.alertMessage + '\n');

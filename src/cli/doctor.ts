@@ -4,9 +4,6 @@ import { existsSync, readFileSync, readdirSync, statSync, chmodSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { resolveInstanceId } from './resolve-instance-id.js';
-import { isOpRef, parseEnvFile } from '../utils/env.js';
-import { resolveActiveInstance } from '../utils/resolve-active-instance.js';
-import { CRONS_DIRECTORY, CRONS_FILENAME } from '../bus/crons-schema.js';
 
 interface Check {
   name: string;
@@ -310,41 +307,6 @@ export const doctorCommand = new Command('doctor')
       });
     }
 
-    let opRefKeys: string[] = [];
-    let tokenAvailable = !!(process.env.OP_SERVICE_ACCOUNT_TOKEN && !isOpRef(process.env.OP_SERVICE_ACCOUNT_TOKEN));
-    if (existsSync(orgsDir)) {
-      try {
-        for (const org of readdirSync(orgsDir)) {
-          const secretsPath = join(orgsDir, org, 'secrets.env');
-          if (!existsSync(secretsPath)) continue;
-
-          const envVars = parseEnvFile(secretsPath);
-          for (const [key, value] of Object.entries(envVars)) {
-            if (isOpRef(value)) {
-              opRefKeys.push(key);
-            }
-          }
-
-          const localToken = envVars['OP_SERVICE_ACCOUNT_TOKEN'];
-          if (!tokenAvailable && localToken && !isOpRef(localToken)) {
-            tokenAvailable = true;
-          }
-        }
-      } catch { /* ignore scan errors */ }
-    }
-    if (opRefKeys.length > 0) {
-      checks.push({
-        name: '1Password secret refs (op://)',
-        status: tokenAvailable ? 'pass' : 'warn',
-        message: tokenAvailable
-          ? `${opRefKeys.length} op:// ref(s) found; OP_SERVICE_ACCOUNT_TOKEN available`
-          : `${opRefKeys.length} op:// ref(s) found but OP_SERVICE_ACCOUNT_TOKEN is not set — agents will boot with literal op:// strings: ${opRefKeys.join(', ')}`,
-        fix: tokenAvailable
-          ? undefined
-          : 'Add OP_SERVICE_ACCOUNT_TOKEN as a literal to orgs/<org>/secrets.env (or the daemon environment), or restore literal values for the listed keys',
-      });
-    }
-
     // Template drift detection: compare every agent's .claude/settings.json
     // hook blocks against the canonical template they were created from.
     // Missing hook blocks silently disable critical features — Stop missing
@@ -410,59 +372,6 @@ export const doctorCommand = new Command('doctor')
           });
         }
       }
-    }
-
-    // Orphan instance trees: enabled crons under dead instances that cannot fire
-    try {
-      const cortextosHome = join(homedir(), '.cortextos');
-      const active = resolveActiveInstance(instanceId);
-      let orphanEnabled = 0;
-      let orphanInstance = '';
-      if (existsSync(cortextosHome)) {
-        for (const entry of readdirSync(cortextosHome, { withFileTypes: true })) {
-          if (!entry.isDirectory()) continue;
-          const id = entry.name;
-          if (id === 'state' || id.startsWith('.')) continue;
-          if (id === active) continue;
-          const sock = join(cortextosHome, id, 'daemon.sock');
-          const sockAlt = join(cortextosHome, id, '.cortextOS', 'daemon.sock');
-          if (existsSync(sock) || existsSync(sockAlt)) continue;
-          const agentsDir = join(cortextosHome, id, CRONS_DIRECTORY);
-          if (!existsSync(agentsDir)) continue;
-          for (const agent of readdirSync(agentsDir)) {
-            const cronFile = join(agentsDir, agent, CRONS_FILENAME);
-            if (!existsSync(cronFile)) continue;
-            try {
-              const body = JSON.parse(readFileSync(cronFile, 'utf-8')) as {
-                crons?: Array<{ enabled?: boolean }>;
-              };
-              const n = (body.crons ?? []).filter((c) => c.enabled !== false).length;
-              if (n > 0) {
-                orphanEnabled += n;
-                orphanInstance = orphanInstance || id;
-              }
-            } catch {
-              /* ignore parse */
-            }
-          }
-        }
-      }
-      if (orphanEnabled > 0) {
-        checks.push({
-          name: 'Instance orphans',
-          status: 'warn',
-          message: `INSTANCE ORPHANS: ${orphanEnabled} crons.json under dead instance '${orphanInstance}' — these will NEVER fire. Active instance: '${active}'.`,
-          fix: `Archive orphan trees under ~/.cortextos/${orphanInstance}/ after diffing vs the active instance (see scripts/archive-orphan-instances.sh --dry-run).`,
-        });
-      } else {
-        checks.push({
-          name: 'Instance orphans',
-          status: 'pass',
-          message: 'No enabled crons under dead instance trees',
-        });
-      }
-    } catch {
-      /* ignore scan failures */
     }
 
     // Display results

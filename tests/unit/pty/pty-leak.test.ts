@@ -15,7 +15,7 @@ import { describe, it, expect } from 'vitest';
 import { execSync, fork } from 'child_process';
 import { join } from 'path';
 import { platform } from 'os';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 
 const N = 20;
 const DELTA_THRESHOLD = 4;
@@ -111,4 +111,40 @@ describe('pty fd leak gate', () => {
 
     expect(delta).toBeLessThanOrEqual(DELTA_THRESHOLD);
   }, 120_000);
+});
+
+/**
+ * D3 — NO-LEAK source invariant covering EVERY runtime spawn path.
+ *
+ * The generic gate above proves hostSpawn is leak-safe; this gate proves every
+ * runtime adapter (agent, codex, opencode) actually ROUTES through it and no one
+ * has reverted to in-process `require('node-pty')` on the daemon — the exact
+ * regression that reintroduced the codex leak during the re-baseline (2026-07-28).
+ * Only pty-host-entry.ts (the sanctioned forked host) may require node-pty.
+ */
+describe('pty no-leak source invariant (all runtimes)', () => {
+  const ptyDir = join(__dirname, '..', '..', '..', 'src', 'pty');
+  const read = (f: string) => readFileSync(join(ptyDir, f), 'utf-8');
+  // Strip line/block comments so a documented `require('node-pty')` in prose
+  // doesn't trip the gate — we only care about executable requires.
+  const stripComments = (s: string) =>
+    s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  it('only pty-host-entry.ts requires node-pty (no in-process daemon spawn)', () => {
+    for (const f of ['agent-pty.ts', 'codex-app-server-pty.ts', 'opencode-pty.ts']) {
+      const code = stripComments(read(f));
+      expect(code, `${f} must NOT require('node-pty') in-process`).not.toMatch(
+        /require\(\s*['"]node-pty['"]\s*\)/,
+      );
+    }
+    // The host itself IS allowed to (it's the forked child that reclaims fds).
+    expect(stripComments(read('pty-host-entry.ts'))).toMatch(
+      /require\(\s*['"]node-pty['"]\s*\)/,
+    );
+  });
+
+  it('agent + codex spawn paths wire through hostSpawn', () => {
+    expect(stripComments(read('agent-pty.ts'))).toMatch(/hostSpawn/);
+    expect(stripComments(read('codex-app-server-pty.ts'))).toMatch(/hostSpawn/);
+  });
 });

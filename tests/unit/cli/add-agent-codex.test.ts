@@ -10,7 +10,7 @@
  *
  * The fix routes `--runtime codex-app-server` (with the default --template
  * agent) at templates/agent-codex/, which: (a) documents the bus reply rule
- * prominently in AGENTS.md and TOOLS.md, (b) ships the codex-compatible
+ * prominently in AGENTS.md and TOOLS.md, (b) ships the 23 codex-compatible
  * skills under plugins/cortextos-agent-skills/skills/, and (c) sets runtime
  * + model defaults in config.json.
  *
@@ -23,25 +23,6 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, lstatSync, readdirSyn
 import { join } from 'path';
 import { tmpdir, homedir } from 'os';
 import { addAgentCommand } from '../../../src/cli/add-agent';
-
-const CODEX_TEMPLATE_SKILLS = join(
-  __dirname,
-  '..',
-  '..',
-  '..',
-  'templates',
-  'agent-codex',
-  'plugins',
-  'cortextos-agent-skills',
-  'skills',
-);
-
-function listSkillDirs(root: string): string[] {
-  return readdirSync(root, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
-}
 
 describe('PR-02: add-agent --runtime codex-app-server', () => {
   let tempRoot: string;
@@ -144,11 +125,16 @@ describe('PR-02: add-agent --runtime codex-app-server', () => {
       'plugins', 'cortextos-agent-skills', 'skills',
     );
     expect(existsSync(skillsDir)).toBe(true);
-    const skills = listSkillDirs(skillsDir);
-    expect(skills).toEqual(listSkillDirs(CODEX_TEMPLATE_SKILLS));
+    const skills = readdirSync(skillsDir, { withFileTypes: true })
+      .filter(d => d.isDirectory())
+      .map(d => d.name);
+    // 24 = the 23 upstream codex-compatible skills + the fork's
+    // comms-check-worker skill (comms meeting-dedup subsystem).
+    expect(skills.length).toBe(24);
     // Spot check: comms is the skill that teaches the Telegram reply pattern.
     expect(skills).toContain('comms');
     expect(skills).toContain('onboarding');
+    expect(skills).toContain('comms-check-worker');
   });
 
   it('creates ~/.codex/skills/<agent>__<skill> symlinks for every skill', async () => {
@@ -163,7 +149,7 @@ describe('PR-02: add-agent --runtime codex-app-server', () => {
     const codexSkillsDir = join(tempHome, '.codex', 'skills');
     expect(existsSync(codexSkillsDir)).toBe(true);
     const links = readdirSync(codexSkillsDir).filter(n => n.startsWith('codex-links__'));
-    expect(links.length).toBe(listSkillDirs(CODEX_TEMPLATE_SKILLS).length);
+    expect(links.length).toBe(24);
 
     // Each entry must be a symlink (not a copy), pointing at the agent's local skill dir.
     for (const link of links) {

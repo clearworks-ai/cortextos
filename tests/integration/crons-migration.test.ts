@@ -299,7 +299,7 @@ describe('migrateCronsForAgent', () => {
   // Test 7: Missing config.json → no-op, no crash, marker created
   // ---------------------------------------------------------------------------
 
-  it('handles missing config.json gracefully: no crash, empty crons.json, NO marker (Codex M7 fix 2026-05-01)', () => {
+  it('handles missing config.json gracefully: no crash, empty crons.json + marker', () => {
     const configPath = join(tmpFrameworkRoot, 'orgs', 'testorg', 'agents', 'noconfig', 'config.json');
     // Do NOT write config.json
 
@@ -313,16 +313,15 @@ describe('migrateCronsForAgent', () => {
     expect(raw).not.toBeNull();
     expect(raw!.crons).toHaveLength(0);
 
-    // M7 fix: marker NOT written when config is missing — operator may have a
-    // transient path issue; next boot must retry instead of locking in "no crons"
-    expect(markerExists(tmpCtxRoot, 'noconfig')).toBe(false);
+    // Marker must exist so we don't retry every boot
+    expect(markerExists(tmpCtxRoot, 'noconfig')).toBe(true);
   });
 
   // ---------------------------------------------------------------------------
   // Test 8: Config.json with no crons array → empty crons.json + marker
   // ---------------------------------------------------------------------------
 
-  it('handles config.json with no crons array: writes empty crons.json, NO marker (Codex M7 fix 2026-05-01)', () => {
+  it('handles config.json with no crons array: writes empty crons.json + marker', () => {
     const agentDir = join(tmpFrameworkRoot, 'orgs', 'testorg', 'agents', 'nocrons');
     mkdirSync(agentDir, { recursive: true });
     writeFileSync(
@@ -338,15 +337,14 @@ describe('migrateCronsForAgent', () => {
     const crons = readCrons('nocrons');
     expect(crons).toHaveLength(0);
 
-    // M7 fix: marker NOT written — operator may add crons later; next boot retries
-    expect(markerExists(tmpCtxRoot, 'nocrons')).toBe(false);
+    expect(markerExists(tmpCtxRoot, 'nocrons')).toBe(true);
   });
 
   // ---------------------------------------------------------------------------
   // Test 9: Empty crons array → empty crons.json + marker
   // ---------------------------------------------------------------------------
 
-  it('handles config.json with empty crons array: writes empty crons.json, NO marker (Codex M7 fix 2026-05-01)', () => {
+  it('handles config.json with empty crons array: writes empty crons.json + marker', () => {
     const agentDir = join(tmpFrameworkRoot, 'orgs', 'testorg', 'agents', 'emptycrons');
     writeConfigJson(agentDir, []);
 
@@ -357,8 +355,7 @@ describe('migrateCronsForAgent', () => {
     const crons = readCrons('emptycrons');
     expect(crons).toHaveLength(0);
 
-    // M7 fix: marker NOT written — operator may add crons later; next boot retries
-    expect(markerExists(tmpCtxRoot, 'emptycrons')).toBe(false);
+    expect(markerExists(tmpCtxRoot, 'emptycrons')).toBe(true);
   });
 
   // ---------------------------------------------------------------------------
@@ -585,28 +582,5 @@ describe('disk round-trip via readCrons()', () => {
     expect(wk!.schedule).toBe('0 16 * * 1');
     expect(wk!.prompt).toBe('Weekly.');
     expect(wk!.enabled).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// banned prompt guard
-// ---------------------------------------------------------------------------
-
-describe('migration prompt guard', () => {
-  it('rejects migrateCronsForAgent when config.json contains a banned prompt', () => {
-    const agentDir = join(tmpFrameworkRoot, 'orgs', 'testorg', 'agents', 'nu');
-    writeConfigJson(agentDir, [
-      {
-        name: 'human-tasks-check',
-        interval: '6h',
-        prompt: 'Send the full HUMAN task list via Telegram.',
-      },
-    ]);
-    const configPath = join(agentDir, 'config.json');
-
-    expect(() => migrateCronsForAgent('nu', configPath, tmpCtxRoot, { force: true })).toThrow(
-      /full-human-task-list-telegram/
-    );
-    expect(rawCronsJson(tmpCtxRoot, 'nu')).toBeNull();
   });
 });

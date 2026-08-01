@@ -7,6 +7,7 @@
     "cortextos": "dist/cli.js"
   },
   "scripts": {
+    "postinstall": "node scripts/fix-spawn-helper.js",
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "vitest run && npm run test:node",

@@ -8,13 +8,11 @@ import { HermesPTY, hermesDbExists } from '../pty/hermes-pty.js';
 import { OpencodePTY, opencodeSessionExists } from '../pty/opencode-pty.js';
 import { MessageDedup, injectMessage as injectMessageIntoPty } from '../pty/inject.js';
 import type { TelegramAPI } from '../telegram/api.js';
-import { TelegramStreamer } from './telegram-streamer.js';
-import { atomicWriteSync, ensureDir } from '../utils/atomic.js';
+import { ensureDir } from '../utils/atomic.js';
 import { writeCortextosEnv } from '../utils/env.js';
 import { getOverdueReminders } from '../bus/reminders.js';
-import { logEvent } from '../bus/event.js';
-import { hardRestart } from '../bus/system.js';
 import { resolvePaths } from '../utils/paths.js';
+import { logEvent } from '../bus/event.js';
 import { loadBuffer } from './conversation-buffer.js';
 import {
   HANDOFF_BACKPING_SUPPRESS_MS,
@@ -22,7 +20,7 @@ import {
   shouldSuppressBackPing,
   writeLastBackPingMs,
 } from './handoff-backping.js';
-import { ensureMissionAnchorFromBuffer, findFreshRecentHandoffDoc } from './restart-context.js';
+import { ensureMissionAnchorFromBuffer } from './restart-context.js';
 
 type LogFn = (msg: string) => void;
 
@@ -48,8 +46,6 @@ interface FleetDegradeMarker {
  * Read the fleet-degrade marker from the larry agent's state directory.
  * Returns null when the marker is absent, unreadable, or malformed — the
  * default (no-degrade) path is ALWAYS safe: this function never throws.
- *
- * @param frameworkRoot  The cortextos framework root (env.frameworkRoot).
  */
 function readFleetDegradeMarker(frameworkRoot: string): FleetDegradeMarker | null {
   try {
@@ -107,63 +103,6 @@ function computeDegradeOverride(
   return { runtime: failoverRuntime, model: cheapModel };
 }
 
-export interface SessionRolloverState {
-  lastFreshAtMs: number | null;
-  continuesSinceFresh: number;
-}
-
-interface FreshRolloverContextStatus {
-  usedPercentage: number;
-  writtenAtMs: number;
-}
-
-function freshRolloverEnabled(config: AgentConfig): boolean {
-  return config.fresh_rollover_max_continues !== undefined
-    || config.fresh_rollover_ctx_pct !== undefined;
-}
-
-export function nextSessionRolloverState(
-  previous: SessionRolloverState,
-  mode: 'fresh' | 'continue',
-  nowMs: number = Date.now(),
-): SessionRolloverState {
-  if (mode === 'fresh') {
-    return { lastFreshAtMs: nowMs, continuesSinceFresh: 0 };
-  }
-
-  return {
-    lastFreshAtMs: previous.lastFreshAtMs ?? null,
-    continuesSinceFresh: Math.max(0, previous.continuesSinceFresh) + 1,
-  };
-}
-
-export function decideSessionRefreshMode(
-  config: AgentConfig,
-  rollover: SessionRolloverState,
-  contextStatus: FreshRolloverContextStatus | null,
-  nowMs: number = Date.now(),
-): 'fresh' | 'continue' {
-  if (!freshRolloverEnabled(config)) {
-    return 'continue';
-  }
-
-  const maxContinues = config.fresh_rollover_max_continues ?? 3;
-  if (maxContinues > 0 && rollover.continuesSinceFresh >= maxContinues) {
-    return 'fresh';
-  }
-
-  const ctxThreshold = config.fresh_rollover_ctx_pct ?? 40;
-  if (
-    contextStatus
-    && nowMs - contextStatus.writtenAtMs < 10 * 60_000
-    && contextStatus.usedPercentage >= ctxThreshold
-  ) {
-    return 'fresh';
-  }
-
-  return 'continue';
-}
-
 /**
  * Manages a single agent's lifecycle.
  * Replaces agent-wrapper.sh for one agent.
@@ -175,9 +114,6 @@ export class AgentProcess {
   private pty: AgentPTY | CodexAppServerPTY | null = null;
   private sessionTimer: ReturnType<typeof setTimeout> | null = null;
   private crashCount: number = 0;
-  private rateLimitCount: number = 0;
-  private plannedRestartRetries = 0;
-  private readonly plannedRestartRetryMax = 3;
   private maxCrashesPerDay: number = 10;
   // CrashLoopPauser (instar-inspired): sliding-window crash detection.
   // Timestamps of recent crashes within the configured window. If the
@@ -185,6 +121,9 @@ export class AgentProcess {
   private crashTimestamps: number[] = [];
   private crashWindowMs: number = 0;
   private crashWindowMax: number = 0;
+  // Rate-limit exits (Anthropic 429 / usage-limit) back off without charging
+  // the daily crash counter, so a rate-limited agent is not falsely HALTED.
+  private rateLimitCount: number = 0;
   private sessionStart: Date | null = null;
   private status: AgentStatus['status'] = 'stopped';
   private stopping: boolean = false;
@@ -217,18 +156,10 @@ export class AgentProcess {
   // (each start() recreates the PTY, but the Telegram handle persists).
   private telegramApi: TelegramAPI | null = null;
   private telegramChatId: string | null = null;
-  // Streaming-Telegram state (spec: Item 1 of .planning/larry-ux-parity-spec.md).
-  // streamingEnabled latches when setStreamingTelegram() is called; the actual
-  // per-turn TelegramStreamer instance is recreated every Codex turn so each
-  // assistant response lands in its own Telegram message.
-  private streamingEnabled = false;
-  private streamingStarterPlaceholder = '…';
-  private activeStreamer: TelegramStreamer | null = null;
   // Issue #392: tracks whether the most recently built startup prompt consumed
   // a handoff doc marker. start() reads this after spawn to decide whether the
   // daemon should fire runtime-owned lifecycle Telegram directly.
   private lastSpawnWasHandoff = false;
-  private rolloverInProgress = false;
 
   constructor(name: string, env: CtxEnv, config: AgentConfig, log?: LogFn) {
     this.name = name;
@@ -268,10 +199,18 @@ export class AgentProcess {
 
     // Determine start mode
     const mode = this.shouldContinue() ? 'continue' : 'fresh';
+    // D4 mission-anchor restore: on a FRESH (crash) restart the --continue
+    // conversation history is gone, so recover the live mission from the
+    // conversation buffer into state/current-mission.txt (best-effort, no-op
+    // if the anchor already exists) BEFORE the boot prompt is built, so the
+    // agent picks it up when it reads its bootstrap files. Graceful/handoff
+    // restarts already have an anchor, so this only ever fills the crash gap.
+    if (mode === 'fresh') {
+      ensureMissionAnchorFromBuffer(this.env.agentDir, this.env.ctxRoot, this.name);
+    }
     const prompt = mode === 'fresh'
       ? this.buildStartupPrompt()
       : this.buildContinuePrompt();
-    this.writeSessionRolloverState(mode);
 
     this.log(`Starting in ${mode} mode`);
     this.status = 'starting';
@@ -314,9 +253,6 @@ export class AgentProcess {
     // typing indicators flow through fast-checker.
     if (this.config.runtime === 'codex-app-server' && this.telegramApi && this.telegramChatId) {
       (this.pty as CodexAppServerPTY).setTelegramHandle(this.telegramApi, this.telegramChatId);
-      // Spec Item 1: re-wire streaming hooks too — PTY is recreated each
-      // start() and the previous instance's hook closures are gone.
-      if (this.streamingEnabled) this.wireStreamingHooks();
     }
 
     // BUG-011 fix: create a fresh exit signal for this run. resolveExit is
@@ -357,7 +293,6 @@ export class AgentProcess {
       }
       this.status = 'running';
       this.rateLimitCount = 0;
-      this.plannedRestartRetries = 0;
       this.sessionStart = new Date();
       this.log(`Running (pid: ${this.pty.getPid()})`);
 
@@ -369,46 +304,9 @@ export class AgentProcess {
       this.notifyStatusChange();
     } catch (err) {
       this.log(`Failed to start: ${err}`);
-      this.handleSpawnFailure();
-    }
-  }
-
-  /**
-   * Handle a PTY spawn failure (e.g. ENXIO from exhausted ptmx pool).
-   * Mirrors handleExit()'s crash-accounting tail so spawn failures are
-   * counted, backed-off, and halted at the daily budget — instead of
-   * leaving the agent permanently crashed with no scheduled recovery.
-   */
-  private handleSpawnFailure(): void {
-    // During shutdown or intentional stop: set crashed but do not schedule retry.
-    if (this.isDaemonShuttingDown() || this.stopRequested || this.stopping) {
       this.status = 'crashed';
-      return;
-    }
-
-    this.crashCount++;
-    const today = new Date().toISOString().split('T')[0];
-    this.resetCrashCountIfNewDay(today);
-
-    if (this.crashCount >= this.maxCrashesPerDay) {
-      this.log(`HALTED: exceeded ${this.maxCrashesPerDay} spawn failures today`);
-      this.appendCrashToRestartsLog(-1, 0, 'HALTED');
-      this.status = 'halted';
       this.notifyStatusChange();
-      return;
     }
-
-    const backoff = Math.min(5000 * Math.pow(2, this.crashCount - 1), 300000);
-    this.log(`Spawn failure — retry in ${backoff / 1000}s (crash #${this.crashCount})`);
-    this.appendCrashToRestartsLog(-1, backoff, 'SPAWN_FAILURE');
-    this.status = 'crashed';
-    this.notifyStatusChange();
-
-    setTimeout(() => {
-      if (this.status === 'crashed') {
-        this.start().catch(err => this.log(`Spawn-failure restart failed: ${err}`));
-      }
-    }, backoff);
   }
 
   /**
@@ -515,48 +413,27 @@ export class AgentProcess {
    * conversation directory still has .jsonl files (shouldContinue() is true).
    */
   async sessionRefresh(): Promise<void> {
-    if (this.rolloverInProgress) {
-      this.log('Session refresh already in progress');
-      return;
-    }
-    this.rolloverInProgress = true;
+    this.log('Session refresh (--continue restart)');
+    // Write .session-refresh marker so the SessionEnd crash-alert hook
+    // (src/hooks/hook-crash-alert.ts) classifies the imminent PTY exit as a
+    // session refresh rather than a crash. The hook's marker handler +
+    // quiet-suppression set + message switch were all wired for this type,
+    // but no writer existed — every --continue rollover at the session-time
+    // cap surfaced as a false-positive 'crash' on chief/analyst + the
+    // crashes.log file.
     try {
       const paths = resolvePaths(this.name, this.env.instanceId, this.env.org);
-      const refreshConfig = this.readFreshRolloverConfig();
-      const refreshMode = decideSessionRefreshMode(
-        refreshConfig,
-        this.readSessionRolloverState(),
-        this.readRecentContextStatusForRollover(),
+      writeFileSync(
+        join(paths.stateDir, '.session-refresh'),
+        'session-time-cap rollover\n',
+        'utf-8',
       );
-      this.log(
-        refreshMode === 'fresh'
-          ? 'Session refresh (planned fresh rollover)'
-          : 'Session refresh (--continue restart)',
-      );
-      // Write .session-refresh marker so the SessionEnd crash-alert hook
-      // (src/hooks/hook-crash-alert.ts) classifies the imminent PTY exit as a
-      // session refresh rather than a crash.
-      try {
-        writeFileSync(
-          join(paths.stateDir, '.session-refresh'),
-          refreshMode === 'fresh' ? 'planned fresh rollover\n' : 'session-time-cap rollover\n',
-          'utf-8',
-        );
-      } catch (err) {
-        this.log(`Failed to write .session-refresh marker: ${err}`);
-      }
-      if (refreshMode === 'fresh') {
-        await this.prepareFreshRollover(paths);
-      }
-      await this.stop();
-      await this.start();
-      this.log('Session refreshed');
     } catch (err) {
-      this.log(`Session refresh failed: ${err}`);
-      throw err;
-    } finally {
-      this.rolloverInProgress = false;
+      this.log(`Failed to write .session-refresh marker: ${err}`);
     }
+    await this.stop();
+    await this.start();
+    this.log('Session refreshed');
   }
 
   /**
@@ -567,7 +444,7 @@ export class AgentProcess {
    * See issue #346 — both used to surface as a bare `false` and got mistaken
    * for "agent not found" by operators investigating restart/cron failures.
    */
-  injectMessageDetailed(content: string): { ok: true; delivery: Promise<boolean> } | { ok: false; code: 'NOT_RUNNING' | 'DEDUPED'; message: string } {
+  injectMessageDetailed(content: string): { ok: true } | { ok: false; code: 'NOT_RUNNING' | 'DEDUPED'; message: string } {
     if (!this.pty || this.status !== 'running') {
       return { ok: false, code: 'NOT_RUNNING', message: `agent "${this.name}" is registered but not running (status: ${this.status})` };
     }
@@ -577,42 +454,23 @@ export class AgentProcess {
       return { ok: false, code: 'DEDUPED', message: `inject for "${this.name}" deduped — content matches MessageDedup hash window` };
     }
 
-    const delivery = this.injectIntoPty(content).then((ok) => {
-      if (!ok) {
-        this.dedup.remove(content);
-      }
-      return ok;
-    });
-    return { ok: true, delivery };
+    if ('injectMessage' in this.pty && typeof this.pty.injectMessage === 'function') {
+      this.pty.injectMessage(content);
+    } else {
+      // CodexAppServerPTY intentionally models stdin writes itself and does not
+      // inherit AgentPTY. Feed it through the same write path used historically.
+      injectMessageIntoPty((data) => this.pty?.write(data), content);
+    }
+    return { ok: true };
   }
 
   /**
-   * Inject a message into the agent's PTY and await delivery confirmation.
+   * Inject a message into the agent's PTY (back-compat boolean wrapper).
+   * New callers that need to distinguish DEDUPED from NOT_RUNNING should use
+   * `injectMessageDetailed()` instead.
    */
-  async injectMessage(content: string): Promise<boolean> {
-    const result = this.injectMessageDetailed(content);
-    return result.ok ? result.delivery : false;
-  }
-
-  private async injectIntoPty(content: string): Promise<boolean> {
-    const pty = this.pty;
-    if (!pty || this.status !== 'running') {
-      return false;
-    }
-
-    if ('injectMessage' in pty && typeof pty.injectMessage === 'function') {
-      return pty.injectMessage(content);
-    }
-
-    try {
-      // CodexAppServerPTY intentionally models stdin writes itself and does not
-      // inherit AgentPTY. Feed it through the same write path used historically.
-      injectMessageIntoPty((data) => pty.write(data), content);
-      return true;
-    } catch (err) {
-      this.log(`Injection failed before write completed: ${err instanceof Error ? err.message : String(err)}`);
-      return false;
-    }
+  injectMessage(content: string): boolean {
+    return this.injectMessageDetailed(content).ok;
   }
 
   /**
@@ -639,120 +497,6 @@ export class AgentProcess {
     };
   }
 
-  private getSessionRolloverPath(): string {
-    return join(this.env.ctxRoot, 'state', this.name, 'session-rollover.json');
-  }
-
-  private readSessionRolloverState(): SessionRolloverState {
-    const rolloverPath = this.getSessionRolloverPath();
-    try {
-      if (!existsSync(rolloverPath)) {
-        return { lastFreshAtMs: null, continuesSinceFresh: 0 };
-      }
-      const parsed = JSON.parse(readFileSync(rolloverPath, 'utf-8'));
-      return {
-        lastFreshAtMs: typeof parsed.lastFreshAtMs === 'number' ? parsed.lastFreshAtMs : null,
-        continuesSinceFresh: typeof parsed.continuesSinceFresh === 'number'
-          ? Math.max(0, Math.floor(parsed.continuesSinceFresh))
-          : 0,
-      };
-    } catch {
-      return { lastFreshAtMs: null, continuesSinceFresh: 0 };
-    }
-  }
-
-  private writeSessionRolloverState(mode: 'fresh' | 'continue'): void {
-    try {
-      const nextState = nextSessionRolloverState(this.readSessionRolloverState(), mode);
-      atomicWriteSync(this.getSessionRolloverPath(), JSON.stringify(nextState));
-    } catch (err) {
-      this.log(`Failed to write session-rollover state: ${err}`);
-    }
-  }
-
-  private readFreshRolloverConfig(): AgentConfig {
-    const merged: AgentConfig = { ...this.config };
-    try {
-      const configPath = join(this.env.agentDir, 'config.json');
-      if (!existsSync(configPath)) {
-        return merged;
-      }
-      const parsed = JSON.parse(readFileSync(configPath, 'utf-8'));
-      if (parsed.fresh_rollover_max_continues !== undefined) {
-        merged.fresh_rollover_max_continues = parsed.fresh_rollover_max_continues;
-      }
-      if (parsed.fresh_rollover_ctx_pct !== undefined) {
-        merged.fresh_rollover_ctx_pct = parsed.fresh_rollover_ctx_pct;
-      }
-    } catch {
-      // Fall back to in-memory config on read error.
-    }
-    return merged;
-  }
-
-  private readRecentContextStatusForRollover(): FreshRolloverContextStatus | null {
-    const statusPath = join(this.env.ctxRoot, 'state', this.name, 'context_status.json');
-    try {
-      if (!existsSync(statusPath)) {
-        return null;
-      }
-      const parsed = JSON.parse(readFileSync(statusPath, 'utf-8'));
-      if (typeof parsed.used_percentage !== 'number') {
-        return null;
-      }
-      const writtenAtMs = new Date(parsed.written_at || 0).getTime();
-      if (!Number.isFinite(writtenAtMs) || Date.now() - writtenAtMs >= 10 * 60_000) {
-        return null;
-      }
-      return {
-        usedPercentage: parsed.used_percentage,
-        writtenAtMs,
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  private buildPlannedFreshRolloverPrompt(ts: string): string {
-    return `[PLANNED FRESH ROLLOVER] Session refresh is switching to a fresh restart to cap --continue history. Within 5 minutes, write a handoff document to memory/handoffs/handoff-${ts}.md that begins with ## LIVE PRIORITY quoting the newest inbound user message(s) verbatim, ABOVE all stale task state. Then include these sections in order: ## Current Tasks, ## Next Actions, ## Active Crons, ## Key Context, ## Files Modified This Session. Before the restart window closes, write or refresh state/current-mission.txt with the LIVE PRIORITY. Do not call hard-restart yourself; the daemon will complete the fresh restart after the handoff window.`;
-  }
-
-  private async waitForFreshRolloverHandoffDoc(cutoffMs: number): Promise<string | null> {
-    const handoffsDir = join(this.env.agentDir, 'memory', 'handoffs');
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-      const docPath = findFreshRecentHandoffDoc(handoffsDir, cutoffMs, 0);
-      if (docPath) {
-        return docPath;
-      }
-      if (attempt < 29) {
-        await sleep(10_000);
-      }
-    }
-    return null;
-  }
-
-  private async prepareFreshRollover(paths: { stateDir: string }): Promise<void> {
-    const cutoffMs = Date.now();
-    const ts = new Date(cutoffMs).toISOString().replace(/[:.]/g, '-').slice(0, 19) + 'Z';
-    const injected = await this.injectMessage(this.buildPlannedFreshRolloverPrompt(ts));
-    if (!injected) {
-      this.log('Failed to deliver planned fresh rollover prompt');
-    }
-
-    const docPath = await this.waitForFreshRolloverHandoffDoc(cutoffMs);
-    if (docPath) {
-      try {
-        atomicWriteSync(join(paths.stateDir, '.handoff-doc-path'), docPath);
-        this.log(`Planned fresh rollover found handoff doc → ${docPath}`);
-      } catch (err) {
-        this.log(`Failed to persist planned fresh rollover handoff marker: ${err}`);
-      }
-    }
-
-    ensureMissionAnchorFromBuffer(this.env.agentDir, this.env.ctxRoot, this.name);
-    hardRestart(paths as any, this.name, 'CONTEXT-FORCE-RESTART: F8 fresh rollover');
-  }
-
   /**
    * Register a status change handler.
    */
@@ -770,73 +514,7 @@ export class AgentProcess {
     this.telegramChatId = chatId;
     if (this.config.runtime === 'codex-app-server' && this.pty) {
       (this.pty as CodexAppServerPTY).setTelegramHandle(api, chatId);
-      if (this.streamingEnabled) this.wireStreamingHooks();
     }
-  }
-
-  /**
-   * Enable per-turn streaming of assistant prose to the configured Telegram
-   * chat. Each Codex turn opens a fresh Telegram message (`sendMessage`)
-   * and then patches it with `editMessageText` as deltas arrive — mirroring
-   * the "watch tokens stream" feel of a terminal Claude Code session.
-   *
-   * Idempotent. Requires `setTelegramHandle()` to have been called first so
-   * the streamer knows where to send. No-op for non-Codex runtimes: the
-   * Claude TUI does not surface deltas in a parseable form and is left
-   * alone (a separate effort if it becomes necessary).
-   *
-   * Spec: Item 1 of .planning/larry-ux-parity-spec.md.
-   */
-  enableStreamingTelegram(initialPlaceholder = '…'): void {
-    this.streamingEnabled = true;
-    this.streamingStarterPlaceholder = initialPlaceholder;
-    if (this.config.runtime === 'codex-app-server' && this.pty) {
-      this.wireStreamingHooks();
-    }
-  }
-
-  private wireStreamingHooks(): void {
-    if (this.config.runtime !== 'codex-app-server' || !this.pty) return;
-    if (!this.telegramApi || !this.telegramChatId) return;
-    const api = this.telegramApi;
-    const chatId = this.telegramChatId;
-    const placeholder = this.streamingStarterPlaceholder;
-    const log = this.log;
-    (this.pty as CodexAppServerPTY).setAssistantStreamHooks({
-      onTurnStart: () => {
-        // Each turn gets a fresh message. Lazy-start: the placeholder is
-        // sent on the first delta, not at turn/started, so empty turns
-        // (e.g. tool-only turns with no prose) never spam the chat.
-        this.activeStreamer = new TelegramStreamer(api, chatId, {
-          finalParseMode: 'HTML',
-          log: (m) => log(`telegram-streamer: ${m}`),
-        });
-        // Capture for the closure below; lazyStart is fired by the first
-        // delta so we don't paint a placeholder on tool-only turns.
-        (this.activeStreamer as unknown as { _placeholder: string })._placeholder = placeholder;
-      },
-      onTextDelta: (delta) => {
-        const streamer = this.activeStreamer;
-        if (!streamer) return;
-        if (!streamer.isStarted()) {
-          // Lazy-start at first delta. Fire-and-forget — append() is a no-op
-          // until start() resolves, but the appended tokens accumulate in
-          // the streamer regardless so nothing is lost.
-          streamer.start(((streamer as unknown as { _placeholder: string })._placeholder) ?? '…').catch((err) => {
-            log(`telegram-streamer: start failed: ${err}`);
-          });
-        }
-        streamer.append(delta);
-      },
-      onTurnEnd: () => {
-        const streamer = this.activeStreamer;
-        this.activeStreamer = null;
-        if (!streamer) return;
-        // Fire-and-forget — finalize() flushes the last pending edit and
-        // marks the streamer closed. Errors are logged inside the streamer.
-        streamer.finalize().catch((err) => log(`telegram-streamer: finalize failed: ${err}`));
-      },
-    });
   }
 
   /**
@@ -861,13 +539,6 @@ export class AgentProcess {
    */
   getAgentDir(): string {
     return this.env.agentDir;
-  }
-
-  /**
-   * Get the runtime ctx root for this agent instance.
-   */
-  getCtxRoot(): string {
-    return this.env.ctxRoot;
   }
 
   /**
@@ -931,6 +602,13 @@ export class AgentProcess {
     return false;
   }
 
+  /**
+   * Detect an exit caused by an Anthropic rate-limit / usage-limit condition
+   * (429s, "overloaded", weekly/5-hour caps) rather than a real crash. Matches
+   * only precise API/CLI signatures — bare prose like "rate limit" is
+   * deliberately excluded so session titles ("Rate Limit Guard") aren't
+   * misclassified. Rate-limit exits back off without charging crash_count.
+   */
   private detectRateLimitCrash(recentOutput: string): boolean {
     if (!recentOutput) return false;
     const text = recentOutput.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').toLowerCase();
@@ -1010,33 +688,6 @@ export class AgentProcess {
     if (this.stopRequested || this.stopping) {
       this.stopRequested = false;
       return;
-    }
-
-    // Planned restart (hard-restart / self-restart / context-force-restart)
-    // writes a `.restart-planned` marker. A fresh-boot exit inside that
-    // window is a restart transient, not a real crash, so suppress the crash
-    // counter/alert. Keep a bounded retry budget so a persistently broken boot
-    // still falls through to the real crash path and surfaces normally.
-    if (this.isPlannedRestartRecent()) {
-      this.plannedRestartRetries += 1;
-      if (this.plannedRestartRetries <= this.plannedRestartRetryMax) {
-        const backoff = Math.min(5000 * Math.pow(2, this.plannedRestartRetries - 1), 60000);
-        this.log(
-          `Planned-restart boot transient (exit_code=${exitCode}, retry ${this.plannedRestartRetries}/${this.plannedRestartRetryMax}) — not counted as crash.`,
-        );
-        this.appendCrashToRestartsLog(exitCode, backoff, 'PLANNED_RESTART_RETRY');
-        this.status = 'starting';
-        this.notifyStatusChange();
-        setTimeout(() => {
-          if (this.status === 'starting') {
-            this.start().catch(err => this.log(`Planned-restart retry failed: ${err}`));
-          }
-        }, backoff);
-        return;
-      }
-      this.log(
-        `Planned-restart retries exhausted (${this.plannedRestartRetries}) — treating as real crash.`,
-      );
     }
 
     // Image-poison auto-recovery (companion to PR #446's photo-injection fix).
@@ -1188,11 +839,7 @@ export class AgentProcess {
       return opencodeSessionExists(this.env.ctxRoot, this.name);
     }
 
-    // Default (Claude runtime): existing conversation = JSONL files present in the
-    // agent's cwd-scoped Claude projects dir. Upstream-aligned (reverted fork-only
-    // #20 deterministic-session-id): each agent runs from its own working directory,
-    // so the cwd already isolates sessions — no fixed session id, no --session-id
-    // collision on force-fresh handoffs.
+    // Default (Claude runtime): existing conversation = JSONL files present.
     const launchDir = this.config.working_directory || this.env.agentDir;
     if (!launchDir) return false;
 
@@ -1514,9 +1161,8 @@ export class AgentProcess {
    *    emits the same notification here for parity (James saw msg1 only for
    *    claude agents otherwise). Format mirrors hook-crash-alert.ts:394-397.
    *  - msg2 (back-online / "back — ..." summary): codex reliably self-sends its
-   *    own contextual reply via the boot prompt; opencode uses the daemon-side
-   *    handoff back-online ping so both emit sites can share the persisted
-   *    suppression marker.
+   *    own contextual reply via the boot prompt; opencode (deepseek) does NOT, so
+   *    the daemon sends a handoff-flavored back-online ping for opencode only.
    *
    * Skipped when:
    *  - runtime is anything other than codex-app-server/opencode (claude-code
@@ -1542,6 +1188,11 @@ export class AgentProcess {
       // msg1: planned-restart lifecycle notif, hook parity for runtimes without
       // Claude Code hooks. Both codex and opencode were missing this.
       send(this.buildPlannedRestartNotification());
+      // msg2: codex self-sends its own "back — ..." via the handoff boot prompt
+      // (its runtime honors the prompt-level first-action requirement). opencode
+      // does NOT reliably honor a prompt-level first-action override, so the
+      // daemon emits the back-online substitute for opencode directly (gated by
+      // the same back-ping dup-suppressor as the prompt path).
       if (this.config.runtime === 'opencode' && !this.isHandoffBackPingSuppressed()) {
         writeLastBackPingMs(this.env.ctxRoot, this.name, Date.now());
         send(`Agent ${this.name} is back online (context handoff)`);
@@ -1644,17 +1295,6 @@ export class AgentProcess {
     }
   }
 
-  private isPlannedRestartRecent(): boolean {
-    const marker = join(this.env.ctxRoot, 'state', this.name, '.restart-planned');
-    try {
-      if (!existsSync(marker)) return false;
-      const ageMs = Date.now() - statSync(marker).mtimeMs;
-      return ageMs < 120_000;
-    } catch {
-      return false;
-    }
-  }
-
   /**
    * Append an unplanned-exit entry to restarts.log. Complements the planned
    * SELF-RESTART / HARD-RESTART entries written by src/bus/system.ts so that
@@ -1668,7 +1308,7 @@ export class AgentProcess {
   private appendCrashToRestartsLog(
     exitCode: number,
     backoffMs: number,
-    kind: 'CRASH' | 'HALTED' | 'CRASH_LOOP' | 'IMAGE_POISON_RECOVERY' | 'RATE_LIMIT' | 'PLANNED_RESTART_RETRY' | 'SPAWN_FAILURE',
+    kind: 'CRASH' | 'HALTED' | 'CRASH_LOOP' | 'IMAGE_POISON_RECOVERY' | 'RATE_LIMIT',
   ): void {
     try {
       const logDir = join(this.env.ctxRoot, 'logs', this.name);
@@ -1681,10 +1321,6 @@ export class AgentProcess {
             ? `exit_code=${exitCode} backoff_s=${backoffMs / 1000} (not counted toward max_crashes)`
             : kind === 'RATE_LIMIT'
               ? `exit_code=${exitCode} rate_limit_count=${this.rateLimitCount} backoff_s=${backoffMs / 1000} (not counted toward max_crashes)`
-              : kind === 'PLANNED_RESTART_RETRY'
-                ? `exit_code=${exitCode} planned_restart_retry=${this.plannedRestartRetries} backoff_s=${backoffMs / 1000} (not counted toward max_crashes)`
-              : kind === 'SPAWN_FAILURE'
-                ? `spawn failure crash_count=${this.crashCount} backoff_s=${backoffMs / 1000}`
               : `exit_code=${exitCode} crash_count=${this.crashCount} backoff_s=${backoffMs / 1000}`;
       const logLine = `[${timestamp}] ${kind}: ${details}\n`;
       appendFileSync(join(logDir, 'restarts.log'), logLine, 'utf-8');

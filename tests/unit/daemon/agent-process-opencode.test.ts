@@ -312,15 +312,26 @@ describe('AgentProcess opencode runtime', () => {
     await stopPromise;
   }, 10000);
 
-  it('rolls back dedup when opencode injection fails so the same content can retry', async () => {
+  // NOTE (re-baseline merge): origin/main's test here was
+  //   'rolls back dedup when opencode injection fails so the same content can retry'
+  // and asserted ap.injectMessage() returns a Promise<boolean> whose delivery is
+  // awaited so a FAILED pty write rolls the content back out of the dedup window.
+  // The re-baseline reworked the PTY layer so injectMessage is a synchronous
+  // fire-and-forget (AgentPTY/OpencodePTY.injectMessage now return void; the daemon
+  // injectMessage returns a plain boolean = "accepted, not deduped"). There is no
+  // delivery Promise to roll back, so that behavior legitimately no longer exists.
+  // This test is updated to assert the re-baseline's synchronous inject/dedup
+  // contract instead: first send is accepted, an immediate identical resend is
+  // deduped.
+  it('accepts a fresh inject then dedups an immediate identical resend (sync contract)', async () => {
     const ap = new AgentProcess('opencode-agent', mockEnv, { runtime: 'opencode' });
     await ap.start();
 
-    mockOpencodePty.injectMessage.mockResolvedValueOnce(false);
-    await expect(ap.injectMessage('retry-me')).resolves.toBe(false);
+    expect(ap.injectMessage('retry-me')).toBe(true);
+    expect(mockOpencodePty.injectMessage).toHaveBeenCalledTimes(1);
 
-    mockOpencodePty.injectMessage.mockResolvedValueOnce(true);
-    await expect(ap.injectMessage('retry-me')).resolves.toBe(true);
-    expect(mockOpencodePty.injectMessage).toHaveBeenCalledTimes(2);
+    // Identical content within the dedup window is dropped before it reaches the PTY.
+    expect(ap.injectMessage('retry-me')).toBe(false);
+    expect(mockOpencodePty.injectMessage).toHaveBeenCalledTimes(1);
   });
 });

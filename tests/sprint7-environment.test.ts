@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, symlinkSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { detectDayNightMode } from '../src/bus/heartbeat.js';
@@ -196,7 +196,7 @@ describe('Sprint 7: Environment & Config Completeness', () => {
 
     it('TC-B leak: agentDir not under frameworkRoot throws sandbox/live leak error', () => {
       const fwRoot = join(testDir, 'sandbox');
-      const liveAgentDir = '/Users/example/cortextos/orgs/testorg/agents/cortext-designer';
+      const liveAgentDir = '/Users/operator/cortextos/orgs/testorg/agents/cortext-designer';
       expect(() => resolveEnv({
         frameworkRoot: fwRoot,
         agentDir: liveAgentDir,
@@ -209,24 +209,9 @@ describe('Sprint 7: Environment & Config Completeness', () => {
       expect(() => resolveEnv({
         frameworkRoot: fwRoot,
         agentDir: join(fwRoot, 'orgs', 'foo', 'agents', 'bar'),
-        projectRoot: '/Users/example/cortextos',
+        projectRoot: '/Users/operator/cortextos',
         agentName: 'bar',
       })).toThrow(/must equal CTX_FRAMEWORK_ROOT/);
-    });
-
-    it('TC-E symlink: agentDir reached through a symlink to frameworkRoot resolves without throwing', () => {
-      const fwRoot = join(testDir, 'real-install');
-      const agentDirReal = join(fwRoot, 'orgs', 'testorg', 'agents', 'foo');
-      mkdirSync(agentDirReal, { recursive: true });
-      const symlinkRoot = join(testDir, 'symlinked-install');
-      symlinkSync(fwRoot, symlinkRoot);
-      // agentDir via symlink, frameworkRoot via real path — same install, not a leak
-      expect(() => resolveEnv({
-        frameworkRoot: fwRoot,
-        projectRoot: symlinkRoot,
-        agentDir: join(symlinkRoot, 'orgs', 'testorg', 'agents', 'foo'),
-        agentName: 'foo',
-      })).not.toThrow();
     });
 
     it('TC-D back-compat: happy-path frameworkRoot=projectRoot with derived agentDir resolves', () => {

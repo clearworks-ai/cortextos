@@ -3,7 +3,6 @@ import { mkdirSync, writeFileSync, unlinkSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { handoffGraceMs } from '../../../src/daemon/fast-checker.js';
-import { deriveMissionFromTrailingInbound } from '../../../src/daemon/restart-context.js';
 
 /**
  * Unit tests for the context monitor logic in fast-checker.ts.
@@ -398,58 +397,5 @@ describe('consumeHandoffBlock', () => {
     unlinkSync(markerPath);
     const docExists = existsSync(doc);
     expect(docExists).toBe(false);
-  });
-});
-
-describe('deriveMissionFromTrailingInbound', () => {
-  it('anchors on the contiguous trailing inbound telegram burst', () => {
-    const mission = deriveMissionFromTrailingInbound(
-      [
-        {
-          ts: '2026-06-30T00:00:00.000Z',
-          sender: 'alice',
-          via: 'telegram',
-          content: 'Old outbound note',
-        },
-        {
-          ts: '2026-06-30T00:01:00.000Z',
-          sender: 'pd88',
-          via: 'telegram',
-          content: 'First newest inbound instruction',
-        },
-        {
-          ts: '2026-06-30T00:02:00.000Z',
-          sender: 'pd88',
-          via: 'telegram',
-          content: 'Second newest inbound instruction',
-        },
-      ],
-      'alice',
-    );
-
-    expect(mission).toContain('First newest inbound instruction');
-    expect(mission).toContain('Second newest inbound instruction');
-  });
-
-  it('returns empty when the trailing run is outbound only', () => {
-    const mission = deriveMissionFromTrailingInbound(
-      [
-        {
-          ts: '2026-06-30T00:00:00.000Z',
-          sender: 'pd88',
-          via: 'telegram',
-          content: 'Inbound earlier in history',
-        },
-        {
-          ts: '2026-06-30T00:01:00.000Z',
-          sender: 'alice',
-          via: 'telegram',
-          content: 'Latest outbound reply',
-        },
-      ],
-      'alice',
-    );
-
-    expect(mission).toBe('');
   });
 });

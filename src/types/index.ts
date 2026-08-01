@@ -38,6 +38,15 @@ export interface TaskOutput {
   label?: string;
 }
 
+export interface TaskOutput {
+  /** Output kind. "file" links to a saved deliverable; other shapes reserved. */
+  type: 'file';
+  /** For type:"file", the path to the file relative to CTX_ROOT (forward-slash separated). */
+  value: string;
+  /** Optional human-readable label shown in dashboard task detail. */
+  label?: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -216,10 +225,6 @@ export interface AgentConfig {
   ctx_warning_threshold?: number;
   /** Context window % at which to inject handoff prompt and hard-restart. Default: 80. */
   ctx_handoff_threshold?: number;
-  /** Opt-in fresh rollover cap for planned session refreshes. When enabled, the Nth continue since the last fresh restart rolls over fresh instead. */
-  fresh_rollover_max_continues?: number;
-  /** Opt-in context % floor for planned fresh rollover. A recent context_status above this threshold upgrades sessionRefresh() from continue to fresh. */
-  fresh_rollover_ctx_pct?: number;
   /**
    * Fallback context window cap (tokens) for codex-app-server agents when the
    * server's `thread/tokenUsage/updated` event reports `modelContextWindow=null`.
@@ -261,15 +266,6 @@ export interface AgentConfig {
    * actively converses with (e.g. larry, frank2). Reversible via config only.
    */
   emit_system_telegram_pings?: boolean;
-  /**
-   * Enables the FastChecker loop-stall watchdog. Defaults to false when absent
-   * so the detector can be rolled out per-agent first.
-   */
-  stall_watchdog_enabled?: boolean;
-  /**
-   * Override for the loop-stall watchdog threshold in minutes. Defaults to 20.
-   */
-  stall_watchdog_threshold_minutes?: number;
 }
 
 export interface CronEntry {

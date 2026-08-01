@@ -37,6 +37,14 @@ export const BUS_TO_MULTICA_PRIORITY: Record<Priority, Exclude<MulticaPriority, 
   low: 'low',
 };
 
+export const MULTICA_TO_BUS_PRIORITY: Record<MulticaPriority, Priority> = {
+  urgent: 'urgent',
+  high: 'high',
+  medium: 'normal',
+  low: 'low',
+  none: 'normal',
+};
+
 export function taskToIssuePayload(
   task: Task,
   config: MulticaConfig,

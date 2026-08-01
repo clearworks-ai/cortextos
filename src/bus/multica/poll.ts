@@ -1,22 +1,39 @@
+import { readFileSync } from 'node:fs';
+
 import type { BusPaths, Task, TaskStatus } from '../../types/index.js';
-import { cancelTask, claimTask, completeTask, listTasks, updateTask } from '../task.js';
+import {
+  cancelTask, claimTask, completeTask, createTask, findTaskFile, listTasks, updateTask,
+} from '../task.js';
 import { MulticaHttpError } from './client.js';
-import { BUS_TO_MULTICA_STATUS, MULTICA_TO_BUS_STATUS } from './mapping.js';
+import {
+  BUS_TO_MULTICA_STATUS,
+  MULTICA_TO_BUS_PRIORITY,
+  MULTICA_TO_BUS_STATUS,
+  hashMappedFields,
+  idempotencyKeyFor,
+  taskToIssuePayload,
+} from './mapping.js';
 import type {
   MulticaClient,
   MulticaConfig,
   MulticaIssue,
   SyncLink,
+  SyncState,
   SyncStateStore,
 } from './types.js';
 
 export const POLL_PAGE_SIZE = 100;
 export const POLL_MAX_PAGES = 20;
 
+export interface InboundImportIdentity {
+  agentName: string;
+  org: string;
+}
+
 export interface InboundAction {
-  bus_task_id: string;
+  bus_task_id: string;                                    // '' for dry-run import previews
   multica_issue_id: string;
-  kind: 'status' | 'claim' | 'resolve_id';
+  kind: 'status' | 'claim' | 'resolve_id' | 'import';     // 'import' is NEW
   from?: TaskStatus;
   to?: TaskStatus;
 }
@@ -24,6 +41,7 @@ export interface InboundAction {
 export interface InboundPollResult {
   wrote_back: number;
   resolved_ids: number;
+  imported: number;                                        // NEW
   skipped: number;
   skipped_assignee: number;
   errors: number;
@@ -41,7 +59,7 @@ export async function runInboundPoll(
   config: MulticaConfig,
   client: MulticaClient,
   store: SyncStateStore,
-  options?: { dryRun?: boolean },
+  options?: { dryRun?: boolean; importIdentity?: InboundImportIdentity },
 ): Promise<InboundPollResult> {
   const dryRun = options?.dryRun === true;
   const result = createResult(dryRun);
@@ -195,6 +213,19 @@ export async function runInboundPoll(
       refreshObservedLink(store, taskId, issue, idPatch, dryRun);
     }
 
+    runReverseImport(
+      paths,
+      config,
+      store,
+      state,
+      busById,
+      issueById,
+      resolvedMatches,
+      result,
+      dryRun,
+      options?.importIdentity,
+    );
+
     return result;
   } catch (error) {
     result.errors += 1;
@@ -314,6 +345,7 @@ function createResult(dryRun: boolean): InboundPollResult {
   return {
     wrote_back: 0,
     resolved_ids: 0,
+    imported: 0,
     skipped: 0,
     skipped_assignee: 0,
     errors: 0,
@@ -324,4 +356,133 @@ function createResult(dryRun: boolean): InboundPollResult {
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+const IMPORT_MARKER_PREFIX = '[multica-import:';
+
+function importMarkerFor(issueId: string): string {
+  return `${IMPORT_MARKER_PREFIX}${issueId}]`;
+}
+
+function runReverseImport(
+  paths: BusPaths,
+  config: MulticaConfig,
+  store: SyncStateStore,
+  state: SyncState,
+  busById: Map<string, Task>,
+  issueById: Map<string, MulticaIssue>,
+  resolvedMatches: Map<string, ResolvedIssueMatch>,
+  result: InboundPollResult,
+  dryRun: boolean,
+  identity: InboundImportIdentity | undefined,
+): void {
+  const linkedIssueIds = new Set<string>();
+  for (const link of Object.values(state.links)) {
+    if (link.multica_issue_id !== null) {
+      linkedIssueIds.add(link.multica_issue_id);
+    }
+  }
+  for (const match of resolvedMatches.values()) {
+    linkedIssueIds.add(match.issue.id);
+  }
+
+  let warnedNoIdentity = false;
+
+  for (const issue of issueById.values()) {
+    if (linkedIssueIds.has(issue.id)) continue;
+    // Never import terminal issues — historical closed work is not a new bus task.
+    if (issue.status === 'done' || issue.status === 'cancelled') continue;
+
+    // Crash-window heal: task was created on a prior run but the link write never
+    // landed. Re-link instead of duplicating.
+    const marker = importMarkerFor(issue.id);
+    const orphanTask = [...busById.values()].find(
+      (task) => typeof task.description === 'string' && task.description.includes(marker),
+    );
+    if (orphanTask !== undefined) {
+      result.resolved_ids += 1;
+      result.actions.push({
+        bus_task_id: orphanTask.id,
+        multica_issue_id: issue.id,
+        kind: 'resolve_id',
+      });
+      if (!dryRun) {
+        store.upsertLink(orphanTask.id, {
+          multica_issue_id: issue.id,
+          last_seen_multica_status: issue.status,
+          last_seen_multica_assignee_id: issue.assignee_id,
+        });
+      }
+      continue;
+    }
+
+    if (identity === undefined) {
+      if (!warnedNoIdentity) {
+        warnedNoIdentity = true;
+        console.warn(
+          '[multica] unlinked Multica issues found but no import identity provided; skipping reverse import',
+        );
+      }
+      continue;
+    }
+
+    const targetStatus = MULTICA_TO_BUS_STATUS[issue.status]; // pending | in_progress | blocked
+
+    if (dryRun) {
+      result.actions.push({
+        bus_task_id: '',
+        multica_issue_id: issue.id,
+        kind: 'import',
+        to: targetStatus,
+      });
+      continue;
+    }
+
+    try {
+      const description = `${marker} ${issue.description ?? ''}`.trimEnd();
+      const assignee = issue.assignee_id === config.memberIdJosh ? 'human' : identity.agentName;
+      const taskId = createTask(paths, identity.agentName, identity.org, issue.title, {
+        description,
+        assignee,
+        priority: MULTICA_TO_BUS_PRIORITY[issue.priority],
+        ...(issue.due_date !== null ? { dueDate: issue.due_date } : {}),
+      });
+
+      if (targetStatus !== 'pending') {
+        applyStatusWriteBack(paths, taskId, targetStatus);
+      }
+
+      const createdTask = readTaskById(paths, taskId);
+      const hash = hashMappedFields(taskToIssuePayload(createdTask, config, 'bus', 'update'));
+      store.upsertLink(taskId, {
+        multica_issue_id: issue.id,
+        last_pushed_status: createdTask.status,
+        last_pushed_hash: hash,
+        last_seen_multica_status: issue.status,
+        last_seen_multica_assignee_id: issue.assignee_id,
+        idempotency_key: idempotencyKeyFor(taskId, hash),
+      });
+
+      result.imported += 1;
+      result.actions.push({
+        bus_task_id: taskId,
+        multica_issue_id: issue.id,
+        kind: 'import',
+        to: targetStatus,
+      });
+    } catch (error) {
+      result.errors += 1;
+      console.warn(
+        `[multica] failed to import issue ${issue.id} as a bus task: ${formatError(error)}`,
+      );
+    }
+  }
+}
+
+function readTaskById(paths: BusPaths, taskId: string): Task {
+  const filePath = findTaskFile(paths, taskId);
+  if (filePath === null) {
+    throw new Error(`imported task ${taskId} not found on disk after create`);
+  }
+  return JSON.parse(readFileSync(filePath, 'utf-8')) as Task;
 }

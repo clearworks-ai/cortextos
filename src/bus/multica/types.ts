@@ -85,6 +85,13 @@ export interface MulticaConfig {
   memberIdJosh: string;
 }
 
+export interface PendingCreate {
+  idempotency_key: string;
+  title: string;
+  field_hash: string;
+  attempted_at: string;
+}
+
 export interface SyncLink {
   multica_issue_id: string | null;
   last_pushed_status: TaskStatus | null;
@@ -92,6 +99,7 @@ export interface SyncLink {
   last_seen_multica_status: MulticaIssueStatus | null;
   last_seen_multica_assignee_id: string | null;
   idempotency_key: string | null;
+  pending_create?: PendingCreate | null;
 }
 
 export interface SyncState {
@@ -126,6 +134,7 @@ export interface SyncSummary {
   pushed_updates: number;
   skipped: number;
   wrote_back: number;
+  imported: number;
   errors: number;
   dry_run: boolean;
 }

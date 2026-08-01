@@ -12,6 +12,7 @@ function createEmptySummary(direction: SyncDirection, dryRun: boolean): SyncSumm
     pushed_updates: 0,
     skipped: 0,
     wrote_back: 0,
+    imported: 0,
     errors: 0,
     dry_run: dryRun,
   };
@@ -26,7 +27,13 @@ function formatUnexpectedError(error: unknown): string {
 
 export async function runMulticaSync(
   paths: BusPaths,
-  options: { direction: SyncDirection; dryRun?: boolean; limit?: number },
+  options: {
+    direction: SyncDirection;
+    dryRun?: boolean;
+    limit?: number;
+    agentName?: string;   // NEW
+    org?: string;         // NEW
+  },
 ): Promise<SyncSummary> {
   const dryRun = options.dryRun === true;
   const summary = createEmptySummary(options.direction, dryRun);
@@ -52,8 +59,15 @@ export async function runMulticaSync(
     }
 
     if (options.direction === 'in' || options.direction === 'both') {
-      const pollResult = await runInboundPoll(paths, config, client, store, { dryRun });
+      const importIdentity = options.agentName !== undefined && options.org !== undefined
+        ? { agentName: options.agentName, org: options.org }
+        : undefined;
+      const pollResult = await runInboundPoll(paths, config, client, store, {
+        dryRun,
+        importIdentity,
+      });
       summary.wrote_back = pollResult.wrote_back;
+      summary.imported = pollResult.imported;
       summary.skipped += pollResult.skipped + pollResult.skipped_assignee;
       summary.errors += pollResult.errors;
     }

@@ -1,0 +1,18 @@
+true-verify evidence — fix-multica-push-issue-endpoint — 2026-07-30
+
+1. npm run build: PASS (clean, no errors)
+2. npx vitest run tests/unit/bus/multica/: PASS — 4 test files, 30 tests
+3. Live dry-run: CTX_ROOT=/Users/joshweiss/code/cortextos cortextos bus multica-sync --direction out --dry-run
+   -> {"direction":"out","pushed_creates":242,"pushed_updates":0,"skipped":936,"wrote_back":0,"errors":0,"dry_run":true}
+   242 distinct planned creates (not collapsed to 1, confirms Bug B fix resolves stale null-id links to create not update)
+4. Live real push, capped: CTX_ROOT=/Users/joshweiss/code/cortextos cortextos bus multica-sync --direction out --limit 2
+   -> {"direction":"out","pushed_creates":2,"pushed_updates":0,"skipped":610,"wrote_back":0,"errors":0,"dry_run":false}
+5. sync-state.json confirms real multica_issue_id persisted for both pushed tasks:
+   task_1776800553712_222 -> 73407a4b-03f9-4e44-af9f-9b51ba47ee68
+   task_1778032527683_089 -> 981443a1-fbcb-4ad3-b845-b27502b6909c
+6. curl-confirmed both issues exist live in Multica as distinct records (Bug A fix — real /api/issues endpoint, not the Autopilot webhook):
+   CLE-36 "Phase 30.5 Extraction Dedup + Capacity Ceiling"
+   CLE-37 "Pull Rick + Tyler Fireflies transcripts for OCG PRD"
+7. curl-confirmed zero Autopilot task-runs fired on either issue (GET /api/issues/{id}/task-runs -> [] for both) — proves the push no longer hits the paid Autopilot-trigger webhook.
+
+Remaining ~240 outbound creates intentionally NOT pushed yet — holding for Josh's go-ahead before bulk-writing to the live production Multica workspace.

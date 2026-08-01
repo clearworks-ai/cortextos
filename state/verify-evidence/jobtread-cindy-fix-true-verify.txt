@@ -1,0 +1,337 @@
+
+> jobtread-integrations@0.1.0 test
+> node --test test/**/*.test.js
+
+TAP version 13
+# Subtest: slash todo with no args still opens the modal unchanged
+ok 1 - slash todo with no args still opens the modal unchanged
+  ---
+  duration_ms: 2.18675
+  type: 'test'
+  ...
+# Subtest: slash todo inline fast path succeeds across tag orderings
+ok 2 - slash todo inline fast path succeeds across tag orderings
+  ---
+  duration_ms: 3.705792
+  type: 'test'
+  ...
+# Subtest: slash todo inline fast path rejects ambiguous end-of-string job ordering immediately
+ok 3 - slash todo inline fast path rejects ambiguous end-of-string job ordering immediately
+  ---
+  duration_ms: 0.267792
+  type: 'test'
+  ...
+# Subtest: slash todo inline fast path rejects missing tags immediately
+ok 4 - slash todo inline fast path rejects missing tags immediately
+  ---
+  duration_ms: 0.102458
+  type: 'test'
+  ...
+# Subtest: slash todo inline fast path rejects invalid dates immediately
+ok 5 - slash todo inline fast path rejects invalid dates immediately
+  ---
+  duration_ms: 0.156416
+  type: 'test'
+  ...
+# Subtest: slash todo posts job-not-found errors and short-circuits
+ok 6 - slash todo posts job-not-found errors and short-circuits
+  ---
+  duration_ms: 0.850291
+  type: 'test'
+  ...
+# Subtest: slash todo posts ambiguous-job errors and short-circuits
+ok 7 - slash todo posts ambiguous-job errors and short-circuits
+  ---
+  duration_ms: 0.460333
+  type: 'test'
+  ...
+# Subtest: slash todo posts assignee-not-found errors after job resolution
+ok 8 - slash todo posts assignee-not-found errors after job resolution
+  ---
+  duration_ms: 0.5875
+  type: 'test'
+  ...
+# inline createTodo failed boom
+# Subtest: slash todo posts ambiguous-assignee errors after job resolution
+ok 9 - slash todo posts ambiguous-assignee errors after job resolution
+  ---
+  duration_ms: 0.590541
+  type: 'test'
+  ...
+# Subtest: slash todo posts JobTread failures when createTodo throws
+ok 10 - slash todo posts JobTread failures when createTodo throws
+  ---
+  duration_ms: 1.371208
+  type: 'test'
+  ...
+# createTodo failed missing job, assignee, or due date
+# Subtest: view_submission happy path calls createTodo with args
+ok 11 - view_submission happy path calls createTodo with args
+  ---
+  duration_ms: 0.5695
+  type: 'test'
+  ...
+# Subtest: view_submission missing job does not call createTodo
+ok 12 - view_submission missing job does not call createTodo
+  ---
+  duration_ms: 0.292458
+  type: 'test'
+  ...
+# Subtest: duplicate view_submission with same view id calls createTodo once
+ok 13 - duplicate view_submission with same view id calls createTodo once
+  ---
+  duration_ms: 0.253625
+  type: 'test'
+  ...
+# slack user lookup failed missing_scope
+# Subtest: bare-ID happy path resolves wrapped mention and creates todo
+ok 14 - bare-ID happy path resolves wrapped mention and creates todo
+  ---
+  duration_ms: 0.259084
+  type: 'test'
+  ...
+# Subtest: users.info failure posts helpful error and does not create todo
+ok 15 - users.info failure posts helpful error and does not create todo
+  ---
+  duration_ms: 0.224916
+  type: 'test'
+  ...
+# Subtest: internal-only rejection by ID posts helpful error and does not create todo
+ok 16 - internal-only rejection by ID posts helpful error and does not create todo
+  ---
+  duration_ms: 0.187041
+  type: 'test'
+  ...
+# Subtest: internal-only rejection by resolved name posts helpful error and does not create todo
+ok 17 - internal-only rejection by resolved name posts helpful error and does not create todo
+  ---
+  duration_ms: 0.237667
+  type: 'test'
+  ...
+# Subtest: parseInlineTodoArgs parses default-order inline syntax
+ok 18 - parseInlineTodoArgs parses default-order inline syntax
+  ---
+  duration_ms: 2.099583
+  type: 'test'
+  ...
+# Subtest: parseInlineTodoArgs parses tags in any order
+ok 19 - parseInlineTodoArgs parses tags in any order
+  ---
+  duration_ms: 0.524875
+  type: 'test'
+  ...
+# Subtest: parseInlineTodoArgs rejects ambiguous end-of-string job ordering
+ok 20 - parseInlineTodoArgs rejects ambiguous end-of-string job ordering
+  ---
+  duration_ms: 0.130792
+  type: 'test'
+  ...
+# Subtest: parseInlineTodoArgs reports exactly the missing tag
+ok 21 - parseInlineTodoArgs reports exactly the missing tag
+  ---
+  duration_ms: 0.349125
+  type: 'test'
+  ...
+# Subtest: parseInlineTodoArgs reports all missing tags
+ok 22 - parseInlineTodoArgs reports all missing tags
+  ---
+  duration_ms: 0.079875
+  type: 'test'
+  ...
+# Subtest: parseInlineTodoArgs rejects empty title after stripping tags
+ok 23 - parseInlineTodoArgs rejects empty title after stripping tags
+  ---
+  duration_ms: 0.052458
+  type: 'test'
+  ...
+# Subtest: parseInlineTodoArgs rejects Slack channel-mention autolink instead of treating the channel ID as \#job
+ok 24 - parseInlineTodoArgs rejects Slack channel-mention autolink instead of treating the channel ID as \#job
+  ---
+  duration_ms: 0.159458
+  type: 'test'
+  ...
+# Subtest: parseInlineTodoArgs unwraps Slack channel-mention autolinks with names into \#job
+ok 25 - parseInlineTodoArgs unwraps Slack channel-mention autolinks with names into \#job
+  ---
+  duration_ms: 0.090292
+  type: 'test'
+  ...
+# Subtest: normalizeDate normalizes supported formats
+ok 26 - normalizeDate normalizes supported formats
+  ---
+  duration_ms: 1.692083
+  type: 'test'
+  ...
+# Subtest: normalizeDate returns null for invalid strings
+ok 27 - normalizeDate returns null for invalid strings
+  ---
+  duration_ms: 0.630666
+  type: 'test'
+  ...
+# Subtest: isValidDateString validates ISO calendar dates only
+ok 28 - isValidDateString validates ISO calendar dates only
+  ---
+  duration_ms: 0.241834
+  type: 'test'
+  ...
+# Subtest: disambiguate handles zero, single, exact, and ambiguous matches
+ok 29 - disambiguate handles zero, single, exact, and ambiguous matches
+  ---
+  duration_ms: 0.351584
+  type: 'test'
+  ...
+# Subtest: resolveJob returns one job, not-found, and ambiguous results
+ok 30 - resolveJob returns one job, not-found, and ambiguous results
+  ---
+  duration_ms: 0.391875
+  type: 'test'
+  ...
+# Subtest: resolveAssignee returns one membership, not-found, and ambiguous results
+ok 31 - resolveAssignee returns one membership, not-found, and ambiguous results
+  ---
+  duration_ms: 0.39125
+  type: 'test'
+  ...
+# Subtest: parseInlineTodoArgs wrapped mention with label
+ok 32 - parseInlineTodoArgs wrapped mention with label
+  ---
+  duration_ms: 0.19125
+  type: 'test'
+  ...
+# Subtest: parseInlineTodoArgs bare wrapped mention (no label)
+ok 33 - parseInlineTodoArgs bare wrapped mention (no label)
+  ---
+  duration_ms: 0.256625
+  type: 'test'
+  ...
+# Subtest: parseInlineTodoArgs label with spaces
+ok 34 - parseInlineTodoArgs label with spaces
+  ---
+  duration_ms: 0.692917
+  type: 'test'
+  ...
+# Subtest: parseInlineTodoArgs multiple wrapped mentions — first wins, rest stay readable in title
+ok 35 - parseInlineTodoArgs multiple wrapped mentions — first wins, rest stay readable in title
+  ---
+  duration_ms: 0.04825
+  type: 'test'
+  ...
+# Subtest: parseInlineTodoArgs plain mention before wrapped mention — sentinel never leaks
+ok 36 - parseInlineTodoArgs plain mention before wrapped mention — sentinel never leaks
+  ---
+  duration_ms: 0.042959
+  type: 'test'
+  ...
+# Subtest: parseInlineTodoArgs plain-mention regression (no wrapped markup)
+ok 37 - parseInlineTodoArgs plain-mention regression (no wrapped markup)
+  ---
+  duration_ms: 0.034542
+  type: 'test'
+  ...
+# Subtest: parseInlineTodoArgs W-prefixed ID
+ok 38 - parseInlineTodoArgs W-prefixed ID
+  ---
+  duration_ms: 0.028709
+  type: 'test'
+  ...
+# Subtest: internalOnly
+    # Subtest: getInternalOnlyDenylist({}) → empty sets
+    ok 1 - getInternalOnlyDenylist({}) → empty sets
+      ---
+      duration_ms: 0.531375
+      type: 'test'
+      ...
+    # Subtest: getInternalOnlyDenylist parses IDs and names correctly
+    ok 2 - getInternalOnlyDenylist parses IDs and names correctly
+      ---
+      duration_ms: 0.118792
+      type: 'test'
+      ...
+    # Subtest: isInternalOnly matches by Slack ID
+    ok 3 - isInternalOnly matches by Slack ID
+      ---
+      duration_ms: 0.315958
+      type: 'test'
+      ...
+    # Subtest: isInternalOnly matches by name case-insensitively
+    ok 4 - isInternalOnly matches by name case-insensitively
+      ---
+      duration_ms: 0.130667
+      type: 'test'
+      ...
+    # Subtest: isInternalOnly returns false for empty object
+    ok 5 - isInternalOnly returns false for empty object
+      ---
+      duration_ms: 0.213667
+      type: 'test'
+      ...
+    # Subtest: filterInternalOnly removes denylisted members
+    ok 6 - filterInternalOnly removes denylisted members
+      ---
+      duration_ms: 0.167084
+      type: 'test'
+      ...
+    # Subtest: filterInternalOnly returns same array for empty denylist
+    ok 7 - filterInternalOnly returns same array for empty denylist
+      ---
+      duration_ms: 0.112041
+      type: 'test'
+      ...
+    1..7
+ok 39 - internalOnly
+  ---
+  duration_ms: 2.504834
+  type: 'suite'
+  ...
+# Subtest: buildPaveEnvelope embeds grantKey
+ok 40 - buildPaveEnvelope embeds grantKey
+  ---
+  duration_ms: 0.306333
+  type: 'test'
+  ...
+# Subtest: modal shape
+ok 41 - modal shape
+  ---
+  duration_ms: 0.562083
+  type: 'test'
+  ...
+# Subtest: verifySlack accepts valid signature
+ok 42 - verifySlack accepts valid signature
+  ---
+  duration_ms: 0.915084
+  type: 'test'
+  ...
+# Subtest: verifySlack rejects tampered body
+ok 43 - verifySlack rejects tampered body
+  ---
+  duration_ms: 0.103
+  type: 'test'
+  ...
+# Subtest: verifySlack rejects stale timestamp
+ok 44 - verifySlack rejects stale timestamp
+  ---
+  duration_ms: 0.138625
+  type: 'test'
+  ...
+# Subtest: verifySlack rejects missing headers
+ok 45 - verifySlack rejects missing headers
+  ---
+  duration_ms: 0.046458
+  type: 'test'
+  ...
+# Subtest: verifySlack rejects different-length signature without throw
+ok 46 - verifySlack rejects different-length signature without throw
+  ---
+  duration_ms: 0.112
+  type: 'test'
+  ...
+1..46
+# tests 52
+# suites 1
+# pass 52
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 65.869417
+PASS - 52/52 tests, npm test exit 0

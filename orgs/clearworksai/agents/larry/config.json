@@ -134,6 +134,12 @@
       "type": "recurring",
       "cron": "37 3 * * *",
       "prompt": "TASK_ID=$(cortextos bus create-task 'Cron: kb-reconcile-nightly' --desc 'Nightly KB reconcile: mmrag reconcile all roots + kb-extract-edges refresh + counts row' 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire kb-reconcile-nightly --interval 24h 2>/dev/null; NIGHTLY KB RECONCILE \u2014 (1) Check the PREVIOUS run's row: tail -1 $CTX_AGENT_DIR/state/kb-reconcile-ledger.jsonl. If it is missing or has \"green\": false, send Telegram 6690120787 with the row \u2014 silent failure on a KB cron is NOT acceptable. (2) Launch tonight's run in the BACKGROUND (it can take hours on backlog nights; do not wait for it): run bash $CTX_AGENT_DIR/bin/kb-reconcile-nightly.sh as a background Bash call. The script writes its own ledger row when it finishes. (3) cortextos bus complete-task $TASK_ID --result 'kb-reconcile launched; previous night checked' 2>/dev/null. SILENT-OK if previous row green and launch succeeded."
+    },
+    {
+      "name": "claude-mem-export",
+      "type": "recurring",
+      "cron": "12 3 * * *",
+      "prompt": "TASK_ID=$(cortextos bus create-task 'Cron: claude-mem-export' --desc 'Nightly claude-mem exporter: new observations/summaries -> session-memory markdown for 03:37 kb-reconcile ingest' 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire claude-mem-export --interval 24h 2>/dev/null; CLAUDE-MEM EXPORT \u2014 (1) Check the PREVIOUS run's row: tail -1 $CTX_AGENT_DIR/state/claude-mem-export-ledger.jsonl. If it is missing or has \\\"green\\\": false, send Telegram 6690120787 with the row \u2014 silent failure on a KB feed cron is NOT acceptable. (2) Run bash $CTX_AGENT_DIR/bin/claude-mem-export.sh $TASK_ID (foreground \u2014 it finishes in seconds; it writes its own ledger row). (3) If it exited 0: cortextos bus complete-task $TASK_ID --result 'claude-mem export ok' 2>/dev/null. SILENT-OK if previous row green and tonight's run exited 0."
     }
   ],
   "ecosystem": {

@@ -1,0 +1,746 @@
+diff --git a/.agent/one-big-feature/multica-task-bridge/04-implementation/spec-02-outbound-push-handoff.md b/.agent/one-big-feature/multica-task-bridge/04-implementation/spec-02-outbound-push-handoff.md
+new file mode 100644
+index 0000000..e412d70
+--- /dev/null
++++ b/.agent/one-big-feature/multica-task-bridge/04-implementation/spec-02-outbound-push-handoff.md
+@@ -0,0 +1,149 @@
++# Spec 02 Handoff: Outbound Push
++
++## Status
++- Implemented with no intentional contract deviations from spec02 or the master plan.
++
++## Changed Files
++- `src/bus/multica/push.ts`
++- `.agent/one-big-feature/multica-task-bridge/04-implementation/spec-02-outbound-push-handoff.md`
++
++## Contract Confirmations
++- `src/bus/multica/push.ts` exports exactly:
++  - `runOutboundPush(paths, client, store, config, options?)`
++  - `OutboundPushOptions`
++  - `OutboundPlanEntry`
++  - `OutboundPushResult`
++- Implemented shapes match the locked spec exactly:
++
++```ts
++export interface OutboundPushOptions {
++  dryRun?: boolean;
++  provenanceFor?: (task: Task) => 'meeting-pipeline' | 'bus';
++}
++
++export interface OutboundPlanEntry {
++  bus_task_id: string;
++  title: string;
++  action: 'create' | 'update' | 'skip';
++  reason: 'new_task' | 'hash_changed' | 'hash_unchanged' | 'not_pushable' | 'push_failed';
++  outcome: 'pushed' | 'planned' | 'skipped' | 'error';
++  field_hash: string | null;
++  idempotency_key: string | null;
++  error: string | null;
++}
++
++export interface OutboundPushResult {
++  pushed_creates: number;
++  pushed_updates: number;
++  skipped: number;
++  errors: number;
++  dry_run: boolean;
++  plan: OutboundPlanEntry[];
++}
++```
++
++- `runOutboundPush()` is sequential only: one task at a time, no batching, no parallel requests, no retries/backoff.
++- `runOutboundPush()` never rejects on per-task failures. Any `pushIssue()` or `upsertLink()` failure is caught per task, counted in `errors`, recorded in `plan`, warned once, and the loop continues.
++- Ledger writes happen only through `store.upsertLink()` and only after a confirmed 2xx push. The patch written is limited to:
++  - `last_pushed_hash`
++  - `last_pushed_status`
++  - `idempotency_key`
++- `push.ts` never writes or resolves `multica_issue_id`, and never writes `last_seen_multica_*`.
++
++## Spec01 Behaviors Relied On
++- `taskToIssuePayload()` / `hashMappedFields()` / `idempotencyKeyFor()` match the spec01 contracts as landed.
++- `hashMappedFields()` hashes only the eight `issue` fields and does not hash `action`, so create/update hashes remain comparable across runs.
++- `createSyncStateStore().upsertLink()` provides the required merge semantics, so no direct ledger file access was needed.
++- `createMulticaClient().pushIssue()` as landed returns `{ status }` on success and throws `MulticaHttpError` on non-2xx or transport failure.
++- `push.ts` still keeps the defensive 2xx guard:
++  - if `pushIssue()` ever returns a non-2xx status instead of throwing, `runOutboundPush()` throws locally before any ledger write.
++
++## In-Scope Filter Implemented
++- Cancelled tasks are fetched explicitly via:
++
++```ts
++const visible = listTasks(paths);
++const cancelled = listTasks(paths, { status: 'cancelled' });
++const universe = [...visible, ...cancelled].reverse();
++```
++
++- Per-task decision predicate implemented:
++
++```ts
++const link = state.links[task.id];
++
++if (!link && !OPEN_TASK_STATUSES.has(task.status)) {
++  // skip / not_pushable
++}
++
++const action = link === undefined || (
++  link.multica_issue_id === null && link.last_pushed_hash === null
++)
++  ? 'create'
++  : 'update';
++
++if (link?.last_pushed_hash === fieldHash) {
++  // skip / hash_unchanged
++}
++```
++
++- Resulting behavior:
++  - unlinked + open (`pending`, `in_progress`, `blocked`, `waiting`) => create candidate
++  - unlinked + `someday` / `completed` / `cancelled` => skip with `reason: 'not_pushable'`
++  - linked + any status => create/update action rule above, then hash-gated push or skip
++  - linked-but-absent tasks => no plan entry, no ledger mutation
++
++## Grep Proof
++- Command outputs from the required purity checks:
++
++```text
++task import
++2:import { listTasks, OPEN_TASK_STATUSES } from '../task.js';
++
++forbidden bus mutator imports
++
++cli imports
++
++direct fetch
++
++direct fs
++```
++
++- These confirm:
++  - only `listTasks` and `OPEN_TASK_STATUSES` are imported from `src/bus/task.ts`
++  - no bus mutator imports
++  - no CLI imports
++  - no direct `fetch`
++  - no direct filesystem access
++
++## Spec05 Note
++- This shard intentionally added no tests; `tests/unit/bus/multica/push.test.ts` remains spec05-owned.
++- spec05 should assert:
++  - new open task + no link => one `create` push, correct idempotency key, 2xx ledger patch with `multica_issue_id` still `null`
++  - unchanged linked task => no push, `skipped++`, `reason: 'hash_unchanged'`
++  - changed linked task => `update`, hash refreshed on 2xx
++  - linked task moved to `completed`, `cancelled`, or `someday` => one final `update`, then hash-skip on the next run
++  - unlinked `completed` / `cancelled` / `someday` => no push, `reason: 'not_pushable'`
++  - `multica_issue_id` set + `last_pushed_hash: null` => `update`, never `create`
++  - thrown `MulticaHttpError` (401 or `status: 0`) => `errors++`, no ledger write, loop continues
++  - mock client returns non-2xx without throwing => defensive guard treats it as failure, no ledger write
++  - `dryRun: true` => zero network calls, zero ledger mutation, planned counts/plan match the real run
++  - two consecutive unchanged real runs => second run pushes nothing and writes nothing
++  - `provenanceFor` override => `meeting-pipeline` only when supplied by the caller
++- Test conventions reference:
++  - vitest
++  - temp `BusPaths` fixture via `mkdtempSync(join(tmpdir(), ...))`
++  - `rmSync` teardown
++  - mock the `MulticaClient` object directly instead of mocking `fetchImpl`
++
++## Risks / Future Work
++- Archived or compacted linked tasks are intentionally left in the ledger if they no longer appear in the task universe. Ledger GC for archived tasks remains out of scope and should be handled later.
++- Accepted edge noted in code: if a linked task disappears from the task universe before its terminal status is ever pushed, this module has no object to reconcile. Given the 10-minute cron cadence versus the 7-day archive window, that remains an accepted low-risk edge.
++
++## Verification
++- `npm run build` PASS in `/private/tmp/codexer-multica-spec02`
++- A temporary `node_modules -> /Users/joshweiss/code/cortextos/node_modules` symlink was created only to run the build in the fresh worktree and was removed immediately afterward.
++
++## Cleanup Notes
++- No files outside the owned write scope were modified.
++- `package.json` was untouched and no runtime dependencies were added.
+diff --git a/.agent/one-big-feature/multica-task-bridge/04-implementation/spec-03-inbound-poll-handoff.md b/.agent/one-big-feature/multica-task-bridge/04-implementation/spec-03-inbound-poll-handoff.md
+new file mode 100644
+index 0000000..3a3eadd
+--- /dev/null
++++ b/.agent/one-big-feature/multica-task-bridge/04-implementation/spec-03-inbound-poll-handoff.md
+@@ -0,0 +1,62 @@
++# Spec 03 Handoff: Inbound Poll + Write-Back
++
++## Status
++- Implemented with no intentional contract deviations from spec03 or the multica-task-bridge master plan.
++
++## Changed Files
++- `src/bus/multica/poll.ts`
++- `.agent/one-big-feature/multica-task-bridge/04-implementation/spec-03-inbound-poll-handoff.md`
++
++## Contract Confirmations
++- `poll.ts` exports exactly:
++  - `runInboundPoll`
++  - `InboundPollResult`
++  - `InboundAction`
++  - `POLL_PAGE_SIZE`
++  - `POLL_MAX_PAGES`
++- `runInboundPoll(paths, config, client, store, options?)` never throws. Top-level failures degrade to `errors += 1` plus a warning and a normal resolve.
++- `POLL_PAGE_SIZE` is `100` and `POLL_MAX_PAGES` is `20`.
++- Pagination uses `client.listIssues({ limit, offset })` until a short page or the cap, and warns on cap-hit while proceeding with partial results.
++- R4 id resolution uses the locked tolerant predicate:
++  - `JSON.stringify(issue.context_refs).includes(taskId)`
++  - title fallback: `issue.title.includes(taskId)`
++  - duplicate matches warn and pick earliest `created_at`, then `id`.
++- Loop suppression follows the locked pre-refresh ordering:
++  - load ledger snapshot
++  - decide against `last_seen_*` plus `last_pushed_status`
++  - mutate bus task if needed
++  - refresh `last_seen_multica_status` / `last_seen_multica_assignee_id` and resolved `multica_issue_id`
++- Status write-back uses only the real bus mutators:
++  - `completeTask(..., 'completed via Multica inbound sync')` for `done`
++  - `cancelTask(..., 'cancelled via Multica inbound sync')` for `cancelled`
++  - `updateTask(...)` for all other status writes
++- Assignee write-back is narrowed exactly as required:
++  - only `claimTask(paths, taskId, 'human')`
++  - only when the bus task is `pending` and polled status maps to `in_progress`
++  - all other Josh-assignee changes increment `skipped_assignee`, warn once, and refresh `last_seen_multica_assignee_id` so they do not re-warn next cycle
++- `dryRun` performs zero mutators and zero ledger writes while still returning the planned `actions`.
++
++## Required Coordination Notes
++- **Cycle ordering assumption for spec04**: this implementation assumes **push then poll** inside a combined sync cycle. That ordering preserves the intended bounded echo suppression behavior because inbound evaluates against the pre-refresh ledger and can suppress the immediate status echo from the prior outbound push.
++- **R4 live field-path remains unverified**: the implementation intentionally keeps the tolerant `context_refs` stringify-substring plus title fallback matcher. Spec05 guarded integration coverage and rollout verification still need to confirm where Multica actually echoes the `bus_task_id`.
++- **Assignee narrowing limitation**: if Josh reassigns an issue in Multica **without** an accompanying `in_progress` status move, inbound sync will count `skipped_assignee` and warn, but it will not update bus `assigned_to`. That unsupported case still requires either a future `task.ts` reassign mutator or a master-plan amendment.
++- **Bounded single-echo behavior**: an inbound status write-back can cause one convergent outbound push on the next cycle because `last_pushed_status` is still the pre-write value. That is expected stabilization behavior, not loop-thrash.
++
++## Grep / Scope Proofs
++- Forbidden operations are absent from `poll.ts`:
++  - `rg -n "pushIssue|getTaskRuns|atomicWriteSync|writeFileSync|createTask|src/cli" src/bus/multica/poll.ts` returned no matches.
++- Ledger push fields are read-only here:
++  - `rg -n "last_pushed_status|last_pushed_hash|idempotency_key" src/bus/multica/poll.ts` shows only `last_pushed_status` reads used for echo suppression.
++
++## Verification
++- `npm run build` PASS
++- `npm test` FAIL before/after this shard in the same baseline-red lanes; no new Multica-specific failure surfaced
++  - summary: `14 failed | 195 passed | 3 skipped` files, `2 failed | 2805 passed | 72 skipped` tests
++  - persistent unrelated failures:
++    - `tests/integration/concurrent-cron-mutations.test.ts`
++    - `tests/integration/phase5-e2e-simulation.test.ts`
++    - dashboard / integration suites importing missing `next/server`, `react`, and `better-sqlite3`
++
++## Cleanup Notes
++- The temporary `node_modules -> /Users/joshweiss/code/cortextos/node_modules` symlink used for verification in the fresh worktree was removed after the build/test run.
++- Test-generated timestamp churn in `.cortextOS/state/agents/alice/crons.json` and `.bak` was reverted so the final branch stays scoped to the Multica dispatch only.
+diff --git a/src/bus/multica/poll.ts b/src/bus/multica/poll.ts
+new file mode 100644
+index 0000000..a0c3ffa
+--- /dev/null
++++ b/src/bus/multica/poll.ts
+@@ -0,0 +1,327 @@
++import type { BusPaths, Task, TaskStatus } from '../../types/index.js';
++import { cancelTask, claimTask, completeTask, listTasks, updateTask } from '../task.js';
++import { MulticaHttpError } from './client.js';
++import { BUS_TO_MULTICA_STATUS, MULTICA_TO_BUS_STATUS } from './mapping.js';
++import type {
++  MulticaClient,
++  MulticaConfig,
++  MulticaIssue,
++  SyncLink,
++  SyncStateStore,
++} from './types.js';
++
++export const POLL_PAGE_SIZE = 100;
++export const POLL_MAX_PAGES = 20;
++
++export interface InboundAction {
++  bus_task_id: string;
++  multica_issue_id: string;
++  kind: 'status' | 'claim' | 'resolve_id';
++  from?: TaskStatus;
++  to?: TaskStatus;
++}
++
++export interface InboundPollResult {
++  wrote_back: number;
++  resolved_ids: number;
++  skipped: number;
++  skipped_assignee: number;
++  errors: number;
++  dry_run: boolean;
++  actions: InboundAction[];
++}
++
++interface ResolvedIssueMatch {
++  idPatch: Pick<SyncLink, 'multica_issue_id'>;
++  issue: MulticaIssue;
++}
++
++export async function runInboundPoll(
++  paths: BusPaths,
++  config: MulticaConfig,
++  client: MulticaClient,
++  store: SyncStateStore,
++  options?: { dryRun?: boolean },
++): Promise<InboundPollResult> {
++  const dryRun = options?.dryRun === true;
++  const result = createResult(dryRun);
++
++  try {
++    const issues = await fetchAllIssues(client);
++    if (issues === null) {
++      result.errors += 1;
++      return result;
++    }
++
++    const state = store.load();
++    const busById = new Map<string, Task>(listTasks(paths).map((task) => [task.id, task]));
++    const issueById = new Map<string, MulticaIssue>(issues.map((issue) => [issue.id, issue]));
++    const resolvedMatches = new Map<string, ResolvedIssueMatch>();
++
++    for (const [taskId, link] of Object.entries(state.links)) {
++      if (link.multica_issue_id !== null) {
++        continue;
++      }
++
++      const matchedIssue = resolveIssueForTaskId(taskId, issues);
++      if (matchedIssue === null) {
++        continue;
++      }
++
++      resolvedMatches.set(taskId, {
++        idPatch: { multica_issue_id: matchedIssue.id },
++        issue: matchedIssue,
++      });
++      result.resolved_ids += 1;
++      result.actions.push({
++        bus_task_id: taskId,
++        multica_issue_id: matchedIssue.id,
++        kind: 'resolve_id',
++      });
++    }
++
++    for (const [taskId, link] of Object.entries(state.links)) {
++      const resolvedMatch = resolvedMatches.get(taskId);
++      const issueId = link.multica_issue_id ?? resolvedMatch?.issue.id ?? null;
++      const issue = issueId === null ? null : issueById.get(issueId) ?? resolvedMatch?.issue ?? null;
++
++      if (issue === null) {
++        result.skipped += 1;
++        continue;
++      }
++
++      const idPatch = resolvedMatch?.idPatch;
++      const task = busById.get(taskId);
++      if (!task) {
++        result.skipped += 1;
++        refreshObservedLink(store, taskId, issue, idPatch, dryRun);
++        continue;
++      }
++
++      if (task.status === 'completed') {
++        result.skipped += 1;
++        refreshObservedLink(store, taskId, issue, idPatch, dryRun);
++        continue;
++      }
++
++      const polledStatus = issue.status;
++      const polledAssignee = issue.assignee_id;
++      const targetStatus = MULTICA_TO_BUS_STATUS[polledStatus];
++      const expectedFromPush = link.last_pushed_status === null
++        ? null
++        : BUS_TO_MULTICA_STATUS[link.last_pushed_status];
++
++      const statusChangedSinceLastSeen = polledStatus !== link.last_seen_multica_status;
++      const statusNotOwnPushEcho = expectedFromPush === null || polledStatus !== expectedFromPush;
++      const statusNeedsWriteBack = targetStatus !== task.status;
++      const shouldWriteStatus = (
++        statusChangedSinceLastSeen &&
++        statusNotOwnPushEcho &&
++        statusNeedsWriteBack
++      );
++
++      const assigneeChangedSinceLastSeen = polledAssignee !== link.last_seen_multica_assignee_id;
++      const assigneeMapsToHuman = polledAssignee === config.memberIdJosh;
++      // The ledger has no last_pushed_assignee, so convergence on a human-owned task
++      // is the assignee-side echo suppressor.
++      const assigneeNeedsWriteBack = task.assigned_to !== 'human' && task.assigned_to !== 'user';
++      const assigneeClaimPreconditions = task.status === 'pending' && targetStatus === 'in_progress';
++      const shouldClaim = (
++        shouldWriteStatus &&
++        targetStatus === 'in_progress' &&
++        assigneeChangedSinceLastSeen &&
++        assigneeMapsToHuman &&
++        assigneeNeedsWriteBack &&
++        assigneeClaimPreconditions
++      );
++      const shouldWarnSkippedAssignee = (
++        assigneeChangedSinceLastSeen &&
++        assigneeMapsToHuman &&
++        assigneeNeedsWriteBack &&
++        !assigneeClaimPreconditions
++      );
++
++      if (shouldClaim) {
++        result.actions.push({
++          bus_task_id: taskId,
++          multica_issue_id: issue.id,
++          kind: 'claim',
++          from: task.status,
++          to: 'in_progress',
++        });
++
++        if (!dryRun) {
++          try {
++            claimTask(paths, taskId, 'human');
++            result.wrote_back += 1;
++          } catch (error) {
++            result.errors += 1;
++            console.warn(
++              `[multica] failed to claim task ${taskId} from issue ${issue.id}: ${formatError(error)}`,
++            );
++          }
++        }
++      } else if (shouldWriteStatus) {
++        result.actions.push({
++          bus_task_id: taskId,
++          multica_issue_id: issue.id,
++          kind: 'status',
++          from: task.status,
++          to: targetStatus,
++        });
++
++        if (!dryRun) {
++          try {
++            applyStatusWriteBack(paths, taskId, targetStatus);
++            result.wrote_back += 1;
++          } catch (error) {
++            result.errors += 1;
++            console.warn(
++              `[multica] failed to update task ${taskId} from issue ${issue.id}: ${formatError(error)}`,
++            );
++          }
++        }
++      }
++
++      if (shouldWarnSkippedAssignee) {
++        result.skipped_assignee += 1;
++        console.warn(
++          `[multica] skipped assignee write-back for task ${taskId}: ` +
++            `Josh-assigned issue ${issue.id} does not satisfy A4 ` +
++            `(task.status=${task.status}, polled_status=${polledStatus})`,
++        );
++      }
++
++      refreshObservedLink(store, taskId, issue, idPatch, dryRun);
++    }
++
++    return result;
++  } catch (error) {
++    result.errors += 1;
++    console.warn(`[multica] inbound poll failed unexpectedly: ${formatError(error)}`);
++    return result;
++  }
++}
++
++async function fetchAllIssues(client: MulticaClient): Promise<MulticaIssue[] | null> {
++  const issues: MulticaIssue[] = [];
++  let offset = 0;
++
++  try {
++    for (let pageNumber = 0; pageNumber < POLL_MAX_PAGES; pageNumber += 1) {
++      const page = await client.listIssues({ limit: POLL_PAGE_SIZE, offset });
++      issues.push(...page);
++
++      if (page.length < POLL_PAGE_SIZE) {
++        return issues;
++      }
++
++      offset += POLL_PAGE_SIZE;
++    }
++  } catch (error) {
++    if (error instanceof MulticaHttpError) {
++      console.warn(
++        `[multica] inbound poll listIssues failed ` +
++          `(status=${error.status}, endpoint=${error.endpoint}): ${error.message}`,
++      );
++      return null;
++    }
++
++    console.warn(`[multica] inbound poll listIssues failed: ${formatError(error)}`);
++    return null;
++  }
++
++  console.warn(
++    `[multica] inbound poll reached pagination cap ` +
++      `(${POLL_MAX_PAGES} pages at ${POLL_PAGE_SIZE} issues/page); proceeding with partial results`,
++  );
++  return issues;
++}
++
++function applyStatusWriteBack(
++  paths: BusPaths,
++  taskId: string,
++  targetStatus: TaskStatus,
++): void {
++  if (targetStatus === 'completed') {
++    completeTask(paths, taskId, 'completed via Multica inbound sync');
++    return;
++  }
++
++  if (targetStatus === 'cancelled') {
++    cancelTask(paths, taskId, 'cancelled via Multica inbound sync');
++    return;
++  }
++
++  updateTask(paths, taskId, targetStatus);
++}
++
++function resolveIssueForTaskId(taskId: string, issues: readonly MulticaIssue[]): MulticaIssue | null {
++  const matches = issues.filter((issue) => issueMatchesTaskId(issue, taskId));
++  if (matches.length === 0) {
++    return null;
++  }
++
++  if (matches.length > 1) {
++    console.warn(
++      `[multica] multiple issues matched task ${taskId}; ` +
++        `selecting earliest created_at from: ${matches.map((issue) => issue.id).join(', ')}`,
++    );
++  }
++
++  return [...matches].sort(compareIssueCreatedAt)[0] ?? null;
++}
++
++function issueMatchesTaskId(issue: MulticaIssue, taskId: string): boolean {
++  return JSON.stringify(issue.context_refs).includes(taskId) || issue.title.includes(taskId);
++}
++
++function compareIssueCreatedAt(left: MulticaIssue, right: MulticaIssue): number {
++  const leftEpoch = issueCreatedAtEpoch(left);
++  const rightEpoch = issueCreatedAtEpoch(right);
++  if (leftEpoch !== rightEpoch) {
++    return leftEpoch - rightEpoch;
++  }
++
++  return left.id.localeCompare(right.id);
++}
++
++function issueCreatedAtEpoch(issue: MulticaIssue): number {
++  const epoch = Date.parse(issue.created_at);
++  return Number.isNaN(epoch) ? Number.POSITIVE_INFINITY : epoch;
++}
++
++function refreshObservedLink(
++  store: SyncStateStore,
++  taskId: string,
++  issue: MulticaIssue,
++  idPatch: Pick<SyncLink, 'multica_issue_id'> | undefined,
++  dryRun: boolean,
++): void {
++  if (dryRun) {
++    return;
++  }
++
++  const patch: Partial<SyncLink> = {
++    last_seen_multica_status: issue.status,
++    last_seen_multica_assignee_id: issue.assignee_id,
++    ...(idPatch ?? {}),
++  };
++  store.upsertLink(taskId, patch);
++}
++
++function createResult(dryRun: boolean): InboundPollResult {
++  return {
++    wrote_back: 0,
++    resolved_ids: 0,
++    skipped: 0,
++    skipped_assignee: 0,
++    errors: 0,
++    dry_run: dryRun,
++    actions: [],
++  };
++}
++
++function formatError(error: unknown): string {
++  return error instanceof Error ? error.message : String(error);
++}
+diff --git a/src/bus/multica/push.ts b/src/bus/multica/push.ts
+new file mode 100644
+index 0000000..fded047
+--- /dev/null
++++ b/src/bus/multica/push.ts
+@@ -0,0 +1,184 @@
++import type { BusPaths, Task } from '../../types/index.js';
++import { listTasks, OPEN_TASK_STATUSES } from '../task.js';
++import { MulticaHttpError } from './client.js';
++import { hashMappedFields, idempotencyKeyFor, taskToIssuePayload } from './mapping.js';
++import type { MulticaClient, MulticaConfig, SyncStateStore } from './types.js';
++
++export interface OutboundPushOptions {
++  dryRun?: boolean;
++  provenanceFor?: (task: Task) => 'meeting-pipeline' | 'bus';
++}
++
++export interface OutboundPlanEntry {
++  bus_task_id: string;
++  title: string;
++  action: 'create' | 'update' | 'skip';
++  reason: 'new_task' | 'hash_changed' | 'hash_unchanged' | 'not_pushable' | 'push_failed';
++  outcome: 'pushed' | 'planned' | 'skipped' | 'error';
++  field_hash: string | null;
++  idempotency_key: string | null;
++  error: string | null;
++}
++
++export interface OutboundPushResult {
++  pushed_creates: number;
++  pushed_updates: number;
++  skipped: number;
++  errors: number;
++  dry_run: boolean;
++  plan: OutboundPlanEntry[];
++}
++
++export async function runOutboundPush(
++  paths: BusPaths,
++  client: MulticaClient,
++  store: SyncStateStore,
++  config: MulticaConfig,
++  options: OutboundPushOptions = {},
++): Promise<OutboundPushResult> {
++  const dryRun = options.dryRun === true;
++  // Callers can opt specific tasks into meeting-pipeline provenance without
++  // adding any detection heuristic to this module.
++  const provenanceFor = options.provenanceFor ?? (() => 'bus' as const);
++  const state = store.load();
++  const visible = listTasks(paths);
++  const cancelled = listTasks(paths, { status: 'cancelled' });
++  // listTasks returns newest-first; reverse for a deterministic oldest-first run.
++  const universe = [...visible, ...cancelled].reverse();
++
++  const result: OutboundPushResult = {
++    pushed_creates: 0,
++    pushed_updates: 0,
++    skipped: 0,
++    errors: 0,
++    dry_run: dryRun,
++    plan: [],
++  };
++
++  // Archived or compacted tasks never appear in the task universe. Leave their
++  // ledger links untouched here; future ledger GC is a separate concern.
++  for (const task of universe) {
++    const link = state.links[task.id];
++
++    if (!link && !OPEN_TASK_STATUSES.has(task.status)) {
++      result.skipped += 1;
++      result.plan.push({
++        bus_task_id: task.id,
++        title: task.title,
++        action: 'skip',
++        reason: 'not_pushable',
++        outcome: 'skipped',
++        field_hash: null,
++        idempotency_key: null,
++        error: null,
++      });
++      continue;
++    }
++
++    const action = link === undefined || (
++      link.multica_issue_id === null && link.last_pushed_hash === null
++    )
++      ? 'create'
++      : 'update';
++    const payload = taskToIssuePayload(task, config, provenanceFor(task), action);
++    const fieldHash = hashMappedFields(payload);
++
++    if (link?.last_pushed_hash === fieldHash) {
++      result.skipped += 1;
++      result.plan.push({
++        bus_task_id: task.id,
++        title: task.title,
++        action: 'skip',
++        reason: 'hash_unchanged',
++        outcome: 'skipped',
++        field_hash: fieldHash,
++        idempotency_key: null,
++        error: null,
++      });
++      continue;
++    }
++
++    const reason = action === 'create' ? 'new_task' : 'hash_changed';
++    const idempotencyKey = idempotencyKeyFor(task.id, fieldHash);
++
++    if (dryRun) {
++      incrementPushCount(result, action);
++      result.plan.push({
++        bus_task_id: task.id,
++        title: task.title,
++        action,
++        reason,
++        outcome: 'planned',
++        field_hash: fieldHash,
++        idempotency_key: idempotencyKey,
++        error: null,
++      });
++      continue;
++    }
++
++    try {
++      const { status } = await client.pushIssue(payload, idempotencyKey);
++      if (status < 200 || status >= 300) {
++        throw new MulticaHttpError(
++          `Multica push returned unexpected status ${status}`,
++          status,
++          'pushIssue',
++        );
++      }
++
++      store.upsertLink(task.id, {
++        last_pushed_hash: fieldHash,
++        last_pushed_status: task.status,
++        idempotency_key: idempotencyKey,
++      });
++
++      incrementPushCount(result, action);
++      result.plan.push({
++        bus_task_id: task.id,
++        title: task.title,
++        action,
++        reason,
++        outcome: 'pushed',
++        field_hash: fieldHash,
++        idempotency_key: idempotencyKey,
++        error: null,
++      });
++    } catch (error) {
++      result.errors += 1;
++      const message = truncateErrorMessage(error);
++      result.plan.push({
++        bus_task_id: task.id,
++        title: task.title,
++        action,
++        reason: 'push_failed',
++        outcome: 'error',
++        field_hash: fieldHash,
++        idempotency_key: idempotencyKey,
++        error: message,
++      });
++      console.warn(`[multica-sync] outbound push failed for ${task.id} (${task.status}): ${message}`);
++      // If the push succeeded but the ledger write failed, the next run
++      // recomputes the same idempotency key and Multica dedupes the re-push.
++      continue;
++    }
++  }
++
++  return result;
++}
++
++function incrementPushCount(
++  result: OutboundPushResult,
++  action: 'create' | 'update',
++): void {
++  if (action === 'create') {
++    result.pushed_creates += 1;
++    return;
++  }
++
++  result.pushed_updates += 1;
++}
++
++function truncateErrorMessage(error: unknown): string {
++  const message = error instanceof Error ? error.message : String(error);
++  return message.length <= 300 ? message : `${message.slice(0, 297)}...`;
++}

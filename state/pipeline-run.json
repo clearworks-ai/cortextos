@@ -1,1 +1,1 @@
-{"ts": 1785211346, "exempt": true, "reason": "continuation of already-diagnosed targeted bugfixes (flaky test + ledger hash-collision), no new design/plan-engine decision this turn \u2014 retroactive provenance docs only, both PRs opened (164 green pending Josh merge, 165 CI running)"}
+{"ts": 1785565772, "slug": "p1-4-cxportal-index", "stage": "review-cycle", "exempt": false, "planner": "fable", "plannerConfirmed": true}

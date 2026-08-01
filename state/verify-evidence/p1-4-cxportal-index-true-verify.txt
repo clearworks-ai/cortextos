@@ -1,0 +1,60 @@
+P1.4 cxportal-index parent-cache bug fix true-verify evidence
+Commit: 0940f68
+Branch: feature/p1-4-cxportal-index
+Verification date: 2026-08-01
+
+=== SETUP ===
+Repo: /Users/joshweiss/code/cortextos/orgs/clearworksai/skills/cxportal-import
+Bug: interviews/surveys entities (parent=engagements) silently pulled 0 records
+     always, because guard `if parent_entity not in org_status:` was already
+     true by the time interviews/surveys checked it (standalone engagements
+     entity runs first, sets org_status without touching parent_cache).
+Fix: guard changed to `if cache_key not in parent_cache:`.
+
+=== TEST 1: Independent smoke test (separate mock shape, 2 orgs) ===
+Script: /tmp/p1-4-verify-test/verify_run_pull.py (Larry-authored, not part of
+        codexer's own regression test — different mock data/shape, tests 2
+        orgs where codexer's test used 1)
+Command: python3 /tmp/p1-4-verify-test/verify_run_pull.py
+Output:
+  acme: interviews=1 surveys=1
+  beta: interviews=1 surveys=1
+  PASS: independent smoke test confirms interviews/surveys pull real records
+  for both orgs
+Result: PASS
+
+=== TEST 2: Full pytest suite on current HEAD ===
+Command: cd orgs/clearworksai/skills/cxportal-import && python3 -m pytest tests/ -v
+Result: 20 passed in 0.03s (19 pre-existing + 1 new regression test
+        test_parent_child_entity_chain_pulls_records, all green)
+Verdict: PASS
+
+=== TEST 3: Adversarial re-proof (revert-and-reprove) ===
+Method: temporarily reverted the guard back to the pre-fix
+        `if parent_entity not in org_status:` and re-ran the new regression
+        test to confirm it fails without the fix (proves the test is not a
+        false-positive tautology), then restored the fix (working tree diff
+        confirmed empty afterward).
+Result: regression test failed under the old guard (0 not greater than 0),
+        passed after restoring the fix.
+Verdict: PASS - test genuinely exercises the bug, not a no-op assertion.
+
+=== TEST 4: Commit scope ===
+Command: git show --stat 0940f68
+Output:
+  orgs/clearworksai/skills/cxportal-import/pull_cxportal.py       |  5 +-
+  orgs/clearworksai/skills/cxportal-import/tests/test_pull_cxportal.py | 70 +++
+  2 files changed, 72 insertions(+), 3 deletions(-)
+Verdict: PASS - exactly 2 files, no scope bleed (round-2 commit 61cdad9 was
+         superseded specifically for this failure mode; not repeated here).
+
+=== FINAL VERDICT ===
+Independent smoke test (2 orgs, separate mocks): PASS
+Full test suite (20/20): PASS
+Revert-and-reprove adversarial check: PASS
+Commit scope clean: PASS
+VERDICT: PASS
+
+Session context: larry main-thread live verification + independent
+general-purpose subagent re-verification (see .agent/one-big-feature/p1-4-cxportal-index/04-review.md)
+Commit verified: 0940f68

@@ -1,0 +1,17 @@
+true-verify — clearpath-intel-dump
+commit: 7a6d5cf486d0126242d4eafc2ba0bf21750acfb6
+runner: larry (direct, independent re-run in a scratch clone)
+
+git diff --stat edeeebc49af1dfc5b2eda242420b0b4f5b5ff9c4 7a6d5cf486d0126242d4eafc2ba0bf21750acfb6
+-> (empty, byte-identical)
+
+python3 -m py_compile knowledge-base/scripts/intel_extractor.py knowledge-base/scripts/clearpath_export.py
+-> exit 0
+
+python3 -m _test_clients.test_intel_extractor
+-> ALL PASS (5/5 scenarios)
+
+python3 -m _test_clients.test_clearpath_export
+-> ALL PASS (4/4 scenarios)
+
+Total: 9/9 test scenarios pass. Scope: exactly 4 files, matching spec. Verdict: PASS.

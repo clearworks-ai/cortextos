@@ -1,0 +1,212 @@
+diff --git a/.gitignore b/.gitignore
+index 9bb84db..7e0d467 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -16,6 +16,8 @@ orgs/*
+ !orgs/clearworksai/
+ orgs/clearworksai/*
+ !orgs/clearworksai/secrets.env.example
++!orgs/clearworksai/skills/
++!orgs/clearworksai/skills/**
+ # But community subdirectories ARE part of the framework
+ !community/
+ !community/**
+diff --git a/orgs/clearworksai/skills/outputs-router/SKILL.md b/orgs/clearworksai/skills/outputs-router/SKILL.md
+new file mode 100644
+index 0000000..780e411
+--- /dev/null
++++ b/orgs/clearworksai/skills/outputs-router/SKILL.md
+@@ -0,0 +1,60 @@
++# Outputs Router Skill
++
++## Purpose
++
++This skill provides a deterministic way to file artifacts into the knowledge-sync taxonomy. It ensures that files are routed to the correct location based on their content type and that necessary frontmatter is added.
++
++## Usage
++
++To use the outputs router, you need to provide the content type, source file path, agent name, job name, source task ID, and date. For client-specific content, the client slug is also required.
++
++### CLI Command
++
++```bash
++python3 orgs/clearworksai/skills/outputs-router/file_output.py --content-type <type> \
++  --source <path> --agent <name> --job <name> --source-task <id> --date <ISO date> \
++  [--client <slug>]
++```
++
++### Supported Content Types
++
++| Content Type | Destination | Requires `--client`? |
++| :--- | :--- | :--- |
++| `client` | `raw/areas/clearworks/<client>/` | Yes |
++| `people` | `raw/resources/people/` | No |
++| `org` | `raw/resources/organizations/` | No |
++| `sop` | `raw/resources/reference/clearworks/` | No |
++| `diagram` | `raw/areas/clearworks/diagrams/` | No |
++| `session` | `raw/sessions/` | No |
++| `media` | `raw/media/` | No |
++
++### Frontmatter
++
++For `.md` and `.txt` files, the following YAML frontmatter will be injected or merged into the filed copy:
++
++```yaml
++agent: <agent_name>
++job: <job_name>
++source-task: <source_task_id>
++date: <iso_date>
++```
++
++For other file types (e.g., PNG, PDF, binary), a sidecar file named `<basename>.provenance.md` will be created containing the frontmatter block.
++
++## Examples
++
++### Filing an SOP
++
++```bash
++python3 orgs/clearworksai/skills/outputs-router/file_output.py --content-type sop \
++  --source /path/to/new-sop.md --agent codexer --job "create sop" \
++  --source-task task_12345 --date 2026-07-31
++```
++
++### Filing a Client Document
++
++```bash
++python3 orgs/clearworksai/skills/outputs-router/file_output.py --content-type client \
++  --source /path/to/client-doc.pdf --agent larry --job "client review" \
++  --source-task task_67890 --date 2026-07-31 --client acme-corp
++```
+\ No newline at end of file
+diff --git a/orgs/clearworksai/skills/outputs-router/file_output.py b/orgs/clearworksai/skills/outputs-router/file_output.py
+new file mode 100644
+index 0000000..0b1d807
+--- /dev/null
++++ b/orgs/clearworksai/skills/outputs-router/file_output.py
+@@ -0,0 +1,125 @@
++import argparse
++import os
++import shutil
++import sys
++from datetime import datetime
++
++# Define the base directory for knowledge-sync
++KNOWLEDGE_SYNC_BASE = os.path.expanduser("~/code/knowledge-sync/")
++
++# Define the mapping from content type to destination directory
++CONTENT_TYPE_MAPPING = {
++    "client": os.path.join(KNOWLEDGE_SYNC_BASE, "raw/areas/clearworks/"),
++    "people": os.path.join(KNOWLEDGE_SYNC_BASE, "raw/resources/people/"),
++    "org": os.path.join(KNOWLEDGE_SYNC_BASE, "raw/resources/organizations/"),
++    "sop": os.path.join(KNOWLEDGE_SYNC_BASE, "raw/resources/reference/clearworks/"),
++    "diagram": os.path.join(KNOWLEDGE_SYNC_BASE, "raw/areas/clearworks/diagrams/"),
++    "session": os.path.join(KNOWLEDGE_SYNC_BASE, "raw/sessions/"),
++    "media": os.path.join(KNOWLEDGE_SYNC_BASE, "raw/media/"),
++}
++
++
++def parse_arguments():
++    parser = argparse.ArgumentParser(
++        description="Deterministic filing helper for knowledge-sync artifacts."
++    )
++    parser.add_argument(
++        "--content-type",
++        required=True,
++        choices=CONTENT_TYPE_MAPPING.keys(),
++        help="The type of content being filed.",
++    )
++    parser.add_argument(
++        "--source", required=True, help="The path to the source file."
++    )
++    parser.add_argument(
++        "--agent", required=True, help="The name of the agent filing the artifact."
++    )
++    parser.add_argument(
++        "--job", required=True, help="The job name associated with the artifact."
++    )
++    parser.add_argument(
++        "--source-task", required=True, help="The ID of the source task."
++    )
++    parser.add_argument(
++        "--date", required=True, help="The ISO date of the artifact."
++    )
++    parser.add_argument(
++        "--client", help="The client slug (required for 'client' content type)."
++    )
++    return parser.parse_args()
++
++
++def validate_arguments(args):
++    if args.content_type == "client" and not args.client:
++        print("Error: --client missing when --content-type=client", file=sys.stderr)
++        sys.exit(1)
++
++    if not os.path.exists(args.source):
++        print(f"Error: Source path '{args.source}' does not exist", file=sys.stderr)
++        sys.exit(1)
++
++
++def get_destination_path(args):
++    base_dest = CONTENT_TYPE_MAPPING[args.content_type]
++    if args.content_type == "client":
++        dest_dir = os.path.join(base_dest, args.client)
++    else:
++        dest_dir = base_dest
++
++    filename = os.path.basename(args.source)
++    return os.path.join(dest_dir, filename)
++
++
++def inject_frontmatter(file_path, args):
++    frontmatter = f"""---
++agent: {args.agent}
++job: {args.job}
++source-task: {args.source_task}
++date: {args.date}
++---
++"""
++    with open(file_path, "r+") as f:
++        content = f.read()
++        f.seek(0, 0)
++        f.write(frontmatter + content)
++
++
++def create_provenance_sidecar(file_path, args):
++    provenance_path = f"{file_path}.provenance.md"
++    frontmatter = f"""---
++agent: {args.agent}
++job: {args.job}
++source-task: {args.source_task}
++date: {args.date}
++---
++"""
++    with open(provenance_path, "w") as f:
++        f.write(frontmatter)
++
++
++def main():
++    args = parse_arguments()
++    validate_arguments(args)
++
++    dest_path = get_destination_path(args)
++    dest_dir = os.path.dirname(dest_path)
++
++    if os.path.exists(dest_path):
++        print(f"Error: Destination file '{dest_path}' already exists", file=sys.stderr)
++        sys.exit(1)
++
++    os.makedirs(dest_dir, exist_ok=True)
++    shutil.copy2(args.source, dest_path)
++
++    file_ext = os.path.splitext(dest_path)[1].lower()
++    if file_ext in [".md", ".txt"]:
++        inject_frontmatter(dest_path, args)
++    else:
++        create_provenance_sidecar(dest_path, args)
++
++    print(dest_path)
++
++
++if __name__ == "__main__":
++    main()
+\ No newline at end of file

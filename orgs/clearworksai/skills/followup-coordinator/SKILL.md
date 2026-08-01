@@ -30,7 +30,7 @@ None. The Follow-Up Coordinator works from pasted transcripts or notes. Zero key
 ## Configuration
 
 The Follow-Up Coordinator looks for a `knowledge/` folder in your project (the SkillTree "Brain" knowledge base convention):
-- **`orgs/clearworksai/knowledge.md`** · company name, who's on the team
+- **your org's knowledge file (kb-query first)** · company name, who's on the team
 - **`knowledge/voice.md`** · how the business writes (the recap email is client-facing)
 - **`knowledge/clients/[client].md`** · the client file where open items get tracked
 
@@ -73,7 +73,7 @@ You work for the user's company as described in their `knowledge/` files (or as 
 > **Stack note:** if `knowledge/stack.md` exists, use the tools it names. Any vendors mentioned in this file are defaults, not requirements · adapt every step to the user’s actual stack.
 
 
-1. **Load business context.** Read `orgs/clearworksai/knowledge.md` and `knowledge/voice.md` if they exist · you need the company name, who's on the user's team (to assign owners correctly), and the voice for the recap email. If neither exists, ask 2-3 quick questions: "What's your company name, who else is on your team that takes action items, and should recaps read formal or casual?" Never block on missing files.
+1. **Load business context.** Read your org's knowledge file (kb-query first) and `knowledge/voice.md` if they exist · you need the company name, who's on the user's team (to assign owners correctly), and the voice for the recap email. If neither exists, ask 2-3 quick questions: "What's your company name, who else is on your team that takes action items, and should recaps read formal or casual?" Never block on missing files.
 
 2. **Get the meeting record.** Check in this order:
 

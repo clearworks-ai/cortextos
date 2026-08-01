@@ -22,31 +22,44 @@ EDGES_OUT="$(cortextos bus kb-extract-edges --org clearworksai --json 2>>/tmp/kb
 EDGES_STATUS=$?
 
 # Step 3 — compose + append counts row
-# Parse the LAST JSON object from RECON_OUT (the _emit_report dump)
-RECON_JSON=$(echo "$RECON_OUT" | grep -v "^SKIP" | tail -1 | grep -v "^$" || echo "{}")
-# Parse EDGES_OUT (already clean JSON)
-EDGES_JSON=$(echo "$EDGES_OUT" | grep -v "^$" || echo "{}")
-
+# Pass raw output directly to python for proper JSON parsing
 # Compose row using python3 to handle JSON parsing safely
-python3 - "$RECON_STATUS" "$EDGES_STATUS" "$RECON_JSON" "$EDGES_JSON" "$TS" "$LEDGER" <<'PYTHON_SCRIPT'
+RECON_OUT="$RECON_OUT" EDGES_OUT="$EDGES_OUT" python3 - "$RECON_STATUS" "$EDGES_STATUS" "$TS" "$LEDGER" <<'PYTHON_SCRIPT'
 import sys
 import json
 import os
+import re
 
 recon_status = int(sys.argv[1])
 edges_status = int(sys.argv[2])
-recon_json = sys.argv[3]
-edges_json = sys.argv[4]
-ts = sys.argv[5]
-ledger_path = sys.argv[6]
+ts = sys.argv[3]
+ledger_path = sys.argv[4]
 
+# Read raw output from environment (passed from bash)
+recon_raw = os.environ.get('RECON_OUT', '')
+edges_raw = os.environ.get('EDGES_OUT', '')
+
+# Parse RECON_OUT using JSONDecoder.raw_decode to find first valid JSON object
 try:
-    recon_data = json.loads(recon_json) if recon_json.strip() else {}
-except json.JSONDecodeError:
+    if recon_raw.strip():
+        # Find first '{' and parse from there
+        decoder = json.JSONDecoder()
+        start_idx = recon_raw.find('{')
+        if start_idx != -1:
+            recon_data, _ = decoder.raw_decode(recon_raw[start_idx:])
+        else:
+            recon_data = {}
+    else:
+        recon_data = {}
+except (json.JSONDecodeError, ValueError):
     recon_data = {}
 
+# Parse EDGES_OUT (already clean JSON)
 try:
-    edges_data = json.loads(edges_json) if edges_json.strip() else {}
+    if edges_raw.strip():
+        edges_data = json.loads(edges_raw)
+    else:
+        edges_data = {}
 except json.JSONDecodeError:
     edges_data = {}
 
@@ -103,8 +116,9 @@ if ledger_dir:
 with open(ledger_path, "a") as f:
     f.write(json.dumps(row) + "\n")
 
-# Exit with reconcile status
-sys.exit(recon_status)
+# Exit nonzero if either status is nonzero or if the composed row isn't green
+final_status = 0 if (recon_status == 0 and edges_status == 0 and green) else 1
+sys.exit(final_status)
 PYTHON_SCRIPT
 
 # Script exits with the reconcile status from the python3 block

@@ -8,6 +8,11 @@ MMRAG="$REPO/knowledge-base/scripts/mmrag.py"
 LEDGER="$REPO/orgs/clearworksai/agents/larry/state/kb-reconcile-ledger.jsonl"
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+# Source org secrets and set MMRAG_DIR
+SECRETS_FILE="$REPO/orgs/clearworksai/secrets.env"
+[[ -f "$SECRETS_FILE" ]] && set -o allexport && source "$SECRETS_FILE" && set +o allexport
+export MMRAG_DIR="$HOME/.cortextos/${CTX_INSTANCE_ID:-default}/orgs/clearworksai/knowledge-base"
+
 # Step 1 — reconcile (defaults cover all 3 DEFAULT_RECONCILE_ROOTS + shared-clearworksai)
 RECON_OUT="$("$PY" "$MMRAG" reconcile --json --yes 2>>/tmp/kb-reconcile-nightly.err)"
 RECON_STATUS=$?

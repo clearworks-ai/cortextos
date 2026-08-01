@@ -492,6 +492,59 @@ def test_never_overwrite():
         assert str(r2_file) in ledger[0]["files"]
 
 
+def test_f_string_regression():
+    """Regression test for f-string bug: verify {from_id-1} renders as integer, not literal string."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        db_path = tmpdir / "test.db"
+        out_root = tmpdir / "out"
+        state_path = tmpdir / "state.json"
+        ledger_path = tmpdir / "ledger.jsonl"
+        
+        # Create fixture db (this creates 3 observations and 3 summaries with ids 1-3)
+        create_fixture_db(db_path)
+        
+        # Run initial seed to establish state
+        result = run_exporter(db_path, out_root, state_path, ledger_path)
+        assert result.returncode == 0
+        
+        # Insert NEW observations with id > 3 to test {from_id-1} rendering
+        conn = sqlite3.connect(str(db_path))
+        now = datetime.now(timezone.utc).isoformat()
+        
+        # Insert observation with id=4 (so from_id-1 = 3)
+        conn.execute("""
+            INSERT INTO observations 
+            (memory_session_id, project, type, title, subtitle, text, facts, narrative, concepts, files_modified, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, ('session_regress', 'test-project', 'test', 'F-String Test', 'Test Regression', 
+              'Text', json.dumps(['fact1']), 'Narrative', json.dumps(['concept1']), 
+              json.dumps(['file1.ts']), now))
+        
+        conn.commit()
+        conn.close()
+        
+        # Run export again (forward run)
+        result = run_exporter(db_path, out_root, state_path, ledger_path)
+        assert result.returncode == 0, f"Export failed with return code {result.returncode}. stdout: {result.stdout}, stderr: {result.stderr}"
+        
+        # Check that observation file was created (summary file may not be created depending on exporter logic)
+        run_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        obs_file = out_root / "observations" / f"{run_date}-obs-4-4.md"
+        
+        assert obs_file.exists(), f"Observations file should exist at {obs_file}"
+        
+        # Read observation file content
+        obs_content = obs_file.read_text()
+        
+        # REGRESSION CHECK: verify that {from_id-1} rendered as integer 3, not literal "{from_id-1}"
+        # The correct output should contain "History before id 3:" not "History before id {from_id-1}:"
+        assert "History before id 3:" in obs_content, \
+            f"Expected 'History before id 3:' but got literal {{from_id-1}}. Content:\n{obs_content}"
+        assert "{from_id-1}" not in obs_content, \
+            f"Found literal {{from_id-1}} in output (f-string bug not fixed). Content:\n{obs_content}"
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v"])

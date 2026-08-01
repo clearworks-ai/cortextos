@@ -241,7 +241,7 @@ def render_observations_batch(rows: List[sqlite3.Row], run_date: str, source_tas
         "",
         f"# Claude session observations {run_date} (ids {from_id}-{to_id})",
         "",
-        "Auto-exported from claude-mem (forward-only). History before id {from_id-1}: query",
+        f"Auto-exported from claude-mem (forward-only). History before id {from_id-1}: query",
         f"claude-mem FTS directly, do not re-export.",
         "",
     ]
@@ -274,7 +274,7 @@ def render_summaries_batch(rows: List[sqlite3.Row], run_date: str, source_task: 
         "",
         f"# Claude session summaries {run_date} (ids {from_id}-{to_id})",
         "",
-        "Auto-exported from claude-mem (forward-only). History before id {from_id-1}: query",
+        f"Auto-exported from claude-mem (forward-only). History before id {from_id-1}: query",
         f"claude-mem FTS directly, do not re-export.",
         "",
     ]

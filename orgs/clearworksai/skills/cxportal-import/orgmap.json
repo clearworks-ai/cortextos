@@ -1,0 +1,14 @@
+{
+  "map": {
+    "6f7bdf8c-486e-46ae-8bf7-8e91abde6d47": "alloi",
+    "fe4dadf0-1b9a-4d86-90d0-160f61ae01ac": "ocg-properties",
+    "2c618f5c-7e30-482d-8c1d-1633930036d9": "rrk",
+    "189b89b4-578d-43b9-8856-1ef54e2b9702": "studio-pch"
+  },
+  "exclude": {
+    "7bbe86c2-3ae2-4f3f-bc9e-daf8921e3920": "clearworks-home: internal sandbox org, no KB home",
+    "94b50d89-01d3-4077-b555-05e25d8e0b89": "aerolab-industries: seed/demo data",
+    "ddb015cf-19cf-46d1-b174-2438dbe0e542": "meridian-tech-group: seed/demo data",
+    "d7adaa99-e042-4f66-9b06-82ef11654be8": "larry-verify-co: test org"
+  }
+}

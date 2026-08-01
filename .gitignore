@@ -79,3 +79,4 @@ WINDOWS_INSTALL_REPORT.md
 docs/phase-reports/
 orgs/clearworksai/skills/outputs-router/**/__pycache__/
 orgs/clearworksai/skills/outputs-router/.pytest_cache/
+orgs/clearworksai/skills/cxportal-import/**/__pycache__/

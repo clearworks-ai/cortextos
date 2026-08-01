@@ -124,6 +124,12 @@
       "prompt": "cortextos bus update-cron-fire staging-health --interval 4h 2>/dev/null; bash $CTX_AGENT_DIR/bin/staging-health.sh"
     },
     {
+      "name": "cxportal-pull-nightly",
+      "type": "recurring",
+      "cron": "52 2 * * *",
+      "prompt": "TASK_ID=$(cortextos bus create-task 'Cron: cxportal-pull-nightly' --desc 'Nightly cxportal pull: import entities to knowledge-sync' 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire cxportal-pull-nightly --interval 24h 2>/dev/null; NIGHTLY CXPORTAL PULL \u2014 (1) Check the PREVIOUS run's row: tail -1 $CTX_AGENT_DIR/state/cxportal-pull-ledger.jsonl. If it is missing or has \\\"green\\\": false, send Telegram 6690120787 with the row \u2014 silent failure on a cxportal cron is NOT acceptable. (2) Run tonight's pull in the FOREGROUND (timeout 600000 ~ 10 minutes): python3 ~/code/cortextos/orgs/clearworksai/skills/cxportal-import/pull_cxportal.py run --source-task $TASK_ID. (3) cortextos bus complete-task $TASK_ID --result 'cxportal-pull complete; previous night checked' 2>/dev/null. SILENT-OK if previous row green and tonight's run green."
+    },
+    {
       "name": "kb-reconcile-nightly",
       "type": "recurring",
       "cron": "37 3 * * *",

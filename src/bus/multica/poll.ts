@@ -65,7 +65,7 @@ export async function runInboundPoll(
   const result = createResult(dryRun);
 
   try {
-    const issues = await fetchAllIssues(client);
+    const issues = await fetchAllIssues(client, config);
     if (issues === null) {
       result.errors += 1;
       return result;
@@ -234,14 +234,16 @@ export async function runInboundPoll(
   }
 }
 
-async function fetchAllIssues(client: MulticaClient): Promise<MulticaIssue[] | null> {
+async function fetchAllIssues(client: MulticaClient, config: MulticaConfig): Promise<MulticaIssue[] | null> {
   const issues: MulticaIssue[] = [];
   let offset = 0;
 
   try {
     for (let pageNumber = 0; pageNumber < POLL_MAX_PAGES; pageNumber += 1) {
       const page = await client.listIssues({ limit: POLL_PAGE_SIZE, offset });
-      issues.push(...page);
+      // Filter to only issues in this workspace — avoid cross-workspace imports
+      const workspaceFiltered = page.filter(issue => issue.workspace_id === config.workspaceId);
+      issues.push(...workspaceFiltered);
 
       if (page.length < POLL_PAGE_SIZE) {
         return issues;
@@ -397,7 +399,7 @@ function runReverseImport(
     // landed. Re-link instead of duplicating.
     const marker = importMarkerFor(issue.id);
     const orphanTask = [...busById.values()].find(
-      (task) => typeof task.description === 'string' && task.description.includes(marker),
+      (task) => typeof task.description === 'string' && task.description.startsWith(marker),
     );
     if (orphanTask !== undefined) {
       result.resolved_ids += 1;
@@ -407,10 +409,15 @@ function runReverseImport(
         kind: 'resolve_id',
       });
       if (!dryRun) {
+        const createdTask = readTaskById(paths, orphanTask.id);
+        const hash = hashMappedFields(taskToIssuePayload(createdTask, config, 'bus', 'update'));
         store.upsertLink(orphanTask.id, {
           multica_issue_id: issue.id,
+          last_pushed_status: createdTask.status,
+          last_pushed_hash: hash,
           last_seen_multica_status: issue.status,
           last_seen_multica_assignee_id: issue.assignee_id,
+          idempotency_key: idempotencyKeyFor(orphanTask.id, hash),
         });
       }
       continue;

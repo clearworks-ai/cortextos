@@ -36,6 +36,8 @@ const config = {
   memberIdJosh: 'member-josh',
   apiKey: 'test-key',
   baseUrl: 'https://api.multica.com',
+  workspaceId: 'workspace-123',
+  readApiToken: 'test-token',
 };
 
 function makeIssue(overrides: Partial<MulticaIssue> & { id: string }): MulticaIssue {
@@ -220,5 +222,53 @@ describe('runInboundPoll - reverse import', () => {
     expect(result.imported).toBe(0);
     expect(listTasks(paths)).toHaveLength(0);
     expect(result.errors).toBe(0);
+  });
+
+  it('re-links crash-window orphan instead of duplicating', async () => {
+    const store = createSyncStateStore(join(testDir, 'sync-state.json'));
+    const identity = { agentName: 'test-agent', org: 'test-org' };
+    const issueId = 'issue-crash-orphan';
+    const issue = makeIssue({ 
+      id: issueId, 
+      workspace_id: 'workspace-123',
+      status: 'todo' 
+    });
+    const client = makeClient([issue]);
+
+    // Pre-seed a bus task with the [multica-import:<id>] marker but no link
+    // This simulates crash window: task created, link write never landed
+    const taskId = createTask(paths, 'test-agent', 'test-org', 'Orphan test task', {
+      assignee: 'human',
+      description: `[multica-import:${issueId}] This task was created but link write failed`,
+    });
+
+    // Run reverse import - should re-link, not duplicate-create
+    const result = await runInboundPoll(paths, config, client, store, { importIdentity: identity });
+
+    // Should resolve the orphan, not import
+    expect(result.imported).toBe(0);
+    expect(result.resolved_ids).toBe(1);
+    expect(result.actions).toHaveLength(1);
+    expect(result.actions[0]).toMatchObject({
+      bus_task_id: taskId,
+      multica_issue_id: issueId,
+      kind: 'resolve_id',
+    });
+
+    // Link should now exist with correct issue ID and all required fields
+    const link = store.load().links[taskId];
+    expect(link).toBeTruthy();
+    expect(link?.multica_issue_id).toBe(issueId);
+    expect(link?.last_seen_multica_status).toBe('todo');
+    expect(link?.last_seen_multica_assignee_id).toBeNull();
+    // Should have outbound fields seeded from the orphaned task
+    expect(link?.last_pushed_status).toBeTruthy();
+    expect(link?.last_pushed_hash).toBeTruthy();
+    expect(link?.idempotency_key).toBeTruthy();
+
+    // Only one task should exist (no duplicate)
+    const tasks = listTasks(paths);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].id).toBe(taskId);
   });
 });

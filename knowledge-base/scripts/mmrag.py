@@ -135,7 +135,6 @@ DEFAULT_RECONCILE_COLLECTION = "shared-clearworksai"
 DEFAULT_RECONCILE_ROOTS = (
     Path.home() / "code" / "knowledge-sync" / "wiki",
     Path.home() / "code" / "knowledge-sync" / "raw",
-    REPO_ROOT / "orgs" / "clearworksai" / "knowledge",
 )
 REBUILD_MIN_COUNT_RATIO = 0.25
 REBUILD_MAX_SIZE_FACTOR = 20

@@ -13,6 +13,10 @@ SECRETS_FILE="$REPO/orgs/clearworksai/secrets.env"
 [[ -f "$SECRETS_FILE" ]] && set -o allexport && source "$SECRETS_FILE" && set +o allexport
 export MMRAG_DIR="$HOME/.cortextos/${CTX_INSTANCE_ID:-default}/orgs/clearworksai/knowledge-base"
 
+# Step 0 — mirror agent-memory topic files into knowledge-sync (P1.5)
+MIRROR_OUT="$("$REPO/orgs/clearworksai/agents/larry/bin/agent-memory-mirror.sh" 2>>/tmp/kb-reconcile-nightly.err)"
+MIRROR_STATUS=$?
+
 # Step 1 — reconcile (defaults cover all 3 DEFAULT_RECONCILE_ROOTS + shared-clearworksai)
 RECON_OUT="$("$PY" "$MMRAG" reconcile --json --yes 2>>/tmp/kb-reconcile-nightly.err)"
 RECON_STATUS=$?
@@ -24,7 +28,7 @@ EDGES_STATUS=$?
 # Step 3 — compose + append counts row
 # Pass raw output directly to python for proper JSON parsing
 # Compose row using python3 to handle JSON parsing safely
-RECON_OUT="$RECON_OUT" EDGES_OUT="$EDGES_OUT" python3 - "$RECON_STATUS" "$EDGES_STATUS" "$TS" "$LEDGER" <<'PYTHON_SCRIPT'
+RECON_OUT="$RECON_OUT" EDGES_OUT="$EDGES_OUT" MIRROR_OUT="$MIRROR_OUT" python3 - "$RECON_STATUS" "$EDGES_STATUS" "$MIRROR_STATUS" "$TS" "$LEDGER" <<'PYTHON_SCRIPT'
 import sys
 import json
 import os
@@ -32,12 +36,14 @@ import re
 
 recon_status = int(sys.argv[1])
 edges_status = int(sys.argv[2])
-ts = sys.argv[3]
-ledger_path = sys.argv[4]
+mirror_status = int(sys.argv[3])
+ts = sys.argv[4]
+ledger_path = sys.argv[5]
 
 # Read raw output from environment (passed from bash)
 recon_raw = os.environ.get('RECON_OUT', '')
 edges_raw = os.environ.get('EDGES_OUT', '')
+mirror_raw = os.environ.get('MIRROR_OUT', '')
 
 # Parse RECON_OUT using JSONDecoder.raw_decode to find LAST valid JSON object
 try:
@@ -62,6 +68,29 @@ try:
         recon_data = {}
 except (json.JSONDecodeError, ValueError):
     recon_data = {}
+
+# Parse MIRROR_OUT using JSONDecoder.raw_decode to find LAST valid JSON object
+try:
+    if mirror_raw.strip():
+        decoder = json.JSONDecoder()
+        lines = mirror_raw.split('\n')
+        start_idx = -1
+        for i in range(len(lines) - 1, -1, -1):
+            if lines[i].strip().startswith('{'):
+                # Found the last line starting with '{'
+                # Calculate the byte index of this line
+                prefix = '\n'.join(lines[:i]) + '\n' if i > 0 else ''
+                start_idx = len(prefix)
+                break
+        
+        if start_idx != -1:
+            mirror_data, _ = decoder.raw_decode(mirror_raw[start_idx:])
+        else:
+            mirror_data = {}
+    else:
+        mirror_data = {}
+except (json.JSONDecodeError, ValueError):
+    mirror_data = {}
 
 # Parse EDGES_OUT (already clean JSON)
 try:
@@ -96,10 +125,19 @@ edges_stats = {
     "errors": len(edges_data.get("errors", []) or [])
 }
 
+# Extract mirror fields with fallbacks
+mirror_stats = {
+    "status": mirror_status,
+    "mirrored": mirror_data.get("mirrored", 0),
+    "deleted": mirror_data.get("deleted", 0),
+    "source_count": mirror_data.get("source_count", 0)
+}
+
 # Determine green status
 green = (
     recon_status == 0 and
     edges_status == 0 and
+    mirror_status == 0 and
     recon_stats["failed_files"] == 0 and
     recon_stats["delete_failures"]["files"] == 0 and
     recon_stats["delete_failures"]["chunks"] == 0 and
@@ -111,6 +149,7 @@ green = (
 row = {
     "ts": ts,
     "run": "kb-reconcile-nightly",
+    "memory_mirror": mirror_stats,
     "reconcile": recon_stats,
     "edges": edges_stats,
     "green": green
@@ -126,7 +165,7 @@ with open(ledger_path, "a") as f:
     f.write(json.dumps(row) + "\n")
 
 # Exit nonzero if either status is nonzero or if the composed row isn't green
-final_status = 0 if (recon_status == 0 and edges_status == 0 and green) else 1
+final_status = 0 if (recon_status == 0 and edges_status == 0 and mirror_status == 0 and green) else 1
 sys.exit(final_status)
 PYTHON_SCRIPT
 

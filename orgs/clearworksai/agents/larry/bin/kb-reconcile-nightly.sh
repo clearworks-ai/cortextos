@@ -39,12 +39,21 @@ ledger_path = sys.argv[4]
 recon_raw = os.environ.get('RECON_OUT', '')
 edges_raw = os.environ.get('EDGES_OUT', '')
 
-# Parse RECON_OUT using JSONDecoder.raw_decode to find first valid JSON object
+# Parse RECON_OUT using JSONDecoder.raw_decode to find LAST valid JSON object
 try:
     if recon_raw.strip():
-        # Find first '{' and parse from there
+        # Find last '{' that starts a line (to avoid SKIP error messages with braces)
         decoder = json.JSONDecoder()
-        start_idx = recon_raw.find('{')
+        lines = recon_raw.split('\n')
+        start_idx = -1
+        for i in range(len(lines) - 1, -1, -1):
+            if lines[i].strip().startswith('{'):
+                # Found the last line starting with '{'
+                # Calculate the byte index of this line
+                prefix = '\n'.join(lines[:i]) + '\n' if i > 0 else ''
+                start_idx = len(prefix)
+                break
+        
         if start_idx != -1:
             recon_data, _ = decoder.raw_decode(recon_raw[start_idx:])
         else:
@@ -84,7 +93,7 @@ edges_stats = {
     "filesSkippedUnchanged": edges_data.get("filesSkippedUnchanged", 0),
     "edgesUpserted": edges_data.get("edgesUpserted", 0),
     "typedEdges": edges_data.get("typedEdges", 0),
-    "errors": edges_data.get("errors", 0)
+    "errors": len(edges_data.get("errors", []) or [])
 }
 
 # Determine green status

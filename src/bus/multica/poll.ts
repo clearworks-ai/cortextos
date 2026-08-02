@@ -308,7 +308,7 @@ function applyStatusWriteBack(
 function resolveLinkedApproval(
   paths: BusPaths,
   taskId: string,
-  targetStatus: 'completed' | 'cancelled',
+  targetStatus: "completed" | "cancelled",
   multicaIssueId: string,
   result: InboundPollResult,
 ): void {
@@ -319,36 +319,26 @@ function resolveLinkedApproval(
     );
 
     if (linkedApproval) {
-      // First, update the task status (completeTask/cancelTask)
-      // This was skipped in applyStatusWriteBack to avoid double-resolution
-      if (targetStatus === 'completed') {
-        completeTask(paths, taskId);
-      } else if (targetStatus === 'cancelled') {
-        cancelTask(paths, taskId);
-      }
-      result.wrote_back += 1;
-
-      // Then resolve the approval
-      // Binding decision: treat Multica 'completed' as 'approved', 'cancelled' as 'rejected'
-      // Use Multica sync attribution, NOT Josh's name
+      // updateApproval (approval.ts) OWNS completing/cancelling the linked task
+      // (approval.ts:318-320). Do NOT call completeTask/cancelTask here directly
+      // — that would double-write the audit log and task_completed event.
       updateApproval(
         paths,
         linkedApproval.id,
-        targetStatus === 'completed' ? 'approved' : 'rejected',
-        targetStatus === 'completed'
-          ? 'resolved via Multica inbound sync (completed)'
-          : 'resolved via Multica inbound sync (cancelled)',
+        targetStatus === "completed" ? "approved" : "rejected",
+        targetStatus === "completed"
+          ? "resolved via Multica inbound sync (completed)"
+          : "resolved via Multica inbound sync (cancelled)",
       );
+      result.wrote_back += 1;
       result.actions.push({
         bus_task_id: taskId,
         multica_issue_id: multicaIssueId,
-        kind: 'approval-resolution',
+        kind: "approval-resolution",
         approval_id: linkedApproval.id,
       });
     }
   } catch (approvalError) {
-    // Approval-resolution failure must not fail or abort the poll loop
-    // Follow existing pattern: console.warn, count in errors if appropriate
     console.warn(
       `[multica] failed to resolve approval for task ${taskId} (issue ${multicaIssueId}): ${formatError(approvalError)}`,
     );

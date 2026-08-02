@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -306,6 +306,12 @@ describe('runInboundPoll - approval resolution', () => {
     expect(tasksBefore).toHaveLength(1);
     const linkedTaskId = tasksBefore[0].id;
 
+    // Verify the approval is linked to the correct task
+    const pendingApprovalsBefore = listPendingApprovals(paths);
+    const createdApproval = pendingApprovalsBefore.find((a) => a.id === approvalId);
+    expect(createdApproval).toBeDefined();
+    expect(createdApproval?.linked_task_id).toBe(linkedTaskId);
+
     // Create the link in the store
     const link = store.load();
     link.links[linkedTaskId] = {
@@ -368,7 +374,9 @@ describe('runInboundPoll - approval resolution', () => {
     // Create an approval with null linked_task_id by manually creating it
     // (createApproval always creates a linked task, so we do this manually for the test)
     const approvalId = `approval_${Math.floor(Date.now() / 1000)}_manual`;
-    const approvalPath = join(paths.approvalDir, 'pending', `${approvalId}.json`);
+    const approvalDir = join(paths.approvalDir, 'pending');
+    mkdirSync(approvalDir, { recursive: true });
+    const approvalPath = join(approvalDir, `${approvalId}.json`);
     const approvalData = {
       id: approvalId,
       title: 'Unlinked approval',

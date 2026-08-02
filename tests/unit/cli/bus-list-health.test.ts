@@ -160,7 +160,7 @@ describe('bus list-tasks + task-health', () => {
     const paths = makePaths('codexer');
     const openBuildId = createTask(paths, 'paul', 'acme', 'Open build');
     const completedId = createTask(paths, 'paul', 'acme', 'Completed build');
-    completeTask(paths, completedId, 'done');
+    completeTask(paths, completedId, 'completed in list test');
     createTask(paths, 'paul', 'acme', '[HUMAN] approve invoice');
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -176,7 +176,7 @@ describe('bus list-tasks + task-health', () => {
     const paths = makePaths('codexer');
     createTask(paths, 'paul', 'acme', 'Pending');
     const completedId = createTask(paths, 'paul', 'acme', 'Completed');
-    completeTask(paths, completedId, 'done');
+    completeTask(paths, completedId, 'completed in list test');
     createTask(paths, 'paul', 'acme', '[HUMAN] review');
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});

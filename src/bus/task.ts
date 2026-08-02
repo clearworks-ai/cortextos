@@ -59,6 +59,9 @@ export const CLASS_DUE_DAYS_CAP: Partial<Record<TaskClass, number>> = {
 export const STALL_ESCALATE_MS = 4 * 60 * 60 * 1000;
 export const RESURFACE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_SWEEP_MAX_ACTIONS = 20;
+/** Minimum trimmed result length that counts as substance on build-class completion. */
+export const MIN_RESULT_SUBSTANCE_LEN = 10;
+const TRIVIAL_RESULT_RE = /^(done|completed?|ok|okay|finished|fixed|yes|n\/?a)[.!]?$/i;
 /**
  * Open (actionable) task statuses. Shared by sweepDueTasks, listTasks
  * (openOnly), and fleetTaskHealth so the definitions cannot drift.
@@ -1078,10 +1081,23 @@ export function claimTask(
  * best-effort — a failing event write never unblocks task completion from
  * persisting to disk.
  */
+/**
+ * Substance check for build-class completion: true when the task carries a
+ * linked deliverable, OR the result is a real sentence (>= MIN_RESULT_SUBSTANCE_LEN
+ * trimmed chars and not a bare "done"/"ok"/"fixed"-style stop-word). Deliberately
+ * narrow — a length + stop-list heuristic, no semantic judgment.
+ */
+export function hasCompletionSubstance(task: Task, result?: string): boolean {
+  if ((task.outputs?.length ?? 0) > 0) return true;
+  const trimmed = (result ?? '').trim();
+  return trimmed.length >= MIN_RESULT_SUBSTANCE_LEN && !TRIVIAL_RESULT_RE.test(trimmed);
+}
+
 export function completeTask(
   paths: BusPaths,
   taskId: string,
   result?: string,
+  opts: { force?: boolean; forceReason?: string } = {},
 ): void {
   const filePath = findTaskFile(paths, taskId);
   if (!filePath) {
@@ -1092,10 +1108,28 @@ export function completeTask(
   let prevStatus: TaskStatus | undefined;
   let assignee: string | undefined;
   let taskOrg: string = '';
+  let forced = false;
   try {
     withFileLockSync(dirname(filePath), () => {
       const content = readFileSync(filePath, 'utf-8');
       const task: Task = JSON.parse(content);
+      // Substance gate — build-class only. Human tasks are completed by agents on
+      // Josh's behalf with terse confirms; system tasks are cron bookkeeping. Runs
+      // BEFORE any mutation so a rejection leaves the file untouched.
+      if (classifyTask(task) === 'build' && !hasCompletionSubstance(task, result)) {
+        if (!opts.force) {
+          throw new Error(
+            `Task ${taskId} completion rejected: build-class task has no substance — pass a real `
+            + `--result (>= 10 chars, not a bare "done"), attach a deliverable via `
+            + `"cortextos bus save-output ${taskId} <file>", or override with `
+            + `--force-no-evidence "<reason>".`,
+          );
+        }
+        if (!opts.forceReason || opts.forceReason.trim() === '') {
+          throw new Error(`Task ${taskId} completion force-override requires a reason`);
+        }
+        forced = true;
+      }
       prevStatus = task.status;
       assignee = task.assigned_to;
       taskOrg = task.org || '';
@@ -1110,7 +1144,8 @@ export function completeTask(
   } catch (err) {
     throw new Error(`Task ${taskId} complete failed: ${err}`);
   }
-  appendTaskAudit(paths, taskId, { event: 'complete', agent: assignee || 'unknown', from: prevStatus, to: 'completed', note: result });
+  const auditNote = forced ? `${result ?? ''} [forced: ${opts.forceReason}]` : result;
+  appendTaskAudit(paths, taskId, { event: 'complete', agent: assignee || 'unknown', from: prevStatus, to: 'completed', note: auditNote });
 
   // Activity-feed event. Best-effort — the task is already persisted.
   if (assignee) {
@@ -1131,6 +1166,7 @@ export function completeTask(
       logEvent(eventPaths, assignee, taskOrg, 'task', 'task_completed', 'info', {
         task_id: taskId,
         ...(result ? { result } : {}),
+        ...(forced ? { forced: true, force_reason: opts.forceReason } : {}),
       });
     } catch {
       // Never let observability break task completion.

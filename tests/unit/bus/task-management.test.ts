@@ -221,7 +221,7 @@ describe('Advanced Task Management', () => {
     it('task writes no longer produce .json.bak files', () => {
       const id = createTask(paths, 'agent1', 'testorg', 'No-bak task');
       updateTask(paths, id, { status: 'in_progress' }, 'agent1');
-      completeTask(paths, id, 'agent1', 'done');
+      completeTask(paths, id, 'completed in archive test');
 
       const baks = readdirSync(paths.taskDir).filter(f => f.endsWith('.json.bak'));
       expect(baks).toEqual([]);

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, findTaskFile, archiveTasks, classifyTask, ensureEpicTask, closeEpic, reclaimOrphanTasks, resolveTaskOwner, sweepDueTasks, deliverDueSweepActions, fleetTaskHealth, computeDefaultDueDate, STALL_ESCALATE_MS } from '../../../src/bus/task';
+import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, findTaskFile, archiveTasks, classifyTask, ensureEpicTask, closeEpic, reclaimOrphanTasks, resolveTaskOwner, sweepDueTasks, deliverDueSweepActions, fleetTaskHealth, computeDefaultDueDate, hasCompletionSubstance, STALL_ESCALATE_MS } from '../../../src/bus/task';
 import type { BusPaths, Task } from '../../../src/types';
 import * as lockMod from '../../../src/utils/lock';
 import { resolvePaths } from '../../../src/utils/paths';
@@ -310,7 +310,8 @@ describe('Task Management', () => {
       const taskId = createTask(paths, 'paul', 'acme', 'Complete-event task', {
         assignee: 'boris',
       });
-      completeTask(paths, taskId, 'shipped');
+      // Substance gate (spec 03): build-class completion needs a real result.
+      completeTask(paths, taskId, 'shipped the report');
 
       // Event file: <analyticsDir>/events/boris/<YYYY-MM-DD>.jsonl
       const today = new Date().toISOString().split('T')[0];
@@ -329,7 +330,99 @@ describe('Task Management', () => {
       expect(evt.category).toBe('task');
       expect(evt.severity).toBe('info');
       expect(evt.metadata.task_id).toBe(taskId);
-      expect(evt.metadata.result).toBe('shipped');
+      expect(evt.metadata.result).toBe('shipped the report');
+    });
+
+    // --- Substance gate before self-reported completion (spec 03) ------------------
+
+    it('rejects a build task completed with no result and no outputs, leaving it unchanged', () => {
+      const taskId = createTask(paths, 'paul', 'acme', 'Bare build task');
+      expect(() => completeTask(paths, taskId)).toThrow(/no substance/);
+      const content = JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8'));
+      expect(content.status).toBe('pending');
+      expect(content.completed_at).toBeNull();
+      // No completion audit entry, no completed event.
+      expect(readTaskAudit(paths, taskId).map(e => e.event)).toEqual(['create']);
+    });
+
+    it('rejects a build task completed with a stop-list result ("done")', () => {
+      const taskId = createTask(paths, 'paul', 'acme', 'Stop-list build task');
+      expect(() => completeTask(paths, taskId, 'done')).toThrow(/no substance/);
+      expect(JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8')).status).toBe('pending');
+    });
+
+    it('rejects a build task completed with a too-short result (<10 chars)', () => {
+      const taskId = createTask(paths, 'paul', 'acme', 'Short-result build task');
+      expect(() => completeTask(paths, taskId, 'short')).toThrow(/no substance/);
+      expect(JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8')).status).toBe('pending');
+    });
+
+    it('completes a build task with a real, substantive result', () => {
+      const taskId = createTask(paths, 'paul', 'acme', 'Real-result build task');
+      completeTask(paths, taskId, 'Shipped PR #123, tests green');
+      const content = JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8'));
+      expect(content.status).toBe('completed');
+      expect(content.result).toBe('Shipped PR #123, tests green');
+    });
+
+    it('completes a build task with no result but a linked deliverable output', () => {
+      const taskId = createTask(paths, 'paul', 'acme', 'Deliverable build task');
+      // Write an outputs[] entry directly onto the task JSON.
+      const file = join(paths.taskDir, `${taskId}.json`);
+      const task = JSON.parse(readFileSync(file, 'utf-8'));
+      task.outputs = [{ source: 'report.md', path: 'deliverables/report.md', linked_at: '2026-07-12T00:00:00Z' }];
+      writeFileSync(file, JSON.stringify(task));
+
+      completeTask(paths, taskId);
+      expect(JSON.parse(readFileSync(file, 'utf-8')).status).toBe('completed');
+    });
+
+    it('force-completes a bare build task with a reason, recording it in the audit note', () => {
+      const taskId = createTask(paths, 'paul', 'acme', 'Force build task', { assignee: 'boris' });
+      completeTask(paths, taskId, undefined, { force: true, forceReason: 'verified manually' });
+      const content = JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8'));
+      expect(content.status).toBe('completed');
+      const log = readTaskAudit(paths, taskId);
+      const complete = log.find(e => e.event === 'complete');
+      expect(complete?.note).toContain('[forced: verified manually]');
+    });
+
+    it('rejects a force completion that omits a reason', () => {
+      const taskId = createTask(paths, 'paul', 'acme', 'Force-no-reason build task');
+      expect(() => completeTask(paths, taskId, undefined, { force: true })).toThrow(
+        /force-override requires a reason/,
+      );
+      expect(JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8')).status).toBe('pending');
+    });
+
+    it('exempts a human-class task from the substance gate', () => {
+      const taskId = createTask(paths, 'paul', 'acme', 'Human follow-up', { assignee: 'human' });
+      completeTask(paths, taskId);
+      expect(JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8')).status).toBe('completed');
+    });
+
+    it('exempts a system-class task from the substance gate', () => {
+      const taskId = createTask(paths, 'paul', 'acme', 'Bookkeeping', { project: 'system' });
+      completeTask(paths, taskId);
+      expect(JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8')).status).toBe('completed');
+    });
+
+    it('closeEpic still closes an open build epic (internal result string passes the gate)', () => {
+      const epic = ensureEpicTask(paths, 'paul', 'acme', 'phase-x');
+      const result = closeEpic(paths, 'phase-x');
+      expect(result.closed).toBe(1);
+      expect(JSON.parse(readFileSync(join(paths.taskDir, `${epic.id}.json`), 'utf-8')).status).toBe('completed');
+    });
+
+    it('hasCompletionSubstance: trims, rejects trivial, accepts a 10-char non-stop string and outputs-only', () => {
+      const base = { outputs: undefined } as unknown as Task;
+      expect(hasCompletionSubstance(base, '   Done.   ')).toBe(false); // trims → trivial
+      expect(hasCompletionSubstance(base, 'ok')).toBe(false);
+      expect(hasCompletionSubstance(base, 'short')).toBe(false);
+      expect(hasCompletionSubstance(base, '1234567890')).toBe(true); // exactly 10, non-stop
+      expect(hasCompletionSubstance(base, undefined)).toBe(false);
+      const withOutputs = { outputs: [{ source: 'a', path: 'b', linked_at: 'c' }] } as unknown as Task;
+      expect(hasCompletionSubstance(withOutputs, undefined)).toBe(true); // outputs alone
     });
   });
 
@@ -474,7 +567,7 @@ describe('Task Management', () => {
       const waitingId = createTask(paths, 'paul', 'acme', 'Waiting');
       updateTask(paths, waitingId, 'waiting');
       const completedId = createTask(paths, 'paul', 'acme', 'Completed');
-      completeTask(paths, completedId, 'done');
+      completeTask(paths, completedId, 'done, verified in test');
       const cancelledId = createTask(paths, 'paul', 'acme', 'Cancelled');
       cancelTask(paths, cancelledId, 'duplicate');
       createTask(paths, 'paul', 'acme', 'Someday', { someday: true });
@@ -491,7 +584,7 @@ describe('Task Management', () => {
 
     it('openOnly with an explicit status filter lets status win', () => {
       const completedId = createTask(paths, 'paul', 'acme', 'Completed');
-      completeTask(paths, completedId, 'done');
+      completeTask(paths, completedId, 'done, verified in test');
       createTask(paths, 'paul', 'acme', 'Pending');
 
       const tasks = listTasks(paths, { openOnly: true, status: 'completed' });
@@ -770,7 +863,7 @@ describe('Task Management', () => {
     it('completed/cancelled/someday/archived tasks contribute nothing', () => {
       const now = new Date('2026-07-12T12:00:00Z');
       const completedId = createTask(paths, 'paul', 'acme', 'Completed');
-      completeTask(paths, completedId, 'done');
+      completeTask(paths, completedId, 'done, verified in test');
       patchTask(completedId, {
         due_date: '2026-07-11T12:00:00Z',
         updated_at: '2026-07-12T06:00:00Z',
@@ -852,7 +945,7 @@ describe('Task Management', () => {
 
     it('ensureEpicTask ignores completed or cancelled same-slug tasks and opens a fresh epic', () => {
       const completedEpic = ensureEpicTask(paths, 'paul', 'acme', 'alpha');
-      completeTask(paths, completedEpic.id, 'done');
+      completeTask(paths, completedEpic.id, 'done, verified in test');
       const reopened = ensureEpicTask(paths, 'paul', 'acme', 'alpha');
       expect(reopened.created).toBe(true);
       expect(reopened.id).not.toBe(completedEpic.id);
@@ -1890,7 +1983,7 @@ describe('claimTask — atomic claim (beads-inspired)', () => {
     claimTask(paths, id, 'alice');
     const claimKeys = spy.mock.calls.map(c => c[0] as string);
     spy.mockClear();
-    completeTask(paths, id, 'done');
+    completeTask(paths, id, 'done, verified in test');
     const completeKeys = spy.mock.calls.map(c => c[0] as string);
     spy.mockRestore();
     // Both mutators must acquire a lock on the task directory.
@@ -1936,7 +2029,7 @@ describe('Task audit log (append-only JSONL)', () => {
   it('full lifecycle records create + claim + complete in order', () => {
     const id = createTask(paths, 'alice', 'acme', 'Lifecycle');
     claimTask(paths, id, 'alice');
-    completeTask(paths, id, 'shipped');
+    completeTask(paths, id, 'shipped to prod');
 
     const log = readTaskAudit(paths, id);
     expect(log.map(e => e.event)).toEqual(['create', 'claim', 'complete']);
@@ -1945,7 +2038,7 @@ describe('Task audit log (append-only JSONL)', () => {
     expect(log[1].agent).toBe('alice');
     expect(log[2].from).toBe('in_progress');
     expect(log[2].to).toBe('completed');
-    expect(log[2].note).toBe('shipped');
+    expect(log[2].note).toBe('shipped to prod');
   });
 
   it('updateTask audit captures from->to transition with assignee as agent', () => {
@@ -2042,7 +2135,7 @@ describe('Task dependency DAG (blocks / blocked_by)', () => {
     expect(open[0].id).toBe(blocker);
     expect(open[0].status).toBe('pending');
 
-    completeTask(paths, blocker, 'done');
+    completeTask(paths, blocker, 'done, verified in test');
     open = checkTaskDependencies(paths, blocked);
     expect(open).toEqual([]);
   });
@@ -2108,7 +2201,7 @@ describe('Task dependency DAG (blocks / blocked_by)', () => {
     expect(idx(blocked)).toBeGreaterThan(idx(free));
 
     // Once blocker completes, respectDeps no longer demotes blocked.
-    completeTask(paths, blocker, 'done');
+    completeTask(paths, blocker, 'done, verified in test');
     const reordered = listTasks(paths, { respectDeps: true });
     const blockedTask = reordered.find(t => t.id === blocked)!;
     expect(blockedTask.status).toBe('pending');
@@ -2151,7 +2244,7 @@ describe('compactTasks — semantic compaction of old completed tasks', () => {
 
   it('archives a completed task older than cutoff — removes active JSON, preserves audit log', () => {
     const id = createTask(paths, 'alice', 'acme', 'Old done', { assignee: 'alice' });
-    completeTask(paths, id, 'shipped');
+    completeTask(paths, id, 'shipped to prod');
     backdateCompletion(id, 40);
 
     const auditPath = join(paths.taskDir, 'audit', `${id}.jsonl`);
@@ -2171,13 +2264,13 @@ describe('compactTasks — semantic compaction of old completed tasks', () => {
     const entry = JSON.parse(archiveLine);
     expect(entry.id).toBe(id);
     expect(entry.title).toBe('Old done');
-    expect(entry.result).toBe('shipped');
+    expect(entry.result).toBe('shipped to prod');
     expect(entry.assigned_to).toBe('alice');
   });
 
   it('skips recently-completed tasks (within cutoff)', () => {
     const id = createTask(paths, 'alice', 'acme', 'Fresh done');
-    completeTask(paths, id, 'ok');
+    completeTask(paths, id, 'ok, done in test');
     // Leave completed_at as "just now" — should be skipped.
     const report = compactTasks(paths, { olderThanDays: 30 });
     expect(report.archived).toEqual([]);
@@ -2197,7 +2290,7 @@ describe('compactTasks — semantic compaction of old completed tasks', () => {
   it('NEVER archives a completed task still referenced by an open task\'s blocked_by chain', () => {
     const blocker = createTask(paths, 'alice', 'acme', 'Blocker');
     const dependent = createTask(paths, 'alice', 'acme', 'Dependent', { blockedBy: [blocker] });
-    completeTask(paths, blocker, 'done');
+    completeTask(paths, blocker, 'done, verified in test');
     backdateCompletion(blocker, 60);
 
     // Dependent is still pending → blocker must not be compacted away.
@@ -2215,8 +2308,8 @@ describe('compactTasks — semantic compaction of old completed tasks', () => {
     expect(c).toBeDefined();
 
     // A + B both completed and aged out; C stays open.
-    completeTask(paths, a, 'done-a');
-    completeTask(paths, b, 'done-b');
+    completeTask(paths, a, 'done-a completed');
+    completeTask(paths, b, 'done-b completed');
     backdateCompletion(a, 60);
     backdateCompletion(b, 60);
 
@@ -2235,9 +2328,9 @@ describe('compactTasks — semantic compaction of old completed tasks', () => {
   it('once the dependent completes, the blocker becomes eligible', () => {
     const blocker = createTask(paths, 'alice', 'acme', 'Blocker');
     const dependent = createTask(paths, 'alice', 'acme', 'Dependent', { blockedBy: [blocker] });
-    completeTask(paths, blocker, 'done');
+    completeTask(paths, blocker, 'done, verified in test');
     backdateCompletion(blocker, 60);
-    completeTask(paths, dependent, 'done');
+    completeTask(paths, dependent, 'done, verified in test');
     backdateCompletion(dependent, 60);
 
     const report = compactTasks(paths, { olderThanDays: 30 });
@@ -2247,7 +2340,7 @@ describe('compactTasks — semantic compaction of old completed tasks', () => {
 
   it('is idempotent — running a second time on the same data archives nothing', () => {
     const id = createTask(paths, 'alice', 'acme', 'Run-twice');
-    completeTask(paths, id, 'ok');
+    completeTask(paths, id, 'ok, done in test');
     backdateCompletion(id, 60);
 
     const first = compactTasks(paths, { olderThanDays: 30 });
@@ -2259,7 +2352,7 @@ describe('compactTasks — semantic compaction of old completed tasks', () => {
 
   it('dry-run reports candidates without modifying anything', () => {
     const id = createTask(paths, 'alice', 'acme', 'Dry-run target');
-    completeTask(paths, id, 'ok');
+    completeTask(paths, id, 'ok, done in test');
     backdateCompletion(id, 60);
 
     const report = compactTasks(paths, { olderThanDays: 30, dryRun: true });

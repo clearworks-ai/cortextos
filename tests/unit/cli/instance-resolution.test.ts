@@ -6,6 +6,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 // resolve-active-instance.test.ts).
 vi.mock('../../../src/utils/resolve-active-instance', () => ({
   resolveActiveInstance: (fallback = 'default') => fallback,
+  // Mirror the real chain minus the marker layer (which resolves to its
+  // fallback here, exactly as if no marker file existed).
+  resolveInstanceIdChain: (explicit?: string, envFileValue?: string) =>
+    explicit || process.env.CTX_INSTANCE_ID || envFileValue || 'default',
 }));
 
 import { resolveInstanceId } from '../../../src/cli/resolve-instance-id';

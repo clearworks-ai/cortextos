@@ -65,3 +65,32 @@ export function resolveActiveInstance(fallback = 'default'): string {
 
   return trimmed;
 }
+
+/**
+ * THE shared instance-id resolution chain — instance-unification, done.
+ *
+ * Every entry point (CLI commands via resolve-instance-id.ts, the daemon via
+ * src/daemon/index.ts, and the bus/hooks/agent env path via
+ * src/utils/env.ts resolveEnv) MUST resolve the instance through this single
+ * function so they can never disagree about which ~/.cortextos/<instance>/
+ * state tree is canonical.
+ *
+ * Priority (highest wins):
+ *   1. explicit value (--instance flag / overrides.instanceId)
+ *   2. CTX_INSTANCE_ID environment variable
+ *   3. envFileValue (CTX_INSTANCE_ID from a .cortextos-env file, if the caller
+ *      loaded one — only env.ts passes this)
+ *   4. canonical-instance marker (~/.cortextos/state/ACTIVE_INSTANCE)
+ *   5. 'default'
+ *
+ * Back-compat: with no marker present, a bare invocation still resolves to
+ * 'default'. Never throws.
+ */
+export function resolveInstanceIdChain(explicit?: string, envFileValue?: string): string {
+  return (
+    explicit ||
+    process.env.CTX_INSTANCE_ID ||
+    envFileValue ||
+    resolveActiveInstance('default')
+  );
+}

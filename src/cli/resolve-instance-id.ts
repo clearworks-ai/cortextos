@@ -1,7 +1,12 @@
-import { resolveActiveInstance } from '../utils/resolve-active-instance.js';
+import { resolveInstanceIdChain } from '../utils/resolve-active-instance.js';
 
 /**
  * Resolve the target instance id for a CLI command.
+ *
+ * Thin CLI-facing wrapper over the ONE shared resolver chain
+ * (resolveInstanceIdChain in utils/resolve-active-instance.ts) so the CLI,
+ * the daemon, and the bus/agent env path can never disagree about which
+ * instance is canonical.
  *
  * Priority (highest wins):
  *   1. explicit --instance <id> option
@@ -10,9 +15,9 @@ import { resolveActiveInstance } from '../utils/resolve-active-instance.js';
  *   4. 'default'
  *
  * Back-compat: with no marker present, a bare invocation (no option, no env)
- * still resolves to 'default' — resolveActiveInstance falls back to the value
- * we pass it, and never throws.
+ * still resolves to 'default' — the shared chain falls back gracefully and
+ * never throws.
  */
 export function resolveInstanceId(instance?: string): string {
-  return instance || process.env.CTX_INSTANCE_ID || resolveActiveInstance('default');
+  return resolveInstanceIdChain(instance);
 }

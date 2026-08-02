@@ -6,6 +6,8 @@ import { spawnSync } from 'child_process';
 import { join } from 'path';
 import { homedir } from 'os';
 import { ensureDir } from '../utils/atomic.js';
+import { resolveInstanceIdChain } from '../utils/resolve-active-instance.js';
+import { detectInstanceMarkerDrift, INSTANCE_MARKER_DRIFT_CHECK_MS } from './instance-drift.js';
 
 // Each fast-checker registers a process-level SIGUSR1 handler (see
 // fast-checker.ts:102). With >10 active agents the default Node listener cap
@@ -224,9 +226,13 @@ class Daemon {
   private reconcileTrigger: ReconcileTrigger | null = null;
   private instanceId: string;
   private ctxRoot: string;
+  private markerDriftTimer: NodeJS.Timeout | null = null;
 
   constructor() {
-    this.instanceId = process.env.CTX_INSTANCE_ID || 'default';
+    // Resolve through the ONE shared chain (CTX_INSTANCE_ID > ACTIVE_INSTANCE
+    // marker > 'default') so a daemon booted without an env pin lands on the
+    // same instance bare CLI calls resolve — no CLI↔daemon split-brain.
+    this.instanceId = resolveInstanceIdChain();
     // Always derive ctxRoot from instanceId to avoid inheriting a parent cortextOS's CTX_ROOT
     this.ctxRoot = join(homedir(), '.cortextos', this.instanceId);
   }
@@ -281,11 +287,29 @@ class Daemon {
     );
     this.reconcileTrigger.start();
 
+    // M7 boot-pin drift monitor (RW-2): the daemon is pinned to its
+    // boot-resolved instance for life, but the ACTIVE_INSTANCE marker can be
+    // rewritten under it at any time. Re-warn loudly (every check, not once)
+    // whenever the marker drifts from the boot value so the CLI↔daemon
+    // split-brain is never silent on the daemon side. Warn-only by design:
+    // refusing/exiting here would take down a healthy fleet over a marker
+    // edit; the loud log + immediate boot-time check is the containment.
+    const checkMarkerDrift = () => {
+      const drift = detectInstanceMarkerDrift(this.instanceId);
+      if (drift) console.error(`[daemon] ${drift}`);
+    };
+    checkMarkerDrift();
+    this.markerDriftTimer = setInterval(checkMarkerDrift, INSTANCE_MARKER_DRIFT_CHECK_MS);
+
     console.log(`[daemon] Running (pid: ${process.pid})`);
 
     // Handle shutdown signals
     const shutdown = async () => {
       console.log('[daemon] Shutting down...');
+      if (this.markerDriftTimer) {
+        clearInterval(this.markerDriftTimer);
+        this.markerDriftTimer = null;
+      }
       try {
         if (this.reconcileTrigger) {
           this.reconcileTrigger.stop();

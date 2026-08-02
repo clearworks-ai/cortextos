@@ -122,9 +122,6 @@ export class AgentProcess {
   private crashTimestamps: number[] = [];
   private crashWindowMs: number = 0;
   private crashWindowMax: number = 0;
-  // Rate-limit exits (Anthropic 429 / usage-limit) back off without charging
-  // the daily crash counter, so a rate-limited agent is not falsely HALTED.
-  private rateLimitCount: number = 0;
   // Image-poison recovery circuit breaker: tracks recent recovery attempts
   // to prevent infinite loops when force-fresh fails to clear poisoned history
   private imagePoisonRecoveries: number[] = [];
@@ -296,7 +293,6 @@ export class AgentProcess {
         return;
       }
       this.status = 'running';
-      this.rateLimitCount = 0;
       this.sessionStart = new Date();
       this.log(`Running (pid: ${this.pty.getPid()})`);
 
@@ -607,29 +603,6 @@ export class AgentProcess {
   }
 
   /**
-   * Detect an exit caused by an Anthropic rate-limit / usage-limit condition
-   * (429s, "overloaded", weekly/5-hour caps) rather than a real crash. Matches
-   * only precise API/CLI signatures — bare prose like "rate limit" is
-   * deliberately excluded so session titles ("Rate Limit Guard") aren't
-   * misclassified. Rate-limit exits back off without charging crash_count.
-   */
-  private detectRateLimitCrash(recentOutput: string): boolean {
-    if (!recentOutput) return false;
-    const text = recentOutput.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').toLowerCase();
-    return (
-      text.includes('overloaded_error') ||
-      text.includes('rate_limit_error') ||
-      text.includes('too many requests') ||
-      text.includes('quota exceeded') ||
-      text.includes('usage limit') ||
-      text.includes('weekly limit') ||
-      text.includes('5-hour limit') ||
-      text.includes('5h limit') ||
-      /used \d+% of your/.test(text)
-    );
-  }
-
-  /**
    * Write the `.force-fresh` marker that AgentProcess.shouldContinue() reads
    * on the next start() to force a fresh Claude Code session (no --continue).
    * Used by the image-poison auto-recovery in handleExit().
@@ -699,7 +672,7 @@ export class AgentProcess {
 
     // Disabled-agent resurrection fix: an agent disabled via config.json or
     // enabled-agents.json while running must NOT be respawned by any crash-
-    // recovery path below (image-poison, rate-limit, exponential backoff).
+    // recovery path below (image-poison, exponential backoff).
     // Fresh read at exit time — the disable may have happened after start().
     // Also skips the crash-count increment: an operator-disabled agent's exit
     // is intentional-by-policy, not a crash.
@@ -785,21 +758,6 @@ export class AgentProcess {
           this.start().catch(err => this.log(`Image-poison restart failed: ${err}`));
         }
       }, 5000);
-      return;
-    }
-
-    if (this.detectRateLimitCrash(recentOutput)) {
-      this.rateLimitCount += 1;
-      const backoff = Math.min(60_000 * Math.pow(2, this.rateLimitCount - 1), 30 * 60_000);
-      this.log(`Rate-limit exit detected. Restarting in ${backoff / 1000}s without charging crash_count (rate-limit #${this.rateLimitCount}).`);
-      this.appendCrashToRestartsLog(exitCode, backoff, 'RATE_LIMIT');
-      this.status = 'crashed';
-      this.notifyStatusChange();
-      setTimeout(() => {
-        if (this.status === 'crashed') {
-          this.start().catch(err => this.log(`Rate-limit restart failed: ${err}`));
-        }
-      }, backoff);
       return;
     }
 
@@ -1368,7 +1326,7 @@ export class AgentProcess {
   private appendCrashToRestartsLog(
     exitCode: number,
     backoffMs: number,
-    kind: 'CRASH' | 'HALTED' | 'CRASH_LOOP' | 'IMAGE_POISON_RECOVERY' | 'RATE_LIMIT',
+    kind: 'CRASH' | 'HALTED' | 'CRASH_LOOP' | 'IMAGE_POISON_RECOVERY',
   ): void {
     try {
       const logDir = join(this.env.ctxRoot, 'logs', this.name);
@@ -1379,9 +1337,7 @@ export class AgentProcess {
           ? `exit_code=${exitCode} crash_count=${this.crashCount} max_crashes=${this.maxCrashesPerDay}`
           : kind === 'IMAGE_POISON_RECOVERY'
             ? `exit_code=${exitCode} backoff_s=${backoffMs / 1000} (not counted toward max_crashes)`
-            : kind === 'RATE_LIMIT'
-              ? `exit_code=${exitCode} rate_limit_count=${this.rateLimitCount} backoff_s=${backoffMs / 1000} (not counted toward max_crashes)`
-              : `exit_code=${exitCode} crash_count=${this.crashCount} backoff_s=${backoffMs / 1000}`;
+            : `exit_code=${exitCode} crash_count=${this.crashCount} backoff_s=${backoffMs / 1000}`;
       const logLine = `[${timestamp}] ${kind}: ${details}\n`;
       appendFileSync(join(logDir, 'restarts.log'), logLine, 'utf-8');
     } catch {

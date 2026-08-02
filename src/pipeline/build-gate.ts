@@ -1,8 +1,12 @@
 import {
   verifyChainDetailed,
   verifyOneBigFeatureArtifacts,
+  type LedgerRow,
   type LedgerVerifyFailure,
+  defaultLedgerPath,
+  readLedgerRows,
 } from './ledger.js';
+import { checkPhaseSequence, defaultPhaseLockPath } from './phase-lock.js';
 
 const BUILD_TARGETS = new Set(['codexer', 'opencoder', 'opencode']);
 const DEFAULT_MAX_AGE_SECONDS = 86_400;
@@ -19,6 +23,7 @@ export type BuildGateCode =
   | 'INVALID_DIRECTIVE'
   | 'ORDERING'
   | 'PIPELINE_GATE_BROKEN'
+  | 'PHASE_SKIPPED'
   | LedgerVerifyFailure['code'];
 
 export class BuildGateError extends Error {
@@ -100,6 +105,18 @@ export function enforceBuildDispatchGate(to: string, text: string): BuildDirecti
     if (!artifacts.ok) {
       throw new BuildGateError(artifacts.code, artifacts.detail);
     }
+  }
+
+  // Check phase sequencing before allowing dispatch
+  const ledgerPath = defaultLedgerPath(directive.repo);
+  const rows = readLedgerRows(ledgerPath);
+  const phaseCheck = checkPhaseSequence({
+    slug: directive.slug,
+    rows: rows,
+    lockPath: defaultPhaseLockPath(ledgerPath),
+  });
+  if (!phaseCheck.ok) {
+    throw new BuildGateError(phaseCheck.code, phaseCheck.detail);
   }
 
   return directive;

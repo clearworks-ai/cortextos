@@ -4,11 +4,18 @@ import {
   defaultLedgerPath,
   defaultSecretPath,
   emitLedgerRow,
+  readLedgerRows,
   verifyChainDetailed,
   verifyOneBigFeatureArtifacts,
   type LedgerRow,
   type Stage,
 } from './ledger.js';
+import {
+  checkPhaseSequence,
+  defaultPhaseLockPath,
+  markPhaseComplete,
+  type PhaseLockState,
+} from './phase-lock.js';
 
 interface ParsedArgs {
   flags: Record<string, string | boolean>;
@@ -68,7 +75,8 @@ function usage(): string {
     'Usage:',
     '  pipeline-stage-emit --slug <slug> --stage <stage> --artifact <path> [--runner <runner> --session <id> --transcript <path>] [--evidence <path>] [--reason <text>] [--ledger <path>] [--secret <path>]',
     '  pipeline-stage-emit --slug <slug> --stage <plan|specs> --artifact <path> --provenance-mode worker-dispatch --runner opencode --session <return-msg-id> --transcript <return-msg.json> [--bus-store-root <path>] [--ctx-root <path>]',
-    '  pipeline-stage-emit --verify --slug <slug> --through <stage> --max-age <seconds> [--scope-sha <sha>] [--repo <path>] [--framework <name>] [--ledger <path>] [--secret <path>]',
+    '  pipeline-stage-emit --verify --slug <slug> --through <stage> --max-age <seconds> [--scope-sha <sha>] [--repo <path>] [--framework <name>] [--ledger <path>] [--secret <path>] [--phase-lock <path>]',
+    '  pipeline-stage-emit --mark-phase-complete <N> [--by <agent>] [--ledger <path>] [--phase-lock <path>]',
   ].join('\n');
 }
 
@@ -111,12 +119,14 @@ export function main(argv: string[] = process.argv.slice(2)): void {
       printAndExit(`Invalid --max-age: ${maxAgeRaw}`, 5);
     }
 
+    const ledgerPath = stringFlag(flags, 'ledger') || defaultLedgerPath();
+
     const result = verifyChainDetailed({
       slug,
       throughStage,
       maxAgeSeconds,
       scopeSha: stringFlag(flags, 'scope-sha'),
-      ledgerPath: stringFlag(flags, 'ledger') || defaultLedgerPath(),
+      ledgerPath,
       secretPath: stringFlag(flags, 'secret') || defaultSecretPath(),
       busStoreRoot: stringFlag(flags, 'bus-store-root'),
     });
@@ -131,7 +141,43 @@ export function main(argv: string[] = process.argv.slice(2)): void {
       printAndExit(`${artifactCheck.code}: ${artifactCheck.detail}`, 1);
     }
 
+    // Phase-sequencing gate: block a `p<N>-` dispatch when a lower phase has neither
+    // a true-verify ledger row nor an explicit completed-phase mark. Runs on EVERY
+    // --verify (any --through incl. exempt, any/no --framework) so the exempt escape
+    // hatch cannot skip a phase. Uses its own readLedgerRows — verifyChainDetailed
+    // returns only the dispatched slug's chain rows. checkPhaseSequence never throws.
+    const lockPath = stringFlag(flags, 'phase-lock') || defaultPhaseLockPath(ledgerPath);
+    const phaseCheck = checkPhaseSequence({ slug, rows: readLedgerRows(ledgerPath), lockPath });
+    if (!phaseCheck.ok) {
+      printAndExit(`${phaseCheck.code}: ${phaseCheck.detail}`, 1);
+    }
+
     printAndExit(JSON.stringify(result.terminal), 0, false);
+  }
+
+  if (flags['mark-phase-complete'] !== undefined) {
+    let state: PhaseLockState;
+    try {
+      const raw = requireString(flags, 'mark-phase-complete');
+      // Validate that the raw value is a pure integer (reject '3abc' etc)
+      if (!/^[1-9]$/.test(raw)) {
+        throw new Error(`Invalid --mark-phase-complete: expected integer 1-9, got '${raw}'`);
+      }
+      const phase = Number.parseInt(raw, 10);
+      const ledgerPath = stringFlag(flags, 'ledger') || defaultLedgerPath();
+      const lockPath = stringFlag(flags, 'phase-lock') || defaultPhaseLockPath(ledgerPath);
+      state = markPhaseComplete({
+        phase,
+        by: stringFlag(flags, 'by') || 'manual',
+        lockPath,
+      });
+    } catch (error) {
+      printAndExit(String(error), mapEmitError(error));
+    }
+    // Success emit sits OUTSIDE the try so the terminal printAndExit is not caught
+    // by the markPhaseComplete error handler (printAndExit is `never` in prod; in
+    // tests it throws to unwind, and that throw must propagate, not be re-mapped).
+    printAndExit(JSON.stringify(state), 0, false);
   }
 
   try {

@@ -359,6 +359,18 @@ export function sweepDueTasks(
         continue;
       }
 
+      // Nudge-cycle counting: a flag with zero `updated_at` movement since the
+      // previous nudge increments the counter; any state change (updated_at
+      // advanced past the last nudge, or never nudged) resets it to 1. Escalation
+      // to Josh fires on the 3rd consecutive no-change flag. Rides the existing
+      // overdue (24h) / stall gate cooldowns — no new throttle constant.
+      const lastNudgedEpoch = parseIsoEpoch(task.last_nudged_at);
+      const stateChangedSinceLastNudge =
+        lastNudgedEpoch === null
+        || (updatedEpoch !== null && updatedEpoch > lastNudgedEpoch);
+      const nextNudgeCount = stateChangedSinceLastNudge ? 1 : (task.nudge_count ?? 1) + 1;
+      const escalateHuman = nextNudgeCount >= 3;
+
       report.actions.push({
         id: task.id,
         title: task.title,
@@ -368,11 +380,15 @@ export function sweepDueTasks(
         due_date: task.due_date,
         updated_at: task.updated_at,
         reasons,
+        nudge_count: nextNudgeCount,
+        escalate_human: escalateHuman,
       });
 
       if (dryRun) continue;
       if (reasons.includes('overdue')) task.resurfaced_at = nowIso;
       if (reasons.includes('stalled')) task.escalated_at = nowIso;
+      task.nudge_count = nextNudgeCount;
+      task.last_nudged_at = nowIso;
       atomicWriteSync(join(paths.taskDir, `${task.id}.json`), JSON.stringify(task));
     }
   };
@@ -389,11 +405,13 @@ export function sweepDueTasks(
 
 export function deliverDueSweepActions(
   actions: DueSweepAction[],
-  opts: { instanceId: string; org: string; fromAgent: string },
+  opts: { instanceId: string; org: string; fromAgent: string; paths: BusPaths },
 ): DueSweepDelivery {
   const delivery: DueSweepDelivery = {
     delivered: 0,
     failed: [],
+    escalations_created: [],
+    escalations_skipped: [],
   };
 
   for (const action of actions) {
@@ -407,6 +425,43 @@ export function deliverDueSweepActions(
         formatDueSweepMessage(action),
       );
       delivery.delivered += 1;
+    } catch (err) {
+      delivery.failed.push({
+        id: action.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // After the standard owner nudge, a 3rd+ consecutive no-change flag also
+    // surfaces a [HUMAN] task so Josh sees the stuck item. Runs outside the
+    // sweep's file lock (createTask takes its own); idempotent per original id.
+    if (!action.escalate_human) continue;
+    try {
+      const marker = `(id: ${action.id})`;
+      const alreadyOpen = listTasks(opts.paths).some(
+        (t) =>
+          OPEN_TASK_STATUSES.has(t.status)
+          && !t.archived
+          && t.title.startsWith('[HUMAN] Escalated:')
+          && t.title.includes(marker),
+      );
+      if (alreadyOpen) {
+        delivery.escalations_skipped.push(action.id);
+        continue;
+      }
+      const dueText = action.due_date ?? 'no due date';
+      const title = `[HUMAN] Escalated: ${action.title} — nudged ${action.nudge_count}x, no progress ${marker}`;
+      const description =
+        `Auto-escalated by the due-sweep after ${action.nudge_count} consecutive nudges with no progress. `
+        + `Owner: ${action.assigned_to}. Due: ${dueText}. Flags: ${action.reasons.join(', ')}. `
+        + `Original task id: ${action.id}.`;
+      const newId = createTask(opts.paths, opts.fromAgent, opts.org, title, {
+        assignee: 'human',
+        project: 'human-tasks',
+        priority: action.priority,
+        description,
+      });
+      delivery.escalations_created.push(newId);
     } catch (err) {
       delivery.failed.push({
         id: action.id,

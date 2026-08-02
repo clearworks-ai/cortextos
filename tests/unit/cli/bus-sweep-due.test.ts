@@ -122,6 +122,8 @@ describe('bus sweep-due-tasks + create-task --due', () => {
     expect(report.delivery).toEqual({
       delivered: 1,
       failed: [],
+      escalations_created: [],
+      escalations_skipped: [],
     });
     expect(readTask(overdueId).resurfaced_at).toBeTruthy();
     expect(readInbox('frank2')).toHaveLength(1);

@@ -1222,6 +1222,7 @@ busCommand
         instanceId: env.instanceId,
         org: env.org,
         fromAgent: env.agentName,
+        paths,
       });
       output.delivery = delivery;
 
@@ -1232,12 +1233,16 @@ busCommand
           assigned_to: action.assigned_to,
           due_date: action.due_date,
           reasons: action.reasons,
+          nudge_count: action.nudge_count,
         };
         if (action.reasons.includes('overdue')) {
           logEvent(paths, env.agentName, env.org, 'task', 'task_due_resurfaced', 'warning', metadata);
         }
         if (action.reasons.includes('stalled')) {
           logEvent(paths, env.agentName, env.org, 'task', 'task_stalled_escalated', 'warning', metadata);
+        }
+        if (action.escalate_human) {
+          logEvent(paths, env.agentName, env.org, 'task', 'task_escalated_to_human', 'warning', metadata);
         }
       }
     }

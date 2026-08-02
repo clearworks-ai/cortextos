@@ -17,6 +17,7 @@ vi.mock('os', async (importOriginal) => {
 import {
   resolveActiveInstance,
   activeInstanceMarkerPath,
+  resolveInstanceIdChain,
 } from '../../../src/utils/resolve-active-instance';
 
 function writeMarker(contents: string): void {
@@ -77,5 +78,55 @@ describe('resolveActiveInstance', () => {
   it('never throws — returns the fallback on any read error', () => {
     expect(() => resolveActiveInstance('default')).not.toThrow();
     expect(resolveActiveInstance('default')).toBe('default');
+  });
+});
+
+describe('resolveInstanceIdChain (the ONE shared resolver)', () => {
+  const originalInstance = process.env.CTX_INSTANCE_ID;
+
+  beforeEach(() => {
+    fakeHome = mkdtempSync(join(tmpdir(), 'ctx-instance-chain-'));
+    delete process.env.CTX_INSTANCE_ID;
+  });
+
+  afterEach(() => {
+    try { rmSync(fakeHome, { recursive: true, force: true }); } catch { /* ignore */ }
+    if (originalInstance === undefined) {
+      delete process.env.CTX_INSTANCE_ID;
+    } else {
+      process.env.CTX_INSTANCE_ID = originalInstance;
+    }
+    vi.restoreAllMocks();
+  });
+
+  it('explicit value wins over everything', () => {
+    writeMarker('cortextos1\n');
+    process.env.CTX_INSTANCE_ID = 'from-env';
+    expect(resolveInstanceIdChain('explicit', 'from-env-file')).toBe('explicit');
+  });
+
+  it('CTX_INSTANCE_ID env wins over env-file value and marker', () => {
+    writeMarker('cortextos1\n');
+    process.env.CTX_INSTANCE_ID = 'from-env';
+    expect(resolveInstanceIdChain(undefined, 'from-env-file')).toBe('from-env');
+  });
+
+  it('env-file value wins over the marker', () => {
+    writeMarker('cortextos1\n');
+    expect(resolveInstanceIdChain(undefined, 'from-env-file')).toBe('from-env-file');
+  });
+
+  it('marker wins when no explicit, env, or env-file value is set', () => {
+    writeMarker('cortextos1\n');
+    expect(resolveInstanceIdChain()).toBe('cortextos1');
+  });
+
+  it("back-compat: bare resolution stays 'default' with no marker", () => {
+    expect(resolveInstanceIdChain()).toBe('default');
+  });
+
+  it("ignores an invalid marker and falls back to 'default'", () => {
+    writeMarker('Not/A Valid Id!');
+    expect(resolveInstanceIdChain()).toBe('default');
   });
 });

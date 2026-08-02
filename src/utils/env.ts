@@ -5,6 +5,7 @@ import { homedir } from 'os';
 import type { CtxEnv } from '../types/index.js';
 import { ensureDir } from './atomic.js';
 import { validateAgentName, validateOrgName } from './validate.js';
+import { resolveInstanceIdChain } from './resolve-active-instance.js';
 import { stripBom } from './strip-bom.js';
 
 /** A value is a 1Password secret reference iff it starts with op:// */
@@ -30,11 +31,14 @@ export function resolveEnv(overrides?: Partial<CtxEnv>): CtxEnv {
     envFile = parseEnvFile(cortextosEnvPath);
   }
 
-  const instanceId =
-    overrides?.instanceId ||
-    process.env.CTX_INSTANCE_ID ||
-    envFile.CTX_INSTANCE_ID ||
-    'default';
+  // Instance id resolves through the ONE shared chain (resolveInstanceIdChain)
+  // so the bus/hooks/agent env path can never split-brain against the CLI or
+  // the daemon: overrides > CTX_INSTANCE_ID env > .cortextos-env file >
+  // ACTIVE_INSTANCE marker > 'default'.
+  const instanceId = resolveInstanceIdChain(
+    overrides?.instanceId,
+    envFile.CTX_INSTANCE_ID,
+  );
 
   const ctxRoot =
     overrides?.ctxRoot ||

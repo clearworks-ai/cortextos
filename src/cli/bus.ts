@@ -74,7 +74,6 @@ import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, Approval
 import type { TaskClass } from '../bus/task.js';
 import { fleetReconcileCommand } from './bus-reconcile.js';
 import { activityLedgerCommand } from './bus-activity-ledger.js';
-import { resolveActiveInstance } from '../utils/resolve-active-instance.js';
 
 /**
  * Check if the org requires deliverables and the task has none attached.
@@ -169,23 +168,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/**
- * Detect CLI ↔ daemon instance split (FP3).
- * Marker exists AND differs from env.instanceId → warn (or exit under STRICT).
- * // TODO(instance-unification): shared resolver across CLI + daemon + agent env.
- */
-function warnOnInstanceMismatch(env: ReturnType<typeof resolveEnv>): void {
-  const marker = resolveActiveInstance('');
-  if (!marker || marker === env.instanceId) return;
-  const msg =
-    `INSTANCE MISMATCH: CLI instanceId='${env.instanceId}' but active marker='${marker}'. ` +
-    `crons.json will write under ~/.cortextos/${env.instanceId}/… while the live daemon is likely ` +
-    `${marker}. Set CTX_INSTANCE_ID=${marker} (or unset stale overrides).`;
-  console.error(msg);
-  if (process.env.CTX_STRICT_INSTANCE === '1' || process.argv.includes('--strict-instance')) {
-    process.exit(1);
-  }
-}
+// NOTE(instance-unification, RW-2): the old warnOnInstanceMismatch (FP3)
+// band-aid was removed. resolveEnv() now resolves the instance through the
+// shared resolveInstanceIdChain (utils/resolve-active-instance.ts), which
+// consults the ACTIVE_INSTANCE marker — so a bare bus call can no longer
+// split-brain against the live daemon. A mismatch is only possible via an
+// explicit CTX_INSTANCE_ID/--instance override, which is intentional.
 
 /**
  * Signal daemon to reload crons.json and return the IPC response for verification.
@@ -3703,7 +3691,6 @@ busCommand
     const env = resolveEnv();
     // Ensure CTX_ROOT is wired so cron I/O helpers find the live instance path.
     ensureCtxRootEnv(env);
-    warnOnInstanceMismatch(env);
 
     // Validate agent exists in framework
     if (!agentExistsInFramework(agent, env.frameworkRoot)) {
@@ -3747,7 +3734,6 @@ busCommand
     const env = resolveEnv();
     // Ensure CTX_ROOT is wired so cron I/O helpers find the live instance path.
     ensureCtxRootEnv(env);
-    warnOnInstanceMismatch(env);
 
     const removed = removeCron(agent, name);
     if (!removed) {
@@ -4065,7 +4051,6 @@ busCommand
     const env = resolveEnv();
     // Ensure CTX_ROOT is wired so cron I/O helpers find the live instance path.
     ensureCtxRootEnv(env);
-    warnOnInstanceMismatch(env);
 
     let ok: boolean;
     try {

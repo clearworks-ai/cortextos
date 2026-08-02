@@ -983,6 +983,8 @@ describe('Task due dates and due sweep', () => {
       ...(overrides.blocked_by ? { blocked_by: overrides.blocked_by } : {}),
       ...(overrides.resurfaced_at !== undefined ? { resurfaced_at: overrides.resurfaced_at } : {}),
       ...(overrides.escalated_at !== undefined ? { escalated_at: overrides.escalated_at } : {}),
+      ...(overrides.nudge_count !== undefined ? { nudge_count: overrides.nudge_count } : {}),
+      ...(overrides.last_nudged_at !== undefined ? { last_nudged_at: overrides.last_nudged_at } : {}),
     };
   }
 
@@ -1074,7 +1076,7 @@ describe('Task due dates and due sweep', () => {
     ]);
   });
 
-  it('escalates stalled in_progress tasks once per stall episode and re-arms after a status touch', () => {
+  it('re-arms a stalled in_progress task every STALL_ESCALATE_MS and after a status touch', () => {
     writeTask(makeTask({
       id: 'task_stalled',
       title: 'Stalled task',
@@ -1095,23 +1097,63 @@ describe('Task due dates and due sweep', () => {
     expect(task.escalated_at).toBe('2026-07-12T12:00:00Z');
     expect(task.updated_at).toBe('2026-07-12T06:59:59Z');
 
-    const stillSameEpisode = sweepDueTasks(paths, {
-      now: new Date('2026-07-12T18:00:00Z'),
+    // Within the 4h stall cooldown since the last escalation → no re-fire.
+    const cooling = sweepDueTasks(paths, {
+      now: new Date('2026-07-12T15:59:59Z'),
     });
-    expect(stillSameEpisode.actions).toEqual([]);
+    expect(cooling.actions).toEqual([]);
 
+    // >= STALL_ESCALATE_MS since the last escalation → re-arms even with no status touch
+    // (the fix: the old gate fired only once per updated_at value).
+    const rearmedByCooldown = sweepDueTasks(paths, {
+      now: new Date('2026-07-12T16:00:01Z'),
+    });
+    expect(rearmedByCooldown.actions).toEqual([
+      expect.objectContaining({ id: 'task_stalled', reasons: ['stalled'] }),
+    ]);
+
+    // A status touch (updated_at advances) still independently re-arms.
     task = {
       ...task,
       updated_at: '2026-07-12T18:00:00Z',
     };
     writeTask(task);
 
-    const rearmed = sweepDueTasks(paths, {
+    const rearmedByTouch = sweepDueTasks(paths, {
       now: new Date('2026-07-12T22:30:01Z'),
     });
-    expect(rearmed.actions).toEqual([
+    expect(rearmedByTouch.actions).toEqual([
       expect.objectContaining({ id: 'task_stalled', reasons: ['stalled'] }),
     ]);
+  });
+
+  it('a stalled-only task (in_progress, no due_date) accrues nudge_count 1->2->3 and escalates', () => {
+    writeTask(makeTask({
+      id: 'task_stall_only',
+      title: 'Stalled no due date',
+      assigned_to: 'alice',
+      status: 'in_progress',
+      due_date: null,
+      updated_at: '2026-07-12T00:00:00Z',
+    }));
+
+    // Repeated stall sweeps, each >= STALL_ESCALATE_MS (4h) after the previous
+    // escalation, updated_at never moving → nudge_count climbs to escalation.
+    const c1 = sweepDueTasks(paths, { dryRun: false, now: new Date('2026-07-12T05:00:00Z') });
+    expect(c1.actions).toEqual([
+      expect.objectContaining({ id: 'task_stall_only', reasons: ['stalled'], nudge_count: 1, escalate_human: false }),
+    ]);
+
+    const c2 = sweepDueTasks(paths, { dryRun: false, now: new Date('2026-07-12T09:00:01Z') });
+    expect(c2.actions).toEqual([
+      expect.objectContaining({ id: 'task_stall_only', reasons: ['stalled'], nudge_count: 2, escalate_human: false }),
+    ]);
+
+    const c3 = sweepDueTasks(paths, { dryRun: false, now: new Date('2026-07-12T13:00:02Z') });
+    expect(c3.actions).toEqual([
+      expect.objectContaining({ id: 'task_stall_only', reasons: ['stalled'], nudge_count: 3, escalate_human: true }),
+    ]);
+    expect(readTaskJson('task_stall_only').nudge_count).toBe(3);
   });
 
   it('reports combined overdue + stalled candidates as one action row', () => {
@@ -1293,6 +1335,8 @@ describe('Task due dates and due sweep', () => {
         due_date: '2026-07-12T11:00:00Z',
         updated_at: '2026-07-12T08:00:00Z',
         reasons: ['overdue'],
+        nudge_count: 1,
+        escalate_human: false,
       },
       {
         id: 'task_bad_msg',
@@ -1303,11 +1347,14 @@ describe('Task due dates and due sweep', () => {
         due_date: null,
         updated_at: '2026-07-12T08:00:00Z',
         reasons: ['stalled'],
+        nudge_count: 1,
+        escalate_human: false,
       },
     ], {
       instanceId: 'default',
       org: 'acme',
       fromAgent: 'codexer',
+      paths,
     });
 
     expect(delivery.delivered).toBe(1);
@@ -1317,6 +1364,197 @@ describe('Task due dates and due sweep', () => {
     const inbox = readInbox('frank2');
     expect(inbox).toHaveLength(1);
     expect(inbox[0].text).toContain('Task overdue: [high] Due message');
+  });
+
+  // --- Nudge-cycle counting + escalate-to-Josh (spec 02) ---------------------------
+
+  it('first flag sets nudge_count=1 and last_nudged_at=now, action escalate_human=false', () => {
+    writeTask(makeTask({
+      id: 'task_nudge1',
+      title: 'Overdue once',
+      assigned_to: 'alice',
+      due_date: '2026-07-01T00:00:00Z',
+      updated_at: '2026-07-01T00:00:00Z',
+    }));
+
+    const applied = sweepDueTasks(paths, {
+      dryRun: false,
+      now: new Date('2026-07-10T00:00:00Z'),
+    });
+
+    expect(applied.actions).toEqual([
+      expect.objectContaining({ id: 'task_nudge1', nudge_count: 1, escalate_human: false }),
+    ]);
+    const task = readTaskJson('task_nudge1');
+    expect(task.nudge_count).toBe(1);
+    expect(task.last_nudged_at).toBe('2026-07-10T00:00:00Z');
+  });
+
+  it('second consecutive no-change flag increments to nudge_count=2 without escalating', () => {
+    writeTask(makeTask({
+      id: 'task_nudge2',
+      title: 'Overdue twice',
+      assigned_to: 'alice',
+      due_date: '2026-07-01T00:00:00Z',
+      updated_at: '2026-07-01T00:00:00Z',
+    }));
+
+    sweepDueTasks(paths, { dryRun: false, now: new Date('2026-07-10T00:00:00Z') });
+    // Advance past the 24h resurface cooldown; updated_at untouched.
+    const second = sweepDueTasks(paths, { dryRun: false, now: new Date('2026-07-11T00:00:01Z') });
+
+    expect(second.actions).toEqual([
+      expect.objectContaining({ id: 'task_nudge2', nudge_count: 2, escalate_human: false }),
+    ]);
+    expect(readTaskJson('task_nudge2').nudge_count).toBe(2);
+  });
+
+  it('third consecutive no-change flag sets escalate_human=true, nudge_count=3', () => {
+    writeTask(makeTask({
+      id: 'task_nudge3',
+      title: 'Overdue thrice',
+      assigned_to: 'alice',
+      due_date: '2026-07-01T00:00:00Z',
+      updated_at: '2026-07-01T00:00:00Z',
+    }));
+
+    sweepDueTasks(paths, { dryRun: false, now: new Date('2026-07-10T00:00:00Z') });
+    sweepDueTasks(paths, { dryRun: false, now: new Date('2026-07-11T00:00:01Z') });
+    const third = sweepDueTasks(paths, { dryRun: false, now: new Date('2026-07-12T00:00:02Z') });
+
+    expect(third.actions).toEqual([
+      expect.objectContaining({ id: 'task_nudge3', nudge_count: 3, escalate_human: true }),
+    ]);
+    expect(readTaskJson('task_nudge3').nudge_count).toBe(3);
+  });
+
+  it('a state change between nudges resets the counter to 1', () => {
+    writeTask(makeTask({
+      id: 'task_reset',
+      title: 'Overdue then touched',
+      assigned_to: 'alice',
+      due_date: '2026-07-01T00:00:00Z',
+      updated_at: '2026-07-01T00:00:00Z',
+    }));
+
+    sweepDueTasks(paths, { dryRun: false, now: new Date('2026-07-10T00:00:00Z') });
+    sweepDueTasks(paths, { dryRun: false, now: new Date('2026-07-11T00:00:01Z') });
+    expect(readTaskJson('task_reset').nudge_count).toBe(2);
+
+    // Simulate real state movement: updated_at advances past last_nudged_at.
+    const touched = { ...readTaskJson('task_reset'), updated_at: '2026-07-11T12:00:00Z' };
+    writeTask(touched);
+
+    const afterTouch = sweepDueTasks(paths, { dryRun: false, now: new Date('2026-07-12T00:00:02Z') });
+    expect(afterTouch.actions).toEqual([
+      expect.objectContaining({ id: 'task_reset', nudge_count: 1, escalate_human: false }),
+    ]);
+    expect(readTaskJson('task_reset').nudge_count).toBe(1);
+  });
+
+  it('dry-run computes nudge_count/escalate_human on the action but writes nothing', () => {
+    writeTask(makeTask({
+      id: 'task_dry',
+      title: 'Overdue dry',
+      assigned_to: 'alice',
+      due_date: '2026-07-01T00:00:00Z',
+      updated_at: '2026-07-01T00:00:00Z',
+      resurfaced_at: '2026-07-11T00:00:00Z',
+      nudge_count: 2,
+      last_nudged_at: '2026-07-11T00:00:00Z',
+    }));
+    const before = readTaskRaw('task_dry');
+
+    const dry = sweepDueTasks(paths, { now: new Date('2026-07-12T00:00:01Z') });
+
+    expect(dry.actions).toEqual([
+      expect.objectContaining({ id: 'task_dry', nudge_count: 3, escalate_human: true }),
+    ]);
+    expect(readTaskRaw('task_dry')).toBe(before);
+  });
+
+  it('deliverDueSweepActions creates one [HUMAN] escalation and skips a duplicate on the next run', () => {
+    const action = {
+      id: 'task_esc_src',
+      title: 'Stuck build',
+      assigned_to: 'alice',
+      org: 'acme',
+      priority: 'high' as const,
+      due_date: '2026-07-01T00:00:00Z',
+      updated_at: '2026-07-01T00:00:00Z',
+      reasons: ['overdue' as const],
+      nudge_count: 3,
+      escalate_human: true,
+    };
+
+    const first = deliverDueSweepActions([action], {
+      instanceId: 'default', org: 'acme', fromAgent: 'codexer', paths,
+    });
+    expect(first.escalations_created).toHaveLength(1);
+    expect(first.escalations_skipped).toEqual([]);
+
+    const created = listTasks(paths).filter(t => t.title.startsWith('[HUMAN] Escalated:'));
+    expect(created).toHaveLength(1);
+    expect(created[0].assigned_to).toBe('human');
+    expect(created[0].project).toBe('human-tasks');
+    expect(created[0].title).toContain('(id: task_esc_src)');
+    expect(created[0].title).toContain('nudged 3x');
+
+    const second = deliverDueSweepActions([action], {
+      instanceId: 'default', org: 'acme', fromAgent: 'codexer', paths,
+    });
+    expect(second.escalations_created).toEqual([]);
+    expect(second.escalations_skipped).toEqual(['task_esc_src']);
+    expect(listTasks(paths).filter(t => t.title.startsWith('[HUMAN] Escalated:'))).toHaveLength(1);
+  });
+
+  it('a created escalation task is human-class and never re-enters the sweep as an action', () => {
+    const action = {
+      id: 'task_esc_src2',
+      title: 'Stuck thing',
+      assigned_to: 'alice',
+      org: 'acme',
+      priority: 'high' as const,
+      due_date: '2026-07-01T00:00:00Z',
+      updated_at: '2026-07-01T00:00:00Z',
+      reasons: ['overdue' as const],
+      nudge_count: 3,
+      escalate_human: true,
+    };
+    deliverDueSweepActions([action], {
+      instanceId: 'default', org: 'acme', fromAgent: 'codexer', paths,
+    });
+    const escId = listTasks(paths).find(t => t.title.startsWith('[HUMAN] Escalated:'))?.id;
+    expect(escId).toBeDefined();
+
+    // Backdate the escalation task so it would otherwise be swept, then confirm it is skipped.
+    const esc = { ...readTaskJson(escId as string), due_date: '2026-07-01T00:00:00Z', updated_at: '2026-07-01T00:00:00Z' };
+    writeTask(esc);
+
+    const report = sweepDueTasks(paths, { now: new Date('2026-07-20T00:00:00Z') });
+    expect(report.skipped_human).toContain(escId);
+    expect(report.actions.find(a => a.id === escId)).toBeUndefined();
+  });
+
+  it('a task JSON lacking the new fields sweeps exactly like a first flag (compat pin)', () => {
+    // makeTask omits nudge_count/last_nudged_at entirely — the pre-migration shape.
+    const legacy = makeTask({
+      id: 'task_legacy',
+      title: 'Legacy overdue',
+      assigned_to: 'alice',
+      due_date: '2026-07-01T00:00:00Z',
+      updated_at: '2026-07-01T00:00:00Z',
+    });
+    expect('nudge_count' in legacy).toBe(false);
+    expect('last_nudged_at' in legacy).toBe(false);
+    writeTask(legacy);
+
+    const applied = sweepDueTasks(paths, { dryRun: false, now: new Date('2026-07-10T00:00:00Z') });
+    expect(applied.actions).toEqual([
+      expect.objectContaining({ id: 'task_legacy', nudge_count: 1, escalate_human: false }),
+    ]);
+    expect(readTaskJson('task_legacy').nudge_count).toBe(1);
+    expect(readTaskJson('task_legacy').last_nudged_at).toBe('2026-07-10T00:00:00Z');
   });
 });
 

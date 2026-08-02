@@ -81,6 +81,14 @@ export interface Task {
   resurfaced_at?: string | null;
   /** Last time the due-sweep escalated a >4h in_progress stall (ISO 8601). */
   escalated_at?: string | null;
+  /**
+   * How many consecutive due-sweep flags this task has drawn with no
+   * `updated_at` movement since the previous nudge. Absent = never nudged.
+   * First flag = 1; resets to 1 whenever the task's state changes between flags.
+   */
+  nudge_count?: number;
+  /** Last time the due-sweep counted a nudge for this task (ISO 8601). */
+  last_nudged_at?: string | null;
 }
 
 // Event Types
@@ -684,6 +692,10 @@ export interface DueSweepAction {
   due_date: string | null;
   updated_at: string;
   reasons: DueSweepReason[];
+  /** Consecutive no-change nudge count this flag represents (first flag = 1). */
+  nudge_count: number;
+  /** True once the task hits its 3rd consecutive no-change flag → surface to Josh. */
+  escalate_human: boolean;
 }
 
 export interface DueSweepReport {
@@ -698,6 +710,10 @@ export interface DueSweepReport {
 export interface DueSweepDelivery {
   delivered: number;
   failed: Array<{ id: string; error: string }>;
+  /** IDs of the `[HUMAN] Escalated:` tasks created this delivery pass. */
+  escalations_created: string[];
+  /** Original task IDs skipped because an open escalation already existed. */
+  escalations_skipped: string[];
 }
 
 /** Why a task landed in a fleet-health exception array. */

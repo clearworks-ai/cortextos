@@ -1361,15 +1361,25 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     const outboundPath = join(this.paths.logDir, 'outbound-messages.jsonl');
     try {
       if (existsSync(outboundPath)) {
-        const { size } = require('fs').statSync(outboundPath);
-        if (this.outboundLogSize === 0) {
-          // First check: seed baseline, don't trigger yet
-          this.outboundLogSize = size;
-        } else if (size > this.outboundLogSize) {
-          // New reply sent — clear typing state
-          this.outboundLogSize = size;
-          this.lastMessageInjectedAt = 0;
-          return false;
+        try {
+          const { size } = statSync(outboundPath);
+          if (this.outboundLogSize === 0) {
+            // First check: seed baseline, don't trigger yet
+            this.outboundLogSize = size;
+          } else if (size > this.outboundLogSize) {
+            // New reply sent — clear typing state
+            this.outboundLogSize = size;
+            this.lastMessageInjectedAt = 0;
+            return false;
+          }
+        } catch (enoentErr) {
+          // File was deleted between existsSync and statSync (log rotation)
+          // Treat as "no new data this tick" — leave outboundLogSize unchanged
+          if ((enoentErr as NodeJS.ErrnoException).code === 'ENOENT') {
+            // Silently ignore — expected during log rotation
+          } else {
+            throw enoentErr; // Re-throw other errors
+          }
         }
       }
     } catch { /* non-critical */ }

@@ -472,3 +472,73 @@ describe('AgentProcess - onboarding marker (do not auto-write .onboarded on hear
     expect(prompt).not.toContain('complete the onboarding protocol');
   });
 });
+
+describe('AgentProcess - image-poison recovery circuit breaker', () => {
+  it('trips circuit breaker on 3rd image-poison recovery within 15 minutes', async () => {
+    const mockTelegramApi = {
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const ap = new AgentProcess('alice', mockEnv, {});
+    ap.setTelegramHandle(mockTelegramApi as any, 'test-chat-id');
+
+    // Mock tailStdoutLog to return image-poison error output
+    const imagePoisonOutput = 'API Error: 400: image.source.base64 not supported for image format image/png not supported';
+    vi.spyOn(ap as any, 'tailStdoutLog').mockReturnValue(imagePoisonOutput);
+
+    // First recovery - should proceed normally
+    ap['handleExit'](0);
+    await new Promise(resolve => setTimeout(resolve, 100)); // Allow async handlers
+
+    // Second recovery - should proceed normally  
+    ap['handleExit'](0);
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Third recovery - should trip circuit breaker and send alert
+    ap['handleExit'](0);
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Verify alert was sent
+    expect(mockTelegramApi.sendMessage).toHaveBeenCalledWith(
+      'test-chat-id',
+      expect.stringContaining('IMAGE-POISON RECOVERY CIRCUIT BREAKER')
+    );
+    expect(mockTelegramApi.sendMessage).toHaveBeenCalledWith(
+      'test-chat-id',
+      expect.stringContaining('alice')
+    );
+    expect(mockTelegramApi.sendMessage).toHaveBeenCalledWith(
+      'test-chat-id',
+      expect.stringContaining('3 image-poison recoveries in 15min')
+    );
+
+    // Verify circuit breaker prevented restart
+    expect(ap['status']).toBe('crashed');
+  });
+
+  it('resets circuit breaker after 15 minutes', async () => {
+    const mockTelegramApi = {
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const ap = new AgentProcess('alice', mockEnv, {});
+    ap.setTelegramHandle(mockTelegramApi as any, 'test-chat-id');
+
+    // Simulate 3 recoveries, but with timestamps >15min apart
+    const now = Date.now();
+    ap['imagePoisonRecoveries'] = [
+      now - 16 * 60 * 1000,  // 16 minutes ago
+      now - 15 * 60 * 1000,  // 15 minutes ago  
+      now - 14 * 60 * 1000,  // 14 minutes ago
+    ];
+
+    // Fourth recovery - should proceed normally because old timestamps filtered out
+    const imagePoisonOutput = 'API Error: 400: image.source.base64 not supported for image format image/png not supported';
+    vi.spyOn(ap as any, 'tailStdoutLog').mockReturnValue(imagePoisonOutput);
+    ap['handleExit'](0);
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Should NOT send alert (circuit not tripped)
+    expect(mockTelegramApi.sendMessage).not.toHaveBeenCalled();
+  });
+});

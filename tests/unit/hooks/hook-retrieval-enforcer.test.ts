@@ -3,10 +3,10 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-const mockExecSync = vi.fn();
+const mockExecFileSync = vi.fn();
 
 vi.mock('child_process', () => ({
-  execSync: (...args: unknown[]) => mockExecSync(...args),
+  execFileSync: (...args: unknown[]) => mockExecFileSync(...args),
 }));
 
 import {
@@ -59,10 +59,10 @@ function writeCacheForSession(sessionId: string, state: object): string {
   return filePath;
 }
 
-function kbQueryCalls(): string[] {
-  return mockExecSync.mock.calls
-    .map(([command]) => String(command))
-    .filter((command) => command.includes('cortextos bus kb-query'));
+function kbQueryCalls(): string[][] {
+  return mockExecFileSync.mock.calls
+    .filter(([file, args]) => file === 'cortextos' && Array.isArray(args) && args[1] === 'kb-query')
+    .map(([, args]) => (args as string[]));
 }
 
 beforeEach(() => {
@@ -75,19 +75,19 @@ beforeEach(() => {
   process.env.CTX_AGENT_NAME = agentName;
   process.env.CTX_ORG = 'clearworksai';
 
-  mockExecSync.mockReset();
-  mockExecSync.mockImplementation((command: unknown) => {
-    const commandText = String(command);
-    if (commandText === 'git rev-parse --show-toplevel') {
+  mockExecFileSync.mockReset();
+  mockExecFileSync.mockImplementation((file: unknown, args: unknown) => {
+    const argv = Array.isArray(args) ? args.map(String) : [];
+    if (file === 'git' && argv[0] === 'rev-parse') {
       return `${join(tempHome, 'fleet-repo')}\n`;
     }
-    if (commandText.includes('git -C') && commandText.includes('log --all')) {
+    if (file === 'git' && argv.includes('log')) {
       return `${commitLogText}\n`;
     }
-    if (commandText.includes('cortextos bus kb-query')) {
+    if (file === 'cortextos' && argv[1] === 'kb-query') {
       return `${kbResultText}\n`;
     }
-    throw new Error(`Unexpected command: ${commandText}`);
+    throw new Error(`Unexpected command: ${String(file)} ${argv.join(' ')}`);
   });
 
   writeTranscript('session.jsonl', [
@@ -127,7 +127,7 @@ describe('hook-retrieval-enforcer', () => {
     );
 
     expect(output).toBe('');
-    expect(mockExecSync).not.toHaveBeenCalled();
+    expect(mockExecFileSync).not.toHaveBeenCalled();
     expect(readCache(cachePathFor(agentName, 'cron-session'))).toEqual({
       turnCount: 99,
       lastCommitsHash: 'keep-me',
@@ -141,7 +141,7 @@ describe('hook-retrieval-enforcer', () => {
     });
 
     expect(output).toBe('');
-    expect(mockExecSync).not.toHaveBeenCalled();
+    expect(mockExecFileSync).not.toHaveBeenCalled();
   });
 
   it('first turn always includes direction and commits when non-empty', () => {
@@ -297,5 +297,61 @@ describe('hook-retrieval-enforcer', () => {
     expect(cache.lastKbQueryNormalized).toContain('meeting-evt-123');
     expect(cache.lastKbResultHash).toBe(sha256Hex(kbResultText));
     expect(cache.lastKbResultAtMs).toBe(5000);
+  });
+
+  it('kb-query runs shell-free: prompt with shell metacharacters stays a single argv element', () => {
+    const hostile = 'check meeting-evt-123 status"; touch /tmp/pwned; echo "&& rm -rf $HOME `id`';
+
+    buildAdditionalContext(promptEnvelope(hostile, 'inject-prompt'), {
+      agentName,
+      org: 'clearworksai',
+    });
+
+    const calls = kbQueryCalls();
+    expect(calls).toHaveLength(1);
+    const argv = calls[0];
+    // Exact argv shape: no shell string is ever built.
+    expect(argv[0]).toBe('bus');
+    expect(argv[1]).toBe('kb-query');
+    expect(argv.slice(3)).toEqual(['--org', 'clearworksai', '--top-k', '5', '--threshold', '0.45']);
+    // The query is one argument; hostile content never reaches a shell.
+    expect(argv[2]).toContain('touch /tmp/pwned');
+    expect(argv[2]).not.toContain('"');
+    expect(argv[2]).not.toContain('$');
+    expect(argv[2]).not.toContain('`');
+  });
+
+  it('kb-query passes org as its own argv element (no shell interpolation of CTX_ORG)', () => {
+    const hostileOrg = 'clearworksai; touch /tmp/pwned-org';
+
+    buildAdditionalContext(promptEnvelope('check meeting-evt-123 status now', 'inject-org'), {
+      agentName,
+      org: hostileOrg,
+    });
+
+    const calls = kbQueryCalls();
+    expect(calls).toHaveLength(1);
+    const orgFlagIndex = calls[0].indexOf('--org');
+    expect(orgFlagIndex).toBeGreaterThan(-1);
+    expect(calls[0][orgFlagIndex + 1]).toBe(hostileOrg);
+  });
+
+  it('git commands run shell-free with argv arrays', () => {
+    buildAdditionalContext(promptEnvelope('ok continue', 'git-argv'), {
+      agentName,
+      org: 'clearworksai',
+    });
+
+    const gitCalls = mockExecFileSync.mock.calls.filter(([file]) => file === 'git');
+    expect(gitCalls.length).toBeGreaterThanOrEqual(2);
+    for (const [, args] of gitCalls) {
+      expect(Array.isArray(args)).toBe(true);
+    }
+    const logCall = gitCalls.find(([, args]) => (args as string[]).includes('log'));
+    expect(logCall).toBeDefined();
+    const logArgs = logCall?.[1] as string[];
+    // Repo path is its own argv element after -C, never quoted into a shell string.
+    expect(logArgs[0]).toBe('-C');
+    expect(logArgs[1]).toBe(join(tempHome, 'fleet-repo'));
   });
 });

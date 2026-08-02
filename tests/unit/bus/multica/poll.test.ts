@@ -291,20 +291,10 @@ describe('runInboundPoll - approval resolution', () => {
     const store = createSyncStateStore(join(testDir, 'sync-state.json'));
     const issueId = 'issue-linked';
 
-    // Create an approval which also creates a companion task
-    const approvalId = await createApproval(
-      paths,
-      'paul',
-      'clearworksai',
-      'Test approval',
-      'other',
-      'test context',
-    );
-
-    // Get the task that was created by createApproval
-    const tasksBefore = listTasks(paths);
-    expect(tasksBefore).toHaveLength(1);
-    const linkedTaskId = tasksBefore[0].id;
+    // Create a task first
+    const linkedTaskId = createTask(paths, 'paul', 'clearworksai', 'Linked task', {
+      description: 'task with approval',
+    });
 
     // Create the link in the store
     const link = store.load();
@@ -314,6 +304,22 @@ describe('runInboundPoll - approval resolution', () => {
       last_seen_multica_assignee_id: null,
     };
     store.save(link);
+
+    // Create an approval linked to this task (using proper signature)
+    const approvalId = await createApproval(
+      paths,
+      'paul',
+      'clearworksai',
+      'Test approval',
+      'other',
+      'test context',
+    );
+
+    // Update the approval to link it to the task (we need to manually set linked_task_id since createApproval creates its own task)
+    const approvalPath = join(paths.approvalDir, 'pending', `${approvalId}.json`);
+    const approvalData = JSON.parse(readFileSync(approvalPath, 'utf-8'));
+    approvalData.linked_task_id = linkedTaskId;
+    writeFileSync(approvalPath, JSON.stringify(approvalData, null, 2));
 
     // Create a Multica issue that transitions to 'done' (mapped to 'completed')
     const issue = makeIssue({ 
@@ -368,7 +374,8 @@ describe('runInboundPoll - approval resolution', () => {
     // Create an approval with null linked_task_id by manually creating it
     // (createApproval always creates a linked task, so we do this manually for the test)
     const approvalId = `approval_${Math.floor(Date.now() / 1000)}_manual`;
-    const approvalPath = join(paths.approvalDir, 'pending', `${approvalId}.json`);
+    const approvalDir = join(paths.approvalDir, 'pending');
+    const approvalPath = join(approvalDir, `${approvalId}.json`);
     const approvalData = {
       id: approvalId,
       title: 'Unlinked approval',
@@ -408,20 +415,10 @@ describe('runInboundPoll - approval resolution', () => {
     const store = createSyncStateStore(join(testDir, 'sync-state.json'));
     const issueId = 'issue-simultaneous';
 
-    // Create an approval which also creates a companion task
-    const approvalId = await createApproval(
-      paths,
-      'paul',
-      'clearworksai',
-      'Simultaneous approval',
-      'other',
-      'simultaneous test context',
-    );
-
-    // Get the task that was created by createApproval
-    const tasksBefore = listTasks(paths);
-    expect(tasksBefore).toHaveLength(1);
-    const linkedTaskId = tasksBefore[0].id;
+    // Create a task first
+    const linkedTaskId = createTask(paths, 'paul', 'clearworksai', 'Simultaneous task', {
+      description: 'task for simultaneous test',
+    });
 
     // Create the link in the store
     const link = store.load();
@@ -431,6 +428,22 @@ describe('runInboundPoll - approval resolution', () => {
       last_seen_multica_assignee_id: null,
     };
     store.save(link);
+
+    // Create an approval linked to this task (using proper signature)
+    const approvalId = await createApproval(
+      paths,
+      'paul',
+      'clearworksai',
+      'Simultaneous approval',
+      'other',
+      'simultaneous test context',
+    );
+
+    // Update the approval to link it to the task
+    const approvalPath = join(paths.approvalDir, 'pending', `${approvalId}.json`);
+    const approvalData = JSON.parse(readFileSync(approvalPath, 'utf-8'));
+    approvalData.linked_task_id = linkedTaskId;
+    writeFileSync(approvalPath, JSON.stringify(approvalData, null, 2));
 
     // First, approve via card (updateApproval)
     const { updateApproval: cardUpdateApproval } = await import('../../../../src/bus/approval.js');
@@ -459,20 +472,10 @@ describe('runInboundPoll - approval resolution', () => {
     const store = createSyncStateStore(join(testDir, 'sync-state.json'));
     const issueId = 'issue-cancelled';
 
-    // Create an approval which also creates a companion task
-    const approvalId = await createApproval(
-      paths,
-      'paul',
-      'clearworksai',
-      'Cancelled approval',
-      'other',
-      'cancellation test context',
-    );
-
-    // Get the task that was created by createApproval
-    const tasksBefore = listTasks(paths);
-    expect(tasksBefore).toHaveLength(1);
-    const linkedTaskId = tasksBefore[0].id;
+    // Create a task first
+    const linkedTaskId = createTask(paths, 'paul', 'clearworksai', 'Cancelled task', {
+      description: 'task for cancellation test',
+    });
 
     // Create the link in the store
     const link = store.load();
@@ -482,6 +485,22 @@ describe('runInboundPoll - approval resolution', () => {
       last_seen_multica_assignee_id: null,
     };
     store.save(link);
+
+    // Create an approval linked to this task
+    const approvalId = await createApproval(
+      paths,
+      'paul',
+      'clearworksai',
+      'Cancelled approval',
+      'other',
+      'cancellation test context',
+    );
+
+    // Update the approval to link it to the task
+    const approvalPath = join(paths.approvalDir, 'pending', `${approvalId}.json`);
+    const approvalData = JSON.parse(readFileSync(approvalPath, 'utf-8'));
+    approvalData.linked_task_id = linkedTaskId;
+    writeFileSync(approvalPath, JSON.stringify(approvalData, null, 2));
 
     // Create a Multica issue that transitions to 'cancelled' (mapped to 'cancelled')
     const issue = makeIssue({ 

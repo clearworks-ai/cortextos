@@ -10,7 +10,8 @@ import { hostSpawn } from './pty-host-client.js';
 // node-pty types
 interface IPty {
   pid: number;
-  /** Pid of the forked pty-host child (hostSpawn only). See pty-host-client.ts. */
+  /** Pid of the forked pty-host child (hostSpawn only). See pty-host-client.ts.
+   * Absent on test-injected fakes (RW-6). */
   readonly hostPid?: number;
   write(data: string): void;
   onData(callback: (data: string) => void): { dispose(): void };
@@ -409,6 +410,8 @@ export class AgentPTY {
    * RW-3: lets the registry reconciler kill the FULL tree, not just the
    * inner pid — a live pty-host with a dead claude child (or the reverse)
    * must not leak.
+   * RW-6: also lets the reaper cross-reference the durable pty-host ledger
+   * against live registry entries.
    */
   getHostPid(): number | null {
     return this.pty?.hostPid ?? null;

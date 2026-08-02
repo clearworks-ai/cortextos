@@ -1175,6 +1175,24 @@ export class AgentManager {
   }
 
   /**
+   * RW-6: pty-host pids owned by a live registry entry (agents + workers).
+   * The PtyHostReaper treats any ledgered host NOT in this set as an orphan
+   * candidate — this is the "owned by a live registry entry" test.
+   */
+  getOwnedPtyHostPids(): ReadonlySet<number> {
+    const owned = new Set<number>();
+    for (const { process: agentProcess } of this.agents.values()) {
+      const pid = agentProcess.getPtyHostPid();
+      if (pid) owned.add(pid);
+    }
+    for (const worker of this.workers.values()) {
+      const pid = worker.getPtyHostPid();
+      if (pid) owned.add(pid);
+    }
+    return owned;
+  }
+
+  /**
    * Return the CronScheduler for a given agent (for testing / introspection).
    * Returns undefined if no scheduler is running for that agent.
    */

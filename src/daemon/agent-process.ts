@@ -21,6 +21,7 @@ import {
   writeLastBackPingMs,
 } from './handoff-backping.js';
 import { ensureMissionAnchorFromBuffer } from './restart-context.js';
+import { readEnabledAgentsMap } from '../bus/enabled-agents-io.js';
 
 type LogFn = (msg: string) => void;
 
@@ -644,6 +645,26 @@ export class AgentProcess {
     }
   }
 
+  /**
+   * Fresh check of whether this agent is user-disabled. Reads live state
+   * (NOT a cached snapshot) because enabled-agents.json and config.json can
+   * change while the process is running — this is the same pair of gates
+   * discoverAndStart() applies at daemon boot (agent-manager.ts).
+   * Default-on: absent entry / unreadable file ⇒ enabled. Fail-open on
+   * reader errors so the gate can never throw inside handleExit.
+   */
+  private isDisabled(): boolean {
+    if (this.config.enabled === false) {
+      return true;
+    }
+    try {
+      const entry = readEnabledAgentsMap(this.env.ctxRoot)[this.name];
+      return entry?.enabled === false;
+    } catch {
+      return false;
+    }
+  }
+
   private handleExit(exitCode: number): void {
     // Capture last 16KB of the agent's stdout BEFORE nulling pty.
     // Used by the image-poison auto-recovery check below — reads the log
@@ -673,6 +694,20 @@ export class AgentProcess {
     // cleanup stays with agent-manager / hook-crash-alert per the existing
     // separation of concerns.
     if (this.isDaemonShuttingDown()) {
+      return;
+    }
+
+    // Disabled-agent resurrection fix: an agent disabled via config.json or
+    // enabled-agents.json while running must NOT be respawned by any crash-
+    // recovery path below (image-poison, rate-limit, exponential backoff).
+    // Fresh read at exit time — the disable may have happened after start().
+    // Also skips the crash-count increment: an operator-disabled agent's exit
+    // is intentional-by-policy, not a crash.
+    if (this.isDisabled()) {
+      this.log('Exit while agent is disabled (config.json enabled:false or enabled-agents.json) — not respawning.');
+      this.stopRequested = false;
+      this.status = 'stopped';
+      this.notifyStatusChange();
       return;
     }
 

@@ -38,6 +38,11 @@ vi.mock('../../../src/bus/reminders.js', () => ({
   getOverdueReminders: vi.fn().mockReturnValue([]),
 }));
 
+const mockReadEnabledAgentsMap = vi.fn().mockReturnValue({});
+vi.mock('../../../src/bus/enabled-agents-io.js', () => ({
+  readEnabledAgentsMap: (...args: unknown[]) => mockReadEnabledAgentsMap(...args),
+}));
+
 vi.mock('../../../src/utils/paths.js', () => ({
   resolvePaths: vi.fn().mockReturnValue({ stateDir: '/tmp/test-ctx/state/alice' }),
 }));
@@ -100,6 +105,7 @@ beforeEach(() => {
   mockPty.isAlive.mockReturnValue(true);
   mockPty.onExit.mockClear();
   mockInjectMessage.mockClear();
+  mockReadEnabledAgentsMap.mockReset().mockReturnValue({});
   fsMocks.existsSync.mockReset().mockReturnValue(false);
   fsMocks.readFileSync.mockReset();
   fsMocks.writeFileSync.mockReset();
@@ -540,5 +546,113 @@ describe('AgentProcess - image-poison recovery circuit breaker', () => {
 
     // Should NOT send alert (circuit not tripped)
     expect(mockTelegramApi.sendMessage).not.toHaveBeenCalled();
+  });
+});
+describe('AgentProcess — disabled-agent resurrection gate (handleExit)', () => {
+  it('config.json-disabled agent does not respawn on crash exit', async () => {
+    vi.useFakeTimers();
+
+    const ap = new AgentProcess('alice', mockEnv, { enabled: false });
+    await ap.start();
+    expect(capturedOnExit).not.toBeNull();
+
+    // Simulate crash exit
+    capturedOnExit!(1);
+
+    // Advance past max backoff (300s) to ensure any respawns would have fired
+    vi.advanceTimersByTime(300_000);
+
+    // Agent should NOT have respawned (only initial start)
+    expect(mockPty.spawn).toHaveBeenCalledTimes(1);
+    expect(ap.getStatus().status).toBe('stopped');
+  });
+
+  it('enabled-agents.json-disabled agent does not respawn', async () => {
+    vi.useFakeTimers();
+
+    // Mock enabled-agents.json to disable this agent
+    mockReadEnabledAgentsMap.mockReturnValue({ alice: { enabled: false } });
+
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+    expect(capturedOnExit).not.toBeNull();
+
+    // Simulate crash exit
+    capturedOnExit!(1);
+
+    // Advance past max backoff
+    vi.advanceTimersByTime(300_000);
+
+    // Agent should NOT have respawned
+    expect(mockPty.spawn).toHaveBeenCalledTimes(1);
+    expect(ap.getStatus().status).toBe('stopped');
+  });
+
+  it('enabled agent still respawns normally on crash (regression guard)', async () => {
+    vi.useFakeTimers();
+
+    // Default mocks: enabled agent
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+    expect(capturedOnExit).not.toBeNull();
+
+    // Simulate crash exit
+    capturedOnExit!(1);
+
+    // Advance past first backoff (5s)
+    vi.advanceTimersByTime(5000);
+
+    // Agent SHOULD have respawned (second spawn call)
+    expect(mockPty.spawn).toHaveBeenCalledTimes(2);
+  });
+
+  it('disabled agent crash exit does not increment crash count', async () => {
+    vi.useFakeTimers();
+
+    const ap = new AgentProcess('alice', mockEnv, { enabled: false });
+    await ap.start();
+    expect(capturedOnExit).not.toBeNull();
+
+    // Simulate crash exit
+    capturedOnExit!(1);
+
+    // No CRASH line should be appended to restarts.log
+    expect(fsMocks.appendFileSync).not.toHaveBeenCalledWith(
+      expect.stringContaining('restarts.log'),
+      expect.stringContaining('CRASH'),
+      expect.anything(),
+    );
+
+    // No .crash_count_today write
+    expect(fsMocks.writeFileSync).not.toHaveBeenCalledWith(
+      expect.stringContaining('.crash_count_today'),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it('gate ordering: disabled check does not mask daemon-shutdown or stop paths', async () => {
+    vi.useFakeTimers();
+
+    // Simulate daemon shutdown marker
+    fsMocks.existsSync.mockImplementation((path: string) => {
+      if (path.endsWith('.daemon-stop')) return true;
+      return false;
+    });
+
+    const ap = new AgentProcess('alice', mockEnv, { enabled: false });
+    await ap.start();
+    expect(capturedOnExit).not.toBeNull();
+
+    // Mock the daemon-shutdown check to return true
+    const isDaemonShuttingDownSpy = vi.spyOn(ap as any, 'isDaemonShuttingDown').mockReturnValue(true);
+
+    // Simulate exit
+    capturedOnExit!(0);
+
+    // Should take shutdown early-return (disabled gate NOT reached)
+    expect(isDaemonShuttingDownSpy).toHaveBeenCalled();
+    expect(mockReadEnabledAgentsMap).not.toHaveBeenCalled();
+    expect(ap.getStatus().status).not.toBe('stopped'); // status unchanged by shutdown path
   });
 });

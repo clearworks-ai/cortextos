@@ -44,6 +44,18 @@ interface PtyDisposable {
 }
 
 /**
+ * RW-5: deadline for the forked host to report pty-ready. Without it, a child
+ * that dies pre-ready (OOM, module-load failure, posix_spawnp refusal) wedges
+ * the spawn path forever — "spawn failed, retry" silently becomes "spawn
+ * wedged permanently". Overridable for tests via CTX_PTY_READY_TIMEOUT_MS.
+ */
+const READY_TIMEOUT_MS = (() => {
+  const raw = process.env.CTX_PTY_READY_TIMEOUT_MS;
+  const n = raw ? parseInt(raw, 10) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : 15_000;
+})();
+
+/**
  * IPty — the interface node-pty's ITypePty exposes.
  * Reproduced here so we can implement it without importing node-pty.
  */
@@ -92,6 +104,7 @@ class PtyHostProxy implements IPty {
   private _ready: Promise<void>;
   private _resolveReady!: () => void;
   private _rejectReady!: (err: Error) => void;
+  private _readySettled = false;
   private _exited = false;
   private _disposing = false;
   private _disposeTimer: NodeJS.Timeout | null = null;
@@ -99,8 +112,8 @@ class PtyHostProxy implements IPty {
   constructor(child: ChildProcess) {
     this._child = child;
     this._ready = new Promise<void>((resolve, reject) => {
-      this._resolveReady = resolve;
-      this._rejectReady = reject;
+      this._resolveReady = () => { this._readySettled = true; resolve(); };
+      this._rejectReady = (err: Error) => { this._readySettled = true; reject(err); };
     });
 
     child.on('message', (raw: unknown) => this._handleHostMsg(raw));
@@ -115,6 +128,14 @@ class PtyHostProxy implements IPty {
         this._exited = true;
         const exitCode = code ?? 1;
         const signal = sig ? (typeof sig === 'string' ? parseInt(sig, 10) : sig as number) : undefined;
+        // RW-5: a child that dies before pty-ready must FAIL the spawn, not
+        // wedge it — reject _ready so waitReady()/hostSpawn() callers see a
+        // normal spawn error and can retry.
+        if (!this._readySettled) {
+          this._rejectReady(new Error(
+            `pty-host exited before pty-ready (code=${exitCode}${signal !== undefined ? `, signal=${signal}` : ''})`,
+          ));
+        }
         for (const cb of this._exitListeners) {
           try { cb({ exitCode, signal }); } catch { /* listener errors must not crash host */ }
         }
@@ -252,9 +273,26 @@ class PtyHostProxy implements IPty {
     this._disposeTimer.unref?.();
   }
 
-  /** Wait for the pty to be allocated (pty-ready received from host) */
-  waitReady(): Promise<void> {
-    return this._ready;
+  /**
+   * Wait for the pty to be allocated (pty-ready received from host).
+   *
+   * RW-5: enforces a spawn deadline — if the host neither reports pty-ready
+   * nor dies within timeoutMs, the wait rejects instead of hanging forever.
+   */
+  waitReady(timeoutMs: number = READY_TIMEOUT_MS): Promise<void> {
+    if (this._readySettled) return this._ready;
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(`pty-host did not report pty-ready within ${timeoutMs}ms`));
+      }, timeoutMs);
+      timer.unref?.();
+      // Attaching both handlers here also guarantees _ready never becomes an
+      // unhandled rejection after a timeout race.
+      this._ready.then(
+        () => { clearTimeout(timer); resolve(); },
+        (err: Error) => { clearTimeout(timer); reject(err); },
+      );
+    });
   }
 
   private _send(msg: PtyClientMsg): void {
@@ -346,9 +384,25 @@ export async function hostSpawn(
     args,
     options,
   };
-  child.send(spawnMsg);
+  try {
+    child.send(spawnMsg);
+  } catch {
+    // Child already dead — the exit handler rejects _ready; fall through so
+    // the waitReady() below surfaces the failure uniformly.
+  }
 
-  await proxy.waitReady();
+  try {
+    await proxy.waitReady();
+  } catch (err) {
+    // RW-5: failed/timed-out spawn must not leave a forked host lingering —
+    // kill it so "spawn failed → retry" holds without minting orphans.
+    // destroy() runs the RW-4 graceful-then-escalate path; the child's exit
+    // handler above then prunes the RW-6 ledger entry (unless the pty child
+    // survived, in which case the reaper needs it).
+    proxy.destroy();
+    throw err;
+  }
+  // RW-6: pty allocated — record the inner pty pid in the durable ledger.
   if (ledgerPath && proxy.pid > 0) {
     updatePtyHostPtyPid(ledgerPath, hostPid, proxy.pid);
   }

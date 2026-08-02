@@ -66,12 +66,33 @@ function armDisposeFallback(): void {
   t.unref();
 }
 
+/**
+ * RW-5: if the parent never delivers pty-spawn (daemon wedged or died
+ * mid-spawn, IPC message lost), exit instead of lingering forever as an idle
+ * orphan process. Overridable for tests via CTX_PTY_SPAWN_WAIT_MS.
+ */
+const SPAWN_WAIT_MS = (() => {
+  const raw = process.env.CTX_PTY_SPAWN_WAIT_MS;
+  const n = raw ? parseInt(raw, 10) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : 15_000;
+})();
+
+const spawnDeadline = setTimeout(() => {
+  if (!pty) {
+    send({ type: 'pty-error', message: `no pty-spawn received within ${SPAWN_WAIT_MS}ms` });
+    // Give the IPC message time to flush before exiting
+    setTimeout(() => process.exit(1), 50);
+  }
+}, SPAWN_WAIT_MS);
+spawnDeadline.unref();
+
 function handleMessage(raw: unknown): void {
   if (typeof raw !== 'object' || raw === null) return;
   const msg = raw as PtyClientMsg;
 
   switch (msg.type) {
     case 'pty-spawn': {
+      clearTimeout(spawnDeadline);
       if (pty) {
         send({ type: 'pty-error', message: 'pty already spawned' });
         return;

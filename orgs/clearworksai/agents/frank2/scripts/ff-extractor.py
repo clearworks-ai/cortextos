@@ -1463,6 +1463,20 @@ def build_recap_meeting(
         attendees = [collapse_ws(str(p)) for p in participants if p]
     else:
         attendees = []
+    attendee_names = {attendee.lower() for attendee in attendees if attendee}
+    speakers = transcript.get("speakers") or []
+    if isinstance(speakers, list):
+        for speaker in speakers:
+            if not isinstance(speaker, dict):
+                continue
+            speaker_name = collapse_ws(str(speaker.get("name") or ""))
+            if not speaker_name:
+                continue
+            speaker_name_lower = speaker_name.lower()
+            if speaker_name_lower in attendee_names:
+                continue
+            attendees.append(speaker_name)
+            attendee_names.add(speaker_name_lower)
     
     # Build summary defensively
     summary = transcript.get("summary") or {}

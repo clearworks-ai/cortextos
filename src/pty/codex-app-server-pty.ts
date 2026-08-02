@@ -397,6 +397,11 @@ export class CodexAppServerPTY {
     let lastErr: unknown;
 
     for (let attempt = 0; attempt < delays.length; attempt += 1) {
+      // kill() may land during a pending spawn or a backoff sleep — never
+      // spawn a fresh app-server onto a dead adapter (RW-7 orphan leak).
+      if (!this._alive) {
+        throw new Error('Codex adapter killed during app-server spawn');
+      }
       try {
         this.removeSocket();
         await this.startAppServer();
@@ -405,7 +410,7 @@ export class CodexAppServerPTY {
         lastErr = err;
         this.cleanupSpawnAttempt();
         this._outputBuffer.push(`[codex-app-server] spawn attempt ${attempt + 1} failed: ${err}\n`);
-        if (attempt < delays.length - 1) {
+        if (attempt < delays.length - 1 && this._alive) {
           await sleep(delays[attempt]);
         }
       }
@@ -435,6 +440,19 @@ export class CodexAppServerPTY {
         cwd: this._socketCwd,
         env: this.buildEnv(),
       })).then((pty) => {
+        if (!this._alive) {
+          // kill() ran while the async hostSpawn was in flight: _appServerPty
+          // was still null so kill() had nothing to reap. Destroy the fresh
+          // pty here instead of assigning it to a dead adapter — otherwise
+          // the pty-host + codex app-server pair leaks permanently (RW-7).
+          try {
+            pty.kill();
+          } catch {
+            // Ignore cleanup errors on an adapter that is already dead.
+          }
+          reject(new Error('Codex adapter killed during app-server spawn'));
+          return;
+        }
         this._appServerPty = pty;
         pty.onData((data) => {
           this._outputBuffer.push(data);

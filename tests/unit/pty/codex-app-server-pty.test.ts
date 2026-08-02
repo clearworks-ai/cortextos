@@ -1443,3 +1443,95 @@ describe('CodexAppServerPTY buildMediaPayload — dynamic fence parsing', () => 
     expect(payload).toContain('caption: hello');
   });
 });
+
+describe('CodexAppServerPTY kill-during-spawn race (RW-7)', () => {
+  function makeFakePty() {
+    return {
+      pid: 4242,
+      write: vi.fn(),
+      onData: vi.fn(),
+      onExit: vi.fn(),
+      kill: vi.fn(),
+    };
+  }
+
+  it('kills the fresh pty instead of assigning it when kill() lands mid-spawn', async () => {
+    const pty = new CodexAppServerPTY(mockEnv, {});
+    const inner = pty as unknown as {
+      _alive: boolean;
+      _appServerPty: unknown;
+      _spawnFn: unknown;
+      startAppServer(): Promise<void>;
+    };
+    inner._alive = true;
+
+    const fakePty = makeFakePty();
+    let resolveSpawn!: (p: typeof fakePty) => void;
+    inner._spawnFn = () => new Promise((res) => { resolveSpawn = res; });
+
+    const startPromise = inner.startAppServer();
+    const rejection = expect(startPromise).rejects.toThrow('killed during app-server spawn');
+
+    // Daemon/watchdog restart lands while hostSpawn is still in flight.
+    pty.kill();
+    expect(inner._appServerPty).toBeNull();
+
+    // Spawn continuation fires on a dead adapter.
+    resolveSpawn(fakePty);
+    await rejection;
+
+    expect(fakePty.kill).toHaveBeenCalledTimes(1);
+    expect(inner._appServerPty).toBeNull();
+    expect(fakePty.onData).not.toHaveBeenCalled();
+    expect(fakePty.onExit).not.toHaveBeenCalled();
+  });
+
+  it('assigns the pty normally when the adapter stays alive through spawn', async () => {
+    const pty = new CodexAppServerPTY(mockEnv, {});
+    const inner = pty as unknown as {
+      _alive: boolean;
+      _appServerPty: unknown;
+      _spawnFn: unknown;
+      startAppServer(): Promise<void>;
+    };
+    inner._alive = true;
+
+    const fakePty = makeFakePty();
+    inner._spawnFn = () => Promise.resolve(fakePty);
+    fsMocks.existsSync.mockReturnValue(true); // socket appears immediately
+
+    await inner.startAppServer();
+
+    expect(inner._appServerPty).toBe(fakePty);
+    expect(fakePty.kill).not.toHaveBeenCalled();
+    expect(fakePty.onData).toHaveBeenCalledTimes(1);
+    expect(fakePty.onExit).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not respawn on a dead adapter from the retry loop', async () => {
+    const pty = new CodexAppServerPTY(mockEnv, {});
+    const inner = pty as unknown as {
+      _alive: boolean;
+      _spawnFn: unknown;
+      startAppServerWithRetry(): Promise<void>;
+    };
+    inner._alive = true;
+
+    const spawnCalls = vi.fn();
+    let resolveSpawn!: (p: ReturnType<typeof makeFakePty>) => void;
+    inner._spawnFn = () => {
+      spawnCalls();
+      return new Promise((res) => { resolveSpawn = res; });
+    };
+
+    const retryPromise = inner.startAppServerWithRetry();
+    const rejection = expect(retryPromise).rejects.toThrow('killed during app-server spawn');
+
+    pty.kill();
+    resolveSpawn(makeFakePty());
+    await rejection;
+
+    // Attempt 1 only — no retry attempts against a dead adapter.
+    expect(spawnCalls).toHaveBeenCalledTimes(1);
+  });
+});

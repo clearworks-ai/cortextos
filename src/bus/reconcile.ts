@@ -18,8 +18,7 @@
  * structured report with NO side effects — no shell commands, no filesystem
  * reads, no daemon calls. That keeps it unit-testable without touching the
  * live machine. Gathering the live inputs and emitting drift events lives in
- * the CLI (src/cli/bus-reconcile.ts) and the daemon trigger
- * (src/daemon/reconcile-trigger.ts).
+ * the CLI (src/cli/bus-reconcile.ts).
  *
  * FALSE-POSITIVE GUARD: an agent that is intentionally disabled
  * (`enabled === false`) or on the `knownOff` list (e.g. hunter, which is

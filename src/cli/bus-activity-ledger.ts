@@ -266,7 +266,7 @@ function gatherCronExecSignals(
 
 /**
  * Gather declared crons from all agent config.json files under
- * orgs/<org>/agents/<agent>/config.json (same filesystem walk as reconcile-trigger.ts).
+ * orgs/<org>/agents/<agent>/config.json (same filesystem walk as bus-reconcile.ts).
  */
 function gatherDeclaredCrons(
   frameworkRoot: string,

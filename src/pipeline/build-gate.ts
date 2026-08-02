@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import {
   verifyChainDetailed,
   verifyOneBigFeatureArtifacts,
@@ -38,6 +41,17 @@ export class BuildGateError extends Error {
 
 export function isBuildWorker(target: string): boolean {
   return BUILD_TARGETS.has(target);
+}
+
+/**
+ * Expand a leading ~ / ~/ to $HOME, matching gate-codexer-planning.sh's shell
+ * expansion. build-gate.ts is the non-shell backstop chokepoint, so it must not
+ * treat a literal '~' as a path segment when the hook (which does expand) is bypassed.
+ */
+function normalizeRepo(repo: string): string {
+  if (repo === '~') return homedir();
+  if (repo.startsWith('~/')) return join(homedir(), repo.slice(2));
+  return repo;
 }
 
 export function parseBuildDirective(text: string): BuildDirective | null {
@@ -83,11 +97,23 @@ export function enforceBuildDispatchGate(to: string, text: string): BuildDirecti
   const directive = parseBuildDirective(text);
   if (!directive) return null;
 
+  // Resolve ONE canonical ledger path and reuse it for BOTH the signed-chain verify
+  // and the phase-sequencing check. Must NOT derive from directive.repo: the ledger
+  // lives at the framework root (CTX_PROJECT_ROOT/CTX_FRAMEWORK_ROOT/cwd), while repo=
+  // is dispatcher-controlled free text that, under the fleet's mandated worktree-isolated
+  // build pattern, points at a worktree holding only a STALE clone-time ledger snapshot.
+  // Deriving the phase check from repo would (a) false-block phases that shipped after the
+  // worktree was cut, and (b) let a repo= pointed at an attacker-writable dir plant
+  // fabricated true-verify rows, silently bypassing the sequencing gate. Matches
+  // stage-emit.ts, which hoists one ledgerPath and never resolves it from --repo.
+  const ledgerPath = defaultLedgerPath();
+
   const chain = verifyChainDetailed({
     slug: directive.slug,
     throughStage: directive.exempt ? 'exempt' : 'specs',
     maxAgeSeconds: DEFAULT_MAX_AGE_SECONDS,
     scopeSha: directive.exempt ? undefined : directive.scopeSha,
+    ledgerPath,
   });
   if (!chain.ok) {
     if (chain.code === 'SECRET_UNREADABLE') {
@@ -97,8 +123,18 @@ export function enforceBuildDispatchGate(to: string, text: string): BuildDirecti
   }
 
   if (directive.framework === 'one-big-feature') {
+    // repo= locates the on-disk OBF planning artifacts (they DO live in the worktree),
+    // so this one legitimately uses repo — but normalized + existence-checked first,
+    // mirroring the shell hook's `[ -d "$REPO" ]` + ~ expansion for the non-shell path.
+    const repoRoot = normalizeRepo(directive.repo);
+    if (!existsSync(repoRoot)) {
+      throw new BuildGateError(
+        'INVALID_DIRECTIVE',
+        `Build dispatch repo= does not exist on disk: ${directive.repo}. OBF artifact verification needs a real checkout/worktree path.`,
+      );
+    }
     const artifacts = verifyOneBigFeatureArtifacts({
-      projectRoot: directive.repo,
+      projectRoot: repoRoot,
       slug: directive.slug,
       rows: chain.rows,
     });
@@ -107,8 +143,7 @@ export function enforceBuildDispatchGate(to: string, text: string): BuildDirecti
     }
   }
 
-  // Check phase sequencing before allowing dispatch
-  const ledgerPath = defaultLedgerPath(directive.repo);
+  // Check phase sequencing before allowing dispatch — same canonical ledger as the chain.
   const rows = readLedgerRows(ledgerPath);
   const phaseCheck = checkPhaseSequence({
     slug: directive.slug,

@@ -313,13 +313,11 @@ describe('runInboundPoll - approval resolution', () => {
     expect(createdApproval?.linked_task_id).toBe(linkedTaskId);
 
     // Create the link in the store
-    const link = store.load();
-    link.links[linkedTaskId] = {
+    store.upsertLink(linkedTaskId, {
       multica_issue_id: issueId,
       last_seen_multica_status: 'in_progress',
       last_seen_multica_assignee_id: null,
-    };
-    store.save(link);
+    });
 
     // Create a Multica issue that transitions to 'done' (mapped to 'completed')
     const issue = makeIssue({ 
@@ -361,15 +359,6 @@ describe('runInboundPoll - approval resolution', () => {
       description: 'task without approval',
     });
     const issueId = 'issue-unlinked';
-
-    // Create the link in the store
-    const link = store.load();
-    link.links[unlinkedTaskId] = {
-      multica_issue_id: issueId,
-      last_seen_multica_status: 'in_progress',
-      last_seen_multica_assignee_id: null,
-    };
-    store.save(link);
 
     // Create an approval with null linked_task_id by manually creating it
     // (createApproval always creates a linked task, so we do this manually for the test)
@@ -432,13 +421,11 @@ describe('runInboundPoll - approval resolution', () => {
     const linkedTaskId = tasksBefore[0].id;
 
     // Create the link in the store
-    const link = store.load();
-    link.links[linkedTaskId] = {
+    store.upsertLink(linkedTaskId, {
       multica_issue_id: issueId,
       last_seen_multica_status: 'in_progress',
       last_seen_multica_assignee_id: null,
-    };
-    store.save(link);
+    });
 
     // First, approve via card (updateApproval)
     const { updateApproval: cardUpdateApproval } = await import('../../../../src/bus/approval.js');
@@ -483,13 +470,11 @@ describe('runInboundPoll - approval resolution', () => {
     const linkedTaskId = tasksBefore[0].id;
 
     // Create the link in the store
-    const link = store.load();
-    link.links[linkedTaskId] = {
+    store.upsertLink(linkedTaskId, {
       multica_issue_id: issueId,
       last_seen_multica_status: 'in_progress',
       last_seen_multica_assignee_id: null,
-    };
-    store.save(link);
+    });
 
     // Create a Multica issue that transitions to 'cancelled' (mapped to 'cancelled')
     const issue = makeIssue({ 
@@ -507,8 +492,11 @@ describe('runInboundPoll - approval resolution', () => {
     expect(pendingApprovals).toHaveLength(0);
 
     // Task should be cancelled
-    const task = findTaskFile(paths, linkedTaskId);
-    expect(task?.status).toBe('cancelled');
+    const taskPath = findTaskFile(paths, linkedTaskId);
+    expect(taskPath).not.toBeNull();
+    const taskContent = readFileSync(taskPath!, 'utf-8');
+    const task = JSON.parse(taskContent);
+    expect(task.status).toBe('cancelled');
 
     // Should have recorded the approval-resolution action
     expect(result.actions).toContainEqual(

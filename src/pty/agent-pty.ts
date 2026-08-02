@@ -4,7 +4,7 @@ import { platform } from 'os';
 import type { AgentConfig, CtxEnv } from '../types/index.js';
 import { OutputBuffer } from './output-buffer.js';
 import { injectMessage as injectMessageIntoPty } from './inject.js';
-import { loadEnvFileInto } from '../utils/env.js';
+import { findUnresolvedOpRefKeys, loadEnvFileIntoAsync } from '../utils/env.js';
 import { hostSpawn } from './pty-host-client.js';
 
 // node-pty types
@@ -99,13 +99,26 @@ export class AgentPTY {
 
     // Source org-level shared secrets (orgs/{org}/secrets.env), including op:// refs when
     // OP_SERVICE_ACCOUNT_TOKEN is available. Agent .env is loaded after and overrides org
-    // values — agent-specific keys win.
+    // values — agent-specific keys win. Async variant: op:// resolution runs off-thread so
+    // a slow/wedged `op` CLI never blocks the daemon event loop at spawn cadence (M6).
     if (this.env.org && this.env.projectRoot) {
-      loadEnvFileInto(join(this.env.projectRoot, 'orgs', this.env.org, 'secrets.env'), ptyEnv);
+      await loadEnvFileIntoAsync(join(this.env.projectRoot, 'orgs', this.env.org, 'secrets.env'), ptyEnv);
     }
 
     // Source agent .env file after org secrets.env so agent-specific keys override org values.
-    loadEnvFileInto(join(this.env.agentDir, '.env'), ptyEnv);
+    await loadEnvFileIntoAsync(join(this.env.agentDir, '.env'), ptyEnv);
+
+    // Loud degraded-boot marker (M6): if any values are STILL literal op:// refs, this
+    // agent would boot "successfully" with unusable secrets (the silent Telegram-401
+    // class). Mark the child env so agents/hooks can detect degradation, and log at
+    // error level so the boot is never silently degraded. Key names only — never values.
+    const degradedSecretKeys = findUnresolvedOpRefKeys(ptyEnv);
+    if (degradedSecretKeys.length > 0) {
+      ptyEnv['CTX_DEGRADED_SECRETS'] = degradedSecretKeys.join(',');
+      console.error(
+        `[DEGRADED-BOOT] agent ${this.env.agentName}: ${degradedSecretKeys.length} unresolved op:// secret(s) (${degradedSecretKeys.join(', ')}) — dependent integrations will fail with invalid-credential errors until op:// resolution recovers`,
+      );
+    }
 
     // Add convenience CTX_* aliases used throughout agent templates.
     // CTX_TELEGRAM_CHAT_ID: alias for CHAT_ID from the agent's .env

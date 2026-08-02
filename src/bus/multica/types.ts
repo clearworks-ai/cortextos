@@ -134,6 +134,7 @@ export interface SyncSummary {
   pushed_updates: number;
   skipped: number;
   wrote_back: number;
+  imported: number;
   errors: number;
   dry_run: boolean;
 }

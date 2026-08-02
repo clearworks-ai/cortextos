@@ -1284,6 +1284,8 @@ busCommand
       direction: opts.direction as SyncDirection,
       dryRun: opts.dryRun === true,
       limit: parsedLimit,
+      agentName: env.agentName,
+      org: env.org,
     });
 
     if (!opts.dryRun) {
@@ -1292,6 +1294,7 @@ busCommand
         pushed_creates: summary.pushed_creates,
         pushed_updates: summary.pushed_updates,
         wrote_back: summary.wrote_back,
+        imported: summary.imported,
         errors: summary.errors,
       });
     }

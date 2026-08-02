@@ -9,6 +9,7 @@ export type SlugSource = 'head' | 'branch';
 
 export interface PrTarget {
   slug: string;
+  slugFallback: string | null;
   headBranch: string;
   slugSource: SlugSource;
   targetRepo: string | null;
@@ -74,6 +75,20 @@ export function slugFromBranch(branch: string): string {
   return branch.replace(/^.*\//, '');
 }
 
+/**
+ * Strip a trailing `-shard<N>` or `-spec<N>[-<M>]` suffix (case-insensitive) to
+ * recover the shared base slug under which the pipeline ledger records rows.
+ * Shard/spec branches derive a per-branch slug via slugFromBranch that never
+ * matches the ledger; this is the fallback the PR gate retries against.
+ * Returns null when there is no such suffix or stripping would leave an empty string.
+ */
+export function slugFallbackCandidate(slug: string): string | null {
+  const match = slug.match(/-(?:shard\d+|spec\d+(?:-\d+)?)$/i);
+  if (!match || match.index === undefined) return null;
+  const stripped = slug.slice(0, match.index);
+  return stripped.length > 0 ? stripped : null;
+}
+
 export function normalizeHeadBranch(head: string): string {
   const idx = head.indexOf(':');
   if (idx === -1) return head;
@@ -112,6 +127,7 @@ function emptyTarget(
 ): PrTarget {
   return {
     slug: '',
+    slugFallback: null,
     headBranch: '',
     slugSource: 'branch',
     targetRepo: null,
@@ -191,9 +207,11 @@ export function derivePrTarget(command: string, opts: DeriveOptions): PrTarget {
     });
   }
 
+  const slugFallback = slugFallbackCandidate(slug);
   const isProdRepo = isProdRepoTarget(targetRepo ?? originUrl ?? '');
   return {
     slug,
+    slugFallback,
     headBranch,
     slugSource,
     targetRepo,
@@ -206,6 +224,7 @@ export function derivePrTarget(command: string, opts: DeriveOptions): PrTarget {
 function toWire(target: PrTarget): Record<string, unknown> {
   return {
     slug: target.slug,
+    slug_fallback: target.slugFallback,
     head_branch: target.headBranch,
     slug_source: target.slugSource,
     target_repo: target.targetRepo,

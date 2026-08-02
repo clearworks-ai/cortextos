@@ -9,6 +9,7 @@ import {
   normalizeHeadBranch,
   parseCdPrefix,
   parseGhFlag,
+  slugFallbackCandidate,
   slugFromBranch,
 } from '../../../src/pipeline/pr-target';
 
@@ -160,6 +161,27 @@ describe('pr-target', () => {
     expect(slugFromBranch('a/b/c')).toBe('c');
   });
 
+  it('slugFallbackCandidate strips shard/spec suffixes', () => {
+    expect(slugFallbackCandidate('task-bus-management-automation-shard2')).toBe(
+      'task-bus-management-automation',
+    );
+    expect(slugFallbackCandidate('foo-shard10')).toBe('foo');
+    expect(slugFallbackCandidate('foo-spec02')).toBe('foo');
+    expect(slugFallbackCandidate('foo-spec02-03')).toBe('foo');
+    expect(slugFallbackCandidate('foo-SHARD2')).toBe('foo');
+    expect(slugFallbackCandidate('foo-Spec02-03')).toBe('foo');
+  });
+
+  it('slugFallbackCandidate returns null when there is no shard/spec suffix', () => {
+    expect(slugFallbackCandidate('slack-todo-jobtread')).toBeNull();
+    expect(slugFallbackCandidate('main')).toBeNull();
+    expect(slugFallbackCandidate('my-spec-thing')).toBeNull();
+    expect(slugFallbackCandidate('shard2')).toBeNull();
+    expect(slugFallbackCandidate('spec02')).toBeNull();
+    expect(slugFallbackCandidate('foo-shard')).toBeNull();
+    expect(slugFallbackCandidate('foo-specimen2')).toBeNull();
+  });
+
   it('isProdRepoTarget matches owned repos only', () => {
     for (const name of ['clearpath', 'cxportal', 'nonprofit-hub', 'auditos', 'gws-security']) {
       expect(isProdRepoTarget(`owner/${name}`)).toBe(true);
@@ -182,6 +204,7 @@ describe('pr-target', () => {
     expect(result.status).toBe(0);
     const parsed = JSON.parse(result.stdout.trim()) as {
       slug: string;
+      slug_fallback: string | null;
       slug_source: string;
       is_prod_repo: boolean;
     };

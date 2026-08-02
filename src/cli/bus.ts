@@ -2174,7 +2174,10 @@ busCommand
   .argument('<title>', 'What you are requesting approval for')
   .argument('<category>', 'Category: external-comms, financial, deployment, data-deletion, other')
   .argument('[context]', 'Additional context')
-  .action(async (title: string, category: string, context?: string) => {
+  .option('--client <name>', 'Client name for card display')
+  .option('--owning-job <name>', 'Owning job/engagement')
+  .option('--confidence <n>', 'Confidence score (number)')
+  .action(async (title: string, category: string, context?: string, opts: { client?: string; owningJob?: string; confidence?: string } = {}) => {
     const validCategories: ApprovalCategory[] = ['external-comms', 'financial', 'deployment', 'data-deletion', 'other'];
     if (!validCategories.includes(category as ApprovalCategory)) {
       console.error(`Invalid category '${category}'. Must be one of: ${validCategories.join(', ')}`);
@@ -2182,13 +2185,36 @@ busCommand
     }
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    
+    // Parse confidence if provided
+    let confidence: number | undefined;
+    if (opts.confidence !== undefined) {
+      confidence = Number.parseFloat(opts.confidence);
+      if (Number.isNaN(confidence)) {
+        console.error(`Invalid --confidence value '${opts.confidence}': must be a number`);
+        process.exit(1);
+      }
+    }
+    
     // await — createApproval fan-out posts to the activity channel, which
     // must complete before the CLI process exits or the post silently
     // never sends. env.frameworkRoot is passed so the activity-channel
     // orgDir resolves to where activity-channel.env actually lives (the
     // framework repo path, NOT the runtime state path — see
     // src/bus/approval.ts:postApprovalToActivityChannel for the history).
-    const id = await createApproval(paths, env.agentName, env.org, title, category as ApprovalCategory, context || '', env.frameworkRoot, env.agentDir);
+    const id = await createApproval(
+      paths,
+      env.agentName,
+      env.org,
+      title,
+      category as ApprovalCategory,
+      context || '',
+      env.frameworkRoot,
+      env.agentDir,
+      opts.client,
+      opts.owningJob,
+      confidence,
+    );
     console.log(id);
   });
 

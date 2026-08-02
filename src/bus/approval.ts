@@ -8,6 +8,7 @@ import { validateApprovalCategory } from '../utils/validate.js';
 import { TelegramAPI } from '../telegram/api.js';
 import { sendMessage } from './message.js';
 import { postActivity } from './system.js';
+import { createTask, completeTask, cancelTask } from './task.js';
 
 /**
  * Build the inline keyboard posted to the activity channel alongside a
@@ -184,6 +185,9 @@ export async function createApproval(
   context?: string,
   frameworkRoot?: string,
   agentDir?: string,
+  client?: string,
+  owning_job?: string,
+  confidence?: number,
 ): Promise<string> {
   validateApprovalCategory(category);
 
@@ -191,6 +195,31 @@ export async function createApproval(
   const rand = randomString(5);
   const approvalId = `approval_${epoch}_${rand}`;
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+  // Create companion task for Multica sync. Graceful degradation: if task
+  // creation fails, approval is still created with linked_task_id: null.
+  let linkedTaskId: string | null = null;
+  try {
+    const taskTitle = `Approval: ${title}`;
+    const taskDescription = context || title;
+    linkedTaskId = createTask(
+      paths,
+      agentName,
+      org,
+      taskTitle,
+      {
+        description: taskDescription,
+        assignee: 'human',
+        needsApproval: true,
+      },
+    );
+  } catch (err) {
+    // Task creation failed — log and continue with linked_task_id: null
+    console.warn(
+      `[approval] Failed to create companion task for approval ${approvalId}: ${err instanceof Error ? err.message : String(err)}. ` +
+      'Approval will be created without linked task.',
+    );
+  }
 
   const approval: Approval = {
     id: approvalId,
@@ -204,6 +233,10 @@ export async function createApproval(
     updated_at: now,
     resolved_at: null,
     resolved_by: null,
+    linked_task_id: linkedTaskId,
+    client,
+    owning_job,
+    confidence,
   };
 
   const pendingDir = join(paths.approvalDir, 'pending');
@@ -231,6 +264,9 @@ export async function createApproval(
 /**
  * Update an approval's status (approve or deny).
  * Notifies the requesting agent via inbox message.
+ * 
+ * Idempotency guard: if the approval is already resolved (not in pending/
+ * or status !== 'pending'), returns without side effects. First decision wins.
  */
 export function updateApproval(
   paths: BusPaths,
@@ -239,24 +275,59 @@ export function updateApproval(
   note?: string,
 ): void {
   const pendingDir = join(paths.approvalDir, 'pending');
-  const filePath = join(pendingDir, `${approvalId}.json`);
+  const resolvedDir = join(paths.approvalDir, 'resolved');
+  const pendingFilePath = join(pendingDir, `${approvalId}.json`);
+  const resolvedFilePath = join(resolvedDir, `${approvalId}.json`);
+
+  // Check if already resolved (idempotency guard)
+  if (existsSync(resolvedFilePath)) {
+    try {
+      const content = readFileSync(resolvedFilePath, 'utf-8');
+      const approval: Approval = JSON.parse(content);
+      console.warn(
+        `[approval] Approval ${approvalId} is already ${approval.status} (resolved at ${approval.resolved_at}). ` +
+        'Ignoring duplicate resolution request.',
+      );
+      return;
+    } catch {
+      // If we can't read the resolved file, continue with normal flow
+    }
+  }
 
   try {
-    const content = readFileSync(filePath, 'utf-8');
+    const content = readFileSync(pendingFilePath, 'utf-8');
     const approval: Approval = JSON.parse(content);
+
     approval.status = status;
     approval.updated_at = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
     approval.resolved_at = approval.updated_at;
     approval.resolved_by = note || null;
 
     // Move to resolved/ directory (matches bash version)
-    const destDir = join(paths.approvalDir, 'resolved');
-    ensureDir(destDir);
-    atomicWriteSync(join(destDir, `${approvalId}.json`), JSON.stringify(approval));
+    ensureDir(resolvedDir);
+    atomicWriteSync(join(resolvedDir, `${approvalId}.json`), JSON.stringify(approval));
 
     // Remove from pending
     const { unlinkSync } = require('fs');
-    unlinkSync(filePath);
+    unlinkSync(pendingFilePath);
+
+    // Complete or cancel the linked companion task
+    if (approval.linked_task_id) {
+      try {
+        if (status === 'approved') {
+          completeTask(paths, approval.linked_task_id, `Approval ${approvalId} approved`);
+        } else if (status === 'rejected') {
+          cancelTask(paths, approval.linked_task_id, `Approval ${approvalId} rejected`);
+        }
+      } catch (err) {
+        // Task-side failure logged but approval resolution still lands
+        console.warn(
+          `[approval] Failed to ${status === 'approved' ? 'complete' : 'cancel'} linked task ${approval.linked_task_id} ` +
+          `for approval ${approvalId}: ${err instanceof Error ? err.message : String(err)}. ` +
+          'Approval resolution succeeded regardless.',
+        );
+      }
+    }
 
     // Notify requesting agent via inbox
     if (approval.requesting_agent) {

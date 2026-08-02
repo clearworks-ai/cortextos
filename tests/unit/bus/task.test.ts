@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, findTaskFile, archiveTasks, classifyTask, ensureEpicTask, closeEpic, reclaimOrphanTasks, resolveTaskOwner, sweepDueTasks, deliverDueSweepActions, fleetTaskHealth, STALL_ESCALATE_MS } from '../../../src/bus/task';
+import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, findTaskFile, archiveTasks, classifyTask, ensureEpicTask, closeEpic, reclaimOrphanTasks, resolveTaskOwner, sweepDueTasks, deliverDueSweepActions, fleetTaskHealth, computeDefaultDueDate, STALL_ESCALATE_MS } from '../../../src/bus/task';
 import type { BusPaths, Task } from '../../../src/types';
 import * as lockMod from '../../../src/utils/lock';
 import { resolvePaths } from '../../../src/utils/paths';
@@ -120,6 +120,59 @@ describe('Task Management', () => {
       const content = JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8'));
       expect(content.status).toBe('someday');
       expect(classifyTask(content)).toBe('build');
+    });
+  });
+
+  describe('computeDefaultDueDate — class-aware caps', () => {
+    const now = new Date('2026-08-02T00:00:00Z');
+    const expected = (days: number) =>
+      new Date(now.getTime() + days * 86400_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+    it('normal build (no class cap) → +7d baseline', () => {
+      expect(computeDefaultDueDate('normal', false, undefined, now)).toBe(expected(7));
+      expect(computeDefaultDueDate('normal', false, 'build', now)).toBe(expected(7));
+    });
+    it('normal human → capped at +2d', () => {
+      expect(computeDefaultDueDate('normal', false, 'human', now)).toBe(expected(2));
+    });
+    it('urgent human → min(1,2) = +1d', () => {
+      expect(computeDefaultDueDate('urgent', false, 'human', now)).toBe(expected(1));
+    });
+    it('low system → capped at +1d regardless of priority', () => {
+      expect(computeDefaultDueDate('low', false, 'system', now)).toBe(expected(1));
+    });
+    it('someday beats class cap → +30d', () => {
+      expect(computeDefaultDueDate('normal', true, 'human', now)).toBe(expected(30));
+    });
+  });
+
+  describe('createTask — class-aware default due dates', () => {
+    const DAY_MS = 86400_000;
+    function dueDeltaDays(taskId: string): number {
+      const content = JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8'));
+      const delta = new Date(content.due_date).getTime() - new Date(content.created_at).getTime();
+      return delta / DAY_MS;
+    }
+
+    it('human-class task (normal) defaults to +2d, not +7d', () => {
+      const taskId = createTask(paths, 'paul', 'acme', '[HUMAN] Decide: pricing tier');
+      expect(dueDeltaDays(taskId)).toBeCloseTo(2, 1);
+    });
+    it('system-class cron-creator task defaults to +1d and project=system', () => {
+      const taskId = createTask(paths, 'comms-check-1', 'acme', 'Poll inbox');
+      const content = JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8'));
+      expect(content.project).toBe('system');
+      expect(dueDeltaDays(taskId)).toBeCloseTo(1, 1);
+    });
+    it('plain build task still defaults to +7d (regression pin)', () => {
+      const taskId = createTask(paths, 'paul', 'acme', 'Build landing page');
+      expect(dueDeltaDays(taskId)).toBeCloseTo(7, 1);
+    });
+    it('explicit dueDate on a human task wins over the class cap', () => {
+      const explicit = new Date(Date.now() + 10 * DAY_MS).toISOString().replace(/\.\d{3}Z$/, 'Z');
+      const taskId = createTask(paths, 'paul', 'acme', '[HUMAN] Review contract', { dueDate: explicit });
+      const content = JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8'));
+      expect(content.due_date).toBe(explicit);
     });
   });
 

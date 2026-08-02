@@ -96,6 +96,7 @@ function emptyLink(): SyncLink {
     last_seen_multica_status: null,
     last_seen_multica_assignee_id: null,
     idempotency_key: null,
+    pending_create: null,
   };
 }
 
@@ -145,7 +146,21 @@ function isSyncLink(value: unknown): value is SyncLink {
     isNullableString(value.last_seen_multica_assignee_id) &&
     isNullableString(value.idempotency_key) &&
     isNullableTaskStatus(value.last_pushed_status) &&
-    isNullableMulticaStatus(value.last_seen_multica_status)
+    isNullableMulticaStatus(value.last_seen_multica_status) &&
+    isNullablePendingCreate(value.pending_create)
+  );
+}
+
+function isNullablePendingCreate(value: unknown): boolean {
+  if (value === undefined || value === null) {
+    return true;
+  }
+  return (
+    isRecord(value) &&
+    typeof value.idempotency_key === 'string' &&
+    typeof value.title === 'string' &&
+    typeof value.field_hash === 'string' &&
+    typeof value.attempted_at === 'string'
   );
 }
 

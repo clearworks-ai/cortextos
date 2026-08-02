@@ -163,4 +163,84 @@ describe('multica sync state store', () => {
     const defaultPath = join(testDir, 'orgs', 'clearworksai', 'state', 'multica-bridge', 'sync-state.json');
     expect(existsSync(defaultPath)).toBe(true);
   });
+
+  it('loads and round-trips a link with valid pending_create', () => {
+    const store = createSyncStateStore(filePath);
+
+    const stateWithPending = {
+      schema_version: '1' as const,
+      updated_at: '2026-08-01T07:00:00Z',
+      links: {
+        'task-with-pending': {
+          multica_issue_id: null,
+          last_pushed_status: null,
+          last_pushed_hash: null,
+          last_seen_multica_status: null,
+          last_seen_multica_assignee_id: null,
+          idempotency_key: null,
+          pending_create: {
+            idempotency_key: 'pending-key',
+            title: 'Pending task',
+            field_hash: 'pending-hash',
+            attempted_at: '2026-08-01T06:00:00Z',
+          },
+        },
+      },
+    };
+
+    store.save(stateWithPending);
+    const result = store.loadWithStatus();
+
+    expect(result.corrupt).toBe(false);
+    expect(result.state.links['task-with-pending']?.pending_create).toEqual({
+      idempotency_key: 'pending-key',
+      title: 'Pending task',
+      field_hash: 'pending-hash',
+      attempted_at: '2026-08-01T06:00:00Z',
+    });
+
+    // Round-trip through upsertLink
+    store.upsertLink('task-with-pending', { multica_issue_id: 'new-issue' });
+    const updated = store.loadWithStatus();
+    expect(updated.state.links['task-with-pending']?.multica_issue_id).toBe('new-issue');
+    expect(updated.state.links['task-with-pending']?.pending_create).toEqual({
+      idempotency_key: 'pending-key',
+      title: 'Pending task',
+      field_hash: 'pending-hash',
+      attempted_at: '2026-08-01T06:00:00Z',
+    });
+  });
+
+  it('loads legacy state files without pending_create field', () => {
+    const store = createSyncStateStore(filePath);
+
+    const legacyState = {
+      schema_version: '1' as const,
+      updated_at: '2026-07-29T07:00:00Z',
+      links: {
+        'legacy-task': {
+          multica_issue_id: 'legacy-issue',
+          last_pushed_status: 'completed',
+          last_pushed_hash: 'legacy-hash',
+          last_seen_multica_status: 'done',
+          last_seen_multica_assignee_id: 'member-a',
+          idempotency_key: 'legacy-key',
+          // pending_create field omitted — legacy shape
+        },
+      },
+    };
+
+    store.save(legacyState);
+    const result = store.loadWithStatus();
+
+    expect(result.corrupt).toBe(false);
+    expect(result.state.links['legacy-task']).toMatchObject({
+      multica_issue_id: 'legacy-issue',
+      last_pushed_status: 'completed',
+      last_pushed_hash: 'legacy-hash',
+      idempotency_key: 'legacy-key',
+    });
+    // pending_create should be undefined for legacy links
+    expect(result.state.links['legacy-task']?.pending_create).toBeUndefined();
+  });
 });

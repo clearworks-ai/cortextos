@@ -89,24 +89,46 @@ function makeIssueResponse(payload: MulticaPushPayload, issueId: string): Multic
 function createRecordingClient() {
   const createdTaskIds: string[] = [];
   const updatedCalls: Array<{ issueId: string; busTaskId: string }> = [];
+  const remoteIssues: MulticaIssue[] = [];
   const client: MulticaClient = {
     async createIssue(payload) {
       createdTaskIds.push(payload.bus_task_id);
-      return makeIssueResponse(payload, `created-${payload.bus_task_id}`);
+      const issueId = `created-${payload.bus_task_id}`;
+      const issue = makeIssueResponse(payload, issueId);
+      remoteIssues.push(issue);
+      return issue;
     },
     async updateIssue(issueId, payload) {
       updatedCalls.push({ issueId, busTaskId: payload.bus_task_id });
       return makeIssueResponse(payload, issueId);
     },
     async listIssues() {
-      return [];
+      return remoteIssues;
     },
     async getTaskRuns() {
       return [];
     },
   };
 
-  return { client, createdTaskIds, updatedCalls };
+  return { client, createdTaskIds, updatedCalls, remoteIssues };
+}
+
+function createFlakyStore(
+  inner: SyncStateStore,
+  shouldFail: (patch: import('../../../../src/bus/multica/types.js').SyncLink) => boolean,
+): SyncStateStore {
+  return {
+    load: () => inner.load(),
+    loadWithStatus: () => inner.loadWithStatus(),
+    save: (state) => inner.save(state),
+    linkFor: (taskId) => inner.linkFor(taskId),
+    upsertLink(taskId, patch) {
+      if (shouldFail(patch as import('../../../../src/bus/multica/types.js').SyncLink)) {
+        throw new Error('simulated ledger write failure');
+      }
+      inner.upsertLink(taskId, patch);
+    },
+  };
 }
 
 describe('multica outbound push', () => {
@@ -298,5 +320,159 @@ describe('multica outbound push', () => {
     }));
     expect(createdTaskIds).toEqual([]);
     expect(updatedCalls).toEqual([]);
+  });
+
+  it('does not create a duplicate issue when the ledger write fails after a successful create', async () => {
+    const { client, createdTaskIds, updatedCalls, remoteIssues } = createRecordingClient();
+    const store = createSyncStateStore(join(testDir, 'sync-state.json'));
+    const flakyStore = createFlakyStore(store, (patch) => patch.multica_issue_id !== undefined && patch.multica_issue_id !== null);
+    const task = createOrderedTask(paths, 0, 'Orphan test task');
+
+    // Run 1: flaky store fails post-create, leaves pending marker
+    const result1 = await runOutboundPush(paths, client, flakyStore, config);
+    expect(result1.errors).toBe(1);
+    expect(createdTaskIds).toHaveLength(1);
+    expect(store.linkFor(task.id)?.multica_issue_id).toBeNull();
+    const pendingMarker = store.linkFor(task.id)?.pending_create;
+    expect(pendingMarker).toBeTruthy();
+    expect(pendingMarker?.title).toBe(task.title);
+    expect(remoteIssues).toHaveLength(1);
+    const orphanId = remoteIssues[0].id;
+
+    // Run 2: real store recovers orphan, no second create
+    const result2 = await runOutboundPush(paths, client, store, config);
+    expect(createdTaskIds).toHaveLength(1); // Still 1 — no second create call
+    expect(updatedCalls).toContainEqual({ issueId: orphanId, busTaskId: task.id });
+    expect(result2.plan).toContainEqual(expect.objectContaining({
+      bus_task_id: task.id,
+      action: 'update',
+      reason: 'recovered_orphan',
+      outcome: 'pushed',
+    }));
+    const finalLink = store.linkFor(task.id);
+    expect(finalLink?.multica_issue_id).toBe(orphanId);
+    expect(finalLink?.pending_create).toBeNull();
+  });
+
+  it('aborts the create when the write-ahead marker cannot be persisted', async () => {
+    const { client, createdTaskIds } = createRecordingClient();
+    const store = createSyncStateStore(join(testDir, 'sync-state.json'));
+    const flakyStore = createFlakyStore(store, (patch) => patch.pending_create !== undefined);
+    const task = createOrderedTask(paths, 0, 'Marker failure test');
+
+    const result = await runOutboundPush(paths, client, flakyStore, config);
+    expect(createdTaskIds).toEqual([]);
+    expect(result.errors).toBe(1);
+    expect(result.plan).toContainEqual(expect.objectContaining({
+      bus_task_id: task.id,
+      action: 'create',
+      reason: 'push_failed',
+      outcome: 'error',
+    }));
+  });
+
+  it('re-creates when a pending marker exists but no orphan is found remotely', async () => {
+    const { client, createdTaskIds } = createRecordingClient();
+    const store = createSyncStateStore(join(testDir, 'sync-state.json'));
+    const task = createOrderedTask(paths, 0, 'No orphan test task');
+    store.upsertLink(task.id, {
+      pending_create: {
+        idempotency_key: 'stale-key',
+        title: task.title,
+        field_hash: 'old-hash',
+        attempted_at: '2026-08-01T00:00:00Z',
+      },
+    });
+
+    const result = await runOutboundPush(paths, client, store, config);
+    expect(createdTaskIds).toHaveLength(1);
+    expect(result.errors).toBe(0);
+    const link = store.linkFor(task.id);
+    expect(link?.multica_issue_id).toBeTruthy();
+    expect(link?.pending_create).toBeNull();
+  });
+
+  it('does not adopt an issue already linked to another task', async () => {
+    const { client, createdTaskIds, remoteIssues } = createRecordingClient();
+    const store = createSyncStateStore(join(testDir, 'sync-state.json'));
+    const taskA = createOrderedTask(paths, 0, 'Shared title task A');
+    const taskB = createOrderedTask(paths, 1, 'Shared title task B');
+    const issueAId = 'issue-a';
+
+    // Task A is linked to issue-a
+    store.upsertLink(taskA.id, {
+      multica_issue_id: issueAId,
+      last_pushed_hash: 'hash-a',
+      last_pushed_status: taskA.status,
+      idempotency_key: 'key-a',
+    });
+    remoteIssues.push({
+      id: issueAId,
+      identifier: `CLE-${issueAId}`,
+      workspace_id: config.workspaceId,
+      project_id: null,
+      title: 'Shared title task', // Same title as taskB
+      description: 'existing issue',
+      status: 'todo',
+      priority: 'medium',
+      assignee_type: null,
+      assignee_id: null,
+      context_refs: [],
+      due_date: null,
+      created_at: '2026-08-01T00:00:00Z',
+      updated_at: '2026-08-01T00:00:00Z',
+    });
+
+    // Task B has pending marker with same title, should NOT adopt issue-a
+    store.upsertLink(taskB.id, {
+      pending_create: {
+        idempotency_key: 'key-b',
+        title: 'Shared title task',
+        field_hash: 'hash-b',
+        attempted_at: '2026-08-01T00:00:00Z',
+      },
+    });
+
+    const result = await runOutboundPush(paths, client, store, config);
+    expect(result.errors).toBe(0);
+    expect(createdTaskIds).toHaveLength(1); // Task B creates fresh issue
+    expect(createdTaskIds[0]).toBe(taskB.id); // Only taskB's create
+    const linkB = store.linkFor(taskB.id);
+    expect(linkB?.multica_issue_id).not.toBe(issueAId);
+    expect(linkB?.pending_create).toBeNull();
+  });
+
+  it('clears a stray pending marker on an already-linked task', async () => {
+    const { client, createdTaskIds, updatedCalls } = createRecordingClient();
+    const store = createSyncStateStore(join(testDir, 'sync-state.json'));
+    const task = createOrderedTask(paths, 0, 'Stray marker test');
+    const currentHash = hashMappedFields(taskToIssuePayload(task, config, 'bus', 'update'));
+
+    // Link with real issue and stray pending marker
+    store.upsertLink(task.id, {
+      multica_issue_id: 'issue-99',
+      last_pushed_hash: currentHash,
+      last_pushed_status: task.status,
+      idempotency_key: 'key-99',
+      pending_create: {
+        idempotency_key: 'stale-key',
+        title: task.title,
+        field_hash: 'old-hash',
+        attempted_at: '2026-08-01T00:00:00Z',
+      },
+    });
+
+    const result = await runOutboundPush(paths, client, store, config);
+    expect(result.plan).toContainEqual(expect.objectContaining({
+      bus_task_id: task.id,
+      action: 'skip',
+      reason: 'hash_unchanged',
+      outcome: 'skipped',
+    }));
+    expect(createdTaskIds).toEqual([]);
+    expect(updatedCalls).toEqual([]);
+    const finalLink = store.linkFor(task.id);
+    expect(finalLink?.pending_create).toBeNull();
+    expect(finalLink?.multica_issue_id).toBe('issue-99');
   });
 });

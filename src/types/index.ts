@@ -909,7 +909,7 @@ export interface IPCRequest {
 
 // Worker Types
 
-export type WorkerStatusValue = 'starting' | 'running' | 'completed' | 'failed';
+export type WorkerStatusValue = 'starting' | 'running' | 'completed' | 'failed' | 'reaped';
 
 export interface WorkerStatus {
   name: string;

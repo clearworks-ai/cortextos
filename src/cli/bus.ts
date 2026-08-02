@@ -5,7 +5,7 @@ import { homedir } from 'os';
 import { dirname, join } from 'path';
 import { sendMessage, checkInbox, ackInbox } from '../bus/message.js';
 import { validateAgentName, validateTaskId } from '../utils/validate.js';
-import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, checkStaleTasks, archiveTasks, checkHumanTasks, classifyTask, ensureEpicTask, closeEpic, reclaimOrphanTasks, resolveTaskOwner, sweepDueTasks, deliverDueSweepActions, fleetTaskHealth, DEFAULT_SWEEP_MAX_ACTIONS, LIST_TASKS_MAX_LIMIT } from '../bus/task.js';
+import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, checkStaleTasks, archiveTasks, checkHumanTasks, classifyTask, ensureEpicTask, closeEpic, reclaimOrphanTasks, resolveTaskOwner, sweepDueTasks, deliverDueSweepActions, sweepSilentAssignees, fleetTaskHealth, DEFAULT_SWEEP_MAX_ACTIONS, DEFAULT_BUILD_ORPHAN_OWNER, LIST_TASKS_MAX_LIMIT } from '../bus/task.js';
 import { saveOutput } from '../bus/save-output.js';
 import { logEvent } from '../bus/event.js';
 import { updateHeartbeat, readAllHeartbeats } from '../bus/heartbeat.js';
@@ -1256,6 +1256,73 @@ busCommand
           logEvent(paths, env.agentName, env.org, 'task', 'task_escalated_to_human', 'warning', metadata);
         }
       }
+    }
+
+    console.log(JSON.stringify(output));
+  });
+
+busCommand
+  .command('sweep-silent-assignees')
+  .description('Dry-run or apply the silent-assignee sweep: flag open tasks whose assignee has no fresh heartbeat (a crashed/wedged agent silently holding work). Registry "running" status can lie; this joins against heartbeat truth.')
+  .option('--dry-run', 'Preview silent-assignee actions without writing or messaging')
+  .option('--apply', 'Stamp silent_flagged_at, message the orphan owner, and emit events')
+  .option('--threshold-hours <n>', 'Heartbeat staleness threshold in hours', '2')
+  .action((opts: { dryRun?: boolean; apply?: boolean; thresholdHours: string }) => {
+    if (opts.dryRun && opts.apply) {
+      console.error('Choose either --dry-run or --apply, not both');
+      process.exit(1);
+    }
+
+    const thresholdHours = Number.parseFloat(opts.thresholdHours);
+    if (!Number.isFinite(thresholdHours) || thresholdHours <= 0) {
+      console.error('Invalid --threshold-hours value: must be a positive number');
+      process.exit(1);
+    }
+
+    const env = resolveEnv();
+    const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    const dryRun = opts.apply !== true;
+    const report = sweepSilentAssignees(paths, {
+      dryRun,
+      thresholdMs: thresholdHours * 3_600_000,
+    });
+
+    const output: Record<string, unknown> = { ...report };
+    if (!dryRun) {
+      const delivery = { delivered: 0, failed: [] as Array<{ id: string; error: string }> };
+      for (const action of report.actions) {
+        logEvent(paths, env.agentName, env.org, 'task', 'task_assignee_silent', 'warning', {
+          task_id: action.id,
+          title: action.title,
+          assigned_to: action.assigned_to,
+          heartbeat_age_ms: action.heartbeat_age_ms,
+          threshold_ms: report.threshold_ms,
+        });
+
+        // Route to the build orphan owner, never the silent assignee. The sweep
+        // already excludes human/system class, so every action is build-class.
+        const owner = DEFAULT_BUILD_ORPHAN_OWNER;
+        const ageText = action.heartbeat_age_ms === null
+          ? 'none at all'
+          : `${(action.heartbeat_age_ms / 3_600_000).toFixed(1)}h`;
+        try {
+          const ownerPaths = resolvePaths(owner, env.instanceId, env.org);
+          sendMessage(
+            ownerPaths,
+            env.agentName,
+            owner,
+            action.priority,
+            `Silent assignee: ${action.assigned_to} has no heartbeat for ${ageText} (or none at all) but holds open task [${action.priority}] ${action.title} (id: ${action.id}). Reassign, restart ${action.assigned_to}, or close the task.`,
+          );
+          delivery.delivered += 1;
+        } catch (err) {
+          delivery.failed.push({
+            id: action.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      output.delivery = delivery;
     }
 
     console.log(JSON.stringify(output));

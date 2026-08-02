@@ -89,6 +89,8 @@ export interface Task {
   nudge_count?: number;
   /** Last time the due-sweep counted a nudge for this task (ISO 8601). */
   last_nudged_at?: string | null;
+  /** Last time the silent-assignee sweep flagged this task's owner as heartbeat-silent (ISO 8601). */
+  silent_flagged_at?: string | null;
 }
 
 // Event Types
@@ -714,6 +716,26 @@ export interface DueSweepDelivery {
   escalations_created: string[];
   /** Original task IDs skipped because an open escalation already existed. */
   escalations_skipped: string[];
+}
+
+export interface SilentAssigneeAction {
+  id: string;
+  title: string;
+  assigned_to: string;
+  org: string;
+  priority: Priority;
+  status: TaskStatus;
+  heartbeat_age_ms: number | null; // null = no heartbeat file at all
+  reason: 'silent_assignee';
+}
+
+export interface SilentAssigneeReport {
+  dry_run: boolean;
+  scanned: number;
+  threshold_ms: number;
+  actions: SilentAssigneeAction[];
+  skipped_recent_flag: number; // cooldown suppressions
+  assignees_checked: number;
 }
 
 /** Why a task landed in a fleet-health exception array. */

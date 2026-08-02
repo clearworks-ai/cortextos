@@ -17,6 +17,9 @@ import type {
   TaskHealthReason,
   TaskHealthRow,
   TaskHealthTotal,
+  SilentAssigneeAction,
+  SilentAssigneeReport,
+  Heartbeat,
 } from '../types/index.js';
 import { atomicWriteSync, ensureDir } from '../utils/atomic.js';
 import { withFileLockSync } from '../utils/lock.js';
@@ -24,6 +27,7 @@ import { randomDigits } from '../utils/random.js';
 import { validatePriority, validateTaskId } from '../utils/validate.js';
 import { logEvent } from './event.js';
 import { sendMessage } from './message.js';
+import { readAllHeartbeats } from './heartbeat.js';
 import { resolvePaths } from '../utils/paths.js';
 
 export type TaskClass = 'system' | 'human' | 'build';
@@ -41,8 +45,8 @@ const HUMAN_TITLE_RE = /^(\[HUMAN\]|Josh:|Decide:)/i;
 const RECLAIM_HUMAN_TITLE_RE = /^\[HUMAN\]/i;
 const SYSTEM_TITLE_RE = /^cron:/i;
 export const EPHEMERAL_WORKER_RE = /-\d{10,}$/;
-const DEFAULT_ORPHAN_OWNER = 'frank2';
-const DEFAULT_BUILD_ORPHAN_OWNER = 'larry';
+export const DEFAULT_ORPHAN_OWNER = 'frank2';
+export const DEFAULT_BUILD_ORPHAN_OWNER = 'larry';
 /** Priority-scaled default due windows (days). Someday/backlog gets 30. */
 export const DEFAULT_DUE_DAYS: Record<Priority, number> = {
   urgent: 1,
@@ -62,6 +66,10 @@ export const DEFAULT_SWEEP_MAX_ACTIONS = 20;
 /** Minimum trimmed result length that counts as substance on build-class completion. */
 export const MIN_RESULT_SUBSTANCE_LEN = 10;
 const TRIVIAL_RESULT_RE = /^(done|completed?|ok|okay|finished|fixed|yes|n\/?a)[.!]?$/i;
+/** Heartbeat staleness beyond which an assignee is considered silent (matches read-all-heartbeats display rule). */
+export const SILENT_ASSIGNEE_THRESHOLD_MS = 2 * 60 * 60 * 1000;
+/** Cooldown before the silent-assignee sweep re-flags the same task. */
+export const SILENT_REFLAG_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 /**
  * Open (actionable) task statuses. Shared by sweepDueTasks, listTasks
  * (openOnly), and fleetTaskHealth so the definitions cannot drift.
@@ -489,6 +497,111 @@ export function deliverDueSweepActions(
   }
 
   return delivery;
+}
+
+/**
+ * Silent-assignee sweep — join open tasks against heartbeat truth.
+ *
+ * Registry "running" status can lie (a hung session still counts live), so this
+ * flags open tasks whose assignee has no fresh heartbeat: a crashed/wedged agent
+ * silently holding work. Deliberately ignores the task's own due_date/updated_at
+ * — a fresh, not-yet-due task on a dead agent must still surface (that is the whole
+ * point, distinct from sweepDueTasks' staleness). Pure-read on heartbeats; only the
+ * task file's silent_flagged_at is written (non-dry-run), atomically under the lock.
+ */
+export function sweepSilentAssignees(
+  paths: BusPaths,
+  options: {
+    dryRun?: boolean;
+    now?: Date;
+    thresholdMs?: number;
+    heartbeats?: Heartbeat[];
+  } = {},
+): SilentAssigneeReport {
+  const dryRun = options.dryRun !== false;
+  const now = options.now ?? new Date();
+  const nowEpoch = now.getTime();
+  const nowIso = now.toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const thresholdMs = options.thresholdMs ?? SILENT_ASSIGNEE_THRESHOLD_MS;
+  const heartbeats = options.heartbeats ?? readAllHeartbeats(paths);
+
+  // agent → last heartbeat epoch (null = entry present but unparseable timestamp).
+  const hbEpochByAgent = new Map<string, number | null>();
+  for (const hb of heartbeats) {
+    hbEpochByAgent.set(hb.agent, parseIsoEpoch(hb.last_heartbeat));
+  }
+
+  const report: SilentAssigneeReport = {
+    dry_run: dryRun,
+    scanned: 0,
+    threshold_ms: thresholdMs,
+    actions: [],
+    skipped_recent_flag: 0,
+    assignees_checked: 0,
+  };
+
+  const mutate = () => {
+    const tasks = readAllTasks(paths.taskDir);
+    report.scanned = tasks.length;
+    const checkedAssignees = new Set<string>();
+
+    for (const task of tasks) {
+      // EXACTLY the sweepDueTasks candidate filters, plus system-class skip.
+      if (!OPEN_TASK_STATUSES.has(task.status) || task.archived) continue;
+      if (isHumanExemptTask(task)) continue;
+      if (classifyTask(task) === 'system') continue;
+      const assignee = (task.assigned_to || '').trim();
+      if (assignee === '' || isEphemeralWorkerName(assignee)) continue;
+
+      checkedAssignees.add(assignee);
+
+      // undefined = no heartbeat entry for this agent at all; null = entry with a
+      // bad timestamp. Both mean "no proof of life" → heartbeat_age_ms: null, flag.
+      const hbEpoch = hbEpochByAgent.has(assignee) ? hbEpochByAgent.get(assignee) : undefined;
+      let heartbeatAgeMs: number | null;
+      let silent: boolean;
+      if (hbEpoch === undefined || hbEpoch === null) {
+        heartbeatAgeMs = null;
+        silent = true;
+      } else {
+        heartbeatAgeMs = nowEpoch - hbEpoch;
+        silent = heartbeatAgeMs > thresholdMs;
+      }
+      if (!silent) continue;
+
+      const flaggedEpoch = parseIsoEpoch(task.silent_flagged_at);
+      if (flaggedEpoch !== null && nowEpoch - flaggedEpoch < SILENT_REFLAG_COOLDOWN_MS) {
+        report.skipped_recent_flag += 1;
+        continue;
+      }
+
+      report.actions.push({
+        id: task.id,
+        title: task.title,
+        assigned_to: assignee,
+        org: task.org,
+        priority: task.priority,
+        status: task.status,
+        heartbeat_age_ms: heartbeatAgeMs,
+        reason: 'silent_assignee',
+      });
+
+      if (dryRun) continue;
+      task.silent_flagged_at = nowIso;
+      atomicWriteSync(join(paths.taskDir, `${task.id}.json`), JSON.stringify(task));
+    }
+
+    report.assignees_checked = checkedAssignees.size;
+  };
+
+  if (dryRun) {
+    mutate();
+  } else {
+    ensureDir(paths.taskDir);
+    withFileLockSync(paths.taskDir, mutate);
+  }
+
+  return report;
 }
 
 /**

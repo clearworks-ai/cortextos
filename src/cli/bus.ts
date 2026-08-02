@@ -680,7 +680,8 @@ busCommand
   .argument('<id>', 'Task ID')
   .argument('[result]', 'Completion result (optional positional form)')
   .option('--result <text>', 'Completion result')
-  .action((id: string, resultArg: string | undefined, opts: { result?: string }) => {
+  .option('--force-no-evidence <reason>', 'Override the substance gate with an explicit reason')
+  .action((id: string, resultArg: string | undefined, opts: { result?: string; forceNoEvidence?: string }) => {
     // Accept result as either positional arg or --result flag (P1 fix #8)
     const effectiveResult = opts.result ?? resultArg;
     const env = resolveEnv();
@@ -695,7 +696,17 @@ busCommand
       }
     }
 
-    completeTask(paths, id, effectiveResult);
+    // The substance gate can now reject (build-class, no evidence) — an expected
+    // path, so surface the message and exit 1 instead of letting the throw escape.
+    try {
+      completeTask(paths, id, effectiveResult, {
+        force: !!opts.forceNoEvidence,
+        forceReason: opts.forceNoEvidence,
+      });
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
     console.log(`Completed ${id}`);
   });
 

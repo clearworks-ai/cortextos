@@ -1023,7 +1023,7 @@ describe('Task due dates and due sweep', () => {
     ]);
   });
 
-  it('escalates stalled in_progress tasks once per stall episode and re-arms after a status touch', () => {
+  it('re-arms a stalled in_progress task every STALL_ESCALATE_MS and after a status touch', () => {
     writeTask(makeTask({
       id: 'task_stalled',
       title: 'Stalled task',
@@ -1044,23 +1044,63 @@ describe('Task due dates and due sweep', () => {
     expect(task.escalated_at).toBe('2026-07-12T12:00:00Z');
     expect(task.updated_at).toBe('2026-07-12T06:59:59Z');
 
-    const stillSameEpisode = sweepDueTasks(paths, {
-      now: new Date('2026-07-12T18:00:00Z'),
+    // Within the 4h stall cooldown since the last escalation → no re-fire.
+    const cooling = sweepDueTasks(paths, {
+      now: new Date('2026-07-12T15:59:59Z'),
     });
-    expect(stillSameEpisode.actions).toEqual([]);
+    expect(cooling.actions).toEqual([]);
 
+    // >= STALL_ESCALATE_MS since the last escalation → re-arms even with no status touch
+    // (the fix: the old gate fired only once per updated_at value).
+    const rearmedByCooldown = sweepDueTasks(paths, {
+      now: new Date('2026-07-12T16:00:01Z'),
+    });
+    expect(rearmedByCooldown.actions).toEqual([
+      expect.objectContaining({ id: 'task_stalled', reasons: ['stalled'] }),
+    ]);
+
+    // A status touch (updated_at advances) still independently re-arms.
     task = {
       ...task,
       updated_at: '2026-07-12T18:00:00Z',
     };
     writeTask(task);
 
-    const rearmed = sweepDueTasks(paths, {
+    const rearmedByTouch = sweepDueTasks(paths, {
       now: new Date('2026-07-12T22:30:01Z'),
     });
-    expect(rearmed.actions).toEqual([
+    expect(rearmedByTouch.actions).toEqual([
       expect.objectContaining({ id: 'task_stalled', reasons: ['stalled'] }),
     ]);
+  });
+
+  it('a stalled-only task (in_progress, no due_date) accrues nudge_count 1->2->3 and escalates', () => {
+    writeTask(makeTask({
+      id: 'task_stall_only',
+      title: 'Stalled no due date',
+      assigned_to: 'alice',
+      status: 'in_progress',
+      due_date: null,
+      updated_at: '2026-07-12T00:00:00Z',
+    }));
+
+    // Repeated stall sweeps, each >= STALL_ESCALATE_MS (4h) after the previous
+    // escalation, updated_at never moving → nudge_count climbs to escalation.
+    const c1 = sweepDueTasks(paths, { dryRun: false, now: new Date('2026-07-12T05:00:00Z') });
+    expect(c1.actions).toEqual([
+      expect.objectContaining({ id: 'task_stall_only', reasons: ['stalled'], nudge_count: 1, escalate_human: false }),
+    ]);
+
+    const c2 = sweepDueTasks(paths, { dryRun: false, now: new Date('2026-07-12T09:00:01Z') });
+    expect(c2.actions).toEqual([
+      expect.objectContaining({ id: 'task_stall_only', reasons: ['stalled'], nudge_count: 2, escalate_human: false }),
+    ]);
+
+    const c3 = sweepDueTasks(paths, { dryRun: false, now: new Date('2026-07-12T13:00:02Z') });
+    expect(c3.actions).toEqual([
+      expect.objectContaining({ id: 'task_stall_only', reasons: ['stalled'], nudge_count: 3, escalate_human: true }),
+    ]);
+    expect(readTaskJson('task_stall_only').nudge_count).toBe(3);
   });
 
   it('reports combined overdue + stalled candidates as one action row', () => {

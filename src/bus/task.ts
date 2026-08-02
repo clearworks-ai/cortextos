@@ -348,8 +348,14 @@ export function sweepDueTasks(
         task.status === 'in_progress'
         && updatedEpoch !== null
         && nowEpoch - updatedEpoch > STALL_ESCALATE_MS
-        && !(escalatedEpoch !== null && escalatedEpoch >= updatedEpoch)
+        && (escalatedEpoch === null || nowEpoch - escalatedEpoch >= STALL_ESCALATE_MS)
       ) {
+        // Periodic re-arm: like the overdue path (RESURFACE_COOLDOWN_MS on
+        // resurfaced_at), a stall re-fires every STALL_ESCALATE_MS so a stalled-only
+        // task (in_progress, no due_date) keeps accruing nudges toward escalation.
+        // The old `escalated_at >= updated_at` gate fired only once per updated_at
+        // value, which — combined with nudge_count resetting on any updated_at move —
+        // silently capped the stalled-only path at nudge_count=1 (never escalated).
         reasons.push('stalled');
       }
 

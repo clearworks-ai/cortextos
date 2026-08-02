@@ -194,6 +194,39 @@ describe('Advanced Task Management', () => {
       expect(existsSync(join(paths.taskDir, 'archive'))).toBe(false);
     });
 
+    it('prunes legacy task .json.bak files (orphaned and live) and reports the count', () => {
+      createBackdatedTask(paths, { id: 'task_020_020', title: 'Live task' });
+      // Legacy .bak next to a live task + an orphaned .bak whose task is gone.
+      atomicWriteSync(join(paths.taskDir, 'task_020_020.json.bak'), '{}');
+      atomicWriteSync(join(paths.taskDir, 'task_099_099.json.bak'), '{}');
+      // Non-task files must be untouched.
+      atomicWriteSync(join(paths.taskDir, 'archive-2026-07.jsonl'), '');
+
+      const report = archiveTasks(paths);
+      expect(report.pruned_bak).toBe(2);
+      expect(existsSync(join(paths.taskDir, 'task_020_020.json.bak'))).toBe(false);
+      expect(existsSync(join(paths.taskDir, 'task_099_099.json.bak'))).toBe(false);
+      expect(existsSync(join(paths.taskDir, 'task_020_020.json'))).toBe(true);
+      expect(existsSync(join(paths.taskDir, 'archive-2026-07.jsonl'))).toBe(true);
+    });
+
+    it('dry-run counts prunable .bak files without deleting them', () => {
+      atomicWriteSync(join(paths.taskDir, 'task_098_098.json.bak'), '{}');
+
+      const report = archiveTasks(paths, true);
+      expect(report.pruned_bak).toBe(1);
+      expect(existsSync(join(paths.taskDir, 'task_098_098.json.bak'))).toBe(true);
+    });
+
+    it('task writes no longer produce .json.bak files', () => {
+      const id = createTask(paths, 'agent1', 'testorg', 'No-bak task');
+      updateTask(paths, id, { status: 'in_progress' }, 'agent1');
+      completeTask(paths, id, 'agent1', 'done');
+
+      const baks = readdirSync(paths.taskDir).filter(f => f.endsWith('.json.bak'));
+      expect(baks).toEqual([]);
+    });
+
     it('adds archived:true field', () => {
       createBackdatedTask(paths, {
         id: 'task_012_012',

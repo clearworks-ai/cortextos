@@ -738,6 +738,8 @@ export interface FleetTaskHealthReport {
 export interface ArchiveReport {
   archived: number;
   skipped: number;
+  /** Legacy task_*.json.bak files removed (nothing reads them; writers no longer create them). */
+  pruned_bak: number;
   dry_run: boolean;
 }
 

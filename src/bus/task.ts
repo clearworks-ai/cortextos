@@ -252,7 +252,7 @@ export function reclaimOrphanTasks(
 
       task.assigned_to = owner;
       task.updated_at = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-      atomicWriteSync(join(paths.taskDir, `${task.id}.json`), JSON.stringify(task), /* keepBak= */ true);
+      atomicWriteSync(join(paths.taskDir, `${task.id}.json`), JSON.stringify(task));
     }
   };
 
@@ -373,7 +373,7 @@ export function sweepDueTasks(
       if (dryRun) continue;
       if (reasons.includes('overdue')) task.resurfaced_at = nowIso;
       if (reasons.includes('stalled')) task.escalated_at = nowIso;
-      atomicWriteSync(join(paths.taskDir, `${task.id}.json`), JSON.stringify(task), /* keepBak= */ true);
+      atomicWriteSync(join(paths.taskDir, `${task.id}.json`), JSON.stringify(task));
     }
   };
 
@@ -597,7 +597,7 @@ export function createTask(
       for (const downId of blocks) detectCycleOrThrow(paths, downId, [taskId], virtualTask);
     }
 
-    atomicWriteSync(join(paths.taskDir, `${taskId}.json`), JSON.stringify(task), /* keepBak= */ true);
+    atomicWriteSync(join(paths.taskDir, `${taskId}.json`), JSON.stringify(task));
 
     // Cycle-safe now: validation already passed, so symmetric-edge
     // maintenance is just mutating peer JSONs.
@@ -628,7 +628,7 @@ function addSymmetricEdge(
     const list = task[field] ?? [];
     if (!list.includes(peerId)) {
       task[field] = [...list, peerId];
-      atomicWriteSync(filePath, JSON.stringify(task), /* keepBak= */ true);
+      atomicWriteSync(filePath, JSON.stringify(task));
     }
   } catch { /* best-effort */ }
 }
@@ -796,7 +796,7 @@ export function updateTask(
       assignee = task.assigned_to;
       task.status = status;
       task.updated_at = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-      atomicWriteSync(filePath, JSON.stringify(task), /* keepBak= */ true);
+      atomicWriteSync(filePath, JSON.stringify(task));
     });
   } catch (err) {
     throw new Error(`Task ${taskId} update failed: ${err}`);
@@ -974,7 +974,7 @@ export function claimTask(
     task.assigned_to = agent;
     task.updated_at = now;
     try {
-      atomicWriteSync(filePath, JSON.stringify(task), /* keepBak= */ true);
+      atomicWriteSync(filePath, JSON.stringify(task));
     } catch (err) {
       // Roll back the claim so a retry can succeed; we never want a ghost
       // lock surviving a write failure on the task JSON itself.
@@ -1027,7 +1027,7 @@ export function completeTask(
       if (result) {
         task.result = result;
       }
-      atomicWriteSync(filePath, JSON.stringify(task), /* keepBak= */ true);
+      atomicWriteSync(filePath, JSON.stringify(task));
     });
   } catch (err) {
     throw new Error(`Task ${taskId} complete failed: ${err}`);
@@ -1087,7 +1087,7 @@ export function cancelTask(
       assignee = task.assigned_to;
       task.status = 'cancelled';
       task.updated_at = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-      atomicWriteSync(filePath, JSON.stringify(task), /* keepBak= */ true);
+      atomicWriteSync(filePath, JSON.stringify(task));
     });
   } catch (err) {
     throw new Error(`Task ${taskId} cancel failed: ${err}`);
@@ -1287,9 +1287,26 @@ export function archiveTasks(paths: BusPaths, dryRun: boolean = false): ArchiveR
 
   let archived = 0;
   let skipped = 0;
+  let prunedBak = 0;
 
   ensureDir(paths.taskDir);
   withFileLockSync(paths.taskDir, () => {
+    // Prune legacy `task_*.json.bak` files. Task writes used to pass
+    // keepBak=true to atomicWriteSync, leaving a `.bak` per task that
+    // nothing ever read (unlike crons.json.bak / enabled-agents.json.bak,
+    // task files have NO .bak fallback reader) and nothing ever deleted —
+    // 10k+ orphans accumulated in the live task dir. Upstream never
+    // writes task .bak files; this pass converges existing state.
+    try {
+      for (const entry of readdirSync(paths.taskDir)) {
+        if (!/^task_[A-Za-z0-9_-]+\.json\.bak$/.test(entry)) continue;
+        prunedBak++;
+        if (!dryRun) {
+          try { unlinkSync(join(paths.taskDir, entry)); } catch { /* best-effort */ }
+        }
+      }
+    } catch { /* best-effort — never block archiving */ }
+
     const tasks = readAllTasks(paths.taskDir);
 
     for (const task of tasks) {
@@ -1315,7 +1332,7 @@ export function archiveTasks(paths: BusPaths, dryRun: boolean = false): ArchiveR
           task.archived = true;
           const srcPath = join(paths.taskDir, `${task.id}.json`);
           const destPath = join(archiveDir, `${task.id}.json`);
-          atomicWriteSync(destPath, JSON.stringify(task), /* keepBak= */ true);
+          atomicWriteSync(destPath, JSON.stringify(task));
           unlinkSync(srcPath);
         }
         archived++;
@@ -1323,7 +1340,7 @@ export function archiveTasks(paths: BusPaths, dryRun: boolean = false): ArchiveR
     }
   });
 
-  return { archived, skipped, dry_run: dryRun };
+  return { archived, skipped, pruned_bak: prunedBak, dry_run: dryRun };
 }
 
 /**

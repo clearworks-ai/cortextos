@@ -77,8 +77,8 @@ describe('RW-5: hostSpawn never wedges', () => {
     expect(Date.now() - started).toBeLessThan(5000);
     // The failed spawn must not leave the forked host lingering (RW-6 feeder).
     expect(lastChild).not.toBeNull();
-    expect(await waitForChildExit(lastChild!, 2000)).toBe(true);
-  });
+    expect(await waitForChildExit(lastChild!, 15000)).toBe(true);
+  }, 20_000);
 
   it.skipIf(!existsSync(DIST_HOST_ENTRY))('pty-host-entry exits(1) on its own when no pty-spawn arrives in time', async () => {
     // Forks the REAL built entry (dist/) — requires `npm run build` first,

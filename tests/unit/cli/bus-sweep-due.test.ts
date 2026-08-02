@@ -84,10 +84,13 @@ describe('bus sweep-due-tasks + create-task --due', () => {
   });
 
   it('prints a dry-run report by default without stamping or messaging', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-12T10:00:00Z'));
+    
     const paths = makePaths('codexer');
     const overdueId = createTask(paths, 'larry', 'acme', 'Overdue task', {
       assignee: 'frank2',
-      dueDate: '2026-07-10T10:00:00Z',
+      dueDate: '2026-07-12T09:00:00Z', // 1 hour ago (at boundary)
     });
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -104,10 +107,13 @@ describe('bus sweep-due-tasks + create-task --due', () => {
   });
 
   it('apply mode stamps the task, delivers a message, and reports delivery', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-12T10:00:00Z'));
+    
     const paths = makePaths('codexer');
     const overdueId = createTask(paths, 'larry', 'acme', 'Apply overdue task', {
       assignee: 'frank2',
-      dueDate: '2026-07-10T10:00:00Z',
+      dueDate: '2026-07-12T09:00:00Z', // 1 hour ago (at boundary)
     });
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});

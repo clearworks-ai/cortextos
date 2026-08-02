@@ -70,6 +70,13 @@ const TRIVIAL_RESULT_RE = /^(done|completed?|ok|okay|finished|fixed|yes|n\/?a)[.
 export const SILENT_ASSIGNEE_THRESHOLD_MS = 2 * 60 * 60 * 1000;
 /** Cooldown before the silent-assignee sweep re-flags the same task. */
 export const SILENT_REFLAG_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+// Due-date sanity bounds for explicit dueDate values in createTask.
+// Bounds are inclusive of the boundary itself — exactly 1 hour past or exactly 365 days future is accepted.
+// Only strictly-beyond bounds are rejected (i.e., now - parsed > HOUR_MS, parsed - now > 365 * DAY_MS).
+const DUE_DATE_PAST_BOUND_MS = 1 * 60 * 60 * 1000; // 1 hour
+const DUE_DATE_FUTURE_BOUND_DAYS = 365;
+const DUE_DATE_FUTURE_BOUND_MS = DUE_DATE_FUTURE_BOUND_DAYS * 24 * 60 * 60 * 1000; // 365 days
 /**
  * Open (actionable) task statuses. Shared by sweepDueTasks, listTasks
  * (openOnly), and fleetTaskHealth so the definitions cannot drift.
@@ -734,6 +741,21 @@ export function createTask(
     if (Number.isNaN(parsed.getTime())) {
       throw new Error(`Invalid due_date '${dueDate}': must be a parseable date/datetime`);
     }
+
+    // Sanity bounds: reject dates more than 1 hour in the past or more than 365 days in the future.
+    // Bounds are inclusive — exactly 1 hour past or exactly 365 days future is accepted.
+    const now = Date.now();
+    const parsedTime = parsed.getTime();
+    const pastDiff = now - parsedTime;
+    const futureDiff = parsedTime - now;
+
+    if (pastDiff > DUE_DATE_PAST_BOUND_MS) {
+      throw new Error(`Invalid due_date '${dueDate}' (${parsed.toISOString()}): more than 1 hour in the past`);
+    }
+    if (futureDiff > DUE_DATE_FUTURE_BOUND_MS) {
+      throw new Error(`Invalid due_date '${dueDate}' (${parsed.toISOString()}): more than ${DUE_DATE_FUTURE_BOUND_DAYS} days in the future`);
+    }
+
     effectiveDueDate = parsed.toISOString().replace(/\.\d{3}Z$/, 'Z');
   } else {
     const taskClass = classifyTask({

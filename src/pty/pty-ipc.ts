@@ -9,6 +9,13 @@
  *   PtyWriteMsg   — write a string to the pty master
  *   PtyResizeMsg  — resize the pty window
  *   PtyKillMsg    — send a signal / kill the pty
+ *   PtyDisposeMsg — graceful teardown request: signal the pty child, then the
+ *                   host self-exits (with a hard fallback timer). The daemon
+ *                   only escalates to SIGKILL of the host if it does not exit
+ *                   within the dispose grace window. This closes the RW-4
+ *                   race where an immediate SIGKILL of the host landed before
+ *                   the async pty-kill IPC was dequeued, orphaning the
+ *                   grandchild (claude) process.
  *
  * Direction: child → client
  *   PtyReadyMsg   — pty has been allocated; carries its pid
@@ -46,8 +53,13 @@ export interface PtyKillMsg {
   signal?: string;
 }
 
+export interface PtyDisposeMsg {
+  type: 'pty-dispose';
+  signal?: string;
+}
+
 /** Messages the daemon sends TO the child */
-export type PtyClientMsg = PtySpawnMsg | PtyWriteMsg | PtyResizeMsg | PtyKillMsg;
+export type PtyClientMsg = PtySpawnMsg | PtyWriteMsg | PtyResizeMsg | PtyKillMsg | PtyDisposeMsg;
 
 export interface PtyReadyMsg {
   type: 'pty-ready';

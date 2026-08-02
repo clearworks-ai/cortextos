@@ -352,6 +352,14 @@ export class AgentPTY {
 
   /**
    * Kill the PTY process.
+   *
+   * RW-4 fix: kill() + destroy() used to race — kill() queued an async
+   * pty-kill IPC message while destroy() SIGKILLed the pty-host child
+   * immediately, so the SIGKILL routinely landed before the host dequeued
+   * the kill and the claude grandchild was orphaned. destroy() on the
+   * host proxy is now graceful (pty-dispose → await host exit → SIGKILL
+   * only after the grace deadline), so this ordering is race-free: the
+   * grandchild is always signaled before the host can die.
    */
   kill(): void {
     const pty = this.pty;

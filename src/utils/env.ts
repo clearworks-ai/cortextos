@@ -1,4 +1,4 @@
-import { execFileSync } from 'child_process';
+import { execFileSync, execFile } from 'child_process';
 import { readFileSync, existsSync, writeFileSync } from 'fs';
 import { join, basename, resolve as resolvePath, sep } from 'path';
 import { homedir } from 'os';
@@ -12,6 +12,18 @@ const OP_REF_PATTERN = /^op:\/\//;
 
 /** Per-process cache: op:// ref string -> resolved secret value. */
 const opRefCache = new Map<string, string>();
+
+/**
+ * Per-process FAILURE cache: op:// ref string -> epoch-ms of last failed resolution.
+ * Without this, a broken `op` binary / network / bad ref re-pays the full subprocess
+ * timeout (up to 10s per call) on EVERY agent/worker spawn in the long-lived daemon.
+ * Within the TTL, known-failing refs are skipped entirely (zero subprocess calls) and
+ * left literal — the degraded-boot marker in agent-pty surfaces them loudly.
+ */
+const opRefFailureCache = new Map<string, number>();
+
+/** How long a failed op:// resolution is remembered before it is retried. */
+const OP_FAILURE_TTL_MS = 5 * 60_000;
 
 /** One-shot flag so the no-token warning fires once per process, not per key/file. */
 let warnedNoOpToken = false;
@@ -312,19 +324,59 @@ function getUsableOpToken(env: Record<string, string>): string | null {
   return null;
 }
 
-function resolveViaOpInject(refsByKey: ReadonlyMap<string, string>, token: string): Map<string, string> {
-  const template = Array.from(refsByKey.entries())
+/** True when this ref failed recently enough that we should not re-pay the op subprocess cost. */
+function isOpFailureCached(ref: string): boolean {
+  const failedAt = opRefFailureCache.get(ref);
+  if (failedAt === undefined) return false;
+  if (Date.now() - failedAt < OP_FAILURE_TTL_MS) return true;
+  opRefFailureCache.delete(ref);
+  return false;
+}
+
+interface OpResolutionState {
+  resolvedEnv: Record<string, string>;
+  /** key -> op:// ref that still needs a live resolution attempt this call. */
+  unresolvedByKey: Map<string, string>;
+}
+
+/**
+ * Split env entries into already-resolved (success cache), skipped (fresh failure
+ * cache — left literal, no subprocess), and refs needing a live attempt.
+ */
+function partitionOpRefs(env: Record<string, string>): OpResolutionState {
+  const resolvedEnv = { ...env };
+  const unresolvedByKey = new Map<string, string>();
+
+  for (const [key, value] of Object.entries(env)) {
+    if (!isOpRef(value)) continue;
+    const cached = opRefCache.get(value);
+    if (cached !== undefined) {
+      resolvedEnv[key] = cached;
+      continue;
+    }
+    if (isOpFailureCached(value)) continue; // skip silently; degraded-boot marker surfaces it
+    unresolvedByKey.set(key, value);
+  }
+
+  return { resolvedEnv, unresolvedByKey };
+}
+
+function warnNoOpTokenOnce(unresolvedByKey: ReadonlyMap<string, string>): void {
+  if (warnedNoOpToken) return;
+  const keys = Array.from(unresolvedByKey.keys());
+  console.warn(
+    `[env] ${keys.length} op:// secret reference(s) left unresolved (OP_SERVICE_ACCOUNT_TOKEN not set): ${keys.join(', ')}`,
+  );
+  warnedNoOpToken = true;
+}
+
+function buildInjectTemplate(refsByKey: ReadonlyMap<string, string>): string {
+  return Array.from(refsByKey.entries())
     .map(([key, ref]) => `${key}=${ref}`)
     .join('\n') + '\n';
+}
 
-  const stdout = execFileSync('op', ['inject'], {
-    input: template,
-    encoding: 'utf-8',
-    timeout: 10_000,
-    stdio: ['pipe', 'pipe', 'ignore'],
-    env: { ...process.env, OP_SERVICE_ACCOUNT_TOKEN: token },
-  });
-
+function parseInjectOutput(stdout: string, refsByKey: ReadonlyMap<string, string>): Map<string, string> {
   const resolved = new Map<string, string>();
   for (const line of stdout.split(/\r?\n/)) {
     if (!line) continue;
@@ -337,8 +389,36 @@ function resolveViaOpInject(refsByKey: ReadonlyMap<string, string>, token: strin
 
     resolved.set(key, value);
   }
-
   return resolved;
+}
+
+/** Apply one resolution outcome to the caches + result env. Never logs ref or value bytes. */
+function commitOpResult(state: OpResolutionState, key: string, ref: string, value: string | null): void {
+  if (value === null) {
+    opRefFailureCache.set(ref, Date.now());
+    console.warn(`[env] failed to resolve op:// secret reference for ${key}`);
+    return;
+  }
+  state.resolvedEnv[key] = value;
+  opRefCache.set(ref, value);
+  opRefFailureCache.delete(ref);
+}
+
+function commitInjectResults(state: OpResolutionState, injected: Map<string, string>): void {
+  for (const [key, ref] of state.unresolvedByKey.entries()) {
+    commitOpResult(state, key, ref, injected.get(key) ?? null);
+  }
+}
+
+function resolveViaOpInject(refsByKey: ReadonlyMap<string, string>, token: string): Map<string, string> {
+  const stdout = execFileSync('op', ['inject'], {
+    input: buildInjectTemplate(refsByKey),
+    encoding: 'utf-8',
+    timeout: 10_000,
+    stdio: ['pipe', 'pipe', 'ignore'],
+    env: { ...process.env, OP_SERVICE_ACCOUNT_TOKEN: token },
+  });
+  return parseInjectOutput(stdout, refsByKey);
 }
 
 function resolveViaOpRead(ref: string, token: string): string | null {
@@ -355,71 +435,105 @@ function resolveViaOpRead(ref: string, token: string): string | null {
   }
 }
 
+/** Promise wrapper over async execFile('op', ...) — never blocks the caller's event loop. */
+function execOpAsync(args: string[], token: string, input?: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = execFile(
+      'op',
+      args,
+      {
+        encoding: 'utf-8',
+        timeout: 10_000,
+        env: { ...process.env, OP_SERVICE_ACCOUNT_TOKEN: token },
+      },
+      (error, stdout) => {
+        if (error) reject(error);
+        else resolve(stdout);
+      },
+    );
+    if (input !== undefined) child.stdin?.write(input);
+    child.stdin?.end();
+  });
+}
+
+/**
+ * SYNCHRONOUS op:// resolution. Blocks the calling process for up to 10s per op
+ * invocation on a cache miss — acceptable in short-lived CLI/bus processes only.
+ * Long-lived processes (the daemon) MUST use resolveOpRefsAsync instead.
+ */
 export function resolveOpRefs(env: Record<string, string>): Record<string, string> {
-  const resolvedEnv = { ...env };
-  const refEntries = Object.entries(env).filter(([, value]) => isOpRef(value));
-
-  if (refEntries.length === 0) {
-    return resolvedEnv;
-  }
-
-  const unresolvedByKey = new Map<string, string>();
-  for (const [key, ref] of refEntries) {
-    const cached = opRefCache.get(ref);
-    if (cached !== undefined) {
-      resolvedEnv[key] = cached;
-    } else {
-      unresolvedByKey.set(key, ref);
-    }
-  }
-
-  if (unresolvedByKey.size === 0) {
-    return resolvedEnv;
+  const state = partitionOpRefs(env);
+  if (state.unresolvedByKey.size === 0) {
+    return state.resolvedEnv;
   }
 
   const token = getUsableOpToken(env);
   if (!token) {
-    if (!warnedNoOpToken) {
-      const keys = Array.from(unresolvedByKey.keys());
-      console.warn(
-        `[env] ${keys.length} op:// secret reference(s) left unresolved (OP_SERVICE_ACCOUNT_TOKEN not set): ${keys.join(', ')}`,
-      );
-      warnedNoOpToken = true;
-    }
-    return resolvedEnv;
+    warnNoOpTokenOnce(state.unresolvedByKey);
+    return state.resolvedEnv;
   }
 
-  let usedOpReadFallback = false;
   try {
-    const injected = resolveViaOpInject(unresolvedByKey, token);
-    for (const [key, ref] of unresolvedByKey.entries()) {
-      const value = injected.get(key);
-      if (value === undefined) {
-        console.warn(`[env] failed to resolve op:// secret reference for ${key}`);
-        continue;
-      }
-      resolvedEnv[key] = value;
-      opRefCache.set(ref, value);
-    }
-    return resolvedEnv;
+    commitInjectResults(state, resolveViaOpInject(state.unresolvedByKey, token));
+    return state.resolvedEnv;
   } catch {
     console.warn('[env] op inject unavailable, falling back to per-key op read');
-    usedOpReadFallback = true;
   }
 
-  if (usedOpReadFallback) {
-    for (const [key, ref] of unresolvedByKey.entries()) {
-      const value = resolveViaOpRead(ref, token);
-      if (value === null) {
-        console.warn(`[env] failed to resolve op:// secret reference for ${key}`);
-        continue;
-      }
-      resolvedEnv[key] = value;
-      opRefCache.set(ref, value);
-    }
+  for (const [key, ref] of state.unresolvedByKey.entries()) {
+    commitOpResult(state, key, ref, resolveViaOpRead(ref, token));
   }
 
-  return resolvedEnv;
+  return state.resolvedEnv;
+}
+
+/**
+ * ASYNC op:// resolution for long-lived processes (the daemon's agent/worker spawn
+ * path). Identical semantics and caches as resolveOpRefs, but op subprocesses run
+ * off-thread via async execFile so a slow or wedged `op` never starves the daemon
+ * event loop (M6: the sync path fired at worker-spawn cadence in-daemon).
+ */
+export async function resolveOpRefsAsync(env: Record<string, string>): Promise<Record<string, string>> {
+  const state = partitionOpRefs(env);
+  if (state.unresolvedByKey.size === 0) {
+    return state.resolvedEnv;
+  }
+
+  const token = getUsableOpToken(env);
+  if (!token) {
+    warnNoOpTokenOnce(state.unresolvedByKey);
+    return state.resolvedEnv;
+  }
+
+  try {
+    const stdout = await execOpAsync(['inject'], token, buildInjectTemplate(state.unresolvedByKey));
+    commitInjectResults(state, parseInjectOutput(stdout, state.unresolvedByKey));
+    return state.resolvedEnv;
+  } catch {
+    console.warn('[env] op inject unavailable, falling back to per-key op read');
+  }
+
+  for (const [key, ref] of state.unresolvedByKey.entries()) {
+    const value = await execOpAsync(['read', ref], token).then(
+      (out) => out.replace(/\r?\n$/, ''),
+      () => null,
+    );
+    commitOpResult(state, key, ref, value);
+  }
+
+  return state.resolvedEnv;
+}
+
+/**
+ * Keys in an env map whose values are STILL literal op:// references after
+ * resolution — i.e. secrets this process would ship to a child in degraded form.
+ * Used by the PTY spawn path to emit the loud degraded-boot marker (M6).
+ */
+export function findUnresolvedOpRefKeys(env: Record<string, string>): string[] {
+  return Object.entries(env)
+    .filter(([, value]) => typeof value === 'string' && isOpRef(value))
+    .map(([key]) => key)
+    .sort();
 }
 
 /**
@@ -435,7 +549,21 @@ export function loadEnvFileInto(filePath: string, target: Record<string, string>
   }
 }
 
+/**
+ * Async twin of loadEnvFileInto for long-lived processes (daemon PTY spawn path):
+ * same overwrite semantics, op:// resolution runs off-thread.
+ */
+export async function loadEnvFileIntoAsync(filePath: string, target: Record<string, string>): Promise<void> {
+  if (!existsSync(filePath)) return;
+
+  const vars = await resolveOpRefsAsync(parseEnvFile(filePath));
+  for (const [key, value] of Object.entries(vars)) {
+    target[key] = value;
+  }
+}
+
 export function resetOpRefStateForTest(): void {
   opRefCache.clear();
+  opRefFailureCache.clear();
   warnedNoOpToken = false;
 }

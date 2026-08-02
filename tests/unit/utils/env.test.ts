@@ -4,20 +4,48 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 
 const execFileSyncMock = vi.hoisted(() => vi.fn());
+const execFileMock = vi.hoisted(() => vi.fn());
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>();
-  return { ...actual, execFileSync: execFileSyncMock };
+  return { ...actual, execFileSync: execFileSyncMock, execFile: execFileMock };
 });
 
 import {
   buildSubprocessCtxEnv,
+  findUnresolvedOpRefKeys,
   isOpRef,
   loadEnvFileInto,
+  loadEnvFileIntoAsync,
   resetOpRefStateForTest,
   resolveEnv,
   resolveOpRefs,
+  resolveOpRefsAsync,
   sourceEnvFile,
 } from '../../../src/utils/env';
+
+/**
+ * Wire execFileMock to behave like async execFile('op', ...): captures stdin writes,
+ * then invokes the completion callback on the next tick with the handler's result.
+ */
+function mockExecFileWith(handler: (args: string[], input: string) => string | Error): void {
+  execFileMock.mockImplementation((file: string, args: string[], _options: unknown, callback: (err: Error | null, stdout: string) => void) => {
+    expect(file).toBe('op');
+    let input = '';
+    const child = {
+      stdin: {
+        write: (chunk: string) => { input += chunk; },
+        end: () => {
+          process.nextTick(() => {
+            const result = handler(args, input);
+            if (result instanceof Error) callback(result, '');
+            else callback(null, result);
+          });
+        },
+      },
+    };
+    return child;
+  });
+}
 
 describe('env op:// resolution', () => {
   let warnSpy: ReturnType<typeof vi.spyOn>;
@@ -59,6 +87,7 @@ describe('env op:// resolution', () => {
     envSnapshot = { ...process.env };
     tempDirs = [];
     execFileSyncMock.mockReset();
+    execFileMock.mockReset();
     resetOpRefStateForTest();
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -294,6 +323,173 @@ describe('env op:// resolution', () => {
       loadEnvFileInto(join(tmpdir(), 'missing-env-file'), target);
       expect(target).toEqual({ K: 'org' });
       expect(execFileSyncMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('op:// failure cache (M6)', () => {
+    it('skips the op subprocess entirely for a ref that failed recently', () => {
+      process.env.OP_SERVICE_ACCOUNT_TOKEN = 'test-token';
+      execFileSyncMock.mockImplementation(() => {
+        throw new Error('op is down');
+      });
+
+      // First call pays the cost: inject attempt + read fallback.
+      const first = resolveOpRefs({ SECRET: 'op://Openclaw/I/f' });
+      expect(first.SECRET).toBe('op://Openclaw/I/f');
+      const callsAfterFirst = execFileSyncMock.mock.calls.length;
+      expect(callsAfterFirst).toBeGreaterThan(0);
+
+      // Second call within the TTL must NOT touch op again.
+      const second = resolveOpRefs({ SECRET: 'op://Openclaw/I/f' });
+      expect(second.SECRET).toBe('op://Openclaw/I/f');
+      expect(execFileSyncMock.mock.calls.length).toBe(callsAfterFirst);
+    });
+
+    it('retries a failed ref after the failure TTL expires', () => {
+      process.env.OP_SERVICE_ACCOUNT_TOKEN = 'test-token';
+      const now = Date.now();
+      const dateSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+      try {
+        execFileSyncMock.mockImplementation(() => {
+          throw new Error('op is down');
+        });
+        resolveOpRefs({ SECRET: 'op://Openclaw/I/f' });
+        const callsAfterFirst = execFileSyncMock.mock.calls.length;
+
+        // Jump past the TTL; op has recovered.
+        dateSpy.mockReturnValue(now + 6 * 60_000);
+        execFileSyncMock.mockReset();
+        execFileSyncMock.mockReturnValue('SECRET=recovered\n');
+
+        const result = resolveOpRefs({ SECRET: 'op://Openclaw/I/f' });
+        expect(result.SECRET).toBe('recovered');
+        expect(execFileSyncMock).toHaveBeenCalled();
+        expect(callsAfterFirst).toBeGreaterThan(0);
+      } finally {
+        dateSpy.mockRestore();
+      }
+    });
+
+    it('clears the failure entry once a ref resolves successfully', () => {
+      process.env.OP_SERVICE_ACCOUNT_TOKEN = 'test-token';
+      const now = Date.now();
+      const dateSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+      try {
+        execFileSyncMock.mockImplementation(() => {
+          throw new Error('op is down');
+        });
+        resolveOpRefs({ SECRET: 'op://Openclaw/I/f' });
+
+        dateSpy.mockReturnValue(now + 6 * 60_000);
+        execFileSyncMock.mockReset();
+        execFileSyncMock.mockReturnValue('SECRET=recovered\n');
+        expect(resolveOpRefs({ SECRET: 'op://Openclaw/I/f' }).SECRET).toBe('recovered');
+
+        // Success cache serves it now — no further subprocess calls.
+        execFileSyncMock.mockClear();
+        expect(resolveOpRefs({ SECRET: 'op://Openclaw/I/f' }).SECRET).toBe('recovered');
+        expect(execFileSyncMock).not.toHaveBeenCalled();
+      } finally {
+        dateSpy.mockRestore();
+      }
+    });
+  });
+
+  describe('resolveOpRefsAsync (M6 off-thread path)', () => {
+    it('resolves refs via async execFile, not execFileSync', async () => {
+      process.env.OP_SERVICE_ACCOUNT_TOKEN = 'test-token';
+      mockExecFileWith((args, input) => {
+        expect(args).toEqual(['inject']);
+        const lines = input.trim().split(/\r?\n/);
+        return lines
+          .map((line) => {
+            const key = line.slice(0, line.indexOf('='));
+            return `${key}=resolved-${key}`;
+          })
+          .join('\n') + '\n';
+      });
+
+      const result = await resolveOpRefsAsync({
+        A: 'op://Openclaw/I/f',
+        LIT: 'plain',
+      });
+
+      expect(result).toEqual({ A: 'resolved-A', LIT: 'plain' });
+      expect(execFileMock).toHaveBeenCalledTimes(1);
+      expect(execFileSyncMock).not.toHaveBeenCalled();
+    });
+
+    it('shares the success cache with the sync path', async () => {
+      process.env.OP_SERVICE_ACCOUNT_TOKEN = 'test-token';
+      mockExecFileWith(() => 'SECRET=shared-value\n');
+
+      expect((await resolveOpRefsAsync({ SECRET: 'op://Openclaw/I/f' })).SECRET).toBe('shared-value');
+
+      // Sync path must hit the cache without any subprocess.
+      expect(resolveOpRefs({ OTHER: 'op://Openclaw/I/f' }).OTHER).toBe('shared-value');
+      expect(execFileSyncMock).not.toHaveBeenCalled();
+    });
+
+    it('falls back to per-key op read and records failures in the shared failure cache', async () => {
+      process.env.OP_SERVICE_ACCOUNT_TOKEN = 'test-token';
+      mockExecFileWith((args) => {
+        if (args[0] === 'inject') return new Error('inject unavailable');
+        return new Error('read failed');
+      });
+
+      const result = await resolveOpRefsAsync({ SECRET: 'op://Openclaw/I/f' });
+      expect(result.SECRET).toBe('op://Openclaw/I/f');
+      const callsAfterFirst = execFileMock.mock.calls.length;
+      expect(callsAfterFirst).toBe(2); // inject + read
+
+      // Within TTL: no further subprocess attempts from either path.
+      await resolveOpRefsAsync({ SECRET: 'op://Openclaw/I/f' });
+      expect(execFileMock.mock.calls.length).toBe(callsAfterFirst);
+      resolveOpRefs({ SECRET: 'op://Openclaw/I/f' });
+      expect(execFileSyncMock).not.toHaveBeenCalled();
+    });
+
+    it('leaves refs literal without subprocess calls when no token is set', async () => {
+      const result = await resolveOpRefsAsync({ A: 'op://Openclaw/I/f' });
+      expect(result.A).toBe('op://Openclaw/I/f');
+      expect(execFileMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('loadEnvFileIntoAsync', () => {
+    it('uses overwrite semantics and resolves op refs off-thread', async () => {
+      process.env.OP_SERVICE_ACCOUNT_TOKEN = 'test-token';
+      mockExecFileWith(() => 'SECRET=resolved-async\n');
+      const envFile = makeTempEnvFile('SECRET=op://Openclaw/I/f\nK=agent\n');
+      const target: Record<string, string> = { K: 'org' };
+
+      await loadEnvFileIntoAsync(envFile, target);
+
+      expect(target.K).toBe('agent');
+      expect(target.SECRET).toBe('resolved-async');
+      expect(execFileSyncMock).not.toHaveBeenCalled();
+    });
+
+    it('ignores missing files', async () => {
+      const target = { K: 'org' };
+      await loadEnvFileIntoAsync(join(tmpdir(), 'missing-env-file'), target);
+      expect(target).toEqual({ K: 'org' });
+      expect(execFileMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findUnresolvedOpRefKeys (degraded-boot marker input)', () => {
+    it('returns only keys whose values are still literal op:// refs, sorted', () => {
+      expect(findUnresolvedOpRefKeys({
+        B: 'op://Openclaw/I/g',
+        A: 'op://Openclaw/I/f',
+        LIT: 'plain',
+        EMPTY: '',
+      })).toEqual(['A', 'B']);
+    });
+
+    it('returns an empty array for a fully resolved env', () => {
+      expect(findUnresolvedOpRefKeys({ A: 'resolved', B: 'x' })).toEqual([]);
     });
   });
 

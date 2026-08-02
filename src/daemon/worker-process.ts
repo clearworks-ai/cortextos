@@ -143,6 +143,14 @@ export class WorkerProcess {
   }
 
   /**
+   * Forked pty-host child's PID for this worker's live pty, or null (RW-6:
+   * consumed by AgentManager.getOwnedPtyHostPids for the pty-host reaper).
+   */
+  getPtyHostPid(): number | null {
+    return this.pty?.getHostPid() ?? null;
+  }
+
+  /**
    * Get current worker status snapshot.
    */
   getStatus(): WorkerStatus {

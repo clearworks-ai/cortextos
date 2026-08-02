@@ -1,5 +1,6 @@
 import { AgentManager } from './agent-manager.js';
 import { IPCServer } from './ipc-server.js';
+import { PtyHostReaper } from './pty-host-reaper.js';
 import { readdirSync, readFileSync, writeFileSync, existsSync, chmodSync } from 'fs';
 import { spawnSync } from 'child_process';
 import { join } from 'path';
@@ -222,6 +223,7 @@ function handleFatal(
 class Daemon {
   private agentManager: AgentManager | null = null;
   private ipcServer: IPCServer | null = null;
+  private ptyHostReaper: PtyHostReaper | null = null;
   private instanceId: string;
   private ctxRoot: string;
   private markerDriftTimer: NodeJS.Timeout | null = null;
@@ -296,6 +298,16 @@ class Daemon {
     checkMarkerDrift();
     this.markerDriftTimer = setInterval(checkMarkerDrift, INSTANCE_MARKER_DRIFT_CHECK_MS);
 
+    // RW-6: periodic pty-host orphan reaper. The fork-per-PTY pty-host
+    // architecture (upstream has none — it allocates node-pty in-process)
+    // needs a durable PID ledger + reaper so abandoned hosts and their
+    // claude grandchildren cannot accumulate into posix_spawnp exhaustion.
+    // Registry ownership comes from AgentManager (agents + workers).
+    this.ptyHostReaper = new PtyHostReaper(this.ctxRoot, {
+      getOwnedHostPids: () => this.agentManager?.getOwnedPtyHostPids() ?? new Set<number>(),
+    });
+    this.ptyHostReaper.start();
+
     console.log(`[daemon] Running (pid: ${process.pid})`);
 
     // Handle shutdown signals
@@ -306,6 +318,9 @@ class Daemon {
         this.markerDriftTimer = null;
       }
       try {
+        if (this.ptyHostReaper) {
+          this.ptyHostReaper.stop();
+        }
         if (this.agentManager) {
           await this.agentManager.stopAll();
         }

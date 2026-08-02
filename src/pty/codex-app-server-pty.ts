@@ -13,7 +13,8 @@ import { hostSpawn } from './pty-host-client.js';
 
 interface IPty {
   pid: number;
-  /** Pid of the forked pty-host child (hostSpawn only). See pty-host-client.ts. */
+  /** Pid of the forked pty-host child (hostSpawn only). See pty-host-client.ts.
+   * Absent on test-injected fakes (RW-6). */
   readonly hostPid?: number;
   write(data: string): void;
   onData(callback: (data: string) => void): { dispose(): void };
@@ -214,7 +215,8 @@ export class CodexAppServerPTY {
     return this._appServerPty?.pid ?? null;
   }
 
-  /** Pid of the forked pty-host child (parent of getPid()). RW-3 tree-kill support. */
+  /** Pid of the forked pty-host child (parent of getPid()). RW-3 tree-kill
+   * support; RW-6 reaper/ledger cross-reference. */
   getHostPid(): number | null {
     return this._appServerPty?.hostPid ?? null;
   }

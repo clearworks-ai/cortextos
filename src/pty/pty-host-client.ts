@@ -14,6 +14,13 @@ import { fork, type ChildProcess } from 'child_process';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import type { PtyClientMsg, PtyDisposeMsg, PtyHostMsg, PtySpawnMsg } from './pty-ipc.js';
+import {
+  ledgerPathFor,
+  recordPtyHost,
+  updatePtyHostPtyPid,
+  removePtyHost,
+  isPidAlive,
+} from './pty-host-ledger.js';
 
 /**
  * RW-4 fix: how long destroy() waits for the host child to exit gracefully
@@ -47,6 +54,7 @@ export interface IPty {
    * Undefined for in-process/mock implementations. RW-3: the phantom-registry
    * reconciler needs BOTH pids to kill the full tree — pty-host dead does not
    * imply the claude child is dead (it reparents), and vice versa.
+   * RW-6: also cross-referenced against the durable pty-host ledger/reaper.
    */
   readonly hostPid?: number;
   write(data: string): void;
@@ -156,7 +164,8 @@ class PtyHostProxy implements IPty {
     return this._pid;
   }
 
-  /** Pid of the forked pty-host child itself (parent of the inner pty pid). */
+  /** Pid of the forked pty-host child itself (parent of the inner pty pid).
+   * RW-6: also cross-referenced against the durable pty-host ledger. */
   get hostPid(): number | undefined {
     return this._child.pid;
   }
@@ -259,10 +268,35 @@ class PtyHostProxy implements IPty {
 }
 
 /**
+ * RW-6: in-process registry of host pids forked by THIS process that have
+ * not yet exited. The reaper uses it to distinguish hosts it still tracks
+ * from ledger entries abandoned by a dead daemon incarnation.
+ */
+const liveHostPids = new Set<number>();
+
+/** Host pids forked by this process and not yet exited (RW-6 reaper input). */
+export function getLiveHostPids(): ReadonlySet<number> {
+  return liveHostPids;
+}
+
+/**
  * Spawn a pty via a forked host child process.
  *
  * Returns a Promise<IPty> that resolves once the child confirms the pty
  * is allocated (pty-ready message received).
+ *
+ * RW-6 containment:
+ * - The host is forked `detached` (POSIX) so it leads its OWN process group —
+ *   the reaper can `kill(-hostPid)` an orphaned host without touching the
+ *   daemon. The host still self-exits on IPC disconnect (pty-host-entry.ts),
+ *   so daemon-death cleanup semantics are unchanged.
+ * - Every fork is recorded in the durable ledger (<CTX_ROOT>/state/
+ *   pty-hosts.json) before the spawn message is sent; the pty child pid is
+ *   added once pty-ready arrives. On host exit the entry is removed ONLY if
+ *   the pty child is also gone — a surviving child (the RW-4 SIGKILL-race
+ *   orphan) keeps its entry so the reaper can find and kill it.
+ * Ledger writes are keyed off options.env.CTX_ROOT; without it (unit tests,
+ * ad-hoc callers) only the in-memory live set is maintained.
  */
 export async function hostSpawn(
   file: string,
@@ -274,9 +308,37 @@ export async function hostSpawn(
     silent: false,
     // Ensure the child inherits a clean module environment
     execArgv: [],
+    // Own process group so an abandoned host (and its descendants that share
+    // the group) is group-killable without signalling the daemon (RW-6).
+    detached: process.platform !== 'win32',
   });
 
   const proxy = new PtyHostProxy(child);
+
+  const hostPid = child.pid ?? 0;
+  const ctxRoot = options.env?.['CTX_ROOT'];
+  const ledgerPath = hostPid > 0 && ctxRoot ? ledgerPathFor(ctxRoot) : null;
+  if (hostPid > 0) liveHostPids.add(hostPid);
+  if (ledgerPath) {
+    recordPtyHost(ledgerPath, {
+      hostPid,
+      ptyPid: 0,
+      file,
+      agent: options.env?.['CTX_AGENT_NAME'] ?? '',
+      daemonPid: process.pid,
+      startedAt: Date.now(),
+    });
+  }
+  child.on('exit', () => {
+    liveHostPids.delete(hostPid);
+    if (!ledgerPath) return;
+    // Keep the entry when the pty child survived the host (RW-4 kill race):
+    // the reaper needs the recorded ptyPid to find and kill the orphan.
+    const ptyPid = proxy.pid;
+    if (!(ptyPid > 0) || !isPidAlive(ptyPid)) {
+      removePtyHost(ledgerPath, hostPid);
+    }
+  });
 
   const spawnMsg: PtySpawnMsg = {
     type: 'pty-spawn',
@@ -287,5 +349,8 @@ export async function hostSpawn(
   child.send(spawnMsg);
 
   await proxy.waitReady();
+  if (ledgerPath && proxy.pid > 0) {
+    updatePtyHostPtyPid(ledgerPath, hostPid, proxy.pid);
+  }
   return proxy;
 }

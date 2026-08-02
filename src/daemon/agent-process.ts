@@ -495,6 +495,14 @@ export class AgentProcess {
   }
 
   /**
+   * Forked pty-host child's PID for this agent's live pty, or null (RW-6:
+   * consumed by AgentManager.getOwnedPtyHostPids for the pty-host reaper).
+   */
+  getPtyHostPid(): number | null {
+    return this.pty?.getHostPid() ?? null;
+  }
+
+  /**
    * Get current agent status.
    */
   getStatus(): AgentStatus {

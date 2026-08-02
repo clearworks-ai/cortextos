@@ -730,6 +730,47 @@ describePrHook('pr push gate hook', () => {
     expect(passed.stdout).toBe('');
   });
 
+  it('shard-branch slug falls back to the base slug when ledger rows exist there', () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    runGit(['checkout', '-b', 'feature/task-bus-management-automation-shard2'], projectRoot);
+    setOrigin('git@github.com:joshweiss/cortextos.git');
+    seedReviewChain(nowSeconds, 'task-bus-management-automation');
+    emitTrueVerifyRow(nowSeconds - 5, 'task-bus-management-automation');
+
+    const result = runHook(gatePrPush, {
+      tool_name: 'Bash',
+      tool_input: {
+        command: 'gh pr create --fill',
+      },
+    }, {
+      CTX_PROJECT_ROOT: projectRoot,
+      PIPELINE_SECRET_PATH: secretPath,
+      PIPELINE_TRANSCRIPT_ROOT_OVERRIDE: projectsRoot,
+    }, projectRoot);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('shard-branch slug still blocks when neither the shard slug nor the base slug has ledger rows', () => {
+    runGit(['checkout', '-b', 'feature/task-bus-management-automation-shard2'], projectRoot);
+    setOrigin('git@github.com:joshweiss/cortextos.git');
+
+    const result = runHook(gatePrPush, {
+      tool_name: 'Bash',
+      tool_input: {
+        command: 'gh pr create --fill',
+      },
+    }, {
+      CTX_PROJECT_ROOT: projectRoot,
+      PIPELINE_SECRET_PATH: secretPath,
+      PIPELINE_TRANSCRIPT_ROOT_OVERRIDE: projectsRoot,
+    }, projectRoot);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('"decision":"block"');
+  });
+
   it('allows a doc-only PR with a signed exempt row (doc-exempt lane)', () => {
     const nowSeconds = Math.floor(Date.now() / 1000);
     runGit(['branch', 'main'], projectRoot);

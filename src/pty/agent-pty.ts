@@ -10,6 +10,8 @@ import { hostSpawn } from './pty-host-client.js';
 // node-pty types
 interface IPty {
   pid: number;
+  /** Pid of the forked pty-host child (hostSpawn only). See pty-host-client.ts. */
+  readonly hostPid?: number;
   write(data: string): void;
   onData(callback: (data: string) => void): { dispose(): void };
   onExit(callback: (e: { exitCode: number; signal?: number }) => void): { dispose(): void };
@@ -399,6 +401,17 @@ export class AgentPTY {
    */
   getPid(): number | null {
     return this.pty?.pid || null;
+  }
+
+  /**
+   * Get the pty-host child pid (parent of the inner pty pid), when the pty
+   * was spawned via hostSpawn. Null for mocks/in-process implementations.
+   * RW-3: lets the registry reconciler kill the FULL tree, not just the
+   * inner pid — a live pty-host with a dead claude child (or the reverse)
+   * must not leak.
+   */
+  getHostPid(): number | null {
+    return this.pty?.hostPid ?? null;
   }
 
   /**

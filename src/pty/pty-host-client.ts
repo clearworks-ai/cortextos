@@ -42,6 +42,13 @@ interface PtyDisposable {
  */
 export interface IPty {
   readonly pid: number;
+  /**
+   * Pid of the forked pty-host child process (the parent of `pid`).
+   * Undefined for in-process/mock implementations. RW-3: the phantom-registry
+   * reconciler needs BOTH pids to kill the full tree — pty-host dead does not
+   * imply the claude child is dead (it reparents), and vice versa.
+   */
+  readonly hostPid?: number;
   write(data: string): void;
   onData(callback: (data: string) => void): PtyDisposable;
   onExit(callback: (e: { exitCode: number; signal?: number }) => void): PtyDisposable;
@@ -147,6 +154,11 @@ class PtyHostProxy implements IPty {
 
   get pid(): number {
     return this._pid;
+  }
+
+  /** Pid of the forked pty-host child itself (parent of the inner pty pid). */
+  get hostPid(): number | undefined {
+    return this._child.pid;
   }
 
   write(data: string): void {

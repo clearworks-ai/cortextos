@@ -13,6 +13,8 @@ import { hostSpawn } from './pty-host-client.js';
 
 interface IPty {
   pid: number;
+  /** Pid of the forked pty-host child (hostSpawn only). See pty-host-client.ts. */
+  readonly hostPid?: number;
   write(data: string): void;
   onData(callback: (data: string) => void): { dispose(): void };
   onExit(callback: (e: { exitCode: number; signal?: number }) => void): { dispose(): void };
@@ -210,6 +212,11 @@ export class CodexAppServerPTY {
 
   getPid(): number | null {
     return this._appServerPty?.pid ?? null;
+  }
+
+  /** Pid of the forked pty-host child (parent of getPid()). RW-3 tree-kill support. */
+  getHostPid(): number | null {
+    return this._appServerPty?.hostPid ?? null;
   }
 
   onExit(handler: (exitCode: number, signal?: number) => void): void {

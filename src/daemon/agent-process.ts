@@ -485,6 +485,16 @@ export class AgentProcess {
   }
 
   /**
+   * Pid of the forked pty-host child (parent of the status pid), when known.
+   * RW-3: consumed by AgentManager.reconcileDeadRegistryEntry so a phantom
+   * reconcile kills the FULL tree (pty-host + claude + descendants) instead
+   * of leaking whichever half of the pair is still alive.
+   */
+  getHostPid(): number | null {
+    return this.pty?.getHostPid() ?? null;
+  }
+
+  /**
    * Get current agent status.
    */
   getStatus(): AgentStatus {

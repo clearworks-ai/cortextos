@@ -670,6 +670,9 @@ export class AgentProcess {
    * discoverAndStart() applies at daemon boot (agent-manager.ts).
    * Default-on: absent entry / unreadable file ⇒ enabled. Fail-open on
    * reader errors so the gate can never throw inside handleExit.
+   * The shared reader is lock-free and non-throwing (RW-9/M5 convergence):
+   * a locked read here serialized the daemon loop for up to 5s per exit
+   * during crash storms. The try/catch below stays as defense in depth.
    */
   private isDisabled(): boolean {
     if (this.config.enabled === false) {

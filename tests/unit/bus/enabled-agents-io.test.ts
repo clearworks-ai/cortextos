@@ -303,6 +303,34 @@ describe('mutateEnabledAgentsMap', () => {
 // No-lost-update: two sequential mutate calls preserve both keys
 // ---------------------------------------------------------------------------
 
+describe('readEnabledAgentsMap — lock-free reader (RW-9 regression)', () => {
+  it('returns immediately with correct data while the config-dir lock is held by a live process', () => {
+    writeEnabledAgentsMap(tmpRoot, { sage: { enabled: true, org: 'testorg' } });
+
+    // Simulate another live process holding the config-dir lock (e.g. a CLI
+    // enable/disable mid-flight). Our own pid is alive, so withFileLockSync
+    // would Atomics.wait-block for the full 5s timeout and then THROW —
+    // which at daemon boot was whole-daemon fatal (index.ts start().catch →
+    // process.exit(1) → .daemon-crashed).
+    const lockDir = join(enabledAgentsLockDir(tmpRoot), '.lock.d');
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(join(lockDir, 'pid'), String(process.pid));
+
+    try {
+      const start = Date.now();
+      const map = readEnabledAgentsMap(tmpRoot);
+      const elapsed = Date.now() - start;
+
+      // Non-throwing, non-blocking: correct data, and nowhere near the 5s
+      // lock timeout (generous CI margin).
+      expect(map).toEqual({ sage: { enabled: true, org: 'testorg' } });
+      expect(elapsed).toBeLessThan(1000);
+    } finally {
+      rmSync(lockDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('mutateEnabledAgentsMap — no-lost-update correctness', () => {
   it('back-to-back mutate calls for different keys both persist (no lost update)', () => {
     // Simulate two separate callers each adding one agent — if read+write were

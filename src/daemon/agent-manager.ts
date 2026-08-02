@@ -17,6 +17,7 @@ import { stripControlChars } from '../utils/validate.js';
 import { processMediaMessage } from '../telegram/media.js';
 import { stripBom } from '../utils/strip-bom.js';
 import { readEnabledAgentsMap } from '../bus/enabled-agents-io.js';
+import { killProcessTree, getProcessElapsedSeconds } from '../utils/process-tree.js';
 
 type LogFn = (msg: string) => void;
 
@@ -171,28 +172,111 @@ export class AgentManager {
     try {
       process.kill(pid, 0);
       return true;
-    } catch (err) {
-      return (err as NodeJS.ErrnoException).code === 'EPERM';
+    } catch {
+      // RW-3 fix: EPERM is NOT evidence of life for a daemon-spawned process.
+      // Every pid we track here was spawned by this daemon under its own uid,
+      // and `kill(pid, 0)` on a live same-uid process never raises EPERM.
+      // EPERM therefore means the pid was RECYCLED by a foreign-uid process —
+      // our process is dead. The old `=== 'EPERM' → alive` branch produced the
+      // 2026-08-01 muse wedge: start() DEDUPED forever + hard-restart
+      // "not in registry", with no live agent behind either answer.
+      return false;
     }
   }
 
   /**
-   * If `name` is registered but its process is not actually alive (no pid, or
-   * a pid that is no longer running), tear the phantom registry entry down and
-   * return true so the caller can proceed with a fresh start. A genuinely-alive
-   * pid keeps the entry (returns false).
+   * RW-3 fix: classify a registry pid before reconcile acts on it.
+   *
+   * - 'alive'    — pid is running AND plausibly still our process.
+   * - 'dead'     — pid is gone (ESRCH). Safe to include in the tree-kill
+   *                sweep (SIGKILL on a dead pid is a no-op).
+   * - 'recycled' — a process is running under this pid but it is NOT the one
+   *                we spawned (foreign-uid EPERM, or a same-uid process whose
+   *                start time postdates our session start). The entry is dead,
+   *                and the pid must be EXCLUDED from any kill sweep — it
+   *                belongs to an innocent process.
+   *
+   * Same-uid recycle detection compares `ps -o etime=` against the entry's
+   * sessionStart: the process we spawned started AT session start, so a
+   * process substantially younger than the session cannot be ours. The 120s
+   * slack absorbs ps rounding and spawn latency. If ps is unavailable the
+   * check degrades to 'alive' (keep the entry — never kill on uncertainty).
+   */
+  private classifyRegistryPid(pid: number, sessionStart?: string): 'alive' | 'dead' | 'recycled' {
+    if (!this.isPidAlive(pid)) {
+      // Not alive per the probe. Distinguish foreign-uid recycle (EPERM) from
+      // plain dead (ESRCH) so the kill sweep can exclude the innocent pid.
+      try {
+        process.kill(pid, 0);
+        return 'recycled'; // probe succeeded here ⇒ isPidAlive's false came from EPERM
+      } catch (err) {
+        return (err as NodeJS.ErrnoException).code === 'EPERM' ? 'recycled' : 'dead';
+      }
+    }
+
+    if (sessionStart) {
+      const sessionAgeSec = (Date.now() - new Date(sessionStart).getTime()) / 1000;
+      const elapsedSec = getProcessElapsedSeconds(pid);
+      if (
+        Number.isFinite(sessionAgeSec) &&
+        elapsedSec !== null &&
+        elapsedSec + 120 < sessionAgeSec
+      ) {
+        return 'recycled';
+      }
+    }
+    return 'alive';
+  }
+
+  /**
+   * If `name` is registered but its process is not actually alive (no pid, a
+   * pid that is no longer running, or a recycled pid that is no longer OUR
+   * process), tear the phantom registry entry down and return true so the
+   * caller can proceed with a fresh start. A genuinely-alive pid keeps the
+   * entry (returns false).
+   *
+   * RW-3 fix (UPSTREAM-ROOT-WOUND.md): before deleting the Map entry, SIGKILL
+   * the FULL process tree — the pty-host child AND the inner claude pid plus
+   * every discoverable descendant. The pre-fix delete-without-kill authorized
+   * a fresh spawn on top of whatever was still alive (pty-host dead ≠ claude
+   * dead — the grandchild reparents), which is the confirmed +1-orphan-per-
+   * cycle accumulation behind the posix_spawnp fleet death. This module
+   * remains a fork-only band-aid slated for REMOVAL once RW-1 (restart churn)
+   * and RW-6 (orphan reaper) land and hold — do not extend it.
    */
   private reconcileDeadRegistryEntry(name: string): boolean {
     const entry = this.agents.get(name);
     if (!entry) return false;
 
-    const pid = entry.process.getStatus().pid;
-    if (pid && this.isPidAlive(pid)) return false;
+    const status = entry.process.getStatus();
+    const pid = status.pid;
+    const verdict = pid ? this.classifyRegistryPid(pid, status.sessionStart) : 'dead';
+    if (verdict === 'alive') return false;
 
-    console.warn(`[agent-manager] Reconciled dead registry entry for ${name} (pid ${pid ?? 'none'} not alive)`);
+    console.warn(
+      `[agent-manager] Reconciled dead registry entry for ${name} ` +
+      `(pid ${pid ?? 'none'} ${verdict === 'recycled' ? 'recycled — not our process' : 'not alive'})`,
+    );
     entry.poller?.stop();
     entry.activityPoller?.stop();
     entry.checker.stop();
+
+    // Kill/reap the full tree BEFORE deleting the entry, so the respawn this
+    // reconcile authorizes never lands on top of live leftovers. Roots:
+    //  - pty-host child pid (parent of the inner pid) — always fair game,
+    //    it is unambiguously ours.
+    //  - the registered inner pid — ONLY when not classified as recycled
+    //    (a recycled pid belongs to an innocent process; ESRCH-dead pids are
+    //    harmless to include, SIGKILL just no-ops).
+    const killRoots: number[] = [];
+    // typeof guard: unit tests inject minimal AgentProcess fakes.
+    const hostPid = typeof entry.process.getHostPid === 'function' ? entry.process.getHostPid() : null;
+    if (hostPid) killRoots.push(hostPid);
+    if (pid && verdict !== 'recycled') killRoots.push(pid);
+    if (killRoots.length > 0) {
+      killProcessTree(killRoots, (msg) => console.warn(`[agent-manager] reconcile(${name}): ${msg}`));
+    }
+
     this.agents.delete(name);
     this.pendingRestarts.delete(name);
 

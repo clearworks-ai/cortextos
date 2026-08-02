@@ -51,6 +51,10 @@ vi.mock('../../../src/pty/pty-host-client.js', async () => {
   return real;
 });
 
+// Shrink the RW-4 dispose grace window so escalation tests run fast.
+// Must be set BEFORE the module import — the constant is read at load time.
+process.env.CORTEXT_PTY_DISPOSE_GRACE_MS = '500';
+
 const { hostSpawn } = await import('../../../src/pty/pty-host-client.js');
 
 // Helper: spawn via stub and get the proxy
@@ -139,5 +143,57 @@ describe('pty-host-client protocol', () => {
     const pty = await spawnStub();
     expect(() => pty.destroy?.()).not.toThrow();
     await new Promise((r) => setTimeout(r, 100));
+  });
+
+  // ─── RW-4: graceful-then-escalate destroy ─────────────────────────────────
+
+  it('9. destroy() is GRACEFUL: host receives pty-dispose and exits cleanly (exitCode 0, no SIGKILL)', async () => {
+    const pty = await spawnStub();
+    let exit: { exitCode: number; signal?: number } | undefined;
+    pty.onExit((e) => { exit = e; });
+    pty.destroy?.();
+    // Stub replies pty-exit + exit(0) within ~20ms — far inside the 500ms
+    // grace window. A premature SIGKILL would surface as exitCode 1 via the
+    // child-exit fallback path instead of the pty-exit message.
+    await new Promise((r) => setTimeout(r, 250));
+    expect(exit).toBeDefined();
+    expect(exit!.exitCode).toBe(0);
+  });
+
+  it('10. destroy() ESCALATES to SIGKILL after the grace deadline when the host ignores pty-dispose', async () => {
+    process.env.PTY_STUB_IGNORE_DISPOSE = '1';
+    try {
+      const pty = await spawnStub();
+      let exited = false;
+      pty.onExit(() => { exited = true; });
+      pty.destroy?.();
+      // Inside the grace window the wedged host must still be alive.
+      await new Promise((r) => setTimeout(r, 250));
+      expect(exited).toBe(false);
+      // After the 500ms grace the client SIGKILLs the host.
+      await new Promise((r) => setTimeout(r, 700));
+      expect(exited).toBe(true);
+    } finally {
+      delete process.env.PTY_STUB_IGNORE_DISPOSE;
+    }
+  });
+
+  it('11. destroy() is idempotent — second call is a no-op and does not throw', async () => {
+    const pty = await spawnStub();
+    pty.destroy?.();
+    expect(() => pty.destroy?.()).not.toThrow();
+    await new Promise((r) => setTimeout(r, 150));
+  });
+
+  it('12. kill() then destroy() (the AgentPTY.kill() ordering) exits gracefully, not via SIGKILL', async () => {
+    const pty = await spawnStub();
+    let exit: { exitCode: number; signal?: number } | undefined;
+    pty.onExit((e) => { exit = e; });
+    // Exact ordering AgentPTY.kill() uses — the RW-4 race sequence.
+    pty.kill();
+    pty.destroy?.();
+    await new Promise((r) => setTimeout(r, 250));
+    expect(exit).toBeDefined();
+    expect(exit!.exitCode).toBe(0);
   });
 });

@@ -13,7 +13,16 @@
 import { fork, type ChildProcess } from 'child_process';
 import { join } from 'path';
 import { existsSync } from 'fs';
-import type { PtyClientMsg, PtyHostMsg, PtySpawnMsg } from './pty-ipc.js';
+import type { PtyClientMsg, PtyDisposeMsg, PtyHostMsg, PtySpawnMsg } from './pty-ipc.js';
+
+/**
+ * RW-4 fix: how long destroy() waits for the host child to exit gracefully
+ * after a pty-dispose message before escalating to SIGKILL of the host.
+ * Must be LONGER than pty-host-entry's DISPOSE_SELF_EXIT_MS (4000ms) so the
+ * host's own signal-then-self-exit path always wins over our SIGKILL.
+ * Overridable via env for tests.
+ */
+const DISPOSE_GRACE_MS = Number(process.env.CORTEXT_PTY_DISPOSE_GRACE_MS || '') || 5000;
 
 interface IPtySpawnOptions {
   name?: string;
@@ -69,6 +78,8 @@ class PtyHostProxy implements IPty {
   private _resolveReady!: () => void;
   private _rejectReady!: (err: Error) => void;
   private _exited = false;
+  private _disposing = false;
+  private _disposeTimer: NodeJS.Timeout | null = null;
 
   constructor(child: ChildProcess) {
     this._child = child;
@@ -79,6 +90,12 @@ class PtyHostProxy implements IPty {
 
     child.on('message', (raw: unknown) => this._handleHostMsg(raw));
     child.on('exit', (code, sig) => {
+      // Host exited — the graceful dispose worked (or the host died on its
+      // own); the SIGKILL escalation is no longer needed.
+      if (this._disposeTimer) {
+        clearTimeout(this._disposeTimer);
+        this._disposeTimer = null;
+      }
       if (!this._exited) {
         this._exited = true;
         const exitCode = code ?? 1;
@@ -165,8 +182,53 @@ class PtyHostProxy implements IPty {
   }
 
   destroy(): void {
-    // Killing the child process releases all its file descriptors
-    try { this._child.kill('SIGKILL'); } catch { /* already gone */ }
+    // RW-4 fix: graceful-then-escalate teardown.
+    //
+    // The old implementation SIGKILLed the host child immediately. Because
+    // the preceding pty-kill IPC message is delivered ASYNCHRONOUSLY, the
+    // SIGKILL routinely landed before the host dequeued it — the node-pty
+    // grandchild (claude) was never signaled, reparented to launchd, and
+    // held its pty slave + memory for days (confirmed alloc-61-65 orphans).
+    //
+    // New sequence: send pty-dispose (host signals its pty child, then
+    // self-exits with its own fallback timer) → wait up to DISPOSE_GRACE_MS
+    // for the host to exit → only then SIGKILL the host. The host's SIGTERM
+    // handler + dispose fallback guarantee the grandchild is signaled before
+    // the host is ever allowed to die.
+    if (this._disposing) return;
+    this._disposing = true;
+
+    // Host already gone — nothing to release.
+    if (this._child.exitCode !== null || this._child.signalCode !== null) return;
+
+    // IPC channel gone but process alive: the graceful path is impossible.
+    // SIGTERM first (the host's SIGTERM handler kills its pty child), then
+    // escalate to SIGKILL after the grace window.
+    if (!this._child.connected) {
+      try { this._child.kill('SIGTERM'); } catch { /* already gone */ }
+      this._armEscalation();
+      return;
+    }
+
+    try {
+      const dispose: PtyDisposeMsg = { type: 'pty-dispose' };
+      this._child.send(dispose);
+    } catch {
+      // send failed (channel closed mid-flight) — fall back to SIGTERM.
+      try { this._child.kill('SIGTERM'); } catch { /* already gone */ }
+    }
+    this._armEscalation();
+  }
+
+  private _armEscalation(): void {
+    this._disposeTimer = setTimeout(() => {
+      this._disposeTimer = null;
+      if (this._child.exitCode === null && this._child.signalCode === null) {
+        try { this._child.kill('SIGKILL'); } catch { /* already gone */ }
+      }
+    }, DISPOSE_GRACE_MS);
+    // Never keep the daemon alive just for an escalation timer.
+    this._disposeTimer.unref?.();
   }
 
   /** Wait for the pty to be allocated (pty-ready received from host) */

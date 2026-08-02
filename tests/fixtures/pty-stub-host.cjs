@@ -6,6 +6,9 @@
  *   1. Replies pty-ready with pid=9999 when it receives pty-spawn
  *   2. Echoes any pty-write data back as a pty-data message
  *   3. Sends pty-exit and exits when it receives pty-kill
+ *   4. Sends pty-exit and exits when it receives pty-dispose (graceful
+ *      teardown, RW-4) — unless PTY_STUB_IGNORE_DISPOSE=1, which simulates
+ *      a wedged host so tests can prove the client escalates to SIGKILL.
  *
  * Cross-platform: no native addons, no /dev/ptmx.
  */
@@ -43,6 +46,22 @@ process.on('message', (msg) => {
       if (!killed) {
         killed = true;
         process.send({ type: 'pty-exit', exitCode: 0, signal: undefined });
+        setTimeout(() => process.exit(0), 20);
+      }
+      break;
+
+    case 'pty-dispose':
+      if (process.env.PTY_STUB_IGNORE_DISPOSE === '1') {
+        // Simulate a wedged host: never exit on its own. Keep the event loop
+        // busy so only an external SIGKILL can take this process down.
+        setInterval(() => {}, 1000);
+        break;
+      }
+      if (!killed) {
+        killed = true;
+        process.send({ type: 'pty-exit', exitCode: 0, signal: undefined });
+        setTimeout(() => process.exit(0), 20);
+      } else {
         setTimeout(() => process.exit(0), 20);
       }
       break;

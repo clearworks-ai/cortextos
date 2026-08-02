@@ -40,6 +40,31 @@ function send(msg: PtyHostMsg): void {
 
 let pty: IPty | null = null;
 let exited = false;
+let disposing = false;
+
+/**
+ * RW-4 fix: after a graceful dispose signals the pty child, arm a fallback
+ * timer so this host process ALWAYS exits even if the pty's onExit never
+ * fires (child ignoring the signal, node-pty edge cases). The fallback
+ * SIGKILLs the pty child before exiting so the grandchild can never be
+ * orphaned by the host going away first.
+ *
+ * 4000ms — intentionally SHORTER than the daemon-side DISPOSE_GRACE_MS
+ * (5000ms in pty-host-client.ts) so the host self-exits cleanly before the
+ * daemon escalates to SIGKILL of the host.
+ */
+const DISPOSE_SELF_EXIT_MS = 4000;
+
+function armDisposeFallback(): void {
+  const t = setTimeout(() => {
+    if (pty && !exited) {
+      try { pty.kill('SIGKILL'); } catch { /* already gone */ }
+      try { pty.destroy?.(); } catch { /* fd already closed */ }
+    }
+    process.exit(0);
+  }, DISPOSE_SELF_EXIT_MS);
+  t.unref();
+}
 
 function handleMessage(raw: unknown): void {
   if (typeof raw !== 'object' || raw === null) return;
@@ -96,6 +121,26 @@ function handleMessage(raw: unknown): void {
       break;
     }
 
+    case 'pty-dispose': {
+      // RW-4 fix: graceful teardown. Signal the pty child, then rely on the
+      // normal onExit path (pty-exit + process.exit) — with a self-exit
+      // fallback so this host can never linger, and never exits leaving the
+      // grandchild alive un-SIGKILLed.
+      if (disposing) break;
+      disposing = true;
+      if (pty && !exited) {
+        try { pty.kill(msg.signal); } catch { /* ignore */ }
+        armDisposeFallback();
+      } else if (!exited) {
+        // Never spawned (or already torn down) — nothing to signal, just exit.
+        exited = true;
+        setTimeout(() => process.exit(0), 20).unref();
+      }
+      // If exited is already true, pty-exit was sent and process.exit(0) is
+      // already scheduled — nothing to do.
+      break;
+    }
+
     default:
       // Unknown message type — ignore silently
       break;
@@ -109,6 +154,17 @@ process.on('disconnect', () => {
   if (pty && !exited) {
     try { pty.kill(); } catch { /* ignore */ }
     try { pty.destroy?.(); } catch { /* ignore */ }
+  }
+  process.exit(0);
+});
+
+// RW-4 fix: SIGTERM must take the pty child down WITH the host. Without this
+// handler a daemon-side (or external) SIGTERM killed only the host and the
+// node-pty grandchild reparented to launchd — the confirmed multi-day orphans.
+process.on('SIGTERM', () => {
+  if (pty && !exited) {
+    try { pty.kill(); } catch { /* ignore */ }
+    try { pty.destroy?.(); } catch { /* fd already closed */ }
   }
   process.exit(0);
 });

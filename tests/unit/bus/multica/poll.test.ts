@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -13,6 +13,7 @@ import {
   updateTask,
   findTaskFile,
 } from '../../../../src/bus/task.js';
+import { createApproval, listPendingApprovals } from '../../../../src/bus/approval.js';
 import { createSyncStateStore } from '../../../../src/bus/multica/sync-state.js';
 import { runInboundPoll } from '../../../../src/bus/multica/poll.js';
 import type { MulticaClient, MulticaIssue } from '../../../../src/bus/multica/types.js';
@@ -270,5 +271,251 @@ describe('runInboundPoll - reverse import', () => {
     const tasks = listTasks(paths);
     expect(tasks).toHaveLength(1);
     expect(tasks[0].id).toBe(taskId);
+  });
+});
+
+describe('runInboundPoll - approval resolution', () => {
+  let testDir: string;
+  let paths: BusPaths;
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join(tmpdir(), 'multica-approval-test-'));
+    paths = buildPaths(testDir);
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('linked close resolves the approval', async () => {
+    const store = createSyncStateStore(join(testDir, 'sync-state.json'));
+    const issueId = 'issue-linked';
+
+    // Create an approval which also creates a companion task
+    const approvalId = await createApproval(
+      paths,
+      'paul',
+      'clearworksai',
+      'Test approval',
+      'other',
+      'test context',
+    );
+
+    // Get the task that was created by createApproval
+    const tasksBefore = listTasks(paths);
+    expect(tasksBefore).toHaveLength(1);
+    const linkedTaskId = tasksBefore[0].id;
+
+    // Create the link in the store
+    const link = store.load();
+    link.links[linkedTaskId] = {
+      multica_issue_id: issueId,
+      last_seen_multica_status: 'in_progress',
+      last_seen_multica_assignee_id: null,
+    };
+    store.save(link);
+
+    // Create a Multica issue that transitions to 'done' (mapped to 'completed')
+    const issue = makeIssue({ 
+      id: issueId, 
+      status: 'done',
+      title: 'Issue transitioning to done',
+    });
+    const client = makeClient([issue]);
+
+    // Run poll
+    const result = await runInboundPoll(paths, config, client, store, { importIdentity: identity });
+
+    // Approval should be resolved
+    const pendingApprovals = listPendingApprovals(paths);
+    expect(pendingApprovals).toHaveLength(0);
+
+    // Should have recorded the approval-resolution action
+    expect(result.actions).toContainEqual(
+      expect.objectContaining({
+        bus_task_id: linkedTaskId,
+        multica_issue_id: issueId,
+        kind: 'approval-resolution',
+        approval_id: approvalId,
+      }),
+    );
+
+    // Verify the resolved approval has the correct status and note
+    const resolvedPath = join(paths.approvalDir, 'resolved', `${approvalId}.json`);
+    const resolvedApproval = JSON.parse(readFileSync(resolvedPath, 'utf-8'));
+    expect(resolvedApproval.status).toBe('approved');
+    expect(resolvedApproval.resolved_by).toBe('resolved via Multica inbound sync (completed)');
+  });
+
+  it('null / unlinked untouched', async () => {
+    const store = createSyncStateStore(join(testDir, 'sync-state.json'));
+
+    // Create a task with no approval link
+    const unlinkedTaskId = createTask(paths, 'paul', 'clearworksai', 'Unlinked task', {
+      description: 'task without approval',
+    });
+    const issueId = 'issue-unlinked';
+
+    // Create the link in the store
+    const link = store.load();
+    link.links[unlinkedTaskId] = {
+      multica_issue_id: issueId,
+      last_seen_multica_status: 'in_progress',
+      last_seen_multica_assignee_id: null,
+    };
+    store.save(link);
+
+    // Create an approval with null linked_task_id by manually creating it
+    // (createApproval always creates a linked task, so we do this manually for the test)
+    const approvalId = `approval_${Math.floor(Date.now() / 1000)}_manual`;
+    const approvalPath = join(paths.approvalDir, 'pending', `${approvalId}.json`);
+    const approvalData = {
+      id: approvalId,
+      title: 'Unlinked approval',
+      requesting_agent: 'paul',
+      org: 'clearworksai',
+      category: 'other',
+      linked_task_id: null,
+      context: 'unlinked test context',
+      status: 'pending',
+      created_at: new Date().toISOString(),
+    };
+    writeFileSync(approvalPath, JSON.stringify(approvalData, null, 2));
+
+    // Create a Multica issue that transitions to 'done'
+    const issue = makeIssue({ 
+      id: issueId, 
+      status: 'done',
+      title: 'Issue transitioning to done',
+    });
+    const client = makeClient([issue]);
+
+    // Run poll
+    const result = await runInboundPoll(paths, config, client, store, { importIdentity: identity });
+
+    // Unlinked approval should still be pending
+    const pendingApprovals = listPendingApprovals(paths);
+    expect(pendingApprovals).toHaveLength(1);
+    expect(pendingApprovals[0].linked_task_id).toBeNull();
+
+    // Should NOT have recorded an approval-resolution action
+    expect(result.actions).not.toContainEqual(
+      expect.objectContaining({ kind: 'approval-resolution' }),
+    );
+  });
+
+  it('simultaneous-close convergence', async () => {
+    const store = createSyncStateStore(join(testDir, 'sync-state.json'));
+    const issueId = 'issue-simultaneous';
+
+    // Create an approval which also creates a companion task
+    const approvalId = await createApproval(
+      paths,
+      'paul',
+      'clearworksai',
+      'Simultaneous approval',
+      'other',
+      'simultaneous test context',
+    );
+
+    // Get the task that was created by createApproval
+    const tasksBefore = listTasks(paths);
+    expect(tasksBefore).toHaveLength(1);
+    const linkedTaskId = tasksBefore[0].id;
+
+    // Create the link in the store
+    const link = store.load();
+    link.links[linkedTaskId] = {
+      multica_issue_id: issueId,
+      last_seen_multica_status: 'in_progress',
+      last_seen_multica_assignee_id: null,
+    };
+    store.save(link);
+
+    // First, approve via card (updateApproval)
+    const { updateApproval: cardUpdateApproval } = await import('../../../../src/bus/approval.js');
+    cardUpdateApproval(paths, approvalId, 'approved', 'approved via card');
+
+    // Then close the issue via the fixture client
+    const issue = makeIssue({ 
+      id: issueId, 
+      status: 'done',
+      title: 'Issue transitioning to done',
+    });
+    const client = makeClient([issue]);
+
+    // Run poll - should handle simultaneous close gracefully
+    const result = await runInboundPoll(paths, config, client, store, { importIdentity: identity });
+
+    // Approval should be resolved (exactly once, no double-processing)
+    const pendingApprovals = listPendingApprovals(paths);
+    expect(pendingApprovals).toHaveLength(0);
+
+    // No errors should have occurred
+    expect(result.errors).toBe(0);
+  });
+
+  it('cancelled task resolves approval as rejected', async () => {
+    const store = createSyncStateStore(join(testDir, 'sync-state.json'));
+    const issueId = 'issue-cancelled';
+
+    // Create an approval which also creates a companion task
+    const approvalId = await createApproval(
+      paths,
+      'paul',
+      'clearworksai',
+      'Cancelled approval',
+      'other',
+      'cancellation test context',
+    );
+
+    // Get the task that was created by createApproval
+    const tasksBefore = listTasks(paths);
+    expect(tasksBefore).toHaveLength(1);
+    const linkedTaskId = tasksBefore[0].id;
+
+    // Create the link in the store
+    const link = store.load();
+    link.links[linkedTaskId] = {
+      multica_issue_id: issueId,
+      last_seen_multica_status: 'in_progress',
+      last_seen_multica_assignee_id: null,
+    };
+    store.save(link);
+
+    // Create a Multica issue that transitions to 'cancelled' (mapped to 'cancelled')
+    const issue = makeIssue({ 
+      id: issueId, 
+      status: 'cancelled',
+      title: 'Issue transitioning to cancelled',
+    });
+    const client = makeClient([issue]);
+
+    // Run poll
+    const result = await runInboundPoll(paths, config, client, store, { importIdentity: identity });
+
+    // Approval should be resolved
+    const pendingApprovals = listPendingApprovals(paths);
+    expect(pendingApprovals).toHaveLength(0);
+
+    // Task should be cancelled
+    const task = findTaskFile(paths, linkedTaskId);
+    expect(task?.status).toBe('cancelled');
+
+    // Should have recorded the approval-resolution action
+    expect(result.actions).toContainEqual(
+      expect.objectContaining({
+        bus_task_id: linkedTaskId,
+        multica_issue_id: issueId,
+        kind: 'approval-resolution',
+        approval_id: approvalId,
+      }),
+    );
+
+    // Verify the resolved approval has the correct status and note
+    const resolvedPath = join(paths.approvalDir, 'resolved', `${approvalId}.json`);
+    const resolvedApproval = JSON.parse(readFileSync(resolvedPath, 'utf-8'));
+    expect(resolvedApproval.status).toBe('rejected');
+    expect(resolvedApproval.resolved_by).toBe('resolved via Multica inbound sync (cancelled)');
   });
 });

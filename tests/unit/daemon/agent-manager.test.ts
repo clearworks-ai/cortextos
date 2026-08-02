@@ -44,6 +44,28 @@ vi.mock('../../../src/telegram/poller.js', () => ({
   },
 }));
 
+// Mock WorkerProcess so spawnWorker tests don't touch the PTY layer.
+vi.mock('../../../src/daemon/worker-process.js', () => ({
+  WorkerProcess: class {
+    name: string;
+    dir: string;
+    parent: string | undefined;
+    finished = false;
+    constructor(name: string, dir: string, parent?: string) {
+      this.name = name;
+      this.dir = dir;
+      this.parent = parent;
+    }
+    async spawn() { /* no-op */ }
+    async terminate() { this.finished = true; }
+    onDone() { /* no-op */ }
+    isFinished() { return this.finished; }
+    getStatus() {
+      return { name: this.name, status: this.finished ? 'reaped' : 'running', dir: this.dir, spawnedAt: '' };
+    }
+  },
+}));
+
 const { AgentManager } = await import('../../../src/daemon/agent-manager.js');
 
 describe('AgentManager.discoverAndStart - BUG-028 fix', () => {
@@ -476,5 +498,45 @@ describe('AgentManager.reloadCrons - silent-success bug fix (iter 7)', () => {
     const result = am.reloadCrons('ghost');
     expect(result).toBe(false);
     expect((am as any).cronSchedulers.has('ghost')).toBe(false);
+  });
+});
+
+describe('AgentManager.spawnWorker — RW-10 stale-entry eviction', () => {
+  let testDir: string;
+  let ctxRoot: string;
+  let frameworkRoot: string;
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join(tmpdir(), 'cortextos-am-worker-test-'));
+    ctxRoot = join(testDir, 'instance');
+    frameworkRoot = join(testDir, 'framework');
+    mkdirSync(ctxRoot, { recursive: true });
+    mkdirSync(frameworkRoot, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('rejects a duplicate spawn while the worker is still running', async () => {
+    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
+    await am.spawnWorker('fuse-worker', '/tmp/proj', 'do the task');
+    await expect(am.spawnWorker('fuse-worker', '/tmp/proj', 'again'))
+      .rejects.toThrow('already running');
+  });
+
+  it('evicts a finished (reaped) worker and allows respawn under the same name', async () => {
+    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
+    await am.spawnWorker('fuse-worker', '/tmp/proj', 'do the task');
+
+    // Simulate a self-reap that finished the worker but whose delayed
+    // auto-remove has not fired yet (or was never scheduled — the RW-10 bug).
+    const worker = (am as any).workers.get('fuse-worker');
+    worker.finished = true;
+
+    // Fixed-name fuse workers must never be wedged by a stale finished entry.
+    await expect(am.spawnWorker('fuse-worker', '/tmp/proj', 'next fire'))
+      .resolves.toBeUndefined();
+    expect((am as any).workers.get('fuse-worker').finished).toBe(false);
   });
 });

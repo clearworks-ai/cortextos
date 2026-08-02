@@ -1104,8 +1104,16 @@ export class AgentManager {
    * Spawn an ephemeral worker session for a parallelized task.
    */
   async spawnWorker(name: string, dir: string, prompt: string, parent?: string, model?: string): Promise<void> {
-    if (this.workers.has(name)) {
-      throw new Error(`Worker "${name}" is already running`);
+    const existing = this.workers.get(name);
+    if (existing) {
+      if (existing.isFinished()) {
+        // A finished (completed/failed/reaped) worker whose delayed
+        // auto-remove hasn't fired yet must never block a fresh spawn under
+        // the same name (RW-10: fixed-name fuse workers were wedged forever).
+        this.workers.delete(name);
+      } else {
+        throw new Error(`Worker "${name}" is already running`);
+      }
     }
     if (this.agents.has(name)) {
       throw new Error(`"${name}" is already a registered agent name`);

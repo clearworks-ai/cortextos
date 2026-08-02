@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Capture PTY exit handler so tests can simulate worker exit
 let capturedOnExit: ((code: number) => void) | null = null;
@@ -164,18 +164,95 @@ describe('WorkerProcess', () => {
   });
 
   describe('terminate', () => {
-    it('kills the PTY and marks completed', async () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('escalates to kill and marks completed when the session ignores Ctrl-C', async () => {
+      vi.useFakeTimers();
       const w = new WorkerProcess('w13', '/tmp/proj', undefined);
       await w.spawn(mockEnv, 'task');
-      await w.terminate();
+      const done = w.terminate();
+      await vi.advanceTimersByTimeAsync(3_000); // graceful window elapses
+      await done;
+      expect(mockPty.write).toHaveBeenCalledWith('\x03');
       expect(mockPty.kill).toHaveBeenCalled();
       expect(w.getStatus().status).toBe('completed');
+    });
+
+    it('skips kill when the session exits gracefully after Ctrl-C', async () => {
+      vi.useFakeTimers();
+      const w = new WorkerProcess('w13g', '/tmp/proj', undefined);
+      const doneSpy = vi.fn();
+      w.onDone(doneSpy);
+      await w.spawn(mockEnv, 'task');
+      const done = w.terminate();
+      capturedOnExit!(0); // graceful exit inside the wait window
+      await vi.advanceTimersByTimeAsync(3_000);
+      await done;
+      expect(mockPty.kill).not.toHaveBeenCalled();
+      expect(w.getStatus().status).toBe('completed');
+      expect(doneSpy).toHaveBeenCalledTimes(1);
+      expect(doneSpy).toHaveBeenCalledWith('w13g', 0);
+    });
+
+    it('fires onDone exactly once when escalation strips the exit listener (RW-10)', async () => {
+      vi.useFakeTimers();
+      const w = new WorkerProcess('w13e', '/tmp/proj', undefined);
+      const doneSpy = vi.fn();
+      w.onDone(doneSpy);
+      await w.spawn(mockEnv, 'task');
+      const done = w.terminate();
+      await vi.advanceTimersByTimeAsync(3_000);
+      await done;
+      // Real AgentPTY.kill() disposes exit listeners before killing, so
+      // onExit never fires after escalation — terminate() itself must
+      // finalize status and fire onDone, or the AgentManager auto-remove is
+      // never scheduled and the workers Map entry becomes immortal.
+      expect(doneSpy).toHaveBeenCalledTimes(1);
+      expect(doneSpy).toHaveBeenCalledWith('w13e', 0);
+      expect(w.isFinished()).toBe(true);
     });
 
     it('is a no-op if not running', async () => {
       const w = new WorkerProcess('w14', '/tmp/proj', undefined);
       await w.terminate(); // should not throw
       expect(mockPty.kill).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('max-lifetime self-reap (RW-10)', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('reaps a hung worker with distinct reaped status and fires onDone', async () => {
+      vi.useFakeTimers();
+      const w = new WorkerProcess('w-reap', '/tmp/proj', undefined);
+      const doneSpy = vi.fn();
+      w.onDone(doneSpy);
+      await w.spawn(mockEnv, 'task');
+      await vi.advanceTimersByTimeAsync(10 * 60_000); // reaper timer fires
+      await vi.advanceTimersByTimeAsync(3_000); // graceful window elapses → escalate
+      expect(mockPty.kill).toHaveBeenCalled();
+      expect(w.getStatus().status).toBe('reaped'); // never laundered as 'completed'
+      expect(w.isFinished()).toBe(true); // so AgentManager auto-remove clears the Map entry
+      expect(doneSpy).toHaveBeenCalledTimes(1);
+      expect(doneSpy).toHaveBeenCalledWith('w-reap', 1);
+    });
+
+    it('does not reap a worker that already exited', async () => {
+      vi.useFakeTimers();
+      const w = new WorkerProcess('w-noreap', '/tmp/proj', undefined);
+      const doneSpy = vi.fn();
+      w.onDone(doneSpy);
+      await w.spawn(mockEnv, 'task');
+      capturedOnExit!(0);
+      await vi.advanceTimersByTimeAsync(11 * 60_000);
+      expect(mockPty.write).not.toHaveBeenCalled();
+      expect(mockPty.kill).not.toHaveBeenCalled();
+      expect(w.getStatus().status).toBe('completed');
+      expect(doneSpy).toHaveBeenCalledTimes(1);
     });
   });
 });

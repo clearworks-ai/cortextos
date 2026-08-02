@@ -10,6 +10,16 @@ vi.mock('../../../src/bus/message', () => ({
   sendMessage: vi.fn(),
 }));
 
+// Mock createTask, completeTask, cancelTask for Multica sync testing
+const createTaskSpy = vi.fn().mockReturnValue('task_1234567890_abcdefgh');
+const completeTaskSpy = vi.fn();
+const cancelTaskSpy = vi.fn();
+vi.mock('../../../src/bus/task', () => ({
+  createTask: (...args: unknown[]) => createTaskSpy(...args),
+  completeTask: (...args: unknown[]) => completeTaskSpy(...args),
+  cancelTask: (...args: unknown[]) => cancelTaskSpy(...args),
+}));
+
 // Mock TelegramAPI so the agent-bot ping is observable without hitting the
 // network. Constructor records the bot token; sendMessage records its call.
 const telegramSendMessageSpy = vi.fn().mockResolvedValue({ result: { message_id: 1 } });
@@ -64,6 +74,10 @@ beforeEach(() => {
   telegramSendMessageSpy.mockClear();
   telegramSendMessageSpy.mockResolvedValue({ result: { message_id: 1 } });
   telegramConstructorSpy.mockClear();
+  createTaskSpy.mockClear();
+  createTaskSpy.mockReturnValue('task_1234567890_abcdefgh');
+  completeTaskSpy.mockClear();
+  cancelTaskSpy.mockClear();
   delete process.env.CTX_FRAMEWORK_ROOT;
 });
 
@@ -428,5 +442,156 @@ describe('listPendingApprovals', () => {
     const pending = listPendingApprovals(paths);
     expect(pending).toHaveLength(1);
     expect(pending[0].id).toBe(id1);
+  });
+});
+
+describe('createApproval — Multica companion task sync (Spec A)', () => {
+  it('creates a companion human task with needsApproval=true and stores linked_task_id', async () => {
+    const id = await createApproval(paths, 'alice', 'TestOrg', 'Test task sync', 'deployment', 'context here', frameworkRoot);
+
+    expect(createTaskSpy).toHaveBeenCalledTimes(1);
+    const [, , , title, options] = createTaskSpy.mock.calls[0] as [unknown, unknown, unknown, string, { description?: string; assignee?: string; needsApproval?: boolean }];
+    expect(title).toContain('Approval: Test task sync');
+    expect(options.description).toBe('context here');
+    expect(options.assignee).toBe('human');
+    expect(options.needsApproval).toBe(true);
+
+    const pendingFile = join(paths.approvalDir, 'pending', `${id}.json`);
+    const approval = JSON.parse(readFileSync(pendingFile, 'utf-8'));
+    expect(approval.linked_task_id).toBe('task_1234567890_abcdefgh');
+  });
+
+  it('graceful degradation: createTask throws → approval still created with linked_task_id===null', async () => {
+    createTaskSpy.mockImplementationOnce(() => {
+      throw new Error('Task creation failed');
+    });
+
+    const id = await createApproval(paths, 'alice', 'TestOrg', 'Graceful test', 'deployment', undefined, frameworkRoot);
+
+    const pendingFile = join(paths.approvalDir, 'pending', `${id}.json`);
+    expect(existsSync(pendingFile)).toBe(true);
+    const approval = JSON.parse(readFileSync(pendingFile, 'utf-8'));
+    expect(approval.linked_task_id).toBe(null);
+    expect(approval.status).toBe('pending');
+  });
+
+  it('stores optional client, owning_job, and confidence fields', async () => {
+    const id = await createApproval(
+      paths,
+      'alice',
+      'TestOrg',
+      'Optional fields test',
+      'financial',
+      'context',
+      frameworkRoot,
+      undefined,
+      'Acme Corp',
+      'Q3-2026-forecast',
+      85,
+    );
+
+    const pendingFile = join(paths.approvalDir, 'pending', `${id}.json`);
+    const approval = JSON.parse(readFileSync(pendingFile, 'utf-8'));
+    expect(approval.client).toBe('Acme Corp');
+    expect(approval.owning_job).toBe('Q3-2026-forecast');
+    expect(approval.confidence).toBe(85);
+  });
+});
+
+describe('updateApproval — Multica companion task sync (Spec A)', () => {
+  it('approve completes the linked task', async () => {
+    const id = await createApproval(paths, 'alice', 'TestOrg', 'Test complete', 'deployment', undefined, frameworkRoot);
+    updateApproval(paths, id, 'approved', 'approved for deployment');
+
+    expect(completeTaskSpy).toHaveBeenCalledTimes(1);
+    const [, taskId, result] = completeTaskSpy.mock.calls[0] as [unknown, string, string];
+    expect(taskId).toBe('task_1234567890_abcdefgh');
+    expect(result).toContain('approved');
+    expect(cancelTaskSpy).not.toHaveBeenCalled();
+  });
+
+  it('reject cancels the linked task', async () => {
+    const id = await createApproval(paths, 'alice', 'TestOrg', 'Test cancel', 'deployment', undefined, frameworkRoot);
+    updateApproval(paths, id, 'rejected', 'security concerns');
+
+    expect(cancelTaskSpy).toHaveBeenCalledTimes(1);
+    const [, taskId, reason] = cancelTaskSpy.mock.calls[0] as [unknown, string, string];
+    expect(taskId).toBe('task_1234567890_abcdefgh');
+    expect(reason).toContain('rejected');
+    expect(completeTaskSpy).not.toHaveBeenCalled();
+  });
+
+  it('idempotency: updateApproval on already-resolved approval is a no-op', async () => {
+    const id = await createApproval(paths, 'alice', 'TestOrg', 'Test idempotency', 'deployment', undefined, frameworkRoot);
+    updateApproval(paths, id, 'approved', 'first decision');
+
+    // Reset spy to check second call doesn't touch task
+    completeTaskSpy.mockClear();
+    
+    updateApproval(paths, id, 'rejected', 'second conflicting decision');
+
+    expect(completeTaskSpy).not.toHaveBeenCalled();
+    expect(cancelTaskSpy).not.toHaveBeenCalled();
+
+    const resolvedFile = join(paths.approvalDir, 'resolved', `${id}.json`);
+    const approval = JSON.parse(readFileSync(resolvedFile, 'utf-8'));
+    expect(approval.status).toBe('approved'); // first decision wins
+    expect(approval.resolved_by).toBe('first decision');
+  });
+
+  it('task-side failure logged but approval resolution still lands', async () => {
+    const id = await createApproval(paths, 'alice', 'TestOrg', 'Task failure test', 'deployment', undefined, frameworkRoot);
+    
+    completeTaskSpy.mockImplementationOnce(() => {
+      throw new Error('Task not found');
+    });
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    updateApproval(paths, id, 'approved', 'approve despite task error');
+
+    expect(completeTaskSpy).toHaveBeenCalledTimes(1);
+    // Approval should still be resolved
+    const resolvedFile = join(paths.approvalDir, 'resolved', `${id}.json`);
+    expect(existsSync(resolvedFile)).toBe(true);
+    
+    const warnCalls = warnSpy.mock.calls.map((c) => c.join(' '));
+    expect(warnCalls.some((w) => w.includes('Failed to complete linked task') && w.includes(id))).toBe(true);
+    warnSpy.mockRestore();
+  });
+
+  it('conflict: second decision does not overwrite first decision', async () => {
+    const id = await createApproval(paths, 'alice', 'TestOrg', 'Conflict test', 'deployment', undefined, frameworkRoot);
+    updateApproval(paths, id, 'approved', 'first approve');
+
+    // Reset spies
+    completeTaskSpy.mockClear();
+    cancelTaskSpy.mockClear();
+
+    updateApproval(paths, id, 'rejected', 'second reject');
+
+    // No task calls on second attempt
+    expect(completeTaskSpy).not.toHaveBeenCalled();
+    expect(cancelTaskSpy).not.toHaveBeenCalled();
+
+    const resolvedFile = join(paths.approvalDir, 'resolved', `${id}.json`);
+    const approval = JSON.parse(readFileSync(resolvedFile, 'utf-8'));
+    expect(approval.status).toBe('approved'); // first wins
+    expect(approval.resolved_by).toBe('first approve');
+  });
+
+  it('linked_task_id===null: no task operations attempted', async () => {
+    createTaskSpy.mockImplementationOnce(() => {
+      throw new Error('No task');
+    });
+    const id = await createApproval(paths, 'alice', 'TestOrg', 'No linked task', 'deployment', undefined, frameworkRoot);
+
+    completeTaskSpy.mockClear();
+    cancelTaskSpy.mockClear();
+
+    updateApproval(paths, id, 'approved', 'approve without task');
+
+    // No task operations since linked_task_id is null
+    expect(completeTaskSpy).not.toHaveBeenCalled();
+    expect(cancelTaskSpy).not.toHaveBeenCalled();
   });
 });

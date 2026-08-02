@@ -149,6 +149,10 @@ export interface Approval {
   updated_at: string;
   resolved_at: string | null;
   resolved_by: string | null;
+  linked_task_id: string | null;
+  client?: string;
+  owning_job?: string;
+  confidence?: number;
 }
 
 // Agent Config Types (config.json)

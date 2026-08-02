@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import {
   existsSync,
@@ -177,9 +177,13 @@ export function kbQuery(prompt: string, org: string): string {
     return '';
   }
   try {
-    return execSync(
-      `cortextos bus kb-query "${query}" --org ${org} --top-k 5 --threshold 0.45 2>/dev/null`,
-      { encoding: 'utf8', timeout: 12000 },
+    // execFileSync with an argv array — no shell is ever involved, so neither
+    // the user prompt nor the org value can inject commands. normalizeKbPrompt
+    // is kept for query hygiene/cache-key parity, not as a security boundary.
+    return execFileSync(
+      'cortextos',
+      ['bus', 'kb-query', query, '--org', org, '--top-k', '5', '--threshold', '0.45'],
+      { encoding: 'utf8', timeout: 12000, stdio: ['ignore', 'pipe', 'ignore'] },
     ).trim();
   } catch {
     return '';
@@ -308,7 +312,7 @@ export function transcriptHits(prompt: string, agentName: string): string {
 
 export function recentCommits(): string {
   try {
-    const top = execSync('git rev-parse --show-toplevel', {
+    const top = execFileSync('git', ['rev-parse', '--show-toplevel'], {
       encoding: 'utf8',
       timeout: 3000,
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -316,8 +320,14 @@ export function recentCommits(): string {
     if (!top) {
       return '';
     }
-    const commits = execSync(
-      `git -C "${top}" log --all --since="48 hours ago" -n 12 --date=format:"%m-%d %H:%M" --pretty=format:"%h %ad%d %s"`,
+    const commits = execFileSync(
+      'git',
+      [
+        '-C', top,
+        'log', '--all', '--since=48 hours ago', '-n', '12',
+        '--date=format:%m-%d %H:%M',
+        '--pretty=format:%h %ad%d %s',
+      ],
       { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] },
     ).trim();
     if (!commits) {

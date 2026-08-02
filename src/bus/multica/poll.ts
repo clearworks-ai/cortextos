@@ -4,6 +4,7 @@ import type { BusPaths, Task, TaskStatus } from '../../types/index.js';
 import {
   cancelTask, claimTask, completeTask, createTask, findTaskFile, listTasks, updateTask,
 } from '../task.js';
+import { listPendingApprovals, updateApproval } from '../approval.js';
 import { MulticaHttpError } from './client.js';
 import {
   BUS_TO_MULTICA_STATUS,
@@ -33,9 +34,10 @@ export interface InboundImportIdentity {
 export interface InboundAction {
   bus_task_id: string;                                    // '' for dry-run import previews
   multica_issue_id: string;
-  kind: 'status' | 'claim' | 'resolve_id' | 'import';     // 'import' is NEW
+  kind: 'status' | 'claim' | 'resolve_id' | 'import' | 'approval-resolution';     // 'import' is NEW
   from?: TaskStatus;
   to?: TaskStatus;
+  approval_id?: string;                                    // NEW for approval-resolution
 }
 
 export interface InboundPollResult {
@@ -190,8 +192,22 @@ export async function runInboundPoll(
 
         if (!dryRun) {
           try {
-            applyStatusWriteBack(paths, taskId, targetStatus);
-            result.wrote_back += 1;
+            // Check if there's a linked approval before calling applyStatusWriteBack
+            // to avoid double-resolution (applyStatusWriteBack calls completeTask,
+            // and resolveLinkedApproval also calls completeTask via updateApproval)
+            const pendingApprovals = listPendingApprovals(paths);
+            const linkedApproval = pendingApprovals.find(
+              (approval) => approval.linked_task_id === taskId,
+            );
+
+            if (linkedApproval && (targetStatus === 'completed' || targetStatus === 'cancelled')) {
+              // Let resolveLinkedApproval handle both the approval resolution and task completion
+              resolveLinkedApproval(paths, taskId, targetStatus, issue.id, result);
+            } else {
+              // No linked approval or not a terminal status - use normal write-back
+              applyStatusWriteBack(paths, taskId, targetStatus);
+              result.wrote_back += 1;
+            }
           } catch (error) {
             result.errors += 1;
             console.warn(
@@ -287,6 +303,57 @@ function applyStatusWriteBack(
   }
 
   updateTask(paths, taskId, targetStatus);
+}
+
+function resolveLinkedApproval(
+  paths: BusPaths,
+  taskId: string,
+  targetStatus: 'completed' | 'cancelled',
+  multicaIssueId: string,
+  result: InboundPollResult,
+): void {
+  try {
+    const pendingApprovals = listPendingApprovals(paths);
+    const linkedApproval = pendingApprovals.find(
+      (approval) => approval.linked_task_id === taskId,
+    );
+
+    if (linkedApproval) {
+      // First, update the task status (completeTask/cancelTask)
+      // This was skipped in applyStatusWriteBack to avoid double-resolution
+      if (targetStatus === 'completed') {
+        completeTask(paths, taskId);
+      } else if (targetStatus === 'cancelled') {
+        cancelTask(paths, taskId);
+      }
+      result.wrote_back += 1;
+
+      // Then resolve the approval
+      // Binding decision: treat Multica 'completed' as 'approved', 'cancelled' as 'rejected'
+      // Use Multica sync attribution, NOT Josh's name
+      updateApproval(
+        paths,
+        linkedApproval.id,
+        targetStatus === 'completed' ? 'approved' : 'rejected',
+        targetStatus === 'completed'
+          ? 'resolved via Multica inbound sync (completed)'
+          : 'resolved via Multica inbound sync (cancelled)',
+      );
+      result.actions.push({
+        bus_task_id: taskId,
+        multica_issue_id: multicaIssueId,
+        kind: 'approval-resolution',
+        approval_id: linkedApproval.id,
+      });
+    }
+  } catch (approvalError) {
+    // Approval-resolution failure must not fail or abort the poll loop
+    // Follow existing pattern: console.warn, count in errors if appropriate
+    console.warn(
+      `[multica] failed to resolve approval for task ${taskId} (issue ${multicaIssueId}): ${formatError(approvalError)}`,
+    );
+    result.errors += 1;
+  }
 }
 
 function resolveIssueForTaskId(taskId: string, issues: readonly MulticaIssue[]): MulticaIssue | null {

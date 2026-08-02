@@ -51,6 +51,11 @@ export const DEFAULT_DUE_DAYS: Record<Priority, number> = {
   low: 14,
 };
 export const SOMEDAY_DUE_DAYS = 30;
+/** Class-based CAPS on the priority-scaled default (days). Build = uncapped. */
+export const CLASS_DUE_DAYS_CAP: Partial<Record<TaskClass, number>> = {
+  human: 2,
+  system: 1,
+};
 export const STALL_ESCALATE_MS = 4 * 60 * 60 * 1000;
 export const RESURFACE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_SWEEP_MAX_ACTIONS = 20;
@@ -158,9 +163,13 @@ export function resolveTaskOwner(
 export function computeDefaultDueDate(
   priority: Priority,
   someday: boolean,
+  taskClass: TaskClass | undefined = undefined,
   now: Date = new Date(),
 ): string {
-  const days = someday ? SOMEDAY_DUE_DAYS : DEFAULT_DUE_DAYS[priority];
+  // Someday (explicit backlog signal) wins over class caps.
+  const days = someday
+    ? SOMEDAY_DUE_DAYS
+    : Math.min(DEFAULT_DUE_DAYS[priority], CLASS_DUE_DAYS_CAP[taskClass as TaskClass] ?? Infinity);
   return new Date(now.getTime() + days * 86400_000)
     .toISOString()
     .replace(/\.\d{3}Z$/, 'Z');
@@ -537,6 +546,11 @@ export function createTask(
   });
 
   validatePriority(priority);
+  // Hoisted above the due-date block so cron-creator tasks classify as system
+  // for the class-aware default too; reused for the task object below.
+  const project = requestedProject === '' && SYSTEM_TASK_CREATOR_RE.test(agentName)
+    ? 'system'
+    : requestedProject;
   let effectiveDueDate: string;
   if (dueDate !== '') {
     const parsed = new Date(dueDate);
@@ -545,7 +559,13 @@ export function createTask(
     }
     effectiveDueDate = parsed.toISOString().replace(/\.\d{3}Z$/, 'Z');
   } else {
-    effectiveDueDate = computeDefaultDueDate(priority, someday);
+    const taskClass = classifyTask({
+      created_by: agentName,
+      title,
+      project,
+      assigned_to: assignee,
+    } as Task);
+    effectiveDueDate = computeDefaultDueDate(priority, someday, taskClass);
   }
 
   const epoch = Date.now();
@@ -556,9 +576,6 @@ export function createTask(
   const rand = randomDigits(8);
   const taskId = `task_${epoch}_${rand}`;
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-  const project = requestedProject === '' && SYSTEM_TASK_CREATOR_RE.test(agentName)
-    ? 'system'
-    : requestedProject;
 
   const task: Task = {
     id: taskId,

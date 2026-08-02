@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-import type { BusPaths, Task, TaskStatus } from '../../types/index.js';
+import type { BusPaths, Priority, Task, TaskStatus } from '../../types/index.js';
 import {
   cancelTask, claimTask, completeTask, createTask, findTaskFile, listTasks, updateTask,
 } from '../task.js';
@@ -448,12 +448,38 @@ function runReverseImport(
     try {
       const description = `${marker} ${issue.description ?? ''}`.trimEnd();
       const assignee = issue.assignee_id === config.memberIdJosh ? 'human' : identity.agentName;
-      const taskId = createTask(paths, identity.agentName, identity.org, issue.title, {
+      
+      // Validate due_date against createTask bounds (>1h past or >365d future)
+      // If out of bounds, omit it entirely and let createTask compute a default
+      let taskOptions: {
+        description: string;
+        assignee: string;
+        priority: Priority;
+        dueDate?: string;
+      } = {
         description,
         assignee,
         priority: MULTICA_TO_BUS_PRIORITY[issue.priority],
-        ...(issue.due_date !== null ? { dueDate: issue.due_date } : {}),
-      });
+      };
+      
+      if (issue.due_date !== null) {
+        const parsed = new Date(issue.due_date);
+        if (!Number.isNaN(parsed.getTime())) {
+          const now = Date.now();
+          const parsedTime = parsed.getTime();
+          const pastDiff = now - parsedTime;
+          const futureDiff = parsedTime - now;
+          const DUE_DATE_PAST_BOUND_MS = 1 * 60 * 60 * 1000; // 1 hour
+          const DUE_DATE_FUTURE_BOUND_MS = 365 * 24 * 60 * 60 * 1000; // 365 days
+          
+          // Only include dueDate if within valid bounds (inclusive)
+          if (pastDiff <= DUE_DATE_PAST_BOUND_MS && futureDiff <= DUE_DATE_FUTURE_BOUND_MS) {
+            taskOptions.dueDate = issue.due_date;
+          }
+        }
+      }
+      
+      const taskId = createTask(paths, identity.agentName, identity.org, issue.title, taskOptions);
 
       if (targetStatus !== 'pending') {
         applyStatusWriteBack(paths, taskId, targetStatus);

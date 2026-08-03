@@ -112,8 +112,11 @@ If any item has no clear owner, ask the user · don't guess. Commitments are mad
 Write the recap in the company voice. Structure:
 
 - One opening line · reference the call, no pleasantries padding.
-- **What we're doing** · bulleted, owner + deadline per item.
-- **What we need from you** · bulleted, named person + deadline per item.
+- **What we're doing** · one bullet per OUR-COMMITMENTS row, owner + deadline. Build this section by
+  walking the OUR-COMMITMENTS table row by row · don't freeform-summarize from memory of the call.
+- **What we need from you** · one bullet per THEIR-COMMITMENTS row, named person + deadline. Same rule:
+  walk the table row by row. A summarized-from-narrative draft is how items silently vanish · a
+  table-driven draft can't drop a row without an explicit, visible decision to cut it.
 - One clear next step (next call date, or the single item that unblocks everything).
 
 Rules for the draft:
@@ -121,6 +124,14 @@ Rules for the draft:
 - Named owners on every line. "Sarah will send the API docs by Thursday" · never "the docs will be sent."
 - Exactly one next step at the end. Not three.
 - No item appears in the email that isn't in the tracker.
+- Completeness is bidirectional and checked after drafting, not just enforced by construction: count
+  the OUR-COMMITMENTS and THEIR-COMMITMENTS rows, count the bullets in each email section, confirm they
+  match 1:1 (a merge or split of rows still has to reconcile to the same count either way). A tracked
+  item silently missing from the email is the same failure as an invented one. If the counts don't
+  match: that's a bug in the draft, not a length call · go back and add the missing bullet. The ONLY
+  case where an item is deliberately left out of the itemized bullets is a genuinely long list (6+
+  items on one side) · there, compress to the top items plus one line "+N more, full list in the
+  tracker" rather than either a bloated email or a silent drop.
 
 ### Step 4 · Write to the Tracker
 

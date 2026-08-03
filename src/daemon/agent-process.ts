@@ -746,6 +746,20 @@ export class AgentProcess {
       return;
     }
 
+    // Planned context-handoff restart: NOT a crash. When an agent's context
+    // fills, the daemon (fast-checker) or `cortextos bus hard-restart` writes a
+    // fresh `.restart-planned` marker (src/bus/system.ts) and the agent exits
+    // to reload with a smaller context. A busy agent legitimately handoffs
+    // 15-25x/day; counting each toward max_crashes_per_day (or the crash-loop
+    // window) falsely HALTs it — observed live: larry hit 15 planned-restarts,
+    // 0 real crashes, and was HALTED at the default limit of 10. Exempt the
+    // planned exit from BOTH counters, mirroring the isDaemonShuttingDown gate
+    // above. A genuine crash writes no such marker and still counts.
+    if (this.isPlannedRestart()) {
+      this.log('Planned context-handoff restart (fresh .restart-planned marker) — not counting as a crash.');
+      return;
+    }
+
     // Image-poison auto-recovery (companion to PR #446's photo-injection fix).
     // Checked FIRST so a poisoned-context crash neither trips the crash-loop
     // window nor charges the daily counter — it is an upstream artifact, not
@@ -1364,6 +1378,24 @@ export class AgentProcess {
    */
   private isDaemonShuttingDown(): boolean {
     const marker = join(this.env.ctxRoot, 'state', this.name, '.daemon-stop');
+    try {
+      if (!existsSync(marker)) return false;
+      const ageMs = Date.now() - statSync(marker).mtimeMs;
+      return ageMs < 60_000;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * True when a fresh `.restart-planned` marker exists — i.e. this exit is a
+   * planned context-handoff / hard-restart (written by src/bus/system.ts on
+   * `hardRestart`, or by fast-checker's context-force-restart), NOT a crash.
+   * Mirrors isDaemonShuttingDown's marker-freshness pattern (60s window) so a
+   * stale marker from an earlier handoff can't mask a genuine crash later.
+   */
+  private isPlannedRestart(): boolean {
+    const marker = join(this.env.ctxRoot, 'state', this.name, '.restart-planned');
     try {
       if (!existsSync(marker)) return false;
       const ageMs = Date.now() - statSync(marker).mtimeMs;

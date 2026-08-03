@@ -228,6 +228,32 @@ describe('webhook-bridge server', () => {
     await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
   });
 
+  it('still requires explicit targets for non-fireflies integrations', async () => {
+    const server = buildServer();
+    const baseUrl = await listen(server);
+
+    for (const { integration, event } of [
+      { integration: 'zoom-officehours', event: 'meeting.registration_created' },
+      { integration: 'ops-check-lead', event: 'lead.submitted' },
+    ] as const) {
+      const response = await sendRequest(baseUrl, `/relay/${integration}`, {
+        method: 'POST',
+        headers: { 'x-webhook-bridge-secret': 'top-secret' },
+        body: JSON.stringify({
+          integration,
+          event,
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      expect(response.json).toMatchObject({ error: 'invalid_target', tier: 'payload' });
+    }
+
+    expect(existsSync(join(tempRoot, 'inbox', 'crm'))).toBe(false);
+
+    await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  });
+
   it('writes exactly one inbox file and one inbound log line on the happy path without tripping the build gate', async () => {
     const server = buildServer();
     const baseUrl = await listen(server);
@@ -305,7 +331,42 @@ describe('webhook-bridge server', () => {
     expect(inboxPayload.text).toContain('meeting-123');
     expect(inboxPayload.text).toContain('meeting-commitments-worker');
     expect(inboxPayload.text).toContain('FF_MEETING_ID=meeting-123');
+    expect(inboxPayload.text).toContain('cd pa agent dir');
+    expect(inboxPayload.text).not.toContain('cd frank2 agent dir');
     expect(inboxPayload.text).toContain('--mode full --meeting-id meeting-123');
+
+    await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  });
+
+  it('defaults fireflies requests without an explicit target to pa', async () => {
+    const server = buildServer(undefined, 'ff-secret');
+    const baseUrl = await listen(server);
+    const body = JSON.stringify({
+      integration: 'fireflies',
+      event: 'transcription.completed',
+      meeting_id: 'meeting-123',
+    });
+    const signature = `sha256=${createHmac('sha256', 'ff-secret').update(body).digest('hex')}`;
+
+    const response = await sendRequest(baseUrl, '/relay/fireflies', {
+      method: 'POST',
+      headers: { 'x-hub-signature': signature },
+      body,
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.json?.ok).toBe(true);
+
+    const inboxDir = join(tempRoot, 'inbox', 'pa');
+    const inboxFiles = readdirSync(inboxDir);
+    expect(inboxFiles).toHaveLength(1);
+
+    const inboxPayload = JSON.parse(readFileSync(join(inboxDir, inboxFiles[0]), 'utf-8')) as {
+      text: string;
+    };
+    expect(inboxPayload.text).toContain('WEBHOOK fireflies transcription.completed');
+    expect(inboxPayload.text).toContain('meeting-123');
+    expect(inboxPayload.text).toContain('cd pa agent dir');
 
     await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
   });

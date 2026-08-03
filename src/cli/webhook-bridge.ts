@@ -264,7 +264,7 @@ function buildRelayMessage(integration: string, event: string, envelope: RelayEn
     : String(envelope.meeting_id).trim();
 
   if (integration === 'fireflies' && meetingId) {
-    return `WEBHOOK ${integration} ${event} — meeting ${meetingId}. Spawn meeting-commitments-worker with FF_MEETING_ID=${meetingId} set so the single-meeting fast path runs now instead of waiting for the 2h poll: cd frank2 agent dir, source env, then python3 scripts/ff-extractor.py --mode full --meeting-id ${meetingId}.`;
+    return `WEBHOOK ${integration} ${event} — meeting ${meetingId}. Spawn meeting-commitments-worker with FF_MEETING_ID=${meetingId} set so the single-meeting fast path runs now instead of waiting for the 2h poll: cd pa agent dir, source env, then python3 scripts/ff-extractor.py --mode full --meeting-id ${meetingId}.`;
   }
 
   if (integration === 'ops-check-lead') {
@@ -595,12 +595,17 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
         jsonResponse(response, 400, { error: 'invalid_event', tier: 'payload' });
         return;
       }
-      if (typeof envelope.target !== 'string' || envelope.target.trim() === '') {
+      const explicitTarget = typeof envelope.target === 'string' ? envelope.target.trim() : null;
+      const target = explicitTarget && explicitTarget !== ''
+        ? explicitTarget
+        : integration === 'fireflies' && (envelope.target === undefined || explicitTarget === '')
+          ? 'pa'
+          : null;
+
+      if (target === null) {
         jsonResponse(response, 400, { error: 'invalid_target', tier: 'payload' });
         return;
       }
-
-      const target = envelope.target.trim();
       if (!isKnownAgent(target, options.ctxRoot, options.frameworkRoot, options.org)) {
         jsonResponse(response, 404, { error: 'unknown_agent', tier: 'target' });
         return;

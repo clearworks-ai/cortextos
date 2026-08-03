@@ -237,6 +237,50 @@ describe('AgentProcess - BUG-011 fix (stop awaits PTY exit)', () => {
     expect(String(fsMocks.appendFileSync.mock.calls[0][1])).toMatch(/\] CRASH: /);
   });
 
+  it('planned context-handoff restart (fresh .restart-planned) is NOT counted as a crash', async () => {
+    // A busy agent context-handoffs 15-25x/day; each writes a fresh
+    // .restart-planned marker (src/bus/system.ts hardRestart) then exits to
+    // reload. Counting these toward max_crashes_per_day falsely HALTs the
+    // agent — observed live: larry hit 15 planned-restarts, 0 real crashes,
+    // HALTED at the default limit of 10.
+    fsMocks.existsSync.mockImplementation((p: any) =>
+      String(p).endsWith('/state/alice/.restart-planned'),
+    );
+    fsMocks.statSync.mockImplementation((p: any) => ({ mtimeMs: Date.now() - 2_000 }));
+
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+    expect(ap.getStatus().status).toBe('running');
+
+    // Agent exits to reload after writing its handoff doc.
+    capturedOnExit!(0, 0);
+
+    // handleExit returned early: no crash write, no crash-count increment.
+    expect(ap.getStatus().status).toBe('running');
+    expect(fsMocks.writeFileSync).not.toHaveBeenCalledWith(
+      expect.stringContaining('.crash_count_today'),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it('stale .restart-planned marker (>60s old) does NOT mask a real crash', async () => {
+    // Regression guard mirroring the .daemon-stop stale case: an old planned
+    // marker must not swallow a genuine crash later.
+    fsMocks.existsSync.mockImplementation((p: any) =>
+      String(p).endsWith('/state/alice/.restart-planned'),
+    );
+    fsMocks.statSync.mockImplementation((p: any) => ({ mtimeMs: Date.now() - 3_600_000 })); // 1h old
+
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+    capturedOnExit!(1, 0);
+
+    expect(ap.getStatus().status).toBe('crashed');
+    expect(fsMocks.appendFileSync).toHaveBeenCalledTimes(1);
+    expect(String(fsMocks.appendFileSync.mock.calls[0][1])).toMatch(/\] CRASH: /);
+  });
+
   it('sessionRefresh() delegates to stop() then start() (in order)', async () => {
     const ap = new AgentProcess('alice', mockEnv, {});
     await ap.start();

@@ -376,6 +376,35 @@ def _retry_generate_content(client, *, model, contents, backoffs=(5, 15, 45)):
     )
 
 
+def _is_quarantine_worthy(exc):
+    """Check if an exception represents an unrecoverable parse error that should be quarantined.
+    
+    Returns True for Gemini APIError subclasses (ClientError/ServerError) with
+    INVALID_ARGUMENT status and "no pages" message, or for PDF/stream/EOF parse errors.
+    These errors are not transient and should not be retried.
+    
+    This is a shared helper to avoid DRY violations between _reconcile_collection
+    and _build_collection_from_disk.
+    """
+    from google.genai import errors as _genai_errors
+    
+    error_message = " ".join(str(exc).split()) or "<no message>"
+    
+    # Check for Gemini APIError with INVALID_ARGUMENT and "no pages" message
+    # Note: isinstance catches ClientError/ServerError subclasses, not just literal APIError
+    if isinstance(exc, _genai_errors.APIError):
+        if "INVALID_ARGUMENT" in error_message and "no pages" in error_message.lower():
+            return True
+    
+    # Check for PDF/stream/EOF/corruption-related errors by exception type name
+    # This catches parse-level errors from PDF libraries that indicate unrecoverable corruption
+    error_type = type(exc).__name__
+    if any(keyword in error_type.lower() for keyword in ["pdf", "stream", "eof", "read", "corrupt"]):
+        return True
+    
+    return False
+
+
 def embed_content(client, config, content, task_type="RETRIEVAL_DOCUMENT"):
     """Embed content using Gemini Embedding 2. Content can be text string or list of Parts."""
     from google.genai import types
@@ -1700,16 +1729,7 @@ def _reconcile_collection(client, config, collection, roots, *, dry_run=False, f
                 error_message = " ".join(str(exc).split()) or "<no message>"
                 error_type = type(exc).__name__
                 
-                # Check for unrecoverable parse errors that should be quarantined
-                is_quarantined = False
-                # PDF stream/EOF errors or file corruption
-                if any(keyword in error_type.lower() for keyword in ["pdf", "stream", "eof", "read", "corrupt"]):
-                    is_quarantined = True
-                # Gemini INVALID_ARGUMENT with no pages message
-                elif error_type == "APIError" and "INVALID_ARGUMENT" in error_message and "no pages" in error_message.lower():
-                    is_quarantined = True
-                
-                if is_quarantined:
+                if _is_quarantine_worthy(exc):
                     print(f"  QUARANTINED (unrecoverable): {file_path} — {error_type}: {error_message}")
                     quarantined_paths.append(str(file_path))
                 else:
@@ -1765,16 +1785,7 @@ def _build_collection_from_disk(client, config, collection, roots, *, checkpoint
             error_message = " ".join(str(exc).split()) or "<no message>"
             error_type = type(exc).__name__
             
-            # Check for unrecoverable parse errors that should be quarantined
-            is_quarantined = False
-            # PDF stream/EOF errors or file corruption
-            if any(keyword in error_type.lower() for keyword in ["pdf", "stream", "eof", "read", "corrupt"]):
-                is_quarantined = True
-            # Gemini INVALID_ARGUMENT with no pages message
-            elif error_type == "APIError" and "INVALID_ARGUMENT" in error_message and "no pages" in error_message.lower():
-                is_quarantined = True
-            
-            if is_quarantined:
+            if _is_quarantine_worthy(exc):
                 print(f"  QUARANTINED (unrecoverable): {file_path} — {error_type}: {error_message}")
                 quarantined_paths.append(str(file_path))
             else:

@@ -732,9 +732,10 @@ export function createTask(
   validatePriority(priority);
   // Hoisted above the due-date block so cron-creator tasks classify as system
   // for the class-aware default too; reused for the task object below.
-  const project = requestedProject === '' && SYSTEM_TASK_CREATOR_RE.test(agentName)
-    ? 'system'
-    : requestedProject;
+  let project = requestedProject;
+  if (requestedProject === '') {
+    project = SYSTEM_TASK_CREATOR_RE.test(agentName) ? 'system' : agentName;
+  }
   let effectiveDueDate: string;
   if (dueDate !== '') {
     const parsed = new Date(dueDate);

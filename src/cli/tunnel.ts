@@ -123,6 +123,15 @@ interface CloudflaredCreateOutput {
   name: string;
 }
 
+// cloudflared `tunnel list --output json` stamps ACTIVE (non-deleted) tunnels with a
+// zero-date sentinel rather than null/empty — a non-empty string that would wrongly
+// pass a plain `!t.deleted_at` truthiness test and hide every live tunnel.
+export const CLOUDFLARED_ZERO_DATE = '0001-01-01T00:00:00Z';
+
+export function isTunnelDeleted(deletedAt?: string): boolean {
+  return !!deletedAt && deletedAt !== CLOUDFLARED_ZERO_DATE;
+}
+
 function findExistingTunnel(): CloudflaredTunnel | null {
   try {
     const output = execSync('cloudflared tunnel list --output json', {
@@ -131,8 +140,9 @@ function findExistingTunnel(): CloudflaredTunnel | null {
       timeout: 10000,
     });
     const tunnels: CloudflaredTunnel[] = JSON.parse(output);
-    // Filter out deleted tunnels — reuse only active ones
-    return tunnels.find((t) => t.name === TUNNEL_NAME && !t.deleted_at) ?? null;
+    // Filter out deleted tunnels — reuse only active ones. Treat the zero-date
+    // sentinel as not-deleted (it marks a live tunnel, not a deleted one).
+    return tunnels.find((t) => t.name === TUNNEL_NAME && !isTunnelDeleted(t.deleted_at)) ?? null;
   } catch {
     return null;
   }

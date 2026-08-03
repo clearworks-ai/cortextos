@@ -1,6 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import { homedir } from 'os';
-import { buildCloudflaredConfig } from '../../../src/cli/tunnel';
+import { buildCloudflaredConfig, isTunnelDeleted, CLOUDFLARED_ZERO_DATE } from '../../../src/cli/tunnel';
+
+describe('isTunnelDeleted — cloudflared zero-date sentinel', () => {
+  it('treats the Go zero-time sentinel as NOT deleted (a live tunnel)', () => {
+    // cloudflared stamps active tunnels with this non-empty string; a plain
+    // `!deleted_at` check wrongly read it as truthy and hid every live tunnel.
+    expect(isTunnelDeleted(CLOUDFLARED_ZERO_DATE)).toBe(false);
+    expect(isTunnelDeleted('0001-01-01T00:00:00Z')).toBe(false);
+  });
+
+  it('treats a missing / empty deleted_at as NOT deleted', () => {
+    expect(isTunnelDeleted(undefined)).toBe(false);
+    expect(isTunnelDeleted('')).toBe(false);
+  });
+
+  it('treats a real timestamp as deleted', () => {
+    expect(isTunnelDeleted('2026-08-02T12:00:00Z')).toBe(true);
+  });
+});
 
 describe('tunnel ingress generation', () => {
   const tunnelId = 'abc123';

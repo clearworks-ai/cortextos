@@ -44,6 +44,7 @@ const SYSTEM_TASK_CREATOR_RE = /^(transcript-scanner|comms-check|session-save|he
 const HUMAN_TITLE_RE = /^(\[HUMAN\]|Josh:|Decide:)/i;
 const RECLAIM_HUMAN_TITLE_RE = /^\[HUMAN\]/i;
 const SYSTEM_TITLE_RE = /^cron:/i;
+const AUDIT_BOOKKEEPING_TITLE_RE = /^\[AUDIT\]\s+Close pipeline bypass:/i;
 export const EPHEMERAL_WORKER_RE = /-\d{10,}$/;
 export const DEFAULT_ORPHAN_OWNER = 'frank2';
 export const DEFAULT_BUILD_ORPHAN_OWNER = 'larry';
@@ -94,6 +95,7 @@ export function classifyTask(task: Task): TaskClass {
     SYSTEM_TASK_CREATOR_RE.test(by)
     || task.project === 'system'
     || SYSTEM_TITLE_RE.test(title)
+    || AUDIT_BOOKKEEPING_TITLE_RE.test(title)
   ) {
     return 'system';
   }

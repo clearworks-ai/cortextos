@@ -938,6 +938,7 @@ describe('Task Management', () => {
 
       expect(classifyTask({ ...baseTask, created_by: 'transcript-scanner-123' })).toBe('system');
       expect(classifyTask({ ...baseTask, title: 'Cron: heartbeat' })).toBe('system');
+      expect(classifyTask({ ...baseTask, title: '[AUDIT] Close pipeline bypass: multica-sync-noise-filter (build)' })).toBe('system');
       expect(classifyTask({ ...baseTask, assigned_to: 'human' })).toBe('human');
       expect(classifyTask({ ...baseTask, title: 'Josh: send token' })).toBe('human');
       expect(classifyTask(baseTask)).toBe('build');

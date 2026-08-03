@@ -144,6 +144,41 @@ describe('multica outbound push', () => {
     rmSync(testDir, { recursive: true, force: true });
   });
 
+  it('skips system-class tasks (crons, audit bookkeeping) without consuming limit budget', async () => {
+    const { client, createdTaskIds, updatedCalls } = createRecordingClient();
+    const store = createSyncStateStore(join(testDir, 'sync-state.json'));
+
+    const cronTask = createOrderedTask(paths, 0, 'Cron: fleet-health-check');
+    const auditTask = createOrderedTask(paths, 1, '[AUDIT] Close pipeline bypass: some-slug (build)');
+    const realTask1 = createOrderedTask(paths, 2, 'Real work item 1');
+    const realTask2 = createOrderedTask(paths, 3, 'Real work item 2');
+
+    // limit=2 with 2 system + 2 real tasks (system tasks are oldest, so they
+    // are visited first): both real tasks must still be pushed — proving the
+    // system skips consumed zero limit budget.
+    const result = await runOutboundPush(paths, client, store, config, { limit: 2 });
+
+    expect(result.pushed_creates).toBe(2);
+    expect(result.pushed_updates).toBe(0);
+    expect(result.skipped).toBe(2);
+    expect(createdTaskIds).toEqual([realTask1.id, realTask2.id]);
+    expect(updatedCalls).toEqual([]);
+
+    for (const systemTask of [cronTask, auditTask]) {
+      expect(result.plan).toContainEqual(expect.objectContaining({
+        bus_task_id: systemTask.id,
+        action: 'skip',
+        reason: 'not_pushable',
+        outcome: 'skipped',
+      }));
+      expect(result.plan).not.toContainEqual(expect.objectContaining({
+        bus_task_id: systemTask.id,
+        action: 'create',
+      }));
+      expect(store.linkFor(systemTask.id)).toBeUndefined();
+    }
+  });
+
   it('caps outbound pushes at the provided limit without counting skipped tasks', async () => {
     const { client, createdTaskIds, updatedCalls } = createRecordingClient();
     const store = createSyncStateStore(join(testDir, 'sync-state.json'));

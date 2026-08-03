@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { createHash, timingSafeEqual } from 'crypto';
+import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { execSync, spawnSync } from 'child_process';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'http';
 import { homedir } from 'os';
@@ -33,6 +33,7 @@ interface BridgeRuntimeContext {
   frameworkRoot: string;
   org?: string;
   bridgeSecret: string;
+  firefliesWebhookSecret?: string;
 }
 
 export interface BridgeServerOptions {
@@ -41,6 +42,7 @@ export interface BridgeServerOptions {
   frameworkRoot: string;
   org?: string;
   bridgeSecret: string;
+  firefliesWebhookSecret?: string;
   allowedIntegrations?: readonly string[];
   now?: () => number;
 }
@@ -65,6 +67,13 @@ function sha256Digest(value: string): Buffer {
 
 function bridgeSecretMatches(headerValue: string, bridgeSecret: string): boolean {
   return timingSafeEqual(sha256Digest(headerValue), sha256Digest(bridgeSecret));
+}
+
+function hmacSignatureMatches(rawBody: string, providedHeader: string, secret: string): boolean {
+  const prefix = 'sha256=';
+  const providedHex = providedHeader.startsWith(prefix) ? providedHeader.slice(prefix.length) : providedHeader;
+  const expectedHex = createHmac('sha256', secret).update(rawBody).digest('hex');
+  return timingSafeEqual(sha256Digest(providedHex), sha256Digest(expectedHex));
 }
 
 function readFrameworkEnv(frameworkRoot: string): Record<string, string> {
@@ -116,6 +125,7 @@ function resolveBridgeRuntimeContext(instanceId: string): BridgeRuntimeContext {
   const org = process.env.CTX_ORG || envFromFiles.CTX_ORG || '';
   const ctxRoot = process.env.CTX_ROOT || envFromFiles.CTX_ROOT || join(homedir(), '.cortextos', instanceId);
   const bridgeSecret = process.env.WEBHOOK_BRIDGE_SECRET || envFromFiles.WEBHOOK_BRIDGE_SECRET || '';
+  const firefliesWebhookSecret = process.env.FIREFLIES_WEBHOOK_SECRET || envFromFiles.FIREFLIES_WEBHOOK_SECRET || undefined;
 
   if (!bridgeSecret) {
     throw new Error(
@@ -123,7 +133,14 @@ function resolveBridgeRuntimeContext(instanceId: string): BridgeRuntimeContext {
     );
   }
 
-  return { instanceId, ctxRoot, frameworkRoot, org: org || undefined, bridgeSecret };
+  return {
+    instanceId,
+    ctxRoot,
+    frameworkRoot,
+    org: org || undefined,
+    bridgeSecret,
+    firefliesWebhookSecret,
+  };
 }
 
 function parsePort(value: string, optionName: string): number {
@@ -247,7 +264,7 @@ function buildRelayMessage(integration: string, event: string, envelope: RelayEn
     : String(envelope.meeting_id).trim();
 
   if (integration === 'fireflies' && meetingId) {
-    return `WEBHOOK ${integration} ${event} — meeting ${meetingId}. Spawn meeting-commitments-worker with FF_MEETING_ID=${meetingId} set so the single-meeting fast path runs now instead of waiting for the 2h poll: cd frank2 agent dir, source env, then python3 scripts/ff-extractor.py --mode full --meeting-id ${meetingId}.`;
+    return `WEBHOOK ${integration} ${event} — meeting ${meetingId}. Spawn meeting-commitments-worker with FF_MEETING_ID=${meetingId} set so the single-meeting fast path runs now instead of waiting for the 2h poll: cd pa agent dir, source env, then python3 scripts/ff-extractor.py --mode full --meeting-id ${meetingId}.`;
   }
 
   if (integration === 'ops-check-lead') {
@@ -528,24 +545,39 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
       }
       requestCount += 1;
 
-      const secretHeader = request.headers['x-webhook-bridge-secret'];
-      const providedSecret = Array.isArray(secretHeader) ? secretHeader[0] : secretHeader;
-      if (!providedSecret) {
-        jsonResponse(response, 401, { error: 'missing_secret', tier: 'auth' });
-        return;
-      }
-      if (!bridgeSecretMatches(providedSecret, options.bridgeSecret)) {
-        jsonResponse(response, 401, { error: 'secret_mismatch', tier: 'auth' });
-        return;
+      const rawBody = await readRequestBody(request, response);
+      if (rawBody === null) return;
+
+      const useFirefliesHmac = integration === 'fireflies' && !!options.firefliesWebhookSecret;
+
+      if (useFirefliesHmac) {
+        const signatureHeader = request.headers['x-hub-signature'];
+        const providedSignature = Array.isArray(signatureHeader) ? signatureHeader[0] : signatureHeader;
+        if (!providedSignature) {
+          jsonResponse(response, 401, { error: 'missing_secret', tier: 'auth' });
+          return;
+        }
+        if (!hmacSignatureMatches(rawBody, providedSignature, options.firefliesWebhookSecret as string)) {
+          jsonResponse(response, 401, { error: 'secret_mismatch', tier: 'auth' });
+          return;
+        }
+      } else {
+        const secretHeader = request.headers['x-webhook-bridge-secret'];
+        const providedSecret = Array.isArray(secretHeader) ? secretHeader[0] : secretHeader;
+        if (!providedSecret) {
+          jsonResponse(response, 401, { error: 'missing_secret', tier: 'auth' });
+          return;
+        }
+        if (!bridgeSecretMatches(providedSecret, options.bridgeSecret)) {
+          jsonResponse(response, 401, { error: 'secret_mismatch', tier: 'auth' });
+          return;
+        }
       }
 
       if (!allowedIntegrations.has(integration)) {
         jsonResponse(response, 403, { error: 'unknown_integration', tier: 'integration' });
         return;
       }
-
-      const rawBody = await readRequestBody(request, response);
-      if (rawBody === null) return;
 
       let envelope: RelayEnvelope;
       try {
@@ -563,12 +595,17 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
         jsonResponse(response, 400, { error: 'invalid_event', tier: 'payload' });
         return;
       }
-      if (typeof envelope.target !== 'string' || envelope.target.trim() === '') {
+      const explicitTarget = typeof envelope.target === 'string' ? envelope.target.trim() : null;
+      const target = explicitTarget && explicitTarget !== ''
+        ? explicitTarget
+        : integration === 'fireflies' && (envelope.target === undefined || explicitTarget === '')
+          ? 'pa'
+          : null;
+
+      if (target === null) {
         jsonResponse(response, 400, { error: 'invalid_target', tier: 'payload' });
         return;
       }
-
-      const target = envelope.target.trim();
       if (!isKnownAgent(target, options.ctxRoot, options.frameworkRoot, options.org)) {
         jsonResponse(response, 404, { error: 'unknown_agent', tier: 'target' });
         return;
@@ -604,7 +641,10 @@ const startCommand = new Command('start')
   .option('--instance <id>', 'Instance ID')
   .option('--port <port>', 'Webhook bridge port', String(DEFAULT_PORT))
   .description('Start the webhook bridge as a launchd service')
-  .addHelpText('after', '\nWEBHOOK_BRIDGE_SECRET is loaded at start time from process env, .cortextos-env, or orgs/<org>/secrets.env.')
+  .addHelpText(
+    'after',
+    '\nWEBHOOK_BRIDGE_SECRET is loaded at start time from process env, .cortextos-env, or orgs/<org>/secrets.env. FIREFLIES_WEBHOOK_SECRET is optional, loaded the same way, and only affects the fireflies integration.',
+  )
   .action(async (options: StartOptions) => {
     try {
       checkPlatform();
@@ -688,7 +728,10 @@ const runCommand = new Command('run')
   .option('--instance <id>', 'Instance ID')
   .option('--port <port>', 'Webhook bridge port', String(DEFAULT_PORT))
   .description('Run the webhook bridge in the foreground')
-  .addHelpText('after', '\nWEBHOOK_BRIDGE_SECRET is loaded at run time from process env, .cortextos-env, or orgs/<org>/secrets.env.')
+  .addHelpText(
+    'after',
+    '\nWEBHOOK_BRIDGE_SECRET is loaded at run time from process env, .cortextos-env, or orgs/<org>/secrets.env. FIREFLIES_WEBHOOK_SECRET is optional, loaded the same way, and only affects the fireflies integration.',
+  )
   .action(async (options: RunOptions) => {
     try {
       const instanceId = resolveInstanceId(options.instance);
@@ -700,6 +743,7 @@ const runCommand = new Command('run')
         frameworkRoot: context.frameworkRoot,
         org: context.org,
         bridgeSecret: context.bridgeSecret,
+        firefliesWebhookSecret: context.firefliesWebhookSecret,
       });
 
       await new Promise<void>((resolve, reject) => {

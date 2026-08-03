@@ -134,6 +134,34 @@ describe('hook-retrieval-enforcer', () => {
     });
   });
 
+  it('session continuation short-circuit unchanged', () => {
+    writeCacheForSession('continue-session', {
+      turnCount: 99,
+      lastCommitsHash: 'keep-me',
+      lastKbQueryNormalized: 'existing normalized query',
+      lastKbResultHash: 'existing-result-hash',
+      lastKbResultAtMs: 1234,
+    });
+
+    const output = buildAdditionalContext(
+      promptEnvelope(
+        'SESSION CONTINUATION: Your CLI process was restarted while this session was still active. Continue from the prior context, preserve the current task state, and do not treat this as a new session. Resume the interrupted work exactly where it left off and recover any in-flight reasoning or pending implementation details before answering.',
+        'continue-session',
+      ),
+      { agentName, org: 'clearworksai' },
+    );
+
+    expect(output).toBe('');
+    expect(mockExecFileSync).not.toHaveBeenCalled();
+    expect(readCache(cachePathFor(agentName, 'continue-session'))).toEqual({
+      turnCount: 99,
+      lastCommitsHash: 'keep-me',
+      lastKbQueryNormalized: 'existing normalized query',
+      lastKbResultHash: 'existing-result-hash',
+      lastKbResultAtMs: 1234,
+    });
+  });
+
   it('empty or short prompts short-circuit unchanged', () => {
     const output = buildAdditionalContext(promptEnvelope('ok', 'short-session'), {
       agentName,

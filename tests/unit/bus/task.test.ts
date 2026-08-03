@@ -96,7 +96,7 @@ describe('Task Management', () => {
       expect(content.created_by).toBe('paul');
       expect(content.org).toBe('acme');
       expect(content.priority).toBe('high');
-      expect(content.project).toBe('');
+      expect(content.project).toBe('paul');
       expect(content.kpi_key).toBeNull();
       expect(content.created_at).toBeTruthy();
       expect(content.updated_at).toBeTruthy();
@@ -119,6 +119,25 @@ describe('Task Management', () => {
 
       const content = JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8'));
       expect(content.status).toBe('someday');
+      expect(classifyTask(content)).toBe('build');
+    });
+
+    it('defaults an ordinary agent task project to the agent name when unset', () => {
+      const taskId = createTask(paths, 'larry', 'acme', 'Build task');
+      const content = JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8'));
+      expect(content.project).toBe('larry');
+    });
+
+    it('preserves an explicit project when provided', () => {
+      const taskId = createTask(paths, 'larry', 'acme', 'Build task', { project: 'my-epic' });
+      const content = JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8'));
+      expect(content.project).toBe('my-epic');
+    });
+
+    it('keeps a defaulted agent-name project classified as build', () => {
+      const taskId = createTask(paths, 'larry', 'acme', 'Build task');
+      const content = JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8'));
+      expect(content.project).toBe('larry');
       expect(classifyTask(content)).toBe('build');
     });
   });

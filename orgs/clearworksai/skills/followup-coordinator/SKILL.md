@@ -121,6 +121,10 @@ Rules for the draft:
 - Named owners on every line. "Sarah will send the API docs by Thursday" · never "the docs will be sent."
 - Exactly one next step at the end. Not three.
 - No item appears in the email that isn't in the tracker.
+- Completeness is bidirectional: before showing the draft, check every THEIR-COMMITMENTS row also appears
+  in "What we need from you" (by item, not just owner name) · a tracked item silently missing from the
+  email is the same failure as an invented one. If an item is cut for length, say so explicitly rather
+  than dropping it.
 
 ### Step 4 · Write to the Tracker
 

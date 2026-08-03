@@ -62,6 +62,11 @@ export class FastChecker {
 
   // External Telegram handler (set by daemon)
   private telegramMessages: Array<{ formatted: string; ackIds: string[] }> = [];
+  // Disk copy of the pending Telegram queue. Telegram advances its server-side
+  // offset the instant a message is queued (the poller handler just pushes into
+  // telegramMessages and returns), so Telegram never redelivers — this file is
+  // the ONLY surviving copy of a not-yet-injected message across a daemon restart.
+  private pendingTelegramFilePath: string = '';
 
   // Persistent dedup: message hashes to prevent duplicate delivery
   // Persistent dedup: message hash -> last-seen timestamp (ms)
@@ -107,6 +112,11 @@ export class FastChecker {
     // Initialize persistent dedup
     this.dedupFilePath = join(paths.stateDir, '.message-dedup-hashes');
     this.loadDedupHashes();
+
+    // Replay any Telegram messages that were queued but never delivered before
+    // this session started (agent-down window + daemon restart).
+    this.pendingTelegramFilePath = join(paths.stateDir, '.pending-telegram-queue.json');
+    this.loadPendingTelegram();
 
     // Load persisted circuit breaker state so --continue restarts don't reset it
     this.ctxCircuitFile = join(paths.stateDir, '.ctx-circuit.json');
@@ -190,6 +200,7 @@ export class FastChecker {
    */
   queueTelegramMessage(formatted: string): void {
     this.telegramMessages.push({ formatted, ackIds: [] });
+    this.savePendingTelegram();
   }
 
   /**
@@ -199,11 +210,17 @@ export class FastChecker {
     let messageBlock = '';
     const ackIds: string[] = [];
 
-    // Process queued Telegram messages
+    // Process queued Telegram messages — PEEK, do not drain here.
+    // A destructive shift() dropped messages permanently whenever injection
+    // failed (agent NOT_RUNNING mid-restart): there was no else branch and no
+    // re-queue, so the loss happened in-process, no daemon restart required.
+    // Build the block from a snapshot of the current queue and only remove those
+    // entries AFTER injection is confirmed (below). Anything queued during the
+    // inject stays past `pendingCount` and is preserved.
+    const pendingCount = this.telegramMessages.length;
     let hasTelegramMessage = false;
-    while (this.telegramMessages.length > 0) {
-      const msg = this.telegramMessages.shift()!;
-      messageBlock += msg.formatted;
+    for (let i = 0; i < pendingCount; i++) {
+      messageBlock += this.telegramMessages[i].formatted;
       hasTelegramMessage = true;
     }
 
@@ -218,6 +235,12 @@ export class FastChecker {
     if (messageBlock) {
       const injected = this.agent.injectMessage(messageBlock);
       if (injected) {
+        // Delivery confirmed — NOW drain the telegram messages we consumed
+        // (only the peeked prefix) and persist the shortened queue.
+        if (pendingCount > 0) {
+          this.telegramMessages.splice(0, pendingCount);
+          this.savePendingTelegram();
+        }
         // ACK inbox messages
         for (const id of ackIds) {
           ackInbox(this.paths, id);
@@ -232,6 +255,9 @@ export class FastChecker {
         // Cooldown after injection
         await sleep(5000);
       }
+      // Injection failed (agent NOT_RUNNING or DEDUPED): telegram messages stay
+      // in this.telegramMessages (and on disk) and inbox stays un-ack'd — both
+      // retry on the next pollCycle once the agent is back up.
     }
 
     // Typing indicator: send while Claude is actively working
@@ -1327,6 +1353,45 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       writeFileSync(this.dedupFilePath, lines.join('\n') + '\n', 'utf-8');
     } catch {
       // Non-critical - dedup will still work in memory
+    }
+  }
+
+  /**
+   * Persist the pending Telegram delivery queue to disk. Called after every
+   * enqueue and after a confirmed drain. This is the only copy of a queued-but-
+   * not-yet-injected message that survives a daemon restart (Telegram's offset
+   * already advanced at queue time, so its server-side redelivery is forfeited).
+   * Removes the file when the queue empties so a clean fleet leaves no residue.
+   */
+  private savePendingTelegram(): void {
+    try {
+      if (this.telegramMessages.length === 0) {
+        if (existsSync(this.pendingTelegramFilePath)) unlinkSync(this.pendingTelegramFilePath);
+        return;
+      }
+      writeFileSync(this.pendingTelegramFilePath, JSON.stringify(this.telegramMessages), 'utf-8');
+    } catch {
+      // Non-critical — the in-memory queue still drives delivery this session.
+    }
+  }
+
+  /**
+   * Replay un-drained Telegram messages persisted by a prior session. Entries
+   * are only ever written by queueTelegramMessage and removed after a confirmed
+   * injection, so anything present here was queued but never delivered — replay
+   * it into the live queue so this session delivers it.
+   */
+  private loadPendingTelegram(): void {
+    try {
+      if (!existsSync(this.pendingTelegramFilePath)) return;
+      const parsed = JSON.parse(readFileSync(this.pendingTelegramFilePath, 'utf-8'));
+      if (Array.isArray(parsed)) {
+        this.telegramMessages = parsed
+          .filter((e): e is { formatted: string; ackIds: string[] } => e && typeof e.formatted === 'string')
+          .map((e) => ({ formatted: e.formatted, ackIds: Array.isArray(e.ackIds) ? e.ackIds : [] }));
+      }
+    } catch {
+      this.telegramMessages = [];
     }
   }
 

@@ -1122,6 +1122,86 @@ describe('Task due dates and due sweep', () => {
     expect(existsSync(paths.taskDir)).toBe(false);
   });
 
+  it('rejects due dates more than 1 hour in the past', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-12T10:00:00Z'));
+    
+    expect(() => createTask(paths, 'alice', 'acme', 'Past due', { 
+      dueDate: '2026-07-11T08:00:00Z' // 26 hours ago
+    })).toThrow(/Invalid due_date.*more than 1 hour in the past/);
+    
+    expect(existsSync(paths.taskDir)).toBe(false);
+  });
+
+  it('accepts due dates exactly 1 hour in the past (inclusive boundary)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-12T10:00:00Z'));
+    
+    const taskId = createTask(paths, 'alice', 'acme', 'Boundary past', { 
+      dueDate: '2026-07-12T09:00:00Z' // Exactly 1 hour ago
+    });
+    
+    expect(existsSync(paths.taskDir)).toBe(true);
+    expect(readTaskJson(taskId).due_date).toBe('2026-07-12T09:00:00Z');
+  });
+
+  it('rejects due dates more than 365 days in the future', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-12T10:00:00Z'));
+    
+    expect(() => createTask(paths, 'alice', 'acme', 'Future due', { 
+      dueDate: '2027-08-16T10:00:00Z' // 400 days in the future
+    })).toThrow(/Invalid due_date.*more than 365 days in the future/);
+    
+    expect(existsSync(paths.taskDir)).toBe(false);
+  });
+
+  it('accepts due dates exactly 365 days in the future (inclusive boundary)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-12T10:00:00Z'));
+    
+    const taskId = createTask(paths, 'alice', 'acme', 'Boundary future', { 
+      dueDate: '2027-07-12T10:00:00Z' // Exactly 365 days from now
+    });
+    
+    expect(existsSync(paths.taskDir)).toBe(true);
+    expect(readTaskJson(taskId).due_date).toBe('2027-07-12T10:00:00Z');
+  });
+
+  it('accepts reasonable future due dates (30 days)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-12T10:00:00Z'));
+    
+    const taskId = createTask(paths, 'alice', 'acme', 'Future task', { 
+      dueDate: '2026-08-11T10:00:00Z' // 30 days in the future
+    });
+    
+    expect(existsSync(paths.taskDir)).toBe(true);
+    expect(readTaskJson(taskId).due_date).toBe('2026-08-11T10:00:00Z');
+  });
+
+  it('default due date computation is unaffected (priority-scaled)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-12T10:00:00Z'));
+    
+    const urgent = createTask(paths, 'alice', 'acme', 'Urgent task', { priority: 'urgent' });
+    const normal = createTask(paths, 'alice', 'acme', 'Normal task', { priority: 'normal' });
+    const low = createTask(paths, 'alice', 'acme', 'Low task', { priority: 'low' });
+    
+    expect(readTaskJson(urgent).due_date).toBe('2026-07-13T10:00:00Z');
+    expect(readTaskJson(normal).due_date).toBe('2026-07-19T10:00:00Z');
+    expect(readTaskJson(low).due_date).toBe('2026-07-26T10:00:00Z');
+  });
+
+  it('default due date computation is unaffected (someday path)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-12T10:00:00Z'));
+    
+    const someday = createTask(paths, 'alice', 'acme', 'Someday task', { someday: true });
+    
+    expect(readTaskJson(someday).due_date).toBe('2026-08-11T10:00:00Z');
+  });
+
   it('ensureEpicTask inherits the default due date', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-12T10:00:00Z'));

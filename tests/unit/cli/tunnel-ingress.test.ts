@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { homedir } from 'os';
 import { buildCloudflaredConfig, isTunnelDeleted, CLOUDFLARED_ZERO_DATE } from '../../../src/cli/tunnel';
+import { DEFAULT_PORT } from '../../../src/cli/webhook-bridge';
 
 describe('isTunnelDeleted — cloudflared zero-date sentinel', () => {
   it('treats the Go zero-time sentinel as NOT deleted (a live tunnel)', () => {
@@ -62,5 +63,23 @@ describe('tunnel ingress generation', () => {
   it('always leaves the catch-all rule last when bridge ingress is enabled', () => {
     const lines = buildCloudflaredConfig(tunnelId, dashboardPort, { port: bridgePort }).trimEnd().split('\n');
     expect(lines.at(-1)).toBe('  - service: http_status:404');
+  });
+
+  it('orders the relay rule before the dashboard rule before the catch-all', () => {
+    const lines = buildCloudflaredConfig(tunnelId, dashboardPort, { port: bridgePort }).split('\n');
+    const relayIdx = lines.indexOf('  - path: ^/relay/.*');
+    const dashboardIdx = lines.indexOf(`  - service: http://localhost:${dashboardPort}`);
+    const catchAllIdx = lines.indexOf('  - service: http_status:404');
+    expect(relayIdx).toBeGreaterThanOrEqual(0);
+    expect(relayIdx).toBeLessThan(dashboardIdx);
+    expect(dashboardIdx).toBeLessThan(catchAllIdx);
+  });
+
+  it('wires the webhook-bridge DEFAULT_PORT constant as the single source of truth', () => {
+    // Pins the newly-exported constant and guards against port drift between
+    // webhook-bridge.ts and tunnel.ts.
+    expect(DEFAULT_PORT).toBe(20242);
+    const config = buildCloudflaredConfig(tunnelId, dashboardPort, { port: DEFAULT_PORT });
+    expect(config).toContain('    service: http://localhost:20242');
   });
 });

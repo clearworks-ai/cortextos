@@ -12,7 +12,7 @@ import { resolvePaths } from '../utils/paths.js';
 import type { BusPaths } from '../types/index.js';
 import { resolveInstanceId } from './resolve-instance-id.js';
 
-const DEFAULT_PORT = 20242;
+export const DEFAULT_PORT = 20242;
 const DEFAULT_HOST = '127.0.0.1';
 const MAX_BODY_BYTES = 256 * 1024;
 const RATE_LIMIT_MAX = 120;

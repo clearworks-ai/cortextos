@@ -4,6 +4,7 @@ import { existsSync, writeFileSync, readFileSync, mkdirSync, chmodSync } from 'f
 import { join } from 'path';
 import { homedir } from 'os';
 import { stripBom } from '../utils/strip-bom.js';
+import { DEFAULT_PORT as WEBHOOK_BRIDGE_PORT } from './webhook-bridge.js';
 
 const TUNNEL_NAME = 'cortextos';
 const PLIST_LABEL = 'com.cortextos.tunnel';
@@ -369,7 +370,7 @@ const startCommand = new Command('start')
     const tunnelUrl = `https://${tunnel.id}.cfargotunnel.com`;
 
     // 4. Write cloudflared config.yaml
-    writeCloudflaredConfig(tunnel.id, port);
+    writeCloudflaredConfig(tunnel.id, port, { port: WEBHOOK_BRIDGE_PORT });
     console.log(`  Config: ${CLOUDFLARED_CONFIG}`);
 
     // 5. Write launchd plist

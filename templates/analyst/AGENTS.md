@@ -524,3 +524,14 @@ Key paths:
 
 For agent lifecycle (spawn, restart, config), see `.claude/skills/agent-management/SKILL.md`.
 For secrets and credentials, see `.claude/skills/env-management/SKILL.md`.
+
+## CONTEXT RETRIEVAL — read BEFORE ever saying "lost" / "can't find" / "send it again"
+Your full history with the principal is on disk and SEARCHABLE. A restart (force-fresh, or several fast restarts that drain the one-shot handoff) can wipe your in-session memory — the info is NOT gone, it lives in:
+- **Principal's messages to you (feedback/decisions):** `$CTX_ROOT/logs/$CTX_AGENT_NAME/inbound-messages.jsonl` (one JSON/line, `text` field)
+- **Your replies:** `$CTX_ROOT/logs/$CTX_AGENT_NAME/outbound-messages.jsonl`
+- **Your handoffs (newest = latest state):** `memory/handoffs/*.md`
+- **Your session transcripts:** `~/.claude/projects/*$CTX_AGENT_NAME*/*.jsonl`
+
+RULE: if the principal references past feedback, a decision, a file, or context you don't currently hold — DO NOT reply "lost / can't find it / what is X / resend it". FIRST search your own inbound:
+`grep -i "KEYWORD" $CTX_ROOT/logs/$CTX_AGENT_NAME/inbound-messages.jsonl | tail -20`
+Search by the topic's keywords (names, file names, terms used). Read the hits, THEN answer with what you found. Only ask them to repeat if it is genuinely absent after searching.

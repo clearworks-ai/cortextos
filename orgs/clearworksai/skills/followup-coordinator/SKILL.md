@@ -126,8 +126,12 @@ Rules for the draft:
 - No item appears in the email that isn't in the tracker.
 - Completeness is bidirectional and checked after drafting, not just enforced by construction: count
   the OUR-COMMITMENTS and THEIR-COMMITMENTS rows, count the bullets in each email section, confirm they
-  match 1:1. A tracked item silently missing from the email is the same failure as an invented one. If
-  an item is cut for length, say so explicitly in the draft rather than dropping it silently.
+  match 1:1 (a merge or split of rows still has to reconcile to the same count either way). A tracked
+  item silently missing from the email is the same failure as an invented one. If the counts don't
+  match: that's a bug in the draft, not a length call · go back and add the missing bullet. The ONLY
+  case where an item is deliberately left out of the itemized bullets is a genuinely long list (6+
+  items on one side) · there, compress to the top items plus one line "+N more, full list in the
+  tracker" rather than either a bloated email or a silent drop.
 
 ### Step 4 · Write to the Tracker
 

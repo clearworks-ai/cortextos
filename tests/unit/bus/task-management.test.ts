@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, existsSync, readdirSync } from 'fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createTask, updateTask, completeTask, checkStaleTasks, archiveTasks, checkHumanTasks } from '../../../src/bus/task';
+import { createTask, updateTask, completeTask, checkStaleTasks, archiveTasks, checkHumanTasks, sweepSilentAssignees } from '../../../src/bus/task';
 import { atomicWriteSync } from '../../../src/utils/atomic';
-import type { BusPaths, Task } from '../../../src/types';
+import type { BusPaths, Task, Heartbeat } from '../../../src/types';
 
 /**
  * Helper to create a task with a backdated timestamp.
@@ -287,6 +287,140 @@ describe('Advanced Task Management', () => {
       expect(humanTasks.length).toBe(2);
       const ids = humanTasks.map(t => t.id).sort();
       expect(ids).toEqual(['task_020_020', 'task_021_021']);
+    });
+  });
+
+  describe('sweepSilentAssignees', () => {
+    function makeHeartbeat(agent: string, lastHeartbeat: string): Heartbeat {
+      return {
+        agent,
+        org: 'testorg',
+        status: 'running',
+        current_task: '',
+        mode: 'day',
+        last_heartbeat: lastHeartbeat,
+        loop_interval: '15m',
+      };
+    }
+
+    function readTask(id: string): Task {
+      return JSON.parse(readFileSync(join(paths.taskDir, `${id}.json`), 'utf-8')) as Task;
+    }
+
+    it('flags an open task whose assignee heartbeat is older than threshold', () => {
+      createBackdatedTask(paths, { id: 'task_s1', assigned_to: 'boris', status: 'in_progress' });
+      const report = sweepSilentAssignees(paths, {
+        heartbeats: [makeHeartbeat('boris', hoursAgo(3))],
+      });
+      expect(report.actions).toHaveLength(1);
+      expect(report.actions[0].id).toBe('task_s1');
+      expect(report.actions[0].reason).toBe('silent_assignee');
+      expect(report.actions[0].heartbeat_age_ms).toBeGreaterThan(2.9 * 3_600_000);
+      expect(report.actions[0].heartbeat_age_ms).toBeLessThan(3.1 * 3_600_000);
+    });
+
+    it('does not flag a fresh heartbeat (1h < 2h threshold)', () => {
+      createBackdatedTask(paths, { id: 'task_s2', assigned_to: 'boris' });
+      const report = sweepSilentAssignees(paths, {
+        heartbeats: [makeHeartbeat('boris', hoursAgo(1))],
+      });
+      expect(report.actions).toEqual([]);
+    });
+
+    it('flags with null age when the assignee has no heartbeat entry at all', () => {
+      createBackdatedTask(paths, { id: 'task_s3', assigned_to: 'boris' });
+      const report = sweepSilentAssignees(paths, { heartbeats: [] });
+      expect(report.actions).toHaveLength(1);
+      expect(report.actions[0].heartbeat_age_ms).toBeNull();
+    });
+
+    it('does not flag human-exempt tasks even with no heartbeat', () => {
+      createBackdatedTask(paths, { id: 'task_s4', assigned_to: 'human' });
+      const report = sweepSilentAssignees(paths, { heartbeats: [] });
+      expect(report.actions).toEqual([]);
+    });
+
+    it('does not flag ephemeral worker assignees', () => {
+      createBackdatedTask(paths, { id: 'task_s5', assigned_to: 'worker-1234567890123' });
+      const report = sweepSilentAssignees(paths, { heartbeats: [] });
+      expect(report.actions).toEqual([]);
+    });
+
+    it('does not scan completed / cancelled / archived tasks', () => {
+      createBackdatedTask(paths, { id: 'task_s6a', assigned_to: 'boris', status: 'completed' });
+      createBackdatedTask(paths, { id: 'task_s6b', assigned_to: 'boris', status: 'cancelled' });
+      createBackdatedTask(paths, { id: 'task_s6c', assigned_to: 'boris', archived: true });
+      const report = sweepSilentAssignees(paths, { heartbeats: [] });
+      expect(report.actions).toEqual([]);
+    });
+
+    it('flags a fresh, not-yet-due task with a stale-heartbeat assignee (distinct from staleness)', () => {
+      // Default createBackdatedTask: created/updated now, due_date null → sweepDueTasks
+      // would never touch it. The silent sweep still must.
+      createBackdatedTask(paths, { id: 'task_s7', assigned_to: 'boris' });
+      const report = sweepSilentAssignees(paths, {
+        heartbeats: [makeHeartbeat('boris', hoursAgo(5))],
+      });
+      expect(report.actions).toHaveLength(1);
+      expect(report.actions[0].id).toBe('task_s7');
+    });
+
+    it('apply stamps silent_flagged_at, cools down an immediate re-run, re-flags after 24h', () => {
+      createBackdatedTask(paths, { id: 'task_s8', assigned_to: 'boris' });
+      const t0 = new Date();
+
+      const first = sweepSilentAssignees(paths, {
+        dryRun: false,
+        now: t0,
+        heartbeats: [makeHeartbeat('boris', hoursAgo(3))],
+      });
+      expect(first.actions).toHaveLength(1);
+      expect(readTask('task_s8').silent_flagged_at).toBeTruthy();
+
+      const second = sweepSilentAssignees(paths, {
+        dryRun: false,
+        now: t0,
+        heartbeats: [makeHeartbeat('boris', hoursAgo(3))],
+      });
+      expect(second.actions).toEqual([]);
+      expect(second.skipped_recent_flag).toBe(1);
+
+      const later = new Date(t0.getTime() + 25 * 3_600_000);
+      const third = sweepSilentAssignees(paths, {
+        dryRun: false,
+        now: later,
+        heartbeats: [makeHeartbeat('boris', hoursAgo(3))],
+      });
+      expect(third.actions).toHaveLength(1);
+    });
+
+    it('dry-run (default) leaves the task file byte-identical', () => {
+      createBackdatedTask(paths, { id: 'task_s9', assigned_to: 'boris' });
+      const before = readFileSync(join(paths.taskDir, 'task_s9.json'), 'utf-8');
+      const report = sweepSilentAssignees(paths, {
+        heartbeats: [makeHeartbeat('boris', hoursAgo(3))],
+      });
+      expect(report.actions).toHaveLength(1);
+      expect(readFileSync(join(paths.taskDir, 'task_s9.json'), 'utf-8')).toBe(before);
+      expect(readTask('task_s9').silent_flagged_at).toBeUndefined();
+    });
+
+    it('default wiring reads real state/<agent>/heartbeat.json (fresh skips, stale flags)', () => {
+      createBackdatedTask(paths, { id: 'task_s10', assigned_to: 'boris' });
+      const hbDir = join(paths.ctxRoot, 'state', 'boris');
+      mkdirSync(hbDir, { recursive: true });
+
+      writeFileSync(join(hbDir, 'heartbeat.json'), JSON.stringify(makeHeartbeat('boris', hoursAgo(1))));
+      expect(sweepSilentAssignees(paths, {}).actions).toEqual([]);
+
+      writeFileSync(join(hbDir, 'heartbeat.json'), JSON.stringify(makeHeartbeat('boris', hoursAgo(3))));
+      expect(sweepSilentAssignees(paths, {}).actions).toHaveLength(1);
+    });
+
+    it('skips system-class tasks', () => {
+      createBackdatedTask(paths, { id: 'task_s11', assigned_to: 'boris', project: 'system' });
+      const report = sweepSilentAssignees(paths, { heartbeats: [] });
+      expect(report.actions).toEqual([]);
     });
   });
 });

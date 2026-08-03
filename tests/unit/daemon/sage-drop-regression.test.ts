@@ -19,9 +19,11 @@
  * it in discoverAndStart AND in bootSelfHeal (which re-read the same
  * corrupt map), so sage was dropped and never recovered.
  *
- * Fix: readInstanceEnableList now delegates to readEnabledAgentsMap which
- * holds the config-dir lock across the entire read and uses the .bak
- * fallback, so only fully-committed maps are ever observed.
+ * Fix: readInstanceEnableList now delegates to readEnabledAgentsMap, whose
+ * .bak fallback recovers torn writes. Writers serialize on the config-dir
+ * lock and swap the primary in with an atomic rename, so the reader is
+ * LOCK-FREE (RW-9 convergence) yet still only ever observes fully-committed
+ * maps.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';

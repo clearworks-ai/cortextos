@@ -161,10 +161,11 @@ export class AgentManager {
    * default-on behavior of `discoverAndStart`.
    */
   private readInstanceEnableList(): Record<string, { enabled?: boolean; org?: string; status?: string }> {
-    // Locked read via the shared I/O module — closes the sage-drop TOCTOU
-    // (a CLI enable/disable overlapping daemon boot could otherwise expose a
-    // half-written or empty map, silently dropping an enabled agent). The
-    // shared reader holds the config-dir lock and falls back to .bak.
+    // Lock-free, non-throwing read via the shared I/O module (RW-9
+    // convergence to upstream semantics). Writers swap the file in with an
+    // atomic rename, so this can never observe a half-written map; parse
+    // failure falls back to .bak, then {}. This runs on the daemon's
+    // boot/startAgent critical path — it must never block or throw.
     return readEnabledAgentsMap(this.ctxRoot);
   }
 

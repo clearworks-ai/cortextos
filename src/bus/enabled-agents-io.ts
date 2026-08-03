@@ -1,9 +1,15 @@
 /**
  * enabled-agents-io.ts — Single source of truth for enabled-agents.json I/O.
  *
- * Mirrors the proven crons.ts pattern:
- *   - All reads and writes go through withFileLockSync (config dir as lock dir)
- *     so concurrent daemon/CLI processes always serialize on this file.
+ * Locking model (RW-9 convergence, matches upstream reader semantics):
+ *   - WRITERS (writeEnabledAgentsMap, mutateEnabledAgentsMap) serialize on
+ *     withFileLockSync (config dir as lock dir) so concurrent daemon/CLI
+ *     writers can't lose each other's read-modify-write updates.
+ *   - READERS are lock-free and non-blocking. Writes go through
+ *     atomicWriteSync (copy .bak, then atomic rename), so a reader can never
+ *     observe a half-written primary — the read-side lock bought nothing and
+ *     its 5s Atomics.wait block + throw-on-timeout sat on the daemon's
+ *     boot/startAgent/handleExit critical paths (RW-9/M5).
  *   - Writes use atomicWriteSync with keepBak=true so the previous version is
  *     preserved as enabled-agents.json.bak for single-step recovery.
  *   - On parse failure, the reader falls back to the .bak file.
@@ -16,7 +22,7 @@
  * module instead of reading/writing enabled-agents.json directly.
  */
 
-import { existsSync, readFileSync, renameSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, renameSync } from 'fs';
 import { join } from 'path';
 import { atomicWriteSync, ensureDir } from '../utils/atomic.js';
 import { withFileLockSync } from '../utils/lock.js';
@@ -54,7 +60,7 @@ export function enabledAgentsLockDir(ctxRoot: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Internal pure parser (no lock — callers hold the lock already)
+// Internal pure parser (no lock — reads never take the lock)
 // ---------------------------------------------------------------------------
 
 /**
@@ -90,11 +96,13 @@ function parseEnabledAgentsRaw(raw: string, label: string): EnabledAgentsMap | n
 }
 
 /**
- * Internal read helper — assumes the caller already holds the config-dir lock.
- * Reads and parses the primary file, falls back to .bak on failure, quarantines
- * a broken primary if both fail. Returns {} on all unrecoverable errors.
+ * Internal read helper — lock-free. Safe without the lock because writers
+ * swap the primary in with an atomic rename (atomicWriteSync), so a reader
+ * can never observe a half-written file. Reads and parses the primary file,
+ * falls back to .bak on failure, quarantines a broken primary if both fail.
+ * Returns {} on all unrecoverable errors.
  */
-function readEnabledAgentsMapLocked(ctxRoot: string): EnabledAgentsMap {
+function readEnabledAgentsMapInner(ctxRoot: string): EnabledAgentsMap {
   const filePath = enabledAgentsPath(ctxRoot);
 
   if (!existsSync(filePath)) {
@@ -160,21 +168,23 @@ function readEnabledAgentsMapLocked(ctxRoot: string): EnabledAgentsMap {
 /**
  * Read the enabled-agents map from disk.
  *
- * Acquires the config-dir lock so no concurrent writer can be mid-rename while
- * we read (preventing observation of a half-written file).
+ * LOCK-FREE and NON-BLOCKING by design (RW-9 convergence to upstream reader
+ * semantics). This runs on the daemon's boot (discoverAndStart), startAgent
+ * (resolveAgentOrg), and handleExit (isDisabled) critical paths — a locked
+ * read there meant up-to-5s Atomics.wait event-loop blocks and a
+ * throw-on-timeout that was whole-daemon fatal at boot. Writers use
+ * atomicWriteSync (atomic rename), so a reader can never observe a
+ * half-written primary; the lock is needed by WRITERS only.
  *
  * Returns {} when:
  *   - The file does not exist (first-run / clean state).
  *   - The file (and its .bak) cannot be parsed — the corrupt primary is
  *     quarantined and {} is returned so the daemon defaults agents to enabled.
  *
- * Never throws.
+ * Never throws, never blocks on the lock.
  */
 export function readEnabledAgentsMap(ctxRoot: string): EnabledAgentsMap {
-  const lockDir = enabledAgentsLockDir(ctxRoot);
-  mkdirSync(lockDir, { recursive: true });
-
-  return withFileLockSync(lockDir, () => readEnabledAgentsMapLocked(ctxRoot));
+  return readEnabledAgentsMapInner(ctxRoot);
 }
 
 /**
@@ -219,8 +229,9 @@ export function mutateEnabledAgentsMap(
   ensureDir(lockDir);
 
   return withFileLockSync(lockDir, () => {
-    // Read without re-acquiring the lock (we already hold it).
-    const current = readEnabledAgentsMapLocked(ctxRoot);
+    // Read inside the write lock so no concurrent writer can interleave
+    // between this read and the write below.
+    const current = readEnabledAgentsMapInner(ctxRoot);
 
     // Apply the mutation: fn may mutate `current` in place (return void) or
     // return a brand-new map object.

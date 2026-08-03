@@ -459,6 +459,9 @@ export function buildAdditionalContext(
   if (/^\s*\[CRON FIRED/.test(prompt)) {
     return '';
   }
+  if (/^\s*SESSION CONTINUATION:/.test(prompt)) {
+    return '';
+  }
 
   const agentName = options.agentName || process.env.CTX_AGENT_NAME || '';
   const org = options.org || process.env.CTX_ORG || 'clearworksai';

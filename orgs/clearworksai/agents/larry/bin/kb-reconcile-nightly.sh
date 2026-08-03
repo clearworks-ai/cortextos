@@ -99,7 +99,7 @@ try:
     else:
         edges_data = {}
 except json.JSONDecodeError:
-    edges_data = {}
+        edges_data = {}
 
 # Extract reconcile fields with fallbacks
 recon_stats = {
@@ -109,6 +109,8 @@ recon_stats = {
     "changed_files": recon_data.get("changed_files", 0),
     "removed_files": recon_data.get("removed_files", 0),
     "failed_files": recon_data.get("failed_files", 0),
+    "failed_paths": recon_data.get("failed_paths", []),
+    "quarantined_paths": recon_data.get("quarantined_paths", []) if recon_data.get("quarantined_paths") else [],
     "resumed_files": recon_data.get("resumed_files", 0),
     "total_files_on_disk": recon_data.get("total_files_on_disk", 0),
     "total_files_indexed_after": recon_data.get("total_files_indexed_after", 0),

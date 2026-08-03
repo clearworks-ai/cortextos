@@ -1,0 +1,28 @@
+kb-reconcile-504-retry-plus-quarantine true-verify, commit d6170d1
+
+Independent re-verification performed directly by larry (not self-report):
+1. Read full diff (git show d6170d1) — _is_quarantine_worthy(exc) helper added,
+   uses isinstance(exc, _genai_errors.APIError) not exact-string match. Both
+   duplicate call sites refactored onto the shared helper.
+2. Ran test suite live: MMRAG_DIR=/tmp/mmrag-test-verify-<pid>
+   knowledge-base/venv/bin/python3 -m _test_clients.test_kb_reconcile_504_quarantine
+   -> 4/4 PASS, test 2 confirmed using a REAL google.genai.errors.ClientError instance.
+3. Extracted+ran the REAL production heredoc (lines 32-171 of
+   orgs/clearworksai/agents/larry/bin/kb-reconcile-nightly.sh, not a test
+   reimplementation) with a crafted RECON_OUT containing failed_paths +
+   quarantined_paths -> ledger row correctly included both arrays.
+4. Live Gemini call against the actual corrupt file
+   (~/code/knowledge-sync/raw/resources/reference/clearworks/pdfs/The AI
+   Discovery Blueprint.pdf) -> raised real ClientError "400 INVALID_ARGUMENT.
+   The document has no pages." -> mmrag._is_quarantine_worthy(exc) == True.
+   Proves the exact round-1 failure scenario is fixed end-to-end.
+5. npx tsc --noEmit and npm run build both clean.
+6. Independent adversarial review subagent (frozen transcript, ledger row
+   above) independently reproduced all of the above and returned PASS.
+7. kb-reconcile-nightly.sh confirmed untouched in d6170d1 (bash -n clean,
+   diff stat shows only the 2 python files).
+
+Round 1 (commit d768729) FAILED an earlier independent review — real bug
+(exact-string APIError match never matches ClientError/ServerError
+subclasses) caught before merge, not after. Round 2 (d6170d1) fixes it,
+independently confirmed twice (this verify + the review subagent).

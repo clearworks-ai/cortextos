@@ -148,8 +148,8 @@ FLASH_OUTPUT_PRICE_PER_M = 0.60
 
 # Retry classifier for the Gemini generate_content call inside ingest_pdf.
 # Module-level so a fault-injection test client can reference the same set.
-TRANSIENT_HTTP_CODES = {429, 500, 503}
-TRANSIENT_STATUS_NAMES = {"UNAVAILABLE", "RESOURCE_EXHAUSTED"}
+TRANSIENT_HTTP_CODES = {429, 500, 503, 504}
+TRANSIENT_STATUS_NAMES = {"UNAVAILABLE", "RESOURCE_EXHAUSTED", "DEADLINE_EXCEEDED"}
 DEFAULT_GEMINI_TIMEOUT_MS = 120000
 MMRAG_GEMINI_TIMEOUT_MS = _env_int("MMRAG_GEMINI_TIMEOUT_MS", DEFAULT_GEMINI_TIMEOUT_MS)
 DEFAULT_EMBED_CACHE_FILENAME = "embedding-cache.sqlite"
@@ -374,6 +374,35 @@ def _retry_generate_content(client, *, model, contents, backoffs=(5, 15, 45)):
         lambda: client.models.generate_content(model=model, contents=contents),
         backoffs=backoffs,
     )
+
+
+def _is_quarantine_worthy(exc):
+    """Check if an exception represents an unrecoverable parse error that should be quarantined.
+    
+    Returns True for Gemini APIError subclasses (ClientError/ServerError) with
+    INVALID_ARGUMENT status and "no pages" message, or for PDF/stream/EOF parse errors.
+    These errors are not transient and should not be retried.
+    
+    This is a shared helper to avoid DRY violations between _reconcile_collection
+    and _build_collection_from_disk.
+    """
+    from google.genai import errors as _genai_errors
+    
+    error_message = " ".join(str(exc).split()) or "<no message>"
+    
+    # Check for Gemini APIError with INVALID_ARGUMENT and "no pages" message
+    # Note: isinstance catches ClientError/ServerError subclasses, not just literal APIError
+    if isinstance(exc, _genai_errors.APIError):
+        if "INVALID_ARGUMENT" in error_message and "no pages" in error_message.lower():
+            return True
+    
+    # Check for PDF/stream/EOF/corruption-related errors by exception type name
+    # This catches parse-level errors from PDF libraries that indicate unrecoverable corruption
+    error_type = type(exc).__name__
+    if any(keyword in error_type.lower() for keyword in ["pdf", "stream", "eof", "read", "corrupt"]):
+        return True
+    
+    return False
 
 
 def embed_content(client, config, content, task_type="RETRIEVAL_DOCUMENT"):
@@ -1684,6 +1713,8 @@ def _reconcile_collection(client, config, collection, roots, *, dry_run=False, f
             successful_ignored_sources.append(source)
 
     new_chunks = 0
+    failed_paths = []
+    quarantined_paths = []
     if not dry_run:
         for source in sorted(new_sources + successful_changed_sources):
             file_hash = disk_state[source]["content_hash"]
@@ -1696,14 +1727,20 @@ def _reconcile_collection(client, config, collection, roots, *, dry_run=False, f
                 _checkpoint_mark_complete(checkpoint_state, source, file_hash)
             except Exception as exc:
                 error_message = " ".join(str(exc).split()) or "<no message>"
-                print(f"  SKIP (error): {file_path} — {type(exc).__name__}: {error_message}")
-                failed_paths.append(str(file_path))
+                error_type = type(exc).__name__
+                
+                if _is_quarantine_worthy(exc):
+                    print(f"  QUARANTINED (unrecoverable): {file_path} — {error_type}: {error_message}")
+                    quarantined_paths.append(str(file_path))
+                else:
+                    print(f"  SKIP (error): {file_path} — {error_type}: {error_message}")
+                    failed_paths.append(str(file_path))
                 continue
 
     total_files_indexed_after = len(index_state) - len(removed_sources) - len(ignored_sources) + len(new_sources)
     if not dry_run:
         total_files_indexed_after = len(_collect_index_state(collection))
-        if checkpoint_state is not None and not failed_paths and delete_failures["files"] == 0:
+        if checkpoint_state is not None and not failed_paths and not quarantined_paths and delete_failures["files"] == 0:
             _clear_checkpoint_state(checkpoint_state["run_key"])
 
     return {
@@ -1721,6 +1758,7 @@ def _reconcile_collection(client, config, collection, roots, *, dry_run=False, f
         "delete_failures": delete_failures,
         "failed_files": len(failed_paths),
         "failed_paths": failed_paths,
+        "quarantined_paths": quarantined_paths,
         "resumed_files": resumed_files,
         "roots": [str(Path(root)) for root in roots],
     }
@@ -1730,6 +1768,7 @@ def _build_collection_from_disk(client, config, collection, roots, *, checkpoint
     """Populate a fresh collection from disk with per-file isolation."""
     disk_state = _scan_disk_state(roots)
     failed_paths = []
+    quarantined_paths = []
     new_chunks = 0
     resumed_files = 0
 
@@ -1744,8 +1783,14 @@ def _build_collection_from_disk(client, config, collection, roots, *, checkpoint
             _checkpoint_mark_complete(checkpoint_state, source, file_hash)
         except Exception as exc:
             error_message = " ".join(str(exc).split()) or "<no message>"
-            print(f"  SKIP (error): {file_path} — {type(exc).__name__}: {error_message}")
-            failed_paths.append(str(file_path))
+            error_type = type(exc).__name__
+            
+            if _is_quarantine_worthy(exc):
+                print(f"  QUARANTINED (unrecoverable): {file_path} — {error_type}: {error_message}")
+                quarantined_paths.append(str(file_path))
+            else:
+                print(f"  SKIP (error): {file_path} — {error_type}: {error_message}")
+                failed_paths.append(str(file_path))
 
     total_files_indexed_after = collection.count()
     return {
@@ -1753,6 +1798,7 @@ def _build_collection_from_disk(client, config, collection, roots, *, checkpoint
         "new_chunks": new_chunks,
         "failed_files": len(failed_paths),
         "failed_paths": failed_paths,
+        "quarantined_paths": quarantined_paths,
         "resumed_files": resumed_files,
         "total_files_on_disk": len(disk_state),
         "total_files_indexed_after": total_files_indexed_after,

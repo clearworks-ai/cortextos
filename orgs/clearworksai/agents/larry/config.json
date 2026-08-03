@@ -88,12 +88,6 @@
       "prompt": "cortextos bus update-cron-fire pr-review-reminder --interval 8h 2>/dev/null; TASK_ID=$(cortextos bus create-task \"Cron: pr-review-reminder\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; PR REVIEW REMINDER \u2014 Check open PRs via gh pr list --state open --repo clearworks-ai/clearpath, clearworks-ai/lifecycle-killer, clearworks-ai/nonprofit-hub, clearworks-ai/auditos. For PRs older than 4 hours: extract title, number, time pending. Telegram to 6690120787 ONLY if PRs pending >4h. Format: *Open PRs \u2014 [date]* with repo + PR title + time pending. SILENT-OK if all PRs <4h old or no open PRs."
     },
     {
-      "name": "passive-heartbeat",
-      "type": "recurring",
-      "interval": "2h",
-      "prompt": "cortextos bus update-cron-fire passive-heartbeat --interval 2h 2>/dev/null; cortextos bus update-heartbeat 'wait-mode' 2>/dev/null; cortextos bus log-event heartbeat agent_heartbeat info --meta '{\"agent\":\"larry\"}' 2>/dev/null; echo OK"
-    },
-    {
       "name": "usage-audit",
       "type": "recurring",
       "cron": "7 23 * * *",

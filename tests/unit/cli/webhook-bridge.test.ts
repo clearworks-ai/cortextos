@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHmac } from 'crypto';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { request as httpRequest } from 'http';
 import { type AddressInfo } from 'net';
@@ -77,13 +78,14 @@ async function sendRequest(
   });
 }
 
-function buildServer(now?: () => number) {
+function buildServer(now?: () => number, firefliesWebhookSecret?: string) {
   return createBridgeServer({
     instanceId: 'test-instance',
     ctxRoot: tempRoot,
     frameworkRoot: tempRoot,
     org: 'clearworksai',
     bridgeSecret: 'top-secret',
+    firefliesWebhookSecret,
     now,
   });
 }
@@ -105,6 +107,7 @@ beforeEach(() => {
     CTX_ROOT: process.env.CTX_ROOT,
     CTX_INSTANCE_ID: process.env.CTX_INSTANCE_ID,
     WEBHOOK_BRIDGE_SECRET: process.env.WEBHOOK_BRIDGE_SECRET,
+    FIREFLIES_WEBHOOK_SECRET: process.env.FIREFLIES_WEBHOOK_SECRET,
   };
 });
 
@@ -273,7 +276,7 @@ describe('webhook-bridge server', () => {
     await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
   });
 
-  it('relays fireflies meetings to pa with explicit single-meeting worker context', async () => {
+  it('relays fireflies meetings to pa with explicit single-meeting worker context when using the legacy shared-secret fallback', async () => {
     const server = buildServer();
     const baseUrl = await listen(server);
 
@@ -305,6 +308,118 @@ describe('webhook-bridge server', () => {
     expect(inboxPayload.text).toContain('--mode full --meeting-id meeting-123');
 
     await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  });
+
+  describe('fireflies HMAC signature verification', () => {
+    it('accepts a valid Fireflies HMAC signature when the Fireflies secret is configured', async () => {
+      const server = buildServer(undefined, 'ff-secret');
+      const baseUrl = await listen(server);
+      const body = JSON.stringify({
+        integration: 'fireflies',
+        target: 'pa',
+        event: 'transcription.completed',
+        meeting_id: 'meeting-123',
+      });
+      const signature = `sha256=${createHmac('sha256', 'ff-secret').update(body).digest('hex')}`;
+
+      const response = await sendRequest(baseUrl, '/relay/fireflies', {
+        method: 'POST',
+        headers: { 'x-hub-signature': signature },
+        body,
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.json?.ok).toBe(true);
+
+      const inboxDir = join(tempRoot, 'inbox', 'pa');
+      const inboxFiles = readdirSync(inboxDir);
+      expect(inboxFiles).toHaveLength(1);
+
+      const inboxPayload = JSON.parse(readFileSync(join(inboxDir, inboxFiles[0]), 'utf-8')) as {
+        text: string;
+      };
+      expect(inboxPayload.text).toContain('WEBHOOK fireflies transcription.completed');
+      expect(inboxPayload.text).toContain('meeting-123');
+
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    });
+
+    it('returns 401 when the Fireflies signature header is missing and the Fireflies secret is configured', async () => {
+      const server = buildServer(undefined, 'ff-secret');
+      const baseUrl = await listen(server);
+
+      const response = await sendRequest(baseUrl, '/relay/fireflies', {
+        method: 'POST',
+        body: JSON.stringify({
+          integration: 'fireflies',
+          target: 'pa',
+          event: 'transcription.completed',
+          meeting_id: 'meeting-123',
+        }),
+      });
+
+      expect(response.status).toBe(401);
+      expect(response.json?.tier).toBe('auth');
+      expect(existsSync(join(tempRoot, 'inbox', 'pa'))).toBe(false);
+
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    });
+
+    it('returns 401 when the Fireflies signature is wrong and the Fireflies secret is configured', async () => {
+      const server = buildServer(undefined, 'ff-secret');
+      const baseUrl = await listen(server);
+
+      const response = await sendRequest(baseUrl, '/relay/fireflies', {
+        method: 'POST',
+        headers: { 'x-hub-signature': 'sha256=deadbeef' },
+        body: JSON.stringify({
+          integration: 'fireflies',
+          target: 'pa',
+          event: 'transcription.completed',
+          meeting_id: 'meeting-123',
+        }),
+      });
+
+      expect(response.status).toBe(401);
+      expect(response.json?.tier).toBe('auth');
+
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    });
+
+    it('keeps other integrations on the shared-secret path even when the Fireflies secret is configured', async () => {
+      const server = buildServer(undefined, 'ff-secret');
+      const baseUrl = await listen(server);
+
+      const response = await sendRequest(baseUrl, '/relay/zoom-officehours', {
+        method: 'POST',
+        headers: { 'x-webhook-bridge-secret': 'top-secret' },
+        body: JSON.stringify({
+          integration: 'zoom-officehours',
+          target: 'crm',
+          event: 'meeting.registration_created',
+          meeting_id: '84893116740',
+          registrant: {
+            first_name: 'Jane',
+            last_name: 'Doe',
+            email: 'jane@example.com',
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.json?.ok).toBe(true);
+
+      const inboxDir = join(tempRoot, 'inbox', 'crm');
+      const inboxFiles = readdirSync(inboxDir);
+      expect(inboxFiles).toHaveLength(1);
+
+      const inboxPayload = JSON.parse(readFileSync(join(inboxDir, inboxFiles[0]), 'utf-8')) as {
+        text: string;
+      };
+      expect(inboxPayload.text.startsWith('WEBHOOK zoom-officehours meeting.registration_created')).toBe(true);
+
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    });
   });
 
   it('relays ops-check leads to crm with an instructive lead-magnet upsert message', async () => {

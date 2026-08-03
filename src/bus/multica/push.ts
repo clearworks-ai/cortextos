@@ -1,5 +1,5 @@
 import type { BusPaths, Task } from '../../types/index.js';
-import { listTasks, OPEN_TASK_STATUSES } from '../task.js';
+import { classifyTask, listTasks, OPEN_TASK_STATUSES } from '../task.js';
 import { hashMappedFields, idempotencyKeyFor, taskToIssuePayload } from './mapping.js';
 import type { MulticaClient, MulticaConfig, MulticaIssue, SyncStateStore } from './types.js';
 
@@ -72,6 +72,23 @@ export async function runOutboundPush(
   for (const task of universe) {
     if (hasReachedPushLimit(result, limit)) {
       break;
+    }
+
+    // System-class tasks (crons, audit bookkeeping) are internal fleet
+    // housekeeping — never surface them as Multica issues.
+    if (classifyTask(task) === 'system') {
+      result.skipped += 1;
+      result.plan.push({
+        bus_task_id: task.id,
+        title: task.title,
+        action: 'skip',
+        reason: 'not_pushable',
+        outcome: 'skipped',
+        field_hash: null,
+        idempotency_key: null,
+        error: null,
+      });
+      continue;
     }
 
     const link = state.links[task.id];

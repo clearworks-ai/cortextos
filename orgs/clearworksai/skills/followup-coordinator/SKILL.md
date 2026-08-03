@@ -112,8 +112,11 @@ If any item has no clear owner, ask the user · don't guess. Commitments are mad
 Write the recap in the company voice. Structure:
 
 - One opening line · reference the call, no pleasantries padding.
-- **What we're doing** · bulleted, owner + deadline per item.
-- **What we need from you** · bulleted, named person + deadline per item.
+- **What we're doing** · one bullet per OUR-COMMITMENTS row, owner + deadline. Build this section by
+  walking the OUR-COMMITMENTS table row by row · don't freeform-summarize from memory of the call.
+- **What we need from you** · one bullet per THEIR-COMMITMENTS row, named person + deadline. Same rule:
+  walk the table row by row. A summarized-from-narrative draft is how items silently vanish · a
+  table-driven draft can't drop a row without an explicit, visible decision to cut it.
 - One clear next step (next call date, or the single item that unblocks everything).
 
 Rules for the draft:
@@ -121,10 +124,10 @@ Rules for the draft:
 - Named owners on every line. "Sarah will send the API docs by Thursday" · never "the docs will be sent."
 - Exactly one next step at the end. Not three.
 - No item appears in the email that isn't in the tracker.
-- Completeness is bidirectional: before showing the draft, check every THEIR-COMMITMENTS row also appears
-  in "What we need from you" (by item, not just owner name) · a tracked item silently missing from the
-  email is the same failure as an invented one. If an item is cut for length, say so explicitly rather
-  than dropping it.
+- Completeness is bidirectional and checked after drafting, not just enforced by construction: count
+  the OUR-COMMITMENTS and THEIR-COMMITMENTS rows, count the bullets in each email section, confirm they
+  match 1:1. A tracked item silently missing from the email is the same failure as an invented one. If
+  an item is cut for length, say so explicitly in the draft rather than dropping it silently.
 
 ### Step 4 · Write to the Tracker
 

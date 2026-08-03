@@ -28,6 +28,17 @@ export function handoffGraceMs(runtime: string | undefined): number {
 }
 
 /**
+ * Dedup hash TTL and count cap. TTL is the primary eviction rule — a hash
+ * older than this is no longer treated as a duplicate. The count cap is a
+ * backstop against unbounded growth if TTL alone lets too many live hashes
+ * accumulate inside the window (was a bare count-1000 cap with no TTL at all,
+ * which let count-based eviction re-enable duplicate sends on high-volume
+ * days regardless of how fresh the evicted hash actually was).
+ */
+export const DEDUP_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+export const DEDUP_MAX_ENTRIES = 5000;
+
+/**
  * Fast message checker for a single agent.
  * Replaces fast-checker.sh: polls Telegram and inbox, injects into PTY.
  */
@@ -53,7 +64,8 @@ export class FastChecker {
   private telegramMessages: Array<{ formatted: string; ackIds: string[] }> = [];
 
   // Persistent dedup: message hashes to prevent duplicate delivery
-  private seenHashes: Set<string> = new Set();
+  // Persistent dedup: message hash -> last-seen timestamp (ms)
+  private seenHashes: Map<string, number> = new Map();
   private dedupFilePath: string = '';
 
   // SIGUSR1 wake: resolve to immediately wake from sleep
@@ -1256,41 +1268,63 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
   }
 
   /**
-   * Check if message has been seen (dedup). Returns true if duplicate.
+   * Check if message has been seen within the TTL window (dedup). Returns true
+   * if duplicate.
    */
   isDuplicate(text: string): boolean {
     const hash = this.hashMessage(text);
-    if (this.seenHashes.has(hash)) return true;
-    this.seenHashes.add(hash);
+    const seenAt = this.seenHashes.get(hash);
+    const now = Date.now();
+    if (seenAt !== undefined && now - seenAt <= DEDUP_TTL_MS) return true;
+    this.seenHashes.set(hash, now);
     this.saveDedupHashes();
     return false;
   }
 
   /**
-   * Load dedup hashes from persistent file.
+   * Load dedup hashes from persistent file. Drops entries older than the TTL
+   * (including pre-fix lines with no timestamp, which parse as expired — safe
+   * direction, they just stop being treated as duplicates one restart earlier
+   * than they otherwise would).
    */
   private loadDedupHashes(): void {
     try {
       if (existsSync(this.dedupFilePath)) {
         const content = readFileSync(this.dedupFilePath, 'utf-8');
-        const hashes = content.trim().split('\n').filter(Boolean);
-        // Keep only last 1000 hashes to prevent file bloat
-        const recent = hashes.slice(-1000);
-        this.seenHashes = new Set(recent);
+        const now = Date.now();
+        const loaded = new Map<string, number>();
+        for (const line of content.trim().split('\n')) {
+          if (!line) continue;
+          const [hash, tsStr] = line.split('|');
+          const ts = Number(tsStr);
+          if (!hash || !Number.isFinite(ts)) continue;
+          if (now - ts > DEDUP_TTL_MS) continue;
+          loaded.set(hash, ts);
+        }
+        this.seenHashes = loaded;
       }
     } catch {
       // Start fresh on error
-      this.seenHashes = new Set();
+      this.seenHashes = new Map();
     }
   }
 
   /**
-   * Save dedup hashes to persistent file.
+   * Prune expired + over-cap entries, persist, and reassign the in-memory map
+   * to the pruned result (bounds long-session memory growth, not just the file).
    */
   private saveDedupHashes(): void {
     try {
-      const hashes = Array.from(this.seenHashes).slice(-1000);
-      writeFileSync(this.dedupFilePath, hashes.join('\n') + '\n', 'utf-8');
+      const now = Date.now();
+      let entries = Array.from(this.seenHashes.entries())
+        .filter(([, ts]) => now - ts <= DEDUP_TTL_MS)
+        .sort((a, b) => a[1] - b[1]); // oldest first
+      if (entries.length > DEDUP_MAX_ENTRIES) {
+        entries = entries.slice(entries.length - DEDUP_MAX_ENTRIES);
+      }
+      this.seenHashes = new Map(entries);
+      const lines = entries.map(([hash, ts]) => `${hash}|${ts}`);
+      writeFileSync(this.dedupFilePath, lines.join('\n') + '\n', 'utf-8');
     } catch {
       // Non-critical - dedup will still work in memory
     }

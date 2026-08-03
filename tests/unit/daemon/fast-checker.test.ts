@@ -4,6 +4,7 @@ vi.mock('child_process', () => ({ execFile: vi.fn() }));
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { createHash } from 'crypto';
 import { FastChecker } from '../../../src/daemon/fast-checker';
 import type { BusPaths, TelegramCallbackQuery } from '../../../src/types';
 
@@ -1019,6 +1020,42 @@ describe('FastChecker', () => {
       const handoffPrompts = injected(agent).filter(m => m.includes('CONTEXT HANDOFF REQUIRED'));
       expect(handoffPrompts.length).toBe(2); // 3rd fire tripped the breaker instead of handing off
       expect((checker as any).ctxCircuitBrokenAt).not.toBeNull();
+    });
+  });
+
+  describe('FastChecker dedup', () => {
+    it('flags the same text as duplicate on second call', () => {
+      const checker = new FastChecker(createMockAgent(), paths, '/tmp/framework');
+      expect(checker.isDuplicate('hello world')).toBe(false);
+      expect(checker.isDuplicate('hello world')).toBe(true);
+    });
+
+    it('does not flag text as duplicate once its hash has expired', () => {
+      const checker = new FastChecker(createMockAgent(), paths, '/tmp/framework');
+      checker.isDuplicate('stale message'); // persists hash|now
+
+      // Rewrite the persisted timestamp to 25h ago (past the 24h TTL), then a
+      // fresh FastChecker's constructor loadDedupHashes() drops it at load.
+      const dedupPath = join(paths.stateDir, '.message-dedup-hashes');
+      const hash = createHash('sha256').update('stale message').digest('hex');
+      const expired = Date.now() - 25 * 60 * 60 * 1000;
+      writeFileSync(dedupPath, `${hash}|${expired}\n`, 'utf-8');
+
+      const reloaded = new FastChecker(createMockAgent(), paths, '/tmp/framework');
+      expect(reloaded.isDuplicate('stale message')).toBe(false);
+    });
+
+    it('holds the 5000-entry cap, evicting oldest first', () => {
+      const checker = new FastChecker(createMockAgent(), paths, '/tmp/framework');
+      for (let i = 0; i < 5100; i += 1) {
+        checker.isDuplicate(`msg-${i}`);
+      }
+      const dedupPath = join(paths.stateDir, '.message-dedup-hashes');
+      const lines = readFileSync(dedupPath, 'utf-8').trim().split('\n').filter(Boolean);
+      expect(lines.length).toBe(5000);
+      // The very first message's hash was evicted; a recent one survives.
+      expect(checker.isDuplicate('msg-0')).toBe(false); // evicted → not a dup
+      expect(checker.isDuplicate('msg-5099')).toBe(true); // still in window
     });
   });
 });

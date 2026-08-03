@@ -16,40 +16,54 @@ describe('Sprint 6: Fast-Checker Completeness', () => {
   });
 
   describe('Persistent dedup file', () => {
-    it('writes dedup hashes to file', () => {
+    it('writes dedup hashes to file with timestamps', () => {
       const dedupPath = join(stateDir, '.message-dedup-hashes');
-      const hashes = ['abc123', 'def456', 'ghi789'];
-      writeFileSync(dedupPath, hashes.join('\n') + '\n', 'utf-8');
+      const now = Date.now();
+      const lines = [`abc123|${now}`, `def456|${now}`, `ghi789|${now}`];
+      writeFileSync(dedupPath, lines.join('\n') + '\n', 'utf-8');
 
       expect(existsSync(dedupPath)).toBe(true);
       const content = readFileSync(dedupPath, 'utf-8').trim().split('\n');
       expect(content.length).toBe(3);
-      expect(content).toContain('abc123');
+      expect(content[0]).toBe(`abc123|${now}`);
     });
 
-    it('loads hashes from file on restart', () => {
+    it('loads non-expired hashes from file on restart, drops expired ones', () => {
       const dedupPath = join(stateDir, '.message-dedup-hashes');
-      writeFileSync(dedupPath, 'hash1\nhash2\nhash3\n', 'utf-8');
+      const now = Date.now();
+      const expired = now - 25 * 60 * 60 * 1000; // 25h ago, past 24h TTL
+      writeFileSync(
+        dedupPath,
+        [`hash1|${now}`, `hash2|${now}`, `hash3|${expired}`].join('\n') + '\n',
+        'utf-8',
+      );
 
+      const TTL_MS = 24 * 60 * 60 * 1000;
       const loaded = readFileSync(dedupPath, 'utf-8').trim().split('\n').filter(Boolean);
-      const hashSet = new Set(loaded);
-      expect(hashSet.has('hash1')).toBe(true);
-      expect(hashSet.has('hash2')).toBe(true);
-      expect(hashSet.has('hash3')).toBe(true);
-      expect(hashSet.has('hash4')).toBe(false);
+      const hashMap = new Map(
+        loaded
+          .map((l) => l.split('|'))
+          .filter(([, ts]) => now - Number(ts) <= TTL_MS)
+          .map(([h, ts]) => [h, Number(ts)]),
+      );
+      expect(hashMap.has('hash1')).toBe(true);
+      expect(hashMap.has('hash2')).toBe(true);
+      expect(hashMap.has('hash3')).toBe(false); // expired, dropped
+      expect(hashMap.has('hash4')).toBe(false);
     });
 
-    it('limits hashes to prevent file bloat', () => {
+    it('limits hashes to 5000 to prevent file bloat, evicting oldest first', () => {
       const dedupPath = join(stateDir, '.message-dedup-hashes');
-      const manyHashes = Array.from({ length: 1500 }, (_, i) => `hash_${i}`);
-      // Simulate keeping only last 1000
-      const recent = manyHashes.slice(-1000);
+      const base = Date.now() - 5500;
+      const manyHashes = Array.from({ length: 5500 }, (_, i) => `hash_${i}|${base + i}`);
+      // Simulate keeping only last 5000 by timestamp
+      const recent = manyHashes.slice(-5000);
       writeFileSync(dedupPath, recent.join('\n') + '\n', 'utf-8');
 
       const loaded = readFileSync(dedupPath, 'utf-8').trim().split('\n').filter(Boolean);
-      expect(loaded.length).toBe(1000);
-      expect(loaded[0]).toBe('hash_500');
-      expect(loaded[999]).toBe('hash_1499');
+      expect(loaded.length).toBe(5000);
+      expect(loaded[0]).toBe(`hash_500|${base + 500}`);
+      expect(loaded[4999]).toBe(`hash_5499|${base + 5499}`);
     });
   });
 

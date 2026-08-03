@@ -483,6 +483,106 @@ describe('webhook-bridge server', () => {
     });
   });
 
+  describe('fireflies native payload normalization', () => {
+    it('accepts the native camelCase shape with no integration field (HMAC auth)', async () => {
+      const server = buildServer(undefined, 'ff-secret');
+      const baseUrl = await listen(server);
+      const body = JSON.stringify({ meetingId: 'meeting-123', eventType: 'Transcription completed' });
+      const signature = `sha256=${createHmac('sha256', 'ff-secret').update(body).digest('hex')}`;
+
+      const response = await sendRequest(baseUrl, '/relay/fireflies', {
+        method: 'POST',
+        headers: { 'x-hub-signature': signature },
+        body,
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.json?.ok).toBe(true);
+
+      const inboxDir = join(tempRoot, 'inbox', 'pa');
+      const inboxFiles = readdirSync(inboxDir);
+      expect(inboxFiles).toHaveLength(1);
+
+      const inboxPayload = JSON.parse(readFileSync(join(inboxDir, inboxFiles[0]), 'utf-8')) as { text: string };
+      expect(inboxPayload.text).toContain('WEBHOOK fireflies Transcription completed');
+      expect(inboxPayload.text).toContain('meeting-123');
+      expect(inboxPayload.text).toContain('FF_MEETING_ID=meeting-123');
+
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    });
+
+    it('accepts the native shape with an explicit integration on the legacy shared-secret branch', async () => {
+      const server = buildServer();
+      const baseUrl = await listen(server);
+      const body = JSON.stringify({
+        integration: 'fireflies',
+        meetingId: 'meeting-456',
+        eventType: 'Transcription completed',
+      });
+
+      const response = await sendRequest(baseUrl, '/relay/fireflies', {
+        method: 'POST',
+        headers: { 'x-webhook-bridge-secret': 'top-secret' },
+        body,
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.json?.ok).toBe(true);
+
+      const inboxDir = join(tempRoot, 'inbox', 'pa');
+      const inboxFiles = readdirSync(inboxDir);
+      expect(inboxFiles).toHaveLength(1);
+
+      const inboxPayload = JSON.parse(readFileSync(join(inboxDir, inboxFiles[0]), 'utf-8')) as { text: string };
+      expect(inboxPayload.text).toContain('meeting-456');
+      expect(inboxPayload.text).toContain('WEBHOOK fireflies Transcription completed');
+
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    });
+
+    it('does not overwrite an explicit wrong integration (still 400s integration_mismatch)', async () => {
+      const server = buildServer();
+      const baseUrl = await listen(server);
+
+      const response = await sendRequest(baseUrl, '/relay/fireflies', {
+        method: 'POST',
+        headers: { 'x-webhook-bridge-secret': 'top-secret' },
+        body: JSON.stringify({
+          integration: 'zoom-officehours',
+          meetingId: 'meeting-123',
+          eventType: 'Transcription completed',
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      expect(response.json).toMatchObject({ error: 'integration_mismatch', tier: 'payload' });
+      expect(existsSync(join(tempRoot, 'inbox', 'pa'))).toBe(false);
+
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    });
+
+    it('does NOT honor native aliases outside fireflies (zoom-officehours still 400s)', async () => {
+      const server = buildServer();
+      const baseUrl = await listen(server);
+
+      const response = await sendRequest(baseUrl, '/relay/zoom-officehours', {
+        method: 'POST',
+        headers: { 'x-webhook-bridge-secret': 'top-secret' },
+        body: JSON.stringify({
+          target: 'crm',
+          meetingId: '84893116740',
+          eventType: 'meeting.registration_created',
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      expect(response.json).toMatchObject({ error: 'integration_mismatch', tier: 'payload' });
+      expect(existsSync(join(tempRoot, 'inbox', 'crm'))).toBe(false);
+
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    });
+  });
+
   it('relays ops-check leads to crm with an instructive lead-magnet upsert message', async () => {
     const server = buildServer();
     const baseUrl = await listen(server);

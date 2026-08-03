@@ -53,7 +53,27 @@ interface RelayEnvelope {
   event?: unknown;
   meeting_id?: unknown;
   registrant?: unknown;
+  meetingId?: unknown;
+  eventType?: unknown;
   [key: string]: unknown;
+}
+
+// Fireflies' dashboard webhook sends {"meetingId": "...", "eventType": "Transcription completed"}
+// — camelCase, no integration field, and no way to configure otherwise. Normalize that native
+// shape into the internal envelope before validation. Internal-shape fields always win; native
+// fields only fill gaps, so existing internal-envelope senders are unaffected.
+function normalizeFirefliesEnvelope(envelope: RelayEnvelope): RelayEnvelope {
+  const normalized: RelayEnvelope = { ...envelope };
+  if (normalized.integration === undefined) {
+    normalized.integration = 'fireflies';
+  }
+  if (normalized.event === undefined && typeof normalized.eventType === 'string') {
+    normalized.event = normalized.eventType;
+  }
+  if (normalized.meeting_id === undefined && normalized.meetingId !== undefined) {
+    normalized.meeting_id = normalized.meetingId;
+  }
+  return normalized;
 }
 
 function jsonResponse(response: ServerResponse, status: number, body: Record<string, unknown>): void {
@@ -585,6 +605,10 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
       } catch {
         jsonResponse(response, 400, { error: 'invalid_json', tier: 'body' });
         return;
+      }
+
+      if (integration === 'fireflies') {
+        envelope = normalizeFirefliesEnvelope(envelope);
       }
 
       if (typeof envelope.integration !== 'string' || envelope.integration !== integration) {

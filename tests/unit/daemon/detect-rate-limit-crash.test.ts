@@ -1,16 +1,21 @@
 /**
- * Regression tests for detectRateLimitCrash (private method in AgentProcess,
+ * Regression tests for handleExit crash classification (AgentProcess,
  * src/daemon/agent-process.ts). Tested via AgentProcess.handleExit() behavior.
  *
- * Root cause: bare prose substrings 'rate limit' and 'rate-limit' caused
- * session titles like "Rate Limit Guard" to be misclassified, triggering
- * RATE_LIMIT backoff instead of the normal CRASH path.
+ * History: the fork used to carry a detectRateLimitCrash() reclassifier that
+ * diverted rate-limit-looking exits to an uncharged RATE_LIMIT backoff path
+ * (RW-1). That reclassifier was removed to converge with upstream/main, which
+ * has no rate-limit special-casing: every non-image-poison, non-shutdown exit
+ * charges crashCount, backs off exponentially, and halts at maxCrashesPerDay.
  *
- * Fix: removed those two bare phrases; all precise API/CLI signatures retained.
+ * These tests pin that convergence: BOTH prose mentions of rate limits AND
+ * genuine Anthropic rate-limit/usage-limit signatures in recent stdout must
+ * flow through the normal CRASH path — no RATE_LIMIT restarts.log entries,
+ * crash_count charged.
  *
  * Test strategy: configure fs mocks so tailStdoutLog() returns specific content,
- * then fire handleExit() via capturedOnExit and assert whether the restarts.log
- * entry contains RATE_LIMIT (true positive) or CRASH (false positive).
+ * then fire handleExit() via capturedOnExit and assert the restarts.log entry
+ * is CRASH (never RATE_LIMIT) and crashCount was incremented.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -110,6 +115,15 @@ function mockStdoutLog(content: string): void {
   fsMocks.closeSync.mockReturnValue(undefined);
 }
 
+/** Assert the exit was classified as a charged CRASH (upstream behavior). */
+function expectCrashPath(ap: InstanceType<typeof AgentProcess>): void {
+  expect(fsMocks.appendFileSync).toHaveBeenCalled();
+  const logLine = String(fsMocks.appendFileSync.mock.calls[0][1]);
+  expect(logLine).not.toContain('RATE_LIMIT');
+  expect(logLine).toContain('CRASH');
+  expect(ap.getStatus().crashCount).toBe(1);
+}
+
 beforeEach(() => {
   capturedOnExit = null;
   mockPty.spawn.mockClear();
@@ -126,86 +140,70 @@ beforeEach(() => {
   fsMocks.closeSync.mockReset();
 });
 
-describe('detectRateLimitCrash (via AgentProcess.handleExit) — false-positive guard', () => {
-  it('does NOT treat "Reverted comms-check Step 0 Rate Limit Guard" as rate-limited', async () => {
+describe('handleExit — prose mentions of rate limits take the normal CRASH path', () => {
+  it('treats "Reverted comms-check Step 0 Rate Limit Guard" as a normal crash', async () => {
     mockStdoutLog('Reverted comms-check Step 0 Rate Limit Guard');
     const ap = new AgentProcess('alice', mockEnv, {});
     await ap.start();
     capturedOnExit!(1, 0);
-    // Must fall through to CRASH path, not RATE_LIMIT
-    expect(fsMocks.appendFileSync).toHaveBeenCalled();
-    const logLine = String(fsMocks.appendFileSync.mock.calls[0][1]);
-    expect(logLine).not.toContain('RATE_LIMIT');
-    expect(logLine).toContain('CRASH');
+    expectCrashPath(ap);
   });
 
-  it('does NOT treat "crash loop caused by rate limiting" as rate-limited', async () => {
+  it('treats "crash loop caused by rate limiting" as a normal crash', async () => {
     mockStdoutLog('Diagnosed and fixed comms-check worker crash loop caused by rate limiting');
     const ap = new AgentProcess('alice', mockEnv, {});
     await ap.start();
     capturedOnExit!(1, 0);
-    expect(fsMocks.appendFileSync).toHaveBeenCalled();
-    const logLine = String(fsMocks.appendFileSync.mock.calls[0][1]);
-    expect(logLine).not.toContain('RATE_LIMIT');
-    expect(logLine).toContain('CRASH');
+    expectCrashPath(ap);
   });
 
-  it('does NOT treat "Comms-check worker crash loop (rate limit) investigation" as rate-limited', async () => {
+  it('treats "Comms-check worker crash loop (rate limit) investigation" as a normal crash', async () => {
     mockStdoutLog('Comms-check worker crash loop (rate limit) investigation');
     const ap = new AgentProcess('alice', mockEnv, {});
     await ap.start();
     capturedOnExit!(1, 0);
-    expect(fsMocks.appendFileSync).toHaveBeenCalled();
-    const logLine = String(fsMocks.appendFileSync.mock.calls[0][1]);
-    expect(logLine).not.toContain('RATE_LIMIT');
-    expect(logLine).toContain('CRASH');
+    expectCrashPath(ap);
   });
 });
 
-describe('detectRateLimitCrash (via AgentProcess.handleExit) — true-positive guard', () => {
-  it('DOES treat "rate_limit_error" as rate-limited (backs off, no crash_count increment)', async () => {
+describe('handleExit — genuine rate-limit signatures ALSO take the CRASH path (upstream convergence, no RW-1 reclassifier)', () => {
+  it('treats "rate_limit_error" as a charged crash (exponential backoff, counts toward max_crashes_per_day)', async () => {
     mockStdoutLog('Anthropic API rate_limit_error: Too Many Requests');
     const ap = new AgentProcess('alice', mockEnv, {});
     await ap.start();
     capturedOnExit!(1, 0);
-    expect(ap.getStatus().crashCount).toBe(0);
-    expect(fsMocks.appendFileSync).toHaveBeenCalled();
-    expect(String(fsMocks.appendFileSync.mock.calls[0][1])).toContain('RATE_LIMIT');
+    expectCrashPath(ap);
   });
 
-  it('DOES treat "overloaded_error" as rate-limited', async () => {
+  it('treats "overloaded_error" as a charged crash', async () => {
     mockStdoutLog('API Error: overloaded_error: system overloaded. Please retry.');
     const ap = new AgentProcess('alice', mockEnv, {});
     await ap.start();
     capturedOnExit!(1, 0);
-    expect(ap.getStatus().crashCount).toBe(0);
-    expect(String(fsMocks.appendFileSync.mock.calls[0][1])).toContain('RATE_LIMIT');
+    expectCrashPath(ap);
   });
 
-  it('DOES treat "Claude usage limit reached" as rate-limited', async () => {
+  it('treats "Claude usage limit reached" as a charged crash', async () => {
     mockStdoutLog('Claude usage limit reached. Please upgrade your plan.');
     const ap = new AgentProcess('alice', mockEnv, {});
     await ap.start();
     capturedOnExit!(1, 0);
-    expect(ap.getStatus().crashCount).toBe(0);
-    expect(String(fsMocks.appendFileSync.mock.calls[0][1])).toContain('RATE_LIMIT');
+    expectCrashPath(ap);
   });
 
-  it('DOES treat "reached your weekly limit" as rate-limited', async () => {
+  it('treats "reached your weekly limit" as a charged crash', async () => {
     mockStdoutLog("You've reached your weekly limit. Resets Monday.");
     const ap = new AgentProcess('alice', mockEnv, {});
     await ap.start();
     capturedOnExit!(1, 0);
-    expect(ap.getStatus().crashCount).toBe(0);
-    expect(String(fsMocks.appendFileSync.mock.calls[0][1])).toContain('RATE_LIMIT');
+    expectCrashPath(ap);
   });
 
-  it('DOES treat "used 95% of your limit" as rate-limited', async () => {
+  it('treats "used 95% of your limit" as a charged crash', async () => {
     mockStdoutLog("You've used 95% of your limit for this week.");
     const ap = new AgentProcess('alice', mockEnv, {});
     await ap.start();
     capturedOnExit!(1, 0);
-    expect(ap.getStatus().crashCount).toBe(0);
-    expect(String(fsMocks.appendFileSync.mock.calls[0][1])).toContain('RATE_LIMIT');
+    expectCrashPath(ap);
   });
 });

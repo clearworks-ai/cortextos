@@ -168,6 +168,33 @@ describe('AgentProcess - BUG-011 fix (stop awaits PTY exit)', () => {
     expect(ap.getStatus().status).toBe('crashed');
   });
 
+  it('clean exit (code 0) restarts to continue WITHOUT counting as a crash', async () => {
+    // opencode is a TUI that exits 0 after each turn (100+/day); counting each
+    // toward max_crashes_per_day falsely HALTs it. A code-0 exit is normal
+    // lifecycle, not a crash — it schedules a restart (status 'crashed' = pending
+    // restart) but must NOT write .crash_count_today.
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+    expect(ap.getStatus().status).toBe('running');
+
+    capturedOnExit!(0, 0);
+
+    // Restart scheduled, but the daily crash counter was NOT written.
+    expect(fsMocks.writeFileSync).not.toHaveBeenCalledWith(
+      expect.stringContaining('.crash_count_today'),
+      expect.anything(),
+      expect.anything(),
+    );
+    // restarts.log records it as CLEAN_EXIT (not counted), not CRASH.
+    const restartLines = fsMocks.appendFileSync.mock.calls
+      .map((c: any[]) => String(c[1]))
+      .filter((l: string) => l.includes('restarts.log') === false);
+    const logged = fsMocks.appendFileSync.mock.calls.map((c: any[]) => String(c[1])).join('');
+    expect(logged).toMatch(/CLEAN_EXIT: exit_code=0/);
+    expect(logged).not.toMatch(/\] CRASH: exit_code=0/);
+    void restartLines;
+  });
+
   it('unexpected PTY exit persists a CRASH line to restarts.log', async () => {
     // Default fs mocks: no .daemon-stop marker, no .crash_count_today file.
     const ap = new AgentProcess('alice', mockEnv, {});

@@ -125,6 +125,10 @@ export class AgentProcess {
   // Image-poison recovery circuit breaker: tracks recent recovery attempts
   // to prevent infinite loops when force-fresh fails to clear poisoned history
   private imagePoisonRecoveries: number[] = [];
+  // Clean-exit (code 0) recovery: tracks recent clean restarts so a genuinely
+  // broken code-0 tight-loop still halts, while normal code-0 lifecycle exits
+  // (opencode TUI turn-completion) do not charge the daily crash counter.
+  private cleanExitRestarts: number[] = [];
   private sessionStart: Date | null = null;
   private status: AgentStatus['status'] = 'stopped';
   private stopping: boolean = false;
@@ -796,6 +800,43 @@ export class AgentProcess {
       return;
     }
 
+    // Clean exit (code 0) is a process ending NORMALLY, not a crash. The
+    // opencode runtime is a TUI that completes a turn and exits 0 by design
+    // (see shouldContinue / the opencode session marker) — 100+ such exits/day
+    // would otherwise exhaust max_crashes_per_day and falsely HALT it. Claude
+    // can also exit 0 on a benign session end. Restart to CONTINUE without
+    // charging the daily crash counter or the crash-loop window. Genuine
+    // failures exit NON-zero (SIGSEGV=139, SIGHUP=129, error=1) and still count;
+    // image-poison (an exit-0 crash-loop) is caught by its signature above and
+    // is unaffected.
+    //
+    // Safety: a genuinely broken code-0 tight-loop (e.g. a runtime that fails
+    // to start and instantly re-exits 0) is still caught here — >=8 clean-exit
+    // restarts within 60s is not "normal turns", it is a spin, so we HALT.
+    if (exitCode === 0) {
+      const now = Date.now();
+      this.cleanExitRestarts = this.cleanExitRestarts.filter((ts) => now - ts < 60_000);
+      this.cleanExitRestarts.push(now);
+      if (this.cleanExitRestarts.length >= 8) {
+        this.log(`CLEAN_EXIT_LOOP: ${this.cleanExitRestarts.length} code-0 exits in 60s — spinning, halting.`);
+        this.appendCrashToRestartsLog(exitCode, 0, 'CRASH_LOOP');
+        this.status = 'halted';
+        this.notifyStatusChange();
+        return;
+      }
+      const backoffMs = this.config.runtime === 'opencode' ? 2000 : 3000;
+      this.log('Clean exit (code 0) — restarting to continue, not counting as a crash.');
+      this.appendCrashToRestartsLog(exitCode, backoffMs, 'CLEAN_EXIT');
+      this.status = 'crashed';
+      this.notifyStatusChange();
+      setTimeout(() => {
+        if (this.status === 'crashed') {
+          this.start().catch(err => this.log(`Clean-exit restart failed: ${err}`));
+        }
+      }, backoffMs);
+      return;
+    }
+
     // CrashLoopPauser (instar-inspired): if a sliding window is configured,
     // check whether the agent is crash-looping before falling through to
     // the legacy daily counter. The window is a more precise signal than
@@ -1379,7 +1420,7 @@ export class AgentProcess {
   private appendCrashToRestartsLog(
     exitCode: number,
     backoffMs: number,
-    kind: 'CRASH' | 'HALTED' | 'CRASH_LOOP' | 'IMAGE_POISON_RECOVERY',
+    kind: 'CRASH' | 'HALTED' | 'CRASH_LOOP' | 'IMAGE_POISON_RECOVERY' | 'CLEAN_EXIT',
   ): void {
     try {
       const logDir = join(this.env.ctxRoot, 'logs', this.name);
@@ -1388,7 +1429,7 @@ export class AgentProcess {
       const details =
         kind === 'HALTED'
           ? `exit_code=${exitCode} crash_count=${this.crashCount} max_crashes=${this.maxCrashesPerDay}`
-          : kind === 'IMAGE_POISON_RECOVERY'
+          : kind === 'IMAGE_POISON_RECOVERY' || kind === 'CLEAN_EXIT'
             ? `exit_code=${exitCode} backoff_s=${backoffMs / 1000} (not counted toward max_crashes)`
             : `exit_code=${exitCode} crash_count=${this.crashCount} backoff_s=${backoffMs / 1000}`;
       const logLine = `[${timestamp}] ${kind}: ${details}\n`;

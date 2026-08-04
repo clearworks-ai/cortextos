@@ -69,6 +69,9 @@ def validate_arguments(args):
         if os.path.sep in args.client or (os.altsep and os.altsep in args.client):
             print("Error: --client must be a flat slug, not a subpath", file=sys.stderr)
             sys.exit(1)
+        if args.client in (".", ""):
+            print("Error: --client must be a non-empty client slug, not '.'", file=sys.stderr)
+            sys.exit(1)
 
 
 def get_destination_path(args):
@@ -81,9 +84,11 @@ def get_destination_path(args):
     filename = os.path.basename(args.source)
     dest_path = os.path.join(dest_dir, filename)
 
-    # Defense-in-depth: ensure resolved dest_path stays under base_dest
-    resolved_base = os.path.abspath(base_dest)
-    resolved_dest = os.path.abspath(dest_path)
+    # Defense-in-depth: ensure resolved dest_path stays under base_dest (realpath
+    # resolves symlinks, unlike abspath, so a stray symlink under base_dest cannot
+    # be used to escape the intended tree)
+    resolved_base = os.path.realpath(base_dest)
+    resolved_dest = os.path.realpath(dest_path)
     if not os.path.commonpath([resolved_base, resolved_dest]) == resolved_base:
         print("Error: Destination path escapes base directory", file=sys.stderr)
         sys.exit(1)

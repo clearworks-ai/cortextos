@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, writeFileSync, unlinkSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { handoffGraceMs } from '../../../src/daemon/fast-checker.js';
+import { handoffGraceMs, realContextWindow } from '../../../src/daemon/fast-checker.js';
 
 /**
  * Unit tests for the context monitor logic in fast-checker.ts.
@@ -342,6 +342,95 @@ describe('overflow-banner backstop corroboration guard', () => {
 });
 
 // --- Handoff block consumption ---
+
+// --- ROOT FIX: real model-window measurement (kills restart churn) ---
+
+describe('realContextWindow model→window map', () => {
+  it('maps 1M-context models to 1_000_000', () => {
+    expect(realContextWindow('claude-sonnet-5')).toBe(1_000_000);
+    expect(realContextWindow('claude-opus-5')).toBe(1_000_000);
+    expect(realContextWindow('claude-opus-4-8')).toBe(1_000_000);
+    expect(realContextWindow('claude-fable-5')).toBe(1_000_000);
+  });
+
+  it('maps [1m] variants and provider prefixes to 1_000_000', () => {
+    expect(realContextWindow('claude-sonnet-5[1m]')).toBe(1_000_000);
+    expect(realContextWindow('claude-opus-4-8[1m]')).toBe(1_000_000);
+    expect(realContextWindow('us.anthropic.claude-sonnet-5')).toBe(1_000_000);
+    expect(realContextWindow('CLAUDE-OPUS-5')).toBe(1_000_000); // case-insensitive
+  });
+
+  it('maps haiku-class and unknown models to 200_000', () => {
+    expect(realContextWindow('claude-haiku-5')).toBe(200_000);
+    expect(realContextWindow('claude-3-5-haiku')).toBe(200_000);
+    expect(realContextWindow('some-unknown-model')).toBe(200_000);
+  });
+
+  it('maps absent model (CC default) to 200_000 (never over-estimate)', () => {
+    expect(realContextWindow(undefined)).toBe(200_000);
+    expect(realContextWindow('')).toBe(200_000);
+  });
+});
+
+describe('realPct replaces CC 200K-based used_percentage', () => {
+  // Mirror of fast-checker's realPct derivation + handoff decision. rawTokens is
+  // summed from current_usage; realPct = rawTokens / realWindow(model) * 100;
+  // falls back to CC used_percentage only when rawTokens is absent.
+  const HANDOFF = 60;
+
+  function sumUsage(cu: Record<string, number> | null): number | null {
+    if (!cu) return null;
+    const sum =
+      (cu.input_tokens ?? 0)
+      + (cu.cache_creation_input_tokens ?? 0)
+      + (cu.cache_read_input_tokens ?? 0)
+      + (cu.output_tokens ?? 0);
+    return sum > 0 ? sum : null;
+  }
+
+  function decide(model: string | undefined, ccPct: number | null, cu: Record<string, number> | null) {
+    const realWindow = realContextWindow(model);
+    const rawTokens = sumUsage(cu);
+    const realPct = rawTokens !== null ? (rawTokens / realWindow) * 100 : ccPct;
+    const fires = realPct !== null && realPct >= HANDOFF;
+    return { realPct, fires };
+  }
+
+  it('1M model at 140K tokens → ~14% → NO handoff (was 70% → handoff)', () => {
+    const r = decide('claude-sonnet-5[1m]', 70, { input_tokens: 140_000 });
+    expect(r.realPct).toBeCloseTo(14, 5);
+    expect(r.fires).toBe(false);
+  });
+
+  it('1M model at 620K tokens → ~62% → handoff fires', () => {
+    const r = decide('claude-opus-4-8[1m]', 100, { input_tokens: 620_000 });
+    expect(r.realPct).toBeCloseTo(62, 5);
+    expect(r.fires).toBe(true);
+  });
+
+  it('haiku agent at 140K tokens → 70% → handoff (still 200K window)', () => {
+    const r = decide('claude-haiku-5', 70, { input_tokens: 140_000 });
+    expect(r.realPct).toBeCloseTo(70, 5);
+    expect(r.fires).toBe(true);
+  });
+
+  it('current_usage absent → falls back to CC used_percentage', () => {
+    const r = decide('claude-sonnet-5[1m]', 70, null);
+    expect(r.realPct).toBe(70);
+    expect(r.fires).toBe(true);
+  });
+
+  it('sums all four usage components toward the window', () => {
+    const r = decide('claude-sonnet-5[1m]', null, {
+      input_tokens: 100_000,
+      cache_creation_input_tokens: 200_000,
+      cache_read_input_tokens: 250_000,
+      output_tokens: 50_000,
+    });
+    expect(r.realPct).toBeCloseTo(60, 5); // 600K / 1M
+    expect(r.fires).toBe(true);
+  });
+});
 
 describe('consumeHandoffBlock', () => {
   let stateDir: string;

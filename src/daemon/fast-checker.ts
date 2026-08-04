@@ -33,6 +33,41 @@ export function handoffGraceMs(runtime: string | undefined): number {
 }
 
 /**
+ * Real context-window size (tokens) for a model id.
+ *
+ * ROOT-CAUSE FIX for restart churn: Claude Code's statusLine payload reports
+ * `context_window_size = 200000` and computes `used_percentage = tokens / 200000`
+ * EVEN ON 1M-context models. The daemon read that `used_percentage` and fired
+ * warn/handoff/force-restart against it, so a 60% handoff threshold tripped at
+ * ~120K real tokens (~12% of a real 1M window) → premature handoff → restart →
+ * churn, while also fighting Claude Code's own native compaction of the real
+ * window. We instead compute the percentage from the RAW token count against the
+ * REAL model window resolved here.
+ *
+ * 1M-context models (and their `[1m]` variants) → 1_000_000. Everything else —
+ * haiku-class and any model whose window we can't positively identify —
+ * conservatively → 200_000 (matches CC's reported size, so behaviour is unchanged
+ * for those). An absent model id (config.model unset → CC default) is treated as
+ * 200_000 so we never OVER-estimate a window and suppress a genuine backstop.
+ */
+export function realContextWindow(model: string | undefined): number {
+  if (!model) return 200_000;
+  const m = model.toLowerCase();
+  // 1M-context generation. Match the family stems so `[1m]` suffixes, provider
+  // prefixes (e.g. `us.anthropic.`), and date/point revisions all resolve.
+  if (
+    m.includes('sonnet-5')
+    || m.includes('opus-5')
+    || m.includes('opus-4-8')
+    || m.includes('fable-5')
+  ) {
+    return 1_000_000;
+  }
+  // Haiku-class and everything else: keep CC's 200K assumption.
+  return 200_000;
+}
+
+/**
  * Dedup hash TTL and count cap. TTL is the primary eviction rule — a hash
  * older than this is no longer treated as a duplicate. The count cap is a
  * backstop against unbounded growth if TTL alone lets too many live hashes
@@ -1161,6 +1196,7 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
 
     let pct: number | null = null;
     let exceeds200k = false;
+    let rawTokens: number | null = null;
     try {
       const raw = readFileSync(statusPath, 'utf-8');
       const data = JSON.parse(raw);
@@ -1168,6 +1204,22 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       if (age > 10 * 60_000) return; // stale file — skip
       pct = typeof data.used_percentage === 'number' ? data.used_percentage : null;
       exceeds200k = Boolean(data.exceeds_200k_tokens);
+
+      // RAW token count from the statusLine bridge (hook-context-status writes
+      // current_usage verbatim from Claude Code). This is the KEY signal that lets
+      // us measure against the REAL model window instead of CC's fixed 200K. Sum
+      // the four occupancy components CC itself counts toward the window: fresh
+      // input, both cache tiers, and generated output. Absent/malformed → null,
+      // and we fall back to CC's used_percentage below.
+      const cu = data.current_usage;
+      if (cu && typeof cu === 'object') {
+        const sum =
+          (typeof cu.input_tokens === 'number' ? cu.input_tokens : 0)
+          + (typeof cu.cache_creation_input_tokens === 'number' ? cu.cache_creation_input_tokens : 0)
+          + (typeof cu.cache_read_input_tokens === 'number' ? cu.cache_read_input_tokens : 0)
+          + (typeof cu.output_tokens === 'number' ? cu.output_tokens : 0);
+        if (sum > 0) rawTokens = sum;
+      }
 
       // Detect new session: if session_id changed, clear stale per-session ctx state.
       // This handles the case where the agent self-restarts (voluntary handoff) and the
@@ -1201,12 +1253,38 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       }
     } catch { return; }
 
+    // Measure context % against the REAL model window, not CC's fixed 200K.
+    // realPct = rawTokens / realWindow(model). Fall back to CC's used_percentage
+    // ONLY when the raw token count is absent (older CC, or a malformed payload) —
+    // and log that degrade so the churn regression is visible if CC ever stops
+    // providing current_usage. On a 1M model this makes a 60% handoff fire at
+    // ~600K real tokens (a genuine backstop that lets CC compact along the way)
+    // rather than at ~120K, which is what caused the restart churn.
+    const model = this.agent.getConfig().model;
+    const realWindow = realContextWindow(model);
+    let realPct: number | null;
+    if (rawTokens !== null) {
+      realPct = (rawTokens / realWindow) * 100;
+    } else {
+      realPct = pct;
+      if (pct !== null) {
+        this.log(
+          `Context: current_usage absent — falling back to CC used_percentage (${Math.round(pct)}%, `
+          + `200K-based). Real-window measurement disabled this tick.`,
+        );
+      }
+    }
+
     // Check PTY output for hard API overflow errors (always act regardless of threshold config).
     // Guard: only treat the banner phrase as a *live* overflow when context usage actually
-    // corroborates it (exceeds 200k, or pct genuinely high). The same phrase appears as benign
-    // text in memory files, source, and chat that *document* this mechanism — without this guard
-    // a fresh boot re-reading those at low context force-restarts on every boot, producing a loop.
-    const ctxCorroboratesOverflow = exceeds200k || (pct !== null && pct >= 85);
+    // corroborates it (exceeds 200k on the real window, or realPct genuinely high). The same
+    // phrase appears as benign text in memory files, source, and chat that *document* this
+    // mechanism — without this guard a fresh boot re-reading those at low context force-restarts
+    // on every boot, producing a loop. exceeds_200k_tokens is only a real near-limit signal on a
+    // 200K-window model; on a 1M model 200K is ~20% and NOT near the limit, so require realPct to
+    // corroborate there instead of trusting the 200K banner alone.
+    const exceedsRealBackstop = realWindow <= 200_000 ? exceeds200k : false;
+    const ctxCorroboratesOverflow = exceedsRealBackstop || (realPct !== null && realPct >= 85);
     const recentOutput = this.agent.getOutputBuffer()?.getRecent(8000) ?? '';
     if (ctxCorroboratesOverflow && /extra usage.*?1[Mm] context|conversation too long.*?compaction/i.test(recentOutput)) {
       this.log('Context overflow error detected in PTY output at high context — force restarting');
@@ -1223,7 +1301,11 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     const configuredHandoff = this.agent.getConfig().ctx_handoff_threshold;
     if (configuredHandoff !== undefined && configuredHandoff <= 0) return;
 
-    const effectivePct = pct ?? (exceeds200k ? 101 : null);
+    // Drive all warn/handoff/force-restart decisions off the REAL-window percentage.
+    // The exceeds_200k backstop only forces 101 on a genuine 200K-window model
+    // (haiku-class); on a 1M model 200K is ~20% and must not trip a handoff, so it
+    // is excluded from exceedsRealBackstop above.
+    const effectivePct = realPct ?? (exceedsRealBackstop ? 101 : null);
     if (effectivePct === null) return;
 
     // Session-id-independent leaked-lease release (the Claude null-session_id edge).

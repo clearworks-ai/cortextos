@@ -129,6 +129,18 @@ export class AgentProcess {
   // broken code-0 tight-loop still halts, while normal code-0 lifecycle exits
   // (opencode TUI turn-completion) do not charge the daily crash counter.
   private cleanExitRestarts: number[] = [];
+  // Startup-failure detection for code-0 exits: opencode (and any runtime) can
+  // exit 0 IMMEDIATELY on a real startup failure (bad config/model/env) — it
+  // prints an error and exits cleanly BEFORE the session ever became ready.
+  // That is NOT a normal turn-completion; retrying it silently spins. We stamp
+  // the wall-clock start of every spawn attempt here so handleExit can measure
+  // how long the process lived and distinguish "exited before ready" (a real
+  // startup fault, surfaced loudly) from "completed a turn" (benign).
+  private spawnStartedAtMs: number = 0;
+  // Timestamps of recent code-0 exits that occurred BEFORE the agent reached a
+  // ready/running state. A cluster of these is a startup crashloop, not normal
+  // lifecycle — the circuit breaker below trips and alerts instead of looping.
+  private cleanExitStartupFailures: number[] = [];
   private sessionStart: Date | null = null;
   private status: AgentStatus['status'] = 'stopped';
   private stopping: boolean = false;
@@ -229,6 +241,10 @@ export class AgentProcess {
     // new lifecycle began" — in which case it bails out without touching
     // handleExit, preventing spurious crash recovery on the new agent.
     const myGeneration = ++this.lifecycleGeneration;
+    // Stamp the spawn start so handleExit can measure how long this attempt
+    // lived. A code-0 exit that fires within a few seconds of this stamp is an
+    // exit-BEFORE-ready (a real startup fault), not a normal turn completion.
+    this.spawnStartedAtMs = Date.now();
 
     // Create PTY — runtime-specific subclass handles binary, args, bootstrap detection
     const logPath = join(this.env.ctxRoot, 'logs', this.name, 'stdout.log');
@@ -815,6 +831,49 @@ export class AgentProcess {
     // restarts within 60s is not "normal turns", it is a spin, so we HALT.
     if (exitCode === 0) {
       const now = Date.now();
+
+      // Startup-failure guard (completes #242): #242 correctly stopped charging
+      // the crash counter for ALL code-0 exits, but it treats every code-0 exit
+      // as a benign turn-completion. A code-0 exit that fires BEFORE the session
+      // ever became ready is the opposite — a real startup fault (bad
+      // config/model/env). opencode prints an error and exits 0, so it slips
+      // past the crash gate, gets silently retried, and (before this) HALTed
+      // with only a bare CRASH_LOOP line and no alert. Detect the
+      // exit-before-ready case (short-lived spawn + agent never reached
+      // 'running') and, on a cluster of them, trip a LOUD circuit breaker with a
+      // Telegram alert, mirroring the image-poison breaker above. A code-0 exit
+      // AFTER the agent was ready is a normal turn and skips this entirely.
+      const spawnAgeMs = this.spawnStartedAtMs > 0 ? now - this.spawnStartedAtMs : Infinity;
+      const exitedBeforeReady = this.status !== 'running' && spawnAgeMs < 8_000;
+      if (exitedBeforeReady) {
+        this.cleanExitStartupFailures = this.cleanExitStartupFailures.filter((ts) => now - ts < 60_000);
+        this.cleanExitStartupFailures.push(now);
+        if (this.cleanExitStartupFailures.length >= 3) {
+          this.log(
+            `CLEAN_EXIT_STARTUP_FAIL: ${this.cleanExitStartupFailures.length} code-0 exits BEFORE ready in 60s ` +
+            `(runtime=${this.config.runtime ?? 'claude-code'}, model=${this.config.model ?? 'default'}) — ` +
+            `this is a startup failure exiting 0, NOT a normal turn. Halting and alerting instead of silent retry. ` +
+            `Check the agent's config/model/env and logs/${this.name}/stdout.log.`,
+          );
+          this.appendCrashToRestartsLog(exitCode, 0, 'CLEAN_EXIT_STARTUP_FAIL');
+          this.status = 'halted';
+          this.notifyStatusChange();
+          const telegramApi = this.telegramApi;
+          const telegramChatId = this.telegramChatId;
+          if (telegramApi && telegramChatId) {
+            const alertMsg = `🚨 STARTUP FAILURE: Agent ${this.name} exited cleanly (code 0) ${this.cleanExitStartupFailures.length}x within 60s BEFORE ever becoming ready (runtime=${this.config.runtime ?? 'claude-code'}, model=${this.config.model ?? 'default'}). This is a broken startup exiting 0, not a normal turn — auto-restart paused to avoid a silent crashloop. Check config/model/env and logs/${this.name}/stdout.log.`;
+            telegramApi
+              .sendMessage(telegramChatId, alertMsg)
+              .catch(() => { /* non-fatal: notification is observability only */ });
+          }
+          return;
+        }
+      } else {
+        // A code-0 exit AFTER the agent was ready is a genuine turn completion —
+        // clear any accumulated startup-failure suspicion.
+        this.cleanExitStartupFailures = [];
+      }
+
       this.cleanExitRestarts = this.cleanExitRestarts.filter((ts) => now - ts < 60_000);
       this.cleanExitRestarts.push(now);
       if (this.cleanExitRestarts.length >= 8) {
@@ -1420,7 +1479,7 @@ export class AgentProcess {
   private appendCrashToRestartsLog(
     exitCode: number,
     backoffMs: number,
-    kind: 'CRASH' | 'HALTED' | 'CRASH_LOOP' | 'IMAGE_POISON_RECOVERY' | 'CLEAN_EXIT',
+    kind: 'CRASH' | 'HALTED' | 'CRASH_LOOP' | 'IMAGE_POISON_RECOVERY' | 'CLEAN_EXIT' | 'CLEAN_EXIT_STARTUP_FAIL',
   ): void {
     try {
       const logDir = join(this.env.ctxRoot, 'logs', this.name);
@@ -1429,9 +1488,11 @@ export class AgentProcess {
       const details =
         kind === 'HALTED'
           ? `exit_code=${exitCode} crash_count=${this.crashCount} max_crashes=${this.maxCrashesPerDay}`
-          : kind === 'IMAGE_POISON_RECOVERY' || kind === 'CLEAN_EXIT'
-            ? `exit_code=${exitCode} backoff_s=${backoffMs / 1000} (not counted toward max_crashes)`
-            : `exit_code=${exitCode} crash_count=${this.crashCount} backoff_s=${backoffMs / 1000}`;
+          : kind === 'CLEAN_EXIT_STARTUP_FAIL'
+            ? `exit_code=${exitCode} startup_failures=${this.cleanExitStartupFailures.length} (exited before ready — auto-restart paused, alerted)`
+            : kind === 'IMAGE_POISON_RECOVERY' || kind === 'CLEAN_EXIT'
+              ? `exit_code=${exitCode} backoff_s=${backoffMs / 1000} (not counted toward max_crashes)`
+              : `exit_code=${exitCode} crash_count=${this.crashCount} backoff_s=${backoffMs / 1000}`;
       const logLine = `[${timestamp}] ${kind}: ${details}\n`;
       appendFileSync(join(logDir, 'restarts.log'), logLine, 'utf-8');
     } catch {

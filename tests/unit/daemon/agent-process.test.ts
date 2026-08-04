@@ -195,6 +195,83 @@ describe('AgentProcess - BUG-011 fix (stop awaits PTY exit)', () => {
     void restartLines;
   });
 
+  it('opencode runtime clean exit (code 0, AFTER ready) is NOT counted as a crash (completes #242)', async () => {
+    // opencode is a TUI that completes a turn and exits 0 by design. Once the
+    // agent has reached 'running', a code-0 exit is a normal turn completion —
+    // it must restart-to-continue WITHOUT charging the daily crash counter and
+    // WITHOUT the startup-failure circuit breaker firing.
+    const ap = new AgentProcess('alice', mockEnv, { runtime: 'opencode', model: 'openrouter/z-ai/glm-4.7' });
+    await ap.start();
+    expect(ap.getStatus().status).toBe('running');
+
+    capturedOnExit!(0, 0);
+
+    // No daily crash-count write.
+    expect(fsMocks.writeFileSync).not.toHaveBeenCalledWith(
+      expect.stringContaining('.crash_count_today'),
+      expect.anything(),
+      expect.anything(),
+    );
+    const logged = fsMocks.appendFileSync.mock.calls.map((c: any[]) => String(c[1])).join('');
+    // Logged as a benign CLEAN_EXIT, never a CRASH and never a startup failure.
+    expect(logged).toMatch(/CLEAN_EXIT: exit_code=0/);
+    expect(logged).not.toMatch(/CLEAN_EXIT_STARTUP_FAIL/);
+    expect(logged).not.toMatch(/\] CRASH: exit_code=0/);
+    // Restart pending (status 'crashed' = scheduled restart), not halted.
+    expect(ap.getStatus().status).toBe('crashed');
+  });
+
+  it('opencode runtime real error exit (code 1) STILL counts as a crash (completes #242)', async () => {
+    // The #242 completion must not over-reach: a genuine non-zero exit from the
+    // opencode runtime is still a crash — it charges the counter and logs CRASH.
+    const ap = new AgentProcess('alice', mockEnv, { runtime: 'opencode', model: 'openrouter/z-ai/glm-4.7' });
+    await ap.start();
+    expect(ap.getStatus().status).toBe('running');
+
+    capturedOnExit!(1, 0);
+
+    expect(ap.getStatus().status).toBe('crashed');
+    const logged = fsMocks.appendFileSync.mock.calls.map((c: any[]) => String(c[1])).join('');
+    expect(logged).toMatch(/\] CRASH: exit_code=1 crash_count=1 backoff_s=5\b/);
+    expect(logged).not.toMatch(/CLEAN_EXIT/);
+  });
+
+  it('opencode exit-0 BEFORE ready trips the startup-failure circuit breaker + alerts (does not silently loop)', async () => {
+    // A real startup fault (bad config/model/env) makes opencode print an error
+    // and exit 0 BEFORE the session ever becomes ready. #242 alone would treat
+    // this as a normal turn and silently retry until a bare CRASH_LOOP halt.
+    // The completion surfaces it LOUDLY: 3 such exits-before-ready in 60s trip a
+    // circuit breaker (halted + Telegram alert), distinct from a benign turn.
+    const telegramApi = { sendMessage: vi.fn().mockResolvedValue(undefined) };
+    const ap = new AgentProcess('alice', mockEnv, { runtime: 'opencode', model: 'openrouter/z-ai/glm-4.7' });
+    ap.setTelegramHandle(telegramApi as any, '999');
+    await ap.start();
+
+    // Simulate three consecutive exit-0-before-ready events: the agent never
+    // reaches 'running' between them (status forced back to a pre-ready state),
+    // and each exit fires immediately after the spawn stamp (spawnAgeMs < 8s).
+    for (let i = 0; i < 3; i++) {
+      ap['status'] = 'starting';
+      ap['spawnStartedAtMs'] = Date.now();
+      ap['handleExit'](0);
+    }
+
+    // Breaker tripped: halted, NOT an infinite silent restart loop.
+    expect(ap.getStatus().status).toBe('halted');
+    // Loud + distinct log line, not the benign CLEAN_EXIT.
+    const logged = fsMocks.appendFileSync.mock.calls.map((c: any[]) => String(c[1])).join('');
+    expect(logged).toMatch(/CLEAN_EXIT_STARTUP_FAIL: exit_code=0/);
+    // Telegram alert fired so the failure is not silent.
+    expect(telegramApi.sendMessage).toHaveBeenCalled();
+    expect(String(telegramApi.sendMessage.mock.calls[0][1])).toMatch(/STARTUP FAILURE/);
+    // The daily crash counter was NOT charged (still a code-0 exit).
+    expect(fsMocks.writeFileSync).not.toHaveBeenCalledWith(
+      expect.stringContaining('.crash_count_today'),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
   it('unexpected PTY exit persists a CRASH line to restarts.log', async () => {
     // Default fs mocks: no .daemon-stop marker, no .crash_count_today file.
     const ap = new AgentProcess('alice', mockEnv, {});

@@ -23,6 +23,10 @@ FINDINGS_DIR="$HOME/code/knowledge-sync/system/kb-maintenance"
 SECRETS_FILE="$REPO/orgs/clearworksai/secrets.env"
 [[ -f "$SECRETS_FILE" ]] && set -o allexport && source "$SECRETS_FILE" && set +o allexport
 
+# mmrag requires MMRAG_DIR at import time (sys.exit(2) if unset). Same line
+# kb-reconcile-nightly.sh uses — without it kb_maintenance.py crashes on every fire.
+export MMRAG_DIR="$HOME/.cortextos/${CTX_INSTANCE_ID:-default}/orgs/clearworksai/knowledge-base"
+
 "$PY" "$SCRIPT" \
   --tier 1 \
   --ledger "$LEDGER" \

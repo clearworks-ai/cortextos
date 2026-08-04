@@ -1,11 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 vi.mock('child_process', () => ({ execFile: vi.fn() }));
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync } from 'fs';
+// Wedge-restart fires hardRestart() (real daemon side effect) — stub it out so the
+// wedge regression tests can assert whether a restart WOULD have fired without
+// actually restarting anything. Other src/bus/system.js exports are preserved.
+vi.mock('../../../src/bus/system.js', async (importActual) => ({
+  ...(await importActual<typeof import('../../../src/bus/system.js')>()),
+  hardRestart: vi.fn(),
+}));
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync, utimesSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { createHash } from 'crypto';
 import { FastChecker } from '../../../src/daemon/fast-checker';
+import { hardRestart } from '../../../src/bus/system.js';
 import type { BusPaths, TelegramCallbackQuery } from '../../../src/types';
 
 // Minimal mock for AgentProcess
@@ -1123,5 +1131,85 @@ describe('FastChecker pending Telegram queue persistence', () => {
     const queue = (checker as any).telegramMessages as Array<{ formatted: string }>;
     expect(queue).toHaveLength(1);
     expect(queue[0].formatted).toContain('survived-restart');
+  });
+});
+
+describe('FastChecker wedge watchdog — default opt-in (wedge-watchdog-default-opt-in)', () => {
+  let testDir: string;
+  let paths: BusPaths;
+
+  beforeEach(() => {
+    vi.mocked(hardRestart).mockClear();
+    testDir = mkdtempSync(join(tmpdir(), 'fastcheck-wedge-'));
+    paths = createTestPaths(testDir);
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  // Build a mock agent whose config is `config` (pass an object WITHOUT the
+  // wedge_restart_min key to simulate "unset"). The agent looks fully alive so
+  // the ONLY thing standing between it and a wedge-restart is the threshold.
+  function createWedgeAgent(config: Record<string, unknown>, name = 'wedge-agent') {
+    const sessionRefresh = vi.fn().mockResolvedValue(undefined);
+    return {
+      agent: {
+        name,
+        getConfig: vi.fn().mockReturnValue(config),
+        isRunning: vi.fn().mockReturnValue(true),
+        isRestartInFlight: vi.fn().mockReturnValue(false),
+        sessionRefresh,
+      } as any,
+      sessionRefresh,
+    };
+  }
+
+  // Write the exact fixture that trips the OLD 15min default: a stale conversation
+  // buffer (mtime `staleMinutes` in the past), a fresh heartbeat (mtime now), and
+  // one pending inbox message.
+  function writeWedgeFixtures(staleMinutes: number): void {
+    mkdirSync(paths.stateDir, { recursive: true });
+    const bufferPath = join(paths.stateDir, 'conversation-buffer.jsonl');
+    writeFileSync(bufferPath, '{"turn":1}\n', 'utf-8');
+    const staleSec = Math.floor((Date.now() - staleMinutes * 60_000) / 1000);
+    utimesSync(bufferPath, staleSec, staleSec); // push mtime into the past
+    writeFileSync(join(paths.stateDir, 'heartbeat.json'), '{"ts":1}', 'utf-8'); // fresh (now)
+    writeFileSync(join(paths.inbox, 'msg-1.json'), '{"id":"m1"}', 'utf-8'); // pending work
+  }
+
+  it('does NOT wedge-restart when wedge_restart_min is unset (opt-in default)', () => {
+    // Config genuinely absent the key — not 0, not positive.
+    const { agent, sessionRefresh } = createWedgeAgent({ name: 'wedge-agent' });
+    writeWedgeFixtures(20); // 20min stale — would trip the old 15min default
+    const checker = new FastChecker(agent, paths, '/tmp/framework');
+
+    (checker as any).checkWedgeInner();
+
+    expect(hardRestart).not.toHaveBeenCalled();
+    expect(sessionRefresh).not.toHaveBeenCalled();
+  });
+
+  it('does NOT wedge-restart when wedge_restart_min <= 0 (explicit opt-out, unchanged)', () => {
+    const { agent, sessionRefresh } = createWedgeAgent({ wedge_restart_min: 0 });
+    writeWedgeFixtures(20);
+    const checker = new FastChecker(agent, paths, '/tmp/framework');
+
+    (checker as any).checkWedgeInner();
+
+    expect(hardRestart).not.toHaveBeenCalled();
+    expect(sessionRefresh).not.toHaveBeenCalled();
+  });
+
+  it('DOES wedge-restart when wedge_restart_min is an explicit positive value (opt-in intact)', () => {
+    // 5min threshold; buffer 20min stale, heartbeat fresh, pending work → WEDGED.
+    const { agent, sessionRefresh } = createWedgeAgent({ wedge_restart_min: 5 });
+    writeWedgeFixtures(20);
+    const checker = new FastChecker(agent, paths, '/tmp/framework');
+
+    (checker as any).checkWedgeInner();
+
+    expect(hardRestart).toHaveBeenCalledTimes(1);
+    expect(sessionRefresh).toHaveBeenCalledTimes(1);
   });
 });

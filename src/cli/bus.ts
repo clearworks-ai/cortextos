@@ -16,6 +16,7 @@ import { sweepExperiments } from '../bus/experiment-sweep.js';
 import { browseCatalog, installCommunityItem, prepareSubmission, submitCommunityItem } from '../bus/catalog.js';
 import { collectMetrics, parseUsageOutput, storeUsageData, checkUpstream, collectTelegramCommands, registerTelegramCommands } from '../bus/metrics.js';
 import { createApproval, updateApproval } from '../bus/approval.js';
+import { buildStatusReportPlan, type GatherIssue, type GatherTask, type GatherInteraction } from '../bus/delivery-status.js';
 import { createReminder, listReminders, ackReminder, pruneReminders } from '../bus/reminders.js';
 import { updateCronFire, parseDurationMs, readCronState } from '../bus/cron-state.js';
 import { addCron, removeCron, readCrons, updateCron as updateCronDef, getCronByName, getExecutionLog } from '../bus/crons.js';
@@ -2366,6 +2367,60 @@ busCommand
     );
     console.log(id);
   });
+
+busCommand
+  .command('delivery-status-plan')
+  .description(
+    'Delivery Status Reporter (Altari-F): read an org-brain client file + optional ' +
+    'source JSON, return the draft/brief/skip plan as JSON. READ-ONLY — never sends, ' +
+    'never files, never creates an approval. The worker acts on the plan.',
+  )
+  .argument('<slug>', 'Client slug, e.g. alloi')
+  .argument('<clientFile>', 'Path to the org-brain client markdown file')
+  .option('--today <date>', 'Report date YYYY-MM-DD (default: today)')
+  .option('--issues <path>', 'JSON file: array of {title,status,updated_at} Multica issues')
+  .option('--tasks <path>', 'JSON file: array of {title,completedAt} completed bus tasks')
+  .option('--interactions <path>', 'JSON file: array of {summary,date} crm interactions')
+  .action(
+    (
+      slug: string,
+      clientFile: string,
+      opts: { today?: string; issues?: string; tasks?: string; interactions?: string } = {},
+    ) => {
+      if (!existsSync(clientFile)) {
+        console.error(`Client file not found: ${clientFile}`);
+        process.exit(1);
+      }
+      const clientFileMarkdown = readFileSync(clientFile, 'utf8');
+      const today = opts.today ?? new Date().toISOString().slice(0, 10);
+
+      const readJson = <T>(p?: string): T[] | undefined => {
+        if (!p) return undefined;
+        if (!existsSync(p)) {
+          console.error(`Source file not found: ${p}`);
+          process.exit(1);
+        }
+        try {
+          const parsed = JSON.parse(readFileSync(p, 'utf8'));
+          return Array.isArray(parsed) ? (parsed as T[]) : undefined;
+        } catch (err) {
+          console.error(`Invalid JSON in ${p}: ${err instanceof Error ? err.message : String(err)}`);
+          process.exit(1);
+        }
+      };
+
+      const plan = buildStatusReportPlan({
+        slug,
+        clientFileMarkdown,
+        today,
+        issues: readJson<GatherIssue>(opts.issues),
+        completedTasks: readJson<GatherTask>(opts.tasks),
+        interactions: readJson<GatherInteraction>(opts.interactions),
+      });
+
+      console.log(JSON.stringify(plan, null, 2));
+    },
+  );
 
 busCommand
   .command('update-approval')

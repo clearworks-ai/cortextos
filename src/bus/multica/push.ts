@@ -7,6 +7,10 @@ export interface OutboundPushOptions {
   dryRun?: boolean;
   limit?: number;
   provenanceFor?: (task: Task) => 'meeting-pipeline' | 'bus';
+  // Real-time mirror: when set, only the named task ids are considered this run.
+  // Everything else is passed over silently (not counted as skipped) so a
+  // single-task event push does not produce a full-universe plan.
+  onlyTaskIds?: Set<string>;
 }
 
 export interface OutboundPlanEntry {
@@ -81,6 +85,12 @@ export async function runOutboundPush(
   for (const task of universe) {
     if (hasReachedPushLimit(result, limit)) {
       break;
+    }
+
+    // Real-time single-task mirror: pass over everything not named, without
+    // counting it as a skip (keeps the event-push plan scoped to one task).
+    if (options.onlyTaskIds && !options.onlyTaskIds.has(task.id)) {
+      continue;
     }
 
     // System-class tasks (crons, audit bookkeeping) are internal fleet

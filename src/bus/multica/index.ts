@@ -33,6 +33,7 @@ export async function runMulticaSync(
     limit?: number;
     agentName?: string;   // NEW
     org?: string;         // NEW
+    taskIds?: string[];   // Real-time mirror: scope the outbound push to these task ids only
   },
 ): Promise<SyncSummary> {
   const dryRun = options.dryRun === true;
@@ -51,6 +52,9 @@ export async function runMulticaSync(
       const pushResult = await runOutboundPush(paths, client, store, config, {
         dryRun,
         limit: options.limit,
+        onlyTaskIds: options.taskIds && options.taskIds.length > 0
+          ? new Set(options.taskIds)
+          : undefined,
       });
       summary.pushed_creates = pushResult.pushed_creates;
       summary.pushed_updates = pushResult.pushed_updates;

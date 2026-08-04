@@ -249,6 +249,27 @@ describe('multica outbound push', () => {
     expect(updatedCalls).toHaveLength(1);
   });
 
+  it('onlyTaskIds scopes the push to the named task and passes over the rest without counting skips', async () => {
+    const { client, createdTaskIds } = createRecordingClient();
+    const store = createSyncStateStore(join(testDir, 'sync-state.json'));
+
+    const target = createOrderedTask(paths, 0, 'Mirror me');
+    createOrderedTask(paths, 1, 'Leave me alone 1');
+    createOrderedTask(paths, 2, 'Leave me alone 2');
+
+    const result = await runOutboundPush(paths, client, store, config, {
+      onlyTaskIds: new Set([target.id]),
+    });
+
+    expect(result.pushed_creates).toBe(1);
+    expect(result.pushed_updates).toBe(0);
+    // The two non-targeted tasks are passed over silently, not counted as skips.
+    expect(result.skipped).toBe(0);
+    expect(createdTaskIds).toEqual([target.id]);
+    expect(result.plan).toHaveLength(1);
+    expect(result.plan[0]).toMatchObject({ bus_task_id: target.id, outcome: 'pushed' });
+  });
+
   it('pushes nothing when the limit is zero', async () => {
     const { client, createdTaskIds, updatedCalls } = createRecordingClient();
     const store = createSyncStateStore(join(testDir, 'sync-state.json'));

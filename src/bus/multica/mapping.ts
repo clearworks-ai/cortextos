@@ -58,12 +58,19 @@ export function taskToIssuePayload(
         assignee_id: config.memberIdJosh,
         project_id: null,
       }
-    : {
-        // v1 does not ship an agent-id map, so agent-owned tasks stay unassigned in Multica.
-        assignee_type: null,
-        assignee_id: null,
-        project_id: null,
-      };
+    : task.type === 'agent'
+      ? {
+          // v1 still ships no agent-id map — claim only the assignee TYPE so
+          // Multica can distinguish agent-executable work (P3.2); the id stays null.
+          assignee_type: 'agent' as const,
+          assignee_id: null,
+          project_id: null,
+        }
+      : {
+          assignee_type: null,
+          assignee_id: null,
+          project_id: null,
+        };
 
   return {
     source: 'cortextos-bus',

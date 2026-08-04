@@ -8,6 +8,7 @@ import { validateAgentName, validateTaskId } from '../utils/validate.js';
 import { createTask, updateTask, completeTask, cancelTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, checkStaleTasks, archiveTasks, checkHumanTasks, classifyTask, ensureEpicTask, closeEpic, reclaimOrphanTasks, resolveTaskOwner, sweepDueTasks, deliverDueSweepActions, sweepSilentAssignees, fleetTaskHealth, DEFAULT_SWEEP_MAX_ACTIONS, DEFAULT_BUILD_ORPHAN_OWNER, LIST_TASKS_MAX_LIMIT } from '../bus/task.js';
 import { saveOutput } from '../bus/save-output.js';
 import { logEvent } from '../bus/event.js';
+import { sweepSignals, deliverSignalActions } from '../bus/signal-sweep.js';
 import { updateHeartbeat, readAllHeartbeats } from '../bus/heartbeat.js';
 import { selfRestart, hardRestart, autoCommit, checkGoalStaleness, postActivity } from '../bus/system.js';
 import { createExperiment, runExperiment, evaluateExperiment, listExperiments, gatherContext, manageCycle, loadExperimentConfig } from '../bus/experiment.js';
@@ -1323,6 +1324,83 @@ busCommand
         }
       }
       output.delivery = delivery;
+    }
+
+    console.log(JSON.stringify(output));
+  });
+
+busCommand
+  .command('sweep-signals')
+  .description('Dry-run or apply the 3-signal detector: blocked >=Nd with unsent escalation, milestone due within N days, client quiet >=Nd (CRM paths required for the quiet signal)')
+  .option('--dry-run', 'Preview signal actions without creating tasks or emitting events')
+  .option('--apply', 'Create signal tasks and emit signal_fired events')
+  .option('--max <n>', 'Max actions per pass', String(DEFAULT_SWEEP_MAX_ACTIONS))
+  .option('--blocker-days <n>', 'Blocked-age threshold in days', '5')
+  .option('--milestone-days <n>', 'Milestone look-ahead window in days', '7')
+  .option('--quiet-days <n>', 'Client-quiet threshold in days', '14')
+  .option('--crm-contacts <path>', 'Path to contacts.json (env fallback: CTX_CRM_CONTACTS)')
+  .option('--crm-pipeline <path>', 'Path to pipeline.json (env fallback: CTX_CRM_PIPELINE)')
+  .action((opts: {
+    dryRun?: boolean;
+    apply?: boolean;
+    max: string;
+    blockerDays: string;
+    milestoneDays: string;
+    quietDays: string;
+    crmContacts?: string;
+    crmPipeline?: string;
+  }) => {
+    if (opts.dryRun && opts.apply) {
+      console.error('Choose either --dry-run or --apply, not both');
+      process.exit(1);
+    }
+
+    const parsePositiveInt = (raw: string, flag: string): number => {
+      const n = Number.parseInt(raw, 10);
+      if (!Number.isInteger(n) || n <= 0) {
+        console.error(`Invalid ${flag} value: must be a positive integer`);
+        process.exit(1);
+      }
+      return n;
+    };
+    const maxActions = parsePositiveInt(opts.max, '--max');
+    const blockerDays = parsePositiveInt(opts.blockerDays, '--blocker-days');
+    const milestoneDays = parsePositiveInt(opts.milestoneDays, '--milestone-days');
+    const quietDays = parsePositiveInt(opts.quietDays, '--quiet-days');
+
+    // CRM paths: flag wins, else env, else null. Env is read ONLY here, never in the module.
+    const crmContactsPath = opts.crmContacts ?? process.env.CTX_CRM_CONTACTS ?? null;
+    const crmPipelinePath = opts.crmPipeline ?? process.env.CTX_CRM_PIPELINE ?? null;
+
+    const env = resolveEnv();
+    const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+    const dryRun = opts.apply !== true;
+    const report = sweepSignals(paths, {
+      dryRun,
+      maxActions,
+      blockerDays,
+      milestoneDays,
+      quietDays,
+      crmContactsPath,
+      crmPipelinePath,
+    });
+
+    const output: Record<string, unknown> = { ...report };
+    if (!dryRun) {
+      output.delivery = deliverSignalActions(report.actions, {
+        instanceId: env.instanceId,
+        org: env.org,
+        fromAgent: env.agentName,
+        paths,
+      });
+      for (const action of report.actions) {
+        logEvent(paths, env.agentName, env.org, 'task', 'signal_fired', 'warning', {
+          signal: action.signal,
+          entity_id: action.entity_id,
+          days: action.days,
+          ...action.detail,
+        });
+      }
     }
 
     console.log(JSON.stringify(output));

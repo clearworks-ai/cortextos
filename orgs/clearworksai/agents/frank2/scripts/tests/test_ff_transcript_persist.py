@@ -276,6 +276,87 @@ class TranscriptPersistTests(unittest.TestCase):
         self.assertIsNone(relative_path)
         self.assertIsNone(preview)
 
+    def test_is_dnr_meeting_detects_markers(self) -> None:
+        for title in (
+            "dnr-Legal strategy call",
+            "dnr: HR review",
+            "DNR - personnel discussion",
+            "Board sync [dnr]",
+            "Comp review (DNR)",
+            "Please do not record this one",
+        ):
+            self.assertTrue(
+                MODULE.is_dnr_meeting(self.make_transcript("x", title=title)),
+                msg=f"expected dnr for title: {title!r}",
+            )
+        for title in ("Acme Follow Up", "Kickoff", "Q3 roadmap sync", ""):
+            self.assertFalse(
+                MODULE.is_dnr_meeting(self.make_transcript("x", title=title)),
+                msg=f"unexpected dnr for title: {title!r}",
+            )
+
+    def test_persist_one_skips_dnr_meeting_no_verbatim(self) -> None:
+        transcript = self.make_transcript(
+            "Sensitive legal content that must never be persisted verbatim.",
+            title="dnr-Legal strategy call",
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            transcripts_dir = Path(tmpdir) / "transcripts"
+            ledger_path = Path(tmpdir) / "ledger.txt"
+            ledger_ids: set[str] = set()
+            status, relative_path, preview = MODULE.persist_one(
+                transcript,
+                transcripts_dir=transcripts_dir,
+                ledger_ids=ledger_ids,
+                ledger_path=ledger_path,
+                dry_run=False,
+            )
+            self.assertEqual(status, "skipped_dnr")
+            self.assertIsNone(relative_path)
+            self.assertIsNone(preview)
+            # No verbatim file written; meeting ledgered so we do not re-evaluate it.
+            self.assertFalse(transcripts_dir.exists() and list(transcripts_dir.glob("*.md")))
+            self.assertIn(str(transcript["id"]), ledger_ids)
+            self.assertEqual(MODULE.FF.load_ledger(ledger_path), {str(transcript["id"])})
+
+    def test_run_persist_reports_skipped_dnr_and_persists_others(self) -> None:
+        dnr = self.make_transcript(
+            "Off the record.", meeting_id="DNR1", title="dnr-Sensitive HR call"
+        )
+        normal = self.make_transcript(
+            "On the record and fine to store.", meeting_id="OK1", title="Acme Kickoff"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ledger_path = Path(tmpdir) / "ledger.txt"
+            transcripts_dir = Path(tmpdir) / "transcripts"
+            output = []
+            original_require_env = MODULE.FF.require_env
+            original_select_transcripts = MODULE.select_transcripts
+            try:
+                MODULE.FF.require_env = lambda _name: "token"
+                MODULE.select_transcripts = lambda *args, **kwargs: [dnr, normal]
+                with unittest.mock.patch("builtins.print", side_effect=output.append):
+                    rc = MODULE.run_persist(
+                        dry_run=False,
+                        limit=5,
+                        meeting_id="",
+                        backfill=False,
+                        ledger_path=ledger_path,
+                        transcripts_dir=transcripts_dir,
+                    )
+            finally:
+                MODULE.FF.require_env = original_require_env
+                MODULE.select_transcripts = original_select_transcripts
+
+            self.assertEqual(rc, 0)
+            payload = json.loads(output[0])
+            self.assertEqual(payload["persisted"], 1)
+            self.assertEqual(payload["skipped_dnr"], 1)
+            # Only the non-dnr meeting has a verbatim file on disk.
+            files = list(transcripts_dir.glob("*.md"))
+            self.assertEqual(len(files), 1)
+            self.assertIn("OK1", files[0].name)
+
     def test_atomic_write_leaves_no_tmp_file(self) -> None:
         transcript = self.make_transcript("Atomic write check.")
         with tempfile.TemporaryDirectory() as tmpdir:

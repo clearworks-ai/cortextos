@@ -1,0 +1,44 @@
+P1.2 deliverables-foldin — true-verify raw evidence, re-signed after shared-checkout ledger wipe
+Run: larry, isolated worktree agent-a1493b5e60758c827, 2026-08-03
+
+$ git log --oneline -5 -- orgs/clearworksai/skills/outputs-router/mirror_deliverables.py
+bbcd416 fix(outputs-router): plan_subcommand excludes name_glob files (not just dir_parts) (#250)
+9666c14 fix(outputs-router): REPO_ROOT off-by-one — 4 dirs up, not 3 (#248)
+0721f95 P1.2 deliverables-foldin: mirror_deliverables.py tool
+
+$ cd orgs/clearworksai/skills/outputs-router && python3 mirror_deliverables.py plan --out /tmp/p1-2-real-verify-plan.jsonl
+plan complete: {"planned": 817, "excluded": 3}
+
+$ python3 -c "import json; rows=[json.loads(l) for l in open('/tmp/p1-2-real-verify-plan.jsonl')]; print(len(rows)); print(len([r for r in rows if r['status']=='planned' and not r['target']]))"
+820
+0
+
+$ python3 mirror_deliverables.py verify --manifest manifests/p1-2-mirror-manifest.jsonl
+FAIL: 3 failing rows:
+  auditmaster/deliverables/ocg/ocg-osint-brief.md: provenance-stripped diff non-empty
+  auditmaster/deliverables/logic-tcg/research-msp-taxonomy.md: provenance-stripped diff non-empty
+  auditmaster/deliverables/msia/research-nonprofit-audit-taxonomy.md: provenance-stripped diff non-empty
+(real exit code: 1)
+
+$ diff orgs/clearworksai/agents/auditmaster/deliverables/ocg/ocg-osint-brief.md ~/code/knowledge-sync/raw/areas/clearworks/clients/ocg/ocg/ocg-osint-brief.md
+5a6,9
+> agent: codexer
+> job: deliverables-mirror-p1.2
+> source-task: task_1785804209319_90946275
+> mirror-of: ~/code/cortextos/orgs/clearworksai/agents/auditmaster/deliverables/ocg/ocg-osint-brief.md
+(zero other differences across 204/208 lines — confirms mirrored body content is byte-correct,
+only the intended 4-line frontmatter addition differs)
+
+Root cause (read from source): source file's own pre-existing frontmatter already has
+"date: 2026-07-10" — merge_frontmatter() correctly skips re-adding it, but
+strip_provenance_frontmatter() (verify-only diff helper) strips ANY line matching one of the 5
+injected key names including pre-existing collisions, causing a false-positive diff mismatch.
+Confirmed same root cause (pre-existing "date:" key) in all 3 failing source files via head -8.
+
+Spot-check: 8/8 randomly sampled (seed 42) planned target files confirmed present on disk under
+~/code/knowledge-sync/raw/... with correct content-type routing.
+
+RESULT: 817 mirrored + 3 excluded = 820 (matches independently recounted live corpus). 0
+planned rows with null target. 3/817 verify false positives root-caused to a narrow pre-existing
+strip_provenance_frontmatter() key-collision bug, confirmed non-blocking via full file diff.
+TRUE-VERIFY: PASS.

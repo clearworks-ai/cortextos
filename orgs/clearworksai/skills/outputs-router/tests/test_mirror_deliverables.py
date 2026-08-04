@@ -402,6 +402,51 @@ def test_t10_basename_collision(temp_dir):
     assert rule1["client"] == "alloi"
     assert rule2["client"] == "msia"
 
+
+def test_t11_plan_excludes_name_glob_files(temp_dir, monkeypatch):
+    """plan_subcommand records name_glob-matched files (e.g. .gitignore) as
+    status=='excluded' with target==null — never status=='planned' with a null
+    target (the null target crashed mirror_subcommand on os.path.exists(None))."""
+    import mirror_deliverables as mod
+
+    root = os.path.join(temp_dir, "auditmaster")
+    os.makedirs(os.path.join(root, "alloi"))
+    with open(os.path.join(root, "alloi", "real.md"), "w") as f:
+        f.write("real content")
+    with open(os.path.join(root, "alloi", ".gitignore"), "w") as f:
+        f.write("*.tmp\n")
+
+    dirmap_path = os.path.join(temp_dir, "dirmap.json")
+    with open(dirmap_path, "w") as f:
+        json.dump(
+            {
+                "client_home": "raw/areas/clearworks/clients",
+                "rules": [{"prefix": "auditmaster/alloi", "type": "client", "client": "alloi"}],
+                "exclude": {"dir_parts": ["__pycache__"], "name_globs": ["*.pyc", "*.bak*", ".gitignore"]},
+            },
+            f,
+        )
+
+    monkeypatch.setattr(mod, "DELIVERABLES_ROOTS", {"auditmaster": root})
+    manifest_path = os.path.join(temp_dir, "manifest.jsonl")
+    mod.plan_subcommand(SimpleNamespace(dirmap=dirmap_path, out=manifest_path))
+
+    rows = [json.loads(line) for line in open(manifest_path) if line.strip()]
+
+    gitignore = [r for r in rows if r["source"].endswith(".gitignore")]
+    assert len(gitignore) == 1
+    assert gitignore[0]["status"] == "excluded"
+    assert gitignore[0]["target"] is None
+    assert gitignore[0]["reason"].startswith("name_glob")
+
+    # Regression invariant: no "planned" row ever carries a null target.
+    assert not [r for r in rows if r["status"] == "planned" and r["target"] is None]
+
+    real = [r for r in rows if r["source"].endswith("real.md")]
+    assert len(real) == 1
+    assert real[0]["status"] == "planned"
+    assert real[0]["target"] is not None
+
     # Targets should be different (distinct paths preserve relpath)
     # With client routing: clients/alloi/report.md vs clients/msia/report.md
     # These are distinct paths, no collision

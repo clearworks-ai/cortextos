@@ -311,25 +311,38 @@ def plan_subcommand(args):
                     unmapped_paths.append(full_key)
                     continue
 
-                # Check exclusions
+                # Check exclusions — both dir_parts AND name_globs, mirroring the
+                # checks compute_target_path() applies (else a name_glob match returns
+                # target=None but was still recorded status="planned", which crashes
+                # mirror_subcommand on os.path.exists(None)).
+                source_basename = os.path.basename(source_path)
+                exclusion_reason = None
                 for part in dirmap["exclude"]["dir_parts"]:
                     if part in source_path.split(os.sep):
-                        manifest.append(
-                            {
-                                "source": source_path,
-                                "target": None,
-                                "agent": agent,
-                                "content_type": None,
-                                "client": None,
-                                "status": "excluded",
-                                "reason": f"dir_part: {part}",
-                                "sha256": compute_sha256(source_path),
-                                "supported_ext": os.path.splitext(source_path)[1].lower() in SUPPORTED_EXTS,
-                                "planned_at": datetime.now().isoformat(),
-                                "mirrored_at": None,
-                            }
-                        )
+                        exclusion_reason = f"dir_part: {part}"
                         break
+                if exclusion_reason is None:
+                    for glob in dirmap["exclude"]["name_globs"]:
+                        if source_basename.endswith(glob.replace("*", "")):
+                            exclusion_reason = f"name_glob: {glob}"
+                            break
+
+                if exclusion_reason is not None:
+                    manifest.append(
+                        {
+                            "source": source_path,
+                            "target": None,
+                            "agent": agent,
+                            "content_type": None,
+                            "client": None,
+                            "status": "excluded",
+                            "reason": exclusion_reason,
+                            "sha256": compute_sha256(source_path),
+                            "supported_ext": os.path.splitext(source_path)[1].lower() in SUPPORTED_EXTS,
+                            "planned_at": datetime.now().isoformat(),
+                            "mirrored_at": None,
+                        }
+                    )
                 else:
                     # No exclusion triggered
                     target_path = compute_target_path(source_path, agent, rule, dirmap, root)

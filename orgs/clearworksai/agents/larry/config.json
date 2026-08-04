@@ -70,12 +70,6 @@
       "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: release-coordinator\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire release-coordinator --interval 7d 2>/dev/null; FRIDAY RELEASE REVIEW \u2014 Check git log since Monday across all 3 repos (~/code/clearpath, ~/code/lifecycle-killer, ~/code/nonprofit-hub, ~/code/auditos). Summarize: what shipped this week, what is in progress, what is blocked. Check open PRs via gh pr list --state open for each repo. Send weekly engineering digest to Josh via Telegram 6690120787. Format: *Weekly Engineering Review \u2014 [week]* with per-repo status bullets."
     },
     {
-      "name": "playwright-coverage",
-      "type": "recurring",
-      "cron": "0 9 * * 2",
-      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: playwright-coverage\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire playwright-coverage --interval 7d 2>/dev/null; PLAYWRIGHT COVERAGE \u2014 Run Playwright test suites where available (~/code/clearpath, ~/code/lifecycle-killer). Extract pass rates and failing tests. Telegram to 6690120787: *Playwright Coverage \u2014 [date]* with pass rates per repo and any new failures. Propose coverage gaps if >3 features have failing tests. SILENT-OK if all passing."
-    },
-    {
       "name": "dependency-audit",
       "type": "recurring",
       "cron": "0 11 * * 4",

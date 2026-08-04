@@ -4,12 +4,13 @@ Run from knowledge-base/scripts:
 
     python -m _test_clients.test_kb_reconcile_504_quarantine
 
-Exits 0 on all-pass, 1 on any failure. Four scenarios:
+Exits 0 on all-pass, 1 on any failure. Five scenarios:
 
   1. transient_504_and_deadline: 504 and DEADLINE_EXCEEDED are now classified as transient
   2. quarantine_parse_errors: PDF/Gemini parse errors go to quarantined_paths via real helper
   3. transient_network_still_fails: transient network errors still go to failed_paths (regression test)
   4. ledger_includes_paths: ledger-row composer includes failed_paths and quarantined_paths arrays via real heredoc execution
+  5. pdftotext_fallback_recovers_slow_pdf: valid PDFs that time out on Gemini inline recover via local pdftotext; corrupt PDFs still re-raise for quarantine
 
 backoffs is passed as (0, 0, 0) so tests run in milliseconds.
 """
@@ -344,16 +345,119 @@ sys.exit(0 if (recon_status == 0 and edges_status == 0 and mirror_status == 0 an
             os.unlink(ledger_path)
 
 
+def _minimal_valid_pdf_bytes(text="Hello reconcile world"):
+    """A hand-rolled single-page PDF with a real text layer (no external deps)."""
+    body = (
+        b"%PDF-1.4\n"
+        b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+        b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+        b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]"
+        b"/Resources<</Font<</F1 5 0 R>>>>/Contents 4 0 R>>endobj\n"
+        b"4 0 obj<</Length 60>>stream\n"
+        b"BT /F1 24 Tf 72 700 Td (" + text.encode() + b") Tj ET\n"
+        b"endstream endobj\n"
+        b"5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\n"
+        b"trailer<</Root 1 0 R>>\n"
+        b"%%EOF\n"
+    )
+    return body
+
+
+def test_pdftotext_fallback_recovers_slow_pdf():
+    """Valid-but-Gemini-failing PDFs recover via pdftotext instead of reddening.
+
+    Reproduces the real incident: large branded audit PDFs carry a valid text
+    layer but exceed the 120s Gemini inline timeout (504/DEADLINE_EXCEEDED), so
+    they landed in failed_paths forever. The pdftotext fallback must recover a
+    valid PDF (count > 0) while a corrupt/truncated PDF (no extractable text)
+    still re-raises so the existing quarantine classification applies.
+    """
+    print("\n[test 5/5] pdftotext_fallback: valid slow PDF recovers, corrupt PDF still raises")
+
+    import shutil as _shutil
+    if not _shutil.which("pdftotext"):
+        _check("pdftotext available (poppler)", False, detail="pdftotext not on PATH")
+        return
+
+    from google.genai import errors as genai_errors
+
+    try:
+        genai_errors.APIError.raise_error(
+            504, {"message": "Gateway timeout", "status": "DEADLINE_EXCEEDED"}, None
+        )
+    except Exception as e:
+        deadline_err = e
+
+    class _FailModels:
+        def generate_content(self, **kw):
+            raise deadline_err
+
+    class _FailClient:
+        models = _FailModels()
+
+    class _CapCollection:
+        name = "test"
+
+        def __init__(self):
+            self.n = 0
+
+        def upsert(self, **kw):
+            self.n += len(kw["ids"])
+
+        def get(self, **kw):
+            return {"ids": []}
+
+    # Stub embed_content so the test never hits the embedding API.
+    orig_embed = mmrag.embed_content
+    mmrag.embed_content = lambda client, config, content, task_type="RETRIEVAL_DOCUMENT": [0.0] * 8
+    cfg = {"gemini_model": "gemini-2.5-flash", "text_chunk_size": 1200, "text_chunk_overlap": 150}
+
+    valid_path = corrupt_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="wb", suffix=".pdf", delete=False) as vf:
+            vf.write(_minimal_valid_pdf_bytes())
+            valid_path = vf.name
+        with tempfile.NamedTemporaryFile(mode="wb", suffix=".pdf", delete=False) as cf:
+            # Header only, no body, no %%EOF -> pdftotext yields nothing.
+            cf.write(b"%PDF-1.4\n<<truncated garbage no pages>>")
+            corrupt_path = cf.name
+
+        coll = _CapCollection()
+        count = mmrag.ingest_pdf(_FailClient(), cfg, coll, valid_path)
+        _check(
+            "valid PDF recovered via pdftotext (count > 0)",
+            count > 0 and coll.n > 0,
+            detail=f"count={count} upserted={coll.n}",
+        )
+
+        raised = None
+        try:
+            mmrag.ingest_pdf(_FailClient(), cfg, _CapCollection(), corrupt_path)
+        except Exception as e:
+            raised = e
+        _check(
+            "corrupt PDF (no text) still re-raises for quarantine",
+            raised is not None,
+            detail=f"raised={raised!r}",
+        )
+    finally:
+        mmrag.embed_content = orig_embed
+        for p in (valid_path, corrupt_path):
+            if p and os.path.exists(p):
+                os.unlink(p)
+
+
 if __name__ == "__main__":
     test_transient_504_and_deadline()
     test_quarantine_parse_errors()
     test_transient_network_still_fails()
     test_ledger_includes_paths()
+    test_pdftotext_fallback_recovers_slow_pdf()
     print()
     if FAILURES:
         print(f"FAILED: {len(FAILURES)} assertion(s)")
         for f in FAILURES:
             print(f"  - {f}")
         sys.exit(1)
-    print(f"ALL PASS (4 scenarios)")
+    print(f"ALL PASS (5 scenarios)")
     sys.exit(0)

@@ -2444,6 +2444,49 @@ def ingest_audio(client, config, collection, file_path):
         return count
 
 
+def _pdftotext_extract(file_path):
+    """Local, deterministic PDF text extraction via poppler's `pdftotext`.
+
+    Fallback for PDFs the Gemini inline path can't handle — large multi-page
+    branded reports either time out (504/DEADLINE_EXCEEDED) or are rejected
+    ("no pages") even though they carry a perfectly valid embedded text layer.
+    Returns extracted text (str) or "" if pdftotext is unavailable, errors, or
+    the PDF has no extractable text (truly image-only / corrupt). A "" result
+    lets the caller fall through to the existing quarantine/failed path.
+    """
+    exe = shutil.which("pdftotext")
+    if not exe:
+        return ""
+    try:
+        # -layout preserves reading order for tables/columns; "-" streams to stdout.
+        result = subprocess.run(
+            [exe, "-layout", "-enc", "UTF-8", str(file_path), "-"],
+            capture_output=True,
+            timeout=120,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return ""
+    if result.returncode != 0:
+        return ""
+    text = result.stdout.decode("utf-8", errors="replace")
+    return text if text.strip() else ""
+
+
+def _pages_from_pdf_text(text, config):
+    """Split raw PDF text into per-page chunks.
+
+    pdftotext emits a form-feed (\\x0c) between pages; prefer that so page
+    metadata stays meaningful, else fall back to size-based chunking.
+    """
+    if "\x0c" in text:
+        return [p.strip() for p in text.split("\x0c") if p.strip()]
+    return chunk_text(
+        text,
+        chunk_size=config.get("text_chunk_size", DEFAULT_TEXT_CHUNK_SIZE),
+        overlap=config.get("text_chunk_overlap", DEFAULT_TEXT_CHUNK_OVERLAP),
+    )
+
+
 def ingest_pdf(client, config, collection, file_path):
     """Ingest a PDF page-by-page using Gemini to extract content including visual elements."""
     file_path = Path(file_path)
@@ -2475,17 +2518,81 @@ def ingest_pdf(client, config, collection, file_path):
         "Separate each page's content with '=== PAGE N ===' markers.\n"
         "Be thorough - this will be used for search and retrieval."
     )
-    response = _retry_generate_content(
-        client,
-        model=config.get("gemini_model", "gemini-2.5-flash"),
-        contents=[
-            types.Part.from_bytes(data=data, mime_type="application/pdf"),
-            extraction_prompt,
-        ],
-    )
-    if _tracker:
-        _tracker.track_generation(response)
-    text = response.text
+    text = None
+    used_fallback = False
+    try:
+        response = _retry_generate_content(
+            client,
+            model=config.get("gemini_model", "gemini-2.5-flash"),
+            contents=[
+                types.Part.from_bytes(data=data, mime_type="application/pdf"),
+                extraction_prompt,
+            ],
+        )
+        if _tracker:
+            _tracker.track_generation(response)
+        text = response.text
+    except Exception as gemini_exc:
+        # Large multi-page branded PDFs time out (504/DEADLINE_EXCEEDED) or get
+        # rejected ("no pages") on the Gemini inline path even though they carry
+        # a valid embedded text layer. Before failing/quarantining, try local
+        # deterministic extraction — a valid text PDF must not redden the nightly.
+        fallback_text = _pdftotext_extract(file_path)
+        if not fallback_text:
+            # No local text either → genuinely image-only or corrupt. Re-raise so
+            # the reconcile loop's quarantine/failed classification still applies.
+            raise
+        error_type = type(gemini_exc).__name__
+        print(
+            f"  Gemini inline failed ({error_type}); recovered via pdftotext "
+            f"local extraction: {file_path.name}"
+        )
+        text = fallback_text
+        used_fallback = True
+
+    # Gemini can also return an empty/None body without raising (safety block,
+    # empty candidate). Treat that the same as a hard failure and try local text.
+    if not text or not text.strip():
+        fallback_text = _pdftotext_extract(file_path)
+        if not fallback_text:
+            print(f"  SKIP (empty extraction): {file_path}")
+            return 0
+        if not used_fallback:
+            print(
+                f"  Gemini returned empty text; recovered via pdftotext "
+                f"local extraction: {file_path.name}"
+            )
+        text = fallback_text
+        used_fallback = True
+
+    # If we fell back to pdftotext, its output has no '=== PAGE N ===' markers;
+    # _pages_from_pdf_text splits on form-feeds (real page boundaries) instead.
+    if used_fallback:
+        pages = _pages_from_pdf_text(text, config)
+        count = 0
+        for i, page_content in enumerate(pages):
+            if not page_content.strip():
+                continue
+            doc_id = file_id(file_path, i)
+            if already_exists(collection, doc_id):
+                continue
+            embedding = embed_content(client, config, page_content)
+            collection.upsert(
+                ids=[doc_id],
+                embeddings=[embedding],
+                documents=[page_content],
+                metadatas=[{
+                    **common_metadata,
+                    "type": "pdf_page",
+                    "chunk_index": i,
+                    "total_chunks": len(pages),
+                    "page_number": i + 1,
+                    "extraction": "pdftotext_fallback",
+                    "ingested_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                }],
+            )
+            count += 1
+        return count
 
     # Split by page markers if present, otherwise chunk normally
     pages = []

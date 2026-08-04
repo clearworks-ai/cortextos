@@ -146,6 +146,12 @@
       "type": "recurring",
       "cron": "23 5 * * 0",
       "prompt": "TASK_ID=$(cortextos bus create-task 'Cron: kb-maintenance-digest' --desc 'Weekly KB content-health digest: Tier-2 LLM verify over Tier-1 candidates + ONE Telegram digest' 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire kb-maintenance-digest --interval 168h 2>/dev/null; WEEKLY KB MAINTENANCE DIGEST \u2014 (1) Run the Tier-2 verify layer over this week's Tier-1 candidates only (near-dup / staleness / contradiction / one-fact-one-home): export MMRAG_DIR=\"$HOME/.cortextos/${CTX_INSTANCE_ID:-default}/orgs/clearworksai/knowledge-base\"; $CTX_REPO/knowledge-base/venv/bin/python3 $CTX_REPO/knowledge-base/scripts/kb_maintenance.py --tier all --dry-run > /tmp/kb-maint-weekly.json (LLM step is a documented stub unless KB_MAINT_ENABLE_LLM=1). (2) Summarize the week's findings files under knowledge-sync/system/kb-maintenance/ into ONE digest and send it to Telegram 6690120787 \u2014 one weekly digest, NOT per-item pings (comms doctrine). (3) For approval-required items (merges/deletions/rewrites/quarantine), create bus tasks assigned to larry with the finding file attached. (4) cortextos bus complete-task $TASK_ID --result 'weekly KB digest sent' 2>/dev/null."
+    },
+    {
+      "name": "production-stack-sweep",
+      "type": "recurring",
+      "cron": "17 6 * * *",
+      "prompt": "TASK_ID=$(cortextos bus create-task 'Cron: production-stack-sweep' --desc 'Daily client-facing-automation stall sweep (DESIGN-G lane G)' 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire production-stack-sweep --interval 24h 2>/dev/null; PRODUCTION-STACK STALL SWEEP \u2014 Run: bash ~/code/cortextos/orgs/clearworksai/agents/larry/bin/production-stack-sweep.sh 2>&1. The script classifies every automation in knowledge-sync/raw/areas/clearworks/production-stack.md and, ONLY for a client-facing STALLED/FAILING row, Telegrams 6690120787 + opens a deduped bus task (silent otherwise; it logs its own summary bus event). cortextos bus complete-task $TASK_ID --result 'production-stack sweep complete' 2>/dev/null. Your entire response must be literally 'OK' unless the script fails."
     }
   ],
   "ecosystem": {

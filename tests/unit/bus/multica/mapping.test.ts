@@ -87,7 +87,7 @@ describe('multica mapping', () => {
     }
   });
 
-  it('maps Josh-owned tasks to member and agent-type tasks to assignee_type agent (id-less in v1)', () => {
+  it('maps Josh-owned tasks to member and leaves id-less agent tasks fully unassigned (Multica rejects a type without an id)', () => {
     const humanPayload = taskToIssuePayload(
       makeTask({
         assigned_to: 'human',
@@ -124,7 +124,7 @@ describe('multica mapping', () => {
       'update',
     );
 
-    expect(agentPayload.issue.assignee_type).toBe('agent');
+    expect(agentPayload.issue.assignee_type).toBeNull();
     expect(agentPayload.issue.assignee_id).toBeNull();
     expect(agentPayload.issue.project_id).toBeNull();
     expect(agentPayload.issue.due_date).toBeNull();

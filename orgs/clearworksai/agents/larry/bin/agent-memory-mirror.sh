@@ -32,12 +32,13 @@ if [[ -z "$DELETED" ]]; then
   DELETED=0
 fi
 
-# Emit final JSON line
-echo "{\"mirrored\":$MIRRORED,\"deleted\":$DELETED,\"source_count\":$SOURCE_COUNT,\"exit\":0}"
-
 # Exit 0 only if rsync succeeded and mirrored == source_count
+FINAL_EXIT=0
 if [[ "$RSYNC_STATUS" -ne 0 ]] || [[ "$MIRRORED" -ne "$SOURCE_COUNT" ]]; then
-  exit 1
+  FINAL_EXIT=1
 fi
 
-exit 0
+# Emit final JSON line (exit field reflects the real outcome, not a hardcoded success)
+echo "{\"mirrored\":$MIRRORED,\"deleted\":$DELETED,\"source_count\":$SOURCE_COUNT,\"exit\":$FINAL_EXIT}"
+
+exit "$FINAL_EXIT"

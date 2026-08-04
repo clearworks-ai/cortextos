@@ -100,6 +100,54 @@ Run these 4 checks (Bash):
       `cortextos bus send-telegram 6690120787 "New email — From: <from> | Subject: <subject> | <one-line snippet>"`
       Use `gws gmail +read --id <id> --headers` first if you need more detail for a surfaced id.
 
+   e. **EA LANE CLASSIFICATION (proactive event-based EA — Lane A + Lane B routing).** Before/alongside surfacing, classify each first-seen human email into exactly ONE inbox-manager lane, and split out SCHEDULING-INTENT for the booking desk. This REPLACES the old binary keep/drop for Josh-inbox mail — noise is already gone (steps 2a/2b), so what survives gets a lane, not just a ping.
+
+      First, run the deterministic SCHEDULING-INTENT detector over the surviving mail (this is the classifier seam — the SKILL prose only judges the residual ambiguous cases):
+      ```bash
+      cd "$CTX_AGENT_DIR"
+      python3 scripts/booking_coordinator.py classify --payload /tmp/josh-inbox-firstseen.json > /tmp/josh-inbox-classified.json
+      cat /tmp/josh-inbox-classified.json
+      ```
+      The helper returns `{scheduling_intent:[...], other:[...], candidates:[...]}`. For each item:
+
+      | Lane | Meaning | Action |
+      |------|---------|--------|
+      | **NEEDS YOU** | real question/decision only Josh can answer | **draft a reply** as a Gmail draft (below), then surface with `✏ draft ready` |
+      | **QUICK REPLY** | routine confirm/thanks/logistics | **draft a reply** as a Gmail draft, surface `✏ draft ready` |
+      | **SCHEDULING-INTENT** | "let's find a time", reschedule, ghosted-link follow-up (from the helper's `scheduling_intent`) | route to **Lane B** (booking) — see 2f; do NOT double-draft here |
+      | **WAITING** | ball in someone else's court | note only, no draft |
+      | **FYI** | receipts/newsletters/cc | no draft (most already excluded upstream) |
+      | **REVIEW** | money / legal / complaint / big decision | flag to Josh (Lane D / approvals), draft at most a careful holding reply |
+
+      For **NEEDS YOU** and **QUICK REPLY** only, write a REAL Gmail draft in Josh's voice — never send, never archive:
+      ```bash
+      # voice from the same source the recap worker uses; threadId anchors the draft to the chain
+      gws gmail +draft --to "<from>" --thread-id "<threadId>" --body "<reply in Josh's voice>"
+      ```
+      Voice: `orgs/clearworksai/knowledge/voice.md`. Draft-only is structural: `+draft` on the DWD shim has no send path. NEVER `+send`, NEVER a Gmail MCP tool. Leave `[NEED FROM YOU: …]` / `[CONFIRM: …]` placeholders rather than inventing a commitment (inbox-manager rule). This satisfies `always_ask: external-comms` — the draft sits in Josh's drafts folder, he sends.
+
+   f. **SCHEDULING-INTENT → Lane B (booking desk).** For each row in the helper's `candidates` array, append it to the booking tracker and spawn the booking worker in new-booking mode (freebusy → slot-proposal DRAFT). No slot is proposed here in comms-check; the booking worker owns freebusy + the draft.
+      ```bash
+      cd "$CTX_AGENT_DIR"
+      TRACKER="state/booking-tracker.json"; mkdir -p state; [[ -f "$TRACKER" ]] || echo '{"rows":[]}' > "$TRACKER"
+      # append each candidate row (atomic write is owned by the helper; append via a tiny python merge)
+      python3 - "$TRACKER" /tmp/josh-inbox-classified.json <<'PY'
+import json,sys
+tracker,classified=sys.argv[1],sys.argv[2]
+t=json.load(open(tracker)); cands=json.load(open(classified)).get("candidates",[])
+have={(r.get("thread_id"),r.get("prospect")) for r in t["rows"]}
+for c in cands:
+    if (c.get("thread_id"),c.get("prospect")) not in have:
+        t["rows"].append(c)
+import os,tempfile
+fd,tmp=tempfile.mkstemp(dir="state",prefix=".booking-tracker.",suffix=".tmp")
+os.write(fd,json.dumps(t,indent=2,sort_keys=True).encode()); os.close(fd); os.replace(tmp,tracker)
+print(f"tracker_rows={len(t['rows'])}")
+PY
+      # spawn Lane B worker (drafts only) for the newly-added proposed rows
+      cortextos spawn-worker "booking-$(date +%s)" --dir "$CTX_AGENT_DIR" --parent pa --prompt "Read .claude/skills/booking-coordinator-worker/SKILL.md and execute it. Mode: new-booking. Draft slot proposals for the newest proposed rows in state/booking-tracker.json. Drafts only — never send. Output DONE." 2>&1 || echo "booking spawn failed"
+      ```
+
 3. **GITHUB CI FAILURES**: `gws gmail +triage --query 'from:notifications@github.com subject:"Run failed" newer_than:6h' --format json`
    Group by repo.
    **Before surfacing any CI failure**, run ALL of the following gates. Skip silently if ANY gate fires:
@@ -230,6 +278,33 @@ echo "$GATE"
 - **Needs response** → Telegram with draft response.
 
 - **Nothing new** → `cortextos bus log-event action comms_check_ok info --meta '{"agent":"frank2"}'` — NO Telegram.
+
+---
+
+## Step 5.5 — No-show sweep (EA Lane B / E5 — cheap state read every fire)
+
+A booked call whose `call_time + 45 min` has passed with NO Fireflies transcript
+close-out is a no-show. We detect this from the ABSENCE of a transcript (a signal we
+uniquely have), not from a human reporting it. This is a cheap read over the tracker —
+no new cron.
+
+```bash
+cd "$CTX_AGENT_DIR"
+[[ -f state/booking-tracker.json ]] || echo '{"rows":[]}' > state/booking-tracker.json
+python3 scripts/booking_coordinator.py no-show-sweep --tracker state/booking-tracker.json > /tmp/booking-noshow.json
+cat /tmp/booking-noshow.json
+```
+
+For each candidate in `/tmp/booking-noshow.json` (`action: recovery-draft` → spawn a
+recovery draft; `action: stop-recovery` → advance the row to `not-now`, no draft, two
+touches spent). Recovery drafts are Gmail drafts only (Lane B worker), never sends:
+
+```bash
+NEED=$(python3 -c "import json;print(len(json.load(open('/tmp/booking-noshow.json')).get('candidates',[])))" 2>/dev/null || echo 0)
+if [ "$NEED" -gt 0 ]; then
+  cortextos spawn-worker "booking-recovery-$(date +%s)" --dir "$CTX_AGENT_DIR" --parent pa --prompt "Read .claude/skills/booking-coordinator-worker/SKILL.md and execute it. Mode: recovery. Process /tmp/booking-noshow.json — draft no-show recovery (2-touch cap), then move exhausted rows to not-now. Drafts only. Output DONE." 2>&1 || echo "recovery spawn failed"
+fi
+```
 
 ---
 

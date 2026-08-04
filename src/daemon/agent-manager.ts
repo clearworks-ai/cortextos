@@ -1377,9 +1377,37 @@ export class AgentManager {
       // dedup-rejected and treated as a dispatch failure.
       const firedAt = new Date().toISOString();
       const injection = `[CRON FIRED ${firedAt}] ${cron.name}: ${prompt}`;
-      const injected = this.injectAgent(agentName, injection);
-      if (!injected) {
-        throw new Error(`injectAgent returned false for agent "${agentName}" — agent may not be running`);
+
+      // Mark this turn as cron-originated so permission hooks (via
+      // readCronActive in src/hooks/lib/session-context.ts) can deny-fast —
+      // nobody is attached to approve a cron-fired turn. 10-minute TTL: an
+      // unusually long cron turn just loses deny-fast protection late (stale
+      // markers are treated as absent), it never gets stuck. Cleaned up in
+      // finally so the marker doesn't outlive the turn.
+      const stateDir = join(this.ctxRoot, 'state', agentName);
+      const markerPath = join(stateDir, '.cron-active');
+      try {
+        mkdirSync(stateDir, { recursive: true });
+        writeFileSync(
+          markerPath,
+          JSON.stringify({ cronName: cron.name, firedAt, expiresAt: Date.now() + 10 * 60 * 1000 }),
+          'utf-8',
+        );
+      } catch {
+        // Marker is best-effort deny-fast protection, not correctness-critical.
+      }
+
+      try {
+        const injected = this.injectAgent(agentName, injection);
+        if (!injected) {
+          throw new Error(`injectAgent returned false for agent "${agentName}" — agent may not be running`);
+        }
+      } finally {
+        try {
+          if (existsSync(markerPath)) unlinkSync(markerPath);
+        } catch {
+          // Cleanup failure is non-critical — a stale marker expires via its TTL.
+        }
       }
     };
 

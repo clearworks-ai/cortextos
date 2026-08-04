@@ -58,14 +58,34 @@ MAX_RETRIES = 2
 RETRY_BACKOFF = 5  # seconds
 
 
+def default_ledger_path() -> Path:
+    """Default cxportal-pull ledger path (when --ledger isn't passed, as the cron invokes it).
+
+    5 .parent hops from orgs/clearworksai/skills/cxportal-import/pull_cxportal.py reach the real
+    repo root (cortextos/). Was 4, which stopped at orgs/ and wrote to a phantom orgs/orgs/...
+    path the nightly cron's own `tail -1 .../state/...` stale-check could never see.
+    """
+    repo_root = Path(__file__).parent.parent.parent.parent.parent
+    return repo_root / "orgs" / "clearworksai" / "agents" / "larry" / "state" / "cxportal-pull-ledger.jsonl"
+
+
+def larry_env_path() -> Path:
+    """Fallback .env location get_token() reads CXPORTAL_MCP_TOKEN from.
+
+    3 .parent hops land at orgs/clearworksai/; appending agents/larry/.env yields the real
+    orgs/clearworksai/agents/larry/.env. Was 4 hops, which produced orgs/agents/larry/.env.
+    """
+    return Path(__file__).parent.parent.parent / "agents" / "larry" / ".env"
+
+
 def get_token() -> str:
     """Get CXPORTAL_MCP_TOKEN from env or larry .env file."""
     token = os.environ.get("CXPORTAL_MCP_TOKEN")
     if token:
         return token
 
-    # Try larry .env file
-    larry_env = Path(__file__).parent.parent.parent.parent / "agents" / "larry" / ".env"
+    # Try larry .env file (see larry_env_path for the path derivation).
+    larry_env = larry_env_path()
     if larry_env.exists():
         with open(larry_env) as f:
             for line in f:
@@ -546,8 +566,7 @@ def main():
     # Write ledger row
     ledger_path = args.ledger
     if ledger_path is None:
-        repo_root = Path(__file__).parent.parent.parent.parent
-        ledger_path = repo_root / "orgs" / "clearworksai" / "agents" / "larry" / "state" / "cxportal-pull-ledger.jsonl"
+        ledger_path = default_ledger_path()
 
     ledger_path.parent.mkdir(parents=True, exist_ok=True)
     with open(ledger_path, "a") as f:

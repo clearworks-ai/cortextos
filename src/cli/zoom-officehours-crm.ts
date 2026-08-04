@@ -224,7 +224,7 @@ function sortKeysDeep(value: unknown): unknown {
 function pythonJsonDump(value: unknown): string {
   const json = JSON.stringify(sortKeysDeep(value), null, 2);
   // Python's default ensure_ascii=True escapes every non-ASCII code unit.
-  return json.replace(/[-￿]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`) + '\n';
+  return json.replace(/[-￿]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`);
 }
 
 // Full NEW-contact default shape (upsert-contact.py:172-195).
@@ -280,81 +280,86 @@ export function processRegistrant(args: {
   const name = `${args.registrant.firstName || ''} ${args.registrant.lastName || ''}`.trim();
   const registrant: ZoomRegistrant = { ...args.registrant, email, name };
 
-  // Read/parse failure THROWS (caller → 500).
-  const data = JSON.parse(readFileSync(contactsPath, 'utf-8')) as { contacts?: ContactRecord[] };
-  const contacts: ContactRecord[] = Array.isArray(data.contacts) ? data.contacts : [];
-
-  const classification = classifyRegistrant(args.registrant, contacts);
-
-  if (classification.tier === 'NOISE') {
-    return { tier: 'NOISE', tags: [], mailchimpEligible: false, registrant };
-  }
-  if (classification.tier === 'AMBIG') {
-    return {
-      tier: 'AMBIG',
-      candidateIds: classification.candidates.map((c) => c.id),
-      tags: [],
-      mailchimpEligible: false,
-      registrant,
-    };
-  }
-
-  // Target id for suppression + write.
-  const targetId = classification.tier === 'NEW' ? slugifyContactId(name) : classification.match.id;
-  const blocked = checkSuppressed(suppressionPath, targetId, name, email ? [email] : []);
-  if (blocked) {
-    return { tier: 'SUPPRESSED', tags: [], mailchimpEligible: false, registrant };
-  }
-
   const applyMerge = (contact: ContactRecord, tags: string[]): void => {
     contact.tags = mergeUnique(contact.tags ?? [], tags);
     if (email) contact.emails = mergeUnique(contact.emails ?? [], [email]);
     contact.source_refs = mergeUnique(contact.source_refs ?? [], [ZOOM_SOURCE_REF]);
   };
 
-  let contactId: string;
-  const tags = [...ZOOM_REGISTRATION_TAGS];
+  // Optimistic-concurrency guard: the v1 Python recon cron writes the same
+  // contacts.json independently, so a naive read-modify-write can silently lose an
+  // update. Re-read the raw file immediately before committing; if it changed under
+  // us, redo the classify+mutate against the fresh snapshot. Retry once — the second
+  // pass commits regardless (residual window is the same tmp+rename race v1 already
+  // accepts; master-plan risk table). Read/parse failure THROWS (caller → 500).
+  for (let attempt = 0; ; attempt += 1) {
+    const rawBefore = readFileSync(contactsPath, 'utf-8');
+    const data = JSON.parse(rawBefore) as { contacts?: ContactRecord[] };
+    const contacts: ContactRecord[] = Array.isArray(data.contacts) ? data.contacts : [];
 
-  if (classification.tier === 'EMAIL' || classification.tier === 'NAME') {
-    // Merge into the matched contact; NEVER touch category/priority/name/company.
-    const target = contacts.find((c) => c.id === classification.match.id) ?? classification.match;
-    applyMerge(target, tags);
-    contactId = target.id;
-  } else {
-    // NEW: upsert-by-slug (mirrors v1's shell-out to upsert-contact.py).
-    const junk = detectJunkName(name);
-    const existing = contacts.find((c) => c.id === targetId);
-    if (existing) {
-      // Existing id → merge only (append-only), don't rewrite scalar fields.
-      applyMerge(existing, junk.junk ? [...tags, 'auto-flagged:junk-name', `junk-name-reason:${junk.reason}`] : tags);
-      contactId = existing.id;
-    } else {
-      const contact = newContactDefaults(targetId);
-      contact.name = name;
-      if (junk.junk) {
-        contact.category = 'other';
-        contact.priority = 'low';
-        tags.push('auto-flagged:junk-name', `junk-name-reason:${junk.reason}`);
-      } else {
-        contact.category = 'prospect';
-        contact.priority = 'normal';
-      }
-      applyMerge(contact, tags);
-      contacts.push(contact);
-      contactId = contact.id;
+    const classification = classifyRegistrant(args.registrant, contacts);
+
+    // No-write tiers return immediately (no CAS needed).
+    if (classification.tier === 'NOISE') {
+      return { tier: 'NOISE', tags: [], mailchimpEligible: false, registrant };
     }
+    if (classification.tier === 'AMBIG') {
+      return { tier: 'AMBIG', candidateIds: classification.candidates.map((c) => c.id), tags: [], mailchimpEligible: false, registrant };
+    }
+
+    const tags = [...ZOOM_REGISTRATION_TAGS];
+    let contactId: string;
+
+    if (classification.tier === 'EMAIL' || classification.tier === 'NAME') {
+      // Merge into the matched contact; NEVER touch category/priority/name/company.
+      // Suppression is NOT checked on merges — matches the Python reference (sync.py
+      // merges existing contacts in-process without a suppression check; only
+      // upsert-contact.py's NEW-creation path checks it) and master-plan D7. An
+      // established contact is never re-suppressed.
+      const target = contacts.find((c) => c.id === classification.match.id) ?? classification.match;
+      applyMerge(target, tags);
+      contactId = target.id;
+    } else {
+      // NEW: upsert-by-slug (mirrors v1's shell-out to upsert-contact.py) — the ONLY
+      // tier that checks _ingest_suppression.json (master-plan D7).
+      const targetId = slugifyContactId(name);
+      const blocked = checkSuppressed(suppressionPath, targetId, name, email ? [email] : []);
+      if (blocked) {
+        return { tier: 'SUPPRESSED', tags: [], mailchimpEligible: false, registrant };
+      }
+      const junk = detectJunkName(name);
+      const existing = contacts.find((c) => c.id === targetId);
+      if (existing) {
+        // Existing id → merge only (append-only), don't rewrite scalar fields.
+        applyMerge(existing, junk.junk ? [...tags, 'auto-flagged:junk-name', `junk-name-reason:${junk.reason}`] : tags);
+        contactId = existing.id;
+      } else {
+        const contact = newContactDefaults(targetId);
+        contact.name = name;
+        if (junk.junk) {
+          contact.category = 'other';
+          contact.priority = 'low';
+          tags.push('auto-flagged:junk-name', `junk-name-reason:${junk.reason}`);
+        } else {
+          contact.category = 'prospect';
+          contact.priority = 'normal';
+        }
+        applyMerge(contact, tags);
+        contacts.push(contact);
+        contactId = contact.id;
+      }
+    }
+
+    // CAS: commit only if nobody rewrote the file between our read and now (or this
+    // is the final allowed pass).
+    const rawNow = readFileSync(contactsPath, 'utf-8');
+    if (rawNow === rawBefore || attempt >= 1) {
+      data.contacts = contacts;
+      atomicWriteSync(contactsPath, pythonJsonDump(data));
+      return { tier: classification.tier, contactId, tags, mailchimpEligible: !!email, registrant };
+    }
+    // else: a concurrent writer changed the file — loop once against the fresh snapshot.
   }
-
-  data.contacts = contacts;
-  atomicWriteSync(contactsPath, pythonJsonDump(data));
-
-  return {
-    tier: classification.tier,
-    contactId,
-    tags,
-    mailchimpEligible: !!email,
-    registrant,
-  };
 }
 
 // ── Mailchimp mirror (sync.py:281-334, single-candidate form) ───────────────

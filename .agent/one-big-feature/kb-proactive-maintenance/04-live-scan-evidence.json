@@ -1,0 +1,101 @@
+{
+  "ts": "2026-08-04T07:46:09Z",
+  "counts": {
+    "dead_wikilink": 365,
+    "orphan": 5,
+    "junk": 111,
+    "exact_dup": 13,
+    "freshness": 8,
+    "read_canary": 0
+  },
+  "green": true,
+  "total": 502,
+  "samples": {
+    "dead_wikilink": [
+      {
+        "route": "auto-pr",
+        "path": "wiki/tools/automation-architecture.md",
+        "detail": "[[clearpath]] resolves to no file"
+      },
+      {
+        "route": "auto-pr",
+        "path": "wiki/processes/content-engine.md",
+        "detail": "[[clearpath]] resolves to no file"
+      },
+      {
+        "route": "auto-pr",
+        "path": "wiki/processes/meeting-to-proposal.md",
+        "detail": "[[clearpath]] resolves to no file"
+      }
+    ],
+    "orphan": [
+      {
+        "route": "auto-pr",
+        "path": "wiki/agents/templates/IDENTITY.md",
+        "detail": "_master-index.md links wiki/agents/templates/IDENTITY.md which no longer exists"
+      },
+      {
+        "route": "auto-pr",
+        "path": "wiki/agents/templates/SOUL.md",
+        "detail": "_master-index.md links wiki/agents/templates/SOUL.md which no longer exists"
+      },
+      {
+        "route": "auto-pr",
+        "path": "wiki/processes/ai-nerdout-(ltcg).md",
+        "detail": "wiki/processes/ai-nerdout-(ltcg).md is not listed in _master-index.md"
+      }
+    ],
+    "junk": [
+      {
+        "route": "bus-task",
+        "path": "wiki/.DS_Store",
+        "detail": "non-ingestible file (no-ext) inside a reconcile root"
+      },
+      {
+        "route": "bus-task",
+        "path": "wiki/.published-urls.json.bak3",
+        "detail": "non-ingestible file (.bak3) inside a reconcile root"
+      },
+      {
+        "route": "bus-task",
+        "path": "wiki/.published-urls.json.stale",
+        "detail": "non-ingestible file (.stale) inside a reconcile root"
+      }
+    ],
+    "exact_dup": [
+      {
+        "route": "bus-task",
+        "path": "raw/resources/reference/clearworks/MASTER-LAUNCH-PLAN.md",
+        "detail": "2 byte-identical files: raw/resources/reference/clearworks/MASTER-LAUNCH-PLAN.md, raw/resources/reference/clearworks/all-docs/MASTER-LAUNCH-"
+      },
+      {
+        "route": "bus-task",
+        "path": "raw/resources/reference/clearworks/all-docs/operational-automation-architecture.md",
+        "detail": "2 byte-identical files: raw/resources/reference/clearworks/all-docs/operational-automation-architecture.md, raw/resources/reference/clearwor"
+      },
+      {
+        "route": "bus-task",
+        "path": "raw/resources/reference/clearworks/DELIVERY-INDEX.md",
+        "detail": "2 byte-identical files: raw/resources/reference/clearworks/DELIVERY-INDEX.md, raw/resources/reference/clearworks/all-docs/DELIVERY-INDEX.md"
+      }
+    ],
+    "freshness": [
+      {
+        "route": "bus-task",
+        "path": "wiki/projects/agent-memory-frank2.md",
+        "detail": "raw source raw/areas/clearworks/agent-memory-frank2.md changed since article compiled"
+      },
+      {
+        "route": "bus-task",
+        "path": "wiki/projects/feedback-agents-claim-live-without-verifying-deploy.md",
+        "detail": "raw source raw/areas/clearworks/agent-memory/feedback_agents_claim_live_without_verifying_deploy.md changed since article compiled"
+      },
+      {
+        "route": "bus-task",
+        "path": "wiki/projects/feedback-delegate-gate-dispatch-hard-rule.md",
+        "detail": "raw source raw/areas/clearworks/agent-memory/feedback_delegate_gate_dispatch_hard_rule.md changed since article compiled"
+      }
+    ],
+    "read_canary": []
+  }
+}

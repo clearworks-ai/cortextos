@@ -227,7 +227,7 @@ describe('AgentProcess opencode runtime', () => {
     expect(sendMessage).toHaveBeenCalledWith('12345', 'Agent opencode-agent is back online');
   });
 
-  it('sends daemon msg1 and daemon msg2 for opencode handoff restart', async () => {
+  it('sends daemon msg1 and relies on the handoff prompt for opencode msg2', async () => {
     const handoffDocPath = '/tmp/opencode-handoff.md';
     fsMocks.existsSync.mockImplementation((path: string) =>
       typeof path === 'string'
@@ -253,14 +253,50 @@ describe('AgentProcess opencode runtime', () => {
 
     const prompt = mockOpencodePty.spawn.mock.calls[0]?.[1] ?? '';
     expect(prompt).toContain('CONTEXT HANDOFF');
-    expect(prompt).not.toContain('VERY FIRST tool call MUST be a Bash call running');
-    expect(prompt).not.toContain("cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID 'back");
+    expect(prompt).toContain('VERY FIRST tool call MUST be a Bash call running');
+    expect(prompt).toContain("cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID 'back");
     // msg1: hook parity — codex/opencode don't run Claude Code hooks, so the
     // daemon emits the planned-restart lifecycle notif itself.
     expect(sendMessage).toHaveBeenCalledWith('12345', '🔄 opencode-agent restarted (planned): context handoff at 92%');
-    expect(sendMessage).toHaveBeenCalledWith('12345', 'Agent opencode-agent is back online (context handoff)');
+    // msg2: opencode receives the same prompt-level first-action requirement as
+    // codex (self-sent), so the daemon must not synthesize a generic handoff ping.
+    expect(sendMessage).not.toHaveBeenCalledWith('12345', 'Agent opencode-agent is back online (context handoff)');
     expect(sendMessage).not.toHaveBeenCalledWith('12345', 'Agent opencode-agent is back online');
-    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('never reads or writes a .last-back-ping marker on handoff restart (back-ping triad removed)', async () => {
+    const handoffDocPath = '/tmp/opencode-handoff-noping.md';
+    fsMocks.existsSync.mockImplementation((path: string) =>
+      typeof path === 'string'
+      && (path.endsWith('.handoff-doc-path')
+        || path.endsWith('.restart-planned')
+        || path === handoffDocPath),
+    );
+    fsMocks.readFileSync.mockImplementation((path: string) =>
+      typeof path === 'string' && path.endsWith('.restart-planned')
+        ? 'context handoff at 90%\n'
+        : handoffDocPath,
+    );
+
+    const ap = new AgentProcess('opencode-agent', mockEnv, {
+      runtime: 'opencode',
+      emit_system_telegram_pings: true,
+    });
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    const api = { sendChatAction: vi.fn().mockResolvedValue(undefined), sendMessage };
+
+    ap.setTelegramHandle(api as any, '12345');
+    await ap.start();
+
+    const readBackPing = fsMocks.readFileSync.mock.calls.some(
+      (c) => typeof c[0] === 'string' && c[0].includes('.last-back-ping'),
+    );
+    const wroteBackPing = fsMocks.writeFileSync.mock.calls.some(
+      (c) => typeof c[0] === 'string' && c[0].includes('.last-back-ping'),
+    );
+    expect(readBackPing).toBe(false);
+    expect(wroteBackPing).toBe(false);
   });
 
   it('sends msg1 (planned-restart) but NOT msg2 on codex handoff restart (codex self-sends its own back-online)', async () => {

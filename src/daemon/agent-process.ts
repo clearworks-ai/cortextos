@@ -14,12 +14,6 @@ import { getOverdueReminders } from '../bus/reminders.js';
 import { resolvePaths } from '../utils/paths.js';
 import { logEvent } from '../bus/event.js';
 import { loadBuffer } from './conversation-buffer.js';
-import {
-  HANDOFF_BACKPING_SUPPRESS_MS,
-  readLastBackPingMs,
-  shouldSuppressBackPing,
-  writeLastBackPingMs,
-} from './handoff-backping.js';
 import { ensureMissionAnchorFromBuffer } from './restart-context.js';
 import { readEnabledAgentsMap } from '../bus/enabled-agents-io.js';
 
@@ -1091,27 +1085,12 @@ export class AgentProcess {
     if (!systemPingsEnabled && shouldPromptTelegram) {
       this.logSystemPingSuppressed(isHandoffRestart ? 'handoff_back_ping' : 'online_message');
     }
-    const emitHandoffBackPing = isHandoffRestart
-      && systemPingsEnabled
-      && shouldPromptTelegram
-      && this.config.runtime !== 'opencode'
-      && !this.isHandoffBackPingSuppressed();
-    if (emitHandoffBackPing) {
-      writeLastBackPingMs(this.env.ctxRoot, this.name, Date.now());
-    }
-    const handoffUxOverride = emitHandoffBackPing
+    const handoffUxOverride = isHandoffRestart && systemPingsEnabled && shouldPromptTelegram
       ? ' HANDOFF UX: This is a context handoff restart — your memory is intact via the handoff document, but the VERBATIM LIVE TAIL below is more authoritative than the doc. If the handoff document conflicts with the newest inbound message, the newest inbound message wins. CRITICAL: After reading the handoff document and the live tail, your VERY FIRST tool call MUST be a Bash call running: cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID \'back — [what you were just working on]\' — replace the brackets with one brief plain-English sentence about your current state derived from the handoff doc plus the newest inbound message, with the newest inbound message winning. Do this BEFORE running heartbeat, BEFORE any other tool call. No cron IDs, no status report, no cold-boot phrasing. Do NOT send "Booting up... one moment" (skip AGENTS.md step 1 entirely).'
       : '';
-    const emitOnlineMessage = !isHandoffRestart
-      && systemPingsEnabled
-      && shouldPromptTelegram
-      && !this.isHandoffBackPingSuppressed();
-    if (emitOnlineMessage) {
-      writeLastBackPingMs(this.env.ctxRoot, this.name, Date.now());
-    }
-    const onlineMessage = emitOnlineMessage
-      ? ' Send a Telegram message to the user saying you are back online.'
-      : '';
+    const onlineMessage = isHandoffRestart || !systemPingsEnabled || !shouldPromptTelegram
+      ? ''
+      : ' Send a Telegram message to the user saying you are back online.';
     return `You are starting a new session. Current UTC time: ${nowUtc}. Read AGENTS.md and all bootstrap files listed there. External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${reminderBlock}${deliverablesBlock}${missionBlock}${handoffBlock}${liveTailBlock}${handoffUxOverride}${onlineMessage}${onboardingAppend}`;
   }
 
@@ -1133,13 +1112,7 @@ export class AgentProcess {
     if (!systemPingsEnabled && shouldPromptTelegram) {
       this.logSystemPingSuppressed('continue_online_message');
     }
-    const emitOnlineMessage = systemPingsEnabled
-      && shouldPromptTelegram
-      && !this.isHandoffBackPingSuppressed();
-    if (emitOnlineMessage) {
-      writeLastBackPingMs(this.env.ctxRoot, this.name, Date.now());
-    }
-    const onlineMessage = emitOnlineMessage
+    const onlineMessage = systemPingsEnabled && shouldPromptTelegram
       ? ' After checking inbox, send a Telegram message to the user saying you are back online.'
       : '';
     return `SESSION CONTINUATION: Your CLI process was restarted with --continue to reload configs. Current UTC time: ${nowUtc}. Your full conversation history is preserved — AGENTS.md, bootstrap files, your skill list and tool registry are ALREADY in context. Do NOT re-read AGENTS.md or bootstrap files, and do NOT re-run list-skills or list-agents, unless you have specific reason to believe they changed since the last restart (re-reading them every restart is a top cause of context bloat). External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${staleReadBlock}${reminderBlock}${deliverablesBlock}${missionBlock}${liveTailBlock} Check inbox. Resume normal operations.${onlineMessage}`;
@@ -1211,32 +1184,6 @@ export class AgentProcess {
     return { missionBlock, liveTailBlock };
   }
 
-  /** epoch ms of the newest inbound (sender != self) buffer message, or null. */
-  private newestInboundMessageMs(): number | null {
-    try {
-      const { verbatim } = loadBuffer(this.env.ctxRoot, this.name);
-      let newest: number | null = null;
-      for (const e of verbatim) {
-        if (e.sender === this.name) continue;
-        const t = Date.parse(e.ts);
-        if (Number.isFinite(t) && (newest === null || t > newest)) newest = t;
-      }
-      return newest;
-    } catch {
-      return null;
-    }
-  }
-
-  /** True when the handoff back-ping should be skipped this restart. */
-  private isHandoffBackPingSuppressed(): boolean {
-    return shouldSuppressBackPing({
-      lastPingMs: readLastBackPingMs(this.env.ctxRoot, this.name),
-      nowMs: Date.now(),
-      newestInboundMs: this.newestInboundMessageMs(),
-      windowMs: HANDOFF_BACKPING_SUPPRESS_MS,
-    });
-  }
-
   private normalizePromptText(text: string, maxChars: number): string {
     const normalized = text.replace(/\s+/g, ' ').trim();
     if (normalized.length <= maxChars) return normalized;
@@ -1266,8 +1213,7 @@ export class AgentProcess {
   /**
    * Per-agent opt-IN gate for system-status Telegram pings (restart back/online
    * ping; the compaction notice checks the same flag in hook-compact-telegram).
-   * Default absent/false = silent. Evaluated BEFORE the PR #108 dup-suppressor:
-   * a gated-off agent never consults or writes the back-ping marker.
+   * Default absent/false = silent. A gated-off agent emits no restart ping.
    */
   private systemPingsEnabled(): boolean {
     return this.config.emit_system_telegram_pings === true;
@@ -1394,15 +1340,12 @@ export class AgentProcess {
       // msg1: planned-restart lifecycle notif, hook parity for runtimes without
       // Claude Code hooks. Both codex and opencode were missing this.
       send(this.buildPlannedRestartNotification());
-      // msg2: codex self-sends its own "back — ..." via the handoff boot prompt
-      // (its runtime honors the prompt-level first-action requirement). opencode
-      // does NOT reliably honor a prompt-level first-action override, so the
-      // daemon emits the back-online substitute for opencode directly (gated by
-      // the same back-ping dup-suppressor as the prompt path).
-      if (this.config.runtime === 'opencode' && !this.isHandoffBackPingSuppressed()) {
-        writeLastBackPingMs(this.env.ctxRoot, this.name, Date.now());
-        send(`Agent ${this.name} is back online (context handoff)`);
-      }
+      // msg2 ("back — ...") is self-sent by the agent via the handoff boot prompt
+      // (agent-process.ts buildStartupPrompt handoffUxOverride) for BOTH codex and
+      // opencode — opencode now reliably honors it. The daemon used to send an
+      // "Agent X is back online (context handoff)" substitute for opencode, but
+      // that produced a redundant 3rd message on top of the self-sent "back —".
+      // Removed: msg1 (daemon) + msg2 (agent self-send) = clean 2-message pattern.
       return;
     }
 

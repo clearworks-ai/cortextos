@@ -105,23 +105,21 @@ describe('stage-emit main() — phase-sequencing gate', () => {
     expect(out).toContain('"stage":"research"');
   });
 
-  it('mark-phase-complete unblocks the dispatch and derives the default lock path', () => {
+  it('the removed --mark-phase-complete override cannot unblock a phase dispatch', () => {
     emitResearch('p2-gate-test');
+    // The flag no longer marks anything — it falls through to the normal emit
+    // path, which requires --slug/--stage and fails closed. No lock is written.
     const mark = run([
       '--mark-phase-complete', '1',
       '--by', 'larry',
       '--ledger', ledgerPath,
     ]);
-    expect(mark.code).toBe(0);
-    const state = JSON.parse(mark.out) as { completed_phases: number[]; history: Array<{ by: string }> };
-    expect(state.completed_phases).toEqual([1]);
-    expect(state.history.some((h) => h.by === 'larry')).toBe(true);
+    expect(mark.code).not.toBe(0);
+    expect(existsSync(join(dirname(ledgerPath), 'build-phase-lock.json'))).toBe(false);
 
-    // default lock path derives next to the ledger
-    expect(existsSync(join(dirname(ledgerPath), 'build-phase-lock.json'))).toBe(true);
-
-    const { code } = run(verifyArgs('p2-gate-test'));
-    expect(code).toBe(0);
+    // p2 dispatch stays blocked — the only way to satisfy phase 1 is a real
+    // p1- true-verify row, which does not exist here.
+    expect(run(verifyArgs('p2-gate-test')).code).toBe(1);
   });
 
   it('leaves a non-phase slug untouched and creates no lock file', () => {
@@ -131,36 +129,9 @@ describe('stage-emit main() — phase-sequencing gate', () => {
     expect(existsSync(join(dirname(ledgerPath), 'build-phase-lock.json'))).toBe(false);
   });
 
-  it('rejects invalid or missing --mark-phase-complete values with exit 5', () => {
-    const zero = run(['--mark-phase-complete', '0', '--ledger', ledgerPath]);
-    expect(zero.code).toBe(5);
-    expect(zero.out).toContain('Invalid');
-
-    const abc = run(['--mark-phase-complete', 'abc', '--ledger', ledgerPath]);
-    expect(abc.code).toBe(5);
-    expect(abc.out).toContain('Invalid');
-
-    // bare flag (no value) → Missing required → exit 5
-    const bare = run(['--mark-phase-complete', '--ledger', ledgerPath]);
-    expect(bare.code).toBe(5);
-  });
-
-  it('honors an explicit --phase-lock override on both branches', () => {
-    emitResearch('p2-gate-test');
-    const altLock = join(root, 'alt-lock.json');
-    const mark = run([
-      '--mark-phase-complete', '1',
-      '--by', 'larry',
-      '--ledger', ledgerPath,
-      '--phase-lock', altLock,
-    ]);
-    expect(mark.code).toBe(0);
-    expect(existsSync(altLock)).toBe(true);
-    // default lock path NOT created (override honored)
-    expect(existsSync(join(dirname(ledgerPath), 'build-phase-lock.json'))).toBe(false);
-
-    // verify with the same override passes; without it (default path) still blocks
-    expect(run(verifyArgs('p2-gate-test', ['--phase-lock', altLock])).code).toBe(0);
-    expect(run(verifyArgs('p2-gate-test')).code).toBe(1);
-  });
+  // Removed 2026-08-03 with the --mark-phase-complete flag:
+  //  - 'rejects invalid --mark-phase-complete values with exit 5'
+  //  - 'honors an explicit --phase-lock override on both branches' (mark branch)
+  // Phase completion is now earned only by a p<M>- true-verify row; there is no
+  // mark branch and no completed_phases/lock override to exercise.
 });

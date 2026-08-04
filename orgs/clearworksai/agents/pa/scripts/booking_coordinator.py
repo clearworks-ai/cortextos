@@ -11,10 +11,9 @@ proposals are computed from ``gws calendar freebusy query`` output; the Gmail
 draft is written via ``gws gmail +draft`` (never ``+send``); a tentative hold is
 validated via ``gws calendar +insert --dry-run`` (validate only, never inserts).
 
-ZCAL: the design is "send the zcal link + consume the zcal webhook". This helper
-never calls a slot-create API — it appends the public ZCAL link to every slot
-proposal as the one-click path, and the tracker row is closed by an inbound
-zcal/meeting-booked signal (calendar delta or Fireflies), not by a poll here.
+Booking is 100% Google-Workspace-native: proposals offer concrete freebusy-backed
+slots and the tracker row is closed by an inbound signal (calendar delta or Fireflies),
+never by an external booking-page link or a poll here.
 
 Subcommands (all print JSON to stdout, exit 0 on success):
   classify        stdin/--payload emails -> per-message intent bucket + tracker candidate rows
@@ -39,7 +38,6 @@ from typing import Any, Iterable
 SCRIPT_PATH = Path(__file__).resolve()
 AGENT_DIR = SCRIPT_PATH.parent.parent
 DEFAULT_TRACKER = AGENT_DIR / "state" / "booking-tracker.json"
-ZCAL_LINK = os.environ.get("ZCAL_BOOKING_LINK", "https://zcal.co/josh-clearworksai/30min")
 NO_SHOW_MINUTES = 45
 MAX_RECOVERY_TOUCHES = 2
 
@@ -241,7 +239,6 @@ def propose_plan(
     window_start: datetime,
     window_end: datetime,
     tz_label: str = "PT",
-    zcal_link: str = ZCAL_LINK,
     voice: str = "",
 ) -> dict[str, Any]:
     """Build a drafts-only slot-proposal plan for one `proposed` row."""
@@ -253,7 +250,7 @@ def propose_plan(
     body = (
         f"Great — happy to grab time.\n\n"
         f"A few that work on my end:\n{slot_lines}\n\n"
-        f"Reply with whichever's easiest, or grab any open slot here: {zcal_link}"
+        f"Reply with whichever's easiest and I'll send an invite."
     )
     to = row.get("prospect")
     thread = row.get("thread_id")
@@ -268,7 +265,6 @@ def propose_plan(
         "slots": slots,
         "draft": {"to": to, "thread_id": thread, "body": body},
         "draft_argv": draft_argv,
-        "zcal_link": zcal_link,
         "send": False,  # invariant: this worker never sends
         # tentative hold is *validated* only, never inserted:
         "hold_validate_argv": [

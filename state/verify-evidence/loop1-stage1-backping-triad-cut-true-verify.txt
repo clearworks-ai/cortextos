@@ -1,0 +1,46 @@
+TRUE-VERIFY EVIDENCE — loop1-stage1-backping-triad-cut (PR #285)
+Reviewer session: 8fba1c38-716e-45ba-bb95-6289455d6441
+Worktree: review-285-loop1 @ 2d2b46798038b3467b00838558f5a1a8e36572f0
+Base: origin/main ; Upstream ref: upstream/main
+
+=== BUILD ===
+npm run build       -> Build success in 117ms (GREEN)
+npx tsc --noEmit    -> exit 0 (GREEN)
+
+=== DAEMON TEST SUITE (npx vitest run tests/unit/daemon/) ===
+Test Files  1 failed | 30 passed (31)
+     Tests  1 failed | 488 passed (489)
+
+Sole failure: tests/unit/daemon/rebaseline-runtime-gates.test.ts
+  > D5(a) fd-leak gate (darwin-only)
+  AssertionError: node-pty spawn-helper prebuild is missing or not executable —
+  pty spawn cannot be exercised; fd-leak gate would be a false pass otherwise.
+Cause: node_modules/node-pty/build/Release/spawn-helper MISSING on disk.
+Environmental / infra (pty prebuild) — NOT related to this diff (diff touches only
+handoff prompt strings + deleted handoff-backping.ts + opencode test; zero code in the
+pty spawn path). Pre-existing env failure set (node-pty prebuild).
+
+PR-changed tests: tests/unit/daemon/agent-process-opencode.test.ts -> 12 passed (GREEN).
+
+=== SCOPE ===
+git diff origin/main...HEAD --name-only:
+  src/daemon/agent-process.ts
+  src/daemon/handoff-backping.ts   (deleted)
+  tests/unit/daemon/agent-process-opencode.test.ts
+
+=== CONVERGENCE ===
+handoff-backping.ts ABSENT upstream (git cat-file -e upstream/main:... -> ABSENT).
+Residual back-ping refs under src/ = 0.
+back-ping token count: HEAD:agent-process.ts = 0 ; upstream/main:agent-process.ts = 0.
+
+=== KEEP FIXES (none dropped) ===
+078a9a3 systemPings gate PRESERVED (emit_system_telegram_pings === true).
+#242 clean-exit + startup-failure guard PRESENT.
+isPlannedRestart handleExit exemption PRESENT.
+single-flight (inFlightStart) PRESENT.
+disabled-resurrection guard PRESENT.
+mission-anchor / live-tail PRESENT.
+pty-host PRESENT.
+fast-checker UNTOUCHED by PR.
+
+VERDICT: PASS. 08-01 HALT-crisis root not re-created.

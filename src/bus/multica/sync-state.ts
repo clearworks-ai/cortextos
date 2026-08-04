@@ -64,13 +64,21 @@ export function createSyncStateStore(filePath = defaultSyncStateFilePath()): Syn
 }
 
 function defaultSyncStateFilePath(): string {
+  return join(defaultMulticaBridgeDir(), 'sync-state.json');
+}
+
+/**
+ * The org-global multica-bridge directory. Shared across all agents (not
+ * per-agent), so it is the correct anchor for a cross-agent mirror lock keyed
+ * on a task id.
+ */
+export function defaultMulticaBridgeDir(): string {
   return join(
     process.env.CTX_ROOT ?? process.cwd(),
     'orgs',
     'clearworksai',
     'state',
     'multica-bridge',
-    'sync-state.json',
   );
 }
 

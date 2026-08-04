@@ -86,8 +86,9 @@ class ProposeDraftTests(unittest.TestCase):
                 datetime(2026, 8, 10, 9, tzinfo=UTC) <= start < datetime(2026, 8, 10, 10, tzinfo=UTC),
                 f"slot {slot['start']} overlaps busy block",
             )
-        # Draft body carries the zcal link (send-the-link, not a slot-create API).
-        self.assertIn("zcal.co", plan["draft"]["body"])
+        # Draft offers concrete freebusy-backed slots — GWS-native, no external
+        # booking-page link.
+        self.assertIn("A few that work on my end", plan["draft"]["body"])
         # Tentative hold is validate-only (dry-run), never a real insert.
         self.assertIn("--dry-run", plan["hold_validate_argv"])
 

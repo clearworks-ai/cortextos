@@ -118,7 +118,12 @@ function mockStdoutLog(content: string): void {
 /** Assert the exit was classified as a charged CRASH (upstream behavior). */
 function expectCrashPath(ap: InstanceType<typeof AgentProcess>): void {
   expect(fsMocks.appendFileSync).toHaveBeenCalled();
-  const logLine = String(fsMocks.appendFileSync.mock.calls[0][1]);
+  // A real crash also writes a stderr-detail line to crashes.log now; the
+  // restarts.log CRASH line (its existing classification behavior) is unchanged.
+  const restartsCall = fsMocks.appendFileSync.mock.calls
+    .find((c: unknown[]) => String(c[0]).endsWith('/restarts.log'));
+  expect(restartsCall).toBeDefined();
+  const logLine = String(restartsCall![1]);
   expect(logLine).not.toContain('RATE_LIMIT');
   expect(logLine).toContain('CRASH');
   expect(ap.getStatus().crashCount).toBe(1);

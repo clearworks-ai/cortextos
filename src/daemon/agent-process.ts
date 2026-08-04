@@ -961,6 +961,15 @@ export class AgentProcess {
       return;
     }
 
+    // OBSERVABILITY FIX: every path below this point is a genuine crash
+    // (nonzero exit that survived the shutdown / disabled / planned-restart /
+    // stop / image-poison gates above). `recentOutput` holds the stderr/error
+    // tail — but historically only `exit_code=N` reached restarts.log, and
+    // crashes.log's `reason=` stayed empty because the SessionEnd hook that
+    // writes it cannot run when a hard exit_code=1 kills the process. Persist
+    // the captured tail so a future crash carries a real, greppable reason.
+    this.appendCrashDetailToCrashesLog(exitCode, recentOutput);
+
     // CrashLoopPauser (instar-inspired): if a sliding window is configured,
     // check whether the agent is crash-looping before falling through to
     // the legacy daily counter. The window is a more precise signal than
@@ -1511,6 +1520,47 @@ export class AgentProcess {
       appendFileSync(join(logDir, 'restarts.log'), logLine, 'utf-8');
     } catch {
       /* swallow — never break crash recovery on a logging failure */
+    }
+  }
+
+  /**
+   * Reduce a raw PTY-output tail to a single greppable crash reason: strip ANSI /
+   * control bytes, prefer the last error-signature line, else the last non-empty
+   * line, cap length. Returns 'no_stderr_captured' when nothing usable remains —
+   * that is itself diagnostic (the crash produced no readable output).
+   */
+  private extractCrashReason(recentOutput: string): string {
+    const cleaned = (recentOutput || '')
+      .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')        // CSI escape sequences
+      .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '') // OSC sequences
+      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');   // other control chars
+    const lines = cleaned.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
+    if (lines.length === 0) return 'no_stderr_captured';
+    const signatureRe = /(error|exception|traceback|fatal|panic|throw|api error|econn|enoent|eacces|unhandled|rejection|assert|segfault|killed)/i;
+    const errorLines = lines.filter((l) => signatureRe.test(l));
+    const picked = errorLines.length > 0 ? errorLines[errorLines.length - 1] : lines[lines.length - 1];
+    // Field-safe single line; capped so a runaway stack trace can't bloat the log.
+    const reason = picked.replace(/\s+/g, ' ').slice(0, 1000);
+    return reason.length > 0 ? reason : 'no_stderr_captured';
+  }
+
+  /**
+   * Write one crashes.log line carrying the actual crash reason on a
+   * daemon-observed hard exit. `reason=` is placed LAST (free-text, may contain
+   * spaces) so the leading key=value fields stay parseable; `source=daemon-exit`
+   * distinguishes these from the SessionEnd-hook lines (which carry reason=none
+   * on a hard crash). Best-effort — never breaks crash recovery.
+   */
+  private appendCrashDetailToCrashesLog(exitCode: number, recentOutput: string): void {
+    try {
+      const logDir = join(this.env.ctxRoot, 'logs', this.name);
+      ensureDir(logDir);
+      const timestamp = new Date().toISOString();
+      const reason = this.extractCrashReason(recentOutput);
+      const logLine = `${timestamp} type=crash exit_code=${exitCode} session=daemon source=daemon-exit reason=${reason}\n`;
+      appendFileSync(join(logDir, 'crashes.log'), logLine, 'utf-8');
+    } catch {
+      /* swallow — observability must never break crash recovery */
     }
   }
 

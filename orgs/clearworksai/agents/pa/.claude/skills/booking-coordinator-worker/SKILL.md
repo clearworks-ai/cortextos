@@ -136,54 +136,94 @@ calendar event is created — and it MUST carry a working Zoom link, never a bar
 
 **Order is mandatory: create the Zoom meeting FIRST, then insert the calendar event.**
 
+Run this ONE block verbatim. Fill the 5 UPPERCASE shell vars first (from the approved
+booking + tracker row). The Zoom password stays entirely in-process — it flows straight
+into the calendar `--description` and is NEVER printed to stdout, a log, the bus, or
+Telegram. On Zoom failure the block writes NO calendar event and exits `3`, which drives
+the Lane-D escalation immediately below.
+
 ```bash
 cd "$AGENT_DIR"
 set -a; source /Users/joshweiss/code/cortextos/orgs/clearworksai/secrets.env 2>/dev/null; set +a
 
-# 1) Create the real Zoom meeting. Prints join_url + meeting_id to stdout (NOT the
-#    password — that goes only into the calendar description, never to logs/bus/Telegram).
-ZOOM_JSON="$(python3 scripts/zoom_meeting.py \
-  --topic "<meeting subject>" \
-  --start "<confirmed slot ISO8601 UTC>" \
-  --duration 30 \
-  --host "${BOOKING_HOST_EMAIL:-josh@clearworks.ai}" 2>/tmp/zoom-err.txt)"
+# Fill these from the approved booking + the tracker row for this prospect:
+export BK_SUBJECT="Call w/ <prospect>"
+export BK_START="<confirmed slot ISO8601 UTC, e.g. 2026-08-10T15:00:00Z>"
+export BK_DURATION=30
+export BK_HOST="${BOOKING_HOST_EMAIL:-josh@clearworks.ai}"
+export BK_PROSPECT="<prospect>"
+export BK_TRACKER="$TRACKER"
+export BK_THREAD="<gmail-thread-id for this row, or empty>"
+
+# Create the Zoom meeting AND insert the real calendar event in one in-process step so
+# the password never touches stdout/logs. Prints only join_url + meeting_id on success.
+python3 - <<'PY'
+import json, os, subprocess, sys, tempfile
+sys.path.insert(0, "scripts")
+from zoom_meeting import create_zoom_meeting, ZoomMeetingCreateError
+
+subject  = os.environ["BK_SUBJECT"]
+start    = os.environ["BK_START"]
+duration = int(os.environ["BK_DURATION"])
+host     = os.environ["BK_HOST"]
+tracker  = os.environ["BK_TRACKER"]
+prospect = os.environ.get("BK_PROSPECT", "")
+
+try:
+    m = create_zoom_meeting(subject, start, duration, host)
+except ZoomMeetingCreateError as e:
+    # Loud, typed failure (e.g. 401/403 scope-denied) — surface code/message for Lane D,
+    # create NO calendar event. Exit 3 => the bash escalation block below runs.
+    with open("/tmp/zoom-err.txt", "w") as f:
+        f.write(f"status={e.status} code={e.code} {e}")
+    print(f"ZOOM_FAIL {e}", file=sys.stderr)
+    sys.exit(3)
+
+# Real event: join_url in BOTH location (one-click affordance) and description (full detail
+# incl. the in-process password — never logged).
+description = (
+    f"Join Zoom Meeting: {m['join_url']}\n"
+    f"Meeting ID: {m['meeting_id']}\n"
+    f"Passcode: {m['password']}"
+)
+subprocess.run(
+    ["gws", "calendar", "+insert",
+     "--summary", subject, "--start", start, "--duration", str(duration),
+     "--location", m["join_url"], "--description", description],
+    check=True,
+)
+
+# Atomic tracker update: state->booked + zoom_join_url + zoom_meeting_id (NOT the password).
+data = json.load(open(tracker))
+for row in data.get("rows", []):
+    if row.get("prospect") == prospect and row.get("state") in ("proposed", None):
+        row["state"] = "booked"
+        row["zoom_join_url"] = m["join_url"]
+        row["zoom_meeting_id"] = m["meeting_id"]
+        break
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(tracker) or ".")
+with os.fdopen(fd, "w") as f:
+    json.dump(data, f, indent=2)
+os.replace(tmp, tracker)
+
+print(json.dumps({"zoom_join_url": m["join_url"], "zoom_meeting_id": m["meeting_id"]}))
+PY
 ZOOM_RC=$?
+
+# Lane-D escalation: Zoom create failed => NO bare event was inserted; stop this booking.
+if [ "$ZOOM_RC" -ne 0 ]; then
+  ERR="$(tail -1 /tmp/zoom-err.txt 2>/dev/null)"
+  cortextos bus send-telegram 6690120787 "Booking for $BK_PROSPECT at $BK_START: Zoom meeting creation FAILED ($ERR). Approved calendar invite NOT sent — needs a manual Zoom link or a Zoom scope fix before I create the event." 2>/dev/null || true
+  cortextos bus create-approval "Booking blocked: Zoom create failed for $BK_PROSPECT" --detail "Slot approved but Zoom meeting creation failed: $ERR. No calendar event was created (no bare-event fallback). Resolve the Zoom issue, then re-run confirm." 2>/dev/null || true
+  # Tracker row stays in `proposed` (never advanced to booked; zoom_* stay null).
+fi
 ```
-
-- **On success (`ZOOM_RC == 0`):** parse `join_url` + `meeting_id` from `ZOOM_JSON`; the
-  password is not printed — re-fetch it into the description only if needed by invoking
-  `zoom_meeting.create_zoom_meeting` from a small python step that writes the full event
-  body, OR pass the password through in-process. Then create the REAL event with the join
-  link embedded in BOTH `location` and `description`:
-  ```bash
-  gws calendar +insert \
-    --summary "<meeting subject>" \
-    --start "<confirmed slot ISO8601 UTC>" \
-    --duration 30 \
-    --location "<join_url>" \
-    --description "Join Zoom Meeting: <join_url>
-  Meeting ID: <meeting_id>
-  Passcode: <password>"
-  ```
-  `location = join_url` renders as the one-click "join" affordance most calendar UIs
-  show; `description` carries the full join details. Then update the tracker row:
-  `state → booked`, `zoom_join_url = <join_url>`, `zoom_meeting_id = <meeting_id>`,
-  written atomically (read JSON, set fields, write to a temp file, `mv` over the
-  original — never hand-edit in place).
-
-- **On failure (`ZOOM_RC != 0`, i.e. `ZoomMeetingCreateError`):** DO NOT insert a bare
-  calendar event. The invite without a working link is worse than no invite. Escalate to
-  Lane D and stop this booking:
-  ```bash
-  ERR="$(cat /tmp/zoom-err.txt | tail -1)"
-  cortextos bus send-telegram 6690120787 "Booking for <prospect> at <slot>: Zoom meeting creation FAILED ($ERR). Approved calendar invite NOT sent — needs a manual Zoom link or a Zoom scope fix before I create the event." 2>/dev/null || true
-  cortextos bus create-approval "Booking blocked: Zoom create failed for <prospect>" --detail "Slot approved but Zoom meeting creation failed: $ERR. No calendar event was created (no bare-event fallback). Resolve the Zoom issue, then re-run confirm." 2>/dev/null || true
-  ```
-  Leave the tracker row in `proposed` (do not advance to `booked`; `zoom_*` stay null).
 
 A single `ZoomMeetingCreateError` typed failure (e.g. a 401/403 scope-denied) is loud
 and distinguishable from a transient network error — the escalation message carries
-Zoom's own code/message so Josh can tell a scope gap from a blip.
+Zoom's own code/message so Josh can tell a scope gap from a blip. `location = join_url`
+renders as the one-click "join" affordance most calendar UIs show; the full join details
+(incl. passcode) live only in the event `description`, never in any log.
 
 ---
 

@@ -43,7 +43,7 @@
       "name": "repo-health",
       "type": "recurring",
       "interval": "4h",
-      "prompt": "cortextos bus update-cron-fire repo-health --interval 4h 2>/dev/null; TASK_ID=$(cortextos bus create-task \"Cron: repo-health\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; REPO HEALTH CHECK \u2014 Check git log --oneline -5 for each repo (~/code/clearpath, ~/code/lifecycle-killer, ~/code/nonprofit-hub, ~/code/auditos). Check Railway deploy status if any recent commits. Report anomalies to Josh via Telegram 6690120787. If all healthy, skip silently. Format: *Repo Health \u2014 [date]* with bullet list of issues. SILENT-OK if all healthy."
+      "prompt": "cortextos bus update-cron-fire repo-health --interval 4h 2>/dev/null; TASK_ID=$(cortextos bus create-task \"Cron: repo-health\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; REPO HEALTH CHECK \u2014 Check git log --oneline -5 for each repo (~/code/clearpath, ~/code/lifecycle-killer [cxportal, active app, not deprecated]). Check Railway deploy status if any recent commits. Report anomalies to Josh via Telegram 6690120787. If all healthy, skip silently. Format: *Repo Health \u2014 [date]* with bullet list of issues. SILENT-OK if all healthy."
     },
     {
       "name": "uptime-check",
@@ -61,31 +61,31 @@
       "name": "test-status",
       "type": "recurring",
       "cron": "0 6 * * 1-5",
-      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: test-status\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire test-status --interval 24h 2>/dev/null; TEST STATUS \u2014 Run npm test in each active repo (~/code/clearpath, ~/code/lifecycle-killer, ~/code/nonprofit-hub, ~/code/auditos). Report failures to Josh immediately via Telegram 6690120787. If all tests pass, skip silently. For failures: diagnose root cause, draft fix proposal, present to Josh before applying. Log result via cortextos bus log-event action test_run info --meta '{\"repos\":3}'."
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: test-status\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire test-status --interval 24h 2>/dev/null; TEST STATUS \u2014 Run npm test in each active repo (~/code/clearpath, ~/code/lifecycle-killer [cxportal, active app]). Report failures to Josh immediately via Telegram 6690120787. If all tests pass, skip silently. For failures: diagnose root cause, draft fix proposal, present to Josh before applying. Log result via cortextos bus log-event action test_run info --meta '{\"repos\":3}'."
     },
     {
       "name": "release-coordinator",
       "type": "recurring",
       "cron": "0 17 * * 5",
-      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: release-coordinator\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire release-coordinator --interval 7d 2>/dev/null; FRIDAY RELEASE REVIEW \u2014 Check git log since Monday across all 3 repos (~/code/clearpath, ~/code/lifecycle-killer, ~/code/nonprofit-hub, ~/code/auditos). Summarize: what shipped this week, what is in progress, what is blocked. Check open PRs via gh pr list --state open for each repo. Send weekly engineering digest to Josh via Telegram 6690120787. Format: *Weekly Engineering Review \u2014 [week]* with per-repo status bullets."
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: release-coordinator\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire release-coordinator --interval 7d 2>/dev/null; FRIDAY RELEASE REVIEW \u2014 Check git log since Monday across active repos (~/code/clearpath, ~/code/lifecycle-killer [cxportal, active app]). Summarize: what shipped this week, what is in progress, what is blocked. Check open PRs via gh pr list --state open for each repo. Send weekly engineering digest to Josh via Telegram 6690120787. Format: *Weekly Engineering Review \u2014 [week]* with per-repo status bullets."
     },
     {
       "name": "playwright-coverage",
       "type": "recurring",
       "cron": "0 9 * * 2",
-      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: playwright-coverage\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire playwright-coverage --interval 7d 2>/dev/null; PLAYWRIGHT COVERAGE \u2014 Run Playwright test suites where available (~/code/clearpath, ~/code/lifecycle-killer). Extract pass rates and failing tests. Telegram to 6690120787: *Playwright Coverage \u2014 [date]* with pass rates per repo and any new failures. Propose coverage gaps if >3 features have failing tests. SILENT-OK if all passing."
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: playwright-coverage\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire playwright-coverage --interval 7d 2>/dev/null; PLAYWRIGHT COVERAGE \u2014 Run Playwright test suites where available (~/code/clearpath, ~/code/lifecycle-killer [cxportal, active app]). Extract pass rates and failing tests. Telegram to 6690120787: *Playwright Coverage \u2014 [date]* with pass rates per repo and any new failures. Propose coverage gaps if >3 features have failing tests. SILENT-OK if all passing."
     },
     {
       "name": "dependency-audit",
       "type": "recurring",
       "cron": "0 11 * * 4",
-      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: dependency-audit\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire dependency-audit --interval 7d 2>/dev/null; DEPENDENCY AUDIT \u2014 For each repo (~/code/clearpath, ~/code/lifecycle-killer, ~/code/nonprofit-hub, ~/code/auditos): (1) npm audit \u2014 flag high/critical vulnerabilities. (2) npm outdated \u2014 identify major version bumps. Telegram to 6690120787: *Dependency Audit \u2014 [date]* with critical vulnerabilities and recommended updates. For major version bumps: always ask Josh. For patch/minor: propose PR. SILENT-OK if no vulnerabilities and <5 outdated packages."
+      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: dependency-audit\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire dependency-audit --interval 7d 2>/dev/null; DEPENDENCY AUDIT \u2014 For each repo (~/code/clearpath, ~/code/lifecycle-killer [cxportal, active app]): (1) npm audit \u2014 flag high/critical vulnerabilities. (2) npm outdated \u2014 identify major version bumps. Telegram to 6690120787: *Dependency Audit \u2014 [date]* with critical vulnerabilities and recommended updates. For major version bumps: always ask Josh. For patch/minor: propose PR. SILENT-OK if no vulnerabilities and <5 outdated packages."
     },
     {
       "name": "pr-review-reminder",
       "type": "recurring",
       "interval": "8h",
-      "prompt": "cortextos bus update-cron-fire pr-review-reminder --interval 8h 2>/dev/null; TASK_ID=$(cortextos bus create-task \"Cron: pr-review-reminder\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; PR REVIEW REMINDER \u2014 Check open PRs via gh pr list --state open --repo clearworks-ai/clearpath, clearworks-ai/lifecycle-killer, clearworks-ai/nonprofit-hub, clearworks-ai/auditos. For PRs older than 4 hours: extract title, number, time pending. Telegram to 6690120787 ONLY if PRs pending >4h. Format: *Open PRs \u2014 [date]* with repo + PR title + time pending. SILENT-OK if all PRs <4h old or no open PRs."
+      "prompt": "cortextos bus update-cron-fire pr-review-reminder --interval 8h 2>/dev/null; TASK_ID=$(cortextos bus create-task \"Cron: pr-review-reminder\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; PR REVIEW REMINDER \u2014 Check open PRs via gh pr list --state open --repo clearworks-ai/clearpath, clearworks-ai/cxportal. For PRs older than 4 hours: extract title, number, time pending. Telegram to 6690120787 ONLY if PRs pending >4h. Format: *Open PRs \u2014 [date]* with repo + PR title + time pending. SILENT-OK if all PRs <4h old or no open PRs."
     },
     {
       "name": "usage-audit",

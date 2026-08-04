@@ -88,11 +88,13 @@ function makeIssueResponse(payload: MulticaPushPayload, issueId: string): Multic
 
 function createRecordingClient() {
   const createdTaskIds: string[] = [];
+  const createdPayloads: MulticaPushPayload[] = [];
   const updatedCalls: Array<{ issueId: string; busTaskId: string }> = [];
   const remoteIssues: MulticaIssue[] = [];
   const client: MulticaClient = {
     async createIssue(payload) {
       createdTaskIds.push(payload.bus_task_id);
+      createdPayloads.push(payload);
       const issueId = `created-${payload.bus_task_id}`;
       const issue = makeIssueResponse(payload, issueId);
       remoteIssues.push(issue);
@@ -110,7 +112,7 @@ function createRecordingClient() {
     },
   };
 
-  return { client, createdTaskIds, updatedCalls, remoteIssues };
+  return { client, createdTaskIds, createdPayloads, updatedCalls, remoteIssues };
 }
 
 function createFlakyStore(
@@ -509,5 +511,26 @@ describe('multica outbound push', () => {
     const finalLink = store.linkFor(task.id);
     expect(finalLink?.pending_create).toBeNull();
     expect(finalLink?.multica_issue_id).toBe('issue-99');
+  });
+
+  it('defaults provenance to meeting-pipeline for project=meeting-pipeline tasks and bus otherwise', async () => {
+    const { client, createdPayloads } = createRecordingClient();
+    const store = createSyncStateStore(join(testDir, 'sync-state.json'));
+
+    const pipelineTask = createOrderedTask(paths, 0, 'Pipeline-sourced task', {
+      project: 'meeting-pipeline',
+    });
+    const plainTask = createOrderedTask(paths, 1, 'Plain bus task');
+
+    // No provenanceFor option passed — the defaultProvenanceFor fallback must route.
+    const result = await runOutboundPush(paths, client, store, config);
+
+    expect(result.pushed_creates).toBe(2);
+    expect(result.errors).toBe(0);
+
+    const pipelinePayload = createdPayloads.find((p) => p.bus_task_id === pipelineTask.id);
+    const plainPayload = createdPayloads.find((p) => p.bus_task_id === plainTask.id);
+    expect(pipelinePayload?.provenance).toBe('meeting-pipeline');
+    expect(plainPayload?.provenance).toBe('bus');
   });
 });

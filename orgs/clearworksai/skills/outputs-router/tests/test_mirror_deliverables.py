@@ -452,5 +452,39 @@ def test_t11_plan_excludes_name_glob_files(temp_dir, monkeypatch):
     # These are distinct paths, no collision
 
 
+# Mirrors the real dirmap.json shape: an ext_in-restricted diagram rule immediately
+# followed by a catch-all sop rule sharing the same prefix.
+EXT_IN_DIRMAP = {
+    "client_home": "raw/areas/clearworks/clients",
+    "rules": [
+        {"prefix": "auditmaster/", "top_level_only": True, "ext_in": [".png", ".svg"], "type": "diagram"},
+        {"prefix": "auditmaster/", "top_level_only": True, "type": "sop"},
+    ],
+    "exclude": {"dir_parts": [], "name_globs": []},
+}
+
+
+def test_ext_in_md_falls_through_to_sop():
+    """A top-level .md must skip the .png/.svg diagram rule and hit the sop fallback.
+    Pre-fix (ext_in ignored) this returns the diagram rule and fails."""
+    rule = find_matching_rule("auditmaster/CRON-REGISTER-ROOTCAUSE.md", EXT_IN_DIRMAP)
+    assert rule is not None
+    assert rule["type"] == "sop"
+
+
+def test_ext_in_png_matches_diagram():
+    """A matching extension still resolves to the ext_in-restricted rule."""
+    rule = find_matching_rule("auditmaster/system-diagram.png", EXT_IN_DIRMAP)
+    assert rule is not None
+    assert rule["type"] == "diagram"
+
+
+def test_ext_in_uppercase_extension_matches_diagram():
+    """Extension comparison is case-insensitive on the file side (.lower())."""
+    rule = find_matching_rule("auditmaster/DIAGRAM.PNG", EXT_IN_DIRMAP)
+    assert rule is not None
+    assert rule["type"] == "diagram"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

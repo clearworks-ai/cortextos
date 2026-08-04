@@ -147,6 +147,16 @@ def find_matching_rule(relpath, dirmap):
                 parts = relpath.split(os.sep)
                 if len(parts) != 2:
                     continue
+            # Honor an optional ext_in allow-list: a rule restricted to certain
+            # extensions (e.g. a diagram rule for .png/.svg) must not swallow files
+            # of other extensions and starve a later fallback rule (e.g. sop) that
+            # shares the same prefix. Case-insensitive on the file side; dirmap
+            # values are already lowercase dotted extensions.
+            ext_in = rule.get("ext_in")
+            if ext_in is not None:
+                ext = os.path.splitext(relpath)[1].lower()
+                if ext not in ext_in:
+                    continue  # keep scanning; later rules may match
             return rule
     return None
 

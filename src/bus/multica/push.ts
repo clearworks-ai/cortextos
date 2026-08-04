@@ -29,6 +29,15 @@ export interface OutboundPushResult {
   plan: OutboundPlanEntry[];
 }
 
+/**
+ * Default provenance routing (P3.2): tasks created by the meeting-intelligence
+ * pipeline set `project: 'meeting-pipeline'` by convention; everything else is
+ * plain bus traffic. Callers can still override via options.provenanceFor.
+ */
+export function defaultProvenanceFor(task: Task): 'meeting-pipeline' | 'bus' {
+  return task.project === 'meeting-pipeline' ? 'meeting-pipeline' : 'bus';
+}
+
 export async function runOutboundPush(
   paths: BusPaths,
   client: MulticaClient,
@@ -40,7 +49,7 @@ export async function runOutboundPush(
   const limit = options.limit;
   // Callers can opt specific tasks into meeting-pipeline provenance without
   // adding any detection heuristic to this module.
-  const provenanceFor = options.provenanceFor ?? (() => 'bus' as const);
+  const provenanceFor = options.provenanceFor ?? defaultProvenanceFor;
   const state = store.load();
   // Issue ids already claimed by any bus task — orphan adoption must never
   // steal an issue that belongs to a different task.

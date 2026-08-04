@@ -142,3 +142,45 @@ export function withFileLockSync<T>(
     releaseLock(dir);
   }
 }
+
+/**
+ * Async counterpart to `withFileLockSync`: hold `dir`'s mutex across an
+ * awaited operation, releasing only after the promise settles.
+ *
+ * `withFileLockSync` cannot guard async work — its `finally` releases the lock
+ * the moment `fn` returns the (still-pending) promise. Use this when the
+ * critical section performs I/O, e.g. the single-task Multica mirror, where two
+ * concurrent same-task pushes would otherwise both create an issue before
+ * either persists its link (duplicate issues).
+ *
+ * @throws if the lock cannot be acquired within `timeoutMs`.
+ */
+export async function withFileLockAsync<T>(
+  dir: string,
+  fn: () => Promise<T>,
+  opts: FileLockOptions = {},
+): Promise<T> {
+  const timeoutMs   = opts.timeoutMs        ?? 5_000;
+  const initBackoff = opts.initialBackoffMs ?? 5;
+  const maxBackoff  = opts.maxBackoffMs     ?? 100;
+
+  const start = process.hrtime.bigint();
+  const timeoutNs = BigInt(timeoutMs) * 1_000_000n;
+  let backoff = initBackoff;
+
+  while (!acquireLock(dir)) {
+    if (process.hrtime.bigint() - start > timeoutNs) {
+      throw new Error(
+        `withFileLockAsync: failed to acquire lock on "${dir}" within ${timeoutMs}ms`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, backoff));
+    backoff = Math.min(backoff * 2, maxBackoff);
+  }
+
+  try {
+    return await fn();
+  } finally {
+    releaseLock(dir);
+  }
+}

@@ -583,6 +583,24 @@ export class AgentProcess {
   }
 
   /**
+   * True when the agent's PTY is live and processing. Used by the wedge
+   * watchdog: a wedge only applies to an agent that LOOKS running (so the
+   * crash/exit paths won't touch it) but has stopped processing its inbox.
+   */
+  isRunning(): boolean {
+    return this.status === 'running';
+  }
+
+  /**
+   * True when a start()/restart is currently coalescing under the #269
+   * single-flight guard. The wedge watchdog reads this so it never stacks a
+   * second restart on top of one already in flight.
+   */
+  isRestartInFlight(): boolean {
+    return this.inFlightStart !== null;
+  }
+
+  /**
    * Register a status change handler.
    */
   onStatusChanged(handler: (status: AgentStatus) => void): void {

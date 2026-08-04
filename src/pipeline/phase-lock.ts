@@ -1,9 +1,7 @@
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 import type { LedgerRow } from './ledger.js';
-import { atomicWriteSync } from '../utils/atomic.js';
-import { withFileLockSync } from '../utils/lock.js';
 
 export interface PhaseHistoryEntry {
   phase: number;
@@ -102,8 +100,9 @@ export function readPhaseLock(lockPath: string): PhaseLockState {
 
 /**
  * Gate a `p<N>-` build dispatch against every lower phase M (1..N-1). Phase M is
- * satisfied iff it is listed in completed_phases OR at least one `true-verify`
- * ledger row has a slug prefixed `p<M>-`. No signature verification on rows (locked
+ * satisfied iff at least one `true-verify` ledger row has a slug prefixed `p<M>-`.
+ * There is no manual/completed_phases override (removed 2026-08-03). No signature
+ * verification on rows (locked
  * design decision — this is a sequencing safety net, not a forgery defense; the
  * dispatched slug's own chain is signature-verified elsewhere). `exempt` rows do not
  * count. Never throws.
@@ -117,12 +116,14 @@ export function checkPhaseSequence(opts: {
   if (n === null) return { ok: true };
   if (n === 1) return { ok: true };
 
-  const lock = readPhaseLock(opts.lockPath);
   const unsatisfied: number[] = [];
   for (let m = 1; m < n; m++) {
-    const satisfied =
-      lock.completed_phases.includes(m) ||
-      opts.rows.some((r) => r.stage === 'true-verify' && r.slug.startsWith(`p${m}-`));
+    // A phase is satisfied ONLY by a real 'true-verify' ledger row for a p<M>-
+    // slug. There is deliberately no completed_phases / manual-mark override:
+    // completion is earned by the verify act producing a receipt, never asserted.
+    const satisfied = opts.rows.some(
+      (r) => r.stage === 'true-verify' && r.slug.startsWith(`p${m}-`),
+    );
     if (!satisfied) unsatisfied.push(m);
   }
 
@@ -131,44 +132,14 @@ export function checkPhaseSequence(opts: {
   const list = unsatisfied.join(', ');
   const detail =
     `cannot dispatch phase ${n} build '${opts.slug}' — phase(s) ${list} unsatisfied: ` +
-    `no true-verify ledger row with slug prefix 'p<M>-' and not listed in ` +
-    `completed_phases (${opts.lockPath}). If a phase legitimately shipped outside ` +
-    `the ledger, run: pipeline-stage-emit --mark-phase-complete <M> --by <agent>`;
+    `each needs at least one 'true-verify' ledger row with slug prefix 'p<M>-'. ` +
+    `There is NO override — run the full plan→specs→build→review→staging-verify→true-verify ` +
+    `chain for the missing phase(s) under a p<M>- slug so each earns a real receipt.`;
   return { ok: false, code: 'PHASE_SKIPPED', detail };
 }
 
-/**
- * Mark a phase complete. Read-modify-write under a file lock (RMW is not atomic via
- * atomicWriteSync alone). Idempotent on completed_phases (dedupe + sort) but always
- * appends a history entry. Throws on a non-integer / out-of-range phase — the `Invalid `
- * prefix is mapped to exit 5 by the CLI.
- */
-export function markPhaseComplete(opts: {
-  phase: number;
-  by: string;
-  lockPath: string;
-  nowSeconds?: number;
-}): PhaseLockState {
-  if (!Number.isInteger(opts.phase) || opts.phase < 1 || opts.phase > 9) {
-    throw new Error('Invalid --mark-phase-complete: expected integer 1-9');
-  }
-
-  const lockDir = join(dirname(opts.lockPath), '.locks', 'build-phase-lock');
-  mkdirSync(lockDir, { recursive: true });
-
-  return withFileLockSync(lockDir, () => {
-    const state = readPhaseLock(opts.lockPath);
-    const completed = new Set(state.completed_phases);
-    completed.add(opts.phase);
-    const completed_phases = [...completed].sort((a, b) => a - b);
-    const markedAt = opts.nowSeconds ?? Math.floor(Date.now() / 1000);
-    const history = [...state.history, { phase: opts.phase, markedAt, by: opts.by }];
-    const next: PhaseLockState = {
-      current_phase: Math.max(...completed_phases) + 1,
-      completed_phases,
-      history,
-    };
-    atomicWriteSync(opts.lockPath, JSON.stringify(next, null, 2));
-    return next;
-  });
-}
+// markPhaseComplete + the --mark-phase-complete CLI flag were REMOVED (2026-08-03,
+// Josh directive): a manual "assert this phase is done" override is a bypass of the
+// verify chain. Phase completion is now earned exclusively by a true-verify ledger
+// row (see checkPhaseSequence). build-phase-lock.json is no longer written by any code
+// path; readPhaseLock remains only for backward-compatible reads of any legacy file.

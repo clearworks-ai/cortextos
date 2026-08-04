@@ -1,14 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
   checkPhaseSequence,
   defaultPhaseLockPath,
   extractPhase,
-  markPhaseComplete,
   readPhaseLock,
-  type PhaseLockState,
 } from '../../../src/pipeline/phase-lock';
 import type { LedgerRow, Stage } from '../../../src/pipeline/ledger';
 
@@ -69,27 +67,31 @@ describe('phase-lock', () => {
       expect(result.ok).toBe(true);
     });
 
-    it('passes when a lower phase is satisfied via completed_phases', () => {
+    it('does NOT satisfy a phase via completed_phases (override removed 2026-08-03)', () => {
+      // A hand-written or legacy completed_phases entry must not count — the only
+      // satisfaction is a real p<M>- true-verify row.
       writeFileSync(lockPath, JSON.stringify({ completed_phases: [1] }));
       const result = checkPhaseSequence({ slug: 'p2-foo', rows: [], lockPath });
-      expect(result.ok).toBe(true);
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected block');
+      expect(result.code).toBe('PHASE_SKIPPED');
+      expect(result.detail).toContain('NO override');
+      expect(result.detail).not.toContain('--mark-phase-complete');
     });
 
-    it('blocks the correct unsatisfied phase in a mixed scenario', () => {
-      // p1 via ledger, p2 via lock, p3 missing → dispatch p4 blocks on 3 only
-      writeFileSync(lockPath, JSON.stringify({ completed_phases: [2] }));
+    it('blocks the correct unsatisfied phase in a mixed scenario (ledger-only)', () => {
+      // p1 satisfied via ledger, p2/p3 have no true-verify rows → dispatch p4 blocks on 2,3.
       const result = checkPhaseSequence({
         slug: 'p4-x',
-        rows: [row('p1-x', 'true-verify')],
+        rows: [row('p1-x', 'true-verify'), row('p3-x', 'review')],
         lockPath,
       });
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error('expected block');
       expect(result.code).toBe('PHASE_SKIPPED');
-      expect(result.detail).toContain('3');
+      expect(result.detail).toContain('2, 3');
       expect(result.detail).not.toContain('phase(s) 1');
       expect(result.detail).toContain('p4-x');
-      expect(result.detail).toContain('--mark-phase-complete');
     });
 
     it('does not count exempt or review stage rows as satisfying a phase', () => {
@@ -156,39 +158,7 @@ describe('phase-lock', () => {
     });
   });
 
-  describe('markPhaseComplete', () => {
-    it('round-trips, is idempotent, and grows history', () => {
-      markPhaseComplete({ phase: 1, by: 'larry', lockPath, nowSeconds: 100 });
-      let state = markPhaseComplete({ phase: 2, by: 'larry', lockPath, nowSeconds: 200 });
-      expect(state.completed_phases).toEqual([1, 2]);
-      expect(state.current_phase).toBe(3);
-      expect(state.history).toHaveLength(2);
-      expect(state.history.every((h) => h.by === 'larry')).toBe(true);
-
-      const onDisk = JSON.parse(readFileSync(lockPath, 'utf-8')) as PhaseLockState;
-      expect(onDisk.completed_phases).toEqual([1, 2]);
-      expect(onDisk.current_phase).toBe(3);
-
-      // re-mark 1 → completed_phases unchanged, history grows to 3
-      state = markPhaseComplete({ phase: 1, by: 'larry', lockPath, nowSeconds: 300 });
-      expect(state.completed_phases).toEqual([1, 2]);
-      expect(state.history).toHaveLength(3);
-    });
-
-    it('throws on invalid phase args', () => {
-      expect(() => markPhaseComplete({ phase: 0, by: 'x', lockPath })).toThrow(/Invalid/);
-      expect(() => markPhaseComplete({ phase: 10, by: 'x', lockPath })).toThrow(/Invalid/);
-      expect(() => markPhaseComplete({ phase: 1.5, by: 'x', lockPath })).toThrow(/Invalid/);
-      expect(() => markPhaseComplete({ phase: NaN, by: 'x', lockPath })).toThrow(/Invalid/);
-    });
-
-    it('survives two sequential marks from separate reads (lock dir used)', () => {
-      markPhaseComplete({ phase: 3, by: 'a', lockPath, nowSeconds: 1 });
-      const state = markPhaseComplete({ phase: 4, by: 'b', lockPath, nowSeconds: 2 });
-      expect(state.completed_phases).toEqual([3, 4]);
-      // lock dir was used (created) and the mutex (.lock.d) released cleanly
-      expect(existsSync(join(dir, '.locks', 'build-phase-lock'))).toBe(true);
-      expect(existsSync(join(dir, '.locks', 'build-phase-lock', '.lock.d'))).toBe(false);
-    });
-  });
+  // The markPhaseComplete describe block was removed 2026-08-03 alongside the
+  // function it tested — phase completion is now earned only by a true-verify
+  // ledger row (covered by the checkPhaseSequence tests above).
 });

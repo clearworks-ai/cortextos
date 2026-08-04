@@ -13,8 +13,6 @@ import {
 import {
   checkPhaseSequence,
   defaultPhaseLockPath,
-  markPhaseComplete,
-  type PhaseLockState,
 } from './phase-lock.js';
 
 interface ParsedArgs {
@@ -76,7 +74,6 @@ function usage(): string {
     '  pipeline-stage-emit --slug <slug> --stage <stage> --artifact <path> [--runner <runner> --session <id> --transcript <path>] [--evidence <path>] [--reason <text>] [--ledger <path>] [--secret <path>]',
     '  pipeline-stage-emit --slug <slug> --stage <plan|specs> --artifact <path> --provenance-mode worker-dispatch --runner opencode --session <return-msg-id> --transcript <return-msg.json> [--bus-store-root <path>] [--ctx-root <path>]',
     '  pipeline-stage-emit --verify --slug <slug> --through <stage> --max-age <seconds> [--scope-sha <sha>] [--repo <path>] [--framework <name>] [--ledger <path>] [--secret <path>] [--phase-lock <path>]',
-    '  pipeline-stage-emit --mark-phase-complete <N> [--by <agent>] [--ledger <path>] [--phase-lock <path>]',
   ].join('\n');
 }
 
@@ -155,30 +152,10 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     printAndExit(JSON.stringify(result.terminal), 0, false);
   }
 
-  if (flags['mark-phase-complete'] !== undefined) {
-    let state: PhaseLockState;
-    try {
-      const raw = requireString(flags, 'mark-phase-complete');
-      // Validate that the raw value is a pure integer (reject '3abc' etc)
-      if (!/^[1-9]$/.test(raw)) {
-        throw new Error(`Invalid --mark-phase-complete: expected integer 1-9, got '${raw}'`);
-      }
-      const phase = Number.parseInt(raw, 10);
-      const ledgerPath = stringFlag(flags, 'ledger') || defaultLedgerPath();
-      const lockPath = stringFlag(flags, 'phase-lock') || defaultPhaseLockPath(ledgerPath);
-      state = markPhaseComplete({
-        phase,
-        by: stringFlag(flags, 'by') || 'manual',
-        lockPath,
-      });
-    } catch (error) {
-      printAndExit(String(error), mapEmitError(error));
-    }
-    // Success emit sits OUTSIDE the try so the terminal printAndExit is not caught
-    // by the markPhaseComplete error handler (printAndExit is `never` in prod; in
-    // tests it throws to unwind, and that throw must propagate, not be re-mapped).
-    printAndExit(JSON.stringify(state), 0, false);
-  }
+  // --mark-phase-complete was REMOVED 2026-08-03 (Josh): a manual phase-completion
+  // override bypasses the verify chain. Phase completion is earned only by a
+  // true-verify ledger row (checkPhaseSequence). Passing the flag now falls through
+  // to the normal emit path, which requires --slug/--stage and fails closed.
 
   try {
     const row = emitLedgerRow({

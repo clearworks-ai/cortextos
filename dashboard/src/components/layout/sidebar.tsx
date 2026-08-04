@@ -20,6 +20,7 @@ import {
   IconMessages,
   IconNotes,
   IconTrendingUp,
+  IconRadar2,
 } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -41,6 +42,7 @@ const navItems: NavItem[] = [
   { label: 'Activity', href: '/activity', icon: IconActivity, section: 'core' },
 
   // Operations
+  { label: 'Mission Control', href: '/mission-control', icon: IconRadar2, section: 'ops' },
   { label: 'Comms', href: '/comms', icon: IconMessages, section: 'ops' },
   { label: 'Approvals', href: '/approvals', icon: IconShieldCheck, section: 'ops' },
   { label: 'Workflows', href: '/workflows', icon: IconClock, section: 'ops' },

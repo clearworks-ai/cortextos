@@ -88,7 +88,7 @@ describe('enforceBuildDispatchGate - phase sequencing', () => {
     expect(result?.slug).toBe('p2-some-feature');
   });
 
-  it('allows p2- dispatch when phase 1 is marked complete', () => {
+  it('does NOT allow p2- dispatch via a completed_phases lock (override removed 2026-08-03)', () => {
     writeFileSync(ledgerPath, '', 'utf-8');
     writeFileSync(
       lockPath,
@@ -97,9 +97,9 @@ describe('enforceBuildDispatchGate - phase sequencing', () => {
     );
     const message = `GATE: build framework=one-big-feature slug=p2-some-feature repo=${repoDir} scope-sha=${SCOPE_SHA}`;
 
-    const result = enforceBuildDispatchGate('codexer', message);
-    expect(result).not.toBeNull();
-    expect(result?.slug).toBe('p2-some-feature');
+    // A hand-written/legacy completed_phases entry no longer satisfies phase 1 —
+    // only a real p1- true-verify ledger row does.
+    expect(() => enforceBuildDispatchGate('codexer', message)).toThrow(/phase\(s\) 1 unsatisfied/);
   });
 
   it('allows p1 dispatch without phase checks', () => {

@@ -1059,3 +1059,69 @@ describe('FastChecker', () => {
     });
   });
 });
+
+describe('FastChecker pending Telegram queue persistence', () => {
+  let testDir: string;
+  let paths: BusPaths;
+  const pendingPath = () => join(paths.stateDir, '.pending-telegram-queue.json');
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join(tmpdir(), 'cortextos-fastchecker-pending-'));
+    paths = createTestPaths(testDir);
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('retains and persists a queued message when injection fails (agent down)', async () => {
+    const agent = createMockAgent();
+    agent.injectMessage.mockReturnValue(false); // simulate NOT_RUNNING
+    const checker = new FastChecker(agent, paths, '/tmp/framework');
+
+    checker.queueTelegramMessage('=== TELEGRAM msg-1 ===\n');
+    await (checker as any).pollCycle();
+
+    // Not dropped: still queued in memory AND on disk (no restart needed to prove loss-prevention)
+    expect((checker as any).telegramMessages).toHaveLength(1);
+    expect(existsSync(pendingPath())).toBe(true);
+    const persisted = JSON.parse(readFileSync(pendingPath(), 'utf-8'));
+    expect(persisted[0].formatted).toContain('msg-1');
+  });
+
+  it('delivers on retry and drains once the agent is back up, preserving order', async () => {
+    const agent = createMockAgent();
+    agent.injectMessage.mockReturnValue(false);
+    const checker = new FastChecker(agent, paths, '/tmp/framework');
+
+    checker.queueTelegramMessage('=== TELEGRAM A ===\n');
+    await (checker as any).pollCycle();          // fails → retained
+    checker.queueTelegramMessage('=== TELEGRAM B ===\n'); // queued after the failure
+
+    agent.injectMessage.mockReturnValue(true);   // agent recovers
+    await (checker as any).pollCycle();           // delivers both
+
+    const injectedBlocks = agent.injectMessage.mock.calls.map((c: any[]) => c[0] as string);
+    const successfulBlock = injectedBlocks[injectedBlocks.length - 1];
+    expect(successfulBlock.indexOf('A')).toBeLessThan(successfulBlock.indexOf('B')); // order preserved
+    expect((checker as any).telegramMessages).toHaveLength(0);       // drained
+    expect(existsSync(pendingPath())).toBe(false);                   // persist file cleared
+  }, 12000); // successful inject path awaits a 5s cooldown
+
+  it('replays un-drained messages persisted by a prior session on construct', () => {
+    // Simulate a prior session that queued a message but restarted before delivering it.
+    mkdirSync(paths.stateDir, { recursive: true });
+    writeFileSync(
+      pendingPath(),
+      JSON.stringify([{ formatted: '=== TELEGRAM survived-restart ===\n', ackIds: [] }]),
+      'utf-8',
+    );
+
+    const agent = createMockAgent();
+    const checker = new FastChecker(agent, paths, '/tmp/framework'); // loadPendingTelegram runs here
+
+    const queue = (checker as any).telegramMessages as Array<{ formatted: string }>;
+    expect(queue).toHaveLength(1);
+    expect(queue[0].formatted).toContain('survived-restart');
+  });
+});

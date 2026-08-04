@@ -285,8 +285,12 @@ describe('AgentProcess - BUG-011 fix (stop awaits PTY exit)', () => {
     // restarts.log must have received a CRASH entry with the exit code and
     // crash counter. Before the fix, daemon-classified crashes only wrote
     // to stdout and left restarts.log empty.
-    expect(fsMocks.appendFileSync).toHaveBeenCalledTimes(1);
-    const [logPath, logLine] = fsMocks.appendFileSync.mock.calls[0];
+    // A real crash now also writes a stderr-detail line to crashes.log; assert on
+    // the restarts.log line specifically (its existing behavior is unchanged).
+    const restartsCall = fsMocks.appendFileSync.mock.calls
+      .find((c: unknown[]) => String(c[0]).includes('/logs/alice/restarts.log'));
+    expect(restartsCall).toBeDefined();
+    const [logPath, logLine] = restartsCall!;
     expect(String(logPath)).toContain('/logs/alice/restarts.log');
     expect(String(logLine)).toMatch(/\] CRASH: exit_code=1 crash_count=1 backoff_s=5\b/);
     expect(String(logLine).endsWith('\n')).toBe(true);
@@ -337,8 +341,9 @@ describe('AgentProcess - BUG-011 fix (stop awaits PTY exit)', () => {
     capturedOnExit!(1, 0);
 
     expect(ap.getStatus().status).toBe('crashed');
-    expect(fsMocks.appendFileSync).toHaveBeenCalledTimes(1);
-    expect(String(fsMocks.appendFileSync.mock.calls[0][1])).toMatch(/\] CRASH: /);
+    const restartsLine = fsMocks.appendFileSync.mock.calls
+      .find((c: unknown[]) => String(c[0]).endsWith('/restarts.log'))?.[1];
+    expect(String(restartsLine)).toMatch(/\] CRASH: /);
   });
 
   it('planned context-handoff restart (fresh .restart-planned) is NOT counted as a crash', async () => {
@@ -381,8 +386,9 @@ describe('AgentProcess - BUG-011 fix (stop awaits PTY exit)', () => {
     capturedOnExit!(1, 0);
 
     expect(ap.getStatus().status).toBe('crashed');
-    expect(fsMocks.appendFileSync).toHaveBeenCalledTimes(1);
-    expect(String(fsMocks.appendFileSync.mock.calls[0][1])).toMatch(/\] CRASH: /);
+    const restartsLine = fsMocks.appendFileSync.mock.calls
+      .find((c: unknown[]) => String(c[0]).endsWith('/restarts.log'))?.[1];
+    expect(String(restartsLine)).toMatch(/\] CRASH: /);
   });
 
   it('sessionRefresh() delegates to stop() then start() (in order)', async () => {
@@ -872,5 +878,55 @@ describe('AgentProcess - single-flight restart guard (double-fire dedup)', () =>
     expect(mockPty.spawn).toHaveBeenCalledTimes(2);
     expect(ap.getStatus().status).toBe('running');
     vi.useRealTimers();
+  });
+});
+
+describe('AgentProcess - crash stderr capture (larry-crash-stderr-capture)', () => {
+  function crashesLogLines(): string[] {
+    return fsMocks.appendFileSync.mock.calls
+      .filter((c: unknown[]) => String(c[0]).endsWith('/crashes.log'))
+      .map((c: unknown[]) => String(c[1]));
+  }
+
+  it('extractCrashReason picks the last error-signature line, strips ANSI, and handles empty', () => {
+    const ap = new AgentProcess('alice', mockEnv, {});
+    const extract = (s: string) => (ap as unknown as { extractCrashReason(o: string): string }).extractCrashReason(s);
+
+    expect(extract('starting up\nsome noise\nAPI Error: 400 boom\ntrailing')).toBe('API Error: 400 boom');
+    expect(extract('\x1b[31mError:\x1b[0m kaboom')).toBe('Error: kaboom');
+    expect(extract('   \n  \n')).toBe('no_stderr_captured');
+    expect(extract('')).toBe('no_stderr_captured');
+    // No error signature → falls back to the last non-empty line.
+    expect(extract('line one\nlast line')).toBe('last line');
+  });
+
+  it('appendCrashDetailToCrashesLog writes a non-empty reason (never reason=none) into crashes.log', () => {
+    const ap = new AgentProcess('alice', mockEnv, {});
+    (ap as unknown as { appendCrashDetailToCrashesLog(code: number, out: string): void })
+      .appendCrashDetailToCrashesLog(1, 'boot\nUncaught Exception: everything is on fire\n');
+
+    const lines = crashesLogLines();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('type=crash');
+    expect(lines[0]).toContain('exit_code=1');
+    expect(lines[0]).toContain('source=daemon-exit');
+    expect(lines[0]).toContain('reason=Uncaught Exception: everything is on fire');
+    expect(lines[0]).not.toContain('reason=none');
+  });
+
+  it('a real exit_code=1 crash writes a crashes.log line via the crash path (closes the empty-reason gap)', async () => {
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+    expect(capturedOnExit).not.toBeNull();
+
+    fsMocks.appendFileSync.mockClear();
+    capturedOnExit!(1, 0); // simulate a hard crash
+
+    const lines = crashesLogLines();
+    expect(lines.length).toBeGreaterThanOrEqual(1);
+    expect(lines[0]).toContain('type=crash');
+    expect(lines[0]).toContain('exit_code=1');
+    expect(lines[0]).toContain('reason='); // reason field present, not omitted
+    expect(lines[0]).not.toMatch(/reason=none\b/);
   });
 });

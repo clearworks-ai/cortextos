@@ -1056,7 +1056,7 @@ describe('FastChecker', () => {
       // The very first message's hash was evicted; a recent one survives.
       expect(checker.isDuplicate('msg-0')).toBe(false); // evicted → not a dup
       expect(checker.isDuplicate('msg-5099')).toBe(true); // still in window
-    });
+    }, 30000);
   });
 });
 

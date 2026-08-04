@@ -24,6 +24,8 @@ from pull_cxportal import (
     render_entity_file,
     get_section_title,
     write_if_changed,
+    default_ledger_path,
+    larry_env_path,
     ENTITIES,
 )
 
@@ -333,6 +335,63 @@ class TestErrorHandling(unittest.TestCase):
         }
         self.assertIn("org-1", orgmap["map"])
         self.assertIn("org-2", orgmap["exclude"])
+
+
+class TestPathResolution(unittest.TestCase):
+    """Regression tests for the two off-by-one .parent path bugs (cxportal-pull-ledger-path-fix)."""
+
+    def test_default_ledger_path_no_orgs_doubling(self):
+        """Default ledger path resolves to <repo_root>/orgs/clearworksai/agents/larry/state/...
+        NOT the phantom orgs/orgs/... path the old 4-parent computation produced."""
+        p = default_ledger_path()
+        self.assertEqual(p.name, "cxportal-pull-ledger.jsonl")
+        # The tail must be the real single-orgs path.
+        self.assertTrue(
+            str(p).endswith(
+                os.path.join(
+                    "orgs", "clearworksai", "agents", "larry", "state",
+                    "cxportal-pull-ledger.jsonl",
+                )
+            ),
+            f"unexpected ledger tail: {p}",
+        )
+        # No doubled orgs/orgs segment anywhere.
+        self.assertNotIn(
+            os.path.join("orgs", "orgs"), str(p),
+            f"ledger path regressed to a doubled orgs/orgs: {p}",
+        )
+        # The parent-of-parent .../larry/state must sit directly under a single orgs/clearworksai.
+        # i.e. exactly one 'orgs' segment on the path.
+        self.assertEqual(
+            [seg for seg in p.parts].count("orgs"), 1,
+            f"expected exactly one 'orgs' segment: {p}",
+        )
+
+    def test_larry_env_fallback_path(self):
+        """get_token()'s .env fallback resolves to orgs/clearworksai/agents/larry/.env,
+        NOT the old 4-parent orgs/agents/larry/.env."""
+        p = larry_env_path()
+        self.assertEqual(p.name, ".env")
+        self.assertTrue(
+            str(p).endswith(
+                os.path.join("orgs", "clearworksai", "agents", "larry", ".env")
+            ),
+            f"unexpected .env tail: {p}",
+        )
+        # The clearworksai segment must be present (the bug dropped it → orgs/agents/larry/.env).
+        self.assertIn("clearworksai", p.parts, f"missing clearworksai segment: {p}")
+        self.assertNotIn(
+            os.path.join("orgs", "agents", "larry"), str(p),
+            f".env path regressed to orgs/agents/larry: {p}",
+        )
+
+    def test_default_ledger_and_env_share_agent_root(self):
+        """Both fixed paths agree on the same orgs/clearworksai/agents/larry base — a sanity
+        check that the two opposite-direction fixes landed on the same real directory."""
+        ledger = default_ledger_path()
+        env = larry_env_path()
+        # ledger is .../larry/state/<file>, env is .../larry/.env → both share .../agents/larry
+        self.assertEqual(ledger.parent.parent, env.parent)
 
 
 if __name__ == "__main__":

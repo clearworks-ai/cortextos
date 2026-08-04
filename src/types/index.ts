@@ -246,7 +246,14 @@ export interface AgentConfig {
    * stamping it, so the dashboard shows it alive) AND it has pending inbox work.
    * That combination means the REPL is stuck, not idle-with-nothing-to-do. When it
    * holds, the daemon force-restarts the agent ONCE through the single-flight path.
-   * Default: 15. An explicit value <= 0 disables the wedge watchdog for this agent.
+   *
+   * Default: DISABLED (unset/absent). The watchdog is opt-in — the conversation
+   * buffer is only touched on outbound Telegram sends (see appendToBuffer() call
+   * site in src/cli/bus.ts), so an agent with a long silent working pattern (no
+   * per-step Telegram pings) would otherwise be false-restarted mid-work. Set an
+   * explicit positive value (15 was the original design point) only after
+   * confirming this agent's real silent-window length fits under that threshold.
+   * A value <= 0 also disables it (same as leaving it unset).
    */
   wedge_restart_min?: number;
   /**

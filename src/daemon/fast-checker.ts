@@ -13,7 +13,6 @@ import { stripControlChars, sanitizeForPtyInjection, wrapFenceSafe } from '../ut
 import { agentHoldsContextHandoffLease, releaseContextHandoffLease, requestContextHandoffLease } from './context-handoff-lease.js';
 import {
   detectWedge,
-  DEFAULT_WEDGE_RESTART_MIN,
   DEFAULT_WEDGE_HEARTBEAT_FRESH_MS,
   DEFAULT_WEDGE_RESTART_COOLDOWN_MS,
 } from './wedge-detector.js';
@@ -310,11 +309,14 @@ export class FastChecker {
 
   private checkWedgeInner(): void {
     const config = this.agent.getConfig();
-    // Resolve the buffer-staleness threshold. An explicit wedge_restart_min <= 0
-    // opts this agent out; unset falls back to the 15min default. detectWedge
-    // treats a non-positive bufferStaleThresholdMs as disabled, so we can pass
-    // the raw computed value straight through.
-    const wedgeMin = config.wedge_restart_min ?? DEFAULT_WEDGE_RESTART_MIN;
+    // Resolve the buffer-staleness threshold. Unset wedge_restart_min = disabled
+    // (opt-in only). An agent must explicitly set a positive value to enable the
+    // watchdog — the conversation buffer is only touched on outbound Telegram
+    // sends, so a long silent working stretch would otherwise be false-restarted
+    // (see AgentConfig.wedge_restart_min JSDoc). An explicit <= 0 also disables.
+    // detectWedge treats a non-positive bufferStaleThresholdMs as disabled, so we
+    // can pass the raw computed value straight through.
+    const wedgeMin = config.wedge_restart_min ?? 0;
     const bufferStaleThresholdMs = wedgeMin * 60_000;
     if (bufferStaleThresholdMs <= 0) return; // disabled — skip the file reads entirely
 

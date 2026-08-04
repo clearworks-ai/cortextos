@@ -284,3 +284,115 @@ describe('resolveRole', () => {
     expect(r.isFallback).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// buildEngagements — CRM stage-compatibility filter (dashboard-seiu-deal-collision-fix)
+// A phase-3/4 roster row must NOT absorb an unrelated pre-sales-stage deal that
+// merely shares the client name (confirmed live: SEIU 521's delivered engagement
+// vs a newer 'qualified' Busywork-Audit prospect under the same name).
+// ---------------------------------------------------------------------------
+describe('buildEngagements — stage-compatibility filter for phase-3/4 rows', () => {
+  let tmpCrm: string;
+  let tmpClients: string;
+  const prevCrm = process.env.CRM_DIR;
+  const prevClients = process.env.ORG_BRAIN_CLIENTS_DIR;
+  const prevMultica = process.env.MULTICA_SYNC_STATE;
+
+  // Distinct from SEIU 521's roster industry ('Labor Union'), so an attached
+  // pipeline row is unambiguously visible in the built engagement's `industry`.
+  const PIPELINE_INDUSTRY = 'Prospect-Deal-Industry';
+
+  beforeAll(() => {
+    tmpCrm = fs.mkdtempSync(path.join(os.tmpdir(), 'seiu-crm-'));
+    tmpClients = fs.mkdtempSync(path.join(os.tmpdir(), 'seiu-clients-'));
+    // No org-brain md and no MULTICA state — isolate the CRM-join behavior.
+    fs.writeFileSync(path.join(tmpCrm, 'contacts.json'), JSON.stringify({ contacts: [] }));
+    process.env.CRM_DIR = tmpCrm;
+    process.env.ORG_BRAIN_CLIENTS_DIR = tmpClients;
+    delete process.env.MULTICA_SYNC_STATE;
+  });
+
+  afterAll(() => {
+    if (prevCrm === undefined) delete process.env.CRM_DIR;
+    else process.env.CRM_DIR = prevCrm;
+    if (prevClients === undefined) delete process.env.ORG_BRAIN_CLIENTS_DIR;
+    else process.env.ORG_BRAIN_CLIENTS_DIR = prevClients;
+    if (prevMultica === undefined) delete process.env.MULTICA_SYNC_STATE;
+    else process.env.MULTICA_SYNC_STATE = prevMultica;
+    fs.rmSync(tmpCrm, { recursive: true, force: true });
+    fs.rmSync(tmpClients, { recursive: true, force: true });
+  });
+
+  // Write a pipeline.json whose ONLY SEIU 521 entry is at `stage`.
+  function writeSeiuPipeline(stage: string): void {
+    fs.writeFileSync(
+      path.join(tmpCrm, 'pipeline.json'),
+      JSON.stringify({
+        engagements: [
+          {
+            name: 'SEIU 521 — Busywork Audit',
+            stage,
+            status: 'prospect',
+            client_org: 'SEIU 521',
+            client_industry: PIPELINE_INDUSTRY,
+            last_signal_at: '2026-08-03T00:00:00Z',
+          },
+        ],
+      }),
+    );
+  }
+
+  async function seiuRow() {
+    const { buildEngagements } = await import('../data/clients');
+    return buildEngagements().find((r) => r.id === 'seiu-521');
+  }
+
+  it('does NOT attach a qualified-stage deal to the phase-3 SEIU 521 row', async () => {
+    writeSeiuPipeline('qualified');
+    const seiu = await seiuRow();
+    // Falls back to the roster's own industry, not the prospect deal's.
+    expect(seiu?.industry).toBe('Labor Union');
+    expect(seiu?.industry).not.toBe(PIPELINE_INDUSTRY);
+  });
+
+  it('does NOT attach a lead-stage deal to the phase-3 SEIU 521 row', async () => {
+    writeSeiuPipeline('lead');
+    const seiu = await seiuRow();
+    expect(seiu?.industry).toBe('Labor Union');
+    expect(seiu?.industry).not.toBe(PIPELINE_INDUSTRY);
+  });
+
+  it('DOES attach a won-stage deal to the phase-3 SEIU 521 row', async () => {
+    writeSeiuPipeline('won');
+    const seiu = await seiuRow();
+    expect(seiu?.industry).toBe(PIPELINE_INDUSTRY);
+  });
+
+  it('DOES attach a committed-stage deal to the phase-3 SEIU 521 row', async () => {
+    writeSeiuPipeline('committed');
+    const seiu = await seiuRow();
+    expect(seiu?.industry).toBe(PIPELINE_INDUSTRY);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseClientMd — blank Open Items row (dashboard-seiu-deal-collision-fix)
+// ---------------------------------------------------------------------------
+describe('parseClientMd — blank Open Items row', () => {
+  const MD_WITH_BLANK_ROW = `# Client: Blankrow Co
+
+## Open Items
+
+| Item | Owner | Deadline | Source | Status |
+|---|---|---|---|---|
+| real open task | Josh | 2026-08-10 | fireflies:x | open |
+| | | | | |
+`;
+
+  it('skips an all-blank template row and counts only the real row', () => {
+    const parsed = parseClientMd(MD_WITH_BLANK_ROW);
+    expect(parsed.openItems).toHaveLength(1);
+    expect(parsed.openItems[0].item).toBe('real open task');
+    expect(parsed.openItems[0].open).toBe(true);
+  });
+});

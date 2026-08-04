@@ -242,6 +242,9 @@ export function parseClientMd(src: string): ClientMd {
       // Skip header and markdown separator rows.
       if (/^item$/i.test(cells[0])) continue;
       if (/^:?-{2,}:?$/.test(cells[0])) continue;
+      // Skip an all-blank template row (`| | | | | |`) — every cell empty after
+      // trim — so it isn't counted as a phantom open item.
+      if (cells.every((c) => c === '')) continue;
       const deadlineRaw = cells[2];
       const statusRaw = (cells[4] || '').toLowerCase();
       const open = statusRaw !== 'done' && statusRaw !== 'closed' && statusRaw !== 'complete' && statusRaw !== 'completed' && statusRaw !== 'cancelled';
@@ -354,10 +357,18 @@ export function buildEngagements(org?: string): ClientEngagement[] {
 
   for (const b of roster) {
     // CRM pipeline row for this deal (matched by client_org, non-archived).
+    // Stage-compatibility guard: a roster row already at phase 3 (Delivered/
+    // Monitoring) or 4 (Post-delivery Follow-up) must NOT be matched to an
+    // unrelated pre-sales-stage deal that happens to share the client name (a
+    // client can have both a delivered engagement and a newer qualified deal —
+    // confirmed live with SEIU 521). Keeping the check inside the predicate lets
+    // .find() skip an incompatible row and keep scanning for a delivery-consistent
+    // one. 'won'/'committed' reuses deriveStartedAt()'s existing precedent below.
     const eng = pipeline.find(
       (p) =>
         !p.archived &&
-        (p.client_org ?? '').trim().toLowerCase() === b.clientOrg.toLowerCase(),
+        (p.client_org ?? '').trim().toLowerCase() === b.clientOrg.toLowerCase() &&
+        (b.phaseNumber < 3 || p.stage === 'won' || p.stage === 'committed'),
     );
 
     const md = loadClientMd(b.clientOrg);

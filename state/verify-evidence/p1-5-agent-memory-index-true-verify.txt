@@ -1,0 +1,77 @@
+p1-5-agent-memory-index true-verify raw evidence — 2026-08-03, Larry, isolated worktree
+(re-signed after ledger clobber; research/plan/specs rows unaffected, review re-authored fresh)
+
+=== 1. Mirror script run 1 (live, real infra) ===
+$ /Users/joshweiss/code/cortextos/.claude/worktrees/agent-a4df3fa0c3156935e/orgs/clearworksai/agents/larry/bin/agent-memory-mirror.sh
+{"mirrored":813,"deleted":0,"source_count":813,"exit":0}
+exit:0
+
+=== 2. Mirror script run 2 (idempotency check) ===
+$ /Users/joshweiss/code/cortextos/.claude/worktrees/agent-a4df3fa0c3156935e/orgs/clearworksai/agents/larry/bin/agent-memory-mirror.sh
+{"mirrored":813,"deleted":0,"source_count":813,"exit":0}
+exit:0
+
+=== 3. Source count check ===
+$ find ~/.claude/projects/-Users-joshweiss-code-cortextos/memory -maxdepth 1 -name '*.md' | wc -l
+813
+
+=== 4. No subdirectories mirrored (handoffs/, memory-archive/ excluded) ===
+$ find ~/code/knowledge-sync/raw/areas/clearworks/agent-memory -mindepth 1 -type d
+(empty output)
+
+=== 5. "handoff" in filename != handoffs/ subdir leakage (14 legit top-level files) ===
+$ ls ~/code/knowledge-sync/raw/areas/clearworks/agent-memory | grep handoff
+feedback_context_limit_proactive_handoff.md
+feedback_critical_handoffs_need_durable_tasks.md
+feedback_fleet_memory_leak_and_handoff_tail.md
+feedback_handoff_captures_final_conversation.md
+feedback_handoff_conversation_buffer.md
+feedback_knox_no_hard_restart_on_handoff.md
+feedback_no_dedup_on_handoff_back_messages.md
+feedback_no_stale_handoff_blockers.md
+feedback_verify_task_id_before_using_handoff_guess.md
+incident_fleet_restart_churn_ctx_handoff_default_60.md
+incident_handoff_claimed_dispatch_never_fired_2026-08-02.md
+incident_handoff_stale_doc_resume_2026-06-29.md
+project_handoff_2026-07-04_routing_and_ws_build.md
+project_handoff_2026-07-05_session_end.md
+(same 14 filenames confirmed present in SOURCE top-level dir via basename diff — legit topic
+files, not leakage from the excluded handoffs/ subdirectory)
+
+=== 6. kb-query live test 1 ===
+$ cortextos bus kb-query --org clearworksai "Why is UID a dangerous variable name in bash scripts?"
+  Knowledge Base Results (5/5)
+  [1] Score: 0.761 | /Users/joshweiss/code/knowledge-sync/raw/areas/clearworks/agent-memory/feedback_bash_reserved_uid_var.md
+  [2] Score: 0.659 | /Users/joshweiss/code/knowledge-sync/raw/areas/clearworks/agent-memory/feedback_bash_approval_timeout_trap.md
+  [3] Score: 0.653 | /Users/joshweiss/code/knowledge-sync/wiki/projects/feedback-bash-approval-timeout-trap.md
+  [4] Score: 0.633 | /Users/joshweiss/code/knowledge-sync/raw/areas/clearworks/agent-memory/feedback_telegram_dollar_sign_bash_expansion.md
+  [5] Score: 0.632 | /Users/joshweiss/code/knowledge-sync/raw/areas/clearworks/agent-memory/feedback_briefs_dashboard_id_env_trap.md
+
+=== 7. kb-query live test 2 ===
+$ cortextos bus kb-query --org clearworksai "What was the root cause of the duplicate Telegram back-ping messages?"
+  Knowledge Base Results (5/5)
+  [1] Score: 0.821 | /Users/joshweiss/code/knowledge-sync/raw/areas/clearworks/agent-memory/incident_backping_dupe_two_emitters_root_cause.md
+  [2] Score: 0.811 | /Users/joshweiss/code/knowledge-sync/wiki/projects/feedback-no-dedup-on-handoff-back-messages.md
+  [3] Score: 0.800 | /Users/joshweiss/code/knowledge-sync/wiki/projects/feedback-reworded-dupes-bypass-telegram-dedup.md
+  [4] Score: 0.799 | /Users/joshweiss/code/knowledge-sync/raw/areas/clearworks/agent-memory/incident_backping_dupe_two_emitters_root_cause.md
+  [5] Score: 0.792 | /Users/joshweiss/code/knowledge-sync/raw/areas/clearworks/agent-memory/feedback_no_dedup_on_handoff_back_messages.md
+
+=== 8. Live chromadb chunk-count + negative leakage checks ===
+DB resolved (active, non-backup): ~/.cortextos/cortextos1/orgs/clearworksai/knowledge-base/chromadb/chroma.sqlite3
+(sibling dirs chromadb.old-*, chromadb.bak-2026-07-02-prereconcile, chromadb.archived-2026-05-01
+are stale snapshots — excluded; querying one by mistake first gave a false 0, discarded)
+
+$ sqlite3 "$DB" "SELECT COUNT(DISTINCT string_value) FROM embedding_metadata WHERE key='source_file' AND string_value LIKE '%/raw/areas/clearworks/agent-memory/%';"
+777
+
+$ sqlite3 "$DB" "SELECT COUNT(*) FROM embedding_metadata WHERE key='source_file' AND string_value LIKE '%/.claude/%';"
+0
+
+$ sqlite3 "$DB" "SELECT COUNT(*) FROM embedding_metadata WHERE key='source_file' AND string_value LIKE '%/agent-memory/handoffs/%';"
+0
+
+=== Conclusion ===
+All done-condition checks from spec Step 4 pass with real live output. Feature works as shipped
+on origin/main (commits d7e8d98, 797d7ee). Known unmerged cosmetic-only follow-up: branch
+p1-5-agent-memory-mirror-exit-code-fix (12ad955) — does not affect wrapper's actual green/red
+computation (wrapper uses process $? via MIRROR_STATUS, not the JSON exit field). Not a blocker.

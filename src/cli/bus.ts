@@ -16,7 +16,6 @@ import { sweepExperiments } from '../bus/experiment-sweep.js';
 import { browseCatalog, installCommunityItem, prepareSubmission, submitCommunityItem } from '../bus/catalog.js';
 import { collectMetrics, parseUsageOutput, storeUsageData, checkUpstream, collectTelegramCommands, registerTelegramCommands } from '../bus/metrics.js';
 import { createApproval, updateApproval } from '../bus/approval.js';
-import { buildStatusReportPlan, type GatherIssue, type GatherTask, type GatherInteraction } from '../bus/delivery-status.js';
 import { createReminder, listReminders, ackReminder, pruneReminders } from '../bus/reminders.js';
 import { updateCronFire, parseDurationMs, readCronState } from '../bus/cron-state.js';
 import { addCron, removeCron, readCrons, updateCron as updateCronDef, getCronByName, getExecutionLog } from '../bus/crons.js';
@@ -52,6 +51,7 @@ import {
 import { parseCalendarEvents, selectUpcomingExternalMeetings, readSurfacedIds, markSurfaced, lookupCrmContext, renderBriefMarkdown, claimEventLease, releaseEventLease, readClaimedIds } from '../bus/meeting-brief.js';
 import type { BriefData, CrmContext } from '../bus/meeting-brief.js';
 import { runMulticaSync } from '../bus/multica/index.js';
+import { triggerMulticaMirror } from '../bus/multica/trigger.js';
 import type { SyncDirection } from '../bus/multica/types.js';
 import { runScopeGuard } from '../bus/scope-guard.js';
 import { checkUsageApi, refreshOAuthToken, rotateOAuth, loadAccounts, ALERT_5H, ALERT_7D } from '../bus/oauth.js';
@@ -536,6 +536,8 @@ busCommand
       blocks: parseList(opts.blocks),
     });
     console.log(taskId);
+    // Real-time Multica mirror: reflect the new task as an issue immediately.
+    triggerMulticaMirror(taskId);
     // Auto-notify assignee so the task is visible immediately (issue #78)
     if (resolvedAssignee && resolvedAssignee !== env.agentName) {
       const assigneePaths = resolvePaths(resolvedAssignee, env.instanceId, env.org);
@@ -587,6 +589,8 @@ busCommand
     }
 
     updateTask(paths, id, status as TaskStatus);
+    // Real-time Multica mirror: flip the matching issue status the moment the task flips.
+    triggerMulticaMirror(id);
     console.log(`Updated ${id} -> ${status}`);
   });
 
@@ -669,6 +673,8 @@ busCommand
     }
     try {
       const task = claimTask(paths, id, agent);
+      // Real-time Multica mirror: claim flips to in_progress — reflect it at once.
+      triggerMulticaMirror(id);
       console.log(`Claimed ${id} -> in_progress (assigned to ${agent})`);
       console.log(`  Title: ${task.title}`);
     } catch (err) {
@@ -709,6 +715,8 @@ busCommand
       console.error(err instanceof Error ? err.message : String(err));
       process.exit(1);
     }
+    // Real-time Multica mirror: reflect completion (issue -> done) immediately.
+    triggerMulticaMirror(id);
     console.log(`Completed ${id}`);
   });
 
@@ -1413,7 +1421,8 @@ busCommand
   .option('--dry-run', 'Preview the sync plan without pushing, polling writes, or ledger mutation')
   .option('--direction <d>', 'Sync direction: out | in | both', 'both')
   .option('--limit <n>', 'Cap the number of outbound issues pushed this run (creates + updates)')
-  .action(async (opts: { dryRun?: boolean; direction: string; limit?: string }) => {
+  .option('--task <id...>', 'Real-time mirror: scope the outbound push to one or more task ids only')
+  .action(async (opts: { dryRun?: boolean; direction: string; limit?: string; task?: string[] }) => {
     if (!['out', 'in', 'both'].includes(opts.direction)) {
       console.error(`Invalid --direction '${opts.direction}'. Must be one of: out, in, both`);
       process.exit(1);
@@ -1436,6 +1445,7 @@ busCommand
       limit: parsedLimit,
       agentName: env.agentName,
       org: env.org,
+      taskIds: opts.task,
     });
 
     if (!opts.dryRun) {
@@ -2367,60 +2377,6 @@ busCommand
     );
     console.log(id);
   });
-
-busCommand
-  .command('delivery-status-plan')
-  .description(
-    'Delivery Status Reporter (Altari-F): read an org-brain client file + optional ' +
-    'source JSON, return the draft/brief/skip plan as JSON. READ-ONLY — never sends, ' +
-    'never files, never creates an approval. The worker acts on the plan.',
-  )
-  .argument('<slug>', 'Client slug, e.g. alloi')
-  .argument('<clientFile>', 'Path to the org-brain client markdown file')
-  .option('--today <date>', 'Report date YYYY-MM-DD (default: today)')
-  .option('--issues <path>', 'JSON file: array of {title,status,updated_at} Multica issues')
-  .option('--tasks <path>', 'JSON file: array of {title,completedAt} completed bus tasks')
-  .option('--interactions <path>', 'JSON file: array of {summary,date} crm interactions')
-  .action(
-    (
-      slug: string,
-      clientFile: string,
-      opts: { today?: string; issues?: string; tasks?: string; interactions?: string } = {},
-    ) => {
-      if (!existsSync(clientFile)) {
-        console.error(`Client file not found: ${clientFile}`);
-        process.exit(1);
-      }
-      const clientFileMarkdown = readFileSync(clientFile, 'utf8');
-      const today = opts.today ?? new Date().toISOString().slice(0, 10);
-
-      const readJson = <T>(p?: string): T[] | undefined => {
-        if (!p) return undefined;
-        if (!existsSync(p)) {
-          console.error(`Source file not found: ${p}`);
-          process.exit(1);
-        }
-        try {
-          const parsed = JSON.parse(readFileSync(p, 'utf8'));
-          return Array.isArray(parsed) ? (parsed as T[]) : undefined;
-        } catch (err) {
-          console.error(`Invalid JSON in ${p}: ${err instanceof Error ? err.message : String(err)}`);
-          process.exit(1);
-        }
-      };
-
-      const plan = buildStatusReportPlan({
-        slug,
-        clientFileMarkdown,
-        today,
-        issues: readJson<GatherIssue>(opts.issues),
-        completedTasks: readJson<GatherTask>(opts.tasks),
-        interactions: readJson<GatherInteraction>(opts.interactions),
-      });
-
-      console.log(JSON.stringify(plan, null, 2));
-    },
-  );
 
 busCommand
   .command('update-approval')

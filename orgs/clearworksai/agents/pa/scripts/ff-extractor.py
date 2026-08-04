@@ -118,6 +118,32 @@ Example: [{{"action":"Send proposal to client","owner":"John","dueDate":"2026-02
 
 TRANSCRIPT:
 {transcript}"""
+DECISIONS_PROMPT = """From this meeting transcript, extract two things a CRM needs but action items do not capture:
+
+1. DECISIONS — concrete choices the parties AGREED and settled during the call (scope locked,
+   approach chosen, price/terms accepted, a "yes/no" landed). A decision is a fact that should
+   not be re-litigated later. It is NOT a task, NOT a follow-up, NOT a maybe. If nobody actually
+   decided anything, return an empty list. Phrase each as a short past-tense statement of what was
+   settled (e.g. "Agreed to a two-phase build starting with the audit").
+
+2. DEAL_STATE — one short sentence describing any CHANGE in where this opportunity stands after the
+   call: advanced a stage (e.g. discovery -> proposal, verbal -> signed), stalled, went cold, budget
+   or timeline shifted, a blocker cleared or appeared. If the deal did not move, return an empty
+   string. This is only about deal/relationship trajectory, never about tasks.
+
+Only report what the transcript actually supports — never infer, never pad. Both empty is a valid
+and common result for an internal or status-only call.
+
+Return ONLY a valid JSON object with exactly these fields:
+{{"decisions": ["..."], "deal_state": "..."}}
+Example: {{"decisions": ["Agreed to fixed-scope pilot at $12k"], "deal_state": "Moved from proposal to verbal yes"}}
+Empty example: {{"decisions": [], "deal_state": ""}}
+
+Client context (for grounding only, do not copy verbatim):
+{client_context}
+
+TRANSCRIPT:
+{transcript}"""
 PUNCT_RE = re.compile(r"[^\w\s-]+", re.UNICODE)
 SPACE_RE = re.compile(r"\s+")
 TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -769,6 +795,49 @@ def extract_action_items(
         urlopen=urlopen,
     )
     return parse_extracted_items(response_text)
+
+
+def extract_decisions_and_deal_state(
+    transcript_text: str,
+    *,
+    client_context: str = "",
+    openrouter_api_key: str,
+    urlopen: Urlopen = urllib.request.urlopen,
+) -> tuple[list[str], str]:
+    """Return (decisions, deal_state) — the two extractions the writeback hardcoded as none."""
+    response_text = openrouter_request(
+        openrouter_api_key,
+        model=EXTRACTOR_MODEL,
+        prompt=DECISIONS_PROMPT.format(
+            transcript=transcript_text,
+            client_context=client_context or "",
+        ),
+        max_tokens=1200,
+        urlopen=urlopen,
+    )
+    return parse_decisions_payload(response_text)
+
+
+def parse_decisions_payload(value: str) -> tuple[list[str], str]:
+    try:
+        payload = parse_json_payload(value)
+    except (json.JSONDecodeError, ValueError):
+        return [], ""
+    if not isinstance(payload, dict):
+        return [], ""
+    raw_decisions = payload.get("decisions")
+    decisions: list[str] = []
+    if isinstance(raw_decisions, list):
+        for item in raw_decisions:
+            text = collapse_ws(str(item or ""))
+            if text:
+                decisions.append(text)
+    elif isinstance(raw_decisions, str):
+        text = collapse_ws(raw_decisions)
+        if text:
+            decisions.append(text)
+    deal_state = collapse_ws(str(payload.get("deal_state") or ""))
+    return decisions, deal_state
 
 
 def normalized_tokens(value: str) -> set[str]:
@@ -1450,13 +1519,23 @@ def build_recap_meeting(
     # Extract action items for next steps
     client_record = matched_client_context_record_for_transcript(transcript)
     client_context = str(client_record.get("context") or "") if client_record is not None else ""
+    extractor_text = build_transcript_text(sentences, limit=EXTRACTOR_MAX_CHARS)
     extracted = extract_action_items(
-        build_transcript_text(sentences, limit=EXTRACTOR_MAX_CHARS),
+        extractor_text,
         client_context=client_context,
         openrouter_api_key=openrouter_api_key,
         urlopen=urlopen,
     )
-    
+
+    # Decisions + deal-state: the two extractions the writeback used to hardcode as
+    # "none" / "no change". Carry them forward in the full-mode payload.
+    decisions, deal_state = extract_decisions_and_deal_state(
+        extractor_text,
+        client_context=client_context,
+        openrouter_api_key=openrouter_api_key,
+        urlopen=urlopen,
+    )
+
     # Build participants list defensively
     participants = transcript.get("participants") or []
     if isinstance(participants, list):
@@ -1506,6 +1585,8 @@ def build_recap_meeting(
             "action_items": collapse_ws(str(summary.get("action_items") or "")),
         },
         "client_context": client_context,
+        "decisions": decisions,
+        "deal_state": deal_state,
         "next_steps": commitment_entries(refine_items(transcript, extracted, client_record=client_record), enriched=True),
     }
 

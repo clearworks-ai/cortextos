@@ -320,6 +320,19 @@ def build_outcomes(summary: dict[str, object]) -> list[str]:
     )
 
 
+def build_decisions(meeting: dict[str, object]) -> list[str]:
+    raw = meeting.get("decisions")
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return []
+    return dedupe_preserve_order([collapse_ws(str(item)) for item in raw if collapse_ws(str(item))])
+
+
+def build_deal_state(meeting: dict[str, object]) -> str:
+    return collapse_ws(str(meeting.get("deal_state") or ""))
+
+
 payload = json.loads(PAYLOAD_PATH.read_text(encoding="utf-8"))
 meetings = payload.get("meetings") or []
 if not isinstance(meetings, list):
@@ -363,6 +376,8 @@ with LEDGER_PATH.open("a", encoding="utf-8") as ledger_handle:
             next_steps = []
 
         outcomes = build_outcomes(summary)
+        decisions = build_decisions(meeting)
+        deal_state = build_deal_state(meeting)
         action_rows: list[str] = []
         open_item_rows: list[str] = []
         for step in next_steps:
@@ -402,19 +417,14 @@ with LEDGER_PATH.open("a", encoding="utf-8") as ledger_handle:
             meeting_lines.extend(action_rows)
         else:
             meeting_lines.append("| none | | |")
-        meeting_lines.extend(
-            [
-                "",
-                "## Decisions",
-                "",
-                "- none",
-                "",
-                "## Deal-State Changes",
-                "",
-                "- no change",
-                "",
-            ]
-        )
+        meeting_lines.extend(["", "## Decisions", ""])
+        if decisions:
+            meeting_lines.extend(f"- {item}" for item in decisions)
+        else:
+            meeting_lines.append("- none")
+        meeting_lines.extend(["", "## Deal-State Changes", ""])
+        meeting_lines.append(f"- {deal_state}" if deal_state else "- no change")
+        meeting_lines.append("")
         meeting_path.write_text("\n".join(meeting_lines), encoding="utf-8")
 
         title, sections = parse_client_sections(client_path, client_name, meeting)
@@ -426,8 +436,8 @@ with LEDGER_PATH.open("a", encoding="utf-8") as ledger_handle:
         history_block = [
             f"- {meeting_date} — {topic} (meeting: {meeting_rel})",
             f"  - Outcomes: {' ; '.join(outcomes) if outcomes else 'none'}",
-            "  - Decisions: none",
-            "  - Deal-state: no change",
+            f"  - Decisions: {' ; '.join(decisions) if decisions else 'none'}",
+            f"  - Deal-state: {deal_state if deal_state else 'no change'}",
         ]
         if meeting_rel not in "\n".join(history_lines):
             history_lines = history_block + history_lines

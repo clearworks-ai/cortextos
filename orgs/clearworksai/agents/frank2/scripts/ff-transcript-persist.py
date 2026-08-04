@@ -23,13 +23,23 @@ STATE_DIR = AGENT_DIR / "state"
 DEFAULT_LEDGER_PATH = STATE_DIR / "ff-transcript-persist-ledger.txt"
 DEFAULT_TRANSCRIPTS_DIR = ORG_DIR / "knowledge" / "transcripts"
 DEFAULT_LIMIT = 20
-FF_EXTRACTOR_PATH = SCRIPT_PATH.with_name("ff-extractor.py")
+# ff-extractor.py is authoritatively maintained in the pa agent's scripts dir. Resolve a
+# sibling copy first (if one is ever placed here) then fall back to the pa location so this
+# script and its tests load regardless of which agent dir hosts the extractor.
+FF_EXTRACTOR_CANDIDATES = (
+    SCRIPT_PATH.with_name("ff-extractor.py"),
+    ORG_DIR / "agents" / "pa" / "scripts" / "ff-extractor.py",
+)
 
 Urlopen = Callable[..., Any]
 
 
 def load_ff_extractor() -> Any:
-    spec = importlib.util.spec_from_file_location("ff_extractor_for_transcript_persist", FF_EXTRACTOR_PATH)
+    extractor_path = next((path for path in FF_EXTRACTOR_CANDIDATES if path.exists()), None)
+    if extractor_path is None:
+        searched = ", ".join(str(path) for path in FF_EXTRACTOR_CANDIDATES)
+        raise RuntimeError(f"Unable to locate ff-extractor.py (searched: {searched})")
+    spec = importlib.util.spec_from_file_location("ff_extractor_for_transcript_persist", extractor_path)
     if spec is None or spec.loader is None:
         raise RuntimeError("Unable to load ff-extractor.py")
     module = importlib.util.module_from_spec(spec)
@@ -39,6 +49,20 @@ def load_ff_extractor() -> Any:
 
 
 FF = load_ff_extractor()
+
+
+def is_dnr_meeting(transcript: dict[str, Any]) -> bool:
+    """Do-not-record: a `dnr-`/`dnr:` marker or 'do not record' phrase in the title means the
+    verbatim transcript must NOT be persisted (summary-only), per knowledge/meetings/_README.md
+    and the meeting-intelligence-engineer dnr convention."""
+    title = FF.collapse_ws(str(transcript.get("title") or "")).lower()
+    if not title:
+        return False
+    if title.startswith("dnr-") or title.startswith("dnr:") or title.startswith("dnr "):
+        return True
+    if "[dnr]" in title or "(dnr)" in title:
+        return True
+    return "do not record" in title or "do-not-record" in title
 
 
 def transcript_date(transcript: dict[str, Any]) -> str:
@@ -243,6 +267,13 @@ def persist_one(
         return "skipped_ledger", transcript_rel_path(transcript), None
     if FF.is_suppressed_meeting(transcript):
         return "empty", None, None
+    if is_dnr_meeting(transcript):
+        # Do-not-record: never write the verbatim transcript. Ledger it so we do not
+        # re-evaluate it every run, and report it as suppressed for visibility.
+        if not dry_run:
+            append_ledger(ledger_path, meeting_id)
+            ledger_ids.add(meeting_id)
+        return "skipped_dnr", None, None
     content = build_transcript_markdown(transcript)
     lines = transcript_lines(transcript)
     if not lines:
@@ -282,6 +313,7 @@ def run_persist(
 
     persisted = 0
     skipped_ledger = 0
+    skipped_dnr = 0
     empty = 0
     files: list[str] = []
     previews: dict[str, list[str]] = {}
@@ -297,6 +329,8 @@ def run_persist(
             persisted += 1
         elif status == "skipped_ledger":
             skipped_ledger += 1
+        elif status == "skipped_dnr":
+            skipped_dnr += 1
         else:
             empty += 1
         if relative_path:
@@ -307,6 +341,7 @@ def run_persist(
     payload: dict[str, Any] = {
         "persisted": persisted,
         "skipped_ledger": skipped_ledger,
+        "skipped_dnr": skipped_dnr,
         "empty": empty,
         "files": files,
         "dry_run": dry_run,
@@ -340,7 +375,7 @@ def execute(
     except (RuntimeError, ValueError, urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError) as exc:
         reason = FF.collapse_ws(str(exc)) or exc.__class__.__name__
         FF.LOGGER.error("ff-transcript-persist failed: %s", reason)
-        print(json.dumps({"error": reason, "persisted": 0, "skipped_ledger": 0, "empty": 0, "files": [], "dry_run": dry_run}))
+        print(json.dumps({"error": reason, "persisted": 0, "skipped_ledger": 0, "skipped_dnr": 0, "empty": 0, "files": [], "dry_run": dry_run}))
         return 1
 
 

@@ -213,3 +213,27 @@ export function getAllAgents(): Array<{ name: string; org: string }> {
 export function getAllowedRootsConfigPath(): string {
   return path.join(CTX_ROOT, 'config', 'allowed-roots.json');
 }
+
+// -- Client-delivery sources (Mission Control v2) --
+// CRM pipeline/contacts live in the framework repo; org-brain client md files
+// live in the sibling knowledge-sync checkout. Both are env-overridable.
+
+export function getCrmDir(): string {
+  const env = process.env.CRM_DIR;
+  if (env && env.trim()) return expandTilde(env.trim());
+  return path.join(CTX_FRAMEWORK_ROOT, 'orgs', 'clearworksai', 'agents', 'crm', 'crm');
+}
+
+export function getOrgBrainClientsDir(): string {
+  const env = process.env.ORG_BRAIN_CLIENTS_DIR;
+  if (env && env.trim()) return expandTilde(env.trim());
+  return path.join(
+    path.dirname(CTX_FRAMEWORK_ROOT),
+    'knowledge-sync',
+    'raw',
+    'areas',
+    'clearworks',
+    'org-brain',
+    'clients',
+  );
+}

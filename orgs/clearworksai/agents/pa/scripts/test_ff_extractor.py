@@ -1030,6 +1030,9 @@ class RecapModeTests(unittest.TestCase):
         "FIREFLIES_API_KEY": "ff-test",
         "OPENROUTER_API_KEY": "or-test",
     }
+    # Defaults for the decisions/deal-state extractor mock; individual tests override.
+    decisions_response: list[str] = []
+    deal_state_response: str = ""
 
     def make_recap_transcript(self, **overrides) -> dict[str, object]:
         base = {
@@ -1080,8 +1083,20 @@ class RecapModeTests(unittest.TestCase):
                                 }
                             }]
                         }).encode("utf-8"))
+                    elif "deal_state" in content:
+                        # Decisions + deal-state extractor prompt
+                        return FakeResponse(json.dumps({
+                            "choices": [{
+                                "message": {
+                                    "content": json.dumps({
+                                        "decisions": self.decisions_response,
+                                        "deal_state": self.deal_state_response,
+                                    })
+                                }
+                            }]
+                        }).encode("utf-8"))
                     else:
-                        # Extractor prompt
+                        # Action-items extractor prompt
                         return FakeResponse(json.dumps({
                             "choices": [{
                                 "message": {
@@ -1357,6 +1372,108 @@ class RecapModeTests(unittest.TestCase):
         args = MODULE.parse_args([])
         self.assertFalse(args.recap)
         self.assertFalse(args.dry_run)
+
+    # --- Decisions + deal-state extraction (the gap the writeback hardcoded as none) ---
+
+    def test_parse_decisions_payload_extracts_list_and_string(self):
+        decisions, deal_state = MODULE.parse_decisions_payload(
+            json.dumps({
+                "decisions": ["Agreed to two-phase build", "Locked $12k pilot"],
+                "deal_state": "Moved from proposal to verbal yes",
+            })
+        )
+        self.assertEqual(decisions, ["Agreed to two-phase build", "Locked $12k pilot"])
+        self.assertEqual(deal_state, "Moved from proposal to verbal yes")
+
+    def test_parse_decisions_payload_empty_case(self):
+        decisions, deal_state = MODULE.parse_decisions_payload(
+            json.dumps({"decisions": [], "deal_state": ""})
+        )
+        self.assertEqual(decisions, [])
+        self.assertEqual(deal_state, "")
+
+    def test_parse_decisions_payload_tolerates_garbage(self):
+        # Non-dict / unparseable → empty, never raises (matches action-item parser tolerance).
+        self.assertEqual(MODULE.parse_decisions_payload("not json"), ([], ""))
+        self.assertEqual(MODULE.parse_decisions_payload(json.dumps(["a", "b"])), ([], ""))
+
+    def test_extract_decisions_and_deal_state_uses_decisions_prompt(self):
+        captured = {}
+
+        def fake_urlopen(request, timeout: int | None = None):
+            body = json.loads(request.data)
+            captured["content"] = body["messages"][0]["content"]
+            return FakeResponse(json.dumps({
+                "choices": [{"message": {"content": json.dumps({
+                    "decisions": ["Chose fixed-scope pilot"],
+                    "deal_state": "Advanced to verbal",
+                })}}]
+            }).encode("utf-8"))
+
+        decisions, deal_state = MODULE.extract_decisions_and_deal_state(
+            "Josh Weiss: Let's lock the fixed-scope pilot. Client: Yes, we're in.",
+            client_context="client=Acme",
+            openrouter_api_key="or-test",
+            urlopen=fake_urlopen,
+        )
+        self.assertIn("DECISIONS", captured["content"])
+        self.assertIn("deal_state", captured["content"])
+        self.assertIn("client=Acme", captured["content"])
+        self.assertEqual(decisions, ["Chose fixed-scope pilot"])
+        self.assertEqual(deal_state, "Advanced to verbal")
+
+    def test_full_payload_carries_real_decisions_and_deal_state(self):
+        # A transcript with a real decision + a real deal-state change → both flow into the
+        # full-mode payload (NOT dropped, NOT hardcoded none).
+        self.decisions_response = ["Agreed to a two-phase build starting with the audit"]
+        self.deal_state_response = "Moved from discovery to proposal"
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                ledger_path = Path(tmp) / "full-ledger.txt"
+                ledger_path.write_text("")
+                stdout = io.StringIO()
+                with unittest.mock.patch.dict(os.environ, self.ENV, clear=True):
+                    with contextlib.redirect_stdout(stdout):
+                        exit_code = MODULE.run_full(
+                            limit=10,
+                            meeting_id="",
+                            full_ledger_path=ledger_path,
+                            urlopen=self.fake_urlopen([]),
+                        )
+                self.assertEqual(exit_code, 0)
+                printed = json.loads(stdout.getvalue())
+                self.assertEqual(printed["mode"], "full")
+                self.assertEqual(len(printed["meetings"]), 1)
+                meeting = printed["meetings"][0]
+                self.assertEqual(
+                    meeting["decisions"],
+                    ["Agreed to a two-phase build starting with the audit"],
+                )
+                self.assertEqual(meeting["deal_state"], "Moved from discovery to proposal")
+        finally:
+            self.decisions_response = []
+            self.deal_state_response = ""
+
+    def test_full_payload_empty_decisions_yields_empty_not_missing(self):
+        # No decision / no deal move → empty (writeback falls back to none/no change).
+        self.decisions_response = []
+        self.deal_state_response = ""
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / "full-ledger.txt"
+            ledger_path.write_text("")
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, self.ENV, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run_full(
+                        limit=10,
+                        meeting_id="",
+                        full_ledger_path=ledger_path,
+                        urlopen=self.fake_urlopen([]),
+                    )
+            self.assertEqual(exit_code, 0)
+            meeting = json.loads(stdout.getvalue())["meetings"][0]
+            self.assertEqual(meeting["decisions"], [])
+            self.assertEqual(meeting["deal_state"], "")
 
 
 if __name__ == "__main__":

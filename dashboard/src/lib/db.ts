@@ -65,6 +65,7 @@ function initializeSchema(db: Database.Database): void {
       created_at TEXT NOT NULL,
       updated_at TEXT,
       completed_at TEXT,
+      due_date TEXT,
       notes TEXT,
       source_file TEXT
     );
@@ -178,6 +179,28 @@ function initializeSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_messages_org ON messages(org);
     CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
   `);
+
+  // Idempotent migrations for columns added after initial release.
+  // `CREATE TABLE IF NOT EXISTS` never alters an existing table, so columns
+  // introduced later must be added explicitly. ALTER ... ADD COLUMN throws a
+  // "duplicate column" error if it already exists — swallow only that case.
+  migrateAddColumn(db, 'tasks', 'due_date', 'TEXT');
+}
+
+function migrateAddColumn(
+  db: Database.Database,
+  table: string,
+  column: string,
+  type: string,
+): void {
+  const cols = db.pragma(`table_info(${table})`) as { name: string }[];
+  if (cols.some((c) => c.name === column)) return;
+  try {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  } catch (err: unknown) {
+    const message = (err as Error).message ?? '';
+    if (!message.includes('duplicate column')) throw err;
+  }
 }
 
 // globalThis singleton survives Next.js hot reload

@@ -154,6 +154,18 @@ export class AgentProcess {
   // crash recovery for an agent we just stopped intentionally.
   private exitPromise: Promise<void> | null = null;
   private resolveExit: (() => void) | null = null;
+  // Double-fire restart fix: single-flight guard around start(). start() is an
+  // async method with multiple awaits (startup_delay sleep, async env resolution,
+  // pty.spawn) and is reachable from SIX independent triggers — crash-recovery
+  // setTimeout, clean-exit/image-poison recovery, fast-checker context force-restart
+  // (sessionRefresh), IPC restart-agent, boot reconcile, and stopAgent's queued
+  // pendingRestart. The old guard `if (status === 'running')` did NOT cover the
+  // window where status is 'starting'/'crashed'/'stopped': two triggers firing
+  // close in time (the confirmed "15s apart" evidence) both passed the guard and
+  // both awaited through to pty.spawn(), leaving TWO live PTYs for one agent —
+  // the dual-larry / 5x-frank2 duplicate-process incident (2026-08-04). This
+  // promise coalesces every concurrent start onto the first in-flight spawn.
+  private inFlightStart: Promise<void> | null = null;
   private dedup: MessageDedup;
   private log: LogFn;
   private onStatusChange: ((status: AgentStatus) => void) | null = null;
@@ -183,8 +195,49 @@ export class AgentProcess {
 
   /**
    * Start the agent. Spawns Claude Code in a PTY.
+   *
+   * Single-flight: if a start is already in flight (or the agent is already
+   * running), the concurrent caller COALESCES onto the existing start instead
+   * of spawning a second PTY. This is the root fix for the daemon double-fire
+   * restart bug — see the `inFlightStart` field comment. Without it, two
+   * near-simultaneous restart triggers each raced through start()'s awaits and
+   * each reached pty.spawn(), producing two live processes for one agent.
    */
   async start(): Promise<void> {
+    // Already running — nothing to do. (Kept as a cheap synchronous fast-path;
+    // startImpl re-checks after the guard.)
+    if (this.status === 'running') {
+      this.log('Already running');
+      return;
+    }
+
+    // A start is already underway — coalesce. The second trigger neither spawns
+    // nor throws; it simply awaits the in-flight start's outcome. This is what
+    // turns two concurrent restart triggers into exactly ONE spawn.
+    if (this.inFlightStart) {
+      this.log('Start already in flight — coalescing concurrent start request (no second spawn).');
+      return this.inFlightStart;
+    }
+
+    const startPromise = this.startImpl().finally(() => {
+      // Clear the guard only if it still points at THIS start. A later start()
+      // could have replaced it (it cannot, given we only set it when null — but
+      // this keeps the invariant explicit and defends future refactors).
+      if (this.inFlightStart === startPromise) {
+        this.inFlightStart = null;
+      }
+    });
+    this.inFlightStart = startPromise;
+    return startPromise;
+  }
+
+  /**
+   * Actual start work. Never call directly — always go through start() so the
+   * single-flight guard is honored.
+   */
+  private async startImpl(): Promise<void> {
+    // Re-check under the guard: a start may have completed between the
+    // synchronous fast-path in start() and this body running.
     if (this.status === 'running') {
       this.log('Already running');
       return;

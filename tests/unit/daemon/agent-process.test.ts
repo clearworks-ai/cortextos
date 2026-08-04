@@ -727,3 +727,73 @@ describe('AgentProcess — disabled-agent resurrection gate (handleExit)', () =>
     expect(ap.getStatus().status).not.toBe('stopped'); // status unchanged by shutdown path
   });
 });
+
+describe('AgentProcess - single-flight restart guard (double-fire dedup)', () => {
+  it('two near-simultaneous start() triggers spawn exactly ONE PTY', async () => {
+    // Open the race window: make spawn resolve on our signal, so both start()
+    // calls are in flight through their awaits at the same time — exactly the
+    // daemon double-fire condition (crash-recovery timer + fast-checker
+    // force-restart / IPC restart firing 15s apart while status !== running).
+    let releaseSpawn!: () => void;
+    const spawnGate = new Promise<void>((resolve) => { releaseSpawn = resolve; });
+    mockPty.spawn.mockReset();
+    mockPty.spawn.mockImplementation(() => spawnGate);
+
+    const ap = new AgentProcess('alice', mockEnv, {});
+
+    // Fire two restart triggers back-to-back with no await between them.
+    const first = ap.start();
+    const second = ap.start();
+
+    // Second must NOT be the same promise-less no-op; both settle, but only one
+    // spawn is ever issued.
+    releaseSpawn();
+    await Promise.all([first, second]);
+
+    expect(mockPty.spawn).toHaveBeenCalledTimes(1);
+    expect(ap.getStatus().status).toBe('running');
+  });
+
+  it('a start() while one is already running is a no-op (no second spawn)', async () => {
+    mockPty.spawn.mockReset().mockResolvedValue(undefined);
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+    expect(mockPty.spawn).toHaveBeenCalledTimes(1);
+    expect(ap.getStatus().status).toBe('running');
+
+    // Second trigger on a live agent — must not spawn again.
+    await ap.start();
+    expect(mockPty.spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it('restart (stop then start) reaps the old PTY and leaves exactly ONE live', async () => {
+    vi.useFakeTimers();
+    mockPty.spawn.mockReset().mockResolvedValue(undefined);
+    mockPty.isAlive.mockReturnValue(true);
+
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+    expect(mockPty.spawn).toHaveBeenCalledTimes(1);
+    const onExitAfterStart = capturedOnExit;
+    expect(onExitAfterStart).not.toBeNull();
+
+    // stop() must tear the old PTY down (kill) BEFORE the next start spawns.
+    // stop() sets stopRequested synchronously BEFORE its graceful-shutdown
+    // sleeps, so the PTY exit fired below hits handleExit's intentional-stop
+    // early return — NO crash-recovery restart is scheduled.
+    const stopPromise = ap.stop();
+    onExitAfterStart!(0);
+    await vi.runAllTimersAsync(); // drain stop()'s Ctrl-C / /exit sleeps
+    await stopPromise;
+    expect(mockPty.kill).toHaveBeenCalled();
+    expect(ap.getStatus().status).toBe('stopped');
+    // The intentional-stop exit must NOT have scheduled any recovery restart.
+    expect(mockPty.spawn).toHaveBeenCalledTimes(1);
+
+    // Now a fresh start spawns exactly one new PTY — total spawns == 2, one live.
+    await ap.start();
+    expect(mockPty.spawn).toHaveBeenCalledTimes(2);
+    expect(ap.getStatus().status).toBe('running');
+    vi.useRealTimers();
+  });
+});

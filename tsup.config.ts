@@ -6,6 +6,7 @@ export default defineConfig({
     daemon: 'src/daemon/index.ts',
     'pipeline/bypass-audit': 'src/pipeline/bypass-audit.ts',
     'pipeline/stage-emit': 'src/pipeline/stage-emit.ts',
+    'pipeline/scoping-gate': 'src/pipeline/scoping-gate.ts',
     'pipeline/staging-verify/cli': 'src/pipeline/staging-verify/cli.ts',
     'pipeline/pr-target': 'src/pipeline/pr-target.ts',
 

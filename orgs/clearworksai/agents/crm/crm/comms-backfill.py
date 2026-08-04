@@ -4,7 +4,7 @@ never produced. Pulls sent + received, upserts contacts via helper, logs interac
 helper, dedupes by (gmail message id). NOT a replacement for the cron — this is the
 recovery pass while we diagnose the scheduler.
 """
-import json, os, re, subprocess
+import json, os, re, subprocess, sys
 from pathlib import Path
 
 CRM = Path("/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm/crm")
@@ -69,6 +69,18 @@ def log_interaction(cid, typ, summary, source_ref):
     payload = json.dumps({"contact_id": cid, "type": typ, "source_ref": source_ref})
     emit_crm_event("crm.email.captured", payload)
 
+def _in_test_mode() -> bool:
+    """True under pytest or a plain unittest run, so emits stay off the live bus.
+    PYTEST_CURRENT_TEST is set by pytest and inherited by subprocess children via
+    os.environ.copy(); the sys.modules checks cover in-process plain-unittest runs. The
+    explicit CRM_EVENT_EMIT_LOG seam still takes precedence when a test asserts emit content."""
+    return (
+        os.environ.get("PYTEST_CURRENT_TEST") is not None
+        or "pytest" in sys.modules
+        or "unittest" in sys.modules
+    )
+
+
 def emit_crm_event(event_type, payload):
     """Self-inbox ``EVENT <type> — <json>`` (fast-checker wakes the crm session). Best-effort.
     Test seam: when CRM_EVENT_EMIT_LOG is set, append the line to that file instead of the bus."""
@@ -80,6 +92,8 @@ def emit_crm_event(event_type, payload):
                 handle.write(line + "\n")
         except OSError:
             pass
+        return
+    if _in_test_mode():
         return
     try:
         subprocess.run(

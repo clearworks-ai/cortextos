@@ -188,6 +188,18 @@ def emit_stage_changed_event(event: JsonObject) -> None:
     _emit_crm_event("crm.deal.stage_changed", json.dumps(event))
 
 
+def _in_test_mode() -> bool:
+    """True under pytest or a plain unittest run, so emits stay off the live bus.
+    PYTEST_CURRENT_TEST is set by pytest and inherited by subprocess children via
+    os.environ.copy(); the sys.modules checks cover in-process plain-unittest runs. The
+    explicit CRM_EVENT_EMIT_LOG seam still takes precedence when a test asserts emit content."""
+    return (
+        os.environ.get("PYTEST_CURRENT_TEST") is not None
+        or "pytest" in sys.modules
+        or "unittest" in sys.modules
+    )
+
+
 def _emit_crm_event(event_type: str, payload: str) -> None:
     """Self-inbox ``EVENT <type> — <json>`` (fast-checker wakes the crm session). Best-effort.
     Test seam: when CRM_EVENT_EMIT_LOG is set, append the line to that file instead of the bus."""
@@ -199,6 +211,8 @@ def _emit_crm_event(event_type: str, payload: str) -> None:
                 handle.write(line + "\n")
         except OSError:
             pass
+        return
+    if _in_test_mode():
         return
     try:
         subprocess.run(

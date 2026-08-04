@@ -11,6 +11,7 @@ import {
   type MulticaConfig,
   type MulticaIssue,
   type MulticaIssueStatus,
+  type MulticaProject,
   type MulticaTaskRun,
 } from './types.js';
 
@@ -143,6 +144,28 @@ export function createMulticaClient(
       const payload = await requestJson(endpoint, fetchImpl, buildReadInit(normalizedConfig));
       return parseTaskRunArray(payload, endpoint);
     },
+
+    async listProjects() {
+      const endpoint = new URL(`${normalizedConfig.baseUrl}/api/projects`);
+      endpoint.searchParams.set('workspace_id', normalizedConfig.workspaceId);
+      const payload = await requestJson(endpoint.toString(), fetchImpl, buildReadInit(normalizedConfig));
+      return parseProjectArray(payload, endpoint.toString());
+    },
+
+    async createProject(title) {
+      const endpoint = new URL(`${normalizedConfig.baseUrl}/api/projects`);
+      endpoint.searchParams.set('workspace_id', normalizedConfig.workspaceId);
+      const responsePayload = await requestJson(
+        endpoint.toString(),
+        fetchImpl,
+        buildWriteInit(
+          normalizedConfig,
+          'POST',
+          JSON.stringify({ workspace_id: normalizedConfig.workspaceId, title }),
+        ),
+      );
+      return parseProjectObject(responsePayload, endpoint.toString());
+    },
   };
 }
 
@@ -245,6 +268,42 @@ function parseTaskRunArray(payload: unknown, endpoint: string): MulticaTaskRun[]
     taskRuns.push(parsed);
   }
   return taskRuns;
+}
+
+function parseProjectArray(payload: unknown, endpoint: string): MulticaProject[] {
+  const rawItems = extractArrayEnvelope(payload, ['projects', 'data', 'items']);
+  if (rawItems === null) {
+    console.warn(`[multica] unexpected projects response envelope from ${endpoint}`);
+    return [];
+  }
+  const projects: MulticaProject[] = [];
+  for (const item of rawItems) {
+    const parsed = toMulticaProject(item);
+    if (parsed !== null) {
+      projects.push(parsed);
+    }
+  }
+  return projects;
+}
+
+function parseProjectObject(payload: unknown, endpoint: string): MulticaProject {
+  const parsed = toMulticaProject(payload);
+  if (parsed === null) {
+    throw new MulticaHttpError('Multica returned an unparseable project payload', 0, endpoint);
+  }
+  return parsed;
+}
+
+function toMulticaProject(value: unknown): MulticaProject | null {
+  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.title !== 'string') {
+    return null;
+  }
+  return {
+    ...value,
+    id: value.id,
+    workspace_id: typeof value.workspace_id === 'string' ? value.workspace_id : '',
+    title: value.title,
+  };
 }
 
 function extractArrayEnvelope(payload: unknown, keys: readonly string[]): unknown[] | null {

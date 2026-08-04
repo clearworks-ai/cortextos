@@ -77,6 +77,14 @@ class FixtureMulticaClient implements MulticaClient {
     return [];
   }
 
+  async listProjects(): Promise<Array<{ id: string; workspace_id: string; title: string }>> {
+    return [];
+  }
+
+  async createProject(title: string): Promise<{ id: string; workspace_id: string; title: string }> {
+    return { id: `project-${title}`, workspace_id: 'ws', title };
+  }
+
   // Test helper: manually update issue status
   setIssueStatus(id: string, status: MulticaIssue['status']): void {
     const issue = this.issues.get(id);

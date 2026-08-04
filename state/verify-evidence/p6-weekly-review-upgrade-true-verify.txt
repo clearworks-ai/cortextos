@@ -1,0 +1,14 @@
+P6 weekly-review-upgrade — independent true-verify evidence (reviewer)
+
+REVIEW VERDICT: PASS (no defects). Independent of the build.
+
+- pytest: 15 passed (reproduced independently from PR#274 branch files in a clean tmp dir)
+- live run weekly-review-audit.py: exit 0
+  JSON: {"date":"2026-08-04","findings":[],"clean":true,"report_path":".../2026-08-04-weekly-review.md","fix_task_ids":[]}
+- report file written: 3 fixed headings (## SYSTEM AUDIT / ## FIX TASKS / ## PIPELINE MOVEMENT)
+- degrade-clean confirmed: subprocess failures -> stderr + None, no crash, exit 0 always
+- p6-done-check.sh: bash -n clean; live run P6 DONE-CONDITION: FAIL (0/4), exit 1 (correct current answer)
+- REPORT_HEADINGS shared constant used by both renderer and done-check -> no heading drift
+- spec-conformant: 3 files all under orgs/, zero src/dist/daemon, no DDL/schema
+- PR #274 (clearworks-ai/cortextos, base main), branch == slug
+- ledger chain: research -> plan -> specs -> implement -> review(reviewer) all prev_sha256-linked

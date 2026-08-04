@@ -51,9 +51,13 @@ def gws_query(query):
     except Exception:
         return {"emails": []}
 
-def upsert(cid, name, email, company=None):
+def upsert(name, email, company=None):
+    # Delegate id resolution to upsert-contact.py --match-email: it reuses an existing
+    # contact's id on an email match and falls back to slugify(name) only for a genuinely
+    # new contact. Passing an explicit --id here (the old behavior) short-circuited that
+    # lookup and minted a fresh duplicate every run.
     args = ["python3", str(CRM / "upsert-contact.py"),
-            "--id", cid, "--name", name, "--type", "person",
+            "--match-email", "--name", name, "--type", "person",
             "--email", email, "--source-ref", "comms-ingest-backfill-2026-06-01"]
     if company: args += ["--company", company]
     subprocess.run(args, capture_output=True, text=True, cwd=str(CRM))
@@ -126,7 +130,7 @@ def main():
                 stats["skipped_noreply"] += 1; continue
             cid = email_to_id.get(em) or slugify(nm) or em.split("@")[0]
             if cid not in {c.get("id") for c in contacts}:
-                upsert(cid, nm or em.split("@")[0], em, company=company_hint(em))
+                upsert(nm or em.split("@")[0], em, company=company_hint(em))
                 email_to_id[em] = cid
                 contacts.append({"id": cid, "emails": [em]})
                 stats["new_contacts"] += 1
@@ -151,7 +155,7 @@ def main():
             stats["skipped_noreply"] += 1; continue
         cid = email_to_id.get(em) or slugify(nm) or em.split("@")[0]
         if cid not in {c.get("id") for c in contacts}:
-            upsert(cid, nm or em.split("@")[0], em, company=em.split("@")[1] if "@" in em else None)
+            upsert(nm or em.split("@")[0], em, company=em.split("@")[1] if "@" in em else None)
             email_to_id[em] = cid
             contacts.append({"id": cid, "emails": [em]})
             stats["new_contacts"] += 1

@@ -70,8 +70,9 @@ TEXT_EXTS = {
 }
 SUPPORTED_EXTS = VIDEO_EXTS | AUDIO_EXTS | IMAGE_EXTS | DOC_EXTS | TEXT_EXTS
 
-# Resolve repo root from __file__ (…/orgs/clearworksai/skills/outputs-router/ → 3 dirs up)
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+# Resolve repo root from __file__ (…/orgs/clearworksai/skills/outputs-router/ → 4 dirs up:
+# outputs-router -> skills -> clearworksai -> orgs -> repo root)
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 DELIVERABLES_ROOTS = {
     agent: os.path.join(REPO_ROOT, "orgs/clearworksai/agents", agent, "deliverables")
     for agent in ("auditmaster", "muse", "larry", "pa", "frank2")

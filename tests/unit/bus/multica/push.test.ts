@@ -59,6 +59,9 @@ function createOrderedTask(
   const timestamp = makeTimestamp(index);
   const nextTask: Task = {
     ...task,
+    // Default to an ungrouped project so hash-based assertions stay stable;
+    // grouping tests override `project` explicitly.
+    project: '',
     ...overrides,
     created_at: timestamp,
     updated_at: timestamp,
@@ -91,6 +94,8 @@ function createRecordingClient() {
   const createdPayloads: MulticaPushPayload[] = [];
   const updatedCalls: Array<{ issueId: string; busTaskId: string }> = [];
   const remoteIssues: MulticaIssue[] = [];
+  const createdProjectTitles: string[] = [];
+  const existingProjects: Array<{ id: string; workspace_id: string; title: string }> = [];
   const client: MulticaClient = {
     async createIssue(payload) {
       createdTaskIds.push(payload.bus_task_id);
@@ -110,9 +115,18 @@ function createRecordingClient() {
     async getTaskRuns() {
       return [];
     },
+    async listProjects() {
+      return existingProjects;
+    },
+    async createProject(title) {
+      const project = { id: `project-${title}`, workspace_id: 'workspace-123', title };
+      existingProjects.push(project);
+      createdProjectTitles.push(title);
+      return project;
+    },
   };
 
-  return { client, createdTaskIds, createdPayloads, updatedCalls, remoteIssues };
+  return { client, createdTaskIds, createdPayloads, updatedCalls, remoteIssues, createdProjectTitles, existingProjects };
 }
 
 function createFlakyStore(
@@ -268,6 +282,27 @@ describe('multica outbound push', () => {
     expect(createdTaskIds).toEqual([target.id]);
     expect(result.plan).toHaveLength(1);
     expect(result.plan[0]).toMatchObject({ bus_task_id: target.id, outcome: 'pushed' });
+  });
+
+  it('groups issues under a Multica project resolved from the bus task project (find-or-create)', async () => {
+    const { client, createdPayloads, createdProjectTitles } = createRecordingClient();
+    const store = createSyncStateStore(join(testDir, 'sync-state.json'));
+
+    // Two tasks share a project, one has a different project, one is ungrouped.
+    const a = createOrderedTask(paths, 0, 'A', { project: 'auditos' });
+    const b = createOrderedTask(paths, 1, 'B', { project: 'auditos' });
+    const c = createOrderedTask(paths, 2, 'C', { project: 'lifecycle-killer' });
+    const d = createOrderedTask(paths, 3, 'D', { project: '' });
+
+    await runOutboundPush(paths, client, store, config);
+
+    const byTask = new Map(createdPayloads.map((p) => [p.bus_task_id, p.issue.project_id]));
+    expect(byTask.get(a.id)).toBe('project-auditos');
+    expect(byTask.get(b.id)).toBe('project-auditos');
+    expect(byTask.get(c.id)).toBe('project-lifecycle-killer');
+    expect(byTask.get(d.id)).toBeNull();
+    // Each distinct project created exactly once (shared project not duplicated).
+    expect(createdProjectTitles).toEqual(['auditos', 'lifecycle-killer']);
   });
 
   it('pushes nothing when the limit is zero', async () => {

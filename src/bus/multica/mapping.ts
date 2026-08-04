@@ -50,6 +50,7 @@ export function taskToIssuePayload(
   config: MulticaConfig,
   provenance: MulticaProvenance = 'bus',
   action: MulticaPushAction = 'create',
+  projectId: string | null = null,
 ): MulticaPushPayload {
   const assignToJosh = task.assigned_to === 'human' || task.assigned_to === 'user';
   const assignment = assignToJosh
@@ -81,7 +82,10 @@ export function taskToIssuePayload(
       priority: BUS_TO_MULTICA_PRIORITY[task.priority],
       assignee_type: assignment.assignee_type,
       assignee_id: assignment.assignee_id,
-      project_id: assignment.project_id,
+      // Master-level grouping: the bus task's `project` resolves to a Multica
+      // project id (find-or-create) so issues nest under a project instead of
+      // dumping flat. null = ungrouped (empty/system project).
+      project_id: projectId,
       due_date: task.due_date ? task.due_date.slice(0, 10) : null,
     },
   };

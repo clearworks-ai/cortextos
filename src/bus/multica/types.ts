@@ -59,6 +59,13 @@ export interface MulticaTaskRun {
   [key: string]: unknown;
 }
 
+export interface MulticaProject {
+  id: string;
+  workspace_id: string;
+  title: string;
+  [key: string]: unknown;
+}
+
 export interface MulticaPushPayload {
   source: 'cortextos-bus';
   provenance: MulticaProvenance;
@@ -126,6 +133,8 @@ export interface MulticaClient {
   updateIssue(issueId: string, payload: MulticaPushPayload): Promise<MulticaIssue>;
   listIssues(params?: { limit?: number; offset?: number }): Promise<MulticaIssue[]>;
   getTaskRuns(issueId: string): Promise<MulticaTaskRun[]>;
+  listProjects(): Promise<MulticaProject[]>;
+  createProject(title: string): Promise<MulticaProject>;
 }
 
 export interface SyncSummary {

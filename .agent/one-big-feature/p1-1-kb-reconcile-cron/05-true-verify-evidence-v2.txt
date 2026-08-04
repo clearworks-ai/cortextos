@@ -1,0 +1,48 @@
+P1.1 kb-reconcile-cron — true-verify evidence (post-clobber re-sign)
+Worktree: /Users/joshweiss/code/cortextos/.claude/worktrees/agent-a1b7371680d748f0c
+Date: 2026-08-03
+
+Live checks re-run immediately before this ledger emit:
+
+$ python3 -c "... count kb-reconcile-nightly entries in live crons.json ..."
+matches: 1
+name=kb-reconcile-nightly schedule='37 3 * * *' enabled=True
+created_at=2026-08-01T17:47:58.074Z fire_count=2 last_fired_at=2026-08-03T10:37:15.383Z
+
+$ git merge-base --is-ancestor 561beba HEAD && echo "561beba IS ancestor"
+561beba IS ancestor
+  (561beba = PR #240 "fix(kb-reconcile): retry 504, quarantine corrupt PDFs, persist failed_paths")
+
+$ bash -n orgs/clearworksai/agents/larry/bin/kb-reconcile-nightly.sh
+syntax OK
+
+$ git diff main -- orgs/clearworksai/agents/larry/bin/kb-reconcile-nightly.sh \
+    orgs/clearworksai/agents/larry/config.json | wc -l
+0   (empty — no diff needed against main)
+
+$ grep -c "TRANSIENT_HTTP_CODES\|_is_quarantine_worthy\|failed_paths\|quarantined_paths" \
+    knowledge-base/scripts/mmrag.py
+27
+
+$ ps -p $(cat ~/.cortextos/cortextos1/daemon.pid)
+PID 56089  node /Users/joshweiss/code/cortextos/dist/daemon.js   (live)
+
+Independent review subagent (aa8c8c668cb8d2fa) additionally ran PR #240's own dedicated test
+suite fresh in this worktree:
+
+$ MMRAG_DIR=~/.cortextos/cortextos1/orgs/clearworksai/knowledge-base \
+  knowledge-base/venv/bin/python3 -m _test_clients.test_kb_reconcile_504_quarantine
+[test 1/4] transient_504_and_deadline           - 4/4 PASS
+[test 2/4] quarantine_parse_errors               - 4/4 PASS
+[test 3/4] transient_network_still_fails         - 2/2 PASS
+[test 4/4] ledger_includes_paths                 - 6/6 PASS
+ALL PASS (4 scenarios, 16/16 assertions)
+
+VERDICT: PASS (no-diff true-verify). Full narrative and chain of evidence in
+.agent/one-big-feature/p1-1-kb-reconcile-cron/05-true-verify-final.md.
+
+Non-blocking findings carried forward (do not block this receipt, both separately tracked):
+1. 2026-08-03 scheduled cron fire has no corresponding task/ledger row (crons.json bookkeeping
+   only) — worth a live check on the next fire.
+2. PR #240's fix is unit-test-proven but not yet exercised by a real production nightly run
+   (merged after the last logged ledger row); tracked under task_1785780818076_75964035.

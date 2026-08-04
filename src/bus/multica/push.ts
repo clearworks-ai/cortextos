@@ -1,6 +1,7 @@
 import type { BusPaths, Task } from '../../types/index.js';
 import { classifyTask, listTasks, OPEN_TASK_STATUSES } from '../task.js';
 import { hashMappedFields, idempotencyKeyFor, taskToIssuePayload } from './mapping.js';
+import { createProjectResolver } from './projects.js';
 import type { MulticaClient, MulticaConfig, MulticaIssue, SyncStateStore } from './types.js';
 
 export interface OutboundPushOptions {
@@ -54,6 +55,10 @@ export async function runOutboundPush(
   // Callers can opt specific tasks into meeting-pipeline provenance without
   // adding any detection heuristic to this module.
   const provenanceFor = options.provenanceFor ?? defaultProvenanceFor;
+  // Groups issues under a Multica project derived from the bus task's `project`.
+  // Resolution creates projects on demand, so it only runs on real pushes — a
+  // dry-run must stay side-effect-free and leaves project_id null in its plan.
+  const projectResolver = createProjectResolver(client);
   const state = store.load();
   // Issue ids already claimed by any bus task — orphan adoption must never
   // steal an issue that belongs to a different task.
@@ -200,7 +205,10 @@ export async function runOutboundPush(
     }
 
     const action = existingIssueId === null ? 'create' : 'update';
-    const payload = taskToIssuePayload(task, config, provenanceFor(task), action);
+    // Resolve the Multica project only on real pushes (creation is a side effect);
+    // a dry-run previews with project_id null.
+    const projectId = dryRun ? null : await projectResolver.resolve(task.project);
+    const payload = taskToIssuePayload(task, config, provenanceFor(task), action, projectId);
     const fieldHash = hashMappedFields(payload);
 
     if (existingIssueId !== null && link?.last_pushed_hash === fieldHash) {

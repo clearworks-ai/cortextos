@@ -65,6 +65,8 @@ function makeClient(issues: MulticaIssue[]): MulticaClient {
     async updateIssue() { throw new Error('not used'); },
     async listIssues() { return issues; },
     async getTaskRuns() { return []; },
+    async listProjects() { return []; },
+    async createProject(title) { return { id: `project-${title}`, workspace_id: 'ws', title }; },
   };
 }
 

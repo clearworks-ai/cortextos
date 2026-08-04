@@ -51,9 +51,9 @@ export function syncTasks(org: string): number {
 
   const upsert = db.prepare(`
     INSERT OR REPLACE INTO tasks
-      (id, title, description, status, priority, assignee, org, project, needs_approval, created_at, updated_at, completed_at, notes, source_file)
+      (id, title, description, status, priority, assignee, org, project, needs_approval, created_at, updated_at, completed_at, due_date, notes, source_file)
     VALUES
-      (@id, @title, @description, @status, @priority, @assignee, @org, @project, @needs_approval, @created_at, @updated_at, @completed_at, @notes, @source_file)
+      (@id, @title, @description, @status, @priority, @assignee, @org, @project, @needs_approval, @created_at, @updated_at, @completed_at, @due_date, @notes, @source_file)
   `);
 
   const files = fs.readdirSync(taskDir).filter((f) => f.endsWith('.json'));
@@ -83,6 +83,7 @@ export function syncTasks(org: string): number {
           created_at: task.created_at ?? new Date().toISOString(),
           updated_at: task.updated_at ?? null,
           completed_at: task.completed_at ?? null,
+          due_date: task.due_date ?? null,
           notes: task.notes ?? null,
           source_file: filePath,
         });
@@ -274,10 +275,11 @@ export interface SyncResult {
   approvals: number;
   events: number;
   heartbeats: number;
+  clients: number;
 }
 
 export function syncAll(): SyncResult {
-  const results: SyncResult = { tasks: 0, approvals: 0, events: 0, heartbeats: 0 };
+  const results: SyncResult = { tasks: 0, approvals: 0, events: 0, heartbeats: 0, clients: 0 };
 
   const orgs = getOrgs();
   for (const org of orgs) {
@@ -322,6 +324,15 @@ export function syncAll(): SyncResult {
     }
   } catch {
     // Best effort
+  }
+
+  // Client-delivery source snapshot: derive engagement rows from CRM pipeline +
+  // org-brain client md and cache them in SQLite so the render is a pure DB read.
+  try {
+    const { syncClients } = require('./data/clients');
+    results.clients = syncClients();
+  } catch (err) {
+    console.error('[sync] Client sync failed:', err);
   }
 
   // Cost sync moved to syncCostsLazy() - only runs when Analytics page is visited

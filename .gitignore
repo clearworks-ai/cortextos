@@ -80,3 +80,10 @@ docs/phase-reports/
 orgs/clearworksai/skills/outputs-router/**/__pycache__/
 orgs/clearworksai/skills/outputs-router/.pytest_cache/
 orgs/clearworksai/skills/cxportal-import/**/__pycache__/
+
+# claude-to-codex-migration leakage-guard fixture (author-specific ban tokens: fleet
+# roster + specific chat-ids). CI/local ONLY, pointed at by CTX_LEAKAGE_FIXTURE. NEVER
+# public — glob'd broadly so it can never be accidentally committed into the tree.
+leakage-fixture.json
+**/leakage-fixture.json
+*.leakage-fixture.json

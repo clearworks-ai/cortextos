@@ -240,6 +240,16 @@ export interface AgentConfig {
   /** Context window % at which to inject handoff prompt and hard-restart. Default: 80. */
   ctx_handoff_threshold?: number;
   /**
+   * Wedge-watchdog threshold (minutes). A WEDGED agent is one whose conversation
+   * buffer (state/<agent>/conversation-buffer.jsonl) has gone stale — no new turns
+   * for this many minutes — WHILE its heartbeat.json stays fresh (a cron keeps
+   * stamping it, so the dashboard shows it alive) AND it has pending inbox work.
+   * That combination means the REPL is stuck, not idle-with-nothing-to-do. When it
+   * holds, the daemon force-restarts the agent ONCE through the single-flight path.
+   * Default: 15. An explicit value <= 0 disables the wedge watchdog for this agent.
+   */
+  wedge_restart_min?: number;
+  /**
    * Fallback context window cap (tokens) for codex-app-server agents when the
    * server's `thread/tokenUsage/updated` event reports `modelContextWindow=null`.
    * Defaults to 256000 when unset. Only applied to the codex-app-server runtime.

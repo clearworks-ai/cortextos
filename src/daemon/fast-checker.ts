@@ -11,6 +11,12 @@ import type { TelegramAPI } from '../telegram/api.js';
 import { KEYS } from '../pty/inject.js';
 import { stripControlChars, sanitizeForPtyInjection, wrapFenceSafe } from '../utils/validate.js';
 import { agentHoldsContextHandoffLease, releaseContextHandoffLease, requestContextHandoffLease } from './context-handoff-lease.js';
+import {
+  detectWedge,
+  DEFAULT_WEDGE_RESTART_MIN,
+  DEFAULT_WEDGE_HEARTBEAT_FRESH_MS,
+  DEFAULT_WEDGE_RESTART_COOLDOWN_MS,
+} from './wedge-detector.js';
 
 type LogFn = (msg: string) => void;
 
@@ -78,6 +84,11 @@ export class FastChecker {
 
   // Idle-session heartbeat watchdog
   private heartbeatTimer: NodeJS.Timeout | null = null;
+
+  // Wedge watchdog: timestamp (ms) of the last wedge-restart we fired for this
+  // agent. Storm guard — we refuse to wedge-restart the same agent more than
+  // once per DEFAULT_WEDGE_RESTART_COOLDOWN_MS. 0 = never fired.
+  private wedgeLastRestartAt: number = 0;
 
   // Context monitor state
   private ctxConfigMtime: number = 0;
@@ -267,6 +278,137 @@ export class FastChecker {
 
     // Context monitor: check usage thresholds and fire warnings/handoffs
     await this.checkContextStatus();
+
+    // Wedge watchdog: detect a stuck REPL (stale conversation buffer while the
+    // heartbeat stays fresh + pending inbox work) and force ONE recovery restart.
+    this.checkWedge();
+  }
+
+  /**
+   * Wedge watchdog — called on every poll cycle.
+   *
+   * Classifies the agent as WEDGED when its conversation buffer has gone stale
+   * (no processed turns for wedge_restart_min) while heartbeat.json stays fresh
+   * AND there is pending inbox work — i.e. the REPL is stuck, not idle. Routes a
+   * WEDGED verdict to forceWedgeRestart(). All the file reads are best-effort;
+   * any error leaves the agent untouched (fail-safe: never restart on a read
+   * glitch).
+   *
+   * Exposed as a plain method (not folded into pollCycle) so its decision path
+   * is easy to trace; the actual decision lives in the pure detectWedge().
+   */
+  private checkWedge(): void {
+    try {
+      this.checkWedgeInner();
+    } catch (err) {
+      // Fail-safe: any read/accessor glitch leaves the agent untouched. A wedge
+      // watchdog must NEVER restart on its own error — a false wedge-restart is
+      // worse than a missed one (the buffer will still be stale next cycle).
+      this.log(`Wedge check error (ignored): ${err}`);
+    }
+  }
+
+  private checkWedgeInner(): void {
+    const config = this.agent.getConfig();
+    // Resolve the buffer-staleness threshold. An explicit wedge_restart_min <= 0
+    // opts this agent out; unset falls back to the 15min default. detectWedge
+    // treats a non-positive bufferStaleThresholdMs as disabled, so we can pass
+    // the raw computed value straight through.
+    const wedgeMin = config.wedge_restart_min ?? DEFAULT_WEDGE_RESTART_MIN;
+    const bufferStaleThresholdMs = wedgeMin * 60_000;
+    if (bufferStaleThresholdMs <= 0) return; // disabled — skip the file reads entirely
+
+    const now = Date.now();
+    const bufferMtime = this.mtimeMsOrNull(join(this.paths.stateDir, 'conversation-buffer.jsonl'));
+    const heartbeatMtime = this.mtimeMsOrNull(join(this.paths.stateDir, 'heartbeat.json'));
+
+    const decision = detectWedge({
+      nowMs: now,
+      conversationBufferMtimeMs: bufferMtime,
+      heartbeatMtimeMs: heartbeatMtime,
+      hasPendingWork: this.hasPendingInboxWork(),
+      agentRunning: this.agent.isRunning(),
+      restartInFlight: this.agent.isRestartInFlight(),
+      lastWedgeRestartAtMs: this.wedgeLastRestartAt,
+      bufferStaleThresholdMs,
+      heartbeatFreshThresholdMs: DEFAULT_WEDGE_HEARTBEAT_FRESH_MS,
+      restartCooldownMs: DEFAULT_WEDGE_RESTART_COOLDOWN_MS,
+    });
+
+    if (decision.wedged) {
+      this.forceWedgeRestart(
+        `conversation buffer stale ${Math.round(decision.bufferAgeMs / 60_000)}min `
+        + `(heartbeat fresh ${Math.round(decision.heartbeatAgeMs / 1000)}s ago) with pending inbox work`,
+      );
+    }
+  }
+
+  /**
+   * Return a file's mtime in ms, or null if it does not exist / is unreadable.
+   * A missing file is a meaningful signal for the wedge detector (no buffer yet =
+   * first boot; no heartbeat = down), so null is distinguished from an mtime.
+   */
+  private mtimeMsOrNull(path: string): number | null {
+    try {
+      if (!existsSync(path)) return null;
+      return statSync(path).mtimeMs;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Non-destructive check for pending inbox work. checkInbox() MOVES messages to
+   * inflight, so it cannot be used here — the wedge detector must not consume the
+   * inbox. Count .json files in both the inbox and inflight dirs directly: a
+   * message sitting in inflight that the wedged REPL never ack'd is exactly the
+   * "pending work the agent is failing to process" signal we want.
+   */
+  private hasPendingInboxWork(): boolean {
+    for (const dir of [this.paths.inbox, this.paths.inflight]) {
+      try {
+        const files = readdirSync(dir).filter(f => f.endsWith('.json') && !f.startsWith('.'));
+        if (files.length > 0) return true;
+      } catch {
+        // dir may not exist yet — treat as no work from this dir
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Force a recovery restart for a WEDGED agent.
+   *
+   * A wedge-restart is a RECOVERY (like a planned context handoff), NOT a crash:
+   *   - It does NOT touch ctxCircuitRestarts / the context circuit breaker, and
+   *     does NOT go through the crash limiter — those exist to stop RESTART
+   *     STORMS from repeated FAILURES, and a wedge-restart is a single deliberate
+   *     recovery, storm-guarded on its own (wedgeLastRestartAt + cooldown).
+   *   - It emits NO Telegram ping (silent recovery — no user-facing spam).
+   *   - It goes through sessionRefresh() → start(), inheriting the #269
+   *     single-flight guard, so it can never spawn a duplicate PTY. detectWedge
+   *     also refuses when a restart is already in flight, a second guard layer.
+   */
+  private forceWedgeRestart(reason: string): void {
+    const now = Date.now();
+    // Stamp BEFORE kicking the restart so the storm guard is armed even if the
+    // restart itself is slow — the next poll cycle sees the cooldown immediately.
+    this.wedgeLastRestartAt = now;
+    this.log(`WEDGE detected — force restarting (recovery, not counted as crash): ${reason}`);
+
+    // Pre-arm a fresh session: a wedged REPL's --continue history is suspect, and
+    // a clean fresh boot is the reliable recovery. hardRestart writes the planned
+    // markers so the crash-alert hook classifies this as a planned restart, not a
+    // crash (no false crash ping, no crash-count increment).
+    hardRestart(this.paths, this.agent.name, `WEDGE-FORCE-RESTART: ${reason}`);
+    try {
+      writeFileSync(join(this.paths.stateDir, '.force-fresh'), '');
+    } catch { /* non-fatal — restart still recovers, just may --continue */ }
+
+    // sessionRefresh() does stop() + start(); .force-fresh makes shouldContinue()
+    // false for a clean fresh session. start()'s single-flight guard ensures no
+    // duplicate spawn even if another trigger races this.
+    this.agent.sessionRefresh().catch(err => this.log(`Wedge restart failed: ${err}`));
   }
 
   /**

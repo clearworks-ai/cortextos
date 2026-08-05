@@ -37,15 +37,15 @@ The extractor owns the full pipeline: Haiku casualness gate + Sonnet extraction 
 
 If `FF_MEETING_ID` is set by the caller, run the extractor once for that single Fireflies meeting id instead of rescanning the latest 20. That is the webhook-triggered cadence path. If it is unset, keep the current poll fallback.
 
-Working directory MUST be the frank2 agent dir (`/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2`) so `scripts/` and `state/` resolve.
+Working directory MUST be the pa agent dir (`/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa`) so `scripts/` and `state/` resolve.
 
 ```bash
-cd /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2
+cd /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa
 # set -a auto-exports everything sourced — .env/secrets.env use bare KEY=value
 # (no `export`), and without this the python3 child would NOT inherit the vars
 # even though the bash guard below sees them (guard says OK, extractor fails).
 set -a
-source /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/.env 2>/dev/null
+source /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/.env 2>/dev/null
 source /Users/joshweiss/code/cortextos/orgs/clearworksai/secrets.env 2>/dev/null
 set +a
 

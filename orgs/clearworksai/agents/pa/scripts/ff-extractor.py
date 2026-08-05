@@ -32,6 +32,7 @@ OFFER_PATH = KNOWLEDGE_DIR / "offer.md"
 STATE_PATH = KNOWLEDGE_DIR / "STATE.md"
 STATE_DIR = AGENT_DIR / "state"
 DEFAULT_WATERMARK_PATH = STATE_DIR / "ff-extractor-watermark.json"
+ZERO_YIELD_LEDGER_PATH = STATE_DIR / "ff-extractor-zero-yield.jsonl"
 DEFAULT_TRANSCRIPT_LIMIT = 20
 FIREFLIES_API_URL = "https://api.fireflies.ai/graphql"
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -95,6 +96,8 @@ Identify every task, commitment, follow-up, or to-do mentioned. Be specific — 
 Only include forward-looking work or business commitments that still need to be done AFTER the meeting ends. Exclude personal or social errands (e.g. saying goodbye, returning home, travel logistics), small talk, and anything that was already completed during the meeting itself.
 Client context:
 {client_context}
+
+Only surface items material to an active Clearworks engagement when client context indicates one; otherwise return only transcript-grounded commitments.
 
 For each action item, ALL of the following must be true or the item must be dropped:
 - A SPECIFIC named owner — a real person mentioned by name in the transcript (not "the team,"
@@ -197,9 +200,14 @@ VAGUE_ACTION_PREFIXES = (
 SUPPRESSED_NAMES = ("marcos", "santa ana")
 # Owner strings that are not a concrete named person — never inbound-worthy.
 GENERIC_OWNERS = {"", "unassigned", "team", "the team", "everyone", "client", "we", "they"}
+EXPLICIT_COMMITMENT_RE = re.compile(
+    r"\b(?:i(?:'ll| will| am going to)|we(?:'ll| will| are going to)|let's)\b",
+    re.IGNORECASE,
+)
 COUNTERPARTY_RE = re.compile(
     r"\b(?:call|email|text|send|share|follow up with|ask|tell|schedule with|meet with)\s+([A-Z][A-Za-z0-9&.-]*(?:\s+[A-Z][A-Za-z0-9&.-]*){0,3})\b"
     r"|\b(?:to|with|for)\s+([A-Z][A-Za-z0-9&.-]*(?:\s+[A-Z][A-Za-z0-9&.-]*){0,3})\b"
+    r"|\b([A-Z][A-Za-z0-9&.-]+)(?:'s|’s)\b"
 )
 MARKDOWN_TABLE_SEPARATOR = re.compile(r"^[\s:|-]+$")
 PRIORITY_ORDER = ("P0", "P1", "P2", "P3")
@@ -599,6 +607,35 @@ def save_watermark(path: Path, transcript: dict[str, Any]) -> None:
     os.replace(temp_path, path)
 
 
+DROP_REASONS = ("empty_text", "casual", "zero_extracted", "all_refined_out")
+
+
+def empty_drop_reason_counts() -> dict[str, int]:
+    return {reason: 0 for reason in DROP_REASONS}
+
+
+def single_drop_reason_counts(reason: str) -> dict[str, int]:
+    counts = empty_drop_reason_counts()
+    if reason in counts:
+        counts[reason] = 1
+    return counts
+
+
+def append_zero_yield_row(path: Path, transcript: dict[str, Any], drop_reason: str) -> None:
+    payload = {
+        "meeting_id": str(transcript.get("id") or ""),
+        "meeting_date": collapse_ws(str(transcript.get("date") or "")),
+        "title": collapse_ws(str(transcript.get("title") or "")),
+        "timestamp": now_utc_iso(),
+        "drop_reason": drop_reason,
+        "drop_reason_counts": single_drop_reason_counts(drop_reason),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, sort_keys=True))
+        handle.write("\n")
+
+
 def is_newer_than_watermark(
     transcript: dict[str, Any],
     watermark_timestamp: datetime | None,
@@ -971,7 +1008,7 @@ def is_already_handled(raw_due: str) -> bool:
 
 def extract_counterparty(text: str) -> str | None:
     for match in COUNTERPARTY_RE.finditer(text):
-        candidate = collapse_ws(match.group(1) or match.group(2) or "")
+        candidate = collapse_ws(match.group(1) or match.group(2) or match.group(3) or "")
         if candidate:
             return candidate
     return None
@@ -1207,6 +1244,47 @@ def refine_inbound_item(
     )
 
 
+def refine_generic_owner_item(
+    item: ExtractedItem,
+    *,
+    meeting_id: str,
+    meeting_day: date,
+    all_sentences: list[str],
+    source_ref: str,
+) -> RefinedCommitment | None:
+    """Preserve an explicit, dated commitment whose speaker cannot be resolved.
+
+    Generic ownership alone is not enough to create a task.  This is the narrow
+    exception for a transcript-grounded promise with both a concrete timeframe
+    and explicit commitment language; the downstream owner is intentionally
+    marked NEEDS-OWNER rather than guessed.
+    """
+    if normalize_action(item.owner) not in GENERIC_OWNERS:
+        return None
+    if not has_concrete_action(item.action) or is_already_handled(item.due_date):
+        return None
+    due = resolve_due_date(item.due_date, meeting_day)
+    if due is None:
+        return None
+    support = best_support_sentence(item.action, all_sentences)
+    if support is None or EXPLICIT_COMMITMENT_RE.search(support) is None:
+        return None
+    counterparty = extract_counterparty(item.action) or extract_counterparty(support)
+    if is_suppressed(item.owner, item.action, counterparty):
+        return None
+    return RefinedCommitment(
+        id=commitment_id(meeting_id, item.action),
+        text=build_commitment_text(item.action, due),
+        source="ff",
+        source_ref=source_ref,
+        direction="outbound",
+        action_text=item.action,
+        owner="NEEDS-OWNER",
+        deadline=due,
+        source_quote=support,
+    )
+
+
 def refine_items(
     transcript: dict[str, Any],
     extracted_items: list[ExtractedItem],
@@ -1231,6 +1309,14 @@ def refine_items(
                 meeting_id=meeting_id,
                 meeting_day=meeting_day,
                 josh_sentences=josh_sentences,
+                source_ref=source_ref,
+            )
+        elif normalize_action(item.owner) in GENERIC_OWNERS:
+            commitment = refine_generic_owner_item(
+                item,
+                meeting_id=meeting_id,
+                meeting_day=meeting_day,
+                all_sentences=all_sentences,
                 source_ref=source_ref,
             )
         else:
@@ -1315,19 +1401,57 @@ def require_env(name: str) -> str:
     return value
 
 
+def extract_commitments_for_transcript(
+    transcript: dict[str, Any],
+    *,
+    openrouter_api_key: str,
+    urlopen: Urlopen = urllib.request.urlopen,
+) -> tuple[list[RefinedCommitment], str | None]:
+    transcript_text = build_transcript_text(transcript.get("sentences", []), limit=CLASSIFIER_MAX_CHARS)
+    if not transcript_text:
+        return [], "empty_text"
+
+    if is_casual_transcript(transcript_text, openrouter_api_key=openrouter_api_key, urlopen=urlopen):
+        return [], "casual"
+
+    client_record = matched_client_context_record_for_transcript(transcript)
+    client_context = str(client_record.get("context") or "") if client_record is not None else ""
+    extraction_text = build_transcript_text(transcript.get("sentences", []), limit=EXTRACTOR_MAX_CHARS)
+    extracted = extract_action_items(
+        extraction_text,
+        client_context=client_context,
+        openrouter_api_key=openrouter_api_key,
+        urlopen=urlopen,
+    )
+    if not extracted:
+        return [], "zero_extracted"
+
+    commitments = refine_items(transcript, extracted, client_record=client_record)
+    if not commitments:
+        return [], "all_refined_out"
+    return commitments, None
+
+
 def execute(
     *,
     limit: int,
     dry_run: bool,
+    meeting_id: str = "",
     watermark_path: Path,
     urlopen: Urlopen = urllib.request.urlopen,
 ) -> int:
     try:
-        return run(limit=limit, dry_run=dry_run, watermark_path=watermark_path, urlopen=urlopen)
+        return run(
+            limit=limit,
+            dry_run=dry_run,
+            meeting_id=meeting_id,
+            watermark_path=watermark_path,
+            urlopen=urlopen,
+        )
     except (RuntimeError, ValueError, urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError) as exc:
         reason = collapse_ws(str(exc)) or exc.__class__.__name__
         LOGGER.error("ff-extractor failed: %s", reason)
-        print(json.dumps({"error": reason, "items": [], "dry_run": dry_run}))
+        print(json.dumps({"error": reason, "items": [], "dry_run": dry_run, **empty_drop_reason_counts()}))
         return 1
 
 
@@ -1335,6 +1459,7 @@ def run(
     *,
     limit: int,
     dry_run: bool,
+    meeting_id: str = "",
     watermark_path: Path,
     urlopen: Urlopen = urllib.request.urlopen,
 ) -> int:
@@ -1351,37 +1476,45 @@ def run(
 
     watermark_timestamp, watermark_meeting_id = load_watermark(watermark_path)
     recent = fetch_recent_transcripts(fireflies_api_key, limit=limit, urlopen=urlopen)
-    fresh = select_recent_transcripts(recent, watermark_timestamp, watermark_meeting_id, limit=limit)
+    if meeting_id:
+        fresh = [t for t in recent if str(t.get("id") or "") == meeting_id]
+    else:
+        fresh = select_recent_transcripts(recent, watermark_timestamp, watermark_meeting_id, limit=limit)
     if not fresh:
-        print(json.dumps({"meetings": 0, "commitments": 0, "posted": False, "dry_run": dry_run, "items": []}))
+        print(
+            json.dumps(
+                {
+                    "meetings": 0,
+                    "commitments": 0,
+                    "posted": False,
+                    "dry_run": dry_run,
+                    "items": [],
+                    **empty_drop_reason_counts(),
+                }
+            )
+        )
         return 0
 
     all_commitments: list[RefinedCommitment] = []
     processed: list[dict[str, Any]] = []
+    zero_yield_transcripts: list[tuple[dict[str, Any], str]] = []
+    drop_reason_counts = empty_drop_reason_counts()
     for transcript in fresh:
-        transcript_text = build_transcript_text(transcript.get("sentences", []), limit=CLASSIFIER_MAX_CHARS)
-        if not transcript_text:
-            processed.append(transcript)
-            continue
-        if is_casual_transcript(transcript_text, openrouter_api_key=openrouter_api_key, urlopen=urlopen):
-            processed.append(transcript)
-            continue
-        client_record = matched_client_context_record_for_transcript(transcript)
-        client_context = str(client_record.get("context") or "") if client_record is not None else ""
-        extraction_text = build_transcript_text(transcript.get("sentences", []), limit=EXTRACTOR_MAX_CHARS)
-        extracted = extract_action_items(
-            extraction_text,
-            client_context=client_context,
+        commitments, drop_reason = extract_commitments_for_transcript(
+            transcript,
             openrouter_api_key=openrouter_api_key,
             urlopen=urlopen,
         )
-        all_commitments.extend(refine_items(transcript, extracted, client_record=client_record))
+        all_commitments.extend(commitments)
+        if drop_reason is not None:
+            drop_reason_counts[drop_reason] += 1
+            zero_yield_transcripts.append((transcript, drop_reason))
         processed.append(transcript)
 
     items = commitment_entries(all_commitments, enriched=True)
     payload = {"commitments": commitment_payload_entries(all_commitments)}
     if dry_run:
-        print(json.dumps({"dry_run": True, "items": items, "payload": payload}, indent=2))
+        print(json.dumps({"dry_run": True, "items": items, "payload": payload, **drop_reason_counts}, indent=2))
         return 0
 
     if payload["commitments"]:
@@ -1399,14 +1532,30 @@ def run(
                     "posted": True,
                     "result": result,
                     "items": items,
+                    **drop_reason_counts,
                 }
             )
         )
     else:
-        print(json.dumps({"meetings": len(processed), "commitments": 0, "posted": False, "noop": True, "items": items}))
+        print(
+            json.dumps(
+                {
+                    "meetings": len(processed),
+                    "commitments": 0,
+                    "posted": False,
+                    "noop": True,
+                    "items": items,
+                    **drop_reason_counts,
+                }
+            )
+        )
 
-    newest = max(processed, key=transcript_sort_key)
-    save_watermark(watermark_path, newest)
+    for transcript, drop_reason in zero_yield_transcripts:
+        append_zero_yield_row(ZERO_YIELD_LEDGER_PATH, transcript, drop_reason)
+
+    if not meeting_id:
+        newest = max(processed, key=transcript_sort_key)
+        save_watermark(watermark_path, newest)
     return 0
 
 
@@ -1431,7 +1580,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--meeting-id",
         default="",
-        help="Only honored in full mode: filter to one Fireflies transcript id",
+        help="Filter to one Fireflies transcript id in commitments or full mode",
     )
     return parser.parse_args(argv)
 
@@ -1747,6 +1896,7 @@ def main(argv: list[str] | None = None) -> int:
     return execute(
         limit=max(1, args.limit),
         dry_run=args.dry_run,
+        meeting_id=str(args.meeting_id or ""),
         watermark_path=Path(args.watermark_path),
     )
 

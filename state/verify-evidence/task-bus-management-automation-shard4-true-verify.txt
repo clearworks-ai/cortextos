@@ -1,0 +1,38 @@
+=== task-bus-management-automation shard4 true-verify evidence ===
+Branch: feature/task-bus-management-automation-shard4
+Commit: ccaf2e9e01e8b1a575dbb50f0f0cbf6ab50abc03
+Worktree: /private/tmp/tbma-shard4
+
+=== npm run build ===
+CJS dist/pipeline/staging-verify/cli.js.map    122.63 KB
+CJS dist/hooks/hook-loop-detector.js.map       37.71 KB
+CJS dist/daemon.js.map                         1.05 MB
+CJS dist/cli.js.map                            1.67 MB
+CJS ⚡️ Build success in 268ms
+
+=== npx tsc --noEmit ===
+(exit: 0)
+
+=== npx vitest run (isolated pty-host-ready + pty-host-dispose) ===
+    123| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 5 passed (6)
+   Start at  17:08:36
+   Duration  6.02s (transform 68ms, setup 32ms, import 63ms, tests 7.13s, environment 0ms)
+
+
+=== npx vitest run (full suite) ===
+(node:2758) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:2991) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ Test Files  224 passed | 3 skipped (227)
+      Tests  3106 passed | 27 skipped (3133)
+   Start at  17:08:44
+   Duration  38.86s (transform 24.37s, setup 3.72s, import 35.50s, tests 238.79s, environment 24ms)
+

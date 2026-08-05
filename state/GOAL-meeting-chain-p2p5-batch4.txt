@@ -1,0 +1,27 @@
+SOURCE OF TRUTH
+- state/SPEC-meeting-chain-p2p5-batch4.md (BINDING) → §4 Requirements, §7 Grounding Ledger.
+- state/P2-P5-CONFORMANCE-2026-08-04-v2.md → Verdict Table (BINDING for FR-003).
+
+STANDING RULES:
+- OBF repo, not superpowers — no /stage or /test-on-staging exist, don't invoke.
+- Tests: npm run build + npm test (TS); python3 -m pytest or file's own runner (py). Pre-existing npm test fails (missing deps, EPERM sockets) unrelated — ignore.
+- No commits/pushes except FR-005's `git add -f` (content only). Rest stays in-tree for Josh.
+- Don't touch other in-flight .agent/one-big-feature/ dirs, cron/launchctl config, or send email/Telegram.
+- PARALLELISM: all 5 independent — CONCURRENT, each own `git worktree add ../ctx-<slug>-fr00N <branch>`, NEVER shared checkout (4+ incidents this week of it destroying ledger/untracked state). Spawn all 5 first.
+- 2 SKILL.md copies may exist (orgs/clearworksai/skills/ + ~/.claude/skills/) — edit both if both exist; global loads first.
+
+SUB-PHASES (all [indep], spawn concurrently):
+FR-005: git add -f orgs/clearworksai/agents/crm/crm/{add-followup.py,fireflies-ingest.py,test_fireflies_ingest.py,upsert-engagement.py}, crm/config.json, pa/config.json, pa/.claude/skills/meeting-commitments-worker/SKILL.md. DONE: git status --short shows all 7 staged, no index.lock error.
+FR-001: pa/scripts/ff-extractor.py refine_commitment() (~1211, GENERIC_OWNERS gate) — flag NEEDS-OWNER instead of dropping when owner generic/self-referential but due-date + explicit commitment language both present; other drop paths unchanged. DONE: caseB fixture (state/skill-tests/meeting-intelligence-engineer/...) shows commitment captured NEEDS-OWNER/resolved-speaker; extended test_ff_extractor.py passes; no regression on named-owner cases; build clean.
+FR-002: frank2/scripts/sync_client_context.py sync_clients() (:342, unlink-all :373-374, write_text :377) — merge step so meeting-appended History/Open-Items in an existing knowledge/clients/<client>.md survives rebuild; test scratch/temp fixtures ONLY, never real knowledge/clients/*.md. DONE: new test proves scratch file's row survives rebuild; CRM-sourced fields unchanged w/ no prior meeting content; build clean.
+FR-003: every router-vs-spec path mismatch in the conformance Verdict Table (delivery-status-reporter, call-prep-researcher, others listed) — amend that skill's SKILL.md Output Format to the live router path, cite worker file:line; if a row's router path itself looks wrong, flag ambiguous instead of forcing the edit. DONE: every mismatch row amended-and-cited or flagged, none skipped.
+FR-004: ~/.claude/skills/records-administrator/SKILL.md — remove contradiction between "never auto-apply" (:16) and "auto-apply STALE/MISSING" (:103); resolve to never-auto-apply. Check crm/config.json:61 records-admin-sweep target for whether LIVE script currently auto-applies anything — report, don't silently change runtime behavior. DONE: contradiction grep clean; auto-apply question answered with evidence.
+
+EACH ITERATION: re-read spec section + cited file/line live → implement directly (single-file, no plan-file needed) → run test/verify, paste output → confirm build clean → report done. No commit/push/merge beyond FR-005 unless Josh says so.
+
+DONE (whole spec): all 5 DONE-when clauses hold on real pasted output. Write state/P2-P5-BATCH4-REPORT-2026-08-04.md: all 5 items + git status --short across worktrees + build output. HALT, report to Josh.
+
+ENVIRONMENT
+- orgs/clearworksai/* is gitignore-excluded (.gitignore:17) except secrets.env.example, skills/**; FR-005's 7 files already force-added by prior batch — this only stages them.
+
+HALT: (1) gate fails (build/test red, DONE-when fails on real output) — stop, report gate+diff+error, no silent fix-forward; (2) spec ambiguity or unresolved conformance row — stop, ask; (3) all 5 done — stop, write report, await Josh's commit/PR call (no auto-commit/push beyond FR-005).

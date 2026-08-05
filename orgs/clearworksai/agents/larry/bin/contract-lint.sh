@@ -32,15 +32,18 @@ FAIL_COUNT=0
 FAILING_SKILLS=()
 
 for skill in "${SKILLS[@]}"; do
-  # Resolve SKILL.md path (repo-tracked first, then global)
+  # Resolve SKILL.md path (runtime-loaded global first, then repo fallback)
   REPO_SKILL="/Users/joshweiss/code/cortextos/orgs/clearworksai/skills/${skill}/SKILL.md"
   GLOBAL_SKILL="/Users/joshweiss/.claude/skills/${skill}/SKILL.md"
   
   SKILL_PATH=""
-  if [[ -f "$REPO_SKILL" ]]; then
-    SKILL_PATH="$REPO_SKILL"
-  elif [[ -f "$GLOBAL_SKILL" ]]; then
+  if [[ -f "$GLOBAL_SKILL" ]]; then
     SKILL_PATH="$GLOBAL_SKILL"
+    if [[ -f "$REPO_SKILL" ]] && ! diff -q "$REPO_SKILL" "$GLOBAL_SKILL" >/dev/null; then
+      echo "DIVERGENCE: $skill repo copy differs from loaded copy — grading loaded copy, but repo copy may contain unmerged fixes" >&2
+    fi
+  elif [[ -f "$REPO_SKILL" ]]; then
+    SKILL_PATH="$REPO_SKILL"
   else
     echo "FAIL: $skill — SKILL.md not found"
     ((FAIL_COUNT++))

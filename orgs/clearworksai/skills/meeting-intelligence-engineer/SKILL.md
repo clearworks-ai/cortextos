@@ -137,7 +137,7 @@ DEAL-STATE CHANGES: [moved forward? stalled? scope changed? budget mentioned? ne
 **Notetaker pull (optional):** when `FIREFLIES_API_KEY` is set you may pull a single transcript via the shared extractor:
 
 ```bash
-cd /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2
+cd /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa
 set -a; source .env 2>/dev/null; source ../../secrets.env 2>/dev/null; set +a
 python3 scripts/ff-extractor.py --mode full --meeting-id <FIREFLIES_ID>
 ```

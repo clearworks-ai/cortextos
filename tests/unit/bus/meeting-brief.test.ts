@@ -64,6 +64,15 @@ describe('parseCalendarEvents', () => {
     expect(events[0].title).toBe('Sync');
   });
 
+  it('parses an {items:[...]} wrapper from calendar events list', () => {
+    const events = parseCalendarEvents(JSON.stringify({
+      items: [{ id: 'c', summary: 'Agenda Event', start: '2026-07-03T19:30:00Z', attendees: [] }],
+    }));
+    expect(events).toHaveLength(1);
+    expect(events[0].id).toBe('c');
+    expect(events[0].title).toBe('Agenda Event');
+  });
+
   it('handles gws-ish shapes: {dateTime} starts, {email} attendees, iCalUID ids', () => {
     const events = parseCalendarEvents(JSON.stringify([
       {

@@ -1,0 +1,16 @@
+Independent re-verification after rebase-fix at commit aeb332b (was 33e60c7), worktree /private/tmp/tbma-shard3, 2026-08-02T23:58Z
+
+Rebase context: shard1/shard2 merged to main (PRs #218/#222) in between, single import-line
+collision in tests/unit/bus/task.test.ts, resolved by codexer via rebase --continue.
+Confirmed via git diff 6894bf3(new base)..aeb332b: same 5 files, same shape as the
+original 33e60c7 diff (src/bus/task.ts, src/cli/bus.ts, tests/unit/bus/task.test.ts,
+tests/unit/bus/task-management.test.ts, tests/unit/cli/bus-list-health.test.ts) —
+no scope drift introduced by the rebase.
+
+npm run build: clean, success
+npx tsc --noEmit: clean, zero errors
+npm test: 3056/3056 passed, 25 skipped (count rose from 3038 baseline as expected — main
+now includes shard1+shard2's own new tests)
+
+Original review (04-review-shard3.md, PASS) and true-verify already cover the substantive
+diff; this row re-confirms the rebase-mechanical commit swap introduced no regression.

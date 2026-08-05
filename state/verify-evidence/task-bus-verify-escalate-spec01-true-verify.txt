@@ -1,0 +1,18 @@
+task-bus-verify-escalate Spec 01 (combined with regression fix) true-verify evidence
+
+Independently verified in isolated scratch worktree, branch feature/task-bus-verify-escalate
+@ 60a6e4f (merge of 87ef542 + 69f7d5a):
+
+npx tsc --noEmit: 0 errors, clean.
+
+npx vitest run tests/unit/bus/task.test.ts tests/unit/bus/multica/poll.test.ts tests/unit/cli/bus-sweep-due.test.ts:
+Test Files  3 passed (3)
+     Tests  123 passed (123)
+
+npx vitest run (full suite):
+Test Files  13 failed | 202 passed | 3 skipped (218)
+     Tests  1 failed | 2814 passed | 72 skipped (2887)
+1 failure (next/server import) confirmed identical to origin/main baseline.
+
+git diff origin/main..branch --stat: 5 files changed, 217 insertions(+), 6 deletions(-)
+(src/bus/task.ts, src/bus/multica/poll.ts, and their 3 test files).

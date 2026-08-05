@@ -24,29 +24,29 @@ If a Telegram status message would report anything other than what a bash block'
 TASK_ID=$(cortextos bus create-task "Cron: meeting-recap-draft" --desc "Post-meeting recap Gmail draft worker" --assignee "${CTX_PARENT_AGENT:-pa}" 2>/dev/null)
 cortextos bus update-task $TASK_ID in_progress 2>/dev/null
 cortextos bus update-cron-fire meeting-recap-draft --interval 4h 2>/dev/null
-LEDGER='/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/state/meeting-recap-drafts-surfaced.txt'
+LEDGER='/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/state/meeting-recap-drafts-surfaced.txt'
 mkdir -p "$(dirname "$LEDGER")"
 [[ -f "$LEDGER" ]] || touch "$LEDGER"
 echo "surfaced=$(wc -l < "$LEDGER")"
 ```
 
-The ledger is ABSOLUTE-path on purpose (sibling ledgers split-brained across pa/state and frank2/state via cwd-relative paths; this worker colocates with the extractor watermark in frank2/state).
+The ledger is ABSOLUTE-path on purpose (sibling ledgers were split-brained via cwd-relative paths; this worker colocates with the extractor watermark in pa/state).
 
 ---
 
 ## Step 2 — Run the extractor in recap mode (Bash)
 
-ff-extractor is the only Fireflies touchpoint — never query the Fireflies API from this SKILL. Recap mode does not POST and does not touch the commitments watermark. Working directory MUST be the frank2 agent dir so `scripts/` resolves.
+ff-extractor is the only Fireflies touchpoint — never query the Fireflies API from this SKILL. Recap mode does not POST and does not touch the commitments watermark. Working directory MUST be the pa agent dir so `scripts/` resolves.
 
 ```bash
-cd /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2
+cd /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa
 # set -a auto-exports everything sourced — .env/secrets.env use bare KEY=value
 set -a
-source /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/.env 2>/dev/null
+source /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/.env 2>/dev/null
 source /Users/joshweiss/code/cortextos/orgs/clearworksai/secrets.env 2>/dev/null
 set +a
 
-LEDGER='/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/state/meeting-recap-drafts-surfaced.txt'
+LEDGER='/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/state/meeting-recap-drafts-surfaced.txt'
 DEGRADED=0
 if [[ -z "$FIREFLIES_API_KEY" || -z "$OPENROUTER_API_KEY" ]]; then
   # Env guard: recap needs both keys; nothing to draft without them.

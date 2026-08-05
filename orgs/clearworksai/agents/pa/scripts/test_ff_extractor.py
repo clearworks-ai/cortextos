@@ -56,6 +56,37 @@ class FirefliesExtractorTests(unittest.TestCase):
         self.assertEqual(commitments[0].source, "ff")
         self.assertEqual(commitments[0].source_ref, "meeting_123 · Acme Follow Up")
 
+    def test_refine_keeps_explicit_dated_generic_owner_as_needs_owner(self) -> None:
+        transcript = self.make_transcript("We'll send the revised scope to Acme by Friday.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Send the revised scope to Acme",
+                owner="we",
+                due_date="Friday",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].owner, "NEEDS-OWNER")
+        self.assertEqual(commitments[0].deadline, "2026-06-12")
+        self.assertEqual(commitments[0].source_quote, "We'll send the revised scope to Acme by Friday.")
+
+    def test_refine_drops_generic_owner_without_explicit_commitment(self) -> None:
+        transcript = self.make_transcript("We should send the revised scope to Acme by Friday.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Send the revised scope to Acme",
+                owner="we",
+                due_date="Friday",
+                status="pending",
+            )
+        ]
+
+        self.assertEqual(MODULE.refine_items(transcript, items), [])
+
     def test_refine_keeps_named_counterparty_without_due(self) -> None:
         transcript = self.make_transcript("Let me call Sara about the contract this afternoon.")
         items = [
@@ -71,6 +102,38 @@ class FirefliesExtractorTests(unittest.TestCase):
 
         self.assertEqual(len(commitments), 1)
         self.assertEqual(commitments[0].text, "Call Sara about the contract")
+
+    def test_refine_keeps_possessive_counterparty_name(self) -> None:
+        transcript = self.make_transcript("I'll automate Wendy's spreadsheet process.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Automate Wendy's spreadsheet process",
+                owner="Josh",
+                due_date="",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].text, "Automate Wendy's spreadsheet process")
+
+    def test_refine_keeps_for_counterparty_name(self) -> None:
+        transcript = self.make_transcript("I'll build spreadsheet automation for Wendy.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Build spreadsheet automation for Wendy",
+                owner="Josh",
+                due_date="",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].text, "Build spreadsheet automation for Wendy")
 
     def test_refine_keeps_llm_assigned_josh_owner_without_verbatim_first_person(self) -> None:
         # We now trust the model's owner=Josh assignment rather than requiring a
@@ -639,6 +702,58 @@ class RunStdoutContractTests(unittest.TestCase):
         printed = json.loads(stdout.getvalue())
         self.assertTrue(printed["noop"])
         self.assertEqual(printed["items"], [])
+        self.assertEqual(printed["casual"], 1)
+        self.assertEqual(printed["empty_text"], 0)
+        self.assertEqual(printed["zero_extracted"], 0)
+        self.assertEqual(printed["all_refined_out"], 0)
+        self.assertFalse(any("briefs.example" in url for url in calls))
+
+    def test_zero_yield_run_writes_auditable_ledger_row(self) -> None:
+        calls: list[str] = []
+
+        def casual_urlopen(request: object, timeout: int | None = None) -> FakeResponse:
+            url = request.full_url
+            calls.append(url)
+            if "fireflies" in url:
+                body: dict[str, object] = {"data": {"transcripts": [self.make_transcript()]}}
+            elif "openrouter" in url:
+                body = {"choices": [{"message": {"content": json.dumps({"is_casual": True})}}]}
+            else:
+                body = {"ok": True}
+            return FakeResponse(json.dumps(body).encode("utf-8"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            watermark_path = Path(tmp) / "watermark.json"
+            zero_yield_path = Path(tmp) / "ff-extractor-zero-yield.jsonl"
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, self.ENV):
+                with unittest.mock.patch.object(MODULE, "ZERO_YIELD_LEDGER_PATH", zero_yield_path):
+                    with contextlib.redirect_stdout(stdout):
+                        exit_code = MODULE.run(
+                            limit=5,
+                            dry_run=False,
+                            meeting_id="",
+                            watermark_path=watermark_path,
+                            urlopen=casual_urlopen,
+                        )
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(watermark_path.exists())
+            self.assertTrue(zero_yield_path.exists())
+            rows = [
+                json.loads(line)
+                for line in zero_yield_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+
+        printed = json.loads(stdout.getvalue())
+        self.assertTrue(printed["noop"])
+        self.assertEqual(printed["casual"], 1)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["meeting_id"], "meeting_123")
+        self.assertEqual(rows[0]["drop_reason"], "casual")
+        self.assertEqual(rows[0]["drop_reason_counts"]["casual"], 1)
+        self.assertEqual(rows[0]["drop_reason_counts"]["empty_text"], 0)
         self.assertFalse(any("briefs.example" in url for url in calls))
 
     def test_posted_print_includes_items(self) -> None:

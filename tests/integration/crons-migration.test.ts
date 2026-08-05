@@ -58,6 +58,7 @@ let migrateCronsForAgent: typeof import('../../src/daemon/cron-migration.js').mi
 let migrateAllAgents: typeof import('../../src/daemon/cron-migration.js').migrateAllAgents;
 let isMigrated: typeof import('../../src/daemon/cron-migration.js').isMigrated;
 let readCrons: typeof import('../../src/bus/crons.js').readCrons;
+let writeCrons: typeof import('../../src/bus/crons.js').writeCrons;
 
 async function reloadModules() {
   vi.resetModules();
@@ -67,6 +68,7 @@ async function reloadModules() {
   isMigrated = migModule.isMigrated;
   const cronsModule = await import('../../src/bus/crons.js');
   readCrons = cronsModule.readCrons;
+  writeCrons = cronsModule.writeCrons;
 }
 
 /**
@@ -206,6 +208,43 @@ describe('migrateCronsForAgent', () => {
     expect(isMigrated(tmpCtxRoot, 'beta')).toBe(true);
   });
 
+  it('merges config-derived crons into the live registry and preserves existing collisions', () => {
+    const agentDir = join(tmpFrameworkRoot, 'orgs', 'testorg', 'agents', 'mergey');
+    writeConfigJson(agentDir, [
+      { name: 'heartbeat', interval: '6h', prompt: 'New heartbeat prompt.' },
+      { name: 'daily', interval: '24h', prompt: 'Daily check.' },
+    ]);
+
+    writeCrons('mergey', [
+      {
+        name: 'heartbeat',
+        prompt: 'Existing live heartbeat prompt.',
+        schedule: '12h',
+        enabled: true,
+        created_at: '2026-08-01T00:00:00.000Z',
+      },
+      {
+        name: 'runtime-only',
+        prompt: 'Created at runtime only.',
+        schedule: '30m',
+        enabled: true,
+        created_at: '2026-08-01T00:05:00.000Z',
+      },
+    ]);
+
+    const result = migrateCronsForAgent('mergey', join(agentDir, 'config.json'), tmpCtxRoot);
+
+    expect(result.status).toBe('migrated');
+    expect(result.cronsMigrated).toBe(2);
+
+    const crons = readCrons('mergey');
+    expect(crons.map((cron) => cron.name)).toEqual(['heartbeat', 'runtime-only', 'daily']);
+    expect(crons.find((cron) => cron.name === 'heartbeat')?.prompt).toBe(
+      'Existing live heartbeat prompt.',
+    );
+    expect(crons.find((cron) => cron.name === 'heartbeat')?.schedule).toBe('12h');
+  });
+
   // ---------------------------------------------------------------------------
   // Test 4: type:"once" with future fire_at → skipped with log
   // ---------------------------------------------------------------------------
@@ -299,7 +338,7 @@ describe('migrateCronsForAgent', () => {
   // Test 7: Missing config.json → no-op, no crash, marker created
   // ---------------------------------------------------------------------------
 
-  it('handles missing config.json gracefully: no crash, empty crons.json + marker', () => {
+  it('handles missing config.json gracefully: no crash, empty crons.json + marker when no live registry exists', () => {
     const configPath = join(tmpFrameworkRoot, 'orgs', 'testorg', 'agents', 'noconfig', 'config.json');
     // Do NOT write config.json
 
@@ -317,11 +356,30 @@ describe('migrateCronsForAgent', () => {
     expect(markerExists(tmpCtxRoot, 'noconfig')).toBe(true);
   });
 
+  it('preserves a populated live registry when config.json is missing', () => {
+    writeCrons('noconfig-live', [
+      {
+        name: 'runtime-only',
+        prompt: 'Created live.',
+        schedule: '15m',
+        enabled: true,
+        created_at: '2026-08-01T00:00:00.000Z',
+      },
+    ]);
+
+    const configPath = join(tmpFrameworkRoot, 'orgs', 'testorg', 'agents', 'noconfig-live', 'config.json');
+    const result = migrateCronsForAgent('noconfig-live', configPath, tmpCtxRoot);
+
+    expect(result.status).toBe('no-config');
+    expect(readCrons('noconfig-live').map((cron) => cron.name)).toEqual(['runtime-only']);
+    expect(markerExists(tmpCtxRoot, 'noconfig-live')).toBe(true);
+  });
+
   // ---------------------------------------------------------------------------
   // Test 8: Config.json with no crons array → empty crons.json + marker
   // ---------------------------------------------------------------------------
 
-  it('handles config.json with no crons array: writes empty crons.json + marker', () => {
+  it('handles config.json with no crons array: writes empty crons.json + marker when no live registry exists', () => {
     const agentDir = join(tmpFrameworkRoot, 'orgs', 'testorg', 'agents', 'nocrons');
     mkdirSync(agentDir, { recursive: true });
     writeFileSync(
@@ -340,11 +398,36 @@ describe('migrateCronsForAgent', () => {
     expect(markerExists(tmpCtxRoot, 'nocrons')).toBe(true);
   });
 
+  it('preserves a populated live registry when config.json has no crons array', () => {
+    const agentDir = join(tmpFrameworkRoot, 'orgs', 'testorg', 'agents', 'nocrons-live');
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(
+      join(agentDir, 'config.json'),
+      JSON.stringify({ agent_name: 'nocrons-live', enabled: true }),
+      'utf-8',
+    );
+    writeCrons('nocrons-live', [
+      {
+        name: 'runtime-only',
+        prompt: 'Created live.',
+        schedule: '15m',
+        enabled: true,
+        created_at: '2026-08-01T00:00:00.000Z',
+      },
+    ]);
+
+    const result = migrateCronsForAgent('nocrons-live', join(agentDir, 'config.json'), tmpCtxRoot);
+
+    expect(result.status).toBe('no-crons');
+    expect(readCrons('nocrons-live').map((cron) => cron.name)).toEqual(['runtime-only']);
+    expect(markerExists(tmpCtxRoot, 'nocrons-live')).toBe(true);
+  });
+
   // ---------------------------------------------------------------------------
   // Test 9: Empty crons array → empty crons.json + marker
   // ---------------------------------------------------------------------------
 
-  it('handles config.json with empty crons array: writes empty crons.json + marker', () => {
+  it('handles config.json with empty crons array: writes empty crons.json + marker when no live registry exists', () => {
     const agentDir = join(tmpFrameworkRoot, 'orgs', 'testorg', 'agents', 'emptycrons');
     writeConfigJson(agentDir, []);
 
@@ -356,6 +439,26 @@ describe('migrateCronsForAgent', () => {
     expect(crons).toHaveLength(0);
 
     expect(markerExists(tmpCtxRoot, 'emptycrons')).toBe(true);
+  });
+
+  it('preserves a populated live registry when config.json has an empty crons array', () => {
+    const agentDir = join(tmpFrameworkRoot, 'orgs', 'testorg', 'agents', 'emptycrons-live');
+    writeConfigJson(agentDir, []);
+    writeCrons('emptycrons-live', [
+      {
+        name: 'runtime-only',
+        prompt: 'Created live.',
+        schedule: '15m',
+        enabled: true,
+        created_at: '2026-08-01T00:00:00.000Z',
+      },
+    ]);
+
+    const result = migrateCronsForAgent('emptycrons-live', join(agentDir, 'config.json'), tmpCtxRoot);
+
+    expect(result.status).toBe('no-crons');
+    expect(readCrons('emptycrons-live').map((cron) => cron.name)).toEqual(['runtime-only']);
+    expect(markerExists(tmpCtxRoot, 'emptycrons-live')).toBe(true);
   });
 
   // ---------------------------------------------------------------------------

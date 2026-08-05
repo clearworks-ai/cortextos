@@ -1,0 +1,13 @@
+Independent re-verification at commit 33e60c7, worktree /private/tmp/tbma-shard3, 2026-08-02T23:33Z
+
+npm run build: clean, success
+npx tsc --noEmit: clean, zero errors
+npm test: 3037/3038 passed, 25 skipped (1 unrelated pre-existing flaky pty-host-dispose.test.ts,
+confirmed passes 3/3 in isolation)
+
+Independent adversarial review (general-purpose subagent, session 5a542d00-21ba-45ac-8dac-5d4ecdbf2b7e,
+agent ae3117171c91096a5) APPROVED: gate placement (inside file lock, before mutation), no-partial-write
+on rejection, human/system exemption, force+reason validation, all 4 completeTask() callers, stop-list
+regex, and CLI --force-no-evidence flag all traced from source and verified live. One process incident
+(smoke-test briefly touched live ~/.cortextos task-bus data via a non-persisting env var) caught and
+cleaned up by the reviewer, independently confirmed removed by larry (find returned no matches).

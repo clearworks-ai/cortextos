@@ -1,0 +1,18 @@
+=== true-verify: task-bus-management-automation Spec 01 (due-date sanity validation) @ 87ef542 ===
+--- npm run typecheck --- clean
+--- npm run build --- clean
+--- npm test (isolated worktree) ---
+114/114 targeted tests pass (tests/unit/bus/task.test.ts, tests/unit/cli/bus-sweep-due.test.ts)
+Full suite: 2812 passed / 1 failed — known pre-existing next/server dashboard dependency
+gap, confirmed present on clean main, unrelated to this change.
+
+--- boundary logic (independent hand-verification) ---
+pastDiff > 1h and futureDiff > 365d (strict >) correctly make exactly-1h-past and
+exactly-365d-future INCLUSIVE (accepted); 1ms beyond either bound is rejected.
+computeDefaultDueDate (default path, no explicit dueDate) untouched — confirmed via diff,
+only 2 hunks total, both isolated to the explicit-dueDate branch of createTask.
+
+--- diff scope --- 3 files only (src/bus/task.ts, tests/unit/bus/task.test.ts,
+tests/unit/cli/bus-sweep-due.test.ts), no scope creep.
+
+Verdict: PASS. Ready for PR.

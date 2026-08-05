@@ -23,7 +23,7 @@ This worker intentionally stops after file writeback. `kb-dream` emission stays 
 ```bash
 TASK_ID=$(cortextos bus create-task "Cron: meeting-writeback" --desc "File new meeting intelligence into knowledge/meetings and knowledge/clients" --assignee "${CTX_PARENT_AGENT:-pa}" 2>/dev/null)
 cortextos bus update-task $TASK_ID in_progress 2>/dev/null
-LEDGER_FILE='/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/state/ff-full-writeback-surfaced.txt'
+LEDGER_FILE='/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/state/ff-full-writeback-surfaced.txt'
 mkdir -p "$(dirname "$LEDGER_FILE")"
 [[ -f "$LEDGER_FILE" ]] || touch "$LEDGER_FILE"
 echo "ledger=$(wc -l < "$LEDGER_FILE")"
@@ -33,12 +33,12 @@ echo "ledger=$(wc -l < "$LEDGER_FILE")"
 
 ## Step 2 — Run the extractor in full mode (Bash)
 
-Working directory MUST be the frank2 agent dir so `scripts/` and `state/` resolve correctly.
+Working directory MUST be the pa agent dir so `scripts/` and `state/` resolve correctly.
 
 ```bash
-cd /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2
+cd /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa
 set -a
-source /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/.env 2>/dev/null
+source /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/.env 2>/dev/null
 source /Users/joshweiss/code/cortextos/orgs/clearworksai/secrets.env 2>/dev/null
 set +a
 
@@ -75,7 +75,7 @@ MEETINGS_DIR = KNOWLEDGE_DIR / "meetings"
 CLIENTS_DIR = KNOWLEDGE_DIR / "clients"
 TEMPLATE_PATH = CLIENTS_DIR / "_template.md"
 PAYLOAD_PATH = Path("/tmp/ff-writeback.json")
-LEDGER_PATH = Path("/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/state/ff-full-writeback-surfaced.txt")
+LEDGER_PATH = Path("/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/state/ff-full-writeback-surfaced.txt")
 
 MEETINGS_DIR.mkdir(parents=True, exist_ok=True)
 CLIENTS_DIR.mkdir(parents=True, exist_ok=True)

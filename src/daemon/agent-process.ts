@@ -291,6 +291,13 @@ export class AgentProcess {
     // (e.g. if the previous stop() timed out before the PTY actually exited).
     // We're starting fresh — the new PTY has no pending stop.
     this.stopRequested = false;
+    // disable-resurrection fix: a fresh start means this agent is (re-)enabled.
+    // Clear any lingering .user-disable marker so handleExit's crash-recovery gate
+    // stops suppressing restarts for it. No-op if the marker is absent.
+    try {
+      const disableMarker = join(this.env.ctxRoot, 'state', this.name, '.user-disable');
+      if (existsSync(disableMarker)) unlinkSync(disableMarker);
+    } catch { /* best effort */ }
     // BUG-040 fix: bump generation. The onExit closure below captures THIS
     // value and uses it to detect "I'm an old PTY whose exit fired after a
     // new lifecycle began" — in which case it bails out without touching
@@ -790,8 +797,8 @@ export class AgentProcess {
     // Fresh read at exit time — the disable may have happened after start().
     // Also skips the crash-count increment: an operator-disabled agent's exit
     // is intentional-by-policy, not a crash.
-    if (this.isDisabled()) {
-      this.log('Exit while agent is disabled (config.json enabled:false or enabled-agents.json) — not respawning.');
+    if (this.isDisabled() || this.isUserDisabled()) {
+      this.log('Exit while agent is disabled (config.json, enabled-agents.json, or .user-disable) — not respawning.');
       this.stopRequested = false;
       this.status = 'stopped';
       this.notifyStatusChange();
@@ -1519,6 +1526,24 @@ export class AgentProcess {
       if (!existsSync(marker)) return false;
       const ageMs = Date.now() - statSync(marker).mtimeMs;
       return ageMs < 60_000;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Check whether this agent has been explicitly disabled by the user.
+   *
+   * Returns true iff a `.user-disable` marker exists in this agent's state
+   * dir (written by `cortextos disable`). Unlike isDaemonShuttingDown()'s 60s
+   * freshness window, there is NO time bound here: `.user-disable` is a
+   * persistent flag with an explicit lifecycle (cleared on the next start()),
+   * not a transient shutdown signal.
+   */
+  private isUserDisabled(): boolean {
+    const marker = join(this.env.ctxRoot, 'state', this.name, '.user-disable');
+    try {
+      return existsSync(marker);
     } catch {
       return false;
     }

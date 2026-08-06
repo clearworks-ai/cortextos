@@ -167,3 +167,25 @@ cortextos terminate-worker $CTX_AGENT_NAME
 ```
 
 Output literally: `DONE`
+
+---
+
+## Output Contract (FR-003)
+
+This worker's canonical runtime output is deliberately different from the
+standalone `call-prep-researcher` skill's local-file contract:
+
+- **Rendered source:** `/tmp/pmb-brief.md` (transient; Step 5).
+- **Published deliverable:** the HTTPS URL returned by
+  `/Users/joshweiss/code/briefs/publisher/publish_brief.py`, accepted only after
+  `CODE=200` (Steps 6-7).
+- **Durable local output:** none. This worker does not write
+  `outputs/call-prep-researcher/` or the knowledge-sync taxonomy.
+
+The historical file
+`/Users/joshweiss/code/knowledge-sync/raw/areas/clearworks/calasia-construction/calasia-callbrief-2026-08-05.md`
+was filed by a separate P1 outputs-router spot-run. It is not evidence that this
+worker emitted the standalone skill's declared
+`outputs/call-prep-researcher/[YYYY-MM-DD]-[company-or-name].md` path. The
+machine-readable status for this distinction lives in
+`state/SKILL-OUTPUT-PATH-REGISTRY.json`.

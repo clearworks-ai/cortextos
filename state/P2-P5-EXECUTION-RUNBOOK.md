@@ -62,7 +62,7 @@ Do these one at a time; do not batch (each needs its own artifact check).
 ```
 
 **A-section DONE-WHEN (rollup):** all 13 artifacts exist under the taxonomy, each with provenance frontmatter. Record each path in this file as you go so a resume knows which are done.
-**Note (already-proven, do NOT re-run):** knowledge-base, followup-coordinator, call-prep-researcher, delivery-status-reporter, meeting-intelligence-engineer already have live artifacts per the ledger — they are NOT in the 13.
+**Note (already-proven, do NOT re-run):** knowledge-base, followup-coordinator, delivery-status-reporter, and meeting-intelligence-engineer already have live artifacts per the ledger — they are NOT in the 13. `call-prep-researcher` has a proven live published-URL path, but its global `outputs/call-prep-researcher/` file contract remains unverified; the CalAsia knowledge-sync file is separate P1 router spot-run evidence. Treat it as PARTIAL until `state/SKILL-OUTPUT-PATH-REGISTRY.json` records an existing artifact at the declared path.
 
 ---
 

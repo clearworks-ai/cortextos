@@ -284,7 +284,7 @@ function buildRelayMessage(integration: string, event: string, envelope: RelayEn
     : String(envelope.meeting_id).trim();
 
   if (integration === 'fireflies' && meetingId) {
-    return `WEBHOOK ${integration} ${event} — meeting ${meetingId}. Spawn meeting-commitments-worker with FF_MEETING_ID=${meetingId} set so the single-meeting fast path runs now instead of waiting for the 2h poll: cd pa agent dir, source env, then python3 scripts/ff-extractor.py --mode full --meeting-id ${meetingId}.`;
+    return `WEBHOOK ${integration} ${event} — meeting ${meetingId}. cd pa agent dir and spawn meeting-writeback-worker with FF_MEETING_ID=${meetingId} so the single-meeting full path files durable meeting/client history before CRM writeback; keep the polling backstop enabled.`;
   }
 
   if (integration === 'ops-check-lead') {

@@ -21,7 +21,7 @@ P2's actual delivered scope was **skill-wiring + I/O contract + contract-lint ga
 | Context Maintenance | knowledge-base | AUTONOMOUS | contract-lint PASS; `knowledge-base/SKILL.md` has I/O contract. Nightly reconcile now LIVE: `larry/kb-reconcile-nightly` cron enabled=true (state crons.json) | LLM cron (larry, 24h) | kb-reconcile cron runs nightly (P1.1) | YES (skill wired + reconcile cron live) |
 | Post-Call Debrief / Follow-Up Drafting | deal-debrief-analyst | ASSISTED | contract-lint PASS | on-demand skill | UNVERIFIED (no dated debrief artifact found this session) | PARTIAL (wired, no live-fire proof) |
 | Meeting Follow-Ups | followup-coordinator | ASSISTED | contract-lint PASS; `followup-coordinator/SKILL.md` has I/O contract | on-demand skill | `alloi/alloi-followup-2026-07-29.md` (real dated followup artifact) | YES (wired + artifact) |
-| Pre-Call Briefing | call-prep-researcher | AUTONOMOUS | contract-lint PASS; fired by `frank2/pre-meeting-brief` + `pre-meeting-brief-page` crons (enabled=true) | LLM cron (calendar-scan) | `calasia-callbrief-2026-08-05.md` (fresh brief) | YES (wired + cron + artifact) |
+| Pre-Call Briefing | call-prep-researcher | AUTONOMOUS | contract-lint PASS; `frank2/pre-meeting-brief-page` publishes `/tmp/pmb-brief.md` through `briefs/publisher/publish_brief.py` and sends the curl-verified URL; see `state/SKILL-OUTPUT-PATH-REGISTRY.json` | LLM cron (calendar-scan) | Verified published URL. No durable local output from the worker; `calasia-callbrief-2026-08-05.md` is separate P1 router spot-run evidence and does not prove the global `outputs/call-prep-researcher/` path | PARTIAL (worker publishes; declared file path UNVERIFIED) |
 | Email Triage | inbox-manager | ASSISTED | contract-lint PASS | on-demand / comms-check lane | UNVERIFIED (triage output not separately located) | PARTIAL |
 | Proposal Generation | proposal-writer | ASSISTED | contract-lint PASS | on-demand skill | UNVERIFIED | PARTIAL (wired, no live-fire proof) |
 | Pricing Support | pricing-analyst | ASSISTED | contract-lint PASS | on-demand skill | UNVERIFIED | PARTIAL |
@@ -103,8 +103,8 @@ Explicitly deferred this phase (heartbeats ×14, larry ×12, sre ×5, sage ×9, 
 **P2 (18 unique rollout skills / 25 jobs):**
 - DETERMINISTIC gate delivered: `contract-lint.sh` = 18 PASS / 0 FAIL, exit 0 (VERIFIED live).
 - Wired w/ I/O contract: 18/18 skills.
-- PLAN-HAPPENED **YES** (wired + live artifact): 4 (knowledge-base, followup-coordinator, call-prep-researcher, delivery-status-reporter).
-- PLAN-HAPPENED **PARTIAL** (wired + contract-lint PASS, no live-fire artifact / not autonomous): 13.
+- PLAN-HAPPENED **YES** (wired + live artifact at the declared path): 3 (knowledge-base, followup-coordinator, delivery-status-reporter).
+- PLAN-HAPPENED **PARTIAL** (wired + contract-lint PASS, no live artifact at the declared path / not autonomous): 14 (including call-prep-researcher: its live worker publishes a verified URL, but does not emit the global skill's local-file path).
 - PLAN-HAPPENED **NO**: 0 — but "autonomous 24/7 job worker" was never built for any; the plan itself scopes that as later-bench (:9-10).
 
 **P5 crons (56 named items across A/B/C, +51 deferred D):**

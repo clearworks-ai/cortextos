@@ -42,7 +42,11 @@ source /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/.env 2>/dev/n
 source /Users/joshweiss/code/cortextos/orgs/clearworksai/secrets.env 2>/dev/null
 set +a
 
-python3 scripts/ff-extractor.py --mode full --limit 20 --full-ledger state/ff-full-writeback-surfaced.txt > /tmp/ff-writeback.json
+if [[ -n "${FF_MEETING_ID:-}" ]]; then
+  python3 scripts/ff-extractor.py --mode full --meeting-id "$FF_MEETING_ID" --limit 1 --full-ledger state/ff-full-writeback-surfaced.txt > /tmp/ff-writeback.json
+else
+  python3 scripts/ff-extractor.py --mode full --limit 20 --full-ledger state/ff-full-writeback-surfaced.txt > /tmp/ff-writeback.json
+fi
 EXTRACTOR_RC=$?
 echo "extractor_rc=$EXTRACTOR_RC"
 ```
@@ -497,6 +501,14 @@ echo "writeback_rc=$WRITEBACK_RC"
 ```
 
 If `WRITEBACK_RC` is nonzero, skip straight to Step 4.
+
+When this worker was launched for a Fireflies webhook (`FF_MEETING_ID` is set), notify CRM only after the writeback block reports a successful meeting write. The event is the handoff for deterministic CRM persistence, not a substitute for the meeting/client file writes:
+
+```bash
+if [[ -n "${FF_MEETING_ID:-}" && "$WRITEBACK_RC" -eq 0 ]]; then
+  cortextos bus send-message crm normal "EVENT crm.meeting.completed — {\"meeting_id\":\"$FF_MEETING_ID\"}"
+fi
+```
 
 ---
 

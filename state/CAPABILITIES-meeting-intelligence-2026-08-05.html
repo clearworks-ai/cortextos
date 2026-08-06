@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Meeting Intelligence & CRM Capabilities — 2026-08-05</title>
+<style>
+  :root {
+    --bg: #0f1117; --panel: #171a24; --panel2: #1e2230; --border: #2a2f40;
+    --text: #e6e8f0; --muted: #9096a8; --accent: #6ea8ff;
+    --live: #3ecf8e; --repair: #f5c26b; --pending: #ff8a8a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    margin: 0; padding: 0 0 80px 0; line-height: 1.55;
+  }
+  header {
+    padding: 48px 8vw 32px 8vw; border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #1a1e2c 0%, var(--bg) 100%);
+  }
+  header h1 { font-size: 30px; margin: 0 0 8px 0; }
+  header p.sub { color: var(--muted); font-size: 15px; margin: 0; }
+  .legend { display: flex; gap: 20px; margin-top: 20px; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .dot.live { background: var(--live); }
+  .dot.repair { background: var(--repair); }
+  .dot.pending { background: var(--pending); }
+  main { max-width: 980px; margin: 0 auto; padding: 0 8vw; }
+  section.block { margin-top: 56px; }
+  section.block h2 { font-size: 22px; margin-bottom: 4px; display:flex; align-items:center; gap:10px; }
+  .badge {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+    padding: 3px 10px; border-radius: 20px; border: 1px solid;
+  }
+  .badge.live { color: var(--live); border-color: var(--live); background: rgba(62,207,142,0.08); }
+  .badge.repair { color: var(--repair); border-color: var(--repair); background: rgba(245,194,107,0.08); }
+  .badge.pending { color: var(--pending); border-color: var(--pending); background: rgba(255,138,138,0.08); }
+  .lede { color: var(--muted); font-size: 15px; margin: 10px 0 20px 0; max-width: 720px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 20px 22px; margin-bottom: 16px;
+  }
+  .card h3 { margin: 0 0 8px 0; font-size: 15px; color: var(--accent); }
+  .card ul { margin: 8px 0; padding-left: 20px; }
+  .card li { margin-bottom: 6px; font-size: 14px; }
+  code, pre {
+    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px;
+  }
+  pre {
+    background: #0b0d13; border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px; overflow-x: auto; color: #c9e5ff;
+  }
+  .sample-label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);
+    margin: 18px 0 6px 0; font-weight: 700;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 10px 0; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .flow {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 18px 0;
+    font-size: 13px;
+  }
+  .flow .step {
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 14px;
+  }
+  .flow .arrow { color: var(--muted); }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 720px) { .two-col { grid-template-columns: 1fr; } }
+  .expect { border-left: 3px solid var(--accent); padding-left: 16px; margin: 16px 0; font-size: 14px; }
+  .expect b { color: var(--accent); }
+  footer { max-width: 980px; margin: 60px auto 0 auto; padding: 24px 8vw; color: var(--muted); font-size: 12px; border-top: 1px solid var(--border); }
+  .toc { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+  .toc a {
+    color: var(--text); text-decoration: none; font-size: 13px; background: var(--panel2);
+    border: 1px solid var(--border); padding: 6px 12px; border-radius: 20px;
+  }
+  .toc a:hover { border-color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Meeting Intelligence &amp; CRM — what's built, what's live, what to expect</h1>
+  <p class="sub">Generated 2026-08-05 from verified state (PR history + independent re-verification), not from claims. cortextOS / clearworksai.</p>
+  <div class="legend">
+    <div class="legend-item"><span class="dot live"></span> Live &amp; merged — you can rely on it today</div>
+    <div class="legend-item"><span class="dot repair"></span> Built once, bugs found, repair branch in progress</div>
+    <div class="legend-item"><span class="dot pending"></span> Blocked on a decision or a merge click</div>
+  </div>
+  <div class="toc">
+    <a href="#dedup">Duplicate contact prevention</a>
+    <a href="#decisions">Meeting decisions capture</a>
+    <a href="#commitments">Commitment / owner capture</a>
+    <a href="#history">Client history preservation</a>
+    <a href="#records-admin">Records administrator</a>
+    <a href="#organization">How knowledge is organized</a>
+    <a href="#using-it">What to actually do with this</a>
+  </div>
+</header>
+
+<main>
+
+<section class="block" id="dedup">
+  <h2>Duplicate contact prevention <span class="badge live">Live — PR#317</span></h2>
+  <p class="lede">Backfill scripts (calendar sync, comms sync) used to pass a slug-based <code>--id</code> to the contact writer. Any name variant — "Mark Lurie" vs "mark" vs "markmsiaorg" — minted a brand-new contact instead of matching the existing one. One real person had split into 3 separate CRM records.</p>
+  <div class="card">
+    <h3>Criteria — what changed</h3>
+    <ul>
+      <li>Backfills now call <code>upsert-contact.py --match-email</code> instead of <code>--id &lt;slug&gt;</code>.</li>
+      <li><code>find_contact_by_email()</code> resolves the canonical contact by real email address, not by a generated slug.</li>
+      <li>Existing 3-way merges (already-split contacts) are <b>not</b> auto-resolved by this fix — they still sit in the approval queue for a human "yes."</li>
+    </ul>
+  </div>
+  <div class="expect"><b>What to expect:</b> a new meeting/calendar invite from someone already in the CRM (under any name variant tied to the same email) updates their existing record instead of creating a lookalike duplicate. You should stop seeing 2-3 near-identical contacts for the same person going forward.</div>
+</section>
+
+<section class="block" id="decisions">
+  <h2>Meeting decisions &amp; deal-state capture <span class="badge live">Live — PR#319</span></h2>
+  <p class="lede">Every meeting run through the extractor already computed real decisions and a deal-state signal — it just threw them away after printing them to a log. This wires that output into the CRM's actual interaction record, without ever auto-flipping a sales pipeline stage from a guess.</p>
+
+  <div class="flow">
+    <div class="step">Fireflies webhook fires</div><div class="arrow">→</div>
+    <div class="step">ff-extractor.py extracts decisions + deal_state</div><div class="arrow">→</div>
+    <div class="step">add-interaction.py folds them into the meeting's existing row</div><div class="arrow">→</div>
+    <div class="step">deal_state → pipeline stage ONLY if a deterministic keyword matches</div>
+  </div>
+
+  <div class="card">
+    <h3>Criteria</h3>
+    <ul>
+      <li>Decisions attach to the <b>existing</b> meeting interaction row (same <code>source_ref</code>) — never a duplicate row for the same meeting.</li>
+      <li>Re-running the same extraction is a true no-op if nothing changed (idempotent, proven against a live-data copy).</li>
+      <li>Deal-state text is <b>never</b> used to auto-flip a CRM sales stage unless it contains an explicit, deterministic keyword ("verbal yes," "signed," "went cold"). Anything else is preserved as text only, for a human to read and decide.</li>
+    </ul>
+  </div>
+
+  <div class="sample-label">Real sample output — actual interactions.jsonl row, MSIA meeting, 2026-08-05</div>
+  <pre>{
+  "ts": "2026-08-05T02:03:08.234161+00:00",
+  "contact_id": "mark-lurie",
+  "type": "meeting",
+  "summary": "CW/MSIA Catchup (25min). AI automation focus: automating
+    Wendy's spreadsheet cleanup (2hrs->5min target). Julie's travel-AI
+    workflow continuing independently...",
+  "sentiment": "positive",
+  "commitments": [],
+  "source_ref": "fireflies:01KZ71M4876B6NKT8V3TFCQBRW",
+  "decisions": [
+    "Agreed to proceed with automation for Wendy's spreadsheet",
+    "Agreed to explore automation with Julie's travel process"
+  ],
+  "deal_state": null
+}</pre>
+  <p style="font-size:13px;color:var(--muted);">Note <code>deal_state: null</code> here is correct, not a bug — this specific meeting had no deterministic stage-change language, so nothing was preserved to flip.</p>
+
+  <div class="expect"><b>What to expect:</b> after a meeting where something was actually decided, check that meeting's row in <code>interactions.jsonl</code> (or, once the reporting layer catches up, the client's dossier file) for a <code>decisions</code> list. Do <b>not</b> expect the CRM's sales stage to move automatically — that only happens on unambiguous language, and otherwise it's on you to read the note and decide.</div>
+</section>
+
+<section class="block" id="commitments">
+  <h2>Commitment / owner capture (NEEDS-OWNER) <span class="badge repair">Built once, real gaps found, repair in progress</span></h2>
+  <p class="lede">The action-item extractor drops any commitment that doesn't have a clearly named, real-person owner — including first-person, vague-deadline ones like "it'll be a day or so, but I'm going to analyze the interviews and send them." That's the exact case a live audit caught disappearing. A fix was built tonight; independent re-verification found it doesn't yet handle the actual audit case correctly.</p>
+  <div class="card">
+    <h3>Intended criteria (target design, not yet fully working)</h3>
+    <ul>
+      <li>A commitment with a concrete due-date/timeframe <b>and</b> explicit commitment language ("I'll," "I'm going to") but a generic/self-referential owner ("I," "we") should be captured with <code>owner: NEEDS-OWNER</code> instead of silently dropped.</li>
+      <li>Items that also fail the due-date or explicit-language checks should still drop — this isn't a loosening of the bar generally, just closing one specific hole.</li>
+    </ul>
+  </div>
+  <div class="sample-label">What the fixed output should look like (target, not yet verified live)</div>
+  <pre>{
+  "owner": "NEEDS-OWNER",
+  "action": "analyze the interviews and send them to Dana and Mark",
+  "due": "a day or so",
+  "source_quote": "it'll be a day or so, but I'm going to analyze the
+    interviews and send them both emails with Mark on copy"
+}</pre>
+  <div class="expect"><b>What to expect right now:</b> don't rely on this yet for vague first-person commitments — the independent re-check found real misses ("I'm going to…" still gets dropped in some cases, "a day or so" gets rejected as too vague). A repair branch (<code>codex/fr001-owner-filter</code>) is actively working the fix. Check back before trusting this specific case.</div>
+</section>
+
+<section class="block" id="history">
+  <h2>Client-file history preservation across rebuilds <span class="badge repair">Built once, real gaps found, repair in progress</span></h2>
+  <p class="lede">A nightly-style script rebuilds every <code>knowledge/clients/*.md</code> file from scratch off CRM data. Left alone, that rebuild would delete-and-regenerate the whole file every run — silently wiping any meeting-appended History or Open Items row the new decision-capture work writes in. A merge-preserving fix was built; independent re-verification found real edge cases still open.</p>
+  <div class="card">
+    <h3>Intended criteria (target design)</h3>
+    <ul>
+      <li>History rows and Open Items rows already present in a client file, that the fresh CRM-driven rebuild wouldn't reproduce on its own, get merged back in — not dropped.</li>
+      <li>Rows are de-duplicated and re-sorted by date, newest first.</li>
+      <li>Fields the rebuild is meant to own (CRM-sourced current-state fields) are untouched — this only protects meeting-appended content, not overrides CRM data.</li>
+    </ul>
+  </div>
+  <div class="expect"><b>What to expect right now:</b> stale CRM rows can still survive incorrectly in some cases, and a row can detach from its meeting parent when multiple meetings get merged in the same pass — both confirmed by independent testing. Not yet safe to fully trust for multi-meeting weeks. Repair branch: <code>codex/fr002-history-merge</code>.</div>
+</section>
+
+<section class="block" id="records-admin">
+  <h2>Records administrator — human-gated CRM change management <span class="badge pending">Doc fixed, runtime policy not yet reconciled</span></h2>
+  <p class="lede">A skill for keeping CRM and knowledge-base records in sync (stale-record resolution, orphan detection, duplicate merges) with a hard rule: nothing writes to a live record without an explicit human "yes." The written policy had an internal contradiction tonight (one section said "never auto-apply," another said "auto-apply STALE/MISSING automatically") — that's fixed. The live scripts still don't fully match the fixed policy yet.</p>
+  <div class="card">
+    <h3>Criteria (as documented now)</h3>
+    <table>
+      <tr><th>Case</th><th>Rule</th></tr>
+      <tr><td>STALE (one side older)</td><td>Present the exact diff + which timestamp wins. Wait for one batch "yes." Nothing writes before that.</td></tr>
+      <tr><td>MISSING (exists one side only)</td><td>Propose the create as a change-list. Same batch-approval gate.</td></tr>
+      <tr><td>DUPLICATE / ORPHAN (merges, deletes)</td><td>Individual human click per record — no batch "yes to all." A wrong merge or delete destroys history; a wrong update is fixable.</td></tr>
+    </table>
+  </div>
+  <div class="expect"><b>What to expect:</b> once fully wired, you'll see a change-list surfaced for review (never a silent write) whenever a record looks stale or a duplicate/orphan is found. Right now the actual <code>records-admin-sweep</code> cron isn't registered live, so treat this as documented-but-not-yet-operating.</div>
+</section>
+
+<section class="block" id="organization">
+  <h2>How the knowledge is organized — and kept clean</h2>
+  <p class="lede">Four stores, each with one job. Nothing is duplicated across them on purpose — each fact lives in exactly one place, and other files reference it rather than copy it.</p>
+
+  <div class="two-col">
+    <div class="card">
+      <h3>1. <code>knowledge/clients/[client].md</code> — the dossier</h3>
+      <p style="font-size:13px;">One markdown file per client. Human-readable narrative: contacts, current state, what's being delivered, financials, dated history, open items table. This is what you'd read cold to get oriented on a client in 60 seconds.</p>
+    </div>
+    <div class="card">
+      <h3>2. <code>knowledge/meetings/[date]-[client]-[topic].md</code> — the record</h3>
+      <p style="font-size:13px;">One file per meeting, permanent. Raw-ish: what was discussed, decisions, next steps. The dossier's History section links back to these rather than re-narrating them.</p>
+    </div>
+    <div class="card">
+      <h3>3. <code>interactions.jsonl</code> — the structured log</h3>
+      <p style="font-size:13px;">Machine-readable, append-mostly, one row per contact-touching event (meeting, email, call). This is what code reads — decisions, sentiment, commitments, dedup keys. The dossier is generated <i>from</i> this, not the other way around.</p>
+    </div>
+    <div class="card">
+      <h3>4. <code>pipeline.json</code> — the deal-stage source of truth</h3>
+      <p style="font-size:13px;">The only place a sales stage lives. Every stage change is written through <code>upsert-engagement.py</code>, which appends an audit trail (<code>stage_history</code>) and no-ops if nothing actually changed — so it can never silently drift or double-log.</p>
+    </div>
+  </div>
+
+  <div class="sample-label">Real example — Alloi's dossier (excerpt, actual file)</div>
+  <pre># Client: Alloi
+
+## Contacts
+- Marcos Santa Ana — Ops/IT Lead — marcos@alloi.us
+
+## Reporting
+&lt;!-- delivery-status-reporter (Altari-F). Blessed active roster. --&gt;
+- cadence: weekly
+- channel: slack+email
+- last_update: 2026-08-02
+
+## Current state
+- CRM org name: alloi.us
+- Deal stage: won
+- Last signal: 2026-07-22T02:31:57+00:00
+
+## What we're delivering
+- Engagement: Marcos Santa Ana — Discovery Call
+- Service type: bounded executive assistant agent</pre>
+
+  <div class="card">
+    <h3>What "kept clean" actually means, mechanically</h3>
+    <ul>
+      <li><b>One writer per store.</b> <code>add-interaction.py</code> is the only thing that writes interactions; <code>upsert-engagement.py</code> is the only thing that changes a pipeline stage. Nothing hand-edits these files directly — that's an explicit rule, not a convention.</li>
+      <li><b>Idempotent by construction.</b> Every writer dedups on a natural key (usually <code>source_ref + contact_id</code>) so re-running the same extraction twice never creates a duplicate row.</li>
+      <li><b>Dossiers are generated, not authored.</b> <code>knowledge/clients/*.md</code> is rebuilt from CRM data on a schedule — so it can't silently drift from the structured truth, but (per the in-repair item above) that same rebuild is exactly what needs the merge-preserve fix so it doesn't erase meeting-appended content in the process.</li>
+      <li><b>No silent stage flips.</b> Deal-state changes require a deterministic keyword match — an LLM's paraphrase of a conversation never moves money-relevant state on its own.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="block" id="using-it">
+  <h2>What to actually do with this</h2>
+  <div class="card">
+    <h3>After a meeting</h3>
+    <ul>
+      <li>Check the client's dossier (<code>knowledge/clients/[client].md</code>) History section, or the raw <code>interactions.jsonl</code> row, for a <code>decisions</code> list — that's now durable, not just a Fireflies transcript you'd have to re-read.</li>
+      <li>If a commitment shows <code>owner: NEEDS-OWNER</code> (once FR-001 lands), that's a flag for you to assign a real owner — don't assume it's being tracked automatically.</li>
+      <li>Don't expect a sales-stage change to happen on its own from a meeting note — check <code>pipeline.json</code>/the dossier's "Deal stage" line yourself if the conversation sounded like it moved something.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>When something looks off</h3>
+    <ul>
+      <li>Two similar-looking contacts for the same person → should be rarer now (PR#317), but existing ones from before the fix are still sitting in the approval queue waiting on your explicit merge decision.</li>
+      <li>A change to a CRM record you didn't make → check for a pending records-administrator change-list before assuming something auto-applied; per policy nothing should write without your "yes" (once fully wired).</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Status to re-check before relying on it</h3>
+    <ul>
+      <li>FR-001 (commitment NEEDS-OWNER) and FR-002 (history preservation) — both have known real bugs, repair branches active. Ask for a status check before trusting the vague-commitment or multi-meeting-merge cases specifically.</li>
+      <li>records-administrator's live cron isn't registered yet — the policy document is right, the running system doesn't match it yet.</li>
+    </ul>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  Generated 2026-08-05 · cortextOS / clearworksai · grounded in PR#317/#318/#319, state/P2-P5-CONFORMANCE-2026-08-04-v2.md, and state/P2-P5-BATCH4-REPORT-2026-08-04.md. Status badges reflect independently re-verified state, not first-pass claims.
+</footer>
+
+</body>
+</html>

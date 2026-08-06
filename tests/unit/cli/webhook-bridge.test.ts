@@ -329,7 +329,7 @@ describe('webhook-bridge server', () => {
     };
     expect(inboxPayload.text).toContain('WEBHOOK fireflies transcription.completed');
     expect(inboxPayload.text).toContain('meeting-123');
-    expect(inboxPayload.text).toContain('meeting-commitments-worker');
+    expect(inboxPayload.text).toContain('meeting-writeback-worker');
     expect(inboxPayload.text).toContain('FF_MEETING_ID=meeting-123');
     expect(inboxPayload.text).toContain('cd pa agent dir');
     expect(inboxPayload.text).not.toContain('cd frank2 agent dir');

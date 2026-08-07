@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs';
+import { createHash } from 'crypto';
 import { request as httpRequest } from 'http';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { EventEmitter } from 'events';
@@ -7,7 +8,7 @@ import type { AddressInfo } from 'net';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { createBridgeServer, type BridgeServerOptions } from '../../../src/cli/webhook-bridge';
-import { handleProviderShadowIngress, readBoundedProviderBody, writeCalendarShadowChannel } from '../../../src/cli/provider-shadow-ingress';
+import { handleProviderShadowIngress, markCalendarShadowChannelCleanupRequired, readBoundedProviderBody, reconcileCalendarShadowChannel, writeCalendarShadowChannel, writePendingCalendarShadowChannel } from '../../../src/cli/provider-shadow-ingress';
 import { getEventCursor } from '../../../src/bus/event-receipt-index';
 import { readEventReceipts, recordIngressReceipt } from '../../../src/bus/event-delivery';
 
@@ -30,7 +31,9 @@ async function post(base: string, path: string, body = '', headers: Record<strin
 const gmailBody = (historyId = '10', emailAddress = 'User@Example.com', extra?: Record<string, unknown>) => JSON.stringify({ message: { data: Buffer.from(JSON.stringify({ emailAddress, historyId, ...extra })).toString('base64'), messageId: 'telemetry-only' }, subscription });
 const gmailHeaders = { authorization: `Bearer ${token}` };
 const expiration = new Date(now + 60_000).toISOString();
+const pendingUntil = new Date(now + 300_000).toISOString();
 const calendarHeaders = (overrides: Record<string, string | string[]> = {}) => ({ 'x-goog-channel-id': 'channel-secret', 'x-goog-resource-id': 'resource-secret', 'x-goog-resource-state': 'exists', 'x-goog-message-number': '10', 'x-goog-channel-expiration': expiration, 'x-goog-channel-token': 'channel-token-secret', ...overrides });
+const channelFile = (channelId: string) => join(stateDir, 'calendar-shadow-channels', `${createHash('sha256').update(channelId).digest('hex')}.json`);
 const close = (server: ReturnType<typeof createBridgeServer>) => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'provider-shadow-')); stateDir = join(root, 'state', 'pa'); mkdirSync(join(root, 'orgs', 'clearworksai', 'agents', 'pa'), { recursive: true }); writeFileSync(join(root, 'orgs', 'clearworksai', 'agents', 'pa', 'IDENTITY.md'), '# PA'); writeCalendarShadowChannel(stateDir, { channelId: 'channel-secret', resourceId: 'resource-secret', channelToken: 'channel-token-secret', expiresAt: expiration }); });
@@ -92,6 +95,101 @@ describe('Gmail Pub/Sub shadow ingress', () => {
 });
 
 describe('Calendar watch shadow ingress', () => {
+  it('writes a strict 0600 v2 active record containing only digests and canonical expiration', () => {
+    const path = channelFile('channel-secret');
+    const stored = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+    expect(stored).toMatchObject({ version: 2, status: 'active', expiresAt: expiration });
+    expect(Object.keys(stored).sort()).toEqual(['channel', 'expiresAt', 'resource', 'status', 'token', 'version']);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    const disk = readFileSync(path, 'utf8');
+    for (const secret of ['channel-secret', 'resource-secret', 'channel-token-secret']) expect(disk).not.toContain(secret);
+  });
+  it('binds an authenticated early sync without routing, then reconciles and activates the channel', async () => {
+    writePendingCalendarShadowChannel(stateDir, { channelId: 'early-channel', channelToken: 'early-token', endpoint: 'https://hooks.clearworks.ai/relay/calendar-watch', ttlSeconds: 604_800, pendingUntil });
+    const path = channelFile('early-channel');
+    const pendingDisk = readFileSync(path, 'utf8');
+    for (const secret of ['early-channel', 'early-token', 'resource-secret']) expect(pendingDisk).not.toContain(secret);
+    expect(JSON.parse(pendingDisk)).toMatchObject({ version: 2, status: 'pending', resource: null, expiresAt: null, requested: { endpoint: 'https://hooks.clearworks.ai/relay/calendar-watch', ttlSeconds: 604_800 }, pendingUntil });
+    const { server, base } = await listen();
+    try {
+      const sync = await post(base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-channel-id': 'early-channel', 'x-goog-channel-token': 'early-token', 'x-goog-resource-state': 'sync', 'x-goog-message-number': '1' }));
+      expect(sync).toMatchObject({ status: 200, json: { disposition: 'sync' } });
+      expect(readEventReceipts(stateDir).filter((entry) => entry.stage === 'routing')).toEqual([]);
+      expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({ status: 'pending', resource: expect.stringMatching(/^[a-f0-9]{64}$/), expiresAt: expiration });
+      expect(reconcileCalendarShadowChannel(stateDir, { channelId: 'early-channel', resourceId: 'resource-secret', expiresAt: expiration, now })).toEqual({ status: 'active' });
+      expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({ version: 2, status: 'active', expiresAt: expiration });
+      expect((await post(base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-channel-id': 'early-channel', 'x-goog-channel-token': 'early-token', 'x-goog-message-number': '2' }))).json.disposition).toBe('accepted');
+    } finally { await close(server); }
+  });
+  it('activates response-first and accepts a later sync without a proposal', async () => {
+    writePendingCalendarShadowChannel(stateDir, { channelId: 'response-first', channelToken: 'response-token', endpoint: 'https://hooks.clearworks.ai/relay/calendar-watch', ttlSeconds: 604_800, pendingUntil });
+    expect(reconcileCalendarShadowChannel(stateDir, { channelId: 'response-first', resourceId: 'response-resource', expiresAt: String(Date.parse(expiration)), now })).toEqual({ status: 'active' });
+    const { server, base } = await listen();
+    try {
+      expect((await post(base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-channel-id': 'response-first', 'x-goog-resource-id': 'response-resource', 'x-goog-channel-token': 'response-token', 'x-goog-resource-state': 'sync', 'x-goog-message-number': '1' }))).json.disposition).toBe('sync');
+      expect(readEventReceipts(stateDir).filter((entry) => entry.stage === 'routing')).toEqual([]);
+    } finally { await close(server); }
+  });
+  it('serializes concurrent sync binding and response reconciliation to one active record', async () => {
+    writePendingCalendarShadowChannel(stateDir, { channelId: 'concurrent-channel', channelToken: 'concurrent-token', endpoint: 'https://hooks.clearworks.ai/relay/calendar-watch', ttlSeconds: 604_800, pendingUntil });
+    const { server, base } = await listen();
+    try {
+      const sync = post(base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-channel-id': 'concurrent-channel', 'x-goog-channel-token': 'concurrent-token', 'x-goog-resource-state': 'sync', 'x-goog-message-number': '1' }));
+      const activation = await new Promise<ReturnType<typeof reconcileCalendarShadowChannel>>((resolve) => setImmediate(() => resolve(reconcileCalendarShadowChannel(stateDir, { channelId: 'concurrent-channel', resourceId: 'resource-secret', expiresAt: expiration, now }))));
+      expect(activation).toEqual({ status: 'active' });
+      expect((await sync).status).toBe(200);
+      expect(JSON.parse(readFileSync(channelFile('concurrent-channel'), 'utf8'))).toMatchObject({ version: 2, status: 'active' });
+      expect(readEventReceipts(stateDir).filter((entry) => entry.stage === 'routing')).toEqual([]);
+    } finally { await close(server); }
+  });
+  it('does not bind pending state on token mismatch or a non-sync notification', async () => {
+    writePendingCalendarShadowChannel(stateDir, { channelId: 'pending-channel', channelToken: 'pending-token', endpoint: 'https://hooks.clearworks.ai/relay/calendar-watch', ttlSeconds: 604_800, pendingUntil });
+    const path = channelFile('pending-channel');
+    const { server, base } = await listen();
+    try {
+      const wrongToken = await post(base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-channel-id': 'pending-channel', 'x-goog-channel-token': 'wrong', 'x-goog-resource-state': 'sync' }));
+      expect(wrongToken.json).toEqual({ error: 'calendar_token_mismatch' });
+      const changed = await post(base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-channel-id': 'pending-channel', 'x-goog-channel-token': 'pending-token', 'x-goog-resource-state': 'exists' }));
+      expect(changed.json).toEqual({ error: 'calendar_channel_pending' });
+      expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({ status: 'pending', resource: null, expiresAt: null });
+      expect(readEventReceipts(stateDir)).toEqual([]);
+    } finally { await close(server); }
+  });
+  it('expires pending state closed and marks expired or mismatched reconciliation cleanup-required', async () => {
+    writePendingCalendarShadowChannel(stateDir, { channelId: 'expired-pending', channelToken: 'expired-token', endpoint: 'https://hooks.clearworks.ai/relay/calendar-watch', ttlSeconds: 604_800, pendingUntil: new Date(now - 1).toISOString() });
+    const { server, base } = await listen();
+    try {
+      expect((await post(base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-channel-id': 'expired-pending', 'x-goog-channel-token': 'expired-token', 'x-goog-resource-state': 'sync' }))).json).toEqual({ error: 'calendar_channel_expired' });
+    } finally { await close(server); }
+    expect(reconcileCalendarShadowChannel(stateDir, { channelId: 'expired-pending', resourceId: 'resource-secret', expiresAt: expiration, now })).toEqual({ status: 'cleanup_required', code: 'calendar_channel_expired' });
+    expect(JSON.parse(readFileSync(channelFile('expired-pending'), 'utf8'))).toMatchObject({ status: 'cleanup_required', reason: 'calendar_channel_expired' });
+
+    writePendingCalendarShadowChannel(stateDir, { channelId: 'mismatch', channelToken: 'mismatch-token', endpoint: 'https://hooks.clearworks.ai/relay/calendar-watch', ttlSeconds: 604_800, pendingUntil });
+    const mismatchFixture = await listen();
+    try { expect((await post(mismatchFixture.base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-channel-id': 'mismatch', 'x-goog-channel-token': 'mismatch-token', 'x-goog-resource-state': 'sync' }))).status).toBe(200); }
+    finally { await close(mismatchFixture.server); }
+    expect(reconcileCalendarShadowChannel(stateDir, { channelId: 'mismatch', resourceId: 'different-resource', expiresAt: expiration, now })).toEqual({ status: 'cleanup_required', code: 'calendar_channel_mismatch' });
+    expect(JSON.parse(readFileSync(channelFile('mismatch'), 'utf8'))).toMatchObject({ status: 'cleanup_required', reason: 'calendar_channel_mismatch' });
+  });
+  it('supports explicit cleanup-required state with a stable redacted handler error', async () => {
+    markCalendarShadowChannelCleanupRequired(stateDir, 'channel-secret', 'calendar_channel_unavailable');
+    const { server, base } = await listen();
+    try {
+      const response = await post(base, '/relay/calendar-watch', '', calendarHeaders());
+      expect(response).toMatchObject({ status: 503, json: { error: 'calendar_cleanup_required' } });
+      for (const secret of ['channel-secret', 'resource-secret', 'channel-token-secret']) expect(response.text).not.toContain(secret);
+    } finally { await close(server); }
+  });
+  it('accepts strict v1 active records and rejects corrupt v2 records', async () => {
+    const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+    writeFileSync(channelFile('legacy-channel'), JSON.stringify({ version: 1, channel: hash('legacy-channel'), resource: hash('legacy-resource'), token: hash('legacy-token'), expiresAt: expiration }), { mode: 0o600 });
+    writeFileSync(channelFile('corrupt-channel'), JSON.stringify({ version: 2, status: 'active', channel: hash('corrupt-channel'), resource: null, token: hash('corrupt-token'), expiresAt: expiration }), { mode: 0o600 });
+    const { server, base } = await listen();
+    try {
+      expect((await post(base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-channel-id': 'legacy-channel', 'x-goog-resource-id': 'legacy-resource', 'x-goog-channel-token': 'legacy-token' }))).status).toBe(200);
+      expect((await post(base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-channel-id': 'corrupt-channel', 'x-goog-resource-id': 'corrupt-resource', 'x-goog-channel-token': 'corrupt-token' }))).json).toEqual({ error: 'calendar_channel_unavailable' });
+    } finally { await close(server); }
+  });
   it.each([
     ['missing header', { 'x-goog-channel-id': '' }, 'calendar_missing_header'],
     ['token mismatch', { 'x-goog-channel-token': 'wrong' }, 'calendar_token_mismatch'],

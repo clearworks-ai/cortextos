@@ -40,6 +40,12 @@ export interface ProviderShadowOptions {
   dependencies?: ProviderIngressDependencies;
 }
 export interface CalendarShadowChannel { channelId: string; resourceId: string; channelToken: string; expiresAt: string; }
+export interface CalendarPendingShadowChannel { channelId: string; channelToken: string; endpoint: string; ttlSeconds: number; pendingUntil: string; }
+export interface CalendarShadowChannelActivation { channelId: string; resourceId: string; expiresAt: string; now: number; }
+export type CalendarShadowCleanupCode = 'calendar_channel_mismatch' | 'calendar_channel_expired' | 'calendar_channel_unavailable';
+export type CalendarShadowReconciliation =
+  | { status: 'active' }
+  | { status: 'cleanup_required'; code: CalendarShadowCleanupCode };
 
 interface RateBucket { startedAt: number; count: number; }
 export type ProviderRateBuckets = Map<string, RateBucket>;
@@ -112,23 +118,132 @@ async function handleGmail(request: IncomingMessage, response: ServerResponse, o
   json(response, 200, { ok: true, mode: 'shadow', disposition: result.disposition });
 }
 
-interface StoredCalendarChannel { version: 1; channel: string; resource: string; token: string; expiresAt: string; }
+interface StoredCalendarChannelV1 { version: 1; channel: string; resource: string; token: string; expiresAt: string; }
+interface StoredCalendarPendingChannel {
+  version: 2;
+  status: 'pending';
+  channel: string;
+  resource: string | null;
+  token: string;
+  requested: { endpoint: string; ttlSeconds: number };
+  pendingUntil: string;
+  expiresAt: string | null;
+}
+interface StoredCalendarActiveChannel { version: 2; status: 'active'; channel: string; resource: string; token: string; expiresAt: string; }
+interface StoredCalendarCleanupChannel {
+  version: 2;
+  status: 'cleanup_required';
+  channel: string;
+  resource: string | null;
+  token: string;
+  expiresAt: string | null;
+  reason: CalendarShadowCleanupCode;
+}
+type StoredCalendarChannel = StoredCalendarChannelV1 | StoredCalendarPendingChannel | StoredCalendarActiveChannel | StoredCalendarCleanupChannel;
+type UsableCalendarChannel = StoredCalendarChannelV1 | StoredCalendarPendingChannel | StoredCalendarActiveChannel;
+
+const CALENDAR_DIGEST = /^[a-f0-9]{64}$/;
+const CALENDAR_CLEANUP_CODES = new Set<StoredCalendarCleanupChannel['reason']>(['calendar_channel_mismatch', 'calendar_channel_expired', 'calendar_channel_unavailable']);
 function channelPath(stateDir: string, channelId: string): string { return join(stateDir, 'calendar-shadow-channels', `${digestHex(channelId)}.json`); }
+function canonicalCalendarExpiration(value: string): string {
+  const expires = /^\d{13}$/.test(value) ? Number(value) : Date.parse(value);
+  if (!Number.isFinite(expires)) throw new Error('invalid calendar shadow channel');
+  return new Date(expires).toISOString();
+}
+function validDigest(value: unknown): value is string { return typeof value === 'string' && CALENDAR_DIGEST.test(value); }
+function validIso(value: unknown): value is string { return typeof value === 'string' && Number.isFinite(Date.parse(value)) && new Date(Date.parse(value)).toISOString() === value; }
+function validCalendarEndpoint(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length > 2_048) return false;
+  try { const endpoint = new URL(value); return endpoint.protocol === 'https:' && endpoint.username === '' && endpoint.password === '' && endpoint.hash === ''; }
+  catch { return false; }
+}
+function writeStoredCalendarChannel(stateDir: string, channelId: string, stored: StoredCalendarChannel): void {
+  ensureDir(join(stateDir, 'calendar-shadow-channels'));
+  atomicWriteSync(channelPath(stateDir, channelId), JSON.stringify(stored));
+}
 export function writeCalendarShadowChannel(stateDir: string, channel: CalendarShadowChannel): void {
-  const expires = Date.parse(channel.expiresAt); if (!channel.channelId || channel.channelId.length > 256 || !channel.resourceId || channel.resourceId.length > 512 || !channel.channelToken || channel.channelToken.length > 512 || !Number.isFinite(expires)) throw new Error('invalid calendar shadow channel');
-  const stored: StoredCalendarChannel = { version: 1, channel: digestHex(channel.channelId), resource: digestHex(channel.resourceId), token: digestHex(channel.channelToken), expiresAt: new Date(expires).toISOString() };
-  const path = channelPath(stateDir, channel.channelId); ensureDir(join(stateDir, 'calendar-shadow-channels')); atomicWriteSync(path, JSON.stringify(stored));
+  if (!channel.channelId || channel.channelId.length > 256 || !channel.resourceId || channel.resourceId.length > 512 || !channel.channelToken || channel.channelToken.length > 512) throw new Error('invalid calendar shadow channel');
+  const stored: StoredCalendarActiveChannel = { version: 2, status: 'active', channel: digestHex(channel.channelId), resource: digestHex(channel.resourceId), token: digestHex(channel.channelToken), expiresAt: canonicalCalendarExpiration(channel.expiresAt) };
+  writeStoredCalendarChannel(stateDir, channel.channelId, stored);
+}
+export function writePendingCalendarShadowChannel(stateDir: string, channel: CalendarPendingShadowChannel): void {
+  const pendingUntil = canonicalCalendarExpiration(channel.pendingUntil);
+  let endpoint: URL;
+  try { endpoint = new URL(channel.endpoint); } catch { throw new Error('invalid calendar shadow pending channel'); }
+  if (!channel.channelId || channel.channelId.length > 256 || !channel.channelToken || channel.channelToken.length > 512 || !validCalendarEndpoint(channel.endpoint) || !Number.isSafeInteger(channel.ttlSeconds) || channel.ttlSeconds <= 0 || channel.ttlSeconds > 604_800) throw new Error('invalid calendar shadow pending channel');
+  const stored: StoredCalendarPendingChannel = { version: 2, status: 'pending', channel: digestHex(channel.channelId), resource: null, token: digestHex(channel.channelToken), requested: { endpoint: endpoint.toString(), ttlSeconds: channel.ttlSeconds }, pendingUntil, expiresAt: null };
+  writeStoredCalendarChannel(stateDir, channel.channelId, stored);
+}
+function parseCalendarChannel(value: unknown): StoredCalendarChannel {
+  if (!exactObject(value, ['version', 'status', 'channel', 'resource', 'token', 'requested', 'pendingUntil', 'expiresAt', 'reason'])) throw new Error();
+  if (value.version === 1 && exactObject(value, ['version', 'channel', 'resource', 'token', 'expiresAt']) && validDigest(value.channel) && validDigest(value.resource) && validDigest(value.token) && validIso(value.expiresAt)) return value as unknown as StoredCalendarChannelV1;
+  if (value.version !== 2 || !validDigest(value.channel) || !validDigest(value.token)) throw new Error();
+  if (value.status === 'active' && exactObject(value, ['version', 'status', 'channel', 'resource', 'token', 'expiresAt']) && validDigest(value.resource) && validIso(value.expiresAt)) return value as unknown as StoredCalendarActiveChannel;
+  if (value.status === 'pending' && exactObject(value, ['version', 'status', 'channel', 'resource', 'token', 'requested', 'pendingUntil', 'expiresAt']) && (value.resource === null || validDigest(value.resource)) && exactObject(value.requested, ['endpoint', 'ttlSeconds']) && validCalendarEndpoint(value.requested.endpoint) && Number.isSafeInteger(value.requested.ttlSeconds) && (value.requested.ttlSeconds as number) > 0 && (value.requested.ttlSeconds as number) <= 604_800 && validIso(value.pendingUntil) && (value.expiresAt === null || validIso(value.expiresAt)) && ((value.resource === null) === (value.expiresAt === null))) return value as unknown as StoredCalendarPendingChannel;
+  if (value.status === 'cleanup_required' && exactObject(value, ['version', 'status', 'channel', 'resource', 'token', 'expiresAt', 'reason']) && (value.resource === null || validDigest(value.resource)) && (value.expiresAt === null || validIso(value.expiresAt)) && typeof value.reason === 'string' && CALENDAR_CLEANUP_CODES.has(value.reason as StoredCalendarCleanupChannel['reason'])) return value as unknown as StoredCalendarCleanupChannel;
+  throw new Error();
 }
 function readCalendarChannel(stateDir: string, channelId: string): StoredCalendarChannel {
   const path = channelPath(stateDir, channelId); if (!existsSync(path)) throw new ProviderError(401, 'calendar_channel_unknown');
-  try { const value = JSON.parse(readFileSync(path, 'utf8')) as StoredCalendarChannel; if (value.version !== 1 || !/^[a-f0-9]{64}$/.test(value.channel) || !/^[a-f0-9]{64}$/.test(value.resource) || !/^[a-f0-9]{64}$/.test(value.token) || !Number.isFinite(Date.parse(value.expiresAt))) throw new Error(); return value; } catch { throw new ProviderError(503, 'calendar_channel_unavailable'); }
+  try { return parseCalendarChannel(JSON.parse(readFileSync(path, 'utf8'))); } catch { throw new ProviderError(503, 'calendar_channel_unavailable'); }
+}
+export function markCalendarShadowChannelCleanupRequired(stateDir: string, channelId: string, code: CalendarShadowCleanupCode): void {
+  if (!CALENDAR_CLEANUP_CODES.has(code)) throw new Error('invalid calendar cleanup code');
+  const current = readCalendarChannel(stateDir, channelId);
+  const stored: StoredCalendarCleanupChannel = { version: 2, status: 'cleanup_required', channel: current.channel, resource: current.resource, token: current.token, expiresAt: current.expiresAt, reason: code };
+  writeStoredCalendarChannel(stateDir, channelId, stored);
+}
+export function reconcileCalendarShadowChannel(stateDir: string, activation: CalendarShadowChannelActivation): CalendarShadowReconciliation {
+  if (!activation.channelId || activation.channelId.length > 256 || !activation.resourceId || activation.resourceId.length > 512 || !Number.isFinite(activation.now)) return { status: 'cleanup_required', code: 'calendar_channel_unavailable' };
+  let current: StoredCalendarChannel;
+  try { current = readCalendarChannel(stateDir, activation.channelId); }
+  catch { return { status: 'cleanup_required', code: 'calendar_channel_unavailable' }; }
+  let expiresAt: string;
+  try { expiresAt = canonicalCalendarExpiration(activation.expiresAt); }
+  catch { markCalendarShadowChannelCleanupRequired(stateDir, activation.channelId, 'calendar_channel_unavailable'); return { status: 'cleanup_required', code: 'calendar_channel_unavailable' }; }
+  if (current.version !== 2 || current.status !== 'pending') {
+    if (current.version === 2 && current.status === 'active' && current.resource === digestHex(activation.resourceId) && current.expiresAt === expiresAt) return { status: 'active' };
+    return { status: 'cleanup_required', code: current.version === 2 && current.status === 'cleanup_required' ? current.reason : 'calendar_channel_mismatch' };
+  }
+  if (Date.parse(current.pendingUntil) <= activation.now || Date.parse(expiresAt) <= activation.now) {
+    markCalendarShadowChannelCleanupRequired(stateDir, activation.channelId, 'calendar_channel_expired');
+    return { status: 'cleanup_required', code: 'calendar_channel_expired' };
+  }
+  const resource = digestHex(activation.resourceId);
+  if ((current.resource !== null && current.resource !== resource) || (current.expiresAt !== null && current.expiresAt !== expiresAt)) {
+    markCalendarShadowChannelCleanupRequired(stateDir, activation.channelId, 'calendar_channel_mismatch');
+    return { status: 'cleanup_required', code: 'calendar_channel_mismatch' };
+  }
+  writeStoredCalendarChannel(stateDir, activation.channelId, { version: 2, status: 'active', channel: current.channel, resource, token: current.token, expiresAt });
+  return { status: 'active' };
+}
+function bindPendingCalendarSync(stateDir: string, channelId: string, configured: StoredCalendarPendingChannel, resourceId: string, expiration: string, now: number): StoredCalendarPendingChannel {
+  let expiresAt: string;
+  try { expiresAt = canonicalCalendarExpiration(expiration); } catch { throw new ProviderError(401, 'calendar_channel_expired'); }
+  if (Date.parse(configured.pendingUntil) <= now || Date.parse(expiresAt) <= now) { markCalendarShadowChannelCleanupRequired(stateDir, channelId, 'calendar_channel_expired'); throw new ProviderError(401, 'calendar_channel_expired'); }
+  const resource = digestHex(resourceId);
+  if ((configured.resource !== null && configured.resource !== resource) || (configured.expiresAt !== null && configured.expiresAt !== expiresAt)) { markCalendarShadowChannelCleanupRequired(stateDir, channelId, 'calendar_channel_mismatch'); throw new ProviderError(401, 'calendar_channel_mismatch'); }
+  if (configured.resource !== null) return configured;
+  const bound: StoredCalendarPendingChannel = { ...configured, resource, expiresAt };
+  writeStoredCalendarChannel(stateDir, channelId, bound);
+  return bound;
 }
 async function handleCalendar(request: IncomingMessage, response: ServerResponse, options: ProviderShadowOptions, buckets: ProviderRateBuckets): Promise<void> {
   const config = options.calendar; if (!config || !consumeRate('calendar', buckets, options.now(), config.rateLimitMax ?? PROVIDER_RATE_LIMIT_MAX)) { if (config) response.setHeader('retry-after', '60'); throw new ProviderError(config ? 429 : 503, config ? 'calendar_rate_limited' : 'calendar_not_configured'); }
   let body: string; try { body = await readBoundedProviderBody(request, 0); } catch { throw new ProviderError(400, 'calendar_body_not_empty'); } if (body.length !== 0) throw new ProviderError(400, 'calendar_body_not_empty');
   const channelId = uniqueHeader(request, 'x-goog-channel-id')!; const resourceId = uniqueHeader(request, 'x-goog-resource-id')!; const state = uniqueHeader(request, 'x-goog-resource-state')!; const messageNumber = canonicalNumber(uniqueHeader(request, 'x-goog-message-number')!, 'calendar_invalid_message_number'); const expiration = uniqueHeader(request, 'x-goog-channel-expiration')!; const token = uniqueHeader(request, 'x-goog-channel-token')!;
   if (!['sync', 'exists', 'not_exists'].includes(state)) throw new ProviderError(400, 'calendar_invalid_state');
-  const configured = readCalendarChannel(options.stateDir, channelId); const expires = Date.parse(expiration); if (configured.channel !== digestHex(channelId) || configured.resource !== digestHex(resourceId)) throw new ProviderError(401, 'calendar_channel_mismatch'); if (!safeEqual(token, configured.token)) throw new ProviderError(401, 'calendar_token_mismatch'); if (!Number.isFinite(expires) || expires <= options.now() || new Date(expires).toISOString() !== configured.expiresAt || Date.parse(configured.expiresAt) <= options.now()) throw new ProviderError(401, 'calendar_channel_expired');
+  let configured = readCalendarChannel(options.stateDir, channelId); const expires = Date.parse(expiration);
+  if (configured.channel !== digestHex(channelId)) throw new ProviderError(401, 'calendar_channel_mismatch');
+  if (!safeEqual(token, configured.token)) throw new ProviderError(401, 'calendar_token_mismatch');
+  if (configured.version === 2 && configured.status === 'cleanup_required') throw new ProviderError(503, 'calendar_cleanup_required');
+  if (configured.version === 2 && configured.status === 'pending') {
+    if (state !== 'sync') throw new ProviderError(401, 'calendar_channel_pending');
+    configured = bindPendingCalendarSync(options.stateDir, channelId, configured, resourceId, expiration, options.now());
+  }
+  const usable = configured as UsableCalendarChannel;
+  if (usable.resource !== digestHex(resourceId)) throw new ProviderError(401, 'calendar_channel_mismatch');
+  if (!Number.isFinite(expires) || expires <= options.now() || new Date(expires).toISOString() !== usable.expiresAt || Date.parse(usable.expiresAt) <= options.now()) throw new ProviderError(401, 'calendar_channel_expired');
   const scope = digestHex(`${channelId}\u0000${resourceId}`).slice(0, 40); const result = processMonotonic(options, { provider: 'calendar', eventType: 'notification', sourceId: `${digestHex(channelId)}\u0000${digestHex(resourceId)}\u0000${messageNumber}` }, `calendar.shadow.notification_high_water:${scope}`, messageNumber, state === 'sync' ? undefined : 'pa.booking-calendar-delta');
   json(response, 200, { ok: true, mode: 'shadow', disposition: state === 'sync' && result.disposition === 'accepted' ? 'sync' : result.disposition });
 }

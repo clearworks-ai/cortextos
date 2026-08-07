@@ -47,17 +47,17 @@ import {
  */
 export const DEFAULT_KNOWN_OFF = ['hunter'];
 
-/**
- * Read one agent's config.json (best-effort). Returns {} on any failure so a
- * single malformed config never breaks the whole reconcile pass.
- */
+/** Read one agent config. Malformed input is surfaced instead of hidden as {}. */
 function readAgentConfig(agentDir: string): AgentConfig {
   const configPath = join(agentDir, 'config.json');
   if (!existsSync(configPath)) return {};
   try {
     return JSON.parse(readFileSync(configPath, 'utf-8')) as AgentConfig;
-  } catch {
-    return {};
+  } catch (error) {
+    throw new Error(
+      'Malformed agent config at ' + configPath + ': '
+      + (error instanceof Error ? error.message : String(error)),
+    );
   }
 }
 

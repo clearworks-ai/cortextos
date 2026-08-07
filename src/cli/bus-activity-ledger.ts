@@ -28,6 +28,7 @@ import { resolveEnv } from '../utils/env.js';
 import { resolvePaths } from '../utils/paths.js';
 import { logEvent } from '../bus/event.js';
 import { parseDurationMs, readCronState } from '../bus/cron-state.js';
+import { readCronOutcomes } from '../bus/cron-outcome.js';
 import { detectsCompletionClaim } from '../utils/claim-detector.js';
 import {
   correlateActivity,
@@ -216,6 +217,32 @@ function gatherCronFireSignals(
   return signals;
 }
 
+/** Gather terminal worker receipts without treating scheduler dispatch as success. */
+function gatherCronOutcomeSignals(ctxRoot: string, targetAgent: string | null): ActionSignal[] {
+  const signals: ActionSignal[] = [];
+  const stateDir = join(ctxRoot, 'state');
+  if (!existsSync(stateDir)) return signals;
+  let agentDirs: string[];
+  try {
+    agentDirs = readdirSync(stateDir, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name);
+  } catch {
+    return signals;
+  }
+  for (const agent of agentDirs) {
+    if (targetAgent && agent !== targetAgent) continue;
+    try {
+      for (const outcome of readCronOutcomes(join(stateDir, agent))) {
+        if (!['succeeded', 'failed', 'skipped', 'timed_out', 'needs_human'].includes(outcome.state)) continue;
+        const ts = Date.parse(outcome.at);
+        if (!Number.isNaN(ts)) signals.push({ agent, kind: 'receipt', ts, ref: outcome.cron + ':' + outcome.state });
+      }
+    } catch {
+      // The ledger remains a best-effort compatibility report.
+    }
+  }
+  return signals;
+}
+
 /**
  * Gather cron_exec ActionSignals from each agent's cron-execution.log.
  * The log lives at .cortextOS/state/agents/<agent>/cron-execution.log
@@ -378,6 +405,7 @@ export const activityLedgerCommand = new Command('activity-ledger')
     const actions: ActionSignal[] = [
       ...gatherReceiptSignals(ctxRoot, targetAgent),
       ...gatherCronFireSignals(ctxRoot, targetAgent),
+      ...gatherCronOutcomeSignals(ctxRoot, targetAgent),
       ...gatherCronExecSignals(ctxRoot, windowStartMs, targetAgent),
     ];
     const declaredCrons = gatherDeclaredCrons(frameworkRoot, targetAgent);

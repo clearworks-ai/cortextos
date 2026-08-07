@@ -498,6 +498,18 @@ export interface CronDefinition {
    * @default false (manual fire is allowed by default — opt-out model)
    */
   manualFireDisabled?: boolean;
+
+  /** Human or system owner responsible for terminal worker outcomes. */
+  owner?: string;
+
+  /** Maximum expected worker runtime before outcome reconciliation times out. */
+  timeout_ms?: number;
+
+  /** Operator-facing description of the expected terminal worker output. */
+  expected_output?: string;
+
+  /** Classification for the fallback/recovery procedure. */
+  backstop_class?: string;
 }
 
 // ---------------------------------------------------------------------------

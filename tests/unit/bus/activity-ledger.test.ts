@@ -233,6 +233,18 @@ describe('correlateActivity — Rule 3: cron_error_unreported', () => {
     expect(report.clean).toBe(true);
   });
 
+  it('terminal cron outcome receipt is accepted alongside the legacy failure log', () => {
+    const actions: ActionSignal[] = [
+      { agent: 'larry', kind: 'cron_exec', ts: NOW - 10 * 60_000, ref: 'fleet-reconcile:failed' },
+      { agent: 'larry', kind: 'receipt', ts: NOW - 5 * 60_000, ref: 'fleet-reconcile:timed_out' },
+    ];
+
+    const report = correlateActivity({ claims: [], actions, declaredCrons: [], now: NOW, windowMs: WINDOW_MS });
+
+    expect(report.counts.cron_error_unreported).toBe(0);
+    expect(report.clean).toBe(true);
+  });
+
   it('cron exec status:fired (not failed) → no cron_error_unreported', () => {
     const actions: ActionSignal[] = [
       { agent: 'larry', kind: 'cron_exec', ts: NOW - 10 * 60_000, ref: 'fleet-reconcile:fired' },

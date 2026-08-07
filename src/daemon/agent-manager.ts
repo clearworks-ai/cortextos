@@ -1371,14 +1371,23 @@ export class AgentManager {
       return;
     }
 
-    const onFire = async (cron: CronDefinition): Promise<void> => {
+    const onFire = async (cron: CronDefinition, context?: import('./cron-scheduler.js').CronDispatchContext): Promise<void> => {
       const prompt = cron.prompt ?? `[cron] ${cron.name} fired`;
       // Salt with the fire timestamp so MessageDedup (which hashes the last 100
       // injects) does not reject identical cron prompts on subsequent fires.
       // Without the salt, every recurring cron after its first fire would be
       // dedup-rejected and treated as a dispatch failure.
       const firedAt = new Date().toISOString();
-      const injection = `[CRON FIRED ${firedAt}] ${cron.name}: ${prompt}`;
+      // The injected payload is stable for the same logical attempt. If the
+      // scheduler delivered successfully but could not persist `dispatched`,
+      // MessageDedup rejects the recovery replay instead of running it twice.
+      const injection = context
+        ? '[CRON FIRED ' + context.scheduledAt + '] ' + cron.name + ': ' + prompt +
+          '\n[CRON RECEIPT] run_id=' + context.runId +
+          ' attempt=' + context.attempt +
+          ' scheduled_at=' + context.scheduledAt +
+          ' dispatch_key=' + context.dispatchKey
+        : '[CRON FIRED ' + firedAt + '] ' + cron.name + ': ' + prompt;
 
       // Mark this turn as cron-originated so permission hooks (via
       // readCronActive in src/hooks/lib/session-context.ts) can deny-fast —

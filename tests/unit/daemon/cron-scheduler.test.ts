@@ -21,11 +21,19 @@ const mockUpdateCron = vi.fn();
 // keep working.  Tests that need to assert the corruption path can override
 // with mockReadCronsWithStatus.mockReturnValueOnce({ crons: [...], corrupt: true }).
 const mockReadCronsWithStatus = vi.fn();
+const mockAppendCronOutcome = vi.fn();
+const mockGetActiveCronOutcome = vi.fn();
 
 vi.mock('../../../src/bus/crons.js', () => ({
   readCrons:  (...args: unknown[]) => mockReadCrons(...args),
   readCronsWithStatus: (...args: unknown[]) => mockReadCronsWithStatus(...args),
   updateCron: (...args: unknown[]) => mockUpdateCron(...args),
+}));
+
+vi.mock('../../../src/bus/cron-outcome.js', () => ({
+  appendCronOutcome: (...args: unknown[]) => mockAppendCronOutcome(...args),
+  cronRunId: () => 'cron_v1_0123456789abcdef0123456789abcdef',
+  getActiveCronOutcome: (...args: unknown[]) => mockGetActiveCronOutcome(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -186,6 +194,9 @@ describe('CronScheduler', () => {
     fired  = [];
     mockReadCrons.mockReset();
     mockUpdateCron.mockReset();
+    mockAppendCronOutcome.mockReset();
+    mockGetActiveCronOutcome.mockReset();
+    mockGetActiveCronOutcome.mockReturnValue(undefined);
     mockReadCronsWithStatus.mockReset();
     // Default: readCronsWithStatus reflects whatever readCrons returns
     // and reports the file as healthy (corrupt: false).
@@ -217,6 +228,106 @@ describe('CronScheduler', () => {
 
     expect(fired).toHaveLength(1);
     expect(fired[0].name).toBe('test-cron');
+  });
+
+  it('keeps legacy fire behavior while recording only dispatch progress', async () => {
+    mockReadCrons.mockReturnValue([makeCron({ schedule: '1m' })]);
+    const outcomeScheduler = new CronScheduler({
+      agentName: 'test-agent',
+      onFire: (cron) => { fired.push(cron); },
+      logger: (msg) => { logs.push(msg); },
+      outcomeStateDir: '/tmp/cortextos-cron-outcomes',
+    });
+    outcomeScheduler.start();
+    await vi.advanceTimersByTimeAsync(60_000 + TICK);
+    outcomeScheduler.stop();
+
+    expect(fired).toHaveLength(1);
+    const outcomeStates = mockAppendCronOutcome.mock.calls.map(call => (call[1] as { state: string }).state);
+    expect(outcomeStates).toEqual(['scheduled', 'started', 'dispatched']);
+    expect(outcomeStates).not.toContain('succeeded');
+    expect(mockUpdateCron).toHaveBeenCalledWith('test-agent', 'test-cron', expect.objectContaining({ fire_count: 1 }));
+  });
+
+  it('does not let an old dispatched receipt suppress later recurring occurrences', async () => {
+    mockReadCrons.mockReturnValue([makeCron({ schedule: '1m' })]);
+    mockGetActiveCronOutcome.mockReturnValue({
+      version: 2,
+      receipt_id: '00000000-0000-4000-8000-000000000000',
+      run_id: 'cron_v1_' + 'a'.repeat(32),
+      attempt: 1,
+      agent: 'agent_v1_' + 'b'.repeat(32),
+      cron: 'cron_v1_' + 'c'.repeat(32),
+      state: 'dispatched',
+      at: new Date().toISOString(),
+      scheduled_at: new Date().toISOString(),
+    });
+    const outcomeScheduler = new CronScheduler({
+      agentName: 'test-agent',
+      onFire: (cron) => { fired.push(cron); },
+      logger: (msg) => { logs.push(msg); },
+      outcomeStateDir: '/tmp/cortextos-cron-outcomes',
+    });
+    outcomeScheduler.start();
+    await vi.advanceTimersByTimeAsync(2 * 60_000 + TICK);
+    outcomeScheduler.stop();
+    expect(fired.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('does not replay a delivered occurrence on the next interval when the dispatched receipt write fails', async () => {
+    mockReadCrons.mockReturnValue([makeCron({ schedule: '1m' })]);
+    mockAppendCronOutcome.mockImplementation((_dir: string, row: { state: string }) => {
+      if (row.state === 'dispatched') throw new Error('disk unavailable');
+    });
+    const outcomeScheduler = new CronScheduler({
+      agentName: 'test-agent',
+      onFire: (cron) => { fired.push(cron); },
+      logger: (msg) => { logs.push(msg); },
+      outcomeStateDir: '/tmp/cortextos-cron-outcomes',
+    });
+    outcomeScheduler.start();
+    await vi.advanceTimersByTimeAsync(2 * 60_000 + TICK);
+    outcomeScheduler.stop();
+    expect(fired.length).toBeGreaterThanOrEqual(2);
+    expect(logs.some(message => message.includes('post-dispatch receipt failed'))).toBe(true);
+  });
+
+  it('continues scheduling when recovery-state reads fail', async () => {
+    mockReadCrons.mockReturnValue([makeCron({ schedule: '1m' })]);
+    mockGetActiveCronOutcome.mockImplementation(() => { throw new Error('corrupt index'); });
+    const outcomeScheduler = new CronScheduler({
+      agentName: 'test-agent',
+      onFire: (cron) => { fired.push(cron); },
+      logger: (msg) => { logs.push(msg); },
+      outcomeStateDir: '/tmp/cortextos-cron-outcomes',
+    });
+    outcomeScheduler.start();
+    await vi.advanceTimersByTimeAsync(2 * 60_000 + TICK);
+    outcomeScheduler.stop();
+    expect(fired.length).toBeGreaterThanOrEqual(2);
+    expect(logs.some(message => message.includes('recovery unavailable'))).toBe(true);
+  });
+
+  it('drains multiple unfinished runs oldest-first after each durable dispatch receipt', async () => {
+    mockReadCrons.mockReturnValue([makeCron({ schedule: '24h' })]);
+    const older = {
+      version: 2, receipt_id: '00000000-0000-4000-8000-000000000001', run_id: 'cron_v1_' + '1'.repeat(32), attempt: 1,
+      agent: 'agent_v1_' + '2'.repeat(32), cron: 'cron_v1_' + '3'.repeat(32), state: 'started',
+      at: '2026-08-07T00:00:00.000Z', scheduled_at: '2026-08-07T00:00:00.000Z',
+    };
+    const newer = { ...older, receipt_id: '00000000-0000-4000-8000-000000000002', run_id: 'cron_v1_' + '4'.repeat(32), at: '2026-08-07T00:10:00.000Z', scheduled_at: '2026-08-07T00:10:00.000Z' };
+    mockGetActiveCronOutcome.mockReturnValueOnce(older).mockReturnValueOnce(newer).mockReturnValue(undefined);
+    const runIds: string[] = [];
+    const outcomeScheduler = new CronScheduler({
+      agentName: 'test-agent',
+      onFire: (_cron, context) => { runIds.push(context.runId); },
+      logger: (msg) => { logs.push(msg); },
+      outcomeStateDir: '/tmp/cortextos-cron-outcomes',
+    });
+    outcomeScheduler.start();
+    await vi.advanceTimersByTimeAsync(2 * TICK);
+    outcomeScheduler.stop();
+    expect(runIds).toEqual([older.run_id, newer.run_id]);
   });
 
   it('does NOT fire before the interval has elapsed', async () => {

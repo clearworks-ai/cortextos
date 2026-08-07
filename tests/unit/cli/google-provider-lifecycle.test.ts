@@ -88,6 +88,14 @@ describe('Google provider lifecycle', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('persists a stopped tombstone even when the local Gmail lease is absent', async () => {
+    const d = deps([{ status: 200, body: {} }]);
+    await gmailStop(d, { apply: true, approval: 'runbook-42' });
+    calls.length = 0;
+    await expect(gmailRenew(d, { apply: true, approval: 'runbook-42' })).resolves.toMatchObject({ code: 'gmail_renew_stopped' });
+    expect(calls).toHaveLength(0);
+  });
+
   it('writes pending before Calendar watch, reconciles active, and persists only raw stop identifiers in a 0600 control index', async () => {
     const expiration = String(now + 6 * 86_400_000); const d = deps([{ status: 200, body: { id: channelId, resourceId: 'resource-secret', expiration } }]);
     const result = await calendarRegister(d, { apply: true, approval: 'runbook-42' });

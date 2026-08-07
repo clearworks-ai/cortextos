@@ -163,12 +163,17 @@ async function gmailWatchApply(deps: GoogleProviderDependencies, renewing: boole
   writeJson(deps, gmailLeasePath(deps.stateDir), lease);
   return record(deps, { code: renewing ? 'gmail_renewed' : 'gmail_watch_created', applied: true, status: 'active', nextRenewBy: lease.nextRenewBy });
 }
+async function withGmailLifecycleLock<T>(deps: GoogleProviderDependencies, operation: () => Promise<T>): Promise<T> {
+  const lockRoot = join(deps.stateDir, 'google-provider-gmail-lease-lock');
+  mkdirSync(lockRoot, { recursive: true });
+  return withFileLockAsync(lockRoot, operation, { timeoutMs: 30_000 });
+}
 
 export async function gmailWatch(deps: GoogleProviderDependencies, options: MutationOptions = {}): Promise<LifecycleResult> {
   if (!assertMutation(options)) return record(deps, { code: 'gmail_watch_dry_run', applied: false, status: 'dry_run' });
-  return gmailWatchApply(deps, false);
+  return withGmailLifecycleLock(deps, () => gmailWatchApply(deps, false));
 }
-export async function gmailRenew(deps: GoogleProviderDependencies, options: MutationOptions = {}): Promise<LifecycleResult> {
+async function gmailRenewUnlocked(deps: GoogleProviderDependencies, options: MutationOptions): Promise<LifecycleResult> {
   if (!assertMutation(options)) return record(deps, { code: 'gmail_renew_dry_run', applied: false, status: 'dry_run' });
   const lease = readJson(deps, gmailLeasePath(deps.stateDir), isGmailLease);
   if (lease?.status === 'stopped') return record(deps, { code: 'gmail_renew_stopped', applied: false, status: 'stopped' });
@@ -176,12 +181,23 @@ export async function gmailRenew(deps: GoogleProviderDependencies, options: Muta
   if (lease?.status === 'active' && deps.now() < Date.parse(lease.nextRenewBy)) return record(deps, { code: 'gmail_renew_not_due', applied: false, status: 'active', nextRenewBy: lease.nextRenewBy });
   return gmailWatchApply(deps, true);
 }
-export async function gmailStop(deps: GoogleProviderDependencies, options: MutationOptions = {}): Promise<LifecycleResult> {
+export async function gmailRenew(deps: GoogleProviderDependencies, options: MutationOptions = {}): Promise<LifecycleResult> {
+  if (!options.apply) return gmailRenewUnlocked(deps, options);
+  return withGmailLifecycleLock(deps, () => gmailRenewUnlocked(deps, options));
+}
+async function gmailStopUnlocked(deps: GoogleProviderDependencies, options: MutationOptions): Promise<LifecycleResult> {
   if (!assertMutation(options)) return record(deps, { code: 'gmail_stop_dry_run', applied: false, status: 'dry_run' });
   const lease = readJson(deps, gmailLeasePath(deps.stateDir), isGmailLease);
   await request(deps, `${GOOGLE_PROVIDER_ALLOWLIST.gmailEndpoint}/stop`);
-  if (lease) writeJson(deps, gmailLeasePath(deps.stateDir), { ...lease, status: 'stopped', lastSuccessAt: iso(deps.now()) });
+  const stopped: GmailLease = lease
+    ? { ...lease, status: 'stopped', lastSuccessAt: iso(deps.now()) }
+    : { version: 1, status: 'stopped', historyId: '0', expiration: iso(deps.now()), topic: digest(GOOGLE_PROVIDER_ALLOWLIST.topic), lastSuccessAt: iso(deps.now()), nextRenewBy: iso(deps.now()) };
+  writeJson(deps, gmailLeasePath(deps.stateDir), stopped);
   return record(deps, { code: 'gmail_watch_stopped', applied: true, status: 'stopped' });
+}
+export async function gmailStop(deps: GoogleProviderDependencies, options: MutationOptions = {}): Promise<LifecycleResult> {
+  if (!options.apply) return gmailStopUnlocked(deps, options);
+  return withGmailLifecycleLock(deps, () => gmailStopUnlocked(deps, options));
 }
 
 function readControl(deps: GoogleProviderDependencies): CalendarControl { return readJson(deps, calendarControlPath(deps.stateDir), isCalendarControl) ?? { version: 1, channels: [] }; }

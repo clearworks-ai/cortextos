@@ -20,6 +20,7 @@ import {
   mirrorToMailchimp,
   type ZoomRegistrant,
 } from './zoom-officehours-crm.js';
+import { handleProviderShadowIngress, type CalendarShadowOptions, type GmailShadowOptions, type ProviderIngressDependencies, type ProviderRateBuckets } from './provider-shadow-ingress.js';
 
 export const DEFAULT_PORT = 20242;
 const DEFAULT_HOST = '127.0.0.1';
@@ -62,6 +63,10 @@ export interface BridgeServerOptions {
   fetchImpl?: typeof fetch;
   allowedIntegrations?: readonly string[];
   now?: () => number;
+  providerShadowStateDir?: string;
+  gmailShadow?: GmailShadowOptions;
+  calendarShadow?: CalendarShadowOptions;
+  providerIngressDependencies?: ProviderIngressDependencies;
 }
 
 interface RelayEnvelope {
@@ -552,6 +557,7 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
   const now = options.now ?? Date.now;
   let windowStartedAt = now();
   let requestCount = 0;
+  const providerRateBuckets: ProviderRateBuckets = new Map();
 
   return createServer(async (request, response) => {
     try {
@@ -573,6 +579,14 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
         jsonResponse(response, 404, { error: 'not_found' });
         return;
       }
+
+      if (await handleProviderShadowIngress(integration, request, response, {
+        stateDir: options.providerShadowStateDir ?? join(options.ctxRoot, 'state', 'pa'),
+        now,
+        gmail: options.gmailShadow,
+        calendar: options.calendarShadow,
+        dependencies: options.providerIngressDependencies,
+      }, providerRateBuckets)) return;
 
       const currentWindow = now();
       if (currentWindow - windowStartedAt >= RATE_LIMIT_WINDOW_MS) {
@@ -805,9 +819,8 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
       wakeFastChecker(options.ctxRoot, target);
       appendInboundLog(options.ctxRoot, target, messageId, text);
       jsonResponse(response, 200, { ok: true, messageId });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      jsonResponse(response, 500, { error: 'relay_failed', details: message });
+    } catch {
+      jsonResponse(response, 500, { error: 'relay_failed' });
     }
   });
 }

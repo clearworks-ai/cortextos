@@ -1,10 +1,11 @@
 import { createHmac, randomUUID } from 'crypto';
-import { appendFileSync, existsSync, readFileSync, statSync } from 'fs';
+import { appendFileSync, existsSync, readFileSync, statSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { atomicWriteSync, ensureDir } from '../utils/atomic.js';
 import { withFileLockSync } from '../utils/lock.js';
 import {
   MAX_EVENT_RECEIPT_DEDUP_KEYS,
+  MAX_EVENT_ROUTE_PROPOSALS,
   clearEventReceiptJournal,
   readEventReceiptIndex,
   readOrCreateEventReceiptKey,
@@ -44,6 +45,7 @@ interface EventReceiptJournal { version: 1; receipt: EventReceipt; }
 function receiptPath(stateDir: string): string { return join(stateDir, 'event-receipts.jsonl'); }
 function receiptLockDir(stateDir: string): string { return join(stateDir, '.event-receipt-log'); }
 function journalPath(stateDir: string): string { return join(stateDir, 'event-receipt-tx.json'); }
+function routeProposalJournalPath(stateDir: string): string { return join(stateDir, 'event-route-proposal-tx.json'); }
 
 function assertSafeCode(value: string | undefined): void {
   if (value !== undefined && !SAFE_CODE_RE.test(value)) throw new Error('invalid event receipt');
@@ -106,6 +108,38 @@ function hasReceiptLocked(stateDir: string, receiptId: string): boolean {
 function pruneDedup(index: ReturnType<typeof readEventReceiptIndex>): void {
   const entries = Object.entries(index.dedup).sort(([, left], [, right]) => left.localeCompare(right));
   for (const [eventId] of entries.slice(0, Math.max(0, entries.length - MAX_EVENT_RECEIPT_DEDUP_KEYS))) delete index.dedup[eventId];
+}
+
+function routeProposalKey(eventId: string, route: string): string { return `${eventId}:${route}`; }
+
+function pruneRouteProposals(index: ReturnType<typeof readEventReceiptIndex>): void {
+  const proposedRoutes = index.proposedRoutes ?? (index.proposedRoutes = {});
+  const entries = Object.entries(proposedRoutes).sort(([, left], [, right]) => left.localeCompare(right));
+  for (const [claim] of entries.slice(0, Math.max(0, entries.length - MAX_EVENT_ROUTE_PROPOSALS))) delete proposedRoutes[claim];
+}
+
+function recoverRouteProposalJournalLocked(stateDir: string): void {
+  const filePath = routeProposalJournalPath(stateDir);
+  if (!existsSync(filePath)) return;
+  let journal: EventReceiptJournal;
+  try {
+    journal = JSON.parse(readFileSync(filePath, 'utf-8')) as EventReceiptJournal;
+    if (journal.version !== 1) throw new Error('invalid');
+    assertEventReceipt(journal.receipt);
+    if (journal.receipt.stage !== 'routing' || journal.receipt.routing_state !== 'proposed' || !journal.receipt.route) throw new Error('invalid');
+  } catch {
+    throw new Error('event route proposal transaction is unreadable');
+  }
+  const index = readEventReceiptIndex(stateDir);
+  const proposedRoutes = index.proposedRoutes ?? (index.proposedRoutes = {});
+  if (!hasReceiptLocked(stateDir, journal.receipt.receipt_id)) appendReceiptLocked(stateDir, journal.receipt);
+  const claim = routeProposalKey(journal.receipt.event_id, journal.receipt.route);
+  if (!proposedRoutes[claim]) {
+    proposedRoutes[claim] = journal.receipt.at;
+    pruneRouteProposals(index);
+    writeEventReceiptIndex(stateDir, index);
+  }
+  try { unlinkSync(filePath); } catch { /* recovered journal may already be absent */ }
 }
 
 function recoverIngressJournalLocked(stateDir: string): void {
@@ -200,6 +234,39 @@ export function recordEventRoutingReceipt(stateDir: string, eventId: string, rou
   const receipt: EventReceipt = { version: EVENT_RECEIPT_VERSION, receipt_id: randomUUID(), event_id: eventId, at: new Date().toISOString(), stage: 'routing', routing_state: routingState, route, reason };
   appendReceiptLocked(stateDir, receipt);
   return receipt;
+}
+
+/**
+ * Atomically claims and records one shadow proposal per event/route pair.
+ * A journal heals crashes between receipt append and durable index update.
+ */
+export function recordEventRoutingProposalOnce(stateDir: string, eventId: string, route: string, reason?: string): EventReceipt | undefined {
+  return withEventReceiptDomainLock(stateDir, () => {
+    recoverRouteProposalJournalLocked(stateDir);
+    const candidate: EventReceipt = { version: EVENT_RECEIPT_VERSION, receipt_id: randomUUID(), event_id: eventId, at: new Date().toISOString(), stage: 'routing', routing_state: 'proposed', route, reason };
+    assertEventReceipt(candidate);
+    const index = readEventReceiptIndex(stateDir);
+    const proposedRoutes = index.proposedRoutes ?? (index.proposedRoutes = {});
+    const claim = routeProposalKey(eventId, route);
+    if (proposedRoutes[claim]) return undefined;
+    atomicWriteSync(routeProposalJournalPath(stateDir), JSON.stringify({ version: 1, receipt: candidate }));
+    try {
+      appendReceiptLocked(stateDir, candidate);
+    } catch (error) {
+      try { unlinkSync(routeProposalJournalPath(stateDir)); } catch { /* failed append leaves no claim to heal */ }
+      throw error;
+    }
+    proposedRoutes[claim] = candidate.at;
+    pruneRouteProposals(index);
+    try {
+      writeEventReceiptIndex(stateDir, index);
+      unlinkSync(routeProposalJournalPath(stateDir));
+    } catch {
+      // The receipt is durable and the journal will restore the index before
+      // the next proposal claim. Returning preserves receipt-before-cursor.
+    }
+    return candidate;
+  });
 }
 
 export function recordEventProcessingReceipt(stateDir: string, eventId: string, state: EventProcessingState, route?: string, reason?: string): EventReceipt {

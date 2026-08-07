@@ -1,14 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { randomUUID } from 'crypto';
 import {
+  appendEventReceipt,
   canonicalEventId,
   readEventReceipts,
   recordIngressReceipt,
   recordRejectedIngressReceipt,
 } from '../../../src/bus/event-delivery';
 import { ShadowRouter } from '../../../src/bus/shadow-router';
+import { advanceNumericEventCursor, compareCanonicalNumericCursors, getEventCursor } from '../../../src/bus/event-receipt-index';
 import { appendCronOutcome, cronRunId, getActiveCronOutcome, reconcileCronOutcomes, readCronOutcomes, MAX_CRON_OUTCOME_INDEX_RECORDS } from '../../../src/bus/cron-outcome';
 import { inventoryCrons } from '../../../src/bus/cron-inventory';
 import type { CronDefinition } from '../../../src/types/index';
@@ -74,6 +77,8 @@ describe('event and cron receipt foundation', () => {
     expect(receipts.filter(receipt => receipt.disposition === 'duplicate')).toHaveLength(19);
   });
 
+  it('compares and persists arbitrary-precision canonical numeric cursors', () => { expect(compareCanonicalNumericCursors('9', '10')).toBeLessThan(0); expect(compareCanonicalNumericCursors('9'.repeat(100), '1' + '0'.repeat(100))).toBeLessThan(0); expect(advanceNumericEventCursor(stateDir, 'gmail.shadow.notification_high_water', '9')).toBe(true); expect(advanceNumericEventCursor(stateDir, 'gmail.shadow.notification_high_water', '10')).toBe(true); expect(advanceNumericEventCursor(stateDir, 'gmail.shadow.notification_high_water', '9')).toBe(false); expect(getEventCursor(stateDir, 'gmail.shadow.notification_high_water')).toBe('10'); for (const invalid of ['', '01', '-1', '+1', '1.0', ' 1', '1 '.padEnd(129, '0')]) expect(() => advanceNumericEventCursor(stateDir, 'numeric', invalid)).toThrow('invalid numeric'); });
+
   it('does not invoke a route sink when the acceptance receipt cannot be written', () => {
     const router = new ShadowRouter('shadow', { stateDir });
     mkdirSync(join(stateDir, 'event-receipts.jsonl'));
@@ -96,6 +101,29 @@ describe('event and cron receipt foundation', () => {
       expect.objectContaining({ event_id: receipt.event_id, routing_state: 'proposed', route: 'larry' }),
     ]);
     expect(() => new ShadowRouter('shadow', { stateDir, deliver: () => undefined })).toThrow('delivery capability');
+  });
+
+  it('deduplicates shadow proposals durably beyond the receipt tail and across router restart', () => {
+    const receipt = recordIngressReceipt(stateDir, event);
+    expect(new ShadowRouter('shadow', { stateDir }).route(receipt, 'larry', 'policy_match').proposed).toBe(true);
+    for (let index = 0; index < 2_100; index += 1) {
+      recordRejectedIngressReceipt(stateDir, { provider: 'noise', eventType: 'notification', sourceId: `noise-${index}` }, 'noise');
+    }
+    expect(new ShadowRouter('shadow', { stateDir }).route(receipt, 'larry', 'policy_match')).toEqual({ mode: 'shadow', proposed: false, delivered: false });
+    const index = JSON.parse(readFileSync(join(stateDir, 'event-receipt-index.json'), 'utf8')) as { proposedRoutes: Record<string, string> };
+    expect(Object.keys(index.proposedRoutes)).toEqual([`${receipt.event_id}:larry`]);
+  });
+
+  it('heals route-proposal crashes before and after the durable receipt append', () => {
+    const ingress = recordIngressReceipt(stateDir, event);
+    for (const [route, receiptAlreadyAppended] of [['larry', false], ['maven', true]] as const) {
+      const proposal = { version: 2 as const, receipt_id: randomUUID(), event_id: ingress.event_id, at: new Date().toISOString(), stage: 'routing' as const, routing_state: 'proposed' as const, route, reason: 'policy_match' };
+      if (receiptAlreadyAppended) appendEventReceipt(stateDir, proposal);
+      writeFileSync(join(stateDir, 'event-route-proposal-tx.json'), JSON.stringify({ version: 1, receipt: proposal }));
+      expect(new ShadowRouter('shadow', { stateDir }).route(ingress, route, 'policy_match').proposed).toBe(false);
+      expect(readEventReceipts(stateDir).filter((entry) => entry.stage === 'routing' && entry.route === route)).toHaveLength(1);
+      expect(existsSync(join(stateDir, 'event-route-proposal-tx.json'))).toBe(false);
+    }
   });
 
   it('reconciles a dispatched run to timed_out without treating dispatch as success', () => {

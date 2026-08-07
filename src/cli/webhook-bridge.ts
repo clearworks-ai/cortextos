@@ -11,6 +11,7 @@ import { loadEnvFileInto } from '../utils/env.js';
 import { resolvePaths } from '../utils/paths.js';
 import type { BusPaths } from '../types/index.js';
 import { resolveInstanceId } from './resolve-instance-id.js';
+import { createGoogleOidcVerifier } from './google-oidc-verifier.js';
 import {
   ZOOM_OFFICEHOURS_MEETING_ID,
   ZOOM_MAILCHIMP_LIST_ID,
@@ -37,7 +38,7 @@ interface BridgeConfig {
   createdAt?: string;
 }
 
-interface BridgeRuntimeContext {
+export interface BridgeRuntimeContext {
   instanceId: string;
   ctxRoot: string;
   frameworkRoot: string;
@@ -46,6 +47,8 @@ interface BridgeRuntimeContext {
   firefliesWebhookSecret?: string;
   zoomWebhookSecretToken?: string;
   mailchimpApiKey?: string;
+  gmailShadow?: GmailShadowOptions;
+  calendarShadow?: CalendarShadowOptions;
 }
 
 export interface BridgeServerOptions {
@@ -161,7 +164,22 @@ function findFrameworkRoot(): string {
   return cliDirCandidate;
 }
 
-function resolveBridgeRuntimeContext(instanceId: string): BridgeRuntimeContext {
+const GMAIL_PUSH_AUDIENCE = 'https://hooks.clearworks.ai/relay/gmail-pubsub';
+const GMAIL_PUSH_SERVICE_ACCOUNT = 'gws-agent@cortextos-gws-495505.iam.gserviceaccount.com';
+const GMAIL_PUSH_SUBSCRIPTION = 'projects/cortextos-gws-495505/subscriptions/cortextos-gmail-push-bridge';
+const GOOGLE_PROVIDER_CONFIG_ERROR = 'google_provider_shadow_config_invalid';
+
+function providerFlag(value: string | undefined): boolean {
+  if (value === undefined || value === 'false') return false;
+  if (value === 'true') return true;
+  throw new Error(GOOGLE_PROVIDER_CONFIG_ERROR);
+}
+
+function providerEnv(name: string, envFromFiles: Record<string, string>): string | undefined {
+  return Object.prototype.hasOwnProperty.call(process.env, name) ? process.env[name] : envFromFiles[name];
+}
+
+export function resolveBridgeRuntimeContext(instanceId: string): BridgeRuntimeContext {
   const frameworkRoot = findFrameworkRoot();
   const envFromFiles = readFrameworkEnv(frameworkRoot);
   const org = process.env.CTX_ORG || envFromFiles.CTX_ORG || '';
@@ -170,6 +188,28 @@ function resolveBridgeRuntimeContext(instanceId: string): BridgeRuntimeContext {
   const firefliesWebhookSecret = process.env.FIREFLIES_WEBHOOK_SECRET || envFromFiles.FIREFLIES_WEBHOOK_SECRET || undefined;
   const zoomWebhookSecretToken = process.env.ZOOM_WEBHOOK_SECRET_TOKEN || envFromFiles.ZOOM_WEBHOOK_SECRET_TOKEN || undefined;
   const mailchimpApiKey = process.env.MAILCHIMP_API_KEY || envFromFiles.MAILCHIMP_API_KEY || undefined;
+  const googleProviderEnabled = providerFlag(providerEnv('GOOGLE_PROVIDER_SHADOW_ENABLED', envFromFiles));
+  const calendarShadowEnabled = providerFlag(providerEnv('CALENDAR_WATCH_SHADOW_ENABLED', envFromFiles));
+
+  let gmailShadow: GmailShadowOptions | undefined;
+  if (googleProviderEnabled) {
+    const audience = providerEnv('GMAIL_PUSH_AUDIENCE', envFromFiles);
+    const serviceAccount = providerEnv('GMAIL_PUSH_SERVICE_ACCOUNT', envFromFiles);
+    const subscription = providerEnv('GMAIL_PUSH_SUBSCRIPTION', envFromFiles);
+    if (
+      audience !== GMAIL_PUSH_AUDIENCE
+      || serviceAccount !== GMAIL_PUSH_SERVICE_ACCOUNT
+      || subscription !== GMAIL_PUSH_SUBSCRIPTION
+    ) {
+      throw new Error(GOOGLE_PROVIDER_CONFIG_ERROR);
+    }
+    gmailShadow = {
+      audience,
+      serviceAccount,
+      subscription,
+      verifyOidc: createGoogleOidcVerifier(),
+    };
+  }
 
   if (!bridgeSecret) {
     throw new Error(
@@ -186,6 +226,8 @@ function resolveBridgeRuntimeContext(instanceId: string): BridgeRuntimeContext {
     firefliesWebhookSecret,
     zoomWebhookSecretToken,
     mailchimpApiKey,
+    gmailShadow,
+    calendarShadow: calendarShadowEnabled ? {} : undefined,
   };
 }
 
@@ -484,12 +526,37 @@ function buildLaunchdPath(): string {
   return candidates.filter((value, index, all) => value && all.indexOf(value) === index).join(':');
 }
 
-function writePlist(context: BridgeRuntimeContext, port: number): void {
-  const logDir = join(homedir(), '.cortextos', context.instanceId, 'logs', 'webhook-bridge');
-  mkdirSync(logDir, { recursive: true });
+export function buildWebhookBridgeLaunchdEnvironment(context: BridgeRuntimeContext): Record<string, string> {
+  const environment: Record<string, string> = {
+    HOME: homedir(),
+    PATH: buildLaunchdPath(),
+    CTX_ROOT: context.ctxRoot,
+    CTX_INSTANCE_ID: context.instanceId,
+    CTX_FRAMEWORK_ROOT: context.frameworkRoot,
+    CTX_PROJECT_ROOT: context.frameworkRoot,
+    GOOGLE_PROVIDER_SHADOW_ENABLED: context.gmailShadow ? 'true' : 'false',
+    CALENDAR_WATCH_SHADOW_ENABLED: context.calendarShadow ? 'true' : 'false',
+  };
+  if (context.org) environment.CTX_ORG = context.org;
+  if (context.gmailShadow) {
+    environment.GMAIL_PUSH_AUDIENCE = context.gmailShadow.audience;
+    environment.GMAIL_PUSH_SERVICE_ACCOUNT = context.gmailShadow.serviceAccount;
+    environment.GMAIL_PUSH_SUBSCRIPTION = context.gmailShadow.subscription;
+  }
+  return environment;
+}
 
+function plistXml(value: string): string {
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&apos;');
+}
+
+export function buildWebhookBridgePlist(context: BridgeRuntimeContext, port: number): string {
+  const logDir = join(homedir(), '.cortextos', context.instanceId, 'logs', 'webhook-bridge');
   const cliEntryPath = getCliEntryPath();
-  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+  const launchEnvironment = Object.entries(buildWebhookBridgeLaunchdEnvironment(context))
+    .map(([key, value]) => `        <key>${plistXml(key)}</key>\n        <string>${plistXml(value)}</string>`)
+    .join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -498,14 +565,14 @@ function writePlist(context: BridgeRuntimeContext, port: number): void {
 
     <key>ProgramArguments</key>
     <array>
-        <string>${process.execPath}</string>
-        <string>${cliEntryPath}</string>
+        <string>${plistXml(process.execPath)}</string>
+        <string>${plistXml(cliEntryPath)}</string>
         <string>webhook-bridge</string>
         <string>run</string>
         <string>--instance</string>
-        <string>${context.instanceId}</string>
+        <string>${plistXml(context.instanceId)}</string>
         <string>--port</string>
-        <string>${port}</string>
+        <string>${plistXml(String(port))}</string>
     </array>
 
     <key>RunAtLoad</key>
@@ -518,37 +585,29 @@ function writePlist(context: BridgeRuntimeContext, port: number): void {
     <integer>30</integer>
 
     <key>WorkingDirectory</key>
-    <string>${context.frameworkRoot}</string>
+    <string>${plistXml(context.frameworkRoot)}</string>
 
     <key>StandardOutPath</key>
-    <string>${logDir}/stdout.log</string>
+    <string>${plistXml(join(logDir, 'stdout.log'))}</string>
 
     <key>StandardErrorPath</key>
-    <string>${logDir}/stderr.log</string>
+    <string>${plistXml(join(logDir, 'stderr.log'))}</string>
 
     <key>EnvironmentVariables</key>
     <dict>
-        <key>HOME</key>
-        <string>${homedir()}</string>
-        <key>PATH</key>
-        <string>${buildLaunchdPath()}</string>
-        <key>CTX_ROOT</key>
-        <string>${context.ctxRoot}</string>
-        <key>CTX_INSTANCE_ID</key>
-        <string>${context.instanceId}</string>
-        <key>CTX_FRAMEWORK_ROOT</key>
-        <string>${context.frameworkRoot}</string>
-        <key>CTX_PROJECT_ROOT</key>
-        <string>${context.frameworkRoot}</string>
-${context.org ? `        <key>CTX_ORG</key>
-        <string>${context.org}</string>
-` : ''}    </dict>
+${launchEnvironment}
+    </dict>
 </dict>
 </plist>
 `;
+}
+
+function writePlist(context: BridgeRuntimeContext, port: number): void {
+  const logDir = join(homedir(), '.cortextos', context.instanceId, 'logs', 'webhook-bridge');
+  mkdirSync(logDir, { recursive: true });
 
   mkdirSync(join(homedir(), 'Library', 'LaunchAgents'), { recursive: true });
-  writeFileSync(PLIST_PATH, plist, 'utf-8');
+  writeFileSync(PLIST_PATH, buildWebhookBridgePlist(context, port), 'utf-8');
   chmodSync(PLIST_PATH, 0o644);
 }
 
@@ -941,6 +1000,8 @@ const runCommand = new Command('run')
         firefliesWebhookSecret: context.firefliesWebhookSecret,
         zoomWebhookSecretToken: context.zoomWebhookSecretToken,
         mailchimpApiKey: context.mailchimpApiKey,
+        gmailShadow: context.gmailShadow,
+        calendarShadow: context.calendarShadow,
       });
 
       await new Promise<void>((resolve, reject) => {

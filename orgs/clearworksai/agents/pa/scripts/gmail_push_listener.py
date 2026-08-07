@@ -40,8 +40,6 @@ HOME = Path.home()
 STATE_DIR = HOME / ".cortextos" / "cortextos1" / "state" / "pa"
 PIDFILE = STATE_DIR / "gmail-push-listener.pid"
 STATE_FILE = STATE_DIR / "gmail-push-listener.json"
-TOKEN_CACHE = Path("/tmp/gws-dwd-token-cache.json")
-KEY_FILE = HOME / ".config" / "gws" / "service-account-key.json"
 
 AGENT_DIR = Path(__file__).resolve().parent.parent
 CORTEXTOS_BIN = "/opt/homebrew/bin/cortextos"
@@ -51,10 +49,9 @@ CORTEXTOS_BIN = "/opt/homebrew/bin/cortextos"
 # ---------------------------------------------------------------------------
 POLL_INTERVAL = 60          # seconds between history.list calls
 DEBOUNCE_SECS = 120         # wait this long after first delta before spawning
-WATCH_RENEW_SECS = 86400    # not used for history.list, kept for symmetry
+WATCH_RENEW_SECS = 86400    # deterministic provider renewal cadence
+WATCH_RETRY_SECS = 300
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
-GMAIL_SUBJECT = "josh@clearworks.ai"
-
 # ---------------------------------------------------------------------------
 # Hard-exclusion prefilter (same senders/subjects as SKILL.md Step 2.2a)
 # These skip a worker spawn entirely — the worker is still the authoritative
@@ -102,89 +99,9 @@ log = logging.getLogger("gmail-push-listener")
 # ---------------------------------------------------------------------------
 
 def _get_token() -> str:
-    """Return a valid DWD access token, cached 55 min in /tmp."""
-    try:
-        with open(TOKEN_CACHE) as f:
-            cache = json.load(f)
-        if cache.get("expiry", 0) > time.time() + 60:
-            return cache["token"]
-    except Exception:
-        pass
-    return _refresh_token()
-
-
-def _refresh_token() -> str:
-    """Generate new DWD token via service account JWT."""
-    import base64
-
-    try:
-        from cryptography.hazmat.primitives import hashes, serialization
-        from cryptography.hazmat.primitives.asymmetric import padding
-    except ImportError:
-        # Fall back to subprocess if cryptography not installed in this venv
-        result = subprocess.run(
-            ["uv", "run", "--with", "cryptography",
-             "/Users/joshweiss/.local/bin/gws-token"],
-            capture_output=True, text=True, timeout=30
-        )
-        token = result.stdout.strip()
-        if not token:
-            raise RuntimeError("gws-token returned empty token")
-        return token
-
-    with open(KEY_FILE) as f:
-        key_data = json.load(f)
-
-    private_key_pem: str = key_data["private_key"]
-    client_email: str = key_data["client_email"]
-    token_uri: str = key_data["token_uri"]
-
-    now = int(time.time())
-    header = {"alg": "RS256", "typ": "JWT", "kid": key_data["private_key_id"]}
-    payload = {
-        "iss": client_email,
-        "sub": GMAIL_SUBJECT,
-        "scope": " ".join([
-            "https://mail.google.com/",
-            "https://www.googleapis.com/auth/gmail.readonly",
-            "https://www.googleapis.com/auth/gmail.modify",
-        ]),
-        "aud": token_uri,
-        "iat": now,
-        "exp": now + 3600,
-    }
-
-    def b64url(data: Any) -> str:
-        if isinstance(data, dict):
-            data = json.dumps(data, separators=(",", ":")).encode()
-        return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
-
-    signing_input = f"{b64url(header)}.{b64url(payload)}".encode()
-
-    private_key = serialization.load_pem_private_key(
-        private_key_pem.encode(), password=None
-    )
-    signature = private_key.sign(signing_input, padding.PKCS1v15(), hashes.SHA256())
-    jwt_str = f"{signing_input.decode()}.{b64url(signature)}"
-
-    data = urllib.parse.urlencode({
-        "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
-        "assertion": jwt_str,
-    }).encode()
-    req = urllib.request.Request(token_uri, data=data)
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        result = json.loads(resp.read())
-
-    token = result["access_token"]
-    expiry = now + result.get("expires_in", 3600) - 300
-
-    try:
-        with open(TOKEN_CACHE, "w") as f:
-            json.dump({"token": token, "expiry": expiry}, f)
-        os.chmod(TOKEN_CACHE, 0o600)
-    except Exception:
-        pass
-    return token
+    """Return a valid DWD access token through the shared helper."""
+    from google_dwd_credentials import get_token
+    return get_token()
 
 
 def _gmail_get(path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
@@ -302,6 +219,49 @@ def spawn_comms_check_worker(reason: str = "") -> None:
         log.error("spawn-worker timed out")
     except FileNotFoundError:
         log.error("cortextos binary not found at %s", CORTEXTOS_BIN)
+
+
+def renew_provider_leases(state: dict[str, Any], now: float) -> None:
+    """Run due Google lease renewals through deterministic CLI code.
+
+    This reuses the existing polling process and remains inert until an
+    operator supplies the approval reference during the provider activation
+    window. Provider output is intentionally not logged.
+    """
+    approval = os.environ.get("GOOGLE_PROVIDER_RENEWAL_APPROVAL", "")
+    if not re.fullmatch(r"[-A-Za-z0-9_/.]{3,128}", approval):
+        return
+    last_attempt = float(state.get("provider_renewal_last_attempt", 0) or 0)
+    last_success = float(state.get("provider_renewal_last_success", 0) or 0)
+    interval = WATCH_RETRY_SECS if last_attempt > last_success else WATCH_RENEW_SECS
+    if last_attempt > 0 and now - last_attempt < interval:
+        return
+
+    state["provider_renewal_last_attempt"] = now
+    framework_root = str(AGENT_DIR.parents[4])
+    command_env = {
+        **os.environ,
+        "CTX_FRAMEWORK_ROOT": framework_root,
+        "CTX_PROJECT_ROOT": framework_root,
+        "CTX_ROOT": str(HOME / ".cortextos" / "cortextos1"),
+        "CTX_INSTANCE_ID": "cortextos1",
+    }
+    commands = (
+        [CORTEXTOS_BIN, "google-provider", "gmail", "renew", "--apply", "--approval", approval],
+        [CORTEXTOS_BIN, "google-provider", "calendar", "renew", "--apply", "--approval", approval],
+    )
+    for command in commands:
+        try:
+            result = subprocess.run(command, capture_output=True, text=True,
+                                    timeout=60, env=command_env)
+        except (OSError, subprocess.TimeoutExpired):
+            log.error("Google provider renewal failed (provider_renewal_exec_failed)")
+            return
+        if result.returncode != 0:
+            log.error("Google provider renewal failed (provider_renewal_command_failed)")
+            return
+    state["provider_renewal_last_success"] = now
+    log.info("Google provider renewal check completed")
 
 
 # ---------------------------------------------------------------------------
@@ -436,6 +396,9 @@ def main_loop() -> None:
 
     while running[0]:
         now = time.time()
+
+        renew_provider_leases(state, now)
+        save_state(state)
 
         # Poll history
         result = get_history(history_id)

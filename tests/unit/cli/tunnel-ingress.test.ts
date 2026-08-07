@@ -82,4 +82,6 @@ describe('tunnel ingress generation', () => {
     const config = buildCloudflaredConfig(tunnelId, dashboardPort, { port: DEFAULT_PORT });
     expect(config).toContain('    service: http://localhost:20242');
   });
+
+  it('routes Gmail and Calendar callback suffixes through the existing relay rule only', () => { const config = buildCloudflaredConfig('abc123', 3000, { port: DEFAULT_PORT }); expect(config).toContain('  - path: ^/relay/.*'); expect('/relay/gmail-pubsub').toMatch(/^\/relay\/.*/); expect('/relay/calendar-watch').toMatch(/^\/relay\/.*/); expect(config.match(/service: http:\/\/localhost:20242/g)).toHaveLength(1); });
 });

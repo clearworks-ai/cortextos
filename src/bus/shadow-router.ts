@@ -1,4 +1,4 @@
-import { recordEventRoutingReceipt, type EventReceipt } from './event-delivery.js';
+import { recordEventRoutingProposalOnce, recordEventRoutingReceipt, type EventReceipt } from './event-delivery.js';
 
 export type RouterMode = 'off' | 'shadow' | 'active';
 
@@ -47,8 +47,8 @@ export class ShadowRouter {
     if (this.mode === 'off') return { mode: 'off', proposed: false, delivered: false };
     const route: ProposedRoute = { eventId: receipt.event_id, target, reason };
     if (this.mode === 'shadow') {
-      recordEventRoutingReceipt(this.stateDir as string, route.eventId, 'proposed', route.target, route.reason);
-      return { mode: 'shadow', proposed: true, delivered: false };
+      const proposal = recordEventRoutingProposalOnce(this.stateDir as string, route.eventId, route.target, route.reason);
+      return { mode: 'shadow', proposed: proposal !== undefined, delivered: false };
     }
     // Receipt write is intentionally before the injected transport call.
     recordEventRoutingReceipt(this.stateDir as string, route.eventId, 'attempted', route.target, route.reason);

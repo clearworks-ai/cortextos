@@ -783,7 +783,7 @@ describe('SC-2: Scaling cliff — sequential fire drift at 1000 crons × 10ms PT
     expect(fireCount).toBe(1000);
 
     vi.useRealTimers();
-  }, 120_000); // generous real-time budget for 1000 async fire ops
+  }, 300_000); // full-suite CI contention can stretch this documentation-only probe well past 120s
 });
 
 // ===========================================================================

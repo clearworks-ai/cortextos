@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -491,6 +492,18 @@ def interaction_source_refs(path: Path = INTERACTIONS_PATH) -> set[str]:
     return refs
 
 
+def _in_test_mode() -> bool:
+    """True under pytest or a plain unittest run, so emits stay off the live bus.
+    PYTEST_CURRENT_TEST is set by pytest and inherited by subprocess children via
+    os.environ.copy(); the sys.modules checks cover in-process plain-unittest runs. The
+    explicit CRM_EVENT_EMIT_LOG seam still takes precedence when a test asserts emit content."""
+    return (
+        os.environ.get("PYTEST_CURRENT_TEST") is not None
+        or "pytest" in sys.modules
+        or "unittest" in sys.modules
+    )
+
+
 def emit_crm_event(event_type: str, payload: str) -> None:
     """DESIGN-B-crm.md event lane: self-inbox a structured ``EVENT <type> — <json>`` bus
     message so the fast-checker wakes the crm session and the Records-Admin Event Runbook
@@ -508,6 +521,8 @@ def emit_crm_event(event_type: str, payload: str) -> None:
                 handle.write(line + "\n")
         except OSError:
             pass
+        return
+    if _in_test_mode():
         return
     try:
         subprocess.run(

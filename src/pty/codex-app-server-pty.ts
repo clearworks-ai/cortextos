@@ -10,6 +10,11 @@ import { resolvePaths } from '../utils/paths.js';
 import { logEvent } from '../bus/event.js';
 import { WsUnixJsonRpcClient, type JsonRpcResponse } from '../utils/ws-unix-client.js';
 import { hostSpawn } from './pty-host-client.js';
+import { createGoalManifest } from '../goals/goal-manifest.js';
+import { defaultRetention, loadGoalConfig, selectGoalAcceptanceProfile, type GoalRun } from '../goals/goal-run.js';
+import { GoalRunStore } from '../goals/goal-run-store.js';
+import { GoalRunner } from '../goals/goal-runner.js';
+import { GoalThreadManager, type GoalCodexApi, type GoalTurnOutcome } from '../goals/goal-thread-manager.js';
 
 interface IPty {
   pid: number;
@@ -51,6 +56,7 @@ interface ThreadResponse {
     status?: unknown;
   };
 }
+interface TurnStartResponse { turn?: { id?: string }; }
 
 interface SkillsListResponse {
   data?: Array<{
@@ -126,6 +132,14 @@ export class CodexAppServerPTY {
   private _telegramApi: TelegramAPI | null = null;
   private _chatId: string | null = null;
   private _typingLastSent = 0;
+  private goalRunStore?: GoalRunStore;
+  private goalRunner?: GoalRunner;
+  private goalTickTimer?: ReturnType<typeof setInterval>;
+  private goalTickRunning = false;
+  private goalTickPending = false;
+  private goalSchedulerStopped = false;
+  private goalTickPromise: Promise<void> | null = null;
+  private goalPendingTurn?: { threadId: string; turnId?: string; reportText: string; outcome?: GoalTurnOutcome };
 
   constructor(env: CtxEnv, config: AgentConfig, logPath?: string) {
     this._env = env;
@@ -154,6 +168,7 @@ export class CodexAppServerPTY {
       await this.connectRpc();
       await this.initializeRpc();
       await this.startOrResumeThread(mode);
+      if (process.env.CXR_GOAL_DURABLE === 'true') await this.initializeGoalIntegration();
       this._outputBuffer.push(`${BOOTSTRAP_PATTERN} thread=${this._threadId}\n`);
       if (prompt.trim()) {
         this.queueTurn([{ type: 'text', text: prompt, text_elements: [] }]);
@@ -161,7 +176,7 @@ export class CodexAppServerPTY {
     } catch (err) {
       this._alive = false;
       this._outputBuffer.push(`[codex-app-server] degraded: ${err}\n`);
-      this.kill();
+      await this.kill();
       throw err;
     }
   }
@@ -185,8 +200,9 @@ export class CodexAppServerPTY {
     }
   }
 
-  kill(): void {
+  async kill(): Promise<void> {
     this._alive = false;
+    await this.stopGoalScheduler();
     this._activeTurnId = null;
     this._turnQueue = [];
     this.rejectTurnCompletion(new Error('Codex app-server stopped'));
@@ -239,15 +255,19 @@ export class CodexAppServerPTY {
     const input = extracted?.payload ?? content;
     const goalCommand = this.parseGoalCommand(input);
     if (goalCommand?.type === 'get') {
-      await this.getGoal();
+      await this.handleGoalList();
       return;
     }
     if (goalCommand?.type === 'clear') {
-      await this.clearGoal();
+      await this.handleGoalClear(goalCommand.runId);
+      return;
+    }
+    if (goalCommand?.type === 'resume') {
+      await this.handleGoalResume(goalCommand.runId, goalCommand.itemId);
       return;
     }
     if (goalCommand?.type === 'set') {
-      await this.setGoal(goalCommand.objective);
+      await this.handleGoalCommand(goalCommand.objective);
       return;
     }
     if (input.startsWith('$')) {
@@ -391,13 +411,18 @@ export class CodexAppServerPTY {
     }
   }
 
-  private parseGoalCommand(content: string): { type: 'get' | 'clear' } | { type: 'set'; objective: string } | null {
+  private parseGoalCommand(content: string): { type: 'get' } | { type: 'clear'; runId?: string } | { type: 'resume'; runId: string; itemId?: string } | { type: 'set'; objective: string } | null {
     const match = content.trim().match(/^\/goal(?:@[A-Za-z0-9_]+)?(?:\s+([\s\S]*))?$/i);
     if (!match) return null;
 
     const objective = match[1]?.trim();
     if (!objective) return { type: 'get' };
     if (objective.toLowerCase() === 'clear') return { type: 'clear' };
+    if (objective.toLowerCase().startsWith('clear ')) return { type: 'clear', runId: objective.slice(6).trim() || undefined };
+    if (objective.toLowerCase().startsWith('resume ')) {
+      const [runId, itemId] = objective.slice(7).trim().split(/\s+/, 2);
+      return runId ? { type: 'resume', runId, itemId } : { type: 'get' };
+    }
     return { type: 'set', objective };
   }
 
@@ -575,7 +600,7 @@ export class CodexAppServerPTY {
    * no message is ever lost. CODEX_STEER_DISABLED=1 reverts to pure queueing.
    */
   private queueTurn(input: unknown[]): void {
-    if (this._executing && this._activeTurnId && process.env.CODEX_STEER_DISABLED !== '1') {
+    if (!this.goalPendingTurn && this._executing && this._activeTurnId && process.env.CODEX_STEER_DISABLED !== '1') {
       this.steerActiveTurn(input).catch((err) => {
         this._outputBuffer.push(`[codex-app-server] steer path failed: ${err}\n`);
       });
@@ -669,6 +694,83 @@ export class CodexAppServerPTY {
     this.replyLocal('[goal] cleared');
   }
 
+  private async initializeGoalIntegration(): Promise<void> {
+    const config = loadGoalConfig();
+    this.goalRunStore = new GoalRunStore(this._stateDir, config);
+    await this.goalRunStore.initialize();
+    const api: GoalCodexApi = {
+      createThread: async ({ repo, worktree }) => {
+        const response = await this.request<ThreadResponse>('thread/start', { cwd: worktree || repo, ...THREAD_PERMISSION_OVERRIDES, config: { features: { goals: true } }, sessionStartSource: 'goal-run', persistExtendedHistory: true });
+        return { id: response.result!.thread.id };
+      },
+      resumeThread: async (threadId, cwd) => { await this.request('thread/resume', { threadId, cwd, ...THREAD_PERMISSION_OVERRIDES, config: { features: { goals: true } }, excludeTurns: true, persistExtendedHistory: true }); },
+      setThreadGoal: async (threadId, goal) => { await this.request('thread/goal/set', { threadId, objective: goal }); },
+      dispatchPrompt: async (threadId, prompt) => {
+        await this.waitForOrdinaryQueue(); this._executing = true; this.goalPendingTurn = { threadId, reportText: '' };
+        try {
+          const completion = this.createTurnCompletion(loadGoalConfig().checkTimeoutMs);
+          const started = await this.request<TurnStartResponse>('turn/start', { threadId, input: [{ type: 'text', text: prompt, text_elements: [] }], ...TURN_PERMISSION_OVERRIDES });
+          if (typeof started.result?.turn?.id === 'string') this.goalPendingTurn.turnId = started.result.turn.id;
+          await completion; const pending = this.goalPendingTurn;
+          return { ...(pending?.outcome ?? { outcome: 'failed' as const }), report: pending?.reportText };
+        } finally { this.goalPendingTurn = undefined; this._executing = false; if (this._alive && this._turnQueue.length) void this.drainQueue(); }
+      },
+    };
+    this.goalRunner = new GoalRunner(this.goalRunStore, config, new GoalThreadManager(api), () => [this._env.agentName]);
+    this.goalSchedulerStopped = false;
+    this.signalGoalTick();
+    this.goalTickTimer = setInterval(() => this.signalGoalTick(), config.tickIntervalMs);
+    this.goalTickTimer.unref?.();
+  }
+
+  private signalGoalTick(): void {
+    if (this.goalSchedulerStopped || !this.goalRunner) return;
+    if (this.goalTickRunning) { this.goalTickPending = true; return; }
+    this.goalTickRunning = true; this.goalTickPromise = this.runGoalTick();
+  }
+
+  private async runGoalTick(): Promise<void> {
+    try { await this.goalRunner?.processTick(); }
+    catch (error) { this._outputBuffer.push(`[goal] scheduler failed: ${error instanceof Error ? error.message : String(error)}\n`); }
+    finally { this.goalTickRunning = false; this.goalTickPromise = null; if (this.goalTickPending && !this.goalSchedulerStopped) { this.goalTickPending = false; this.signalGoalTick(); } }
+  }
+
+  private async stopGoalScheduler(): Promise<void> {
+    this.goalSchedulerStopped = true; if (this.goalTickTimer) clearInterval(this.goalTickTimer); this.goalTickTimer = undefined; this.goalTickPending = false; this.goalRunner?.shutdown?.();
+    if (this.goalPendingTurn) { const pending = this.goalPendingTurn; void this.request('turn/interrupt', { threadId: pending.threadId, ...(pending.turnId ? { turnId: pending.turnId } : {}) }).catch(() => {}); this.rejectTurnCompletion(new Error('Goal scheduler stopped')); }
+    const active = this.goalTickPromise; if (active) await Promise.race([active.catch(() => {}), new Promise<void>((resolve) => { const timer = setTimeout(resolve, 5_000); timer.unref?.(); })]);
+  }
+
+  private async waitForOrdinaryQueue(): Promise<void> {
+    const deadline = Date.now() + 30_000;
+    while ((this._executing || this._turnCompletion) && !this.goalSchedulerStopped) { if (Date.now() >= deadline) throw new Error('ordinary turn queue did not become idle'); await new Promise((resolve) => setTimeout(resolve, 10)); }
+    if (this.goalSchedulerStopped) throw new Error('goal scheduler stopped');
+  }
+
+  private async handleGoalCommand(objective: string): Promise<void> {
+    if (!this.goalRunStore) return this.setGoal(objective);
+    const now = new Date().toISOString(); const config = loadGoalConfig(); const profile = selectGoalAcceptanceProfile(process.env, config, this._cwd);
+    const manifest = createGoalManifest(objective, profile.checks.filter((check) => check.required).map((check) => check.id));
+    const run: GoalRun = { schemaVersion: 3, id: randomBytes(16).toString('hex'), agentName: this._env.agentName, goal: objective, repo: this._cwd, state: 'queued', manifest, itemProgress: manifest.boards.flatMap((board) => board.items).map((item) => ({ itemId: item.id, status: 'runnable', phase: 'implementation', cycle: 1, attempt: 0, evidenceReceipts: [], reviewReceipts: [], findings: [], updatedAt: now })), schedulingCursor: 0, attempt: 0, maxAttempts: config.maxAttempts, acceptanceChecks: profile.checks, acceptanceProfile: profile, retention: defaultRetention(config), artifacts: [], events: [{ id: randomBytes(12).toString('hex'), type: 'run_created', timestamp: now, data: { profile: profile.name, itemCount: manifest.boards.flatMap((board) => board.items).length } }], createdAt: now, updatedAt: now };
+    await this.goalRunStore.create(run); this.replyLocal(`[goal] queued ${run.id}: ${manifest.boards.flatMap((board) => board.items).length} item(s)`); this.signalGoalTick();
+  }
+
+  private async handleGoalList(): Promise<void> {
+    if (!this.goalRunStore) return this.getGoal(); const runs = await this.goalRunStore.list(this._env.agentName);
+    this.replyLocal(runs.length ? `Goal runs:\n${runs.map((run) => { const progress = run.itemProgress ?? []; return `- ${run.id}: ${progress.filter((item) => item.status === 'done').length}/${progress.length} done, ${progress.filter((item) => item.status === 'waiting').length} waiting (${run.state})`; }).join('\n')}` : 'No goal runs');
+  }
+
+  private async handleGoalClear(runId?: string): Promise<void> {
+    if (!this.goalRunStore) return this.clearGoal(); if (!runId) { this.replyLocal('Use /goal clear <run-id>'); return; }
+    try { await this.goalRunStore.updateUnleased(this._env.agentName, runId, (run) => ({ ...run, state: 'cancelled', updatedAt: new Date().toISOString() })); this.replyLocal(`[goal] cancelled ${runId}`); } catch (error) { this.replyLocal(`[goal] unable to cancel ${runId}: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+
+  private async handleGoalResume(runId: string, itemId?: string): Promise<void> {
+    if (!this.goalRunStore) { this.replyLocal('[goal] durable runner is not enabled'); return; }
+    try { const run = await this.goalRunStore.resume(this._env.agentName, runId, itemId); this.replyLocal(`[goal] resumed ${runId}${itemId ? ` ${itemId}` : ''}`); this.signalGoalTick(); }
+    catch (error) { this.replyLocal(`[goal] unable to resume ${runId}: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+
   private async handleSkillInput(content: string): Promise<void> {
     const match = content.match(/^\$([A-Za-z0-9:_-]+)(?:\s+([\s\S]*))?$/);
     if (!match) {
@@ -732,11 +834,16 @@ export class CodexAppServerPTY {
       case 'turn/started':
         if (isRecord(params.turn) && typeof params.turn.id === 'string') {
           this._activeTurnId = params.turn.id;
+          if (this.goalPendingTurn && this.goalEventMatches(params, false)) this.goalPendingTurn.turnId = params.turn.id;
         }
         this.maybeFireTyping();
         this._outputBuffer.push('[codex-app-server] turn started\n');
         break;
       case 'turn/completed':
+        if (this.goalPendingTurn) {
+          if (!this.goalEventMatches(params, true)) break;
+          this.goalPendingTurn.outcome = this.extractGoalTurnOutcome(params.turn) ?? { outcome: 'failed' };
+        }
         this._activeTurnId = null;
         this.writeIdleFlag();
         this._outputBuffer.push('[codex-app-server] turn completed\n');
@@ -750,6 +857,7 @@ export class CodexAppServerPTY {
         break;
       case 'item/completed':
         if (isRecord(params.item) && params.item.type === 'agentMessage' && typeof params.item.text === 'string') {
+          if (this.goalPendingTurn && this.goalEventMatches(params, true)) this.goalPendingTurn.reportText = params.item.text;
           this._outputBuffer.push('\n');
         }
         break;
@@ -767,6 +875,7 @@ export class CodexAppServerPTY {
         this._outputBuffer.push('[goal] cleared\n');
         break;
       case 'error':
+        if (this.goalPendingTurn && !this.goalEventMatches(params, true)) break;
         this._activeTurnId = null;
         this._outputBuffer.push(`[codex-app-server] error: ${JSON.stringify(params)}\n`);
         this.rejectTurnCompletion(new Error(JSON.stringify(params)));
@@ -786,6 +895,23 @@ export class CodexAppServerPTY {
       default:
         this._outputBuffer.push(`[codex-app-server:event] ${method}\n`);
     }
+  }
+
+  private extractGoalTurnOutcome(turn: unknown): GoalTurnOutcome | undefined {
+    if (!isRecord(turn)) return undefined;
+    const outcome = turn.status === 'failed' || turn.outcome === 'failed' ? 'failed' : 'completed';
+    const blocker = isRecord(turn.blocker) ? turn.blocker : null;
+    if (!blocker || typeof blocker.kind !== 'string' || typeof blocker.summary !== 'string' || !['approval', 'credential', 'human_action', 'permission'].includes(blocker.kind)) return { outcome };
+    return { outcome, blocker: { kind: blocker.kind as 'approval' | 'credential' | 'human_action' | 'permission', summary: blocker.summary, source: 'codex_turn' } };
+  }
+
+  private goalEventMatches(params: Record<string, unknown>, requireTurn: boolean): boolean {
+    const nested = isRecord(params.turn) ? params.turn : isRecord(params.item) ? params.item : {};
+    const threadId = typeof params.threadId === 'string' ? params.threadId : typeof nested.threadId === 'string' ? nested.threadId : undefined;
+    const turnId = typeof params.turnId === 'string' ? params.turnId : typeof nested.turnId === 'string' ? nested.turnId : isRecord(params.turn) && typeof params.turn.id === 'string' ? params.turn.id : undefined;
+    if (!this.goalPendingTurn || threadId !== this.goalPendingTurn.threadId) return false;
+    if (!requireTurn) return true;
+    return Boolean(this.goalPendingTurn.turnId && turnId === this.goalPendingTurn.turnId);
   }
 
   private request<T>(method: string, params: unknown): Promise<JsonRpcResponse<T>> {

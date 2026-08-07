@@ -36,6 +36,7 @@
 const net = require('net');
 const { createHash, randomUUID } = require('crypto');
 const { promisify } = require('util');
+const { readFileSync, writeFileSync } = require('fs');
 const { unlink } = require('fs/promises');
 
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
@@ -54,6 +55,9 @@ class MockCodexServer {
     this.modelContextWindow = options.modelContextWindow || 256000;
     this.threadStartDelayMs = options.threadStartDelayMs || 0;
     this.turnDeltaText = options.turnDeltaText || 'mock response';
+    this.goalScenario = options.goalScenario || false;
+    this.goalScenarioStatePath = options.goalScenarioStatePath || null;
+    this.goalHang = options.goalHang || false;
     this.failNextRequest = null;
     this.threads = new Map();
     this.nextTurnId = 1;
@@ -238,13 +242,38 @@ class MockCodexServer {
       case 'turn/start': {
         const turnId = `mock-turn-${this.nextTurnId++}`;
         const threadId = params?.threadId;
-        this._send(socket, { id, result: { turnId } });
-        this._notify(socket, 'turn/started', { threadId, turnId });
+        this._send(socket, { id, result: { turnId, turn: { id: turnId } } });
+        this._notify(socket, 'turn/started', { threadId, turnId, turn: { id: turnId, threadId } });
+        if (this.goalScenario) {
+          const prompt = params?.input?.[0]?.text || '';
+          const itemId = (prompt.match(/(?:Item |review )(item-\d+)/i) || [])[1] || 'item-001';
+          const cycle = Number((prompt.match(/(?:Cycle: |cycle )(\d+)/i) || [])[1] || 1);
+          let state = {};
+          try { if (this.goalScenarioStatePath) state = JSON.parse(readFileSync(this.goalScenarioStatePath, 'utf8')); } catch { /* first process */ }
+          this._notify(socket, 'item/completed', { threadId: 'noise-thread', turnId: 'noise-turn', item: { type: 'agentMessage', text: JSON.stringify({ kind: 'review_report', itemId, cycle, decision: 'approved', summary: 'wrong turn' }), threadId: 'noise-thread', turnId: 'noise-turn' } });
+          if (this.goalHang && !prompt.includes('Independently review')) return;
+          if (itemId === 'item-002' && cycle >= 2 && Number(state.boots || 0) < 2) return;
+          if (itemId === 'item-001' && cycle === 1 && !state.blocked) {
+            state.blocked = true; if (this.goalScenarioStatePath) writeFileSync(this.goalScenarioStatePath, JSON.stringify(state));
+            this._notify(socket, 'turn/completed', { threadId, turnId, turn: { id: turnId, threadId, status: 'failed', blocker: { kind: 'credential', summary: 'fixture credential', source: 'codex_turn' } } });
+            return;
+          }
+          let report;
+          if (prompt.includes('Independently review')) {
+            if (itemId === 'item-002' && cycle === 1 && !state.reviewed) { state.reviewed = true; if (this.goalScenarioStatePath) writeFileSync(this.goalScenarioStatePath, JSON.stringify(state)); report = { kind: 'review_report', itemId, cycle, decision: 'changes_requested', summary: 'fixture review', findings: [{ summary: 'fixture restart finding' }] }; }
+            else report = { kind: 'review_report', itemId, cycle, decision: 'approved', summary: 'fixture approved' };
+          } else report = { kind: 'implementation_report', itemId, cycle, status: 'completed', summary: 'fixture implemented' };
+          const text = JSON.stringify(report);
+          this._notify(socket, 'item/agentMessage/delta', { threadId, turnId, delta: text });
+          this._notify(socket, 'item/completed', { threadId, turnId, item: { type: 'agentMessage', text, threadId, turnId } });
+          this._notify(socket, 'turn/completed', { threadId, turnId, turn: { id: turnId, threadId, status: 'completed' } });
+          return;
+        }
         this._notify(socket, 'item/agentMessage/delta', { threadId, turnId, delta: this.turnDeltaText });
         this._notify(socket, 'item/completed', {
           threadId,
           turnId,
-          item: { type: 'agentMessage', text: this.turnDeltaText },
+          item: { type: 'agentMessage', text: this.turnDeltaText, threadId, turnId },
         });
         this._notify(socket, 'thread/tokenUsage/updated', {
           threadId,
@@ -255,9 +284,12 @@ class MockCodexServer {
             modelContextWindow: this.modelContextWindow,
           },
         });
-        this._notify(socket, 'turn/completed', { threadId, turnId });
+        this._notify(socket, 'turn/completed', { threadId, turnId, turn: { id: turnId, threadId, status: 'completed' } });
         return;
       }
+      case 'turn/interrupt':
+        this._send(socket, { id, result: {} });
+        return;
       case 'thread/goal/set': {
         const state = this.threads.get(params?.threadId);
         const goal = { objective: params?.objective || '', status: 'active' };
@@ -360,7 +392,8 @@ if (require.main === module) {
   const path = require('path');
   const resolved = path.isAbsolute(socketPath) ? socketPath : path.join(cwd, socketPath);
 
-  const server = new MockCodexServer({ socketPath: resolved });
+  if (process.env.MOCK_CODEX_GOAL_SCENARIO === '1' && process.env.MOCK_CODEX_GOAL_STATE) { let state = {}; try { state = JSON.parse(readFileSync(process.env.MOCK_CODEX_GOAL_STATE, 'utf8')); } catch { /* first boot */ } state.boots = Number(state.boots || 0) + 1; writeFileSync(process.env.MOCK_CODEX_GOAL_STATE, JSON.stringify(state)); }
+  const server = new MockCodexServer({ socketPath: resolved, goalScenario: process.env.MOCK_CODEX_GOAL_SCENARIO === '1', goalScenarioStatePath: process.env.MOCK_CODEX_GOAL_STATE, goalHang: process.env.MOCK_CODEX_GOAL_HANG === '1' });
   server.listen().then(() => {
     process.stdout.write(`[codex-app-server] ready socket=${resolved}\n`);
   }).catch((err) => {

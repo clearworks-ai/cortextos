@@ -2,7 +2,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resolveBridgeRuntimeContext } from '../../../src/cli/webhook-bridge';
+import {
+  buildWebhookBridgeLaunchdEnvironment,
+  buildWebhookBridgePlist,
+  resolveBridgeRuntimeContext,
+} from '../../../src/cli/webhook-bridge';
 
 const ENV_KEYS = [
   'CTX_FRAMEWORK_ROOT',
@@ -53,6 +57,15 @@ function validGoogleEnv(): void {
     GMAIL_PUSH_SERVICE_ACCOUNT: 'gws-agent@cortextos-gws-495505.iam.gserviceaccount.com',
     GMAIL_PUSH_SUBSCRIPTION: 'projects/cortextos-gws-495505/subscriptions/cortextos-gmail-push-bridge',
   });
+}
+
+function replaceProviderProcessEnv(environment: Record<string, string>): void {
+  for (const key of ENV_KEYS) {
+    if (key.startsWith('GOOGLE_') || key.startsWith('GMAIL_') || key.startsWith('CALENDAR_')) delete process.env[key];
+  }
+  for (const [key, value] of Object.entries(environment)) {
+    if (key.startsWith('GOOGLE_') || key.startsWith('GMAIL_') || key.startsWith('CALENDAR_')) process.env[key] = value;
+  }
 }
 
 describe('Google runtime config lane A', () => {
@@ -119,5 +132,59 @@ describe('Google runtime config lane A', () => {
     ].join('\n'));
     process.env.GMAIL_PUSH_AUDIENCE = '';
     expect(() => resolveBridgeRuntimeContext('test')).toThrowError(/^google_provider_shadow_config_invalid$/);
+  });
+
+  it('persists validated enabled values into launchd and replays them at run time', () => {
+    writeFileSync(join(root, '.env'), 'GOOGLE_PROVIDER_SHADOW_ENABLED=false\nCALENDAR_WATCH_SHADOW_ENABLED=false\n');
+    validGoogleEnv();
+    process.env.CALENDAR_WATCH_SHADOW_ENABLED = 'true';
+    const startContext = resolveBridgeRuntimeContext('test');
+    const launched = buildWebhookBridgeLaunchdEnvironment(startContext);
+    const plist = buildWebhookBridgePlist(startContext, 20242);
+
+    expect(launched).toMatchObject({
+      GOOGLE_PROVIDER_SHADOW_ENABLED: 'true',
+      GMAIL_PUSH_AUDIENCE: 'https://hooks.clearworks.ai/relay/gmail-pubsub',
+      GMAIL_PUSH_SERVICE_ACCOUNT: 'gws-agent@cortextos-gws-495505.iam.gserviceaccount.com',
+      GMAIL_PUSH_SUBSCRIPTION: 'projects/cortextos-gws-495505/subscriptions/cortextos-gmail-push-bridge',
+      CALENDAR_WATCH_SHADOW_ENABLED: 'true',
+    });
+    for (const [key, value] of Object.entries(launched).filter(([key]) => /^(?:GOOGLE|GMAIL|CALENDAR)_/.test(key))) {
+      expect(plist).toContain(`<key>${key}</key>\n        <string>${value}</string>`);
+    }
+
+    replaceProviderProcessEnv(launched);
+    const runContext = resolveBridgeRuntimeContext('test');
+    expect(runContext.gmailShadow).toMatchObject({
+      audience: launched.GMAIL_PUSH_AUDIENCE,
+      serviceAccount: launched.GMAIL_PUSH_SERVICE_ACCOUNT,
+      subscription: launched.GMAIL_PUSH_SUBSCRIPTION,
+      verifyOidc: expect.any(Function),
+    });
+    expect(runContext.calendarShadow).toEqual({});
+  });
+
+  it('persists explicit disabled flags so later file changes cannot activate providers', () => {
+    const startContext = resolveBridgeRuntimeContext('test');
+    const launched = buildWebhookBridgeLaunchdEnvironment(startContext);
+    const plist = buildWebhookBridgePlist(startContext, 20242);
+    expect(launched.GOOGLE_PROVIDER_SHADOW_ENABLED).toBe('false');
+    expect(launched.CALENDAR_WATCH_SHADOW_ENABLED).toBe('false');
+    expect(launched).not.toHaveProperty('GMAIL_PUSH_AUDIENCE');
+    expect(plist).toContain('<key>GOOGLE_PROVIDER_SHADOW_ENABLED</key>\n        <string>false</string>');
+    expect(plist).toContain('<key>CALENDAR_WATCH_SHADOW_ENABLED</key>\n        <string>false</string>');
+    expect(plist).not.toContain('<key>GMAIL_PUSH_AUDIENCE</key>');
+
+    writeFileSync(join(root, '.env'), [
+      'GOOGLE_PROVIDER_SHADOW_ENABLED=true',
+      'GMAIL_PUSH_AUDIENCE=https://hooks.clearworks.ai/relay/gmail-pubsub',
+      'GMAIL_PUSH_SERVICE_ACCOUNT=gws-agent@cortextos-gws-495505.iam.gserviceaccount.com',
+      'GMAIL_PUSH_SUBSCRIPTION=projects/cortextos-gws-495505/subscriptions/cortextos-gmail-push-bridge',
+      'CALENDAR_WATCH_SHADOW_ENABLED=true',
+    ].join('\n'));
+    replaceProviderProcessEnv(launched);
+    const runContext = resolveBridgeRuntimeContext('test');
+    expect(runContext.gmailShadow).toBeUndefined();
+    expect(runContext.calendarShadow).toBeUndefined();
   });
 });

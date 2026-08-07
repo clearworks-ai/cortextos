@@ -1104,10 +1104,31 @@ describe('CodexAppServerPTY event handling', () => {
 });
 
 describe('CodexAppServerPTY thread/tokenUsage/updated → context_status.json', () => {
-  function feedTokenUsage(pty: InstanceType<typeof CodexAppServerPTY>, tokenUsage: unknown) {
+  function feedTokenUsage(
+    pty: InstanceType<typeof CodexAppServerPTY>,
+    tokenUsage: unknown,
+    threadId = 'thread-9',
+  ) {
     (pty as unknown as { handleRpcMessage(message: unknown): void }).handleRpcMessage({
       method: 'thread/tokenUsage/updated',
-      params: { threadId: 'thread-9', turnId: 'turn-1', tokenUsage },
+      params: { threadId, turnId: 'turn-1', tokenUsage },
+    });
+  }
+
+  function feedError(
+    pty: InstanceType<typeof CodexAppServerPTY>,
+    codexErrorInfo: string,
+    threadId = 'thread-9',
+    willRetry = false,
+  ) {
+    (pty as unknown as { handleRpcMessage(message: unknown): void }).handleRpcMessage({
+      method: 'error',
+      params: {
+        threadId,
+        turnId: 'turn-1',
+        willRetry,
+        error: { codexErrorInfo, message: 'request failed' },
+      },
     });
   }
 
@@ -1277,6 +1298,98 @@ describe('CodexAppServerPTY thread/tokenUsage/updated → context_status.json', 
       total: { cachedInputTokens: 0, inputTokens: 1000, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 1000 },
       modelContextWindow: 200000,
     })).not.toThrow();
+  });
+
+  it('retains trustworthy same-thread usage and overflow state after a failed zero update', () => {
+    const pty = new CodexAppServerPTY(mockEnv, { codex_context_cap: 997500 });
+    (pty as unknown as { _threadId: string })._threadId = 'thread-9';
+    feedTokenUsage(pty, {
+      last: { cachedInputTokens: 100, inputTokens: 278039, outputTokens: 947, totalTokens: 278986 },
+      total: { cachedInputTokens: 100, inputTokens: 278039, outputTokens: 947, totalTokens: 278986 },
+      modelContextWindow: 997500,
+    });
+    feedError(pty, 'contextWindowExceeded');
+    feedTokenUsage(pty, {
+      last: { cachedInputTokens: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      total: { cachedInputTokens: 100, inputTokens: 278039, outputTokens: 947, totalTokens: 278986 },
+      modelContextWindow: 997500,
+    });
+
+    const markerCall = atomicWriteSyncMock.mock.calls.find(([path]) =>
+      String(path).endsWith('/.codex-context-overflow.json')) as [string, string];
+    expect(JSON.parse(markerCall[1])).toEqual({
+      thread_id: 'thread-9',
+      turn_id: 'turn-1',
+      reason: 'contextWindowExceeded',
+      timestamp: expect.any(String),
+    });
+    const payload = lastWrittenPayload()!;
+    expect(payload.context_state).toBe('overflow');
+    expect(payload.used_percentage).toBeCloseTo((278986 / 997500) * 100, 5);
+    expect(payload.current_usage).toEqual({
+      input_tokens: 278039,
+      output_tokens: 947,
+      cache_read_input_tokens: 100,
+      cache_creation_input_tokens: 0,
+    });
+  });
+
+  it('reports unknown rather than healthy zero when overflow has no prior usage', () => {
+    const pty = new CodexAppServerPTY(mockEnv, { model_context_window: 997500 });
+    (pty as unknown as { _threadId: string })._threadId = 'thread-9';
+    feedError(pty, 'contextWindowExceeded');
+
+    const payload = lastWrittenPayload()!;
+    expect(payload).toMatchObject({
+      used_percentage: null,
+      current_usage: null,
+      session_id: 'thread-9',
+      context_state: 'overflow',
+      context_window_size: 997500,
+    });
+  });
+
+  it('ignores unrelated, retryable, or wrong-thread structured errors', () => {
+    const pty = new CodexAppServerPTY(mockEnv, {});
+    (pty as unknown as { _threadId: string })._threadId = 'thread-9';
+    feedError(pty, 'rateLimitExceeded');
+    feedError(pty, 'contextWindowExceeded', 'thread-old');
+    feedError(pty, 'contextWindowExceeded', 'thread-9', true);
+
+    expect(atomicWriteSyncMock.mock.calls.some(([path]) =>
+      String(path).endsWith('/.codex-context-overflow.json'))).toBe(false);
+  });
+
+  it('ignores token usage from a thread other than the active thread', () => {
+    const pty = new CodexAppServerPTY(mockEnv, {});
+    (pty as unknown as { _threadId: string })._threadId = 'thread-active';
+    feedTokenUsage(pty, {
+      last: { cachedInputTokens: 0, inputTokens: 100, outputTokens: 0, totalTokens: 100 },
+      total: { cachedInputTokens: 0, inputTokens: 100, outputTokens: 0, totalTokens: 100 },
+      modelContextWindow: 997500,
+    }, 'thread-stale');
+
+    expect(atomicWriteSyncMock).not.toHaveBeenCalled();
+    expect(fsMocks.appendFileSync).not.toHaveBeenCalled();
+    expect(pty.getOutputBuffer().getRecent()).toContain('ignored for inactive thread');
+  });
+
+  it('accepts a legitimate zero from a genuinely new thread as normal telemetry', () => {
+    const pty = new CodexAppServerPTY(mockEnv, {});
+    (pty as unknown as { _threadId: string })._threadId = 'thread-9';
+    feedError(pty, 'contextWindowExceeded');
+    (pty as unknown as { _threadId: string })._threadId = 'thread-10';
+    feedTokenUsage(pty, {
+      last: { cachedInputTokens: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      total: { cachedInputTokens: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      modelContextWindow: 997500,
+    }, 'thread-10');
+
+    expect(lastWrittenPayload()).toMatchObject({
+      used_percentage: 0,
+      session_id: 'thread-10',
+      context_state: 'normal',
+    });
   });
 });
 
@@ -1525,6 +1638,48 @@ describe('CodexAppServerPTY kill-during-spawn race (RW-7)', () => {
     expect(inner._spawnFn).toHaveBeenCalledWith('codex', expect.arrayContaining([
       'app-server', '-c', 'model="gpt-5.6-luna"',
       'model_reasoning_effort="xhigh"', '--enable', 'goals',
+    ]), expect.any(Object));
+  });
+
+  it('passes the configured model_context_window to app-server', async () => {
+    const pty = new CodexAppServerPTY(mockEnv, {
+      model: 'gpt-5.6-luna',
+      reasoning_effort: 'xhigh',
+      model_context_window: 1_000_000,
+    });
+    const inner = pty as unknown as {
+      _alive: boolean;
+      _spawnFn: ReturnType<typeof vi.fn>;
+      startAppServer(): Promise<void>;
+    };
+    inner._alive = true;
+    const fakePty = makeFakePty();
+    inner._spawnFn = vi.fn().mockResolvedValue(fakePty);
+    fsMocks.existsSync.mockReturnValue(true);
+
+    await inner.startAppServer();
+
+    expect(inner._spawnFn).toHaveBeenCalledWith('codex', expect.arrayContaining([
+      '-c', 'model_context_window=1000000',
+    ]), expect.any(Object));
+  });
+
+  it('retains codex_context_cap as a launcher fallback for older configs', async () => {
+    const pty = new CodexAppServerPTY(mockEnv, { codex_context_cap: 256_000 });
+    const inner = pty as unknown as {
+      _alive: boolean;
+      _spawnFn: ReturnType<typeof vi.fn>;
+      startAppServer(): Promise<void>;
+    };
+    inner._alive = true;
+    const fakePty = makeFakePty();
+    inner._spawnFn = vi.fn().mockResolvedValue(fakePty);
+    fsMocks.existsSync.mockReturnValue(true);
+
+    await inner.startAppServer();
+
+    expect(inner._spawnFn).toHaveBeenCalledWith('codex', expect.arrayContaining([
+      '-c', 'model_context_window=256000',
     ]), expect.any(Object));
   });
 

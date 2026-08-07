@@ -4,30 +4,51 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { buildReplyContext } from '../../../src/daemon/agent-manager.js';
 
+const fastCheckerStartSpy = vi.fn();
+const telegramPollerStartSpy = vi.fn();
+const registerTelegramCommandsSpy = vi.fn().mockResolvedValue({ status: 'empty', count: 0 });
+const migrateCronsForAgentSpy = vi.fn();
+
 // Mock the PTY layer so we don't load native bindings or spawn real processes.
 // AgentManager → AgentProcess → AgentPTY → node-pty. We mock at AgentProcess.
 vi.mock('../../../src/daemon/agent-process.js', () => ({
   AgentProcess: class {
     name: string;
     dir: string;
-    constructor(name: string, dir: string) {
+    config: unknown;
+    constructor(name: string, dir: string, config?: unknown) {
       this.name = name;
       this.dir = dir;
+      this.config = config;
     }
     async start() { /* no-op */ }
     async stop() { /* no-op */ }
     getStatus() { return { name: this.name, status: 'stopped' }; }
     onExit() { /* no-op */ }
+    onStatusChanged() { /* no-op */ }
+    setTelegramHandle() { /* no-op */ }
   },
 }));
 
 // Mock FastChecker so it doesn't try to spawn anything either.
 vi.mock('../../../src/daemon/fast-checker.js', () => ({
   FastChecker: class {
-    start() { /* no-op */ }
+    start() {
+      fastCheckerStartSpy();
+      return Promise.resolve();
+    }
     stop() { /* no-op */ }
     wake() { /* no-op */ }
   },
+}));
+
+vi.mock('../../../src/bus/metrics.js', () => ({
+  collectTelegramCommands: () => [],
+  registerTelegramCommands: (...args: unknown[]) => registerTelegramCommandsSpy(...args),
+}));
+
+vi.mock('../../../src/daemon/cron-migration.js', () => ({
+  migrateCronsForAgent: (...args: unknown[]) => migrateCronsForAgentSpy(...args),
 }));
 
 // Mock Telegram so we don't try to make HTTP calls.
@@ -39,7 +60,14 @@ vi.mock('../../../src/telegram/api.js', () => ({
 
 vi.mock('../../../src/telegram/poller.js', () => ({
   TelegramPoller: class {
-    start() { /* no-op */ }
+    lastExitReason = 'stopped-externally';
+    onMessage() { /* no-op */ }
+    onCallback() { /* no-op */ }
+    onReaction() { /* no-op */ }
+    start() {
+      telegramPollerStartSpy();
+      return Promise.resolve();
+    }
     stop() { /* no-op */ }
   },
 }));
@@ -67,6 +95,11 @@ vi.mock('../../../src/daemon/worker-process.js', () => ({
 }));
 
 const { AgentManager } = await import('../../../src/daemon/agent-manager.js');
+
+beforeEach(() => {
+  migrateCronsForAgentSpy.mockReset();
+  migrateCronsForAgentSpy.mockImplementation(() => undefined);
+});
 
 describe('AgentManager.discoverAndStart - BUG-028 fix', () => {
   let testDir: string;
@@ -133,9 +166,7 @@ describe('AgentManager.discoverAndStart - BUG-028 fix', () => {
     expect(startSpy).toHaveBeenCalledTimes(2);
   });
 
-  it('still respects per-agent config.json enabled: false (existing behavior)', async () => {
-    // Per-agent config.json takes precedence — this is the legacy behavior we
-    // explicitly preserved in the BUG-028 fix
+  it('still respects per-agent config.json enabled: false when there is no instance override', async () => {
     writeFileSync(
       join(frameworkRoot, 'orgs', 'acme', 'agents', 'alice', 'config.json'),
       JSON.stringify({ enabled: false }),
@@ -151,6 +182,28 @@ describe('AgentManager.discoverAndStart - BUG-028 fix', () => {
     expect(startSpy).toHaveBeenCalledTimes(1);
     // BUG-043: startAgent now accepts a 4th `org` argument
     expect(startSpy).toHaveBeenCalledWith('bob', expect.any(String), expect.any(Object), 'acme');
+  });
+
+  it('lets enabled-agents.json explicit enable override stale config.json enabled:false', async () => {
+    writeFileSync(
+      join(frameworkRoot, 'orgs', 'acme', 'agents', 'alice', 'config.json'),
+      JSON.stringify({ enabled: false }),
+    );
+    writeFileSync(
+      join(ctxRoot, 'config', 'enabled-agents.json'),
+      JSON.stringify({ alice: { enabled: true, org: 'acme' } }),
+    );
+
+    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
+    const startSpy = vi.spyOn(am, 'startAgent').mockImplementation(async (name) => {
+      (am as unknown as { agents: Map<string, unknown> }).agents.set(name, { process: {}, checker: {} });
+    });
+
+    await am.discoverAndStart();
+
+    expect(startSpy).toHaveBeenCalledTimes(2);
+    const namesStarted = startSpy.mock.calls.map(call => call[0]).sort();
+    expect(namesStarted).toEqual(['alice', 'bob']);
   });
 
   it('handles corrupt enabled-agents.json by defaulting to enabled-all', async () => {
@@ -328,6 +381,109 @@ describe('AgentManager.restartAgent - BUG-007 fix (rebuild Telegram poller)', ()
 
     expect(stopSpy).not.toHaveBeenCalled();
     expect(startSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('AgentManager.startAgent - cron startup failure isolation', () => {
+  let testDir: string;
+  let ctxRoot: string;
+  let frameworkRoot: string;
+
+  beforeEach(() => {
+    fastCheckerStartSpy.mockClear();
+    telegramPollerStartSpy.mockClear();
+    registerTelegramCommandsSpy.mockClear();
+    migrateCronsForAgentSpy.mockReset();
+
+    testDir = mkdtempSync(join(tmpdir(), 'cortextos-am-startagent-'));
+    ctxRoot = join(testDir, 'instance');
+    frameworkRoot = join(testDir, 'framework');
+    mkdirSync(join(ctxRoot, 'config'), { recursive: true });
+    mkdirSync(join(frameworkRoot, 'orgs', 'acme', 'agents', 'alice'), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('keeps fast-checker and Telegram poller startup alive when cron scheduler wiring throws', async () => {
+    const agentDir = join(frameworkRoot, 'orgs', 'acme', 'agents', 'alice');
+    writeFileSync(
+      join(agentDir, '.env'),
+      [
+        'BOT_TOKEN=123456:ABC_def-ghi',
+        'CHAT_ID=6690120787',
+        'ALLOWED_USER=6690120787',
+      ].join('\n'),
+    );
+
+    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
+    vi.spyOn(am as any, 'startAgentCronScheduler').mockImplementation(() => {
+      throw new Error('cron scheduler boom');
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(
+      am.startAgent(
+        'alice',
+        agentDir,
+        { runtime: 'codex-app-server', telegram_polling: true } as any,
+        'acme',
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(fastCheckerStartSpy).toHaveBeenCalledTimes(1);
+    expect(telegramPollerStartSpy).toHaveBeenCalledTimes(1);
+    expect(registerTelegramCommandsSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[agent-manager] Cron scheduler failed for alice; continuing startup so inbound listeners stay live:',
+      expect.any(Error),
+    );
+    expect((am as any).agents.has('alice')).toBe(true);
+
+    errorSpy.mockRestore();
+  });
+
+  it('keeps fast-checker and Telegram poller startup alive when cron migration throws', async () => {
+    const agentDir = join(frameworkRoot, 'orgs', 'acme', 'agents', 'alice');
+    writeFileSync(
+      join(agentDir, '.env'),
+      [
+        'BOT_TOKEN=123456:ABC_def-ghi',
+        'CHAT_ID=6690120787',
+        'ALLOWED_USER=6690120787',
+      ].join('\n'),
+    );
+
+    migrateCronsForAgentSpy.mockImplementation(() => {
+      throw new Error('cron migration boom');
+    });
+
+    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
+    const schedulerSpy = vi.spyOn(am as any, 'startAgentCronScheduler').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(
+      am.startAgent(
+        'alice',
+        agentDir,
+        { runtime: 'codex-app-server', telegram_polling: true } as any,
+        'acme',
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(migrateCronsForAgentSpy).toHaveBeenCalledTimes(1);
+    expect(schedulerSpy).toHaveBeenCalledTimes(1);
+    expect(fastCheckerStartSpy).toHaveBeenCalledTimes(1);
+    expect(telegramPollerStartSpy).toHaveBeenCalledTimes(1);
+    expect(registerTelegramCommandsSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[agent-manager] Cron migration failed for alice; continuing startup so inbound listeners stay live:',
+      expect.any(Error),
+    );
+    expect((am as any).agents.has('alice')).toBe(true);
+
+    errorSpy.mockRestore();
   });
 });
 

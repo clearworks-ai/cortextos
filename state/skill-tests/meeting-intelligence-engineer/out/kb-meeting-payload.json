@@ -1,0 +1,18 @@
+{
+  "entities": [
+    { "name": "Josh Weiss", "type": "people" },
+    { "name": "Dana Okafor", "type": "people" },
+    { "name": "Mark Reyes", "type": "people" },
+    { "name": "Sarah Chen", "type": "people" },
+    { "name": "Northwind Logistics", "type": "clients" },
+    { "name": "Northwind Logistics Full Rollout", "type": "deals" }
+  ],
+  "edges": [
+    { "from": "Dana Okafor", "to": "Northwind Logistics", "type": "works_at", "context": "Dana Okafor (Northwind Logistics, VP Operations)" },
+    { "from": "Mark Reyes", "to": "Northwind Logistics", "type": "works_at", "context": "Mark Reyes (Northwind Logistics, CFO)" },
+    { "from": "Josh Weiss", "to": "Northwind Logistics", "type": "mentions", "context": "Josh Weiss (Clearworks AI) ran the discovery call with Northwind Logistics" },
+    { "from": "Sarah Chen", "to": "Northwind Logistics", "type": "mentions", "context": "Sarah Chen will send you the current routing spreadsheet by Thursday" },
+    { "from": "Northwind Logistics", "to": "Northwind Logistics Full Rollout", "type": "relates_to", "context": "Let's plan on full rollout scope. Pencil in a proposal review for the 18th." }
+  ],
+  "pages": []
+}

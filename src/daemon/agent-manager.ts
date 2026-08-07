@@ -124,15 +124,19 @@ export class AgentManager {
     const instanceEnabled = this.readInstanceEnableList();
 
     for (const { name, dir, org, config } of agentDirs) {
-      // Per-agent config.json `enabled: false` (existing behavior, unchanged)
-      if (config.enabled === false) {
-        console.log(`[agent-manager] Skipping disabled agent: ${name} (per-agent config.json)`);
-        continue;
-      }
-      // Instance-level enabled-agents.json `enabled: false` (BUG-028 fix)
       const entry = instanceEnabled[name];
-      if (entry && entry.enabled === false) {
-        console.log(`[agent-manager] Skipping disabled agent: ${name} (enabled-agents.json)`);
+      // Instance-level enabled-agents.json is the explicit operator override.
+      // If an entry exists, honor it in preference to a stale per-agent
+      // config.json enabled flag. This lets `cortextos enable <agent>` recover
+      // an agent that ships with config.enabled=false without dying again on
+      // the next clean exit / daemon restart.
+      if (entry) {
+        if (entry.enabled === false) {
+          console.log(`[agent-manager] Skipping disabled agent: ${name} (enabled-agents.json)`);
+          continue;
+        }
+      } else if (config.enabled === false) {
+        console.log(`[agent-manager] Skipping disabled agent: ${name} (per-agent config.json)`);
         continue;
       }
       // BUG-043 fix: pass the per-agent org so startAgent can use it instead
@@ -617,15 +621,32 @@ export class AgentManager {
     // starting the scheduler, so the scheduler always has a populated crons.json
     // to read from.  The migration is idempotent (marker file prevents re-runs).
     const configJsonPath = join(agentDir, 'config.json');
-    migrateCronsForAgent(name, configJsonPath, this.ctxRoot, {
-      log: (msg) => log(`[migration] ${msg}`),
-    });
+    try {
+      migrateCronsForAgent(name, configJsonPath, this.ctxRoot, {
+        log: (msg) => log(`[migration] ${msg}`),
+      });
+    } catch (err) {
+      // A stale or invalid legacy cron must not prevent the agent's
+      // FastChecker or Telegram poller from coming online. The scheduler
+      // below will still load any valid persisted crons.json state.
+      console.error(
+        `[agent-manager] Cron migration failed for ${name}; continuing startup so inbound listeners stay live:`,
+        err,
+      );
+    }
 
     // Wire daemon-level CronScheduler for this agent.
     // The scheduler reads crons.json, fires crons, and injects prompts into
     // the agent PTY via injectAgent().  This is the Phase 2 daemon-managed
     // external cron system — agents no longer need to call CronCreate on boot.
-    this.startAgentCronScheduler(name);
+    try {
+      this.startAgentCronScheduler(name);
+    } catch (err) {
+      console.error(
+        `[agent-manager] Cron scheduler failed for ${name}; continuing startup so inbound listeners stay live:`,
+        err,
+      );
+    }
 
     // Start fast checker in background
     checker.start().catch(err => {

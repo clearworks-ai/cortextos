@@ -111,8 +111,13 @@ def main():
              "interactions_logged": 0, "skipped_already": 0, "skipped_noreply": 0}
 
     # ---------- SENT (Josh → others) ----------
-    sent = gws_query("from:josh@clearworks.ai newer_than:7d -from:sanebox.com")
+    sent = gws_query("from:josh@clearworks.ai newer_than:7d -from:sanebox.com -in:drafts")
     for m in sent.get("emails", []):
+        # Gmail's from: search still matches unsent drafts (Josh is "from" on his own
+        # drafts) — -in:drafts filters most of them, but check labels too as a backstop
+        # so an unsent draft never gets logged/reported as a real sent email.
+        if "DRAFT" in (m.get("labels") or []):
+            continue
         stats["sent_msgs"] += 1
         msg_id = m.get("id"); ref = f"gmail:{msg_id}"
         if ref in seen_refs:

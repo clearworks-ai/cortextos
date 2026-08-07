@@ -137,6 +137,7 @@ def main() -> int:
     parser.add_argument("--role")
     parser.add_argument("--industry")
     parser.add_argument("--location")
+    parser.add_argument("--important-date", action="append", default=[], help="DATE|LABEL relationship milestone; may be supplied more than once")
     parser.add_argument("--context", default="")
     parser.add_argument("--notes", default="")
     parser.add_argument("--source-ref", action="append", default=[])
@@ -154,10 +155,10 @@ def main() -> int:
 
     data = load_contacts()
     contacts = data.setdefault("contacts", [])
-    matched_contact = None
-    if args.match_email and not args.contact_id:
-        matched_contact = find_contact_by_email(contacts, args.email)
-    contact_id = args.contact_id or matched_contact.get("id") if matched_contact else args.contact_id or slugify(args.name)
+    # Resolve email identity even when a proposed ID is supplied; otherwise an
+    # ID+email collision creates a duplicate contact.
+    matched_contact = find_contact_by_email(contacts, args.email) if args.match_email else None
+    contact_id = matched_contact.get("id") if matched_contact else (args.contact_id or slugify(args.name))
 
     blocked = check_suppressed(contact_id, args.name, args.email)
     if blocked:
@@ -221,6 +222,19 @@ def main() -> int:
     contact["tags"] = merge_unique(contact.get("tags", []), args.tag)
     contact["aliases"] = merge_unique(contact.get("aliases", []), args.alias)
     contact["source_refs"] = merge_unique(contact.get("source_refs", []), args.source_ref)
+    if args.important_date:
+        existing_dates = contact.get("important_dates", [])
+        additions = []
+        for value in args.important_date:
+            date, separator, label = value.partition("|")
+            if not separator or not date or not label:
+                parser.error("--important-date must use DATE|LABEL")
+            additions.append({"date": date, "label": label})
+        seen = {(item.get("date"), item.get("label")) for item in existing_dates if isinstance(item, dict)}
+        contact["important_dates"] = [
+            *existing_dates,
+            *(item for item in additions if (item["date"], item["label"]) not in seen),
+        ]
 
     CONTACTS_PATH.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
     print(contact_id)

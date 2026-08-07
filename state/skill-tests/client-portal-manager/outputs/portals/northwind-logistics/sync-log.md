@@ -1,0 +1,1 @@
+- 2026-08-05 · Refreshed NOW / SHIPPED / WAITING ON YOU from the August 4 discovery call and current proposal-prep work.

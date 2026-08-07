@@ -284,7 +284,7 @@ function buildRelayMessage(integration: string, event: string, envelope: RelayEn
     : String(envelope.meeting_id).trim();
 
   if (integration === 'fireflies' && meetingId) {
-    return `WEBHOOK ${integration} ${event} — meeting ${meetingId}. cd pa agent dir and spawn meeting-writeback-worker with FF_MEETING_ID=${meetingId} so the single-meeting full path files durable meeting/client history before CRM writeback; keep the polling backstop enabled.`;
+    return `WEBHOOK ${integration} ${event} — meeting ${meetingId}. cd pa agent dir and spawn meeting-writeback-worker with FF_MEETING_ID=${meetingId} --mode full --meeting-id ${meetingId} so the single-meeting full path files durable meeting/client history before CRM writeback; keep the polling backstop enabled.`;
   }
 
   if (integration === 'ops-check-lead') {

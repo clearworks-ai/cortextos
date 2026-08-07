@@ -92,6 +92,7 @@ describe('OpencodePTY', () => {
     expect(args).toEqual([
       '--model', 'anthropic/claude-sonnet-4',
       '--agent', 'build',
+      '--log-level', 'DEBUG', '--print-logs',
     ]);
   });
 
@@ -100,7 +101,7 @@ describe('OpencodePTY', () => {
     const args = (pty as unknown as { buildClaudeArgs(m: string, p: string): string[] })
       .buildClaudeArgs('continue', 'resume me');
 
-    expect(args).toEqual(['--continue']);
+    expect(args).toEqual(['--continue', '--log-level', 'DEBUG', '--print-logs']);
   });
 
   it('starts the persistent TUI without a launch-time prompt', async () => {
@@ -114,6 +115,7 @@ describe('OpencodePTY', () => {
     expect(spawnCall?.args).toEqual([
       '--model', 'openai/gpt-4.1-nano',
       '--agent', 'build',
+      '--log-level', 'DEBUG', '--print-logs',
     ]);
   });
 

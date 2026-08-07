@@ -101,7 +101,10 @@ describe.skipIf(!canRun)('pty-host-entry RW-4 dispose/SIGTERM grandchild reaping
     expect(pidAlive(grandchildPid)).toBe(false);
   }, 20000);
 
-  it('CONTROL — the old semantics (bare SIGKILL on the host) orphans the grandchild', async () => {
+  // macOS may reap the node-pty child with its host process even after a bare
+  // SIGKILL (unlike Linux). This control intentionally documents Linux's old
+  // failure mode, so skip it where the kernel semantics do not apply.
+  it.skipIf(platform() === 'darwin')('CONTROL — the old semantics (bare SIGKILL on the host) orphans the grandchild', async () => {
     const { child, grandchildPid } = await spawnRealHost();
     expect(pidAlive(grandchildPid)).toBe(true);
 

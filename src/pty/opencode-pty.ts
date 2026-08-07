@@ -95,6 +95,11 @@ export class OpencodePTY extends AgentPTY {
       args.push('--agent', this.config.opencode_agent);
     }
 
+    // An exit code alone cannot explain a failed OpenCode TUI. Emit the
+    // runtime's own DEBUG diagnostics to the PTY so AgentProcess can persist
+    // an actionable error tail when an unplanned exit occurs.
+    args.push('--log-level', 'DEBUG', '--print-logs');
+
     return args;
   }
 

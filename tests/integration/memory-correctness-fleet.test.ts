@@ -165,6 +165,9 @@ describe('R8 memory-correctness fleet gate', () => {
       expect(true).toBe(true);
     });
   } else {
+    // The local fleet currently contains 800+ memory files. Keep the gate
+    // deterministic under a busy Vitest worker instead of relying on the
+    // 10-second default timeout.
     it(`runs over ${files.length} memory file(s) and produces an audit table`, () => {
       const allResults: MemoryClaimResult[] = [];
       for (const { label, content } of files) {
@@ -200,7 +203,7 @@ describe('R8 memory-correctness fleet gate', () => {
           );
         }
       }
-    });
+    }, 60_000);
   }
 
   // ---------------------------------------------------------------------------

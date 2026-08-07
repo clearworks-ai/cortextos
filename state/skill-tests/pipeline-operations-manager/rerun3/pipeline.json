@@ -1,0 +1,731 @@
+{
+  "engagements": [
+    {
+      "_notes": "Merged from phantom MSIA Platform/AI Integration Assessment \u2192 Proposal record (clearpath_id:30) on 2026-06-12 per Josh confirmation. $10K WON deal. Phantom was incorrectly stood up 2026-05-29 from a Fireflies sweep as a hypothesized upsell \u2014 actually one engagement.",
+      "_open_commitments": {
+        "josh": [
+          "Paul Kaye: send Jeffrey-Morgan intro + Acumatica streamlining notes (from 5/18 MSIA call)",
+          "Vincent Dupont: follow up on MSIA survey + AI post-production workflow proposal"
+        ]
+      },
+      "billing": "monthly",
+      "clearpath_id": 19,
+      "client_industry": "Non-Profit",
+      "client_org": "Movement of Spiritual Awareness",
+      "contact_ids": [
+        "mark-lurie",
+        "paul-kaye",
+        "vincent-dupont",
+        "coco-kan"
+      ],
+      "last_signal_at": "2026-05-21T16:55:00Z",
+      "merged_from_clearpath_ids": [
+        30
+      ],
+      "name": "MSIA Busywork Audit",
+      "primary_contact_id": "mark-lurie",
+      "service_type": "busy_work_audit",
+      "stage": "won",
+      "stage_changed_at": "2026-06-24T18:45:20.700493+00:00",
+      "status": "prospect",
+      "value_monthly": null,
+      "value_total": 10000
+    },
+    {
+      "_clearpath_stage_divergence": {
+        "agent_stage": "won/active_client",
+        "clearpath_stage": "lead",
+        "clearpath_status": "active",
+        "reason": "Josh confirmed 2026-05-12: active delivery on busywork audit, not a lead. Writeback required when API key available."
+      },
+      "_status_log": [
+        "2026-07-10: audit findings presentation scheduled next week (Josh). Booking owned by frank2."
+      ],
+      "billing": "monthly",
+      "clearpath_id": 1,
+      "client_industry": "Real Estate",
+      "client_org": "OCG Properties",
+      "contact_ids": [
+        "mathew-owens"
+      ],
+      "last_signal_at": "2026-07-10T21:55:00Z",
+      "name": "Busywork audit",
+      "next_action": "present audit findings \u2014 week of 7/13",
+      "primary_contact_id": "mathew-owens",
+      "service_type": "busy_work_audit",
+      "stage": "won",
+      "stage_changed_at": "2026-05-12T17:31:00Z",
+      "status": "active_client",
+      "value_monthly": null,
+      "value_total": 10000
+    },
+    {
+      "_relationship_note": "Bones is a friend (Josh 2026-05-12). Low-probability: one of these may materialize, may not.",
+      "archived": true,
+      "billing": null,
+      "clearpath_id": 21,
+      "client_industry": "MSP",
+      "client_org": "All Safe IT",
+      "contact_ids": [
+        "bones-ijeoma"
+      ],
+      "last_signal_at": "2026-05-10T19:30:29Z",
+      "name": "AllSafe IT \u2014 Internal Training",
+      "primary_contact_id": "bones-ijeoma",
+      "service_type": "custom",
+      "stage": "lost",
+      "stage_changed_at": "2026-06-12T18:45:22.249770+00:00",
+      "status": "prospect",
+      "value_monthly": null,
+      "value_total": null
+    },
+    {
+      "_relationship_note": "Bones is a friend (Josh 2026-05-12). Low-probability: one of these may materialize, may not.",
+      "archived": true,
+      "billing": null,
+      "clearpath_id": 22,
+      "client_industry": "MSP",
+      "client_org": "All Safe IT",
+      "contact_ids": [
+        "bones-ijeoma"
+      ],
+      "last_signal_at": "2026-05-10T19:30:29Z",
+      "name": "AllSafe IT \u2014 Client Training",
+      "primary_contact_id": "bones-ijeoma",
+      "service_type": "custom",
+      "stage": "lost",
+      "stage_changed_at": "2026-06-12T18:45:22.249770+00:00",
+      "status": "prospect",
+      "value_monthly": null,
+      "value_total": null
+    },
+    {
+      "_relationship_note": "Bones is a friend (Josh 2026-05-12). Low-probability: one of these may materialize, may not.",
+      "archived": true,
+      "billing": null,
+      "clearpath_id": 23,
+      "client_industry": "MSP",
+      "client_org": "All Safe IT",
+      "contact_ids": [
+        "bones-ijeoma"
+      ],
+      "last_signal_at": "2026-05-10T19:30:29Z",
+      "name": "AllSafe IT \u2014 Prospect Training",
+      "primary_contact_id": "bones-ijeoma",
+      "service_type": "custom",
+      "stage": "lost",
+      "stage_changed_at": "2026-06-12T18:45:22.249770+00:00",
+      "status": "prospect",
+      "value_monthly": null,
+      "value_total": null
+    },
+    {
+      "_dossier": "meetings/2026-05-13-robin-nanney-dossier.md",
+      "_focus_areas": [
+        "Project Management",
+        "Quality Control"
+      ],
+      "_misclassified": {
+        "needs_josh_decision": true,
+        "reason": "Process-map working session scheduled 2026-05-12 15:00-17:00 PDT. Not stalled, mid-cadence. Recommend reclass to qualified or active_client pending May 12 session outcome."
+      },
+      "_notes": "\n[2026-05-18] 2hr process-map session completed 5/12. More work TBD per Josh; no fixed next-step.",
+      "_open_workstreams": {
+        "admin_moffat": [
+          "email Egnyte re Claude MCP access",
+          "coordinate scheduling"
+        ],
+        "josh": [
+          "design recurring consultative plan",
+          "invite Robin+Katie to Slack",
+          "get Egnyte MCP pricing"
+        ],
+        "robin": [
+          "curate PM tasks in Airtable",
+          "build QA/QC redline base",
+          "create Loom demos",
+          "test voice dictation",
+          "auto-research plugin experiment"
+        ]
+      },
+      "_relationship_status": "session-ongoing",
+      "billing": "monthly",
+      "clearpath_id": 2,
+      "client_industry": "AEC",
+      "client_org": "Robin Nanney Studio",
+      "contact_ids": [
+        "robin-nanney",
+        "admin-moffat"
+      ],
+      "last_signal_at": "2026-05-12T18:00:00Z",
+      "name": "starter",
+      "primary_contact_id": "robin-nanney",
+      "service_type": "consultative_ops_workshop",
+      "stage": "proposal_sent",
+      "stage_changed_at": "2026-08-05T00:04:00.329846+00:00",
+      "stage_history": [
+        {
+          "at": "2026-08-05T00:04:00.329697+00:00",
+          "from": "qualified",
+          "note": "conformance test",
+          "source_ref": "skill-test:fixture",
+          "to": "proposal_sent"
+        }
+      ],
+      "status": "prospect",
+      "value_monthly": 1500,
+      "value_total": null
+    },
+    {
+      "_blocker": "Josh-owed policy doc deliverables; Ellie + Community IT + lawyer waiting since March",
+      "_dossier": "meetings/2026-05-13-ellie-spitz-dossier.md",
+      "_misclassified": {
+        "needs_josh_decision": true,
+        "reason": "Svara chose Community IT over Logic TCG for managed services (closed 2026-04-21). Cyber assessment is done. Open work = Josh-owed policy docs (AI Usage, Incident Response, Data Handling). Recommend reclass to active_client or split: closed_lost on managed services, won on cyber assessment."
+      },
+      "_notes": "\n[2026-05-18] Per Josh: Ellie already has policies; mailing list only for now. No active deliverables.",
+      "_relationship_status": "mailing-list-dormant",
+      "billing": null,
+      "clearpath_id": 16,
+      "client_industry": "Non-Profit",
+      "client_org": "Svara",
+      "contact_ids": [
+        "ellie-spitz"
+      ],
+      "last_signal_at": "2026-04-22T00:06:35Z",
+      "name": "Svara \u2014 Ellie Spitz",
+      "primary_contact_id": "ellie-spitz",
+      "service_type": "policy_doc_delivery",
+      "stage": "audit",
+      "stage_changed_at": "2026-08-05T02:34:31.684026+00:00",
+      "stage_history": [
+        {
+          "at": "2026-08-05T02:34:31.683962+00:00",
+          "from": "lead",
+          "note": "P2/P5 sequential run",
+          "source_ref": "skill-test:conformance",
+          "to": "audit"
+        }
+      ],
+      "status": "prospect",
+      "value_monthly": null,
+      "value_total": null
+    },
+    {
+      "_clearpath_stage_divergence": {
+        "agent_stage": "closed_lost",
+        "clearpath_stage": "lead",
+        "clearpath_status": "prospect",
+        "reason": "Josh confirmed dead 2026-05-12. Writeback required."
+      },
+      "billing": "monthly",
+      "clearpath_id": 3,
+      "client_industry": "Non-Profit",
+      "client_org": "LA Alliance Foundation",
+      "contact_ids": [
+        "dulce-appiagyei"
+      ],
+      "last_signal_at": "2026-04-08T15:52:55Z",
+      "lost_reason": "Josh confirmed dead 2026-05-12",
+      "name": "middle tier",
+      "primary_contact_id": null,
+      "service_type": null,
+      "stage": "lost",
+      "stage_changed_at": "2026-06-24T18:45:20.700493+00:00",
+      "status": "lost",
+      "value_monthly": 2500,
+      "value_total": null
+    },
+    {
+      "billing": null,
+      "clearpath_id": 17,
+      "client_industry": null,
+      "client_org": null,
+      "contact_ids": [
+        "eva-galanes-rosenbaum"
+      ],
+      "last_signal_at": "2026-06-03T16:30:00Z",
+      "name": "Eva Galanes-Rosenbaum",
+      "primary_contact_id": "eva-galanes-rosenbaum",
+      "service_type": null,
+      "stage": "lead",
+      "stage_changed_at": null,
+      "status": "prospect",
+      "value_monthly": null,
+      "value_total": null
+    },
+    {
+      "_reactivated": {
+        "at": "2026-06-05",
+        "by": "crm-agent",
+        "reason": "Josh 2026-06-05 Telegram: 'I deaded PCH because Hunter agent was driving me crazy. Severine and I texted 3 days ago and she said she wants help' \u2014 Severine = decision-maker per CRM tags. Primary contact set to severine-tatangelo."
+      },
+      "billing": "monthly",
+      "clearpath_id": 4,
+      "client_industry": "AEC",
+      "client_org": "Studio PCH",
+      "contact_ids": [
+        "melinda-prisco",
+        "severine-tatangelo",
+        "jordan-abrams"
+      ],
+      "last_signal_at": "2026-06-02T00:00:00Z",
+      "name": "Studio PCH Advisory",
+      "primary_contact_id": "severine-tatangelo",
+      "service_type": null,
+      "stage": "qualified",
+      "stage_changed_at": "2026-06-05T22:00:00Z",
+      "status": "prospect",
+      "value_monthly": 3500,
+      "value_total": null
+    },
+    {
+      "_unresolved_contact": "clearpath:contacts:309 (Eric Stotz, hidden)",
+      "billing": null,
+      "clearpath_id": 15,
+      "client_industry": "Legal",
+      "client_org": "Nolemon (The Lemon Law Experts)",
+      "contact_ids": [
+        "eric-stotz"
+      ],
+      "last_signal_at": "2026-03-15T10:04:52Z",
+      "name": "Nolemon (The Lemon Law Experts) \u2014 Eric Stotz",
+      "primary_contact_id": "eric-stotz",
+      "service_type": null,
+      "stage": "lost",
+      "stage_changed_at": "2026-06-24T18:45:20.700493+00:00",
+      "status": "exploring",
+      "value_monthly": null,
+      "value_total": null
+    },
+    {
+      "billing": null,
+      "clearpath_id": 28,
+      "client_industry": null,
+      "client_org": null,
+      "contact_ids": [
+        "christopher-james",
+        "shobhit-baadkar"
+      ],
+      "last_signal_at": "2026-05-21T22:14:00Z",
+      "name": "AIA Panel Contacts \u2014 Follow-Up Sequence",
+      "primary_contact_id": "shobhit-baadkar",
+      "service_type": null,
+      "stage": "dormant",
+      "stage_changed_at": "2026-06-26T09:05:48.954670+00:00",
+      "stage_history": [
+        {
+          "at": "2026-06-26T09:05:48.954357+00:00",
+          "from": "lead",
+          "note": "deal-enrichment 2026-06-26: cold AIA26 conference leads, zero Clearpath intel. Per frank2 call, default to dormant unless a warm intro surfaces. Low-pri followup left on christopher-james.",
+          "source_ref": "deal-enrichment:2026-06-26-aia-panel",
+          "to": "dormant"
+        }
+      ],
+      "status": "prospect",
+      "value_monthly": null,
+      "value_total": null
+    },
+    {
+      "_unresolved_contact": "Carlos Ferro contact (clearpath:507) lives in Holdco Partner Platform org (48d14151...), not Clearworks Internal. Cross-org link needed. Flag for Josh.",
+      "billing": null,
+      "clearpath_id": 26,
+      "client_industry": null,
+      "client_org": null,
+      "contact_ids": [],
+      "last_signal_at": null,
+      "name": "Carlos Ferro \u2014 Discovery",
+      "primary_contact_id": null,
+      "service_type": null,
+      "stage": "lead",
+      "stage_changed_at": "2026-04-17T17:34:40Z",
+      "status": "prospect",
+      "value_monthly": null,
+      "value_total": null
+    },
+    {
+      "_completed_separate_project": "cyber-audit-2026-05-15",
+      "_contact_resolved_2026-05-13": "Rachel Gross (COO, last seen 2026-04-30) primary; Julianne Schwartz (Managing Director) secondary. Both at Jewish Studio Project. Resolved via org name match.",
+      "_notes": "\n[2026-05-18] Cyber audit project complete (separate scope). AI Starter engagement remains as future opportunity via Clearworks AI mailing list. Testimonial collection Wed 5/20.",
+      "_relationship_status": "active-mailing-list",
+      "billing": "monthly",
+      "clearpath_id": 5,
+      "client_industry": "Non-Profit",
+      "client_org": "Jewish Studio Project",
+      "contact_ids": [
+        "rachel-gross",
+        "julianne-schwartz"
+      ],
+      "crm_authoritative": true,
+      "last_signal_at": "2026-05-20T18:00:00Z",
+      "name": "AI Starter",
+      "primary_contact_id": "rachel-gross",
+      "service_type": null,
+      "stage": "qualified",
+      "stage_changed_at": "2026-06-29T04:01:38.681268+00:00",
+      "stage_history": [
+        {
+          "at": "2026-06-24T22:36:30.436616+00:00",
+          "from": "lead",
+          "note": "JSP engagement is in active delivery. Rachel + Josh executing security hardening (2FA, admin roles, passphrase policy), audit prep through Nov 15, AI workshops + cybersecurity training scheduling, MSP selection. Monthly retainer cadence per existing $1500/mo value_monthly. Reclass from lead -> active_client based on 2026-06-24 JSP check-in evidence.",
+          "source_ref": "fireflies:01KVXMW1955TPF31B8GEE0AATH",
+          "to": "active_client"
+        },
+        {
+          "at": "2026-06-25T19:45:19.737856+00:00",
+          "from": "lead",
+          "note": "Reclassified lead->dormant 2026-06-25: Rachel Gross converted to active JSP client via separate cyber-audit engagement (complete 5/18). AI Starter remains a passive mailing-list/nurture opportunity, not an active deal. Stops false 'stale hot lead' surfacing in deal-enrichment scan.",
+          "source_ref": "manual",
+          "to": "dormant"
+        },
+        {
+          "at": "2026-06-26T09:04:44.720760+00:00",
+          "from": "lead",
+          "note": "deal-enrichment 2026-06-26: reclassified lead->qualified. Warm post-cyber-audit follow-on at JSP (Rachel Gross COO=active_client, audit completed 2026-05-15). Explicit need: org-wide AI-usage chaos + no AI policy (Rachel 2026-03-27). Owed: AI usage survey/policy framework (promised 2026-03-27, never sent). Approval gate: Julianne Schwartz (Mng Dir). _dossier=meetings/2026-06-26-rachel-gross-dossier.md",
+          "source_ref": "dossier:2026-06-26-rachel-gross",
+          "to": "qualified"
+        },
+        {
+          "at": "2026-06-29T01:46:53.876608+00:00",
+          "from": "lead",
+          "note": "CRM-authoritative reclass per frank2 6/28: AI Starter is qualified, not lead. Board reverse-sync keeps reverting \u2014 board stage needs update or sync override.",
+          "source_ref": "frank2-reclass-2026-06-28",
+          "to": "qualified"
+        },
+        {
+          "at": "2026-06-29T04:01:38.681002+00:00",
+          "from": "lead",
+          "note": "CRM-authoritative per frank2 6/28; board sync must not revert",
+          "source_ref": "frank2-reclass-2026-06-28",
+          "to": "qualified"
+        }
+      ],
+      "status": "prospect",
+      "value_monthly": 1500,
+      "value_total": null
+    },
+    {
+      "_contact_resolved_2026-05-13": "Linked Bones Ijeoma via name + org match (same as engagements 21/22/23)",
+      "_relationship_note": "Bones is a friend (Josh 2026-05-12). Low-probability: one of these may materialize, may not.",
+      "archived": true,
+      "billing": null,
+      "clearpath_id": 25,
+      "client_industry": "MSP",
+      "client_org": "AllSafe IT",
+      "contact_ids": [
+        "bones-ijeoma"
+      ],
+      "last_signal_at": null,
+      "name": "AllSafe IT \u2014 Internal Training App",
+      "primary_contact_id": "bones-ijeoma",
+      "service_type": null,
+      "stage": "lost",
+      "stage_changed_at": "2026-06-12T18:45:22.249770+00:00",
+      "status": "prospect",
+      "value_monthly": null,
+      "value_total": null
+    },
+    {
+      "_contact_resolved_2026-05-13": "Linked Bones Ijeoma via name + org match (same as engagements 21/22/23)",
+      "_relationship_note": "Bones is a friend (Josh 2026-05-12). Low-probability: one of these may materialize, may not.",
+      "billing": null,
+      "clearpath_id": 24,
+      "client_industry": "MSP",
+      "client_org": "AllSafe IT",
+      "contact_ids": [
+        "bones-ijeoma"
+      ],
+      "last_signal_at": null,
+      "name": "AllSafe IT \u2014 AI Office Hours",
+      "primary_contact_id": "bones-ijeoma",
+      "service_type": null,
+      "stage": "lead",
+      "stage_changed_at": "2026-04-17T15:55:02Z",
+      "status": "prospect",
+      "value_monthly": null,
+      "value_total": null
+    },
+    {
+      "_dossier": "meetings/2026-05-13-marcos-santa-ana-dossier.md",
+      "_open_commitments": {
+        "josh": [
+          "send 1-pager on bounded EA agent first 30 days",
+          "propose Wed/Thu 20-min validation call"
+        ],
+        "marcos": [
+          "identify top 3-5 workflows",
+          "evaluate Gamma.app",
+          "backup strategy 45TB",
+          "firewall replacement plan",
+          "IT plan for office move"
+        ]
+      },
+      "_reactivated": {
+        "at": "2026-06-05",
+        "by": "crm-agent",
+        "reason": "Josh 2026-06-05 Telegram: 'I deaded Marcos because Hunter agent was driving me crazy. Marcos you know why' \u2014 second call happened 6/5, first cold-found managed-services client per Josh."
+      },
+      "billing": null,
+      "clearpath_id": 29,
+      "client_industry": "AEC",
+      "client_org": "alloi.us",
+      "contact_ids": [
+        "marcos-santa-ana"
+      ],
+      "last_signal_at": "2026-07-03T17:15:32Z",
+      "name": "Marcos Santa Ana \u2014 Discovery Call",
+      "primary_contact_id": "marcos-santa-ana",
+      "service_type": "bounded_executive_assistant_agent",
+      "stage": "won",
+      "stage_changed_at": "2026-06-29T01:38:34.306592+00:00",
+      "stage_history": [
+        {
+          "at": "2026-06-19T23:35:00+00:00",
+          "from": "qualified",
+          "note": "Verbal commit to sign 2026-06-19 post-3:30 PDT call. Definition: seen price, not yet signed.",
+          "source_ref": "fireflies:01KVGFXDEVGH1CP0FP7BSYTPP0",
+          "to": "committed"
+        },
+        {
+          "at": "2026-06-24T17:42:16.271424+00:00",
+          "from": "qualified",
+          "note": "Josh confirmed 2026-06-24: Marcos is a RECURRING CLIENT, not a prospect. Reclass from qualified -> active_client. Remove from prospect/sales pipeline views.",
+          "source_ref": "frank2-msg:1782322875930-frank2-vfpts",
+          "to": "active_client"
+        },
+        {
+          "at": "2026-06-26T16:41:08.654547+00:00",
+          "from": "won",
+          "note": "Josh correction 2026-06-26: Marcos is an onboarded recurring client (discussed twice). Graduating won->active_client so it stops surfacing as a deal-to-close.",
+          "source_ref": "josh-correction:2026-06-26",
+          "to": "active_client"
+        }
+      ],
+      "status": "prospect",
+      "value_monthly": null,
+      "value_total": null
+    },
+    {
+      "_contact_resolved_2026-05-15": "Tima Bell (clearpath:706) added to Clearworks Internal 2026-05-14, lead_source=AIA26 (not Logic TCG as the engagement name originally implied). CRM agent linked via engagement_contacts row 17. Industry: Architecture / Affordable Housing Compliance.",
+      "_outreach_blocked": "Tima has no email or phone in Clearpath (manual entry, partial). Hunter cannot draft outreach until email is enriched \u2014 either Josh fills it in, or we look up Bell Design Group via web/LinkedIn.",
+      "billing": null,
+      "clearpath_id": 27,
+      "client_industry": "AEC",
+      "client_org": "Bell Design Group",
+      "contact_ids": [
+        "tima-bell"
+      ],
+      "last_signal_at": "2026-05-22T09:00:00Z",
+      "name": "Tima Bell \u2014 AIA26 Lead",
+      "primary_contact_id": "tima-bell",
+      "service_type": null,
+      "stage": "lead",
+      "stage_changed_at": "2026-04-17T17:34:40Z",
+      "status": "prospect",
+      "value_monthly": null,
+      "value_total": null
+    },
+    {
+      "_blocker": "Budget sign-off from Rebecca (interim ED) at HACP",
+      "_dossier": "meetings/2026-05-13-neesha-rose-dossier.md",
+      "_pricing_floated": "$2,500-$5,000 for live training + advisory",
+      "_re_engage_strategy": "workshop-as-lead-magnet, not hard close",
+      "billing": null,
+      "clearpath_id": 20,
+      "client_industry": "Non-Profit",
+      "client_org": "HACP",
+      "contact_ids": [
+        "neesha-rose"
+      ],
+      "last_signal_at": "2026-03-28T00:00:00Z",
+      "name": "HACP Inc \u2014 Cybersecurity Training",
+      "primary_contact_id": "neesha-rose",
+      "service_type": "ai_safety_training",
+      "stage": "lead",
+      "stage_changed_at": "2026-04-06T20:04:58Z",
+      "status": "prospect",
+      "value_monthly": null,
+      "value_total": null
+    },
+    {
+      "_notes": "[2026-06-01] Josh sent outbound check-in to Amara Norman re: cybersecurity training proposal ($1,400 total). client_org corrected from \"Amara Norman\" (was the contact's NAME \u2014 import error).",
+      "billing": "one_time",
+      "clearpath_id": 18,
+      "client_industry": "Non-Profit",
+      "client_org": "The Outwords Archive",
+      "contact_ids": [
+        "amara-the-outwords-archive"
+      ],
+      "crm_authoritative": true,
+      "last_signal_at": "2026-06-01T18:30:00Z",
+      "name": "Cybersecurity Training",
+      "primary_contact_id": "amara-the-outwords-archive",
+      "service_type": null,
+      "stage": "qualified",
+      "stage_changed_at": "2026-06-29T04:01:38.739643+00:00",
+      "stage_history": [
+        {
+          "at": "2026-06-01T18:26:33.209653+00:00",
+          "from": "lead",
+          "note": "Josh outbound follow-up email; client_org corrected from 'Amara Norman' to 'The Outwords Archive'; primary contact linked.",
+          "source_ref": "frank2-relay:1780338290140-frank2-yqt9a",
+          "to": "lead"
+        },
+        {
+          "at": "2026-06-27T09:03:43.773252+00:00",
+          "from": "lead",
+          "note": "deal-enrichment 2026-06-27: lead->qualified. Stalled qualified discovery (3/19 call), NOT a fresh lead. Need is clear + visceral; stall = scoping bullet points Amara owed were never sent, Josh never returned an estimate. Budget: none pre-allocated, fiscal year starts July 1. Decision gate: internal committee. _dossier=meetings/2026-06-27-amara-norman-dossier.md",
+          "source_ref": "dossier:2026-06-27-amara-norman",
+          "to": "qualified"
+        },
+        {
+          "at": "2026-06-29T01:46:53.975063+00:00",
+          "from": "lead",
+          "note": "CRM-authoritative reclass per frank2 6/28: Amara Cybersecurity Training is qualified, not lead. Board reverse-sync reverts.",
+          "source_ref": "frank2-reclass-2026-06-28",
+          "to": "qualified"
+        },
+        {
+          "at": "2026-06-29T04:01:38.739454+00:00",
+          "from": "lead",
+          "note": "CRM-authoritative per frank2 6/28; board sync must not revert",
+          "source_ref": "frank2-reclass-2026-06-28",
+          "to": "qualified"
+        }
+      ],
+      "status": "prospect",
+      "value_monthly": null,
+      "value_total": 1400
+    },
+    {
+      "_notes": "Created 2026-06-12 from Josh Telegram. David Sailer is the contact. Previously held under Logic-TCG ecosystem suppression; Josh explicitly greenlit the deal.",
+      "billing": "one_time",
+      "client_industry": "Labor Union",
+      "client_org": "SEIU 521",
+      "contact_ids": [
+        "david-sailer"
+      ],
+      "last_signal_at": "2026-06-12T20:20:41.071687Z",
+      "name": "SEIU 521 Busywork Audit",
+      "primary_contact_id": "david-sailer",
+      "service_type": "busy_work_audit",
+      "stage": "qualified",
+      "stage_changed_at": "2026-06-12T20:20:41.071687Z",
+      "status": "prospect",
+      "value_total": 10000
+    },
+    {
+      "_notes": "Created 2026-06-12 from Josh Telegram. Dupe contact record exists (jared-piraneo-379 = GBK Insights, SVP) \u2014 surfaced to Josh separately, may need merge.",
+      "_status_log": [
+        "2026-07-10: FULLY QUALIFIED per Josh. Jared accepted Audit Scope 7/9. Proposal Mon/Tue 7/13-14."
+      ],
+      "billing": "one_time",
+      "client_industry": "Advertising and Marketing",
+      "client_org": "GBK Collective",
+      "contact_ids": [
+        "jared-piraneo"
+      ],
+      "last_signal_at": "2026-07-10T21:55:00Z",
+      "name": "GBK Collective Busywork Audit",
+      "next_action": "send proposal 7/13-14",
+      "primary_contact_id": "jared-piraneo",
+      "service_type": "busy_work_audit",
+      "stage": "qualified",
+      "stage_changed_at": "2026-06-12T20:20:41.071687Z",
+      "status": "prospect",
+      "value_total": 10000
+    },
+    {
+      "_notes": "Created 2026-06-12 from Josh Telegram. RTM (Rethink Media), Eva Galanes-Rosenbaum is the contact.",
+      "_status_log": [
+        "2026-07-10: meeting scheduled next week to review grant options (Josh). Scope may shift from half-day workshop toward grant-funded engagement."
+      ],
+      "billing": "one_time",
+      "client_industry": "Non-Profit",
+      "client_org": "Rethink Media",
+      "contact_ids": [
+        "eva-galanes-rosenbaum"
+      ],
+      "last_signal_at": "2026-07-10T21:55:00Z",
+      "name": "Rethink Media Half-Day Workshop",
+      "next_action": "grant options review \u2014 week of 7/13",
+      "primary_contact_id": "eva-galanes-rosenbaum",
+      "service_type": "half_day_workshop",
+      "stage": "qualified",
+      "stage_changed_at": "2026-06-12T20:20:41.071687Z",
+      "status": "prospect",
+      "value_total": 2500
+    },
+    {
+      "billing": null,
+      "clearpath_id": 30,
+      "client_industry": null,
+      "client_org": "Stoss Landscape Urbanism",
+      "contact_ids": [
+        "elaine-roark"
+      ],
+      "intake_id": "stoss-landscape-2026-06-30",
+      "last_signal_at": "2026-07-02T21:18:08.828944+00:00",
+      "merged_from_clearpath_ids": [],
+      "name": "Stoss Landscape Urbanism \u2014 AI Discovery",
+      "primary_contact_id": "elaine-roark",
+      "service_type": "custom",
+      "stage": "lead",
+      "stage_changed_at": "2026-07-02T21:18:08.828944+00:00",
+      "status": "prospect",
+      "value_monthly": null,
+      "value_total": null
+    },
+    {
+      "_notes": "New lead 2026-08-03 via Josh Telegram, referred by Mike Sloan. Intro call held (recorded, not yet transcribed). Onsite meeting 2026-08-05 1:30-2:30pm PDT scheduled at their office.",
+      "billing": null,
+      "client_industry": "General Contractor / Commercial Construction",
+      "client_org": "CalAsia Construction, Inc.",
+      "contact_ids": [
+        "john-murawski",
+        "myrna-murawski",
+        "abbey-calasia"
+      ],
+      "last_signal_at": "2026-08-04T02:00:00Z",
+      "name": "CalAsia Construction Audit + Managed Dev",
+      "next_action": "Attend onsite meeting 2026-08-05 1:30pm PDT",
+      "primary_contact_id": "john-murawski",
+      "service_type": "audit_and_managed_dev",
+      "stage": "qualified",
+      "stage_changed_at": "2026-08-04T02:00:00Z",
+      "status": "prospect",
+      "value_total": null
+    },
+    {
+      "_notes": "New lead 2026-08-03, referred by Mike Sloan (text). Intro call held (audio on Josh iPhone, pending sync/transcript). Onsite meeting 2026-08-05 1:30-2:30pm PDT at CalAsia office. Interest: audit + managed dev service, rebuild a spreadsheet-based process as real software. Value TBD pending onsite scoping.",
+      "billing": null,
+      "clearpath_id": 31,
+      "client_industry": "Construction / General Contractor",
+      "client_org": "CalAsia Construction, Inc.",
+      "contact_ids": [
+        "john-murawski",
+        "myrna-murawski",
+        "abbey-calasia"
+      ],
+      "last_signal_at": "2026-08-03T21:00:00Z",
+      "name": "CalAsia Construction \u2014 Audit + Managed Dev",
+      "primary_contact_id": "john-murawski",
+      "service_type": "audit_and_managed_dev",
+      "stage": "qualified",
+      "stage_changed_at": "2026-08-04T02:23:00Z",
+      "status": "prospect",
+      "value_monthly": null,
+      "value_total": null
+    }
+  ],
+  "source": "Clearpath Supabase yojqkosklnpgegigrvrd, org 0ce7b73b-9161-47a6-a800-a0c8f15a4ae4, synced 2026-05-12",
+  "stage_mapping": {
+    "closed_lost": "lost",
+    "closed_won": "won",
+    "committed": "committed",
+    "lead": "lead",
+    "qualified": "qualified"
+  },
+  "updated_at": "2026-08-04T04:24:00Z",
+  "version": "1.0.0"
+}

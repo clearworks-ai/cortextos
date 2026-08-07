@@ -1,0 +1,26 @@
+MEETING TRANSCRIPT (SYNTHETIC FIXTURE — NOT REAL)
+Client: Northwind Fabrication
+Date of call: 2026-08-04
+Attendees: Josh Weiss (Clearworks), Dana Reyes (VP Ops, Northwind), Priya Raman (IT, Northwind), Mark Ellison (Clearworks)
+
+[00:01] Dana Reyes: Thanks for making time. We want to get the hiring-panel workflow off spreadsheets before the end of the month.
+
+[00:04] Josh Weiss: Understood. On the interviews you sent over — it'll be a day or so, but I'm going to analyze the interviews and send them both emails with Mark on copy.
+
+[00:07] Dana Reyes: Perfect. And I'll get you the sandbox credentials by Thursday.
+
+[00:09] Priya Raman: I can pull the last six months of ticket exports. Give me until August 12th.
+
+[00:12] Josh Weiss: Mark will send over the revised SOW.
+
+[00:13] Mark Ellison: Yep, I'll have the SOW to Dana by Friday August 8th.
+
+[00:18] Dana Reyes: We should look into whether the Slack integration is even worth it.
+
+[00:19] Josh Weiss: Noted.
+
+[00:22] Dana Reyes: One more — somebody needs to loop in our controller about the invoicing schedule before we sign.
+
+[00:26] Josh Weiss: Let's plan to reconvene the week of the 18th.
+
+[00:27] Dana Reyes: Works.

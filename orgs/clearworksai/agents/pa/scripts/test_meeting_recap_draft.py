@@ -126,7 +126,7 @@ class ProcessMeetingsTests(unittest.TestCase):
         self.assertEqual(summary["auto_filed"], 1)
         self.assertIn("meeting-internal", ledger_contents)
 
-    def test_build_body_includes_client_context_and_next_steps(self):
+    def test_build_body_excludes_client_context_includes_next_steps(self):
         meeting = {
             "id": "meeting-body",
             "title": "OCG recap",
@@ -140,7 +140,9 @@ class ProcessMeetingsTests(unittest.TestCase):
 
         body = MODULE.build_body(meeting, "Keep it direct.")
 
-        self.assertIn("Relationship context:", body)
+        # client_context is internal CRM analysis — must never leak into the client-facing body
+        self.assertNotIn("Relationship context:", body)
+        self.assertNotIn("Deal stage=won", body)
         self.assertIn("Here’s the quick recap.", body)
         self.assertIn("Next steps:", body)
         self.assertIn("Josh: Send findings deck", body)

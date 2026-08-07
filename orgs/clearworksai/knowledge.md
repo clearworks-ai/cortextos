@@ -14,8 +14,7 @@ Shared facts, context, and institutional knowledge for all agents in this org. R
 **Source:** CA SOS Certificate of Status + SOI LLC-12 filings (2026-06-19), Google Drive Operations folder
 
 Current focus areas:
-- **AuditOS** — audit app, primary engineering push right now
-- **ClearPath Academy** — course/training product, launching soon
+- **Agent-led operational audits** — Josh currently delivers audits through an agent; the productized/teachable form of the method is still being defined.
 - **Marketing campaign launch** — top-of-funnel for the consulting arm
 - **Client delivery model** — still being designed; open question
 
@@ -131,6 +130,7 @@ Source: frank-cc memory (`reference_clearpath_org_ids.md`), 2026-04-10.
 - **2026-03-30** — Todoist is authoritative for tasks, not markdown files. Query the API for status.
 - **2026-04-05** — Never create `railway.json`/`railway.toml` in Clearpath. Custom healthcheck config blocks deploys. Deploy via `git push` to main only.
 - **2026-07-21** — Adopted SkillTree `knowledge-base` convention as the org's structured brain: `knowledge/` (this file's sibling dir) holds `company.md`, `offer.md`, `voice.md`, `stack.md`, `STATE.md`, `clients/`, `meetings/`, `playbooks/`. This `knowledge.md` file stays the canonical deep reference; `knowledge/STATE.md` is the fast read-first/write-last session file.
+- **2026-08-05** — ClearPath Academy and AuditOS are retired. Current audit delivery is agent-led; research should help identify how to offer and teach the audit process without rebuilding either former product shape.
 
 ## Knowledge Base Rules
 

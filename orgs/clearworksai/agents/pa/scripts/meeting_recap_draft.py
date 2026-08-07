@@ -19,6 +19,8 @@ DEFAULT_VOICE_PATH = ORG_DIR / "knowledge" / "voice.md"
 DEFAULT_VIP_PATH = ORG_DIR / "knowledge" / "vip-clients.txt"
 CLEARWORKS_DOMAINS = {"clearworks.ai"}
 SUPPRESSED_NAMES = ("marcos santa ana",)
+JOSH_SELF_EMAILS = {"josh@clearworks.ai", "weissjosh0@gmail.com"}
+JOSH_SELF_NAMES = {"josh", "josh weiss"}
 RunResult = subprocess.CompletedProcess[str]
 Runner = Callable[[Sequence[str]], RunResult]
 
@@ -87,6 +89,31 @@ def attendee_emails(meeting: dict[str, Any]) -> list[str]:
         if value:
             emails.append(value)
     return emails
+
+
+def attendee_first_names(meeting: dict[str, Any]) -> list[str]:
+    organizer = normalize_space(str(meeting.get("organizer") or "")).lower()
+    names: list[str] = []
+    for attendee in meeting.get("attendees") or []:
+        value = normalize_space(str(attendee))
+        lowered = value.lower()
+        if not value or lowered in JOSH_SELF_EMAILS or lowered in JOSH_SELF_NAMES or lowered == organizer:
+            continue
+        local = value.split("@", 1)[0] if "@" in value else value
+        first = re.split(r"[._+\s-]", local)[0]
+        if first:
+            names.append(first.title())
+    return names
+
+
+def build_salutation(meeting: dict[str, Any]) -> str:
+    names = attendee_first_names(meeting)
+    return f"Hi {', '.join(names)}," if names else "Hi,"
+
+
+def fireflies_link(meeting: dict[str, Any]) -> str:
+    meeting_id = normalize_space(str(meeting.get("id") or ""))
+    return f"https://app.fireflies.ai/view/{meeting_id}" if meeting_id else ""
 
 
 def has_external_attendees(meeting: dict[str, Any]) -> bool:
@@ -158,7 +185,32 @@ def build_subject(meeting: dict[str, Any]) -> str:
     return f"Recap: {title} — {date_value}"
 
 
+def build_discussion_bullets(meeting: dict[str, Any]) -> list[str]:
+    # Fireflies' overview/bullets fields arrive as one markdown-formatted string
+    # ("- **Topic:** detail - **Topic2:** detail...", sometimes emoji + (mm:ss)
+    # timestamp prefixed). Split on the bold markers into real per-topic bullets
+    # instead of surfacing the raw markdown blob verbatim.
+    summary = meeting.get("summary") or {}
+    raw = normalize_space(str(summary.get("overview") or summary.get("bullets") or ""))
+    if not raw or "**" not in raw:
+        return []
+    bullets: list[str] = []
+    for header, rest in re.findall(r"\*\*([^*]+?)\*\*\s*([^*]*)", raw):
+        header = header.strip().rstrip(":").strip()
+        rest = re.sub(r"^\(\s*\d{1,2}:\d{2}[^)]*\)\s*", "", rest.strip())
+        rest = re.sub(r"\s*-\s*$", "", rest).strip()
+        if header and rest:
+            bullets.append(f"- {header}: {rest}")
+        elif header:
+            bullets.append(f"- {header}")
+    return bullets
+
+
 def build_summary_paragraph(meeting: dict[str, Any], voice_guidance: str) -> str:
+    bullets = build_discussion_bullets(meeting)
+    if bullets:
+        opener = "Here’s the quick recap:" if voice_guidance else "Recap:"
+        return opener + "\n" + "\n".join(bullets)
     summary = meeting.get("summary") or {}
     base = (
         normalize_space(str(summary.get("overview") or ""))
@@ -190,11 +242,15 @@ def build_next_steps(meeting: dict[str, Any]) -> str:
 
 
 def build_body(meeting: dict[str, Any], voice_guidance: str) -> str:
+    # client_context is internal CRM analysis prose (relationship/psychographic/deal-stage
+    # signals) used elsewhere for confidence scoring, suppression, and VIP/trust-tier
+    # matching — it must never be surfaced in the client-facing draft body itself.
     parts: list[str] = []
-    client_context = normalize_space(str(meeting.get("client_context") or ""))
     source_ref = normalize_space(str(meeting.get("sourceRef") or meeting.get("id") or ""))
-    if client_context:
-        parts.append(f"Relationship context: {client_context}")
+    link = fireflies_link(meeting)
+    parts.append(build_salutation(meeting))
+    if link:
+        parts.append(f"Meeting recording/transcript: {link}")
     parts.append(build_summary_paragraph(meeting, voice_guidance))
     parts.append(build_next_steps(meeting))
     parts.append(f"— drafted automatically from the Fireflies transcript ({source_ref}); review before sending.")

@@ -96,14 +96,17 @@ Identify every task, commitment, follow-up, or to-do mentioned. Be specific — 
 Only include forward-looking work or business commitments that still need to be done AFTER the meeting ends. Exclude personal or social errands (e.g. saying goodbye, returning home, travel logistics), small talk, and anything that was already completed during the meeting itself.
 Client context:
 {client_context}
-
-Only surface items material to an active Clearworks engagement when client context indicates one; otherwise return only transcript-grounded commitments.
+Only surface items material to an active Clearworks engagement; ignore unrelated personal or social chatter.
 
 For each action item, ALL of the following must be true or the item must be dropped:
-- A SPECIFIC named owner — a real person mentioned by name in the transcript (not "the team,"
-  not a generic/implied party, not "Unassigned"). If no real person is named, drop it.
+- An attributable owner — preferably a real person named in the transcript. First-person promises
+  ("I", "I'll", "I'm going to") may be returned with that self-reference when the transcript's
+  speaker label is the only reliable owner; never guess a different person's name. Generic plural
+  owners such as "the team" remain insufficient unless the transcript contains an explicit promise.
 - A CONCRETE due date or explicit near-term timeframe stated in the transcript (e.g. "by Friday,"
-  "next week"). Vague or absent timing ("eventually," "at some point," unstated) means: drop it.
+  "next week", "a day or so"). Preserve imprecise phrases verbatim in dueDate; never turn them into
+  an exact calendar date. Vague or absent timing ("eventually," "at some point," unstated) means:
+  drop it.
 - Explicit commitment language — "I will," "I'll send," "let's do X by Y" — not hedged or
   speculative language ("could," "might," "worth considering," "an option would be to").
 This bar applies REGARDLESS of whether client context is populated or empty, and regardless of
@@ -111,8 +114,9 @@ whether the other party is a prospect or an existing client — the test is alwa
 specifically-owned, specifically-dated commitment, not whether the relationship is established.
 Explicitly REJECT: descriptions of what a company/service offers in the abstract, self-referential
 pitch or business-model narration (e.g. "the way my company works is...", "we typically do X for
-clients"), and hypothetical/illustrative examples — these are never action items even if phrased
-with task-like structure.
+clients"), hypothetical/illustrative examples, and casual personal self-disclosures (e.g. "I'll be
+learning more about coding in the next few weeks") — these are context, never action items even if
+phrased with future-tense or task-like structure.
 No artificial limit on count. Zero acceptable if none found — that is the expected result for a
 call with no real commitments.
 IMPORTANT: Return ONLY a valid JSON array with objects using exactly these fields:
@@ -196,12 +200,45 @@ VAGUE_ACTION_PREFIXES = (
     "think about",
     "work on",
 )
+# Personal learning chatter commonly arrives with future-tense language and a
+# broad timeframe. Keep this deliberately narrow so a concrete work commitment
+# such as "learn the Acme API by Friday" still survives.
+CASUAL_LEARNING_ACTION_RE = re.compile(
+    r"^(?:learn|learning|study|studying|read|reading|watch|watching|build|develop|practice)\b"
+    r".*\b(?:coding|programming)\b",
+    re.IGNORECASE,
+)
+IMPRECISE_TIMEFRAME_RE = re.compile(
+    r"\b(?:in\s+)?(?:a|one)\s+(?:business\s+)?day\s+or\s+so\b"
+    r"|\b(?:in|within)\s+(?:a\s+)?(?:couple|few)\s+(?:of\s+)?(?:days?|weeks?)\b"
+    r"|\bnext\s+(?:few|couple(?:\s+of)?)\s+weeks?\b",
+    re.IGNORECASE,
+)
+CASUAL_CONTEXT_TIMEFRAME_RE = re.compile(
+    rf"(?:{IMPRECISE_TIMEFRAME_RE.pattern})|\b(?:soon|sometime|later)\b",
+    re.IGNORECASE,
+)
+SUPPORT_TIMEFRAME_RE = re.compile(
+    r"\b(?:today|tomorrow|(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b"
+    r"|\b(?:this|next)\s+week\b"
+    r"|\b\d{4}-\d{2}-\d{2}\b",
+    re.IGNORECASE,
+)
 # Fleet rule: Marcos Santa Ana is a hard-no — must never become a task or ping.
 SUPPRESSED_NAMES = ("marcos", "santa ana")
 # Owner strings that are not a concrete named person — never inbound-worthy.
-GENERIC_OWNERS = {"", "unassigned", "team", "the team", "everyone", "client", "we", "they"}
+GENERIC_OWNERS = {
+    "", "unassigned", "team", "the team", "everyone", "client", "we", "they",
+}
+FIRST_PERSON_OWNER_RE = re.compile(
+    r"^(?:i|me|myself|i\s+(?:ll|will|m|am)(?:\s+going\s+to)?|im(?:\s+going\s+to)?)$"
+)
+COLLECTIVE_OWNER_RE = re.compile(
+    r"^we(?:\s+(?:ll|will|re|are)(?:\s+going\s+to)?)?$"
+)
 EXPLICIT_COMMITMENT_RE = re.compile(
-    r"\b(?:i(?:'ll| will| am going to)|we(?:'ll| will| are going to)|let's)\b",
+    r"\b(?:i(?:['’]?ll|\s+will)|i(?:['’]?m|\s+am)\s+going\s+to"
+    r"|we(?:['’]?ll|\s+will)|we(?:['’]?re|\s+are)\s+going\s+to|let\s+me|let['’]?s)\b",
     re.IGNORECASE,
 )
 COUNTERPARTY_RE = re.compile(
@@ -903,7 +940,62 @@ def fuzzy_similarity(left: str, right: str) -> float:
 
 def is_josh_owner(owner: str) -> bool:
     normalized = normalize_action(owner)
-    return normalized in {"josh", "josh weiss", "me", "i", "myself"}
+    return normalized in {"josh", "josh weiss"}
+
+
+def is_first_person_owner(owner: str) -> bool:
+    return FIRST_PERSON_OWNER_RE.fullmatch(normalize_action(owner)) is not None
+
+
+def is_generic_owner(owner: str) -> bool:
+    normalized = normalize_action(owner)
+    return (
+        normalized in GENERIC_OWNERS
+        or FIRST_PERSON_OWNER_RE.fullmatch(normalized) is not None
+        or COLLECTIVE_OWNER_RE.fullmatch(normalized) is not None
+    )
+
+
+def infer_first_person_speaker(
+    transcript: dict[str, Any],
+    action: str,
+    due_date: str = "",
+) -> str | None:
+    """Resolve a self-referential owner from its explicit promise sentence."""
+    sentences = transcript.get("sentences")
+    if not isinstance(sentences, list):
+        return None
+    action_tokens = normalized_tokens(action)
+    if not action_tokens:
+        return None
+    due_tokens = normalized_tokens(due_date)
+    best_name: str | None = None
+    best_score: tuple[float, int, int] | None = None
+    tied_speakers: set[str] = set()
+    for index, sentence in enumerate(sentences):
+        if not isinstance(sentence, dict):
+            continue
+        speaker = collapse_ws(str(sentence.get("speaker_name") or ""))
+        text = collapse_ws(str(sentence.get("text") or sentence.get("raw_text") or ""))
+        if not speaker or not text or EXPLICIT_COMMITMENT_RE.search(text) is None:
+            continue
+        sentence_tokens = normalized_tokens(text)
+        action_overlap = len(action_tokens & sentence_tokens)
+        if action_overlap == 0:
+            continue
+        due_overlap = len(due_tokens & sentence_tokens)
+        # Speaker attribution must remain ambiguous when otherwise-equal
+        # evidence appears under multiple speakers.  Sentence order is only a
+        # tiebreaker for selecting one best sentence, never for declaring a
+        # unique owner.
+        score = (action_overlap / len(action_tokens), due_overlap, action_overlap)
+        if best_score is None or score > best_score:
+            best_score = score
+            best_name = speaker
+            tied_speakers = {speaker}
+        elif score == best_score:
+            tied_speakers.add(speaker)
+    return best_name if len(tied_speakers) == 1 else None
 
 
 def extract_josh_sentences(transcript: dict[str, Any]) -> list[str]:
@@ -976,6 +1068,92 @@ def resolve_due_date(raw_due: str, meeting_day: date) -> str | None:
         delta = (target - meeting_day.weekday()) % 7
         return (meeting_day + timedelta(days=delta)).isoformat()
     return None
+
+
+def has_imprecise_timeframe(value: str) -> bool:
+    return IMPRECISE_TIMEFRAME_RE.search(collapse_ws(value)) is not None
+
+
+def source_has_explicit_timeframe(source_quote: str) -> bool:
+    source = collapse_ws(source_quote)
+    return bool(source and (IMPRECISE_TIMEFRAME_RE.search(source) or SUPPORT_TIMEFRAME_RE.search(source)))
+
+
+def source_matches_timeframe(raw_due: str, meeting_day: date, source_quote: str) -> bool:
+    """Check that the model's due phrase has evidence in the supporting sentence."""
+    source = collapse_ws(source_quote)
+    due = collapse_ws(raw_due)
+    if not source or not due:
+        return False
+    if has_imprecise_timeframe(due):
+        return has_imprecise_timeframe(source)
+
+    source_normalized = normalize_action(source)
+    due_normalized = normalize_action(due)
+    if due_normalized in source_normalized:
+        return True
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", due):
+        return False
+
+    for phrase in (
+        "today",
+        "tomorrow",
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+        "next monday",
+        "next tuesday",
+        "next wednesday",
+        "next thursday",
+        "next friday",
+        "next saturday",
+        "next sunday",
+    ):
+        if re.search(rf"\b{re.escape(phrase)}\b", source_normalized) and resolve_due_date(
+            phrase,
+            meeting_day,
+        ) == due:
+            return True
+    return False
+
+
+def has_explicit_timeframe(raw_due: str, meeting_day: date, source_quote: str = "") -> bool:
+    if raw_due and source_quote:
+        return source_matches_timeframe(raw_due, meeting_day, source_quote)
+    return (
+        resolve_due_date(raw_due, meeting_day) is not None
+        or has_imprecise_timeframe(raw_due)
+        or source_has_explicit_timeframe(source_quote)
+    )
+
+
+def has_unsupported_imprecise_due(raw_due: str, meeting_day: date, source_quote: str) -> bool:
+    return bool(raw_due and has_imprecise_timeframe(raw_due) and not source_matches_timeframe(
+        raw_due,
+        meeting_day,
+        source_quote,
+    ))
+
+
+def resolve_grounded_due_date(raw_due: str, meeting_day: date, source_quote: str = "") -> str | None:
+    """Resolve exact dates, but never sharpen an imprecise source phrase."""
+    if raw_due and source_quote and source_has_explicit_timeframe(source_quote):
+        if not source_matches_timeframe(raw_due, meeting_day, source_quote):
+            return None
+    if has_imprecise_timeframe(raw_due):
+        return None
+    return resolve_due_date(raw_due, meeting_day)
+
+
+def is_casual_self_disclosure(action: str, due: str, source_quote: str = "") -> bool:
+    """Reject narrow personal-learning chatter without swallowing real work."""
+    if CASUAL_LEARNING_ACTION_RE.search(normalize_action(action)) is None:
+        return False
+    return CASUAL_CONTEXT_TIMEFRAME_RE.search(collapse_ws(f"{due} {source_quote}")) is not None
 
 
 def has_concrete_action(action: str) -> bool:
@@ -1182,12 +1360,23 @@ def refine_outbound_item(
         return None
     if is_already_handled(item.due_date):
         return None
-    due = resolve_due_date(item.due_date, meeting_day)
     support = best_support_sentence(item.action, josh_sentences)
+    if is_casual_self_disclosure(item.action, item.due_date, support or ""):
+        return None
+    if has_unsupported_imprecise_due(item.due_date, meeting_day, support or ""):
+        return None
+    due = resolve_grounded_due_date(item.due_date, meeting_day, support or "")
     counterparty = extract_counterparty(item.action) or (
         extract_counterparty(support) if support else None
     )
-    if due is None and counterparty is None:
+    if due is None and counterparty is None and not (
+        # A source-backed timeframe may be imprecise, or the model may have
+        # sharpened it into an unsupported exact date. Keep the commitment but
+        # leave deadline blank in either case; only unsupported vague phrases
+        # are rejected above.
+        source_has_explicit_timeframe(support or "")
+        or has_explicit_timeframe(item.due_date, meeting_day, support or "")
+    ):
         return None
     if is_suppressed(item.owner, item.action, counterparty):
         return None
@@ -1213,24 +1402,29 @@ def refine_inbound_item(
     all_sentences: list[str] | None = None,
 ) -> RefinedCommitment | None:
     # Conservative inbound gate (client → Josh): concrete named owner only.
-    if normalize_action(item.owner) in GENERIC_OWNERS:
+    if is_generic_owner(item.owner):
         return None
     if not has_concrete_action(item.action):
         return None
     if is_already_handled(item.due_date):
         return None
-    due = resolve_due_date(item.due_date, meeting_day)
+    quote = best_support_sentence(item.action, all_sentences or []) or ""
+    if is_casual_self_disclosure(item.action, item.due_date, quote):
+        return None
+    if has_unsupported_imprecise_due(item.due_date, meeting_day, quote):
+        return None
+    due = resolve_grounded_due_date(item.due_date, meeting_day, quote)
     counterparty = extract_counterparty(item.action)
     josh_tied = (
         "josh" in normalized_tokens(item.action)
         or (counterparty is not None and "josh" in normalize_action(counterparty))
-        or due is not None
+        or source_has_explicit_timeframe(quote)
+        or has_explicit_timeframe(item.due_date, meeting_day, quote)
     )
     if not josh_tied:
         return None
     if is_suppressed(item.owner, item.action, counterparty):
         return None
-    quote = best_support_sentence(item.action, all_sentences or []) or ""
     return RefinedCommitment(
         id=directional_commitment_id(meeting_id, item.action, "inbound"),
         text=build_commitment_text(f"[inbound] {item.owner}: {item.action}", due),
@@ -1252,23 +1446,21 @@ def refine_generic_owner_item(
     all_sentences: list[str],
     source_ref: str,
 ) -> RefinedCommitment | None:
-    """Preserve an explicit, dated commitment whose speaker cannot be resolved.
-
-    Generic ownership alone is not enough to create a task.  This is the narrow
-    exception for a transcript-grounded promise with both a concrete timeframe
-    and explicit commitment language; the downstream owner is intentionally
-    marked NEEDS-OWNER rather than guessed.
-    """
-    if normalize_action(item.owner) not in GENERIC_OWNERS:
+    """Keep only transcript-grounded generic-owner promises for later assignment."""
+    if not is_generic_owner(item.owner):
         return None
     if not has_concrete_action(item.action) or is_already_handled(item.due_date):
-        return None
-    due = resolve_due_date(item.due_date, meeting_day)
-    if due is None:
         return None
     support = best_support_sentence(item.action, all_sentences)
     if support is None or EXPLICIT_COMMITMENT_RE.search(support) is None:
         return None
+    if not source_has_explicit_timeframe(support):
+        return None
+    if item.due_date and not source_matches_timeframe(item.due_date, meeting_day, support):
+        return None
+    if is_casual_self_disclosure(item.action, item.due_date, support):
+        return None
+    due = resolve_grounded_due_date(item.due_date, meeting_day, support)
     counterparty = extract_counterparty(item.action) or extract_counterparty(support)
     if is_suppressed(item.owner, item.action, counterparty):
         return None
@@ -1277,10 +1469,10 @@ def refine_generic_owner_item(
         text=build_commitment_text(item.action, due),
         source="ff",
         source_ref=source_ref,
-        direction="outbound",
+        direction="unassigned",
         action_text=item.action,
         owner="NEEDS-OWNER",
-        deadline=due,
+        deadline=due or "",
         source_quote=support,
     )
 
@@ -1303,29 +1495,47 @@ def refine_items(
     seen_ids: set[str] = set()
 
     for item in extracted_items:
-        if is_josh_owner(item.owner):
+        effective_item = item
+        inferred_speaker: str | None = None
+        if is_first_person_owner(item.owner):
+            speaker = infer_first_person_speaker(transcript, item.action, item.due_date)
+            if speaker:
+                effective_item = replace(item, owner=speaker)
+                inferred_speaker = speaker
+        if is_josh_owner(effective_item.owner):
             commitment = refine_outbound_item(
-                item,
+                effective_item,
                 meeting_id=meeting_id,
                 meeting_day=meeting_day,
                 josh_sentences=josh_sentences,
                 source_ref=source_ref,
             )
-        elif normalize_action(item.owner) in GENERIC_OWNERS:
+        elif is_generic_owner(effective_item.owner):
             commitment = refine_generic_owner_item(
-                item,
+                effective_item,
                 meeting_id=meeting_id,
                 meeting_day=meeting_day,
                 all_sentences=all_sentences,
                 source_ref=source_ref,
             )
         else:
+            inbound_sentences = all_sentences
+            if inferred_speaker:
+                raw_sentences = transcript.get("sentences")
+                if isinstance(raw_sentences, list):
+                    inbound_sentences = [
+                        collapse_ws(str(sentence.get("text") or sentence.get("raw_text") or ""))
+                        for sentence in raw_sentences
+                        if isinstance(sentence, dict)
+                        and collapse_ws(str(sentence.get("speaker_name") or "")) == inferred_speaker
+                        and collapse_ws(str(sentence.get("text") or sentence.get("raw_text") or ""))
+                    ]
             commitment = refine_inbound_item(
-                item,
+                effective_item,
                 meeting_id=meeting_id,
                 meeting_day=meeting_day,
                 source_ref=source_ref,
-                all_sentences=all_sentences,
+                all_sentences=inbound_sentences,
             )
         if commitment is None or commitment.id in seen_ids:
             continue

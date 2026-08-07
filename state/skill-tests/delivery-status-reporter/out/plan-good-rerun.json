@@ -1,0 +1,60 @@
+{
+  "parsed": {
+    "slug": "testco",
+    "name": "TestCo",
+    "history": [
+      {
+        "date": "2026-08-03",
+        "text": "Working session with Dana. Josh said on the call: \"it'll be a day or so, but I'm going to analyze the interviews and send them both emails with Mark on copy.\" No named owner recorded in the transcript."
+      },
+      {
+        "date": "2026-08-02",
+        "text": "Hiring scorecard v1 shipped and merged; Dana confirmed it in Slack."
+      },
+      {
+        "date": "2026-07-20",
+        "text": "Kickoff call held."
+      }
+    ],
+    "reporting": {
+      "cadence": "weekly",
+      "cadenceDays": 7,
+      "channel": "slack+email",
+      "contact": "Dana Reyes <dana@testco.example>",
+      "milestones": [
+        "Interview analysis pack",
+        "Hiring scorecard rollout",
+        "Onboarding automation"
+      ],
+      "lastUpdate": "2026-07-28"
+    },
+    "openItems": [
+      "Send interview analysis + both emails w/ Mark cc'd",
+      "Confirm scorecard rubric weights"
+    ]
+  },
+  "plan": {
+    "client": "testco",
+    "action": "draft",
+    "classification": "GOOD",
+    "draft": {
+      "fileContent": "---\nagent: crm\njob: status-updates\nskill: delivery-status-reporter\ndate: 2026-08-05\nclient: testco\ntype: status-update\nstatus: DRAFT — needs approval\nauto_send: false\n---\n\n# Status Update: TestCo · 2026-08-05\n**Type:** weekly\n**Classification:** GOOD\n**Status:** DRAFT · needs approval\n**Cadence:** weekly · last update: 2026-07-28\n\n## Slack draft\n\nHi Dana — quick update on TestCo.\n\n*Hiring scorecard v1 shipped and merged; Dana confirmed it in Slack..*\n\n*Done since last update*\n• Hiring scorecard v1 shipped and merged; Dana confirmed it in Slack.\n\nNext up: Interview analysis pack. More soon.\n\n## Email draft\n\n**Subject:** TestCo — status update 2026-08-05\n\nHi Dana,\n\nHiring scorecard v1 shipped and merged; Dana confirmed it in Slack..\n\nDone since last update:\n  - Hiring scorecard v1 shipped and merged; Dana confirmed it in Slack.\n\nNext up is Interview analysis pack. I'll check back in with the next update.\n\nBest,\nJosh\n\n## Send discipline\n\nApprove = \"the content is right.\" Approval is NOT a send. A human sends via\nSlack or email. This draft is never auto-sent.\n",
+      "relPath": "raw/areas/clearworks/clients/testco/status-update-2026-08-05.md",
+      "channels": {
+        "slack": "Hi Dana — quick update on TestCo.\n\n*Hiring scorecard v1 shipped and merged; Dana confirmed it in Slack..*\n\n*Done since last update*\n• Hiring scorecard v1 shipped and merged; Dana confirmed it in Slack.\n\nNext up: Interview analysis pack. More soon.",
+        "email": {
+          "subject": "TestCo — status update 2026-08-05",
+          "body": "Hi Dana,\n\nHiring scorecard v1 shipped and merged; Dana confirmed it in Slack..\n\nDone since last update:\n  - Hiring scorecard v1 shipped and merged; Dana confirmed it in Slack.\n\nNext up is Interview analysis pack. I'll check back in with the next update.\n\nBest,\nJosh"
+        }
+      },
+      "approval": {
+        "title": "Status update for TestCo (2026-08-05) — needs approval before send",
+        "category": "external-comms",
+        "context": "Weekly delivery-status draft for TestCo. Classification: GOOD. Slack + email formats drafted at raw/areas/clearworks/clients/testco/status-update-2026-08-05.md. Approve = content is right; a HUMAN still sends. Never auto-sent.",
+        "client": "testco",
+        "owningJob": "delivery-status-reporter"
+      },
+      "activityLine": "Weekly status update drafted for TestCo · pending approval"
+    }
+  }
+}

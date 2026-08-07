@@ -1,0 +1,57 @@
+FIXTURE — SYNTHETIC TRANSCRIPT (not a real call). For conformance testing only.
+
+Meeting: Northwind Logistics · Discovery Call #2
+Date: 2026-08-04
+Source: pasted notes (synthetic)
+Organizer: Josh Weiss <josh@clearworks.ai>
+Attendees:
+  - Josh Weiss (Clearworks AI) — josh@clearworks.ai
+  - Dana Okafor (Northwind Logistics, VP Operations) — dana@northwindlogistics.com
+  - Mark Reyes (Northwind Logistics, CFO) — mark@northwindlogistics.com
+
+---
+
+[00:00] Josh: Thanks for making time again. Last time we left it that you were going to
+loop in finance before we talked scope.
+
+[00:14] Dana: Right, and Mark's here now. We did the internal interviews you asked for —
+six of them, ops leads mostly.
+
+[00:31] Josh: Perfect. So here's where I'm at. It'll be a day or so, but I'm going to
+analyze the interviews and send them both emails with Mark on copy.
+
+[00:44] Dana: That works. We're not in a rush but we'd like it before the board thing.
+
+[00:52] Mark: On budget — we've decided to fund this out of the ops line, not IT. That's
+settled, I already cleared it with the controller.
+
+[01:10] Josh: Good, that removes the procurement review entirely?
+
+[01:14] Mark: Correct. Ops line means no procurement review. Done deal on that.
+
+[01:22] Dana: One thing — Sarah Chen will send you the current routing spreadsheet by
+Thursday so you have the real volumes.
+
+[01:35] Josh: Great, that's exactly what I need.
+
+[01:40] Dana: Also we should probably revisit the SLA language at some point. Not urgent.
+
+[01:50] Mark: Where does that leave us commercially? Last we spoke it was a pilot.
+
+[01:58] Josh: I'd say we're past pilot. If the interview analysis lands the way I expect,
+we'd be scoping the full rollout — three regions, not one.
+
+[02:10] Mark: Agreed. Let's plan on full rollout scope. Pencil in a proposal review for
+the 18th.
+
+[02:20] Dana: Confirmed, August 18th, same time.
+
+[02:28] Josh: One flag — I heard the word "Trellis" in the hallway before we started.
+
+[02:34] Dana: Yeah, we did take a call with Trellis. Nothing serious.
+
+[02:40] Josh: Understood. I'll take that seriously anyway.
+
+[02:45] Mark: Fair. See you on the 18th.
+
+[END]

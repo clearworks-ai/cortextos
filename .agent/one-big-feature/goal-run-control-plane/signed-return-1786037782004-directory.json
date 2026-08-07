@@ -1,0 +1,11 @@
+{
+  "stage": "specs",
+  "slug": "goal-run-control-plane",
+  "repo": "/Users/joshweiss/code/cortextos",
+  "scope-sha": "f5abb4505dd8811e9770365e6c493e6b4d3b69a58c2641e976bbde76296ddc08",
+  "artifact-sha256": "dd907b85d25fe1e7ec61084ae30b1d28ce482b4ad3760a2e38700c1af5126bb3",
+  "artifact-path": "/Users/joshweiss/code/cortextos/.agent/one-big-feature/goal-run-control-plane/03-specs",
+  "directory-manifest-sha256": "dd907b85d25fe1e7ec61084ae30b1d28ce482b4ad3760a2e38700c1af5126bb3",
+  "signed-at": "2026-08-06T17:50:34.120Z",
+  "signed-by": "opencode"
+}

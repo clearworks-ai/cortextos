@@ -135,6 +135,9 @@ const AUTHORED_STAGES = new Set<Stage>(['synthesize', 'plan', 'specs', 'review']
 const SHA_HEX_RE = /^[a-f0-9]{64}$/;
 const SLUG_RE = /^[a-z0-9-]+$/;
 const WORKER_AUTHORS = new Set<string>(['opencode', 'opencoder']);
+// Larry has a legacy Claude identity and a live Codex identity. Both are trusted
+// planning dispatchers; worker replies remain HMAC-bound to the actual sender.
+const PLANNING_DISPATCHERS = new Set<string>(['larry', 'larry-codex']);
 const PROVENANCE_LINE_RE =
   /PROVENANCE:\s*stage=(plan|specs)\s+slug=([a-z0-9-]+)\s+artifact-sha256=([a-f0-9]{64})\b/;
 const BUS_STORE_BUCKETS = ['inbox', 'inflight', 'processed'] as const;
@@ -539,6 +542,8 @@ function resolveDispatchForReply(opts: {
   busKey: string;
   replyToId: string;
   expectedSlug: string;
+  expectedStage: WorkerProvenanceStage;
+  expectedParentSha?: string;
 }): { ok: true } | ProvenanceFailure {
   const found = findBusMessageById(opts.busStoreRoot, opts.replyToId);
   if (!found) {
@@ -550,11 +555,11 @@ function resolveDispatchForReply(opts: {
   }
 
   const { msg } = found;
-  if (msg.from !== 'larry') {
+  if (!PLANNING_DISPATCHERS.has(msg.from)) {
     return {
       ok: false,
       code: 'PROVENANCE_MISMATCH',
-      detail: `Dispatch ${opts.replyToId} not from larry (from=${msg.from})`,
+      detail: `Dispatch ${opts.replyToId} not from an authorized planning dispatcher (from=${msg.from})`,
     };
   }
   if (!verifyBusMessageSig(msg, opts.busKey)) {
@@ -567,11 +572,17 @@ function resolveDispatchForReply(opts: {
 
   const slug = msg.text.match(/\bslug=([a-z0-9-]+)\b/)?.[1];
   const isBuild = /\bGATE:\s*build\b/i.test(msg.text);
-  if (!isBuild || slug !== opts.expectedSlug) {
+  const isPlanning = /\bGATE:\s*plan\b/i.test(msg.text);
+  const requestedStage = msg.text.match(/\bstage=(plan|specs)\b/)?.[1];
+  const requestedParentSha = msg.text.match(/\bscope-sha=([a-f0-9]{64})\b/i)?.[1]?.toLowerCase();
+  const isBoundPlanningRequest = isPlanning
+    && requestedStage === opts.expectedStage
+    && requestedParentSha === opts.expectedParentSha;
+  if ((!isBuild && !isBoundPlanningRequest) || slug !== opts.expectedSlug) {
     return {
       ok: false,
       code: 'PROVENANCE_MISMATCH',
-      detail: `Dispatch ${opts.replyToId} is not a GATE: build for slug ${opts.expectedSlug}`,
+      detail: `Dispatch ${opts.replyToId} is not a matching GATE: build or scope-bound GATE: plan for ${opts.expectedStage}/${opts.expectedSlug}`,
     };
   }
 
@@ -585,6 +596,7 @@ export function verifyWorkerAttestationMessage(opts: {
   expectedMessageId?: string;
   busStoreRoot?: string;
   busKey?: string | null;
+  expectedParentSha?: string;
 }): WorkerAttestationResult {
   const busStoreRoot = opts.busStoreRoot || defaultBusStoreRoot();
   const messagePath = resolve(opts.messagePath);
@@ -676,6 +688,8 @@ export function verifyWorkerAttestationMessage(opts: {
     busKey,
     replyToId: msg.reply_to,
     expectedSlug: opts.slug,
+    expectedStage: opts.stage,
+    expectedParentSha: opts.expectedParentSha,
   });
   if (!dispatch.ok) return dispatch;
 
@@ -695,6 +709,7 @@ export function verifyWorkerDispatchAuthorship(opts: {
   expectedMessageId?: string;
   busStoreRoot?: string;
   busKey?: string | null;
+  expectedParentSha?: string;
 }): ProvenanceResult {
   const attestation = verifyWorkerAttestationMessage({
     messagePath: opts.messagePath,
@@ -703,6 +718,7 @@ export function verifyWorkerDispatchAuthorship(opts: {
     expectedMessageId: opts.expectedMessageId,
     busStoreRoot: opts.busStoreRoot,
     busKey: opts.busKey,
+    expectedParentSha: opts.expectedParentSha,
   });
   if (!attestation.ok) return attestation;
 
@@ -868,6 +884,15 @@ export function emitLedgerRow(opts: {
   }
 
   const artifact = describeArtifact(opts.artifactPath);
+  const existingRows = readLedgerRows(ledgerPath);
+  const prevRow = latestPreviousRow(existingRows, opts.slug, opts.stage, secret);
+  const prevSha = opts.stage === 'research' || opts.stage === 'exempt'
+    ? GENESIS
+    : prevRow?.artifact_sha256;
+
+  if (opts.stage !== 'research' && opts.stage !== 'exempt' && !prevSha) {
+    throw new Error(`CHAIN_BREAK: missing prior-stage row for ${opts.slug}:${opts.stage}`);
+  }
   if (opts.stage === 'true-verify' || opts.stage === 'staging-verify') {
     if (!opts.evidencePath || !existsSync(opts.evidencePath) || statSync(opts.evidencePath).size === 0) {
       throw new Error(`Artifact/evidence missing or empty for ${opts.stage}`);
@@ -900,6 +925,7 @@ export function emitLedgerRow(opts: {
         expectedMessageId: opts.sessionId,
         busStoreRoot: opts.busStoreRoot,
         busKey,
+        expectedParentSha: prevSha,
       });
     } else {
       provenance = verifyTranscriptAuthorship({
@@ -918,16 +944,6 @@ export function emitLedgerRow(opts: {
   }
 
   mkdirSync(dirname(ledgerPath), { recursive: true });
-  const existingRows = readLedgerRows(ledgerPath);
-  const prevRow = latestPreviousRow(existingRows, opts.slug, opts.stage, secret);
-  const prevSha = opts.stage === 'research' || opts.stage === 'exempt'
-    ? GENESIS
-    : prevRow?.artifact_sha256;
-
-  if (opts.stage !== 'research' && opts.stage !== 'exempt' && !prevSha) {
-    throw new Error(`CHAIN_BREAK: missing prior-stage row for ${opts.slug}:${opts.stage}`);
-  }
-
   const unsigned: Omit<LedgerRow, 'sig'> = {
     slug: opts.slug,
     stage: opts.stage,
@@ -1125,7 +1141,9 @@ export function verifyChainDetailed(opts: {
       continue;
     }
 
-    for (const row of chain.rows) {
+    for (let index = 0; index < chain.rows.length; index += 1) {
+      const row = chain.rows[index];
+      const expectedParentSha = index > 0 ? chain.rows[index - 1]?.artifact_sha256 : undefined;
       if (!isAuthoredStage(row.stage)) continue;
       if (!row.runner || !row.session_id || !row.transcript_path || !row.transcript_sha256) {
         return {
@@ -1187,6 +1205,7 @@ export function verifyChainDetailed(opts: {
           expectedMessageId: row.session_id,
           busStoreRoot: opts.busStoreRoot,
           busKey,
+          expectedParentSha,
         });
         if (!provenance.ok) {
           return {

@@ -1,0 +1,50 @@
+{
+  "id": "FIXTURE01NORTHWIND0000000",
+  "title": "Northwind Logistics \u00b7 Discovery Call #2",
+  "date": "2026-08-04T15:00:00+00:00",
+  "organizer": "josh@clearworks.ai",
+  "attendees": [
+    "Josh Weiss",
+    "Dana Okafor",
+    "Mark Reyes",
+    "Sarah Chen"
+  ],
+  "summary": {
+    "overview": "Second discovery call with Northwind Logistics. Funding settled on the ops line, procurement review removed, scope moved from pilot to three-region full rollout, proposal review set for August 18th.",
+    "bullets": "Six ops-lead interviews completed; ops-line funding clears procurement; full rollout across three regions; proposal review 2026-08-18; competitor Trellis disclosed",
+    "action_items": "Josh to analyze interviews and email Dana and Mark; Sarah Chen to send routing spreadsheet by Thursday"
+  },
+  "client_context": "client=Northwind Logistics. stage=discovery.",
+  "decisions": [
+    "Project is funded out of the ops line, not IT - cleared with the controller",
+    "No procurement review is required as a consequence of the ops-line funding decision",
+    "Scope target is full rollout across three regions, not a single-region pilot"
+  ],
+  "deal_state": "Advanced: pilot -> full rollout scoping; dated next step 2026-08-18 proposal review; risk: competitor Trellis call disclosed",
+  "next_steps": [
+    {
+      "id": "ffin_FIXTURE01NORTHWIND0000000_520e51231ab2",
+      "text": "[inbound] Sarah Chen: Send the current routing spreadsheet with real volumes (due 2026-08-06)",
+      "direction": "inbound",
+      "source": "ff-inbound",
+      "sourceRef": "FIXTURE01NORTHWIND0000000 \u00b7 Northwind Logistics \u00b7 Discovery Call #2",
+      "owner": "Sarah Chen",
+      "deadline": "2026-08-06",
+      "sourceQuote": "Sarah Chen will send you the current routing spreadsheet by Thursday so you have the real volumes.",
+      "priority": "P0",
+      "relevanceScore": 0.175
+    },
+    {
+      "id": "ff_FIXTURE01NORTHWIND0000000_2be00ee28fea",
+      "text": "Analyze the six ops-lead interviews and send Dana Okafor and Mark Reyes emails with Mark on copy",
+      "direction": "outbound",
+      "source": "ff",
+      "sourceRef": "FIXTURE01NORTHWIND0000000 \u00b7 Northwind Logistics \u00b7 Discovery Call #2",
+      "owner": "Josh",
+      "deadline": "",
+      "sourceQuote": "It'll be a day or so, but I'm going to analyze the interviews and send them both emails with Mark on copy.",
+      "priority": "P3",
+      "relevanceScore": 0.1623
+    }
+  ]
+}

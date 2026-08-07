@@ -1,0 +1,11 @@
+# True-Verify — PR#319 (crm-decision-persistence)
+
+Performed directly by larry, fresh worktree from the actual PR ref, plus direct checks against LIVE production data (this PR includes a real backfill, so live-data checks matter here beyond the fixture tests):
+
+1. **Live interactions.jsonl** (`orgs/clearworksai/agents/crm/crm/interactions.jsonl`): `grep -c "01KZ71M4876B6NKT8V3TFCQBRW"` → **1** row, contact_id `mark-lurie`, contains both real decisions ("Agreed to proceed with automation for Wendy's spreadsheet", "Agreed to explore automation with Julie's travel process"). `deal_state: null` — accurate, ff-extractor produced no deal_state text for this specific meeting (matches independent review's finding; not a bug, just nothing to preserve).
+2. **Live pipeline.json**: MSIA Busywork Audit (clearpath_id 19) — `stage: "won"`, `stage_changed_at: "2026-06-24T18:45:20"` — unchanged, no stage mutation occurred tonight.
+3. **Fresh worktree** (`git fetch origin pull/319/head`, `git worktree add`): `python3 -m pytest .` in `crm/crm/` → **32 passed, 2 skipped**, zero failures/regressions.
+4. **ff-extractor.py / upsert-engagement.py diff** (`git diff 9e1f1dce...HEAD -- <both files>`) → **0 lines**, genuinely untouched.
+5. **Idempotency, verified directly** (not trusting the PR description): ran the exact live backfill command from the PR's own `add-interaction.py`, against a COPY of the real interactions.jsonl (`/tmp/interactions-verify-copy.jsonl`, seeded from the actual live file post-backfill) — result: `{"skipped": "duplicate", ...}`, row count stayed at 1. Confirms re-running the backfill does not create a second row.
+
+Combined with the independent review (05-reviews/01-independent-review.md, score 5/5 — verified against the true merge-base after an initial stale-local-main confusion, replayed the backfill against a copy, confirmed the deal_state→stage keyword map is deterministic-only): PR#319 correctly persists meeting decisions without touching the commitment classifier, ff-extractor.py, or upsert-engagement.py, and the live MSIA backfill is proven idempotent and stage-safe. PR is a DRAFT per nighttime guardrails — ready for Josh's review and merge decision when he's back, not merging tonight.

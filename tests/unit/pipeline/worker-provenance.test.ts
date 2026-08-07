@@ -134,6 +134,21 @@ describe('worker-dispatch provenance', () => {
     });
   }
 
+  function seedPlanningDispatch(
+    id: string,
+    stage: 'plan' | 'specs',
+    parentSha: string,
+    slug = 'hard-spec-gate',
+  ): string {
+    return writeBusMessage(join(busStoreRoot, 'processed', 'opencode'), {
+      id,
+      from: 'larry',
+      to: 'opencode',
+      text: `GATE: plan framework=one-big-feature slug=${slug} stage=${stage} repo=${repoRoot} scope-sha=${parentSha}`,
+      busKey,
+    });
+  }
+
   function emitWorkerStage(
     stage: 'plan' | 'specs',
     artifactPath: string,
@@ -209,6 +224,62 @@ describe('worker-dispatch provenance', () => {
     const rows = readLedgerRows(ledgerPath);
     expect(rows.find((row) => row.stage === 'plan')?.provenance_mode).toBe('worker-dispatch');
     expect(rows.find((row) => row.stage === 'specs')?.provenance_mode).toBe('worker-dispatch');
+  });
+
+  it('accepts a signed scope-bound planning dispatch without authorizing a build', () => {
+    const research = emitResearch(100);
+    seedPlanningDispatch('P1', 'plan', research.artifact_sha256);
+    const planReturnPath = writeBusMessage(join(busStoreRoot, 'processed', 'larry'), {
+      id: 'R1', from: 'opencode', to: 'larry', reply_to: 'P1',
+      text: `done\nPROVENANCE: stage=plan slug=hard-spec-gate artifact-sha256=${describeArtifact(planPath).sha256}`,
+      busKey,
+    });
+    const plan = emitWorkerStage('plan', planPath, 'R1', planReturnPath, 200);
+    seedPlanningDispatch('P2', 'specs', plan.artifact_sha256);
+    const specsReturnPath = writeBusMessage(join(busStoreRoot, 'processed', 'larry'), {
+      id: 'R2', from: 'opencode', to: 'larry', reply_to: 'P2',
+      text: `done\nPROVENANCE: stage=specs slug=hard-spec-gate artifact-sha256=${describeArtifact(specsDir).sha256}`,
+      busKey,
+    });
+    expect(() => emitWorkerStage('specs', specsDir, 'R2', specsReturnPath, 300)).not.toThrow();
+
+    const verified = verifyChainDetailed({
+      slug: 'hard-spec-gate',
+      throughStage: 'specs',
+      maxAgeSeconds: 86_400,
+      scopeSha: describeArtifact(specsDir).sha256,
+      ledgerPath,
+      secretPath,
+      busStoreRoot,
+      nowSeconds: 350,
+    });
+    expect(verified.ok).toBe(true);
+  });
+
+  it('accepts a planning dispatch from the live larry-codex identity', () => {
+    const research = emitResearch(100);
+    writeBusMessage(join(busStoreRoot, 'processed', 'opencode'), {
+      id: 'P1', from: 'larry-codex', to: 'opencode',
+      text: `GATE: plan framework=one-big-feature slug=hard-spec-gate stage=plan repo=${repoRoot} scope-sha=${research.artifact_sha256}`,
+      busKey,
+    });
+    const returnPath = writeBusMessage(join(busStoreRoot, 'processed', 'larry'), {
+      id: 'R1', from: 'opencode', to: 'larry', reply_to: 'P1',
+      text: `done\nPROVENANCE: stage=plan slug=hard-spec-gate artifact-sha256=${describeArtifact(planPath).sha256}`,
+      busKey,
+    });
+    expect(() => emitWorkerStage('plan', planPath, 'R1', returnPath, 200)).not.toThrow();
+  });
+
+  it('rejects a planning dispatch whose scope-sha is not the signed parent artifact', () => {
+    emitResearch(100);
+    seedPlanningDispatch('P1', 'plan', 'f'.repeat(64));
+    const returnPath = writeBusMessage(join(busStoreRoot, 'processed', 'larry'), {
+      id: 'R1', from: 'opencode', to: 'larry', reply_to: 'P1',
+      text: `done\nPROVENANCE: stage=plan slug=hard-spec-gate artifact-sha256=${describeArtifact(planPath).sha256}`,
+      busKey,
+    });
+    expect(() => emitWorkerStage('plan', planPath, 'R1', returnPath, 200)).toThrow(/PROVENANCE_MISMATCH/);
   });
 
   it('fails emit when the return message is signed from larry instead of a worker', () => {

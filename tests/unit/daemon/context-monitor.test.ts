@@ -1,8 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, writeFileSync, unlinkSync, existsSync } from 'fs';
+import { mkdirSync, writeFileSync, unlinkSync, existsSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { handoffGraceMs, realContextWindow } from '../../../src/daemon/fast-checker.js';
+import {
+  formatContextBaseline,
+  consumeCodexContextOverflowMarker,
+  FastChecker,
+  handoffGraceMs,
+  realContextWindow,
+  shouldLogContextBaseline,
+} from '../../../src/daemon/fast-checker.js';
+import type { BusPaths } from '../../../src/types/index.js';
 
 /**
  * Unit tests for the context monitor logic in fast-checker.ts.
@@ -59,6 +67,122 @@ describe('context_status.json staleness detection', () => {
     writeContextStatus(stateDir, null, true, 0);
     const raw = JSON.parse(require('fs').readFileSync(join(stateDir, 'context_status.json'), 'utf-8'));
     expect(raw.exceeds_200k_tokens).toBe(true);
+  });
+});
+
+describe('structured Codex overflow recovery marker', () => {
+  let rootDir: string;
+  let stateDir: string;
+
+  beforeEach(() => {
+    rootDir = join(tmpdir(), `ctx-overflow-test-${Date.now()}-${Math.random()}`);
+    stateDir = join(rootDir, 'state', 'agent');
+    mkdirSync(stateDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(rootDir, { recursive: true, force: true });
+  });
+
+  it('consumes a valid marker once', () => {
+    const markerPath = join(stateDir, '.codex-context-overflow.json');
+    const marker = {
+      thread_id: 'thread-old',
+      turn_id: 'turn-failed',
+      reason: 'contextWindowExceeded',
+      timestamp: new Date().toISOString(),
+    };
+    writeFileSync(markerPath, JSON.stringify(marker));
+
+    expect(consumeCodexContextOverflowMarker(stateDir)).toEqual(marker);
+    expect(existsSync(markerPath)).toBe(false);
+    expect(consumeCodexContextOverflowMarker(stateDir)).toBeNull();
+  });
+
+  it('consumes but rejects a stale marker', () => {
+    const markerPath = join(stateDir, '.codex-context-overflow.json');
+    writeFileSync(markerPath, JSON.stringify({
+      thread_id: 'thread-old',
+      turn_id: 'turn-failed',
+      reason: 'contextWindowExceeded',
+      timestamp: new Date(Date.now() - 11 * 60_000).toISOString(),
+    }));
+
+    expect(consumeCodexContextOverflowMarker(stateDir)).toBeNull();
+    expect(existsSync(markerPath)).toBe(false);
+  });
+
+  it('consumes malformed JSON so it cannot be reparsed indefinitely', () => {
+    const markerPath = join(stateDir, '.codex-context-overflow.json');
+    writeFileSync(markerPath, '{not valid json');
+
+    expect(consumeCodexContextOverflowMarker(stateDir)).toBeNull();
+    expect(existsSync(markerPath)).toBe(false);
+    expect(consumeCodexContextOverflowMarker(stateDir)).toBeNull();
+  });
+
+  it('drives one bounded force-fresh refresh and leaves recovering telemetry', async () => {
+    const paths = {
+      ctxRoot: rootDir,
+      inbox: join(rootDir, 'inbox'),
+      inflight: join(rootDir, 'inflight'),
+      processed: join(rootDir, 'processed'),
+      logDir: join(rootDir, 'logs', 'agent'),
+      stateDir,
+      taskDir: join(rootDir, 'tasks'),
+      approvalDir: join(rootDir, 'approvals'),
+      analyticsDir: join(rootDir, 'analytics'),
+      deliverablesDir: join(rootDir, 'deliverables'),
+    } satisfies BusPaths;
+    mkdirSync(paths.logDir, { recursive: true });
+    const sessionRefresh = vi.fn().mockResolvedValue(undefined);
+    const agent = {
+      name: 'agent',
+      getAgentDir: () => join(rootDir, 'agent-dir'),
+      getConfig: () => ({ runtime: 'codex-app-server', codex_context_cap: 997500 }),
+      getOutputBuffer: () => ({ getRecent: () => '' }),
+      sessionRefresh,
+      injectMessage: vi.fn(),
+    } as any;
+    const markerPath = join(stateDir, '.codex-context-overflow.json');
+    writeFileSync(markerPath, JSON.stringify({
+      thread_id: 'thread-old',
+      turn_id: 'turn-failed',
+      reason: 'contextWindowExceeded',
+      timestamp: new Date().toISOString(),
+    }));
+    writeFileSync(join(stateDir, 'context_status.json'), JSON.stringify({
+      used_percentage: 90.23,
+      context_window_size: 997500,
+      current_usage: {
+        input_tokens: 899000,
+        output_tokens: 1000,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+      },
+      session_id: 'thread-old',
+      context_state: 'overflow',
+      written_at: new Date().toISOString(),
+    }));
+    const checker = new FastChecker(agent, paths, rootDir, { log: vi.fn() });
+
+    await (checker as any).checkContextStatus();
+    // Expire any grace/session guard so this specifically proves context_state,
+    // not a secondary suppression mechanism, prevents the duplicate action.
+    (checker as any).ctxLastSessionId = 'thread-old';
+    (checker as any).ctxSessionStartedAt = Date.now() - 20 * 60_000;
+    await (checker as any).checkContextStatus();
+
+    expect(sessionRefresh).toHaveBeenCalledTimes(1);
+    expect(existsSync(markerPath)).toBe(false);
+    expect(existsSync(join(stateDir, '.force-fresh'))).toBe(true);
+    const status = JSON.parse(readFileSync(join(stateDir, 'context_status.json'), 'utf-8'));
+    expect(status).toMatchObject({
+      used_percentage: 90.23,
+      session_id: 'thread-old',
+      context_state: 'recovering',
+    });
+    expect(agent.injectMessage).not.toHaveBeenCalled();
   });
 });
 
@@ -374,22 +498,31 @@ describe('realContextWindow model→window map', () => {
 
 describe('realPct replaces CC 200K-based used_percentage', () => {
   // Mirror of fast-checker's realPct derivation + handoff decision. rawTokens is
-  // summed from current_usage; realPct = rawTokens / realWindow(model) * 100;
-  // falls back to CC used_percentage only when rawTokens is absent.
+  // current-turn occupancy from input_tokens + output_tokens only; the effective
+  // denominator prefers context_window_size and falls back to realContextWindow(model).
+  // The calculation falls back to CC used_percentage only when rawTokens is absent.
   const HANDOFF = 60;
 
   function sumUsage(cu: Record<string, number> | null): number | null {
     if (!cu) return null;
+    const inputTokens = Number.isFinite(cu.input_tokens) ? cu.input_tokens : 0;
+    const outputTokens = Number.isFinite(cu.output_tokens) ? cu.output_tokens : 0;
     const sum =
-      (cu.input_tokens ?? 0)
-      + (cu.cache_creation_input_tokens ?? 0)
-      + (cu.cache_read_input_tokens ?? 0)
-      + (cu.output_tokens ?? 0);
+      inputTokens
+      + outputTokens;
     return sum > 0 ? sum : null;
   }
 
-  function decide(model: string | undefined, ccPct: number | null, cu: Record<string, number> | null) {
-    const realWindow = realContextWindow(model);
+  function decide(
+    model: string | undefined,
+    ccPct: number | null,
+    cu: Record<string, number> | null,
+    contextWindowSize: number | null = null,
+  ) {
+    const realWindow =
+      contextWindowSize !== null && Number.isFinite(contextWindowSize) && contextWindowSize > 0
+        ? contextWindowSize
+        : realContextWindow(model);
     const rawTokens = sumUsage(cu);
     const realPct = rawTokens !== null ? (rawTokens / realWindow) * 100 : ccPct;
     const fires = realPct !== null && realPct >= HANDOFF;
@@ -420,15 +553,46 @@ describe('realPct replaces CC 200K-based used_percentage', () => {
     expect(r.fires).toBe(true);
   });
 
-  it('sums all four usage components toward the window', () => {
+  it('uses the bridge denominator and ignores large cache fields', () => {
     const r = decide('claude-sonnet-5[1m]', null, {
-      input_tokens: 100_000,
-      cache_creation_input_tokens: 200_000,
-      cache_read_input_tokens: 250_000,
-      output_tokens: 50_000,
-    });
+      input_tokens: 278_039,
+      cache_creation_input_tokens: 400_000,
+      cache_read_input_tokens: 500_000,
+      output_tokens: 947,
+    }, 997_500);
+    expect(r.realPct).toBeCloseTo(27.97, 2); // (278,039 + 947) / 997,500
+    expect(r.fires).toBe(false);
+  });
+
+  it('falls back to the model denominator when the bridge denominator is invalid', () => {
+    const r = decide('claude-sonnet-5[1m]', null, { input_tokens: 600_000 }, 0);
     expect(r.realPct).toBeCloseTo(60, 5); // 600K / 1M
     expect(r.fires).toBe(true);
+  });
+});
+
+describe('context baseline observability', () => {
+  it('formats exact current-turn occupancy and denominator', () => {
+    expect(formatContextBaseline(278_986, 997_500, 'bridge context_window_size'))
+      .toBe('Context baseline: 27.97% (278986/997500) current-turn occupancy; denominator=bridge context_window_size');
+  });
+
+  it('logs once per effective denominator and re-emits only when it changes', () => {
+    const rawTokens = 278_986;
+    let lastDenominator: number | null = null;
+    const logs: string[] = [];
+
+    for (let tick = 0; tick < 3; tick += 1) {
+      if (shouldLogContextBaseline(lastDenominator, 997_500, rawTokens)) {
+        logs.push(formatContextBaseline(rawTokens, 997_500, 'bridge context_window_size'));
+        lastDenominator = 997_500;
+      }
+    }
+
+    expect(logs).toHaveLength(1);
+    expect(shouldLogContextBaseline(lastDenominator, 997_500, rawTokens)).toBe(false);
+    expect(shouldLogContextBaseline(lastDenominator, 1_000_000, rawTokens)).toBe(true);
+    expect(shouldLogContextBaseline(lastDenominator, 997_500, null)).toBe(false);
   });
 });
 

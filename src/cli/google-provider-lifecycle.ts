@@ -171,6 +171,7 @@ export async function gmailWatch(deps: GoogleProviderDependencies, options: Muta
 export async function gmailRenew(deps: GoogleProviderDependencies, options: MutationOptions = {}): Promise<LifecycleResult> {
   if (!assertMutation(options)) return record(deps, { code: 'gmail_renew_dry_run', applied: false, status: 'dry_run' });
   const lease = readJson(deps, gmailLeasePath(deps.stateDir), isGmailLease);
+  if (lease?.status === 'stopped') return record(deps, { code: 'gmail_renew_stopped', applied: false, status: 'stopped' });
   if (lease?.retry && deps.now() < Date.parse(lease.retry.nextAt)) return record(deps, { code: 'gmail_renew_retry_not_due', applied: false, status: lease.status, nextRenewBy: lease.retry.nextAt });
   if (lease?.status === 'active' && deps.now() < Date.parse(lease.nextRenewBy)) return record(deps, { code: 'gmail_renew_not_due', applied: false, status: 'active', nextRenewBy: lease.nextRenewBy });
   return gmailWatchApply(deps, true);

@@ -1,16 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs';
 import { createHash } from 'crypto';
+import { spawn } from 'child_process';
 import { request as httpRequest } from 'http';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { EventEmitter } from 'events';
 import type { AddressInfo } from 'net';
 import { join } from 'path';
+import { pathToFileURL } from 'url';
 import { tmpdir } from 'os';
 import { createBridgeServer, type BridgeServerOptions } from '../../../src/cli/webhook-bridge';
 import { handleProviderShadowIngress, markCalendarShadowChannelCleanupRequired, readBoundedProviderBody, reconcileCalendarShadowChannel, writeCalendarShadowChannel, writePendingCalendarShadowChannel } from '../../../src/cli/provider-shadow-ingress';
 import { getEventCursor } from '../../../src/bus/event-receipt-index';
 import { readEventReceipts, recordIngressReceipt } from '../../../src/bus/event-delivery';
+import { acquireLock, releaseLock } from '../../../src/utils/lock';
 
 const now = Date.parse('2026-08-07T00:00:00.000Z');
 const audience = 'https://bridge.example.com/relay/gmail-pubsub';
@@ -34,7 +37,45 @@ const expiration = new Date(now + 60_000).toISOString();
 const pendingUntil = new Date(now + 300_000).toISOString();
 const calendarHeaders = (overrides: Record<string, string | string[]> = {}) => ({ 'x-goog-channel-id': 'channel-secret', 'x-goog-resource-id': 'resource-secret', 'x-goog-resource-state': 'exists', 'x-goog-message-number': '10', 'x-goog-channel-expiration': expiration, 'x-goog-channel-token': 'channel-token-secret', ...overrides });
 const channelFile = (channelId: string) => join(stateDir, 'calendar-shadow-channels', `${createHash('sha256').update(channelId).digest('hex')}.json`);
+const channelLock = (channelId: string) => join(stateDir, 'calendar-shadow-channel-locks', createHash('sha256').update(channelId).digest('hex'));
 const close = (server: ReturnType<typeof createBridgeServer>) => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+
+async function startChildCalendarOperation(operation: 'bind' | 'reconcile', payload: Record<string, unknown>) {
+  const moduleUrl = pathToFileURL(join(process.cwd(), 'src', 'cli', 'provider-shadow-ingress.ts')).href;
+  const script = `
+    const { bindCalendarShadowSync, reconcileCalendarShadowChannel } = (await import(${JSON.stringify(moduleUrl)})).default;
+    const stateDir = process.argv[1];
+    const operation = process.argv[2];
+    const payload = JSON.parse(process.argv[3]);
+    process.stdout.write('READY\\n');
+    process.stdin.once('data', () => {
+      try {
+        const value = operation === 'bind' ? bindCalendarShadowSync(stateDir, payload) : reconcileCalendarShadowChannel(stateDir, payload);
+        process.stdout.write('RESULT ' + JSON.stringify(value ?? null) + '\\n');
+      } catch (error) {
+        process.stdout.write('ERROR ' + JSON.stringify(String(error)) + '\\n');
+      }
+    });
+  `;
+  const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '--eval', script, stateDir, operation, JSON.stringify(payload)], { cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'] });
+  let stdout = ''; let stderr = '';
+  const ready = new Promise<void>((resolve, reject) => {
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8'); if (stdout.includes('READY\n')) resolve(); });
+    child.once('error', reject);
+    child.once('close', (code) => { if (!stdout.includes('READY\n')) reject(new Error(`calendar child exited before ready (${code}): ${stderr}`)); });
+  });
+  child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
+  const done = new Promise<{ result?: unknown; error?: string }>((resolve, reject) => child.on('close', (code) => {
+    if (code !== 0) { reject(new Error(`calendar child failed: ${stderr}`)); return; }
+    const result = stdout.match(/^RESULT (.+)$/m); const error = stdout.match(/^ERROR (.+)$/m);
+    if (result) resolve({ result: JSON.parse(result[1]) });
+    else if (error) resolve({ error: JSON.parse(error[1]) });
+    else reject(new Error(`calendar child returned no result: ${stdout} ${stderr}`));
+  }));
+  void done.catch(() => {});
+  await ready;
+  return { child, run: () => { child.stdin.end('go'); return done; } };
+}
 
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'provider-shadow-')); stateDir = join(root, 'state', 'pa'); mkdirSync(join(root, 'orgs', 'clearworksai', 'agents', 'pa'), { recursive: true }); writeFileSync(join(root, 'orgs', 'clearworksai', 'agents', 'pa', 'IDENTITY.md'), '# PA'); writeCalendarShadowChannel(stateDir, { channelId: 'channel-secret', resourceId: 'resource-secret', channelToken: 'channel-token-secret', expiresAt: expiration }); });
 afterEach(() => { vi.restoreAllMocks(); rmSync(root, { recursive: true, force: true }); });
@@ -51,6 +92,20 @@ describe('Gmail Pub/Sub shadow ingress', () => {
     ['verified email', async () => ({ ...claims, email_verified: false })],
     ['service account', async () => ({ ...claims, email: 'other@example.iam.gserviceaccount.com' })],
   ])('rejects invalid %s with one redacted auth code', async (_case, verifyOidc) => { const { server, base } = await listen({ gmailShadow: { audience, serviceAccount, subscription, verifyOidc } }); try { const response = await post(base, '/relay/gmail-pubsub', gmailBody(), gmailHeaders); expect(response.status).toBe(401); expect(response.json).toEqual({ error: 'gmail_auth_invalid' }); expect(response.text).not.toContain(token); expect(readEventReceipts(stateDir)).toEqual([]); } finally { await close(server); } });
+  it.each([
+    ['google_oidc_unavailable', 503, 'gmail_auth_unavailable'],
+    ['google_oidc_invalid', 401, 'gmail_auth_invalid'],
+  ])('preserves verifier classification for %s without exposing verifier details', async (code, status, expected) => {
+    const verifierSecret = `verifier-secret-${code}`;
+    const verifyOidc = async () => { throw Object.assign(new Error(verifierSecret), { code }); };
+    const { server, base } = await listen({ gmailShadow: { audience, serviceAccount, subscription, verifyOidc } });
+    try {
+      const response = await post(base, '/relay/gmail-pubsub', gmailBody(), gmailHeaders);
+      expect(response).toMatchObject({ status, json: { error: expected } });
+      expect(response.text).not.toContain(verifierSecret);
+      expect(readEventReceipts(stateDir)).toEqual([]);
+    } finally { await close(server); }
+  });
   it('fails closed without a verifier and rejects subscription before data decoding', async () => { let fixture = await listen({ gmailShadow: { audience, serviceAccount, subscription } }); try { expect((await post(fixture.base, '/relay/gmail-pubsub', gmailBody(), gmailHeaders)).json).toEqual({ error: 'gmail_auth_unavailable' }); } finally { await close(fixture.server); } fixture = await listen(); try { const body = JSON.stringify({ message: { data: 'not base64' }, subscription: `${subscription}-wrong` }); expect((await post(fixture.base, '/relay/gmail-pubsub', body, gmailHeaders)).json).toEqual({ error: 'gmail_invalid_envelope' }); } finally { await close(fixture.server); } });
   it.each([
     [JSON.stringify({ message: { data: '***=' }, subscription }), 'gmail_invalid_data'],
@@ -104,6 +159,13 @@ describe('Calendar watch shadow ingress', () => {
     const disk = readFileSync(path, 'utf8');
     for (const secret of ['channel-secret', 'resource-secret', 'channel-token-secret']) expect(disk).not.toContain(secret);
   });
+  it('refuses initialization writers that would replace an existing active or cleanup record', () => {
+    expect(() => writePendingCalendarShadowChannel(stateDir, { channelId: 'channel-secret', channelToken: 'replacement-token', endpoint: 'https://hooks.clearworks.ai/relay/calendar-watch', ttlSeconds: 604_800, pendingUntil })).toThrow('calendar_channel_transition_conflict');
+    expect(JSON.parse(readFileSync(channelFile('channel-secret'), 'utf8'))).toMatchObject({ status: 'active' });
+    markCalendarShadowChannelCleanupRequired(stateDir, 'channel-secret', 'calendar_channel_unavailable');
+    expect(() => writeCalendarShadowChannel(stateDir, { channelId: 'channel-secret', resourceId: 'replacement-resource', channelToken: 'replacement-token', expiresAt: expiration })).toThrow('calendar_channel_transition_conflict');
+    expect(JSON.parse(readFileSync(channelFile('channel-secret'), 'utf8'))).toMatchObject({ status: 'cleanup_required' });
+  });
   it('binds an authenticated early sync without routing, then reconciles and activates the channel', async () => {
     writePendingCalendarShadowChannel(stateDir, { channelId: 'early-channel', channelToken: 'early-token', endpoint: 'https://hooks.clearworks.ai/relay/calendar-watch', ttlSeconds: 604_800, pendingUntil });
     const path = channelFile('early-channel');
@@ -141,6 +203,55 @@ describe('Calendar watch shadow ingress', () => {
       expect(JSON.parse(readFileSync(channelFile('concurrent-channel'), 'utf8'))).toMatchObject({ version: 2, status: 'active' });
       expect(readEventReceipts(stateDir).filter((entry) => entry.stage === 'routing')).toEqual([]);
     } finally { await close(server); }
+  });
+  it('uses an inter-process channel lock so stale pending sync cannot overwrite active state across restart', async () => {
+    const channelId = 'locked-active'; const channelToken = 'locked-active-token'; const resourceId = 'locked-active-resource';
+    writePendingCalendarShadowChannel(stateDir, { channelId, channelToken, endpoint: 'https://hooks.clearworks.ai/relay/calendar-watch', ttlSeconds: 604_800, pendingUntil });
+    expect(acquireLock(channelLock(channelId))).toBe(true);
+    const child = await startChildCalendarOperation('bind', { channelId, resourceId, channelToken, expiresAt: expiration, now });
+    const childResult = child.run();
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      expect(child.child.exitCode).toBeNull();
+      const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+      writeFileSync(channelFile(channelId), JSON.stringify({ version: 2, status: 'active', channel: hash(channelId), resource: hash(resourceId), token: hash(channelToken), expiresAt: expiration }), { mode: 0o600 });
+    } finally { releaseLock(channelLock(channelId)); }
+    expect(await childResult).toEqual({ result: null });
+    expect(JSON.parse(readFileSync(channelFile(channelId), 'utf8'))).toMatchObject({ version: 2, status: 'active' });
+    const fixture = await listen();
+    try { expect((await post(fixture.base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-channel-id': channelId, 'x-goog-resource-id': resourceId, 'x-goog-channel-token': channelToken, 'x-goog-resource-state': 'sync', 'x-goog-message-number': '1' }))).status).toBe(200); }
+    finally { await close(fixture.server); }
+  });
+  it('preserves cleanup-required against a blocked stale sync writer across restart', async () => {
+    const channelId = 'locked-cleanup'; const channelToken = 'locked-cleanup-token'; const resourceId = 'locked-cleanup-resource';
+    writePendingCalendarShadowChannel(stateDir, { channelId, channelToken, endpoint: 'https://hooks.clearworks.ai/relay/calendar-watch', ttlSeconds: 604_800, pendingUntil });
+    expect(acquireLock(channelLock(channelId))).toBe(true);
+    const child = await startChildCalendarOperation('bind', { channelId, resourceId, channelToken, expiresAt: expiration, now });
+    const childResult = child.run();
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      expect(child.child.exitCode).toBeNull();
+      const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+      writeFileSync(channelFile(channelId), JSON.stringify({ version: 2, status: 'cleanup_required', channel: hash(channelId), resource: null, token: hash(channelToken), expiresAt: null, reason: 'calendar_channel_unavailable' }), { mode: 0o600 });
+    } finally { releaseLock(channelLock(channelId)); }
+    expect((await childResult).error).toContain('calendar_cleanup_required');
+    expect(JSON.parse(readFileSync(channelFile(channelId), 'utf8'))).toMatchObject({ status: 'cleanup_required', reason: 'calendar_channel_unavailable' });
+    const fixture = await listen();
+    try { expect(await post(fixture.base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-channel-id': channelId, 'x-goog-resource-id': resourceId, 'x-goog-channel-token': channelToken, 'x-goog-resource-state': 'sync' }))).toMatchObject({ status: 503, json: { error: 'calendar_cleanup_required' } }); }
+    finally { await close(fixture.server); }
+  });
+  it('converges conflicting cross-process sync and reconciliation to cleanup-required, never active', async () => {
+    const channelId = 'locked-conflict'; const channelToken = 'locked-conflict-token';
+    writePendingCalendarShadowChannel(stateDir, { channelId, channelToken, endpoint: 'https://hooks.clearworks.ai/relay/calendar-watch', ttlSeconds: 604_800, pendingUntil });
+    const child = await startChildCalendarOperation('bind', { channelId, resourceId: 'sync-resource', channelToken, expiresAt: expiration, now });
+    const childResult = child.run();
+    const reconciliation = reconcileCalendarShadowChannel(stateDir, { channelId, resourceId: 'response-resource', expiresAt: expiration, now });
+    await childResult;
+    expect(reconciliation.status).toMatch(/active|cleanup_required/);
+    expect(JSON.parse(readFileSync(channelFile(channelId), 'utf8'))).toMatchObject({ version: 2, status: 'cleanup_required', reason: 'calendar_channel_mismatch' });
+    const fixture = await listen();
+    try { expect((await post(fixture.base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-channel-id': channelId, 'x-goog-resource-id': 'sync-resource', 'x-goog-channel-token': channelToken, 'x-goog-resource-state': 'sync' }))).json).toEqual({ error: 'calendar_cleanup_required' }); }
+    finally { await close(fixture.server); }
   });
   it('does not bind pending state on token mismatch or a non-sync notification', async () => {
     writePendingCalendarShadowChannel(stateDir, { channelId: 'pending-channel', channelToken: 'pending-token', endpoint: 'https://hooks.clearworks.ai/relay/calendar-watch', ttlSeconds: 604_800, pendingUntil });

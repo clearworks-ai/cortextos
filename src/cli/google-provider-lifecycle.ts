@@ -171,6 +171,7 @@ export async function gmailWatch(deps: GoogleProviderDependencies, options: Muta
 export async function gmailRenew(deps: GoogleProviderDependencies, options: MutationOptions = {}): Promise<LifecycleResult> {
   if (!assertMutation(options)) return record(deps, { code: 'gmail_renew_dry_run', applied: false, status: 'dry_run' });
   const lease = readJson(deps, gmailLeasePath(deps.stateDir), isGmailLease);
+  if (lease?.retry && deps.now() < Date.parse(lease.retry.nextAt)) return record(deps, { code: 'gmail_renew_retry_not_due', applied: false, status: lease.status, nextRenewBy: lease.retry.nextAt });
   if (lease?.status === 'active' && deps.now() < Date.parse(lease.nextRenewBy)) return record(deps, { code: 'gmail_renew_not_due', applied: false, status: 'active', nextRenewBy: lease.nextRenewBy });
   return gmailWatchApply(deps, true);
 }
@@ -270,11 +271,16 @@ export async function calendarStop(deps: GoogleProviderDependencies, handle: str
 export async function calendarRenew(deps: GoogleProviderDependencies, options: MutationOptions = {}): Promise<LifecycleResult> {
   if (!assertMutation(options)) return record(deps, { code: 'calendar_renew_dry_run', applied: false, status: 'dry_run' });
   return withCalendarLifecycleLock(deps, async () => {
-    const before = readControl(deps); const due = before.channels.filter((item) => item.status === 'active' && Date.parse(item.expiresAt) <= deps.now() + DAY_MS);
-    if (!due.length) return record(deps, { code: 'calendar_renew_not_due', applied: false, status: 'active' });
-    const replacement = await calendarRegisterUnlocked(deps, options);
-    for (const old of due) await calendarStopUnlocked(deps, old.handle, options);
-    return record(deps, { ...replacement, code: 'calendar_channel_renewed' });
+    const before = readControl(deps);
+    const due = before.channels.filter((item) => item.status === 'active' && Date.parse(item.expiresAt) <= deps.now() + DAY_MS);
+    const cleanup = before.channels.filter((item) => item.status === 'cleanup_required');
+    if (!due.length && !cleanup.length) return record(deps, { code: 'calendar_renew_not_due', applied: false, status: 'active' });
+    const fresh = before.channels.find((item) => item.status === 'active' && Date.parse(item.expiresAt) > deps.now() + DAY_MS);
+    const replacement = due.length && !fresh
+      ? await calendarRegisterUnlocked(deps, options)
+      : { code: 'calendar_replacement_reused', applied: false, status: 'active', handle: fresh?.handle };
+    for (const old of [...due, ...cleanup]) await calendarStopUnlocked(deps, old.handle, options);
+    return record(deps, { ...replacement, code: due.length ? 'calendar_channel_renewed' : 'calendar_cleanup_retried' });
   });
 }
 

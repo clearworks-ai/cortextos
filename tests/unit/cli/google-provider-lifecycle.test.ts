@@ -63,6 +63,9 @@ describe('Google provider lifecycle', () => {
     d.http = vi.fn(async () => { throw new Error(`secret seeded-access-token ${GOOGLE_PROVIDER_ALLOWLIST.mailbox}`); });
     await expect(gmailRenew(d, { apply: true, approval: 'runbook-42' })).rejects.toMatchObject({ code: 'provider_request_failed' });
     const preserved = JSON.parse(readFileSync(path, 'utf8')); expect(preserved.historyId).toBe('10'); expect(preserved.retry.attempt).toBe(1); expect(JSON.stringify(preserved)).not.toContain('seeded-access-token');
+    calls.length = 0;
+    await expect(gmailRenew(d, { apply: true, approval: 'runbook-42' })).resolves.toMatchObject({ code: 'gmail_renew_retry_not_due' });
+    expect(calls).toHaveLength(0);
   });
 
   it('marks Gmail stopped only after provider success and rejects missing approval', async () => {
@@ -104,5 +107,27 @@ describe('Google provider lifecycle', () => {
     const registered = await calendarRegister(d, { apply: true, approval: 'runbook-42' });
     await expect(calendarStop(d, registered.handle!, { apply: true, approval: 'runbook-42' })).rejects.toMatchObject({ code: 'provider_request_failed' });
     expect(JSON.parse(readFileSync(join(stateDir, 'google-provider', 'calendar-control.json'), 'utf8')).channels[0].status).toBe('cleanup_required');
+  });
+
+  it('reuses a fresh replacement and retries cleanup without creating duplicate channels', async () => {
+    const d = deps([{ status: 200, body: { id: channelId, resourceId: 'old-resource', expiration: String(now + 60_000) } }]);
+    await calendarRegister(d, { apply: true, approval: 'runbook-42' });
+    d.uuid = () => '223e4567-e89b-42d3-a456-426614174000';
+    let stopAttempts = 0;
+    d.http = vi.fn(async (request) => {
+      calls.push(request);
+      if (request.url.endsWith('/channels/stop')) {
+        stopAttempts += 1;
+        return stopAttempts === 1 ? { status: 503, body: {} } : { status: 200, body: {} };
+      }
+      return { status: 200, body: { id: d.uuid(), resourceId: 'new-resource', expiration: String(now + 6 * 86_400_000) } };
+    });
+    await expect(calendarRenew(d, { apply: true, approval: 'runbook-42' })).rejects.toMatchObject({ code: 'provider_request_failed' });
+    calls.length = 0;
+    await expect(calendarRenew(d, { apply: true, approval: 'runbook-42' })).resolves.toMatchObject({ code: 'calendar_cleanup_retried' });
+    expect(calls.filter((request) => request.url.endsWith('/events/watch'))).toHaveLength(0);
+    const control = JSON.parse(readFileSync(join(stateDir, 'google-provider', 'calendar-control.json'), 'utf8'));
+    expect(control.channels.filter((item: { status: string }) => item.status === 'active')).toHaveLength(1);
+    expect(control.channels.filter((item: { status: string }) => item.status === 'stopped')).toHaveLength(1);
   });
 });

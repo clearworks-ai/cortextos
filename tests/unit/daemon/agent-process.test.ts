@@ -51,6 +51,7 @@ const fsMocks = {
   existsSync: vi.fn().mockReturnValue(false),
   readFileSync: vi.fn(),
   writeFileSync: vi.fn(),
+  unlinkSync: vi.fn(),
   appendFileSync: vi.fn(),
   statSync: vi.fn(),
 };
@@ -79,6 +80,7 @@ vi.mock('fs', async () => {
     get existsSync() { return fsMocks.existsSync; },
     get readFileSync() { return fsMocks.readFileSync; },
     get writeFileSync() { return fsMocks.writeFileSync; },
+    get unlinkSync() { return fsMocks.unlinkSync; },
     get appendFileSync() { return fsMocks.appendFileSync; },
     get statSync() { return fsMocks.statSync; },
   };
@@ -109,8 +111,28 @@ beforeEach(() => {
   fsMocks.existsSync.mockReset().mockReturnValue(false);
   fsMocks.readFileSync.mockReset();
   fsMocks.writeFileSync.mockReset();
+  fsMocks.unlinkSync.mockReset();
   fsMocks.appendFileSync.mockReset();
   fsMocks.statSync.mockReset();
+});
+
+describe('AgentProcess - force-fresh marker', () => {
+  it('consumes .force-fresh once and selects a fresh spawn', async () => {
+    let markerPresent = true;
+    fsMocks.existsSync.mockImplementation((path: string) =>
+      path.endsWith('/.force-fresh') ? markerPresent : false);
+    fsMocks.unlinkSync.mockImplementation((path: string) => {
+      if (path.endsWith('/.force-fresh')) markerPresent = false;
+    });
+
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+
+    expect(mockPty.spawn).toHaveBeenCalledWith('fresh', expect.any(String));
+    expect(fsMocks.unlinkSync).toHaveBeenCalledTimes(1);
+    expect(fsMocks.unlinkSync).toHaveBeenCalledWith('/tmp/test-ctx/state/alice/.force-fresh');
+    expect(markerPresent).toBe(false);
+  });
 });
 
 describe('AgentProcess - BUG-011 fix (stop awaits PTY exit)', () => {

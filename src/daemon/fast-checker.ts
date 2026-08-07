@@ -67,6 +67,58 @@ export function realContextWindow(model: string | undefined): number {
   return 200_000;
 }
 
+export function formatContextBaseline(
+  rawTokens: number,
+  contextWindow: number,
+  denominatorSource: 'bridge context_window_size' | 'model fallback',
+): string {
+  const pct = (rawTokens / contextWindow) * 100;
+  return `Context baseline: ${pct.toFixed(2)}% (${rawTokens}/${contextWindow}) current-turn occupancy; denominator=${denominatorSource}`;
+}
+
+export function shouldLogContextBaseline(
+  lastDenominator: number | null,
+  denominator: number,
+  rawTokens: number | null,
+): boolean {
+  return rawTokens !== null && lastDenominator !== denominator;
+}
+
+export interface CodexContextOverflowMarker {
+  thread_id: string;
+  turn_id: string | null;
+  reason: 'contextWindowExceeded';
+  timestamp: string;
+}
+
+const CODEX_OVERFLOW_MARKER_MAX_AGE_MS = 10 * 60_000;
+
+/** Consume one atomically-written Codex overflow incident marker. */
+export function consumeCodexContextOverflowMarker(stateDir: string): CodexContextOverflowMarker | null {
+  const markerPath = join(stateDir, '.codex-context-overflow.json');
+  if (!existsSync(markerPath)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(markerPath, 'utf-8')) as Record<string, unknown>;
+    unlinkSync(markerPath);
+    if (
+      typeof parsed.thread_id !== 'string'
+      || (typeof parsed.turn_id !== 'string' && parsed.turn_id !== null)
+      || parsed.reason !== 'contextWindowExceeded'
+      || typeof parsed.timestamp !== 'string'
+    ) return null;
+    const timestampMs = new Date(parsed.timestamp).getTime();
+    if (!Number.isFinite(timestampMs) || Date.now() - timestampMs > CODEX_OVERFLOW_MARKER_MAX_AGE_MS) {
+      return null;
+    }
+    return parsed as unknown as CodexContextOverflowMarker;
+  } catch {
+    // Atomic producers should prevent partial JSON, but a manually corrupted or
+    // legacy marker must not be reparsed forever on every poll.
+    try { unlinkSync(markerPath); } catch { /* already consumed or inaccessible */ }
+    return null;
+  }
+}
+
 /**
  * Dedup hash TTL and count cap. TTL is the primary eviction rule — a hash
  * older than this is no longer treated as a duplicate. The count cap is a
@@ -133,6 +185,7 @@ export class FastChecker {
   private ctxSessionStartedAt: number = 0; // when current session_id was first observed — handoff grace window anchor
   private ctxHandoffLeaseId: string | null = null;
   private ctxHandoffQueuedLogAt: number = 0;
+  private ctxBaselineLoggedForWindow: number | null = null;
   private ctxCircuitRestarts: number[] = []; // timestamps of recent context-triggered restarts
   private ctxHandoffFires: number[] = [];    // timestamps of recent Tier-2 handoff fires (cooperative-restart loop backstop)
   private ctxCircuitBrokenAt: number | null = null; // when circuit tripped (null = healthy)
@@ -1190,6 +1243,15 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       }
     }
 
+    // Structured app-server overflow signals are authoritative and do not depend
+    // on percentage telemetry, which may be absent or followed by a failed zero.
+    const overflow = consumeCodexContextOverflowMarker(this.paths.stateDir);
+    if (overflow) {
+      this.log(`Codex context overflow marker consumed for thread ${overflow.thread_id.slice(0, 8)}…`);
+      this.forceContextRestart('Codex app-server contextWindowExceeded', overflow.thread_id);
+      return;
+    }
+
     // Read the bridge file written by hook-context-status
     const statusPath = join(this.paths.stateDir, 'context_status.json');
     if (!existsSync(statusPath)) return;
@@ -1197,6 +1259,8 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     let pct: number | null = null;
     let exceeds200k = false;
     let rawTokens: number | null = null;
+    let contextWindowSize: number | null = null;
+    let contextState: string | null = null;
     try {
       const raw = readFileSync(statusPath, 'utf-8');
       const data = JSON.parse(raw);
@@ -1204,20 +1268,33 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       if (age > 10 * 60_000) return; // stale file — skip
       pct = typeof data.used_percentage === 'number' ? data.used_percentage : null;
       exceeds200k = Boolean(data.exceeds_200k_tokens);
+      contextState = typeof data.context_state === 'string' ? data.context_state : null;
+      if (
+        typeof data.context_window_size === 'number'
+        && Number.isFinite(data.context_window_size)
+        && data.context_window_size > 0
+      ) {
+        contextWindowSize = data.context_window_size;
+      }
 
       // RAW token count from the statusLine bridge (hook-context-status writes
-      // current_usage verbatim from Claude Code). This is the KEY signal that lets
-      // us measure against the REAL model window instead of CC's fixed 200K. Sum
-      // the four occupancy components CC itself counts toward the window: fresh
-      // input, both cache tiers, and generated output. Absent/malformed → null,
-      // and we fall back to CC's used_percentage below.
+      // current_usage verbatim from Claude Code). This is the current-turn
+      // occupancy signal. Count only fresh input and generated output; cache
+      // read/creation fields are not additional current-turn occupancy. Absent/
+      // malformed → null, and we fall back to CC's used_percentage below.
       const cu = data.current_usage;
       if (cu && typeof cu === 'object') {
+        const inputTokens =
+          typeof cu.input_tokens === 'number' && Number.isFinite(cu.input_tokens)
+            ? cu.input_tokens
+            : 0;
+        const outputTokens =
+          typeof cu.output_tokens === 'number' && Number.isFinite(cu.output_tokens)
+            ? cu.output_tokens
+            : 0;
         const sum =
-          (typeof cu.input_tokens === 'number' ? cu.input_tokens : 0)
-          + (typeof cu.cache_creation_input_tokens === 'number' ? cu.cache_creation_input_tokens : 0)
-          + (typeof cu.cache_read_input_tokens === 'number' ? cu.cache_read_input_tokens : 0)
-          + (typeof cu.output_tokens === 'number' ? cu.output_tokens : 0);
+          inputTokens
+          + outputTokens;
         if (sum > 0) rawTokens = sum;
       }
 
@@ -1253,15 +1330,17 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       }
     } catch { return; }
 
-    // Measure context % against the REAL model window, not CC's fixed 200K.
-    // realPct = rawTokens / realWindow(model). Fall back to CC's used_percentage
-    // ONLY when the raw token count is absent (older CC, or a malformed payload) —
-    // and log that degrade so the churn regression is visible if CC ever stops
-    // providing current_usage. On a 1M model this makes a 60% handoff fire at
-    // ~600K real tokens (a genuine backstop that lets CC compact along the way)
-    // rather than at ~120K, which is what caused the restart churn.
+    // The structured marker is the sole trigger for an overflow restart. Once it
+    // has been consumed, retained old-thread usage is informational only until a
+    // normal token event from the fresh thread replaces this recovery state.
+    if (contextState === 'overflow' || contextState === 'recovering') return;
+
+    // Measure current-turn occupancy against the actual context window. Prefer the
+    // positive finite denominator reported by the bridge; older bridge payloads
+    // fall back to the model-derived window. Fall back to CC's used_percentage
+    // ONLY when current_usage is absent (older CC, or a malformed payload).
     const model = this.agent.getConfig().model;
-    const realWindow = realContextWindow(model);
+    const realWindow = contextWindowSize ?? realContextWindow(model);
     let realPct: number | null;
     if (rawTokens !== null) {
       realPct = (rawTokens / realWindow) * 100;
@@ -1269,10 +1348,24 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       realPct = pct;
       if (pct !== null) {
         this.log(
-          `Context: current_usage absent — falling back to CC used_percentage (${Math.round(pct)}%, `
-          + `200K-based). Real-window measurement disabled this tick.`,
+          `Context: current-turn occupancy absent — falling back to CC used_percentage (${Math.round(pct)}%, `
+          + `effective denominator ${realWindow} tokens not used this tick).`,
         );
       }
+    }
+
+    if (
+      rawTokens !== null
+      && shouldLogContextBaseline(this.ctxBaselineLoggedForWindow, realWindow, rawTokens)
+    ) {
+      this.log(
+        formatContextBaseline(
+          rawTokens,
+          realWindow,
+          contextWindowSize === null ? 'model fallback' : 'bridge context_window_size',
+        ),
+      );
+      this.ctxBaselineLoggedForWindow = realWindow;
     }
 
     // Check PTY output for hard API overflow errors (always act regardless of threshold config).
@@ -1440,7 +1533,7 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
    * Writes .force-fresh + .restart-planned, then triggers sessionRefresh().
    * The circuit breaker prevents runaway restart loops.
    */
-  private forceContextRestart(reason: string): void {
+  private forceContextRestart(reason: string, overflowThreadId: string | null = null): void {
     const now = Date.now();
 
     // Update and check circuit breaker window (persisted to disk — survives --continue restarts)
@@ -1500,11 +1593,27 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     // Write .force-fresh + .restart-planned (hardRestart from src/bus/system.ts)
     hardRestart(this.paths, this.agent.name, `CONTEXT-FORCE-RESTART: ${reason}`);
 
-    // Reset context_status.json so the new session's FastChecker doesn't re-trigger
-    // Tier 2 immediately by reading the stale high-% value from the previous session.
+    // Recovery telemetry must remain explicitly unknown until the new thread's
+    // first token-usage notification becomes authoritative (including valid zero).
     const statusPath = join(this.paths.stateDir, 'context_status.json');
     try {
-      writeFileSync(statusPath, JSON.stringify({ used_percentage: 0, exceeds_200k_tokens: false, written_at: new Date().toISOString() }));
+      let prior: Record<string, unknown> = {};
+      try {
+        const parsed = JSON.parse(readFileSync(statusPath, 'utf-8'));
+        if (parsed && typeof parsed === 'object') prior = parsed;
+      } catch { /* no trustworthy prior status */ }
+      writeFileSync(statusPath, JSON.stringify({
+        ...prior,
+        used_percentage: typeof prior.used_percentage === 'number' && prior.used_percentage > 0
+          ? prior.used_percentage
+          : null,
+        current_usage: prior.current_usage && typeof prior.current_usage === 'object'
+          ? prior.current_usage
+          : null,
+        session_id: typeof prior.session_id === 'string' ? prior.session_id : overflowThreadId,
+        context_state: 'recovering',
+        written_at: new Date().toISOString(),
+      }));
     } catch { /* non-fatal */ }
 
     // sessionRefresh() does stop() + start(); shouldContinue() will return false

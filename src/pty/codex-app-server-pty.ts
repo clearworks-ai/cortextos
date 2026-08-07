@@ -71,6 +71,21 @@ interface GoalResponse {
   } | null;
 }
 
+interface ContextStatusPayload {
+  used_percentage: number | null;
+  context_window_size: number;
+  exceeds_200k_tokens: boolean;
+  current_usage: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_input_tokens: number;
+    cache_creation_input_tokens: number;
+  } | null;
+  session_id: string | null;
+  context_state: 'normal' | 'overflow';
+  written_at: string;
+}
+
 const THREAD_PERMISSION_OVERRIDES = {
   approvalPolicy: 'never',
   sandbox: 'danger-full-access',
@@ -126,6 +141,8 @@ export class CodexAppServerPTY {
   private _telegramApi: TelegramAPI | null = null;
   private _chatId: string | null = null;
   private _typingLastSent = 0;
+  private _lastTrustworthyContextStatus: ContextStatusPayload | null = null;
+  private _overflowIncident: { threadId: string; turnId: string | null } | null = null;
 
   constructor(env: CtxEnv, config: AgentConfig, logPath?: string) {
     this._env = env;
@@ -767,11 +784,16 @@ export class CodexAppServerPTY {
         this._outputBuffer.push('[goal] cleared\n');
         break;
       case 'error':
+        this.handleStructuredError(params);
         this._activeTurnId = null;
         this._outputBuffer.push(`[codex-app-server] error: ${JSON.stringify(params)}\n`);
         this.rejectTurnCompletion(new Error(JSON.stringify(params)));
         break;
       case 'thread/tokenUsage/updated':
+        if (typeof params.threadId === 'string' && params.threadId !== this._threadId) {
+          this._outputBuffer.push(`[codex-app-server:event] ${method} ignored for inactive thread\n`);
+          break;
+        }
         this.writeContextStatus(params);
         this.appendCodexTokenLog(params);
         this._outputBuffer.push(`[codex-app-server:event] ${method}\n`);
@@ -785,6 +807,93 @@ export class CodexAppServerPTY {
         break;
       default:
         this._outputBuffer.push(`[codex-app-server:event] ${method}\n`);
+    }
+  }
+
+  /** Persist the exact terminal context-overflow signal for daemon recovery. */
+  private handleStructuredError(params: Record<string, unknown>): void {
+    const error = isRecord(params.error) ? params.error : null;
+    const threadId = typeof params.threadId === 'string' ? params.threadId : null;
+    if (
+      error?.codexErrorInfo !== 'contextWindowExceeded'
+      || params.willRetry !== false
+      || !threadId
+      || threadId !== this._threadId
+    ) return;
+
+    const turnId = typeof params.turnId === 'string' ? params.turnId : this._activeTurnId;
+    if (
+      this._overflowIncident?.threadId === threadId
+      && this._overflowIncident.turnId === turnId
+    ) return;
+    this._overflowIncident = { threadId, turnId };
+
+    const timestamp = new Date().toISOString();
+    const prior = this.getTrustworthyContextStatus(threadId);
+    const overflowStatus: ContextStatusPayload = prior
+      ? { ...prior, context_state: 'overflow', written_at: timestamp }
+      : {
+          used_percentage: null,
+          context_window_size: this._config.codex_context_cap ?? 256000,
+          exceeds_200k_tokens: false,
+          current_usage: null,
+          session_id: threadId,
+          context_state: 'overflow',
+          written_at: timestamp,
+        };
+
+    try {
+      atomicWriteSync(join(this._stateDir, '.codex-context-overflow.json'), JSON.stringify({
+        thread_id: threadId,
+        turn_id: turnId,
+        reason: 'contextWindowExceeded',
+        timestamp,
+      }));
+      atomicWriteSync(join(this._stateDir, 'context_status.json'), JSON.stringify(overflowStatus));
+    } catch {
+      // Non-fatal: the turn still fails normally and the existing watchdog remains available.
+    }
+  }
+
+  /** Recover positive same-thread telemetry across an adapter/daemon restart. */
+  private getTrustworthyContextStatus(threadId: string): ContextStatusPayload | null {
+    if (
+      this._lastTrustworthyContextStatus?.session_id === threadId
+      && this._lastTrustworthyContextStatus.used_percentage !== null
+      && this._lastTrustworthyContextStatus.used_percentage > 0
+    ) return this._lastTrustworthyContextStatus;
+
+    try {
+      const parsed = JSON.parse(readFileSync(join(this._stateDir, 'context_status.json'), 'utf-8'));
+      const usage = isRecord(parsed?.current_usage) ? parsed.current_usage : null;
+      if (
+        !isRecord(parsed)
+        || parsed.session_id !== threadId
+        || typeof parsed.used_percentage !== 'number'
+        || parsed.used_percentage <= 0
+        || typeof parsed.context_window_size !== 'number'
+        || !usage
+      ) return null;
+      return {
+        used_percentage: parsed.used_percentage,
+        context_window_size: parsed.context_window_size,
+        exceeds_200k_tokens: Boolean(parsed.exceeds_200k_tokens),
+        current_usage: {
+          input_tokens: typeof usage.input_tokens === 'number' ? usage.input_tokens : 0,
+          output_tokens: typeof usage.output_tokens === 'number' ? usage.output_tokens : 0,
+          cache_read_input_tokens: typeof usage.cache_read_input_tokens === 'number'
+            ? usage.cache_read_input_tokens
+            : 0,
+          cache_creation_input_tokens: typeof usage.cache_creation_input_tokens === 'number'
+            ? usage.cache_creation_input_tokens
+            : 0,
+        },
+        session_id: threadId,
+        context_state: 'normal',
+        written_at: typeof parsed.written_at === 'string' ? parsed.written_at : new Date().toISOString(),
+      };
+    } catch {
+      return null;
     }
   }
 
@@ -887,7 +996,36 @@ export class CodexAppServerPTY {
     const outputTokens = current && typeof current.outputTokens === 'number' ? current.outputTokens : 0;
     const cachedInputTokens = current && typeof current.cachedInputTokens === 'number' ? current.cachedInputTokens : 0;
 
-    const payload = JSON.stringify({
+    const eventThreadId = typeof params.threadId === 'string' ? params.threadId : this._threadId;
+    const isFailedZeroForOverflowedThread = currentTokens === 0
+      && eventThreadId !== null
+      && this._overflowIncident?.threadId === eventThreadId;
+    if (isFailedZeroForOverflowedThread) {
+      const prior = this.getTrustworthyContextStatus(eventThreadId);
+      const overflowPayload: ContextStatusPayload = prior
+        ? { ...prior, context_state: 'overflow', written_at: new Date().toISOString() }
+        : {
+            used_percentage: null,
+            context_window_size: cap,
+            exceeds_200k_tokens: false,
+            current_usage: null,
+            session_id: eventThreadId,
+            context_state: 'overflow',
+            written_at: new Date().toISOString(),
+          };
+      try {
+        atomicWriteSync(join(this._stateDir, 'context_status.json'), JSON.stringify(overflowPayload));
+      } catch {
+        // Non-fatal: FastChecker will skip stale/missing files gracefully.
+      }
+      return;
+    }
+
+    if (eventThreadId !== this._overflowIncident?.threadId) {
+      this._overflowIncident = null;
+    }
+
+    const statusPayload: ContextStatusPayload = {
       used_percentage: usedPct,
       context_window_size: cap,
       exceeds_200k_tokens: currentTokens !== null ? currentTokens > 200000 : false,
@@ -897,9 +1035,14 @@ export class CodexAppServerPTY {
         cache_read_input_tokens: cachedInputTokens,
         cache_creation_input_tokens: 0,
       },
-      session_id: this._threadId,
+      session_id: eventThreadId,
+      context_state: 'normal',
       written_at: new Date().toISOString(),
-    });
+    };
+    if (currentTokens !== null && currentTokens > 0 && eventThreadId !== null) {
+      this._lastTrustworthyContextStatus = statusPayload;
+    }
+    const payload = JSON.stringify(statusPayload);
 
     try {
       atomicWriteSync(join(this._stateDir, 'context_status.json'), payload);

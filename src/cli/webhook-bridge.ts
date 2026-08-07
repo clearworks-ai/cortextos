@@ -11,6 +11,7 @@ import { loadEnvFileInto } from '../utils/env.js';
 import { resolvePaths } from '../utils/paths.js';
 import type { BusPaths } from '../types/index.js';
 import { resolveInstanceId } from './resolve-instance-id.js';
+import { createGoogleOidcVerifier } from './google-oidc-verifier.js';
 import {
   ZOOM_OFFICEHOURS_MEETING_ID,
   ZOOM_MAILCHIMP_LIST_ID,
@@ -46,6 +47,8 @@ interface BridgeRuntimeContext {
   firefliesWebhookSecret?: string;
   zoomWebhookSecretToken?: string;
   mailchimpApiKey?: string;
+  gmailShadow?: GmailShadowOptions;
+  calendarShadow?: CalendarShadowOptions;
 }
 
 export interface BridgeServerOptions {
@@ -161,7 +164,22 @@ function findFrameworkRoot(): string {
   return cliDirCandidate;
 }
 
-function resolveBridgeRuntimeContext(instanceId: string): BridgeRuntimeContext {
+const GMAIL_PUSH_AUDIENCE = 'https://hooks.clearworks.ai/relay/gmail-pubsub';
+const GMAIL_PUSH_SERVICE_ACCOUNT = 'gws-agent@cortextos-gws-495505.iam.gserviceaccount.com';
+const GMAIL_PUSH_SUBSCRIPTION = 'projects/cortextos-gws-495505/subscriptions/cortextos-gmail-push-bridge';
+const GOOGLE_PROVIDER_CONFIG_ERROR = 'google_provider_shadow_config_invalid';
+
+function providerFlag(value: string | undefined): boolean {
+  if (value === undefined || value === 'false') return false;
+  if (value === 'true') return true;
+  throw new Error(GOOGLE_PROVIDER_CONFIG_ERROR);
+}
+
+function providerEnv(name: string, envFromFiles: Record<string, string>): string | undefined {
+  return Object.prototype.hasOwnProperty.call(process.env, name) ? process.env[name] : envFromFiles[name];
+}
+
+export function resolveBridgeRuntimeContext(instanceId: string): BridgeRuntimeContext {
   const frameworkRoot = findFrameworkRoot();
   const envFromFiles = readFrameworkEnv(frameworkRoot);
   const org = process.env.CTX_ORG || envFromFiles.CTX_ORG || '';
@@ -170,6 +188,28 @@ function resolveBridgeRuntimeContext(instanceId: string): BridgeRuntimeContext {
   const firefliesWebhookSecret = process.env.FIREFLIES_WEBHOOK_SECRET || envFromFiles.FIREFLIES_WEBHOOK_SECRET || undefined;
   const zoomWebhookSecretToken = process.env.ZOOM_WEBHOOK_SECRET_TOKEN || envFromFiles.ZOOM_WEBHOOK_SECRET_TOKEN || undefined;
   const mailchimpApiKey = process.env.MAILCHIMP_API_KEY || envFromFiles.MAILCHIMP_API_KEY || undefined;
+  const googleProviderEnabled = providerFlag(providerEnv('GOOGLE_PROVIDER_SHADOW_ENABLED', envFromFiles));
+  const calendarShadowEnabled = providerFlag(providerEnv('CALENDAR_WATCH_SHADOW_ENABLED', envFromFiles));
+
+  let gmailShadow: GmailShadowOptions | undefined;
+  if (googleProviderEnabled) {
+    const audience = providerEnv('GMAIL_PUSH_AUDIENCE', envFromFiles);
+    const serviceAccount = providerEnv('GMAIL_PUSH_SERVICE_ACCOUNT', envFromFiles);
+    const subscription = providerEnv('GMAIL_PUSH_SUBSCRIPTION', envFromFiles);
+    if (
+      audience !== GMAIL_PUSH_AUDIENCE
+      || serviceAccount !== GMAIL_PUSH_SERVICE_ACCOUNT
+      || subscription !== GMAIL_PUSH_SUBSCRIPTION
+    ) {
+      throw new Error(GOOGLE_PROVIDER_CONFIG_ERROR);
+    }
+    gmailShadow = {
+      audience,
+      serviceAccount,
+      subscription,
+      verifyOidc: createGoogleOidcVerifier(),
+    };
+  }
 
   if (!bridgeSecret) {
     throw new Error(
@@ -186,6 +226,8 @@ function resolveBridgeRuntimeContext(instanceId: string): BridgeRuntimeContext {
     firefliesWebhookSecret,
     zoomWebhookSecretToken,
     mailchimpApiKey,
+    gmailShadow,
+    calendarShadow: calendarShadowEnabled ? {} : undefined,
   };
 }
 
@@ -941,6 +983,8 @@ const runCommand = new Command('run')
         firefliesWebhookSecret: context.firefliesWebhookSecret,
         zoomWebhookSecretToken: context.zoomWebhookSecretToken,
         mailchimpApiKey: context.mailchimpApiKey,
+        gmailShadow: context.gmailShadow,
+        calendarShadow: context.calendarShadow,
       });
 
       await new Promise<void>((resolve, reject) => {

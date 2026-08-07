@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import stat
 import subprocess
 import sys
 import time
@@ -20,7 +21,7 @@ SCOPES = (
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/calendar.readonly",
 )
-TOKEN_CACHE = Path("/tmp/gws-dwd-token-cache.json")
+TOKEN_CACHE = Path.home() / ".cortextos" / "cortextos1" / "state" / "pa" / "google-provider" / "dwd-token-cache.json"
 KEY_FILE = Path.home() / ".config" / "gws" / "service-account-key.json"
 
 
@@ -69,17 +70,55 @@ def _refresh_token(key_file: Path, now: int) -> tuple[str, int]:
         raise RuntimeError("dwd_token_unavailable") from exc
 
 
+def _read_cache(cache_file: Path) -> dict[str, Any]:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(cache_file, flags)
+    try:
+        metadata = os.fstat(descriptor)
+        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid()
+                or stat.S_IMODE(metadata.st_mode) & 0o077):
+            raise RuntimeError("dwd_cache_invalid")
+        with os.fdopen(descriptor, "r", encoding="utf-8", closefd=False) as handle:
+            value = json.load(handle)
+        if not isinstance(value, dict):
+            raise RuntimeError("dwd_cache_invalid")
+        return value
+    finally:
+        os.close(descriptor)
+
+
+def _write_cache(cache_file: Path, token: str, expiry: int) -> None:
+    cache_file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    parent = cache_file.parent.lstat()
+    if not stat.S_ISDIR(parent.st_mode) or parent.st_uid != os.getuid():
+        raise RuntimeError("dwd_cache_invalid")
+    os.chmod(cache_file.parent, 0o700)
+    temporary = cache_file.parent / f".{cache_file.name}.{os.getpid()}.{os.urandom(8).hex()}.tmp"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(temporary, flags, 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", closefd=False) as handle:
+            json.dump({"token": token, "expiry": expiry}, handle)
+            handle.flush()
+            os.fsync(descriptor)
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, cache_file)
+        os.chmod(cache_file, 0o600)
+    finally:
+        os.close(descriptor)
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def get_token(*, cache_file: Path = TOKEN_CACHE, key_file: Path = KEY_FILE,
               now: float | None = None) -> str:
     """Return a cached or freshly minted DWD token without logging it."""
     current = int(time.time() if now is None else now)
     try:
-        cached = json.loads(cache_file.read_text())
+        cached = _read_cache(cache_file)
         if cached.get("expiry", 0) > current + 60 and isinstance(cached.get("token"), str):
-            try:
-                os.chmod(cache_file, 0o600)
-            except Exception:
-                pass
             return cached["token"]
     except Exception:
         pass
@@ -98,8 +137,7 @@ def get_token(*, cache_file: Path = TOKEN_CACHE, key_file: Path = KEY_FILE,
             raise RuntimeError("dwd_token_unavailable")
         return token
     try:
-        cache_file.write_text(json.dumps({"token": token, "expiry": expiry}))
-        os.chmod(cache_file, 0o600)
+        _write_cache(cache_file, token, expiry)
     except Exception:
         pass
     return token

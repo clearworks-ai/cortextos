@@ -10,7 +10,7 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { tmpdir } from 'os';
 import { createBridgeServer, type BridgeServerOptions } from '../../../src/cli/webhook-bridge';
-import { handleProviderShadowIngress, markCalendarShadowChannelCleanupRequired, readBoundedProviderBody, reconcileCalendarShadowChannel, writeCalendarShadowChannel, writePendingCalendarShadowChannel } from '../../../src/cli/provider-shadow-ingress';
+import { handleProviderShadowIngress, markCalendarShadowChannelCleanupRequired, markCalendarShadowChannelStopped, readBoundedProviderBody, reconcileCalendarShadowChannel, writeCalendarShadowChannel, writePendingCalendarShadowChannel } from '../../../src/cli/provider-shadow-ingress';
 import { getEventCursor } from '../../../src/bus/event-receipt-index';
 import { readEventReceipts, recordIngressReceipt } from '../../../src/bus/event-delivery';
 import { acquireLock, releaseLock } from '../../../src/utils/lock';
@@ -31,7 +31,7 @@ async function listen(options: Partial<BridgeServerOptions> = {}) {
 async function post(base: string, path: string, body = '', headers: Record<string, string | string[]> = {}) {
   return new Promise<{ status: number; text: string; json: Record<string, unknown> }>((resolve, reject) => { const request = httpRequest(new URL(path, base), { method: 'POST', headers }, (response) => { const chunks: Buffer[] = []; response.on('data', (chunk) => chunks.push(Buffer.from(chunk))); response.on('end', () => { const text = Buffer.concat(chunks).toString('utf8'); resolve({ status: response.statusCode ?? 0, text, json: JSON.parse(text) as Record<string, unknown> }); }); }); request.on('error', reject); request.end(body); });
 }
-const gmailBody = (historyId = '10', emailAddress = 'User@Example.com', extra?: Record<string, unknown>) => JSON.stringify({ message: { data: Buffer.from(JSON.stringify({ emailAddress, historyId, ...extra })).toString('base64'), messageId: 'telemetry-only' }, subscription });
+const gmailBody = (historyId = '10', emailAddress = 'Josh@Clearworks.AI', extra?: Record<string, unknown>) => JSON.stringify({ message: { data: Buffer.from(JSON.stringify({ emailAddress, historyId, ...extra })).toString('base64'), messageId: 'telemetry-only' }, subscription });
 const gmailHeaders = { authorization: `Bearer ${token}` };
 const expiration = new Date(now + 60_000).toISOString();
 const pendingUntil = new Date(now + 300_000).toISOString();
@@ -81,7 +81,8 @@ beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'provider-shadow-')); state
 afterEach(() => { vi.restoreAllMocks(); rmSync(root, { recursive: true, force: true }); });
 
 describe('Gmail Pub/Sub shadow ingress', () => {
-  it('authenticates before decoding and records accepted + proposed without transport or raw identity leakage', async () => { const verifier = vi.fn(async (jwt: string) => { expect(jwt).toBe(token); return claims; }); const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('must not call provider')); const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {}); const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true); writeFileSync(join(stateDir, '.fast-checker.pid'), String(process.pid)); const { server, base } = await listen({ gmailShadow: { audience, serviceAccount, subscription, verifyOidc: verifier } }); try { const response = await post(base, '/relay/gmail-pubsub', gmailBody(), gmailHeaders); expect(response.status).toBe(200); expect(response.json).toEqual({ ok: true, mode: 'shadow', disposition: 'accepted' }); const receipts = readEventReceipts(stateDir); expect(receipts.map((entry) => entry.stage)).toEqual(['ingress', 'routing']); expect(receipts[1]).toMatchObject({ routing_state: 'proposed', route: 'pa.comms-check-worker' }); expect(receipts.some((entry) => entry.stage === 'processing')).toBe(false); const persisted = readFileSync(join(stateDir, 'event-receipts.jsonl'), 'utf8'); for (const secret of ['User@Example.com', 'user@example.com', token, subscription, 'telemetry-only']) expect(persisted + response.text).not.toContain(secret); expect(existsSync(join(root, 'inbox'))).toBe(false); expect(existsSync(join(root, 'logs', 'pa', 'inbound-messages.jsonl'))).toBe(false); expect(existsSync(join(root, 'crons.json'))).toBe(false); expect(fetchSpy).not.toHaveBeenCalled(); expect(killSpy).not.toHaveBeenCalled(); expect(consoleSpy).not.toHaveBeenCalled(); } finally { await close(server); } });
+  it('authenticates before decoding and records accepted + proposed without transport or raw identity leakage', async () => { const verifier = vi.fn(async (jwt: string) => { expect(jwt).toBe(token); return claims; }); const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('must not call provider')); const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {}); const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true); writeFileSync(join(stateDir, '.fast-checker.pid'), String(process.pid)); const { server, base } = await listen({ gmailShadow: { audience, serviceAccount, subscription, verifyOidc: verifier } }); try { const response = await post(base, '/relay/gmail-pubsub', gmailBody(), gmailHeaders); expect(response.status).toBe(200); expect(response.json).toEqual({ ok: true, mode: 'shadow', disposition: 'accepted' }); const receipts = readEventReceipts(stateDir); expect(receipts.map((entry) => entry.stage)).toEqual(['ingress', 'routing']); expect(receipts[1]).toMatchObject({ routing_state: 'proposed', route: 'pa.comms-check-worker' }); expect(receipts.some((entry) => entry.stage === 'processing')).toBe(false); const persisted = readFileSync(join(stateDir, 'event-receipts.jsonl'), 'utf8'); for (const secret of ['Josh@Clearworks.AI', 'josh@clearworks.ai', token, subscription, 'telemetry-only']) expect(persisted + response.text).not.toContain(secret); expect(existsSync(join(root, 'inbox'))).toBe(false); expect(existsSync(join(root, 'logs', 'pa', 'inbound-messages.jsonl'))).toBe(false); expect(existsSync(join(root, 'crons.json'))).toBe(false); expect(fetchSpy).not.toHaveBeenCalled(); expect(killSpy).not.toHaveBeenCalled(); expect(consoleSpy).not.toHaveBeenCalled(); } finally { await close(server); } });
+  it('rejects a validly authenticated notification for a mailbox outside the frozen allowlist', async () => { const { server, base } = await listen(); try { const response = await post(base, '/relay/gmail-pubsub', gmailBody('10', 'other@clearworks.ai'), gmailHeaders); expect(response).toMatchObject({ status: 400, json: { error: 'gmail_invalid_payload' } }); expect(readEventReceipts(stateDir)).toEqual([]); } finally { await close(server); } });
   it.each([
     ['signature', async () => { throw new Error(`signature rejected ${token}`); }],
     ['issuer', async () => ({ ...claims, iss: 'evil.example' })],
@@ -289,6 +290,17 @@ describe('Calendar watch shadow ingress', () => {
       const response = await post(base, '/relay/calendar-watch', '', calendarHeaders());
       expect(response).toMatchObject({ status: 503, json: { error: 'calendar_cleanup_required' } });
       for (const secret of ['channel-secret', 'resource-secret', 'channel-token-secret']) expect(response.text).not.toContain(secret);
+    } finally { await close(server); }
+  });
+  it('removes handler eligibility only when Calendar lifecycle marks a channel stopped', async () => {
+    const path = channelFile('channel-secret');
+    expect(existsSync(path)).toBe(true);
+    markCalendarShadowChannelStopped(stateDir, 'channel-secret');
+    expect(existsSync(path)).toBe(false);
+    expect(() => markCalendarShadowChannelStopped(stateDir, 'channel-secret')).not.toThrow();
+    const { server, base } = await listen();
+    try {
+      expect((await post(base, '/relay/calendar-watch', '', calendarHeaders())).json).toEqual({ error: 'calendar_channel_unknown' });
     } finally { await close(server); }
   });
   it('accepts strict v1 active records and rejects corrupt v2 records', async () => {

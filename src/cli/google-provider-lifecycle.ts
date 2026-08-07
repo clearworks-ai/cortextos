@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
+import { withFileLockAsync } from '../utils/lock.js';
 
 export const GOOGLE_PROVIDER_ALLOWLIST = Object.freeze({
   project: 'cortextos-gws-495505',
@@ -184,6 +185,11 @@ export async function gmailStop(deps: GoogleProviderDependencies, options: Mutat
 function readControl(deps: GoogleProviderDependencies): CalendarControl { return readJson(deps, calendarControlPath(deps.stateDir), isCalendarControl) ?? { version: 1, channels: [] }; }
 function writeControl(deps: GoogleProviderDependencies, control: CalendarControl): void { writeJson(deps, calendarControlPath(deps.stateDir), control); }
 function calendarHandle(channelId: string): string { return digest(channelId).slice(0, 24); }
+async function withCalendarLifecycleLock<T>(deps: GoogleProviderDependencies, operation: () => Promise<T>): Promise<T> {
+  const lockRoot = join(deps.stateDir, 'google-provider-calendar-control-lock');
+  mkdirSync(lockRoot, { recursive: true });
+  return withFileLockAsync(lockRoot, operation, { timeoutMs: 30_000 });
+}
 
 export function calendarStatus(deps: GoogleProviderDependencies): LifecycleResult {
   const control = readControl(deps); const active = control.channels.filter((item) => item.status === 'active' && Date.parse(item.expiresAt) > deps.now()); const cleanup = control.channels.filter((item) => item.status === 'cleanup_required');
@@ -193,7 +199,7 @@ export function calendarStatus(deps: GoogleProviderDependencies): LifecycleResul
 async function stopRaw(deps: GoogleProviderDependencies, channelId: string, resourceId: string): Promise<void> {
   await request(deps, `${GOOGLE_PROVIDER_ALLOWLIST.calendarEndpoint}/channels/stop`, { id: channelId, resourceId });
 }
-export async function calendarRegister(deps: GoogleProviderDependencies, options: MutationOptions = {}): Promise<LifecycleResult> {
+async function calendarRegisterUnlocked(deps: GoogleProviderDependencies, options: MutationOptions): Promise<LifecycleResult> {
   if (!assertMutation(options)) return record(deps, { code: 'calendar_register_dry_run', applied: false, status: 'dry_run' });
   const channelId = deps.uuid(); const channelToken = deps.secret(32).toString('base64url');
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(channelId) || channelToken.length < 32) throw new GoogleProviderLifecycleError('calendar_random_invalid');
@@ -237,7 +243,12 @@ export async function calendarRegister(deps: GoogleProviderDependencies, options
   return record(deps, { code: 'calendar_channel_active', applied: true, status: 'active', handle });
 }
 
-export async function calendarStop(deps: GoogleProviderDependencies, handle: string, options: MutationOptions = {}): Promise<LifecycleResult> {
+export async function calendarRegister(deps: GoogleProviderDependencies, options: MutationOptions = {}): Promise<LifecycleResult> {
+  if (!options.apply) return calendarRegisterUnlocked(deps, options);
+  return withCalendarLifecycleLock(deps, () => calendarRegisterUnlocked(deps, options));
+}
+
+async function calendarStopUnlocked(deps: GoogleProviderDependencies, handle: string, options: MutationOptions): Promise<LifecycleResult> {
   if (!/^[a-f0-9]{24}$/.test(handle)) throw new GoogleProviderLifecycleError('calendar_handle_invalid');
   if (!assertMutation(options)) return record(deps, { code: 'calendar_stop_dry_run', applied: false, status: 'dry_run', handle });
   const control = readControl(deps); const channel = control.channels.find((item) => item.handle === handle && item.status !== 'stopped');
@@ -251,13 +262,20 @@ export async function calendarStop(deps: GoogleProviderDependencies, handle: str
   return record(deps, { code: 'calendar_channel_stopped', applied: true, status: 'stopped', handle });
 }
 
+export async function calendarStop(deps: GoogleProviderDependencies, handle: string, options: MutationOptions = {}): Promise<LifecycleResult> {
+  if (!options.apply) return calendarStopUnlocked(deps, handle, options);
+  return withCalendarLifecycleLock(deps, () => calendarStopUnlocked(deps, handle, options));
+}
+
 export async function calendarRenew(deps: GoogleProviderDependencies, options: MutationOptions = {}): Promise<LifecycleResult> {
   if (!assertMutation(options)) return record(deps, { code: 'calendar_renew_dry_run', applied: false, status: 'dry_run' });
-  const before = readControl(deps); const due = before.channels.filter((item) => item.status === 'active' && Date.parse(item.expiresAt) <= deps.now() + DAY_MS);
-  if (!due.length) return record(deps, { code: 'calendar_renew_not_due', applied: false, status: 'active' });
-  const replacement = await calendarRegister(deps, options);
-  for (const old of due) await calendarStop(deps, old.handle, options);
-  return record(deps, { ...replacement, code: 'calendar_channel_renewed' });
+  return withCalendarLifecycleLock(deps, async () => {
+    const before = readControl(deps); const due = before.channels.filter((item) => item.status === 'active' && Date.parse(item.expiresAt) <= deps.now() + DAY_MS);
+    if (!due.length) return record(deps, { code: 'calendar_renew_not_due', applied: false, status: 'active' });
+    const replacement = await calendarRegisterUnlocked(deps, options);
+    for (const old of due) await calendarStopUnlocked(deps, old.handle, options);
+    return record(deps, { ...replacement, code: 'calendar_channel_renewed' });
+  });
 }
 
 export function createDefaultGoogleProviderDependencies(stateDir: string, token: () => Promise<string>, calendarIngress: CalendarIngressLifecycle): GoogleProviderDependencies {

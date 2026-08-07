@@ -49,7 +49,8 @@ CORTEXTOS_BIN = "/opt/homebrew/bin/cortextos"
 # ---------------------------------------------------------------------------
 POLL_INTERVAL = 60          # seconds between history.list calls
 DEBOUNCE_SECS = 120         # wait this long after first delta before spawning
-WATCH_RENEW_SECS = 86400    # not used for history.list, kept for symmetry
+WATCH_RENEW_SECS = 86400    # deterministic provider renewal cadence
+WATCH_RETRY_SECS = 300
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 # ---------------------------------------------------------------------------
 # Hard-exclusion prefilter (same senders/subjects as SKILL.md Step 2.2a)
@@ -220,6 +221,49 @@ def spawn_comms_check_worker(reason: str = "") -> None:
         log.error("cortextos binary not found at %s", CORTEXTOS_BIN)
 
 
+def renew_provider_leases(state: dict[str, Any], now: float) -> None:
+    """Run due Google lease renewals through deterministic CLI code.
+
+    This reuses the existing polling process and remains inert until an
+    operator supplies the approval reference during the provider activation
+    window. Provider output is intentionally not logged.
+    """
+    approval = os.environ.get("GOOGLE_PROVIDER_RENEWAL_APPROVAL", "")
+    if not re.fullmatch(r"[-A-Za-z0-9_/.]{3,128}", approval):
+        return
+    last_attempt = float(state.get("provider_renewal_last_attempt", 0) or 0)
+    last_success = float(state.get("provider_renewal_last_success", 0) or 0)
+    interval = WATCH_RETRY_SECS if last_attempt > last_success else WATCH_RENEW_SECS
+    if last_attempt > 0 and now - last_attempt < interval:
+        return
+
+    state["provider_renewal_last_attempt"] = now
+    framework_root = str(AGENT_DIR.parents[4])
+    command_env = {
+        **os.environ,
+        "CTX_FRAMEWORK_ROOT": framework_root,
+        "CTX_PROJECT_ROOT": framework_root,
+        "CTX_ROOT": str(HOME / ".cortextos" / "cortextos1"),
+        "CTX_INSTANCE_ID": "cortextos1",
+    }
+    commands = (
+        [CORTEXTOS_BIN, "google-provider", "gmail", "renew", "--apply", "--approval", approval],
+        [CORTEXTOS_BIN, "google-provider", "calendar", "renew", "--apply", "--approval", approval],
+    )
+    for command in commands:
+        try:
+            result = subprocess.run(command, capture_output=True, text=True,
+                                    timeout=60, env=command_env)
+        except (OSError, subprocess.TimeoutExpired):
+            log.error("Google provider renewal failed (provider_renewal_exec_failed)")
+            return
+        if result.returncode != 0:
+            log.error("Google provider renewal failed (provider_renewal_command_failed)")
+            return
+    state["provider_renewal_last_success"] = now
+    log.info("Google provider renewal check completed")
+
+
 # ---------------------------------------------------------------------------
 # Self-test mode
 # ---------------------------------------------------------------------------
@@ -352,6 +396,9 @@ def main_loop() -> None:
 
     while running[0]:
         now = time.time()
+
+        renew_provider_leases(state, now)
+        save_state(state)
 
         # Poll history
         result = get_history(history_id)

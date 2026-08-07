@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from 'crypto';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, unlinkSync } from 'fs';
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'http';
 import { join } from 'path';
 import { recordIngressReceipt, recordRejectedIngressReceipt, type EventReceipt, type IngressEvent } from '../bus/event-delivery.js';
@@ -13,6 +13,7 @@ const CALENDAR_HEADER_LIMIT = 512;
 const PROVIDER_RATE_LIMIT_MAX = 60;
 const RATE_WINDOW_MS = 60_000;
 const GOOGLE_ISSUERS = new Set(['accounts.google.com', 'https://accounts.google.com']);
+const GMAIL_SHADOW_MAILBOX = 'josh@clearworks.ai';
 
 export interface GoogleOidcClaims { iss?: unknown; aud?: unknown; exp?: unknown; iat?: unknown; email?: unknown; email_verified?: unknown; }
 export type GoogleOidcVerifier = (jwt: string) => Promise<GoogleOidcClaims>;
@@ -120,7 +121,9 @@ async function handleGmail(request: IncomingMessage, response: ServerResponse, o
   if (!exactObject(envelope, ['message', 'subscription']) || envelope.subscription !== config.subscription || !exactObject(envelope.message, ['data', 'messageId', 'publishTime']) || (envelope.message.messageId !== undefined && (typeof envelope.message.messageId !== 'string' || envelope.message.messageId.length > 256))) throw new ProviderError(400, 'gmail_invalid_envelope');
   let decoded: unknown; try { decoded = JSON.parse(strictBase64(envelope.message.data).toString('utf8')); } catch (error) { if (error instanceof ProviderError) throw error; throw new ProviderError(400, 'gmail_invalid_payload'); }
   if (!exactObject(decoded, ['emailAddress', 'historyId']) || Object.keys(decoded).length !== 2) throw new ProviderError(400, 'gmail_invalid_payload');
-  const mailbox = canonicalMailbox(decoded.emailAddress); const historyId = canonicalNumber(decoded.historyId, 'gmail_invalid_history_id');
+  const mailbox = canonicalMailbox(decoded.emailAddress);
+  if (mailbox !== GMAIL_SHADOW_MAILBOX) throw new ProviderError(400, 'gmail_invalid_payload');
+  const historyId = canonicalNumber(decoded.historyId, 'gmail_invalid_history_id');
   const result = processMonotonic(options, { provider: 'gmail', eventType: 'notification', sourceId: `${mailbox}\u0000${historyId}` }, 'gmail.shadow.notification_high_water', historyId, 'pa.comms-check-worker');
   json(response, 200, { ok: true, mode: 'shadow', disposition: result.disposition });
 }
@@ -221,6 +224,15 @@ export function markCalendarShadowChannelCleanupRequired(stateDir: string, chann
     if (current.version === 2 && current.status === 'cleanup_required') return;
     const stored: StoredCalendarCleanupChannel = { version: 2, status: 'cleanup_required', channel: current.channel, resource: current.resource, token: current.token, expiresAt: current.expiresAt, reason: code };
     writeStoredCalendarChannel(stateDir, channelId, stored);
+  });
+}
+export function markCalendarShadowChannelStopped(stateDir: string, channelId: string): void {
+  if (!channelId || channelId.length > 256) throw new Error('invalid calendar shadow channel');
+  withCalendarChannelLock(stateDir, channelId, () => {
+    const path = channelPath(stateDir, channelId);
+    if (!existsSync(path)) return;
+    readCalendarChannel(stateDir, channelId);
+    unlinkSync(path);
   });
 }
 export function reconcileCalendarShadowChannel(stateDir: string, activation: CalendarShadowChannelActivation): CalendarShadowReconciliation {

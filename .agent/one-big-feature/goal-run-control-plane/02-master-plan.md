@@ -1953,3 +1953,38 @@ private getDefaultAcceptanceChecks(): GoalAcceptanceCheck[] {
 - Event volume and storage growth
 - Thread resource utilization
 - Error patterns and frequency
+
+## Runtime Recovery Addendum — 2026-08-07
+
+### Triggering evidence
+
+The production daemon running with `CXR_GOAL_DURABLE=true` created only the per-agent
+`.retention-observation` marker. It contained no `goal-runs/larry-codex/*.json` files,
+despite prior status messages claiming three run IDs. This is a false-completion risk:
+there is no durable receipt, thread ID, event history, verification record, or restart
+recovery target for those claimed runs.
+
+### Locked remediation scope
+
+1. Make `/goal` persist a run before acknowledging it and report its exact run ID.
+2. Bind the run to an explicit validated repository/worktree contract rather than the
+   agent control directory when a project worktree is required.
+3. Replace fire-and-forget `turn/start` dispatch with a completion-aware, run-scoped
+   lifecycle. Verification may begin only after the matching goal turn is terminal.
+4. Add a bounded daemon-owned periodic tick and startup resume that recover queued,
+   retryable, and expired leased runs without requiring another `/goal` command.
+5. Serialize goal-run dispatch against interactive turns, renew ownership while a goal
+   turn is active, and fail closed on an uncorrelated completion event.
+6. Preserve native `/goal` fallback, require profile-bound acceptance checks, retain
+   append-only run events, and never auto-push, merge, deploy, or delete data.
+7. Add integration proof covering actual `/goal` ingress, on-disk run receipt,
+   asynchronous turn completion before verification, restart recovery, repository
+   binding, and retry-to-pass. A status message alone is never proof of a live run.
+
+### Completion gate
+
+This addendum is PASS only when a real daemon-backed `/goal` invocation creates an
+inspectable run JSON in the expected agent state directory, transitions through a
+matching completed turn before verification, survives a daemon restart, and records
+the validation evidence for its explicitly bound repository. Any missing receipt,
+unbounded race, wrong-worktree execution, or early verification is a FAIL.

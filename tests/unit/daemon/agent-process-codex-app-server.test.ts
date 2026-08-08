@@ -169,6 +169,8 @@ describe('AgentProcess codex-app-server runtime', () => {
 
     const prompt = mockCodexAppServerPty.spawn.mock.calls[0]?.[1] ?? '';
     expect(prompt).toContain('CONTEXT HANDOFF');
+    expect(prompt).toContain('do NOT re-read AGENTS.md or bootstrap files');
+    expect(prompt).not.toContain('Read AGENTS.md and all bootstrap files listed there');
     expect(sendMessage).toHaveBeenCalledWith('12345', '🔄 codex-app-agent restarted (planned): no reason given');
     expect(sendMessage).not.toHaveBeenCalledWith('12345', 'Agent codex-app-agent is back online');
     expect(sendMessage).not.toHaveBeenCalledWith('12345', 'Agent codex-app-agent is back online (context handoff)');

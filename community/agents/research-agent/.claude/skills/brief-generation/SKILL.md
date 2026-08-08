@@ -111,6 +111,23 @@ One sentence explaining why.
 - Content angles must be specific. "Here's a content angle" is not a content angle. "The security incident shows that centralizing OAuth tokens at a vendor is an architectural liability -- frame as why to own your credential layer" is a content angle.
 - If a brief cannot be written with enough evidence (source returned only a title), mark confidence as `low` and note what additional research is needed.
 
+### AEC newsletter defaults
+
+When the selected signals are being assembled into the AEC newsletter, use Josh's personal opening by default:
+
+```text
+Hi all —
+
+Looking at the last few weeks of AEC tech news, there are three trends I keep seeing. First, [trend one]. Second, [trend two]. Finally, [trend three].
+```
+
+- Keep the opening personal, specific, and grounded in the selected source set. Use the First / Second / Finally structure when three trends are present.
+- Write complete sentences throughout the newsletter. Integrate source limitations into prose, such as “The article supports this adoption hypothesis, but it does not provide a measured productivity result.” Avoid fragmentary labels such as “Medium-high confidence” or “Claim safety: medium.”
+- Preserve the seven-item format: two-to-three sentence opening, one linked item with operator relevance and a marker per story, then one deeper actionable section.
+- Apply a hard Clearworks relevance gate. Replace generic design showcases, broad housing or legal stories, and weak title-only items with clearer AEC technology, workflow, data, labor, or adoption signals.
+- Pull one relevant source image for each selected item when the output is intended for email or Mailchimp. Save images under `research/output/YYYY-MM-DD/images/`, include source attribution, and use hosted image URLs in the email HTML.
+- For the current AEC newsletter workflow, Josh's directive is one Clearworks-branded HTML campaign to the combined `AEC` segment. Use the Clearworks sender, palette, personalized intro, and sourced images. Do not apply the AIA/non-AIA split used for office-hours recap campaigns unless Josh explicitly requests that distribution.
+
 ---
 
 ## Run Summary Format

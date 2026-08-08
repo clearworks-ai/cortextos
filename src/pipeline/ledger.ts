@@ -134,7 +134,14 @@ const GENESIS = 'GENESIS';
 const AUTHORED_STAGES = new Set<Stage>(['synthesize', 'plan', 'specs', 'review']);
 const SHA_HEX_RE = /^[a-f0-9]{64}$/;
 const SLUG_RE = /^[a-z0-9-]+$/;
-const WORKER_AUTHORS = new Set<string>(['opencode', 'opencoder']);
+// Planning workers whose signed replies may author plan/spec ledger rows.
+// Codexer remains the implementation worker; it is intentionally not a
+// planning author. OpenCode is the optional worker-dispatch planning route.
+// Signed planning receipts may come from the implementation runtime when a
+// legacy/explicit GATE:plan was dispatched there. This does not change role
+// routing (Codexer remains implementation-only for new dispatches); it only
+// lets the verifier validate an already signed, scope-bound return message.
+const WORKER_AUTHORS = new Set<string>(['opencode', 'opencoder', 'codexer']);
 // Larry has a legacy Claude identity and a live Codex identity. Both are trusted
 // planning dispatchers; worker replies remain HMAC-bound to the actual sender.
 const PLANNING_DISPATCHERS = new Set<string>(['larry', 'larry-codex']);
@@ -395,6 +402,26 @@ export function defaultTranscriptRoot(): string {
   return resolve(process.env.PIPELINE_TRANSCRIPT_ROOT_OVERRIDE || join(homedir(), '.claude', 'projects'));
 }
 
+/** Runtime transcript roots accepted by the normal transcript-backed gate.
+ * Claude remains the primary root; Codex sessions are a first-class runtime
+ * after the migration. An explicit override remains strict and single-root.
+ */
+export function defaultTranscriptRoots(): string[] {
+  if (process.env.PIPELINE_TRANSCRIPT_ROOT_OVERRIDE) return [defaultTranscriptRoot()];
+  return [
+    defaultTranscriptRoot(),
+    resolve(join(homedir(), '.codex', 'sessions')),
+  ];
+}
+
+function resolveTranscriptInsideRoots(pathToCheck: string, roots: string[]): string | null {
+  for (const root of roots) {
+    const real = ensureInsideRoot(pathToCheck, root);
+    if (real) return real;
+  }
+  return null;
+}
+
 export function defaultBusStoreRoot(): string {
   return resolve(
     process.env.PIPELINE_BUS_STORE_ROOT_OVERRIDE || join(homedir(), '.cortextos', 'cortextos1'),
@@ -537,6 +564,37 @@ function findBusMessageById(busStoreRoot: string, id: string): { path: string; m
   return null;
 }
 
+type GateDirective = {
+  command: 'build' | 'plan' | 'specs';
+  values: Map<string, string>;
+};
+
+function parseGateDirective(text: string): GateDirective | null {
+  const directiveLines = text.split(/\r?\n/).filter((line) => line.startsWith('GATE:'));
+  if (directiveLines.length !== 1) return null;
+
+  const parts = directiveLines[0].split(' ');
+  const command = parts[1];
+  if (
+    parts.length < 2
+    || !['build', 'plan', 'specs'].includes(command)
+    || parts.some((part, index) => index > 1 && !/^[a-z][a-z0-9-]*=[^\s=]+$/.test(part))
+  ) {
+    return null;
+  }
+
+  const values = new Map<string, string>();
+  for (const part of parts.slice(2)) {
+    const separator = part.indexOf('=');
+    const key = part.slice(0, separator);
+    const value = part.slice(separator + 1);
+    if (values.has(key)) return null;
+    values.set(key, value);
+  }
+
+  return { command: command as GateDirective['command'], values };
+}
+
 function resolveDispatchForReply(opts: {
   busStoreRoot: string;
   busKey: string;
@@ -570,12 +628,12 @@ function resolveDispatchForReply(opts: {
     };
   }
 
-  const slug = msg.text.match(/\bslug=([a-z0-9-]+)\b/)?.[1];
-  const isBuild = /\bGATE:\s*build\b/i.test(msg.text);
-  const isPlanning = /\bGATE:\s*plan\b/i.test(msg.text);
-  const requestedStage = msg.text.match(/\bstage=(plan|specs)\b/)?.[1];
-  const requestedParentSha = msg.text.match(/\bscope-sha=([a-f0-9]{64})\b/i)?.[1]?.toLowerCase();
-  const isBoundPlanningRequest = isPlanning
+  const directive = parseGateDirective(msg.text);
+  const slug = directive?.values.get('slug');
+  const requestedStage = directive?.values.get('stage');
+  const requestedParentSha = directive?.values.get('scope-sha')?.toLowerCase();
+  const isBuild = directive?.command === 'build';
+  const isBoundPlanningRequest = (directive?.command === 'plan' || directive?.command === 'specs')
     && requestedStage === opts.expectedStage
     && requestedParentSha === opts.expectedParentSha;
   if ((!isBuild && !isBoundPlanningRequest) || slug !== opts.expectedSlug) {
@@ -805,9 +863,9 @@ export function verifyTranscriptAuthorship(opts: {
   transcriptRoot?: string;
   expectedSessionId?: string;
 }): ProvenanceResult {
-  const transcriptRoot = opts.transcriptRoot || defaultTranscriptRoot();
+  const transcriptRoots = opts.transcriptRoot ? [opts.transcriptRoot] : defaultTranscriptRoots();
   const transcriptPath = resolve(opts.transcriptPath);
-  const realTranscript = ensureInsideRoot(transcriptPath, transcriptRoot);
+  const realTranscript = resolveTranscriptInsideRoots(transcriptPath, transcriptRoots);
   if (!realTranscript || !existsSync(realTranscript)) {
     return {
       ok: false,
@@ -890,9 +948,6 @@ export function emitLedgerRow(opts: {
     ? GENESIS
     : prevRow?.artifact_sha256;
 
-  if (opts.stage !== 'research' && opts.stage !== 'exempt' && !prevSha) {
-    throw new Error(`CHAIN_BREAK: missing prior-stage row for ${opts.slug}:${opts.stage}`);
-  }
   if (opts.stage === 'true-verify' || opts.stage === 'staging-verify') {
     if (!opts.evidencePath || !existsSync(opts.evidencePath) || statSync(opts.evidencePath).size === 0) {
       throw new Error(`Artifact/evidence missing or empty for ${opts.stage}`);
@@ -941,6 +996,10 @@ export function emitLedgerRow(opts: {
     transcriptSha = provenance.transcript_sha256;
     transcriptRealpath = provenance.transcript_realpath;
     provenanceMode = mode === 'worker-dispatch' ? mode : undefined;
+  }
+
+  if (opts.stage !== 'research' && opts.stage !== 'exempt' && !prevSha) {
+    throw new Error(`CHAIN_BREAK: missing prior-stage row for ${opts.slug}:${opts.stage}`);
   }
 
   mkdirSync(dirname(ledgerPath), { recursive: true });
@@ -1167,12 +1226,12 @@ export function verifyChainDetailed(opts: {
           detail: `Transcript missing for ${row.slug}:${row.stage}: ${row.transcript_path}`,
         };
       }
-      const realTranscript = ensureInsideRoot(
-        row.transcript_path,
-        mode === 'worker-dispatch'
-          ? (opts.busStoreRoot || defaultBusStoreRoot())
-          : (opts.transcriptRoot || defaultTranscriptRoot()),
-      );
+      const realTranscript = mode === 'worker-dispatch'
+        ? ensureInsideRoot(row.transcript_path, opts.busStoreRoot || defaultBusStoreRoot())
+        : resolveTranscriptInsideRoots(
+          row.transcript_path,
+          opts.transcriptRoot ? [opts.transcriptRoot] : defaultTranscriptRoots(),
+        );
       if (!realTranscript) {
         return {
           ok: false,

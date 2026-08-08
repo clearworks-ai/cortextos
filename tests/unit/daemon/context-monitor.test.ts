@@ -9,6 +9,7 @@ import {
   handoffGraceMs,
   realContextWindow,
   shouldLogContextBaseline,
+  shouldUseCurrentUsageOccupancy,
 } from '../../../src/daemon/fast-checker.js';
 import type { BusPaths } from '../../../src/types/index.js';
 
@@ -587,6 +588,22 @@ describe('realPct replaces CC 200K-based used_percentage', () => {
     expect(shouldLogContextBaseline(997_500, 997_500, 278_986)).toBe(false);
     expect(shouldLogContextBaseline(997_500, 1_000_000, 278_986)).toBe(true);
     expect(shouldLogContextBaseline(null, 997_500, null)).toBe(false);
+  });
+
+  it('keeps OpenCode cumulative used_percentage when current_usage is latest-step telemetry', () => {
+    const usedPercentage = 71.5673828125;
+    const latestStepTokens = 1_203 + 42;
+    const currentTurnPct = (latestStepTokens / 204_800) * 100;
+
+    expect(shouldUseCurrentUsageOccupancy('opencode', false)).toBe(false);
+    expect(usedPercentage).toBeCloseTo(71.567, 3);
+    expect(currentTurnPct).toBeCloseTo(0.6079, 3);
+    expect(usedPercentage).not.toBeCloseTo(currentTurnPct, 2);
+  });
+
+  it('allows Codex current_usage occupancy and an explicit OpenCode cumulative marker', () => {
+    expect(shouldUseCurrentUsageOccupancy('codex-app-server', false)).toBe(true);
+    expect(shouldUseCurrentUsageOccupancy('opencode', true)).toBe(true);
   });
 });
 

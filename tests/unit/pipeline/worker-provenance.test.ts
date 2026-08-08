@@ -282,6 +282,25 @@ describe('worker-dispatch provenance', () => {
     expect(() => emitWorkerStage('plan', planPath, 'R1', returnPath, 200)).toThrow(/PROVENANCE_MISMATCH/);
   });
 
+  it.each([
+    ['split-line', 'GATE:\nplan slug=hard-spec-gate stage=plan scope-sha=' + 'a'.repeat(64)],
+    ['duplicate directives', 'GATE: plan slug=hard-spec-gate stage=plan scope-sha=' + 'a'.repeat(64) + '\nGATE: build slug=hard-spec-gate'],
+    ['prose-prefixed directive', 'please run GATE: plan slug=hard-spec-gate stage=plan scope-sha=' + 'a'.repeat(64)],
+    ['mixed directive tokens', 'GATE: plan build slug=hard-spec-gate stage=plan scope-sha=' + 'a'.repeat(64)],
+  ])('rejects a %s dispatch directive', (_label, text) => {
+    emitResearch();
+    writeBusMessage(join(busStoreRoot, 'processed', 'opencode'), {
+      id: 'D1', from: 'larry', to: 'opencode', text, busKey,
+    });
+    const returnPath = writeBusMessage(join(busStoreRoot, 'processed', 'larry'), {
+      id: 'R1', from: 'opencode', to: 'larry', reply_to: 'D1',
+      text: 'done\nPROVENANCE: stage=plan slug=hard-spec-gate artifact-sha256=' + describeArtifact(planPath).sha256,
+      busKey,
+    });
+
+    expect(() => emitWorkerStage('plan', planPath, 'R1', returnPath, 200)).toThrow(/PROVENANCE_MISMATCH/);
+  });
+
   it('fails emit when the return message is signed from larry instead of a worker', () => {
     emitResearch();
     seedDispatch('D1');

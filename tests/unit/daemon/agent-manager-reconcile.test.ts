@@ -194,4 +194,15 @@ describe('RW-3: reconcileDeadRegistryEntry (via inspectAgentOp start path)', () 
     expect(() => am.inspectAgentOp('start', 'muse')).not.toThrow();
     expect((am as unknown as AgentsMap).agents.has('muse')).toBe(false);
   });
+
+  it('status snapshot marks a mapped running entry stopped when its pid is gone', () => {
+    (am as unknown as AgentsMap).agents.set('muse', makeEntry({ pid: 4242, hostPid: 4241 }));
+    vi.spyOn(process, 'kill').mockImplementation(() => {
+      const err = new Error('kill ESRCH') as NodeJS.ErrnoException;
+      err.code = 'ESRCH';
+      throw err;
+    });
+
+    expect(am.getAllStatuses()[0].status).toBe('stopped');
+  });
 });

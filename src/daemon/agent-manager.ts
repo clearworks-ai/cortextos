@@ -1063,7 +1063,7 @@ export class AgentManager {
   /**
    * Stop a specific agent.
    */
-  async stopAgent(name: string): Promise<void> {
+  async stopAgent(name: string, userInitiated = false): Promise<void> {
     const entry = this.agents.get(name);
     if (!entry) {
       console.log(`[agent-manager] Agent ${name} not found`);
@@ -1081,6 +1081,15 @@ export class AgentManager {
     if (scheduler) {
       scheduler.stop();
       this.cronSchedulers.delete(name);
+    }
+
+    // An explicit user stop/disable wins against a racing queued restart.
+    // Internal callers (restartAgent, stopAll) retain the safety-net honor path.
+    if (userInitiated) {
+      if (this.pendingRestarts.delete(name)) {
+        console.log(`[agent-manager] Dropped queued restart for ${name} — explicit user stop/disable wins.`);
+      }
+      return;
     }
 
     // BUG-031: honor any restart that was queued while we were stopping.
@@ -1169,7 +1178,13 @@ export class AgentManager {
   getAllStatuses(): AgentStatus[] {
     const statuses: AgentStatus[] = [];
     for (const [, entry] of this.agents) {
-      statuses.push(entry.process.getStatus());
+      const status = entry.process.getStatus();
+      // A mapped entry whose running pid has disappeared is stopped, not
+      // running. Correct the returned snapshot without mutating AgentProcess.
+      if (status.status === 'running' && (!status.pid || !this.isPidAlive(status.pid))) {
+        status.status = 'stopped';
+      }
+      statuses.push(status);
     }
     return statuses;
   }

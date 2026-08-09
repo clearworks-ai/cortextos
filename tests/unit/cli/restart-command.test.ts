@@ -5,7 +5,23 @@
  * pins the command-level wiring (name, required argument, --instance
  * option, description) instead of duplicating the marker-write tests.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+const sentRequests: Array<Record<string, unknown>> = [];
+vi.mock('../../../src/daemon/ipc-server.js', () => ({
+  IPCClient: class {
+    constructor(_instance: string) { /* no-op */ }
+    async isDaemonRunning() { return true; }
+    async send(req: Record<string, unknown>) {
+      sentRequests.push(req);
+      return { success: true, data: `ok:${req.type}` };
+    }
+  },
+}));
+vi.mock('../../../src/cli/stop.js', () => ({
+  writeStopMarker: vi.fn(),
+}));
+
 import { restartCommand } from '../../../src/cli/restart';
 
 describe('issue #328: cortextos restart <agent>', () => {
@@ -39,5 +55,19 @@ describe('issue #328: cortextos restart <agent>', () => {
     expect(desc).toContain('stop');
     expect(desc).toContain('start');
     expect(desc).toContain('daemon');
+  });
+});
+
+describe('disable-resurrection fix: restart stop-half is not user-initiated', () => {
+  beforeEach(() => { sentRequests.length = 0; });
+
+  it('sends userInitiated:false and then a follow-up start-agent', async () => {
+    await restartCommand.parseAsync(['alice'], { from: 'user' });
+
+    const stopReq = sentRequests.find(r => r.type === 'stop-agent');
+    expect(stopReq).toBeDefined();
+    expect(stopReq?.agent).toBe('alice');
+    expect(stopReq?.userInitiated).toBe(false);
+    expect(sentRequests.some(r => r.type === 'start-agent' && r.agent === 'alice')).toBe(true);
   });
 });

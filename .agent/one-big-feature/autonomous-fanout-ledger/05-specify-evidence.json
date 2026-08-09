@@ -1,0 +1,16 @@
+{
+  "schema": "specify-evidence/v1",
+  "spec": ".agent/one-big-feature/autonomous-fanout-ledger/03-specs/01-pilot.md",
+  "research": ".agent/one-big-feature/autonomous-fanout-ledger/01-research.md",
+  "plan": ".agent/one-big-feature/autonomous-fanout-ledger/02-master-plan.md",
+  "sha256": {
+    "research": "0c61137c4754de987d10b388a7ec403c5773d68980c5a869f43b222527c668f5",
+    "plan": "557692838e4042ffd96fe266a7bc93b8109288522d3ecd67f5264fed9cae3038",
+    "spec": "cb70a9a2ed660df45d2147bb5cb21005f883df092641e637ae138b448abe9a5f",
+    "goal": "2b03bbaebfd12d81d88d5956912e60d41a8f1eea973d4824c15d6f1d2f6f208e"
+  },
+  "grounding": "local source probes + Fable adversarial review",
+  "ui_mockup": "not-applicable-backend-only",
+  "status": "PASS",
+  "note": "These hashes bind the final planning bytes for this review; the goal runner must recheck them before dispatch. No runtime fixture or live ledger is mutated by this evidence marker."
+}

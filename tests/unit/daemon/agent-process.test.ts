@@ -9,6 +9,7 @@ const mockPty = {
   write: vi.fn(),
   getPid: vi.fn().mockReturnValue(12345),
   isAlive: vi.fn().mockReturnValue(true),
+  isAwaitingInteractiveConfirmation: vi.fn().mockReturnValue(false),
   onExit: vi.fn().mockImplementation((cb: (exitCode: number, signal?: number) => void) => {
     capturedOnExit = cb;
   }),
@@ -105,6 +106,8 @@ beforeEach(() => {
   mockPty.write.mockClear();
   mockPty.isAlive.mockClear();
   mockPty.isAlive.mockReturnValue(true);
+  mockPty.isAwaitingInteractiveConfirmation.mockClear();
+  mockPty.isAwaitingInteractiveConfirmation.mockReturnValue(false);
   mockPty.onExit.mockClear();
   mockInjectMessage.mockClear();
   mockReadEnabledAgentsMap.mockReset().mockReturnValue({});
@@ -967,5 +970,22 @@ describe('AgentProcess - crash stderr capture (larry-crash-stderr-capture)', () 
     expect(lines[0]).toContain('exit_code=1');
     expect(lines[0]).toContain('reason='); // reason field present, not omitted
     expect(lines[0]).not.toMatch(/reason=none\b/);
+  });
+});
+
+describe('AgentProcess - first-run observability', () => {
+  it('surfaces awaitingConfirmation when the PTY reports a first-run wedge', async () => {
+    mockPty.isAwaitingInteractiveConfirmation.mockReturnValue(true);
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+
+    expect(ap.getStatus().awaitingConfirmation).toBe(true);
+  });
+
+  it('reports awaitingConfirmation falsy for a normal running agent', async () => {
+    const ap = new AgentProcess('alice', mockEnv, {});
+    await ap.start();
+
+    expect(ap.getStatus().awaitingConfirmation).toBeFalsy();
   });
 });

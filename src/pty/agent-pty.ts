@@ -42,6 +42,8 @@ type PtyDisposable = { dispose(): void };
 export class AgentPTY {
   private pty: IPty | null = null;
   private _alive = false;
+  // True when the PTY is still parked on a first-run prompt at the backstop.
+  private _awaitingInteractiveConfirmation = false;
   private outputBuffer: OutputBuffer;
   protected env: CtxEnv;
   protected config: AgentConfig;
@@ -77,7 +79,20 @@ export class AgentPTY {
       this.spawnFn = hostSpawn;
     }
 
-    const cwd = this.config.working_directory || this.env.agentDir || process.cwd();
+    const configuredCwd = this.config.working_directory;
+    // Validate explicit working directories before node-pty sees them. Empty
+    // string remains the framework's unset sentinel and falls through to the
+    // agent directory; whitespace-only and nonexistent paths fail loudly.
+    if (configuredCwd !== undefined && configuredCwd !== '') {
+      const trimmed = configuredCwd.trim();
+      if (trimmed === '') {
+        throw new Error(`[agent-pty] ${this.env.agentName}: working_directory is whitespace-only; set a valid path or remove it`);
+      }
+      if (!existsSync(trimmed)) {
+        throw new Error(`[agent-pty] ${this.env.agentName}: working_directory does not exist: ${trimmed}`);
+      }
+    }
+    const cwd = (configuredCwd && configuredCwd.trim()) || this.env.agentDir || process.cwd();
 
     // Build environment variables for the PTY process
     const ptyEnv: Record<string, string> = {
@@ -207,9 +222,12 @@ export class AgentPTY {
     let bypassHandled = false;
     const promptPoll = setInterval(() => {
       if (!this.pty) { clearInterval(promptPoll); return; }
+      // Stop before evaluating prompt branches once the real session is live.
+      if (this.outputBuffer.isBootstrapped()) { clearInterval(promptPoll); return; }
       const recent = this.outputBuffer.getRecent().replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-      const showingBypass = recent.includes('Bypass') && recent.includes('accept');
-      const showingTrust = recent.includes('trust') && recent.includes('folder');
+      const kind = this.detectFirstRunPrompt(recent);
+      const showingBypass = kind === 'bypass';
+      const showingTrust = kind === 'trust';
       if (showingBypass && !bypassHandled) {
         // Bypass screen: default selection is "1. No, exit". Move DOWN to
         // "2. Yes, I accept", then confirm. Bare Enter here would quit the agent.
@@ -232,12 +250,27 @@ export class AgentPTY {
         this.pty.write('\r');     // trust screen default is "Yes, I trust"
         return;
       }
-      // No first-run prompt pending and the real session is up -> stop polling so we
-      // never write a stray keystroke into the live agent session.
-      if (this.outputBuffer.isBootstrapped()) { clearInterval(promptPoll); return; }
     }, 1200);
-    // Unconditional backstop: never let the poll outlive first-run.
-    setTimeout(() => clearInterval(promptPoll), 20000);
+    // Broaden the window for slow first-runs and surface a wedge instead of a
+    // false healthy/running status when a prompt remains visible.
+    setTimeout(() => {
+      clearInterval(promptPoll);
+      if (this.pty && !this.outputBuffer.isBootstrapped()) {
+        const recent = this.outputBuffer.getRecent().replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+        if (this.detectFirstRunPrompt(recent) !== null) {
+          this._awaitingInteractiveConfirmation = true;
+          console.warn(`[agent-pty] ${this.env.agentName}: awaiting interactive confirmation — first-run prompt still showing at backstop, not bootstrapped`);
+        }
+      }
+    }, 45000);
+  }
+
+  // Match co-occurring prompt-specific tokens only; a single benign word in
+  // normal output must never trigger a keystroke.
+  private detectFirstRunPrompt(recent: string): 'bypass' | 'trust' | null {
+    if ((recent.includes('Bypass') || recent.includes('bypass')) && recent.includes('accept')) return 'bypass';
+    if (recent.includes('trust') && (recent.includes('folder') || recent.includes('directory'))) return 'trust';
+    return null;
   }
 
   /**
@@ -429,6 +462,10 @@ export class AgentPTY {
    */
   getOutputBuffer(): OutputBuffer {
     return this.outputBuffer;
+  }
+
+  isAwaitingInteractiveConfirmation(): boolean {
+    return this._awaitingInteractiveConfirmation && !this.outputBuffer.isBootstrapped();
   }
 
   /**

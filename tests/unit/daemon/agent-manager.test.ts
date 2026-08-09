@@ -384,6 +384,66 @@ describe('AgentManager.restartAgent - BUG-007 fix (rebuild Telegram poller)', ()
   });
 });
 
+describe('AgentManager.stopAgent - stop wins versus queued restart', () => {
+  let testDir: string;
+  let ctxRoot: string;
+  let frameworkRoot: string;
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join(tmpdir(), 'cortextos-am-stop-test-'));
+    ctxRoot = join(testDir, 'instance');
+    frameworkRoot = join(testDir, 'framework');
+    mkdirSync(join(ctxRoot, 'config'), { recursive: true });
+    mkdirSync(join(frameworkRoot, 'orgs', 'acme', 'agents', 'alice'), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  function seedAgent(am: unknown) {
+    (am as { agents: Map<string, unknown> }).agents.set('alice', {
+      process: { stop: vi.fn().mockResolvedValue(undefined) },
+      checker: { stop: vi.fn() },
+    });
+    (am as { pendingRestarts: Set<string> }).pendingRestarts.add('alice');
+  }
+
+  it('user-initiated stop drops a queued restart', async () => {
+    const { AgentManager } = await import('../../../src/daemon/agent-manager.js');
+    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
+    seedAgent(am);
+    const startSpy = vi.spyOn(am, 'startAgent').mockResolvedValue();
+
+    await am.stopAgent('alice', true);
+
+    expect(startSpy).not.toHaveBeenCalled();
+    expect((am as { pendingRestarts: Set<string> }).pendingRestarts.has('alice')).toBe(false);
+  });
+
+  it('internal stop still honors a queued restart', async () => {
+    const { AgentManager } = await import('../../../src/daemon/agent-manager.js');
+    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
+    seedAgent(am);
+    const startSpy = vi.spyOn(am, 'startAgent').mockResolvedValue();
+
+    await am.stopAgent('alice');
+
+    expect(startSpy).toHaveBeenCalledWith('alice', '');
+  });
+
+  it('restart stop-half explicitly preserves a queued restart', async () => {
+    const { AgentManager } = await import('../../../src/daemon/agent-manager.js');
+    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
+    seedAgent(am);
+    const startSpy = vi.spyOn(am, 'startAgent').mockResolvedValue();
+
+    await am.stopAgent('alice', false);
+
+    expect(startSpy).toHaveBeenCalledWith('alice', '');
+  });
+});
+
 describe('AgentManager.startAgent - cron startup failure isolation', () => {
   let testDir: string;
   let ctxRoot: string;

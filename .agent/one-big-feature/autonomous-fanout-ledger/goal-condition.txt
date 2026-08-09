@@ -1,0 +1,26 @@
+SOURCE OF TRUTH
+- Spec: `.agent/one-big-feature/autonomous-fanout-ledger/03-specs/01-pilot.md` (binding FR-001–FR-006).
+- Plan: `.agent/one-big-feature/autonomous-fanout-ledger/02-master-plan.md`.
+- Research/evidence: `.agent/one-big-feature/autonomous-fanout-ledger/01-research.md` and `01-fable-analysis.md`.
+
+STANDING RULES
+- Larry/Codex is the single coordinator; the daemon `AgentProcess` owns one `PipelineSupervisor` singleton.
+- Use existing task bus, MultiCA, signed ledger, and analytics events; WS1 creates the plan-worker fixture manifest and isolated `CTX_ROOT`/`PIPELINE_SECRET_PATH` from the spec.
+- Internal exploration uses current Graphify; external research uses Gemini; run `/specify` before `/goalify`.
+- Preserve signed provenance; never hand-author or bypass ledger rows. Build/tests alone never count as done.
+- The first goal is WS1→WS2 only; WS3 fan-out/staging is a separate follow-up goal after this pilot passes.
+- Run `npm test` and `npm run build` for code changes; persist worker-produced heartbeat/receipt and every action/result event with run/workstream/attempt/fence and artifact SHA.
+
+SUB-PHASES
+[WS1] [indep] Create the plan-worker fixture manifest, then prove one exact `GATE: plan` dispatch via `node dist/cli.js bus send-message` and `bin/pipeline-stage-emit`; DONE when worker receipt, `pipeline_dispatch/v1`, and terminal signed `plan` row join on run/workstream/attempt/fence/artifact SHA, while `agent_message_sent` proves transport msg_id/reply_to; inbox-only/coordinator-fabricated evidence is RED.
+[WS2] [needs WS1] Add lease expiry/fencing and kill/restart recovery. DONE when FR-004 passes with no duplicate or stale completion.
+
+EACH ITERATION
+1. Read the plan, spec, current run projection, and git status; take the lowest unshipped workstream.
+2. Implement only that workstream; run the exact bus/receipt/ledger assertions and required tests.
+3. Reconcile the run projection after every dispatch, receipt, lease expiry, blocker, and gate result.
+
+DONE
+WS1 and WS2 satisfy their DONE clauses with reproducible evidence and a signed `plan` receipt. Stop; report the exact evidence and await a separate approved WS3 goal. Do not claim staging, true-verify, fan-out, or PR readiness for this goal.
+
+HALT only on: (1) a WS1/WS2 gate fails — stop, report gate+diff+error, no silent fix-forward; (2) spec ambiguity or conflict — stop, ask; (3) WS1 and WS2 pass — stop, report evidence, and await a separate approved WS3 goal. Do not auto-promote or claim staging/true-verify.

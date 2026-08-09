@@ -443,7 +443,7 @@ export class AgentProcess {
       // middle of flushing. Polling first eliminates the remaining SIGHUP risk.
       if (pty.isAlive()) {
         try {
-          await pty.kill();
+          pty.kill();
         } catch {
           // PTY may have exited between the check and the kill — ignore
         }

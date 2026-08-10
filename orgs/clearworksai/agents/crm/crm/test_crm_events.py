@@ -156,5 +156,63 @@ class SweepAndRunbookWiringTests(unittest.TestCase):
             self.assertIn(event_type, text, f"runbook is missing an action row for {event_type}")
 
 
+# --- FR-CRM1: the three Altari CRM skills run as SKILLS under the crm agent ---
+# These assertions run on TRACKED artifacts (org skills + the CRM1-WIRING apply doc),
+# so they do not skip when the gitignored agent runtime files are absent.
+
+REPO_ROOT = AGENT_DIR.parents[3]  # orgs/clearworksai/agents/crm -> repo root
+ORG_SKILLS = REPO_ROOT / "orgs" / "clearworksai" / "skills"
+WIRING_DOC = ORG_SKILLS / "CRM1-WIRING.md"
+CRM1_SKILLS = (
+    "data-enrichment-specialist",
+    "records-administrator",
+    "pipeline-operations-manager",
+)
+
+
+class CRM1ClusterWiringTests(unittest.TestCase):
+    """FR-CRM1: enrichment + records + pipeline-ops run as versioned org SKILLS under the crm
+    agent on crm events/schedule (the SKILL path, not the legacy cron), emitting via the A6 sink."""
+
+    def test_three_skills_are_versioned_org_skills(self) -> None:
+        for name in CRM1_SKILLS:
+            skill = ORG_SKILLS / name / "SKILL.md"
+            self.assertTrue(skill.exists(), f"{name} not present as a tracked org skill")
+
+    def test_each_skill_declares_crm_wiring_and_a6_sink(self) -> None:
+        for name in CRM1_SKILLS:
+            text = (ORG_SKILLS / name / "SKILL.md").read_text(encoding="utf-8")
+            self.assertIn("cortextOS CRM wiring", text, f"{name} missing CRM wiring section")
+            self.assertIn("Trigger surface", text, f"{name} missing a trigger surface")
+            self.assertIn("A6 sink", text, f"{name} missing the A6 sink section")
+            self.assertIn("create-task", text, f"{name} A6 sink must use bus create-task")
+            self.assertIn("--assignee human", text, f"{name} A6 sink must file a HUMAN task")
+            # idempotency: a deterministic crm-* key so re-runs never duplicate
+            self.assertIn("crm-", text, f"{name} A6 sink missing an idempotency key")
+
+    def test_pipeline_ops_is_bound_to_stage_changed(self) -> None:
+        """The previously-unwired skill: pipeline-operations-manager fires on crm.deal.stage_changed."""
+        text = (ORG_SKILLS / "pipeline-operations-manager" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("crm.deal.stage_changed", text)
+        # It replaces the legacy inline weekly-brief cron with the named skill on a schedule.
+        self.assertIn("pipeline-ops", text)
+
+    def test_wiring_doc_maps_pipeline_ops_and_a6(self) -> None:
+        self.assertTrue(WIRING_DOC.exists(), "CRM1-WIRING.md apply doc missing")
+        text = WIRING_DOC.read_text(encoding="utf-8")
+        self.assertIn("pipeline-operations-manager", text)
+        self.assertIn("crm.deal.stage_changed", text)
+        # every emitted event type is mapped to a skill in the apply doc's runbook
+        for event_type in (
+            "crm.contact.created", "crm.deal.created", "crm.deal.stage_changed",
+            "crm.meeting.completed", "crm.email.captured", "crm.doc.received",
+        ):
+            self.assertIn(event_type, text, f"wiring doc missing runbook row for {event_type}")
+        # the A6 human-task sink line
+        self.assertIn("create-task", text)
+        self.assertIn("--assignee human", text)
+        self.assertIn("create-approval", text)
+
+
 if __name__ == "__main__":
     unittest.main()

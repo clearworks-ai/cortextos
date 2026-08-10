@@ -1284,6 +1284,75 @@ def commitment_payload_entries(commitments: list[RefinedCommitment]) -> list[dic
     return commitment_entries(commitments, enriched=False)
 
 
+# --- A6: commitment triple-sink (BUS + BRIEFS + Telegram) -------------------
+# Each extracted commitment must fan out to THREE sinks, all idempotent by the
+# SAME deterministic commitment id (`ff_…` / `ffin_…`):
+#   1. BUS human task  — `cortextos bus create-task --assignee human`
+#      (client-visible → `--needs-approval` + a `create-approval` card),
+#      deduped by `cortextos bus event-dedup --source commitment:<id>`.
+#   2. BRIEFS POST     — `post_commitments()` (server-side dedup by id). KEEP.
+#   3. Telegram        — surfaced by the SKILL, deduped by id in the surfaced
+#      ledger. KEEP.
+# The extractor OWNS the deterministic bus-task spec so the id is shared across
+# all three sinks; the SKILL only executes the spec through the dedup gate. This
+# keeps the fan-out deterministic (not LLM-driven) and unit-testable in Python.
+
+# A matched-client outbound commitment is client-visible → route it through the
+# human approval card before it can turn into an external action. `relevance_score`
+# is >0 only when a client context record actually matched (see
+# relevance_score_for_commitment), so it is a deterministic client-visible signal.
+CLIENT_VISIBLE_RELEVANCE_MIN = RELEVANCE_P1_MIN
+
+
+def is_client_visible(commitment: RefinedCommitment) -> bool:
+    """True when the commitment is a client-facing action Josh owns.
+
+    Only OUTBOUND (WE committed) items can be client-visible — an inbound item is
+    someone else's action and is FYI/tracking only, never an approval-gated task.
+    """
+    if commitment.direction != "outbound":
+        return False
+    return commitment.relevance_score >= CLIENT_VISIBLE_RELEVANCE_MIN
+
+
+def bus_task_entries(commitments: list[RefinedCommitment]) -> list[dict[str, Any]]:
+    """Deterministic bus-sink spec, one entry per commitment, keyed by the SAME
+    commitment id used by BRIEFS and Telegram.
+
+    Every entry carries:
+      - `dedupSource` = `commitment:<id>` — the atomic first-sight gate the SKILL
+        passes to `cortextos bus event-dedup` so a re-run never creates a second
+        task (and inbound/outbound ids differ, so the same action in both
+        directions stays two distinct tasks, matching BRIEFS/Telegram).
+      - `assignee` = `human` — surfaces on the [HUMAN] board.
+      - `needsApproval` + `approval` card metadata for client-visible items.
+
+    Pure/deterministic: no I/O, no time, no LLM. The SKILL is the only caller
+    that shells out to the bus, so this stays testable in isolation.
+    """
+    entries: list[dict[str, Any]] = []
+    for item in commitments:
+        client_visible = is_client_visible(item)
+        entry: dict[str, Any] = {
+            "id": item.id,
+            "dedupSource": f"commitment:{item.id}",
+            "title": item.text,
+            "assignee": "human",
+            "direction": item.direction,
+            "sourceRef": item.source_ref,
+            "priority": item.priority,
+            "needsApproval": client_visible,
+        }
+        if client_visible:
+            entry["approval"] = {
+                "title": item.text,
+                "category": "external-comms",
+                "context": item.source_ref,
+            }
+        entries.append(entry)
+    return entries
+
+
 def post_commitments(
     *,
     ingest_url: str,
@@ -1353,7 +1422,7 @@ def run(
     recent = fetch_recent_transcripts(fireflies_api_key, limit=limit, urlopen=urlopen)
     fresh = select_recent_transcripts(recent, watermark_timestamp, watermark_meeting_id, limit=limit)
     if not fresh:
-        print(json.dumps({"meetings": 0, "commitments": 0, "posted": False, "dry_run": dry_run, "items": []}))
+        print(json.dumps({"meetings": 0, "commitments": 0, "posted": False, "dry_run": dry_run, "items": [], "busTasks": []}))
         return 0
 
     all_commitments: list[RefinedCommitment] = []
@@ -1380,8 +1449,11 @@ def run(
 
     items = commitment_entries(all_commitments, enriched=True)
     payload = {"commitments": commitment_payload_entries(all_commitments)}
+    # A6: emit the deterministic BUS sink spec (shared id) alongside items so the
+    # SKILL can fan out to the bus without re-deriving anything from the LLM.
+    bus_tasks = bus_task_entries(all_commitments)
     if dry_run:
-        print(json.dumps({"dry_run": True, "items": items, "payload": payload}, indent=2))
+        print(json.dumps({"dry_run": True, "items": items, "payload": payload, "busTasks": bus_tasks}, indent=2))
         return 0
 
     if payload["commitments"]:
@@ -1399,11 +1471,12 @@ def run(
                     "posted": True,
                     "result": result,
                     "items": items,
+                    "busTasks": bus_tasks,
                 }
             )
         )
     else:
-        print(json.dumps({"meetings": len(processed), "commitments": 0, "posted": False, "noop": True, "items": items}))
+        print(json.dumps({"meetings": len(processed), "commitments": 0, "posted": False, "noop": True, "items": items, "busTasks": bus_tasks}))
 
     newest = max(processed, key=transcript_sort_key)
     save_watermark(watermark_path, newest)

@@ -163,7 +163,7 @@ The report itself posts to the org activity feed (`cortextos bus post-activity`,
   ```bash
   cortextos bus create-task "Pipeline: <deal> stage '<stage>' vs <N>d idle — pursue or kill?" \
     --assignee human --priority normal \
-    --desc "pipeline-operations-manager STAGE AUDIT · evidence: <last activity, next step> · key: crm-pipeline:<deal_id>:<yyyymmdd>"
+    --desc "pipeline-operations-manager STAGE AUDIT · evidence: <last activity, next step> · key: crm-pipeline:<deal_id>.<yyyymmdd>"
   ```
 - **Forecast sign-off (the DRAFT is never valid until a human signs it):**
   ```bash
@@ -172,4 +172,4 @@ The report itself posts to the org activity feed (`cortextos bus post-activity`,
     --desc "pipeline-operations-manager weekly forecast DRAFT · key: crm-forecast:<isoweek>"
   ```
 
-**Idempotency:** every task's `--desc` carries a deterministic key (`crm-pipeline:<deal_id>:<yyyymmdd>` for a stage audit, `crm-forecast:<isoweek>` for the weekly forecast); a re-run for the same deal/day or the same ISO week reuses the key and files no duplicate. The forecast is always labeled DRAFT and carries the signature line until the human signs.
+**Idempotency:** every task's `--desc` carries a deterministic key (`crm-pipeline:<deal_id>.<yyyymmdd>` for a stage audit, `crm-forecast:<isoweek>` for the weekly forecast); a re-run for the same deal/day or the same ISO week reuses the key and files no duplicate. The forecast is always labeled DRAFT and carries the signature line until the human signs.

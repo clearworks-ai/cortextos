@@ -136,7 +136,7 @@ An enrichment pass is silent when it only fills blanks. When the pass surfaces a
 # human-actionable, non-client-visible (e.g. a spend confirmation)
 cortextos bus create-task "Enrichment: confirm $<amt> Apollo spend for <list> (<N> rows)" \
   --assignee human --priority normal \
-  --desc "data-enrichment-specialist · <what/why> · idempotency key: crm-enrich:<contact_id|list>:<yyyymmdd>"
+  --desc "data-enrichment-specialist · <what/why> · idempotency key: crm-enrich:<contact_id|list>.<yyyymmdd>"
 
 # client-visible / send-affecting → also raise an approval card
 cortextos bus create-task "Enrichment hold: <contact> email <status>, unsafe to send" \
@@ -144,4 +144,4 @@ cortextos bus create-task "Enrichment hold: <contact> email <status>, unsafe to 
 cortextos bus create-approval "Send-safety hold: <contact>" other "<evidence>"
 ```
 
-**Idempotency:** the `--desc` carries a deterministic key `crm-enrich:<contact_id|list-slug>:<yyyymmdd>`; a re-run for the same contact/day must reuse the same key and must not file a duplicate task.
+**Idempotency:** the `--desc` carries a deterministic key `crm-enrich:<contact_id|list-slug>.<yyyymmdd>`; a re-run for the same contact/day must reuse the same key and must not file a duplicate task.

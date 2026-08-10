@@ -73,10 +73,36 @@ SUPPORTED_EXTS = VIDEO_EXTS | AUDIO_EXTS | IMAGE_EXTS | DOC_EXTS | TEXT_EXTS
 # Resolve repo root from __file__ (…/orgs/clearworksai/skills/outputs-router/ → 4 dirs up:
 # outputs-router -> skills -> clearworksai -> orgs -> repo root)
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-DELIVERABLES_ROOTS = {
-    agent: os.path.join(REPO_ROOT, "orgs/clearworksai/agents", agent, "deliverables")
-    for agent in ("auditmaster", "muse", "larry", "pa", "frank2")
-}
+# Agent deliverables are gitignored local state (`orgs/clearworksai/*`), so a git
+# worktree checkout does NOT contain them. MIRROR_AGENTS_DIR lets the planner point
+# at the live checkout's agents dir while the script itself runs from a worktree.
+AGENTS_DIR = os.environ.get(
+    "MIRROR_AGENTS_DIR", os.path.join(REPO_ROOT, "orgs/clearworksai/agents")
+)
+
+
+def discover_deliverables_roots():
+    """
+    Discover every agent that has a `deliverables/` dir under AGENTS_DIR.
+
+    P1.2 originally hardcoded 5 legacy agents (auditmaster/muse/larry/pa/frank2),
+    which silently skipped the RUNNING `-codex` set (auditmaster-codex holds ~831
+    files) and any future agent. The `-codex` deliverables mirror their legacy
+    counterparts' subtree layout, so the same dirmap rules apply once the
+    `<agent>-codex/` prefix rules are present in dirmap.json. Auto-discovery keeps
+    the roots in sync with the actual fleet: any `<agent>/deliverables/` is scanned.
+    """
+    roots = {}
+    if not os.path.isdir(AGENTS_DIR):
+        return roots
+    for agent in sorted(os.listdir(AGENTS_DIR)):
+        d = os.path.join(AGENTS_DIR, agent, "deliverables")
+        if os.path.isdir(d):
+            roots[agent] = d
+    return roots
+
+
+DELIVERABLES_ROOTS = discover_deliverables_roots()
 MIRROR_JOB = "deliverables-mirror-p1.2"
 
 # Support env override for tmp-dir test fixtures
@@ -118,8 +144,11 @@ def compute_target_path(source_path, agent, rule, dirmap, source_root):
         target_dir = os.path.join(MIRROR_KS_BASE, client_home, rule["client"])
         target_path = os.path.join(target_dir, relpath)
     elif rule["type"] == "diagram":
-        # Special case: frank2 + auditmaster top-level diagrams go to basename only
-        if agent in ("frank2", "auditmaster") and rule.get("top_level_only"):
+        # Special case: frank2 + auditmaster top-level diagrams go to basename only.
+        # Match the base agent name so the `-codex` variants route identically to
+        # their legacy counterparts.
+        base_agent = agent[: -len("-codex")] if agent.endswith("-codex") else agent
+        if base_agent in ("frank2", "auditmaster") and rule.get("top_level_only"):
             base_dest = CONTENT_TYPE_MAPPING["diagram"]
             target_path = os.path.join(base_dest, source_basename)
         else:

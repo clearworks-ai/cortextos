@@ -27,7 +27,7 @@
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'fs';
 import { dirname, join } from 'path';
 import type { CronDefinition, CronEntry } from '../types/index.js';
-import { readCronsWithStatus, writeCrons } from '../bus/crons.js';
+import { readCrons, writeCrons } from '../bus/crons.js';
 import { CRONS_DIRECTORY } from '../bus/crons-schema.js';
 import { scanAgentDir } from '../utils/cron-teaching-scanner.js';
 
@@ -260,37 +260,6 @@ export interface MigrationResult {
   cronsSkipped?: string[];
 }
 
-function mergeCronsPreferringExisting(
-  existing: CronDefinition[],
-  migrated: CronDefinition[],
-): CronDefinition[] {
-  const merged = [...existing];
-  const existingNames = new Set(existing.map((cron) => cron.name));
-  for (const cron of migrated) {
-    if (!existingNames.has(cron.name)) {
-      merged.push(cron);
-    }
-  }
-  return merged;
-}
-
-function writeEmptyRegistryOnlyIfAlreadyEmpty(
-  agentName: string,
-  log: (msg: string) => void,
-  reason: string,
-): void {
-  const existing = readCronsWithStatus(agentName);
-  if (existing.corrupt) {
-    log(`${reason} — preserving unreadable existing crons.json instead of writing an empty registry`);
-    return;
-  }
-  if (existing.crons.length === 0) {
-    writeCrons(agentName, []);
-    return;
-  }
-  log(`${reason} — preserving ${existing.crons.length} existing live cron(s)`);
-}
-
 /**
  * Migrate crons for a single agent from its config.json → crons.json.
  *
@@ -351,12 +320,8 @@ function runMigrationCore(
 
   // Read config.json — no-op on missing file
   if (!existsSync(configJsonPath)) {
-    log(`No config.json found for "${agentName}" at ${configJsonPath} — only writing empty crons.json when the live registry is already empty`);
-    writeEmptyRegistryOnlyIfAlreadyEmpty(
-      agentName,
-      log,
-      `No config.json found for "${agentName}" at ${configJsonPath}`,
-    );
+    log(`No config.json found for "${agentName}" at ${configJsonPath} — writing empty crons.json + marker`);
+    writeCrons(agentName, []);
     writeMarker(ctxRoot, agentName);
     return { agentName, status: 'no-config' };
   }
@@ -368,14 +333,10 @@ function runMigrationCore(
     // Unreadable / corrupt config.json: write empty crons.json + marker so we
     // don't retry on every boot with the same broken file
     log(
-      `WARNING: failed to parse config.json for "${agentName}" — only writing empty crons.json when the live registry is already empty. ` +
+      `WARNING: failed to parse config.json for "${agentName}" — writing empty crons.json + marker. ` +
         `Error: ${err instanceof Error ? err.message : String(err)}`,
     );
-    writeEmptyRegistryOnlyIfAlreadyEmpty(
-      agentName,
-      log,
-      `WARNING: failed to parse config.json for "${agentName}"`,
-    );
+    writeCrons(agentName, []);
     writeMarker(ctxRoot, agentName);
     return { agentName, status: 'no-crons' };
   }
@@ -392,12 +353,8 @@ function runMigrationCore(
   }
 
   if (configCrons.length === 0) {
-    log(`No crons array in config.json for "${agentName}" — only writing empty crons.json when the live registry is already empty`);
-    writeEmptyRegistryOnlyIfAlreadyEmpty(
-      agentName,
-      log,
-      `No crons array in config.json for "${agentName}"`,
-    );
+    log(`No crons array in config.json for "${agentName}" — writing empty crons.json + marker`);
+    writeCrons(agentName, []);
     writeMarker(ctxRoot, agentName);
     return { agentName, status: 'no-crons' };
   }
@@ -417,19 +374,12 @@ function runMigrationCore(
     }
   }
 
-  const existingRegistry = readCronsWithStatus(agentName);
-  const merged = mergeCronsPreferringExisting(existingRegistry.crons, converted);
-
-  if (existingRegistry.corrupt) {
-    log(`WARNING: existing live crons.json for "${agentName}" was unreadable; merging from recovered entries only`);
-  }
-
   // Write crons.json atomically and set marker
-  writeCrons(agentName, merged);
+  writeCrons(agentName, converted);
   writeMarker(ctxRoot, agentName);
 
   log(
-    `Migration complete for "${agentName}": ${converted.length} config cron(s), ${existingRegistry.crons.length} existing preserved, ${skipped.length} skipped`,
+    `Migration complete for "${agentName}": ${converted.length} migrated, ${skipped.length} skipped`,
   );
 
   return {

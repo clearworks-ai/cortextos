@@ -11,6 +11,16 @@ import { loadEnvFileInto } from '../utils/env.js';
 import { resolvePaths } from '../utils/paths.js';
 import type { BusPaths } from '../types/index.js';
 import { resolveInstanceId } from './resolve-instance-id.js';
+import {
+  ZOOM_OFFICEHOURS_MEETING_ID,
+  ZOOM_MAILCHIMP_LIST_ID,
+  buildCrcResponse,
+  verifyZoomSignature,
+  processRegistrant,
+  mirrorToMailchimp,
+  type ZoomRegistrant,
+} from './zoom-officehours-crm.js';
+import { handleProviderShadowIngress, type CalendarShadowOptions, type GmailShadowOptions, type ProviderIngressDependencies, type ProviderRateBuckets } from './provider-shadow-ingress.js';
 
 export const DEFAULT_PORT = 20242;
 const DEFAULT_HOST = '127.0.0.1';
@@ -34,6 +44,8 @@ interface BridgeRuntimeContext {
   org?: string;
   bridgeSecret: string;
   firefliesWebhookSecret?: string;
+  zoomWebhookSecretToken?: string;
+  mailchimpApiKey?: string;
 }
 
 export interface BridgeServerOptions {
@@ -43,8 +55,18 @@ export interface BridgeServerOptions {
   org?: string;
   bridgeSecret: string;
   firefliesWebhookSecret?: string;
+  zoomWebhookSecretToken?: string;
+  mailchimpApiKey?: string;
+  // Test seams (only consulted when zoom mode is active).
+  zoomContactsPath?: string;
+  zoomStateDir?: string;
+  fetchImpl?: typeof fetch;
   allowedIntegrations?: readonly string[];
   now?: () => number;
+  providerShadowStateDir?: string;
+  gmailShadow?: GmailShadowOptions;
+  calendarShadow?: CalendarShadowOptions;
+  providerIngressDependencies?: ProviderIngressDependencies;
 }
 
 interface RelayEnvelope {
@@ -146,6 +168,8 @@ function resolveBridgeRuntimeContext(instanceId: string): BridgeRuntimeContext {
   const ctxRoot = process.env.CTX_ROOT || envFromFiles.CTX_ROOT || join(homedir(), '.cortextos', instanceId);
   const bridgeSecret = process.env.WEBHOOK_BRIDGE_SECRET || envFromFiles.WEBHOOK_BRIDGE_SECRET || '';
   const firefliesWebhookSecret = process.env.FIREFLIES_WEBHOOK_SECRET || envFromFiles.FIREFLIES_WEBHOOK_SECRET || undefined;
+  const zoomWebhookSecretToken = process.env.ZOOM_WEBHOOK_SECRET_TOKEN || envFromFiles.ZOOM_WEBHOOK_SECRET_TOKEN || undefined;
+  const mailchimpApiKey = process.env.MAILCHIMP_API_KEY || envFromFiles.MAILCHIMP_API_KEY || undefined;
 
   if (!bridgeSecret) {
     throw new Error(
@@ -160,6 +184,8 @@ function resolveBridgeRuntimeContext(instanceId: string): BridgeRuntimeContext {
     org: org || undefined,
     bridgeSecret,
     firefliesWebhookSecret,
+    zoomWebhookSecretToken,
+    mailchimpApiKey,
   };
 }
 
@@ -284,7 +310,7 @@ function buildRelayMessage(integration: string, event: string, envelope: RelayEn
     : String(envelope.meeting_id).trim();
 
   if (integration === 'fireflies' && meetingId) {
-    return `WEBHOOK ${integration} ${event} — meeting ${meetingId}. cd pa agent dir and spawn meeting-writeback-worker with FF_MEETING_ID=${meetingId} --mode full --meeting-id ${meetingId} so the single-meeting full path files durable meeting/client history before CRM writeback; keep the polling backstop enabled.`;
+    return `WEBHOOK ${integration} ${event} — meeting ${meetingId}. Spawn meeting-commitments-worker with FF_MEETING_ID=${meetingId} set so the single-meeting fast path runs now instead of waiting for the 2h poll: cd pa agent dir, source env, then python3 scripts/ff-extractor.py --mode full --meeting-id ${meetingId}.`;
   }
 
   if (integration === 'ops-check-lead') {
@@ -531,6 +557,7 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
   const now = options.now ?? Date.now;
   let windowStartedAt = now();
   let requestCount = 0;
+  const providerRateBuckets: ProviderRateBuckets = new Map();
 
   return createServer(async (request, response) => {
     try {
@@ -553,6 +580,14 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
         return;
       }
 
+      if (await handleProviderShadowIngress(integration, request, response, {
+        stateDir: options.providerShadowStateDir ?? join(options.ctxRoot, 'state', 'pa'),
+        now,
+        gmail: options.gmailShadow,
+        calendar: options.calendarShadow,
+        dependencies: options.providerIngressDependencies,
+      }, providerRateBuckets)) return;
+
       const currentWindow = now();
       if (currentWindow - windowStartedAt >= RATE_LIMIT_WINDOW_MS) {
         windowStartedAt = currentWindow;
@@ -570,7 +605,45 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
 
       const useFirefliesHmac = integration === 'fireflies' && !!options.firefliesWebhookSecret;
 
-      if (useFirefliesHmac) {
+      // Zoom mode: active only when the secret is set AND (via test seams or org)
+      // the CRM paths resolve. If org is undefined, zoom stays dormant (v1 behavior).
+      const zoomContactsPath = options.zoomContactsPath
+        ?? (options.org ? join(options.frameworkRoot, 'orgs', options.org, 'agents', 'crm', 'crm', 'contacts.json') : undefined);
+      const zoomStateDir = options.zoomStateDir
+        ?? (options.org ? join(options.frameworkRoot, 'orgs', options.org, 'agents', 'crm', 'state') : undefined);
+      const zoomSuppressionPath = zoomContactsPath ? join(dirname(zoomContactsPath), '_ingest_suppression.json') : undefined;
+      const zoomModeConfigured = !!options.zoomWebhookSecretToken && !!zoomContactsPath && !!zoomStateDir;
+      const useZoomHmac = integration === 'zoom-officehours' && !!options.zoomWebhookSecretToken && zoomModeConfigured;
+
+      const appendZoomLog = (entry: Record<string, unknown>): void => {
+        if (!zoomStateDir) return;
+        try {
+          mkdirSync(zoomStateDir, { recursive: true });
+          appendFileSync(
+            join(zoomStateDir, 'zoom-officehours-webhook.jsonl'),
+            `${JSON.stringify({ ts: new Date(now()).toISOString(), ...entry })}\n`,
+            'utf-8',
+          );
+        } catch { /* non-critical audit trail */ }
+      };
+
+      if (useZoomHmac) {
+        // master-plan D2: signature is verified on ALL zoom POSTs, including CRC —
+        // an unauthenticated CRC responder is an HMAC-forgery oracle.
+        const zoomSig = request.headers['x-zm-signature'];
+        const zoomTs = request.headers['x-zm-request-timestamp'];
+        const verdict = verifyZoomSignature({
+          rawBody,
+          signatureHeader: Array.isArray(zoomSig) ? zoomSig[0] : zoomSig,
+          timestampHeader: Array.isArray(zoomTs) ? zoomTs[0] : zoomTs,
+          secret: options.zoomWebhookSecretToken as string,
+          nowSeconds: Math.floor(now() / 1000),
+        });
+        if (!verdict.ok) {
+          jsonResponse(response, 401, { error: verdict.reason, tier: 'auth' });
+          return;
+        }
+      } else if (useFirefliesHmac) {
         const signatureHeader = request.headers['x-hub-signature'];
         const providedSignature = Array.isArray(signatureHeader) ? signatureHeader[0] : signatureHeader;
         if (!providedSignature) {
@@ -607,6 +680,27 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
         return;
       }
 
+      if (useZoomHmac) {
+        const payload = (typeof envelope.payload === 'object' && envelope.payload !== null ? envelope.payload : {}) as Record<string, unknown>;
+        // CRC handshake — respond with the HMAC of plainToken (guarded per D2).
+        if (envelope.event === 'endpoint.url_validation') {
+          const plainToken = payload.plainToken;
+          if (typeof plainToken !== 'string' || plainToken.length > 512) {
+            jsonResponse(response, 400, { error: 'invalid_crc', tier: 'payload' });
+            return;
+          }
+          jsonResponse(response, 200, buildCrcResponse(plainToken, options.zoomWebhookSecretToken as string));
+          appendZoomLog({ type: 'crc' });
+          return;
+        }
+        // Native Zoom shape → internal envelope (internal fields win, like fireflies).
+        const object = (typeof payload.object === 'object' && payload.object !== null ? payload.object : {}) as Record<string, unknown>;
+        if (envelope.integration === undefined) envelope.integration = 'zoom-officehours';
+        if (envelope.meeting_id === undefined && object.id !== undefined) envelope.meeting_id = object.id;
+        if (envelope.registrant === undefined && object.registrant !== undefined) envelope.registrant = object.registrant;
+        // `event` stays as Zoom sent it (top-level).
+      }
+
       if (integration === 'fireflies') {
         envelope = normalizeFirefliesEnvelope(envelope);
       }
@@ -617,6 +711,84 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
       }
       if (typeof envelope.event !== 'string' || envelope.event.trim() === '') {
         jsonResponse(response, 400, { error: 'invalid_event', tier: 'payload' });
+        return;
+      }
+
+      if (useZoomHmac) {
+        // Meeting filter — 200 (not a retry-triggering error) on noise.
+        if (envelope.event !== 'meeting.registration_created' || String(envelope.meeting_id) !== ZOOM_OFFICEHOURS_MEETING_ID) {
+          jsonResponse(response, 200, { ok: true, ignored: true, event: envelope.event, meeting_id: envelope.meeting_id ?? null });
+          appendZoomLog({ type: 'ignored', event: String(envelope.event) });
+          return;
+        }
+        const rawReg = envelope.registrant;
+        if (!rawReg || typeof rawReg !== 'object') {
+          jsonResponse(response, 400, { error: 'invalid_registrant', tier: 'payload' });
+          return;
+        }
+        const reg = rawReg as Record<string, unknown>;
+        const registrant: ZoomRegistrant = {
+          email: typeof reg.email === 'string' ? reg.email : '',
+          firstName: typeof reg.first_name === 'string' ? reg.first_name : '',
+          lastName: typeof reg.last_name === 'string' ? reg.last_name : '',
+          name: '',
+        };
+        registrant.name = `${registrant.firstName} ${registrant.lastName}`.trim();
+
+        let result;
+        try {
+          result = processRegistrant({
+            contactsPath: zoomContactsPath as string,
+            suppressionPath: zoomSuppressionPath as string,
+            registrant,
+          });
+        } catch {
+          jsonResponse(response, 500, { error: 'crm_unavailable', tier: 'crm' });
+          appendZoomLog({ type: 'error', tier: 'crm', email: registrant.email });
+          return;
+        }
+
+        if (result.tier === 'AMBIG') {
+          const explicitZoomTarget = typeof envelope.target === 'string' ? envelope.target.trim() : '';
+          const targetAgent = explicitZoomTarget !== '' ? explicitZoomTarget : 'crm';
+          if (!isKnownAgent(targetAgent, options.ctxRoot, options.frameworkRoot, options.org)) {
+            jsonResponse(response, 404, { error: 'unknown_agent', tier: 'target' });
+            return;
+          }
+          const reviewText = `WEBHOOK zoom-officehours meeting.registration_created — AMBIG registrant ${registrant.name} ${registrant.email} for meeting ${ZOOM_OFFICEHOURS_MEETING_ID}. Candidates: ${(result.candidateIds ?? []).join(', ')}. Do not auto-write; review and merge manually per crm/zoom-officehours-sync.py rules.`;
+          const messageId = sendMessage(
+            resolveBusPaths(options.ctxRoot, targetAgent, options.instanceId || 'default', options.org),
+            SOURCE_NAME,
+            targetAgent,
+            'normal',
+            reviewText,
+          );
+          wakeFastChecker(options.ctxRoot, targetAgent);
+          appendInboundLog(options.ctxRoot, targetAgent, messageId, reviewText);
+          jsonResponse(response, 200, { ok: true, tier: 'AMBIG', messageId });
+          appendZoomLog({ type: 'processed', tier: 'AMBIG', email: registrant.email });
+          return;
+        }
+
+        // NOISE / SUPPRESSED / EMAIL / NAME / NEW — no bus message.
+        jsonResponse(response, 200, { ok: true, tier: result.tier, ...(result.contactId ? { contactId: result.contactId } : {}) });
+        appendZoomLog({ type: 'processed', tier: result.tier, email: registrant.email, ...(result.contactId ? { contactId: result.contactId } : {}) });
+
+        // Mailchimp mirror fires AFTER the response (fire-and-forget, master-plan D4).
+        if (result.mailchimpEligible && options.mailchimpApiKey) {
+          const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+          void mirrorToMailchimp({
+            apiKey: options.mailchimpApiKey,
+            listId: ZOOM_MAILCHIMP_LIST_ID,
+            email: registrant.email,
+            tags: result.tags,
+            fetchImpl,
+          })
+            .then((outcome) => appendZoomLog({ type: 'mailchimp', email: registrant.email, outcome: outcome.outcome, detail: outcome.detail }))
+            .catch((err) => appendZoomLog({ type: 'mailchimp', email: registrant.email, outcome: 'error', detail: err instanceof Error ? err.message : String(err) }));
+        } else if (result.mailchimpEligible) {
+          appendZoomLog({ type: 'mailchimp', email: registrant.email, outcome: 'skipped_no_key' });
+        }
         return;
       }
       const explicitTarget = typeof envelope.target === 'string' ? envelope.target.trim() : null;
@@ -647,9 +819,8 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
       wakeFastChecker(options.ctxRoot, target);
       appendInboundLog(options.ctxRoot, target, messageId, text);
       jsonResponse(response, 200, { ok: true, messageId });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      jsonResponse(response, 500, { error: 'relay_failed', details: message });
+    } catch {
+      jsonResponse(response, 500, { error: 'relay_failed' });
     }
   });
 }
@@ -667,7 +838,7 @@ const startCommand = new Command('start')
   .description('Start the webhook bridge as a launchd service')
   .addHelpText(
     'after',
-    '\nWEBHOOK_BRIDGE_SECRET is loaded at start time from process env, .cortextos-env, or orgs/<org>/secrets.env. FIREFLIES_WEBHOOK_SECRET is optional, loaded the same way, and only affects the fireflies integration.',
+    '\nWEBHOOK_BRIDGE_SECRET is loaded at start time from process env, .cortextos-env, or orgs/<org>/secrets.env. FIREFLIES_WEBHOOK_SECRET is optional, loaded the same way, and only affects the fireflies integration. ZOOM_WEBHOOK_SECRET_TOKEN (loaded the same way) turns /relay/zoom-officehours into a real Zoom webhook receiver (CRC + x-zm-signature); MAILCHIMP_API_KEY additionally enables the Mailchimp mirror.',
   )
   .action(async (options: StartOptions) => {
     try {
@@ -754,7 +925,7 @@ const runCommand = new Command('run')
   .description('Run the webhook bridge in the foreground')
   .addHelpText(
     'after',
-    '\nWEBHOOK_BRIDGE_SECRET is loaded at run time from process env, .cortextos-env, or orgs/<org>/secrets.env. FIREFLIES_WEBHOOK_SECRET is optional, loaded the same way, and only affects the fireflies integration.',
+    '\nWEBHOOK_BRIDGE_SECRET is loaded at run time from process env, .cortextos-env, or orgs/<org>/secrets.env. FIREFLIES_WEBHOOK_SECRET is optional, loaded the same way, and only affects the fireflies integration. ZOOM_WEBHOOK_SECRET_TOKEN (loaded the same way) turns /relay/zoom-officehours into a real Zoom webhook receiver (CRC + x-zm-signature); MAILCHIMP_API_KEY additionally enables the Mailchimp mirror.',
   )
   .action(async (options: RunOptions) => {
     try {
@@ -768,6 +939,8 @@ const runCommand = new Command('run')
         org: context.org,
         bridgeSecret: context.bridgeSecret,
         firefliesWebhookSecret: context.firefliesWebhookSecret,
+        zoomWebhookSecretToken: context.zoomWebhookSecretToken,
+        mailchimpApiKey: context.mailchimpApiKey,
       });
 
       await new Promise<void>((resolve, reject) => {

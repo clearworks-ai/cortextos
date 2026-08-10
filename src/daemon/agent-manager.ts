@@ -124,19 +124,15 @@ export class AgentManager {
     const instanceEnabled = this.readInstanceEnableList();
 
     for (const { name, dir, org, config } of agentDirs) {
-      const entry = instanceEnabled[name];
-      // Instance-level enabled-agents.json is the explicit operator override.
-      // If an entry exists, honor it in preference to a stale per-agent
-      // config.json enabled flag. This lets `cortextos enable <agent>` recover
-      // an agent that ships with config.enabled=false without dying again on
-      // the next clean exit / daemon restart.
-      if (entry) {
-        if (entry.enabled === false) {
-          console.log(`[agent-manager] Skipping disabled agent: ${name} (enabled-agents.json)`);
-          continue;
-        }
-      } else if (config.enabled === false) {
+      // Per-agent config.json `enabled: false` (existing behavior, unchanged)
+      if (config.enabled === false) {
         console.log(`[agent-manager] Skipping disabled agent: ${name} (per-agent config.json)`);
+        continue;
+      }
+      // Instance-level enabled-agents.json `enabled: false` (BUG-028 fix)
+      const entry = instanceEnabled[name];
+      if (entry && entry.enabled === false) {
+        console.log(`[agent-manager] Skipping disabled agent: ${name} (enabled-agents.json)`);
         continue;
       }
       // BUG-043 fix: pass the per-agent org so startAgent can use it instead
@@ -621,32 +617,15 @@ export class AgentManager {
     // starting the scheduler, so the scheduler always has a populated crons.json
     // to read from.  The migration is idempotent (marker file prevents re-runs).
     const configJsonPath = join(agentDir, 'config.json');
-    try {
-      migrateCronsForAgent(name, configJsonPath, this.ctxRoot, {
-        log: (msg) => log(`[migration] ${msg}`),
-      });
-    } catch (err) {
-      // A stale or invalid legacy cron must not prevent the agent's
-      // FastChecker or Telegram poller from coming online. The scheduler
-      // below will still load any valid persisted crons.json state.
-      console.error(
-        `[agent-manager] Cron migration failed for ${name}; continuing startup so inbound listeners stay live:`,
-        err,
-      );
-    }
+    migrateCronsForAgent(name, configJsonPath, this.ctxRoot, {
+      log: (msg) => log(`[migration] ${msg}`),
+    });
 
     // Wire daemon-level CronScheduler for this agent.
     // The scheduler reads crons.json, fires crons, and injects prompts into
     // the agent PTY via injectAgent().  This is the Phase 2 daemon-managed
     // external cron system — agents no longer need to call CronCreate on boot.
-    try {
-      this.startAgentCronScheduler(name);
-    } catch (err) {
-      console.error(
-        `[agent-manager] Cron scheduler failed for ${name}; continuing startup so inbound listeners stay live:`,
-        err,
-      );
-    }
+    this.startAgentCronScheduler(name);
 
     // Start fast checker in background
     checker.start().catch(err => {
@@ -1063,7 +1042,7 @@ export class AgentManager {
   /**
    * Stop a specific agent.
    */
-  async stopAgent(name: string, userInitiated = false): Promise<void> {
+  async stopAgent(name: string): Promise<void> {
     const entry = this.agents.get(name);
     if (!entry) {
       console.log(`[agent-manager] Agent ${name} not found`);
@@ -1081,15 +1060,6 @@ export class AgentManager {
     if (scheduler) {
       scheduler.stop();
       this.cronSchedulers.delete(name);
-    }
-
-    // An explicit user stop/disable wins against a racing queued restart.
-    // Internal callers (restartAgent, stopAll) retain the safety-net honor path.
-    if (userInitiated) {
-      if (this.pendingRestarts.delete(name)) {
-        console.log(`[agent-manager] Dropped queued restart for ${name} — explicit user stop/disable wins.`);
-      }
-      return;
     }
 
     // BUG-031: honor any restart that was queued while we were stopping.
@@ -1124,6 +1094,20 @@ export class AgentManager {
    */
   async restartAgent(name: string): Promise<void> {
     if (!this.agents.has(name)) {
+      // Registry-drift recovery: an errant `stop` (e.g. an agent's heartbeat/ops issuing
+      // `cortextos stop <name>`) fully DEREGISTERS the agent. A plain `restart` then used to
+      // give up here ("not found — cannot restart"), forcing a manual `cortextos enable` to
+      // bring it back. If the agent is still ENABLED in enabled-agents.json, recover by
+      // starting it (same effect as `enable`). Fixes larry-codex needing a manual start after
+      // every reboot/stop (2026-08-10). Only recovers agents explicitly enabled — an absent
+      // or disabled entry still falls through to the no-op below.
+      const entry = this.readInstanceEnableList()[name];
+      if (entry && entry.enabled !== false) {
+        console.log(`[agent-manager] ${name} not in registry but enabled — starting (restart registry-drift recovery)`);
+        await this.startAgent(name, '');
+        console.log(`[agent-manager] Restart (recovery) complete for ${name}`);
+        return;
+      }
       console.log(`[agent-manager] Agent ${name} not found — cannot restart`);
       return;
     }
@@ -1178,13 +1162,7 @@ export class AgentManager {
   getAllStatuses(): AgentStatus[] {
     const statuses: AgentStatus[] = [];
     for (const [, entry] of this.agents) {
-      const status = entry.process.getStatus();
-      // A mapped entry whose running pid has disappeared is stopped, not
-      // running. Correct the returned snapshot without mutating AgentProcess.
-      if (status.status === 'running' && (!status.pid || !this.isPidAlive(status.pid))) {
-        status.status = 'stopped';
-      }
-      statuses.push(status);
+      statuses.push(entry.process.getStatus());
     }
     return statuses;
   }
@@ -1407,14 +1385,23 @@ export class AgentManager {
       return;
     }
 
-    const onFire = async (cron: CronDefinition): Promise<void> => {
+    const onFire = async (cron: CronDefinition, context?: import('./cron-scheduler.js').CronDispatchContext): Promise<void> => {
       const prompt = cron.prompt ?? `[cron] ${cron.name} fired`;
       // Salt with the fire timestamp so MessageDedup (which hashes the last 100
       // injects) does not reject identical cron prompts on subsequent fires.
       // Without the salt, every recurring cron after its first fire would be
       // dedup-rejected and treated as a dispatch failure.
       const firedAt = new Date().toISOString();
-      const injection = `[CRON FIRED ${firedAt}] ${cron.name}: ${prompt}`;
+      // The injected payload is stable for the same logical attempt. If the
+      // scheduler delivered successfully but could not persist `dispatched`,
+      // MessageDedup rejects the recovery replay instead of running it twice.
+      const injection = context
+        ? '[CRON FIRED ' + context.scheduledAt + '] ' + cron.name + ': ' + prompt +
+          '\n[CRON RECEIPT] run_id=' + context.runId +
+          ' attempt=' + context.attempt +
+          ' scheduled_at=' + context.scheduledAt +
+          ' dispatch_key=' + context.dispatchKey
+        : '[CRON FIRED ' + firedAt + '] ' + cron.name + ': ' + prompt;
 
       // Mark this turn as cron-originated so permission hooks (via
       // readCronActive in src/hooks/lib/session-context.ts) can deny-fast —

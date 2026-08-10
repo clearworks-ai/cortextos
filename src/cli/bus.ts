@@ -64,7 +64,6 @@ import { withFileLockSync } from '../utils/lock.js';
 import { IPCClient } from '../daemon/ipc-server.js';
 import { TelegramAPI } from '../telegram/api.js';
 import { logOutboundMessage, cacheLastSent } from '../telegram/logging.js';
-import { classifyRoutineAuthorizationDisclaimer } from '../utils/outbound-policy.js';
 import { checkAndRecord, removeRecord } from '../telegram/dedup.js';
 import { appendToBuffer } from '../daemon/conversation-buffer.js';
 import { findBannedCronPrompts } from '../utils/cron-prompt-validator.js';
@@ -77,6 +76,8 @@ import type { Priority, Task, TaskStatus, EventCategory, EventSeverity, Approval
 import type { TaskClass } from '../bus/task.js';
 import { fleetReconcileCommand } from './bus-reconcile.js';
 import { activityLedgerCommand } from './bus-activity-ledger.js';
+import { eventReceiptsCommand } from './bus-event-receipts.js';
+import { cronInventoryCommand } from './bus-cron-inventory.js';
 
 /**
  * Check if the org requires deliverables and the task has none attached.
@@ -361,6 +362,10 @@ busCommand.addCommand(fleetReconcileCommand);
 
 // WS10 R6: did-vs-claimed activity ledger (read-only, warn-only).
 busCommand.addCommand(activityLedgerCommand);
+
+// Event and cron receipt tooling is observational/recording only.
+busCommand.addCommand(eventReceiptsCommand);
+busCommand.addCommand(cronInventoryCommand);
 
 busCommand
   .command('send-message')
@@ -1954,11 +1959,6 @@ busCommand
     // does not expand escapes, so they arrive at argv as 2-char literals and
     // Telegram renders them as visible text. Normalize before send + log.
     message = message.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
-    const outboundPolicyReason = classifyRoutineAuthorizationDisclaimer(message);
-    if (outboundPolicyReason) {
-      process.stderr.write(`[outbound-policy] HOLD: ${outboundPolicyReason}\n`);
-      process.exit(2);
-    }
     // Resolve bot token: agent .env first, then process.env
     const env = resolveEnv();
     let kind: BusSendKind;

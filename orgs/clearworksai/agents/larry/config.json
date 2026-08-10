@@ -7,7 +7,7 @@
  "max_crashes_per_day": 30,
  "emit_system_telegram_pings": false,
  "ctx_warning_threshold": 60,
- "ctx_handoff_threshold": 0,
+ "ctx_handoff_threshold": 70,
  "working_directory": "",
  "timezone": "America/Los_Angeles",
  "day_mode_start": "08:00",

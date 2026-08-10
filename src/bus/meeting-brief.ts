@@ -135,8 +135,6 @@ export function parseCalendarEvents(raw: string): CalendarEventInput[] {
     entries = parsed;
   } else if (isRecord(parsed) && Array.isArray(parsed.events)) {
     entries = parsed.events;
-  } else if (isRecord(parsed) && Array.isArray(parsed.items)) {
-    entries = parsed.items;
   } else {
     return [];
   }

@@ -25,10 +25,13 @@
  * New or modified crons get a freshly computed nextFireAt.
  */
 
+import { createHash } from 'crypto';
 import { homedir } from 'os';
 import { join } from 'path';
 import { parseDurationMs, readCronState } from '../bus/cron-state.js';
 import { readCronsWithStatus, updateCron } from '../bus/crons.js';
+import { appendCronOutcome, cronRunId, getActiveCronOutcome } from '../bus/cron-outcome.js';
+import type { CronOutcomeReceipt } from '../bus/cron-outcome.js';
 import type { CronDefinition } from '../types/index.js';
 import { appendExecutionLog } from './cron-execution-log.js';
 
@@ -138,6 +141,8 @@ interface ScheduledCron {
   changeKey: string;
   /** True while onFire (+ retries) is executing — prevents re-entry on the next tick. */
   firing?: boolean;
+  /** Startup-only recovery candidate. Never reused for later occurrences. */
+  recoveryOutcome?: CronOutcomeReceipt;
 }
 
 function changeKeyFor(c: CronDefinition): string {
@@ -174,12 +179,16 @@ async function fireWithRetry(
   agentName: string,
   onFire: (c: CronDefinition) => Promise<void> | void,
   logger: (msg: string) => void,
+  onAttempt?: (attempt: number) => void,
+  onDispatched?: (attempt: number) => void,
 ): Promise<boolean> {
   const maxAttempts = RETRY_DELAYS_MS.length + 1; // 4 attempts total
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const start = Date.now();
     try {
+      onAttempt?.(attempt + 1);
       await Promise.resolve(onFire(cron));
+      onDispatched?.(attempt + 1);
       appendExecutionLog(agentName, {
         ts: new Date().toISOString(),
         cron: cron.name,
@@ -230,20 +239,84 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+interface ReceiptFireResult { delivered: boolean; attempts: number; receiptRecorded: boolean; }
+
+/**
+ * Retries only a failed delivery. A write failure after delivery is logged and
+ * returned as delivered so the same worker dispatch is never replayed.
+ */
+async function fireWithReceiptRetry(
+  cron: CronDefinition,
+  agentName: string,
+  dispatch: (attempt: number) => Promise<void> | void,
+  logger: (msg: string) => void,
+  writeIntent: (attempt: number) => void,
+  writeDispatched: (attempt: number) => void,
+  startAttempt: number,
+  attemptLimit = RETRY_DELAYS_MS.length + 1,
+): Promise<ReceiptFireResult> {
+  const maxAttempts = attemptLimit;
+  for (let offset = 0; offset < maxAttempts; offset++) {
+    const attempt = startAttempt + offset;
+    try {
+      writeIntent(attempt);
+    } catch {
+      logger('[cron-scheduler] durable dispatch intent failed; dispatch skipped.');
+      return { delivered: false, attempts: attempt, receiptRecorded: false };
+    }
+    const startedAt = Date.now();
+    try {
+      await Promise.resolve(dispatch(attempt));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const duration_ms = Date.now() - startedAt;
+      if (offset < maxAttempts - 1) {
+        const delay = RETRY_DELAYS_MS[offset];
+        logger('[cron-scheduler] onFire failed for "' + cron.name + '" (attempt ' + attempt + '/4, retrying in ' + delay + 'ms): ' + message);
+        appendExecutionLog(agentName, { ts: new Date().toISOString(), cron: cron.name, status: 'retried', attempt, duration_ms, error: message });
+        await sleep(delay);
+        continue;
+      }
+      logger('[cron-scheduler] onFire failed for "' + cron.name + '" after all 4 attempts — giving up. Last error: ' + message);
+      appendExecutionLog(agentName, { ts: new Date().toISOString(), cron: cron.name, status: 'failed', attempt, duration_ms, error: message });
+      return { delivered: false, attempts: attempt, receiptRecorded: false };
+    }
+    let receiptRecorded = true;
+    try {
+      writeDispatched(attempt);
+    } catch {
+      receiptRecorded = false;
+      logger('[cron-scheduler] post-dispatch receipt failed; delivery will not be retried.');
+    }
+    appendExecutionLog(agentName, { ts: new Date().toISOString(), cron: cron.name, status: 'fired', attempt, duration_ms: Date.now() - startedAt, error: null });
+    return { delivered: true, attempts: attempt, receiptRecorded };
+  }
+  return { delivered: false, attempts: startAttempt + maxAttempts - 1, receiptRecorded: false };
+}
+
 // ---------------------------------------------------------------------------
 // CronScheduler
 // ---------------------------------------------------------------------------
 
 export interface CronSchedulerOptions {
   agentName: string;
-  onFire: (cron: CronDefinition) => Promise<void> | void;
+  onFire: (cron: CronDefinition, context: CronDispatchContext) => Promise<void> | void;
   logger?: (msg: string) => void;
+  outcomeStateDir?: string;
+}
+
+export interface CronDispatchContext {
+  runId: string;
+  attempt: number;
+  scheduledAt: string;
+  dispatchKey: string;
 }
 
 export class CronScheduler {
   private readonly agentName: string;
-  private readonly onFire: (cron: CronDefinition) => Promise<void> | void;
+  private readonly onFire: (cron: CronDefinition, context: CronDispatchContext) => Promise<void> | void;
   private readonly logger: (msg: string) => void;
+  private readonly outcomeStateDir?: string;
 
   /** In-memory schedule, keyed by cron name. */
   private scheduled: Map<string, ScheduledCron> = new Map();
@@ -271,6 +344,8 @@ export class CronScheduler {
     this.agentName = opts.agentName;
     this.onFire    = opts.onFire;
     this.logger    = opts.logger ?? ((msg: string) => process.stdout.write(msg + '\n'));
+    this.outcomeStateDir = opts.outcomeStateDir
+      ?? (process.env.CTX_ROOT ? join(process.env.CTX_ROOT, 'state', opts.agentName) : undefined);
   }
 
   // -------------------------------------------------------------------------
@@ -415,7 +490,36 @@ export class CronScheduler {
         nextFireAt = now; // fire on the very next tick
       }
 
-      nextScheduled.set(def.name, { definition: def, nextFireAt, changeKey: key });
+      let recoveryOutcome: CronOutcomeReceipt | undefined;
+      if (this.outcomeStateDir) {
+        try {
+          let pending = getActiveCronOutcome(this.outcomeStateDir, this.agentName, def.name);
+          const healed = new Set<string>();
+          while (pending && (pending.state === 'scheduled' || pending.state === 'started') && def.last_fired_at !== undefined && Date.parse(def.last_fired_at) >= Date.parse(pending.scheduled_at)) {
+            if (healed.has(pending.run_id)) throw new Error('cron recovery did not advance');
+            healed.add(pending.run_id);
+            appendCronOutcome(this.outcomeStateDir, {
+              run_id: pending.run_id,
+              attempt: pending.attempt,
+              agent: this.agentName,
+              cron: def.name,
+              state: pending.state === 'started' ? 'dispatched' : 'timed_out',
+              scheduled_at: pending.scheduled_at,
+              detail: pending.state === 'started' ? 'persisted_fire_recovered' : 'stale_schedule_recovered',
+            });
+            pending = getActiveCronOutcome(this.outcomeStateDir, this.agentName, def.name);
+          }
+          const persistedSuccess = def.last_fired_at !== undefined && pending !== undefined
+            && Date.parse(def.last_fired_at) >= Date.parse(pending.scheduled_at);
+          if (pending && (pending.state === 'scheduled' || pending.state === 'started') && !persistedSuccess) {
+            nextFireAt = now;
+            recoveryOutcome = pending;
+          }
+        } catch {
+          this.logger('[cron-scheduler] pending outcome recovery unavailable; retaining normal schedule.');
+        }
+      }
+      nextScheduled.set(def.name, { definition: def, nextFireAt, changeKey: key, recoveryOutcome });
     }
 
     // LAST-GOOD-SCHEDULE FALLBACK (corruption-only)
@@ -467,7 +571,39 @@ export class CronScheduler {
       }
 
       sc.firing = true;
+      try {
       const cron = sc.definition;
+      const outcomeStateDir = this.outcomeStateDir;
+      // Recovery is captured during load. Looking up any active receipt on
+      // every occurrence would let an old dispatched run suppress all future
+      // recurring fires until an external terminal receipt arrived.
+      const activeOutcome = sc.recoveryOutcome;
+      const scheduledAt = activeOutcome?.scheduled_at ?? new Date(sc.nextFireAt).toISOString();
+      const runId = activeOutcome?.run_id ?? (outcomeStateDir
+        ? cronRunId(outcomeStateDir, this.agentName, cron.name, scheduledAt)
+        : 'cron_v1_' + createHash('sha256').update(this.agentName + '\u0000' + cron.name + '\u0000' + scheduledAt).digest('hex').slice(0, 32));
+      const startAttempt = activeOutcome?.state === 'started' ? activeOutcome.attempt : 1;
+      const alreadyDispatched = activeOutcome?.state === 'dispatched';
+      if (outcomeStateDir) {
+        try {
+          appendCronOutcome(outcomeStateDir, {
+            run_id: runId,
+            attempt: 1,
+            agent: this.agentName,
+            cron: cron.name,
+            state: 'scheduled',
+            scheduled_at: scheduledAt,
+            detail: 'scheduler_due',
+          });
+          sc.recoveryOutcome = undefined;
+        } catch (err) {
+          this.logger('[cron-scheduler] ERROR: failed to record scheduled outcome for "' + name + '" — ' + (err instanceof Error ? err.message : String(err)) + '. Dispatch skipped.');
+          sc.firing = false;
+          continue;
+        }
+      } else {
+        sc.recoveryOutcome = undefined;
+      }
       this.logger(`[cron-scheduler] firing cron "${name}" (was due ${new Date(sc.nextFireAt).toISOString()})`);
 
       // Persist last_fire_attempted_at to disk BEFORE awaiting the dispatch.
@@ -487,7 +623,42 @@ export class CronScheduler {
         );
       }
 
-      const success = await fireWithRetry(cron, this.agentName, this.onFire, this.logger);
+      const fireResult = alreadyDispatched
+        ? { delivered: true, attempts: activeOutcome?.attempt ?? 1, receiptRecorded: true }
+        : await fireWithReceiptRetry(
+          cron,
+          this.agentName,
+          (attempt) => this.onFire(cron, { runId, attempt, scheduledAt, dispatchKey: runId + ':' + attempt }),
+          this.logger,
+          (attempt) => {
+            if (!outcomeStateDir) return;
+            appendCronOutcome(outcomeStateDir, {
+              run_id: runId,
+              attempt,
+              agent: this.agentName,
+              cron: cron.name,
+              state: 'started',
+              scheduled_at: scheduledAt,
+              detail: 'scheduler_dispatch_intent',
+            });
+          },
+          (attempt) => {
+            if (!outcomeStateDir) return;
+            appendCronOutcome(outcomeStateDir, {
+              run_id: runId,
+              attempt,
+              agent: this.agentName,
+              cron: cron.name,
+              state: 'dispatched',
+              scheduled_at: scheduledAt,
+              detail: 'worker_receipt_pending',
+            });
+          },
+          startAttempt,
+          activeOutcome?.state === 'started' ? 1 : RETRY_DELAYS_MS.length + 1,
+        );
+      const success = fireResult.delivered;
+      let outcomeAdvanced = fireResult.receiptRecorded;
 
       if (success) {
         // Persist last_fired_at + fire_count to disk.
@@ -521,6 +692,22 @@ export class CronScheduler {
           continue; // sc is gone, skip clearing firing flag
         }
       } else {
+        if (outcomeStateDir) {
+          try {
+            appendCronOutcome(outcomeStateDir, {
+              run_id: runId,
+              attempt: fireResult.attempts,
+              agent: this.agentName,
+              cron: cron.name,
+              state: 'failed',
+              scheduled_at: scheduledAt,
+              detail: 'dispatch_failed',
+            });
+            outcomeAdvanced = true;
+          } catch (err) {
+            this.logger('[cron-scheduler] ERROR: failed to record dispatch failure for "' + name + '" — ' + (err instanceof Error ? err.message : String(err)));
+          }
+        }
         // Dispatch failed (all retries exhausted). Advance nextFireAt anyway so
         // we don't re-fire the same scheduled slot on every subsequent tick —
         // that produced a busy-loop when an agent was unreachable. Treat the
@@ -538,7 +725,22 @@ export class CronScheduler {
           continue;
         }
       }
-      sc.firing = false;
+      if (activeOutcome && outcomeStateDir && outcomeAdvanced) {
+        try {
+          const nextRecovery = getActiveCronOutcome(outcomeStateDir, this.agentName, cron.name);
+          if (nextRecovery && (nextRecovery.state === 'scheduled' || nextRecovery.state === 'started')) {
+            sc.recoveryOutcome = nextRecovery;
+            sc.nextFireAt = Date.now();
+          }
+        } catch (error) {
+          this.logger('[cron-scheduler] pending outcome recovery unavailable after "' + name + '" — ' + (error instanceof Error ? error.message : String(error)));
+        }
+      }
+      } catch (error) {
+        this.logger('[cron-scheduler] ERROR: cron "' + name + '" tick failed — ' + (error instanceof Error ? error.message : String(error)));
+      } finally {
+        sc.firing = false;
+      }
     }
   }
 }

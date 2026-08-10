@@ -193,8 +193,6 @@ export interface AgentConfig {
    */
   crash_window?: { seconds: number; max_crashes?: number };
   model?: string;
-  /** Codex model-reasoning effort passed to `codex app-server -c`. */
-  reasoning_effort?: 'low' | 'medium' | 'high' | 'xhigh';
   /**
    * Opt-in to fleet-level failover degrade. When true and state/fleet-degrade.json
    * indicates Anthropic is DEPLETED, the daemon will substitute the cheap failover
@@ -258,13 +256,6 @@ export interface AgentConfig {
    * A value <= 0 also disables it (same as leaving it unset).
    */
   wedge_restart_min?: number;
-  /**
-   * Requested context window (tokens) for codex-app-server agents. Passed to
-   * Codex as `model_context_window`; the runtime telemetry remains authoritative
-   * for the effective window. `codex_context_cap` is retained as a fallback for
-   * older configs.
-   */
-  model_context_window?: number;
   /**
    * Fallback context window cap (tokens) for codex-app-server agents when the
    * server's `thread/tokenUsage/updated` event reports `modelContextWindow=null`.
@@ -507,6 +498,18 @@ export interface CronDefinition {
    * @default false (manual fire is allowed by default — opt-out model)
    */
   manualFireDisabled?: boolean;
+
+  /** Human or system owner responsible for terminal worker outcomes. */
+  owner?: string;
+
+  /** Maximum expected worker runtime before outcome reconciliation times out. */
+  timeout_ms?: number;
+
+  /** Operator-facing description of the expected terminal worker output. */
+  expected_output?: string;
+
+  /** Classification for the fallback/recovery procedure. */
+  backstop_class?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -971,12 +974,6 @@ export interface IPCRequest {
    * Optional for backwards compatibility — older clients fall back to 'unknown'.
    */
   source?: string;
-  /**
-   * Whether a stop-agent request came directly from an explicit user stop or
-   * disable. Internal restart stop-halves set this false so queued restarts
-   * remain eligible; omitted values default to user-initiated at the IPC edge.
-   */
-  userInitiated?: boolean;
 }
 
 // Worker Types
@@ -1030,5 +1027,4 @@ export interface AgentStatus {
   sessionStart?: string;
   crashCount?: number;
   model?: string;
-  awaitingConfirmation?: boolean;
 }

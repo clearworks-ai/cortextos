@@ -134,17 +134,7 @@ const GENESIS = 'GENESIS';
 const AUTHORED_STAGES = new Set<Stage>(['synthesize', 'plan', 'specs', 'review']);
 const SHA_HEX_RE = /^[a-f0-9]{64}$/;
 const SLUG_RE = /^[a-z0-9-]+$/;
-// Planning workers whose signed replies may author plan/spec ledger rows.
-// Codexer remains the implementation worker; it is intentionally not a
-// planning author. OpenCode is the optional worker-dispatch planning route.
-// Signed planning receipts may come from the implementation runtime when a
-// legacy/explicit GATE:plan was dispatched there. This does not change role
-// routing (Codexer remains implementation-only for new dispatches); it only
-// lets the verifier validate an already signed, scope-bound return message.
-const WORKER_AUTHORS = new Set<string>(['opencode', 'opencoder', 'codexer']);
-// Larry has a legacy Claude identity and a live Codex identity. Both are trusted
-// planning dispatchers; worker replies remain HMAC-bound to the actual sender.
-const PLANNING_DISPATCHERS = new Set<string>(['larry', 'larry-codex']);
+const WORKER_AUTHORS = new Set<string>(['opencode', 'opencoder']);
 const PROVENANCE_LINE_RE =
   /PROVENANCE:\s*stage=(plan|specs)\s+slug=([a-z0-9-]+)\s+artifact-sha256=([a-f0-9]{64})\b/;
 const BUS_STORE_BUCKETS = ['inbox', 'inflight', 'processed'] as const;
@@ -402,26 +392,6 @@ export function defaultTranscriptRoot(): string {
   return resolve(process.env.PIPELINE_TRANSCRIPT_ROOT_OVERRIDE || join(homedir(), '.claude', 'projects'));
 }
 
-/** Runtime transcript roots accepted by the normal transcript-backed gate.
- * Claude remains the primary root; Codex sessions are a first-class runtime
- * after the migration. An explicit override remains strict and single-root.
- */
-export function defaultTranscriptRoots(): string[] {
-  if (process.env.PIPELINE_TRANSCRIPT_ROOT_OVERRIDE) return [defaultTranscriptRoot()];
-  return [
-    defaultTranscriptRoot(),
-    resolve(join(homedir(), '.codex', 'sessions')),
-  ];
-}
-
-function resolveTranscriptInsideRoots(pathToCheck: string, roots: string[]): string | null {
-  for (const root of roots) {
-    const real = ensureInsideRoot(pathToCheck, root);
-    if (real) return real;
-  }
-  return null;
-}
-
 export function defaultBusStoreRoot(): string {
   return resolve(
     process.env.PIPELINE_BUS_STORE_ROOT_OVERRIDE || join(homedir(), '.cortextos', 'cortextos1'),
@@ -564,44 +534,11 @@ function findBusMessageById(busStoreRoot: string, id: string): { path: string; m
   return null;
 }
 
-type GateDirective = {
-  command: 'build' | 'plan' | 'specs';
-  values: Map<string, string>;
-};
-
-function parseGateDirective(text: string): GateDirective | null {
-  const directiveLines = text.split(/\r?\n/).filter((line) => line.startsWith('GATE:'));
-  if (directiveLines.length !== 1) return null;
-
-  const parts = directiveLines[0].split(' ');
-  const command = parts[1];
-  if (
-    parts.length < 2
-    || !['build', 'plan', 'specs'].includes(command)
-    || parts.some((part, index) => index > 1 && !/^[a-z][a-z0-9-]*=[^\s=]+$/.test(part))
-  ) {
-    return null;
-  }
-
-  const values = new Map<string, string>();
-  for (const part of parts.slice(2)) {
-    const separator = part.indexOf('=');
-    const key = part.slice(0, separator);
-    const value = part.slice(separator + 1);
-    if (values.has(key)) return null;
-    values.set(key, value);
-  }
-
-  return { command: command as GateDirective['command'], values };
-}
-
 function resolveDispatchForReply(opts: {
   busStoreRoot: string;
   busKey: string;
   replyToId: string;
   expectedSlug: string;
-  expectedStage: WorkerProvenanceStage;
-  expectedParentSha?: string;
 }): { ok: true } | ProvenanceFailure {
   const found = findBusMessageById(opts.busStoreRoot, opts.replyToId);
   if (!found) {
@@ -613,11 +550,11 @@ function resolveDispatchForReply(opts: {
   }
 
   const { msg } = found;
-  if (!PLANNING_DISPATCHERS.has(msg.from)) {
+  if (msg.from !== 'larry') {
     return {
       ok: false,
       code: 'PROVENANCE_MISMATCH',
-      detail: `Dispatch ${opts.replyToId} not from an authorized planning dispatcher (from=${msg.from})`,
+      detail: `Dispatch ${opts.replyToId} not from larry (from=${msg.from})`,
     };
   }
   if (!verifyBusMessageSig(msg, opts.busKey)) {
@@ -628,19 +565,13 @@ function resolveDispatchForReply(opts: {
     };
   }
 
-  const directive = parseGateDirective(msg.text);
-  const slug = directive?.values.get('slug');
-  const requestedStage = directive?.values.get('stage');
-  const requestedParentSha = directive?.values.get('scope-sha')?.toLowerCase();
-  const isBuild = directive?.command === 'build';
-  const isBoundPlanningRequest = (directive?.command === 'plan' || directive?.command === 'specs')
-    && requestedStage === opts.expectedStage
-    && requestedParentSha === opts.expectedParentSha;
-  if ((!isBuild && !isBoundPlanningRequest) || slug !== opts.expectedSlug) {
+  const slug = msg.text.match(/\bslug=([a-z0-9-]+)\b/)?.[1];
+  const isBuild = /\bGATE:\s*build\b/i.test(msg.text);
+  if (!isBuild || slug !== opts.expectedSlug) {
     return {
       ok: false,
       code: 'PROVENANCE_MISMATCH',
-      detail: `Dispatch ${opts.replyToId} is not a matching GATE: build or scope-bound GATE: plan for ${opts.expectedStage}/${opts.expectedSlug}`,
+      detail: `Dispatch ${opts.replyToId} is not a GATE: build for slug ${opts.expectedSlug}`,
     };
   }
 
@@ -654,7 +585,6 @@ export function verifyWorkerAttestationMessage(opts: {
   expectedMessageId?: string;
   busStoreRoot?: string;
   busKey?: string | null;
-  expectedParentSha?: string;
 }): WorkerAttestationResult {
   const busStoreRoot = opts.busStoreRoot || defaultBusStoreRoot();
   const messagePath = resolve(opts.messagePath);
@@ -746,8 +676,6 @@ export function verifyWorkerAttestationMessage(opts: {
     busKey,
     replyToId: msg.reply_to,
     expectedSlug: opts.slug,
-    expectedStage: opts.stage,
-    expectedParentSha: opts.expectedParentSha,
   });
   if (!dispatch.ok) return dispatch;
 
@@ -767,7 +695,6 @@ export function verifyWorkerDispatchAuthorship(opts: {
   expectedMessageId?: string;
   busStoreRoot?: string;
   busKey?: string | null;
-  expectedParentSha?: string;
 }): ProvenanceResult {
   const attestation = verifyWorkerAttestationMessage({
     messagePath: opts.messagePath,
@@ -776,7 +703,6 @@ export function verifyWorkerDispatchAuthorship(opts: {
     expectedMessageId: opts.expectedMessageId,
     busStoreRoot: opts.busStoreRoot,
     busKey: opts.busKey,
-    expectedParentSha: opts.expectedParentSha,
   });
   if (!attestation.ok) return attestation;
 
@@ -863,9 +789,9 @@ export function verifyTranscriptAuthorship(opts: {
   transcriptRoot?: string;
   expectedSessionId?: string;
 }): ProvenanceResult {
-  const transcriptRoots = opts.transcriptRoot ? [opts.transcriptRoot] : defaultTranscriptRoots();
+  const transcriptRoot = opts.transcriptRoot || defaultTranscriptRoot();
   const transcriptPath = resolve(opts.transcriptPath);
-  const realTranscript = resolveTranscriptInsideRoots(transcriptPath, transcriptRoots);
+  const realTranscript = ensureInsideRoot(transcriptPath, transcriptRoot);
   if (!realTranscript || !existsSync(realTranscript)) {
     return {
       ok: false,
@@ -942,12 +868,6 @@ export function emitLedgerRow(opts: {
   }
 
   const artifact = describeArtifact(opts.artifactPath);
-  const existingRows = readLedgerRows(ledgerPath);
-  const prevRow = latestPreviousRow(existingRows, opts.slug, opts.stage, secret);
-  const prevSha = opts.stage === 'research' || opts.stage === 'exempt'
-    ? GENESIS
-    : prevRow?.artifact_sha256;
-
   if (opts.stage === 'true-verify' || opts.stage === 'staging-verify') {
     if (!opts.evidencePath || !existsSync(opts.evidencePath) || statSync(opts.evidencePath).size === 0) {
       throw new Error(`Artifact/evidence missing or empty for ${opts.stage}`);
@@ -980,7 +900,6 @@ export function emitLedgerRow(opts: {
         expectedMessageId: opts.sessionId,
         busStoreRoot: opts.busStoreRoot,
         busKey,
-        expectedParentSha: prevSha,
       });
     } else {
       provenance = verifyTranscriptAuthorship({
@@ -998,11 +917,17 @@ export function emitLedgerRow(opts: {
     provenanceMode = mode === 'worker-dispatch' ? mode : undefined;
   }
 
+  mkdirSync(dirname(ledgerPath), { recursive: true });
+  const existingRows = readLedgerRows(ledgerPath);
+  const prevRow = latestPreviousRow(existingRows, opts.slug, opts.stage, secret);
+  const prevSha = opts.stage === 'research' || opts.stage === 'exempt'
+    ? GENESIS
+    : prevRow?.artifact_sha256;
+
   if (opts.stage !== 'research' && opts.stage !== 'exempt' && !prevSha) {
     throw new Error(`CHAIN_BREAK: missing prior-stage row for ${opts.slug}:${opts.stage}`);
   }
 
-  mkdirSync(dirname(ledgerPath), { recursive: true });
   const unsigned: Omit<LedgerRow, 'sig'> = {
     slug: opts.slug,
     stage: opts.stage,
@@ -1200,9 +1125,7 @@ export function verifyChainDetailed(opts: {
       continue;
     }
 
-    for (let index = 0; index < chain.rows.length; index += 1) {
-      const row = chain.rows[index];
-      const expectedParentSha = index > 0 ? chain.rows[index - 1]?.artifact_sha256 : undefined;
+    for (const row of chain.rows) {
       if (!isAuthoredStage(row.stage)) continue;
       if (!row.runner || !row.session_id || !row.transcript_path || !row.transcript_sha256) {
         return {
@@ -1226,12 +1149,12 @@ export function verifyChainDetailed(opts: {
           detail: `Transcript missing for ${row.slug}:${row.stage}: ${row.transcript_path}`,
         };
       }
-      const realTranscript = mode === 'worker-dispatch'
-        ? ensureInsideRoot(row.transcript_path, opts.busStoreRoot || defaultBusStoreRoot())
-        : resolveTranscriptInsideRoots(
-          row.transcript_path,
-          opts.transcriptRoot ? [opts.transcriptRoot] : defaultTranscriptRoots(),
-        );
+      const realTranscript = ensureInsideRoot(
+        row.transcript_path,
+        mode === 'worker-dispatch'
+          ? (opts.busStoreRoot || defaultBusStoreRoot())
+          : (opts.transcriptRoot || defaultTranscriptRoot()),
+      );
       if (!realTranscript) {
         return {
           ok: false,
@@ -1264,7 +1187,6 @@ export function verifyChainDetailed(opts: {
           expectedMessageId: row.session_id,
           busStoreRoot: opts.busStoreRoot,
           busKey,
-          expectedParentSha,
         });
         if (!provenance.ok) {
           return {
@@ -1350,12 +1272,9 @@ export function verifyOneBigFeatureArtifacts(opts: {
     };
   }
 
-  const latestRowForStage = (stage: Stage): LedgerRow | undefined => opts.rows
-    .filter((row) => row.stage === stage)
-    .sort((left, right) => right.ts - left.ts)[0];
-  const researchRow = latestRowForStage('research');
-  const planRow = latestRowForStage('plan');
-  const specsRow = latestRowForStage('specs');
+  const researchRow = opts.rows.find((row) => row.stage === 'research');
+  const planRow = opts.rows.find((row) => row.stage === 'plan');
+  const specsRow = opts.rows.find((row) => row.stage === 'specs');
   if (!researchRow || !planRow || !specsRow) {
     return {
       ok: false,

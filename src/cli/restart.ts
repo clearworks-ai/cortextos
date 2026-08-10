@@ -23,12 +23,7 @@ export const restartCommand = new Command('restart')
     // before the IPC stop so the SessionEnd crash-alert hook does not fire a
     // false 🚨 CRASH alarm during the brief stop window. (BUG-036 pattern.)
     writeStopMarker(instanceId, agent, 'stopped via cortextos restart');
-    const stopResponse = await ipc.send({
-      type: 'stop-agent',
-      agent,
-      source: 'cortextos restart',
-      userInitiated: false,
-    });
+    const stopResponse = await ipc.send({ type: 'stop-agent', agent, source: 'cortextos restart' });
     if (!stopResponse.success) {
       console.error(`  Stop failed: ${stopResponse.error}`);
       process.exit(1);

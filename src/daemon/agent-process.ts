@@ -13,12 +13,9 @@ import { writeCortextosEnv } from '../utils/env.js';
 import { getOverdueReminders } from '../bus/reminders.js';
 import { resolvePaths } from '../utils/paths.js';
 import { logEvent } from '../bus/event.js';
-import { sendMessage } from '../bus/message.js';
 import { loadBuffer } from './conversation-buffer.js';
 import { ensureMissionAnchorFromBuffer } from './restart-context.js';
 import { readEnabledAgentsMap } from '../bus/enabled-agents-io.js';
-import { PipelineRunStore } from './pipeline-run-store.js';
-import { PipelineSupervisor } from './pipeline-supervisor.js';
 
 type LogFn = (msg: string) => void;
 
@@ -186,9 +183,6 @@ export class AgentProcess {
   // a handoff doc marker. start() reads this after spawn to decide whether the
   // daemon should fire runtime-owned lifecycle Telegram directly.
   private lastSpawnWasHandoff = false;
-  // Larry-owned durable pipeline reconciliation. It is deliberately opt-in to
-  // the Larry coordinator so other agents do not acquire the pipeline lock.
-  private pipelineSupervisor: PipelineSupervisor | null = null;
 
   constructor(name: string, env: CtxEnv, config: AgentConfig, log?: LogFn) {
     this.name = name;
@@ -203,26 +197,6 @@ export class AgentProcess {
     }
     this.dedup = new MessageDedup();
     this.log = log || ((msg) => console.log(`[${name}] ${msg}`));
-    if (name === 'larry' || name === 'larry-codex') {
-      const store = new PipelineRunStore(join(env.ctxRoot, 'state'));
-      this.pipelineSupervisor = new PipelineSupervisor({
-        store,
-        owner: `${name}:${process.pid}`,
-        lockRoot: join(env.ctxRoot, 'state', 'pipeline-supervisor.lock'),
-        dispatch: async (request) => {
-          const worker = String(request.route?.worker || 'opencode');
-          const paths = resolvePaths(this.name, this.env.instanceId, this.env.org);
-          const route = request.route || {};
-          const framework = String(route.framework || 'one-big-feature');
-          const repo = String(route.repo || this.env.projectRoot || process.cwd());
-          const scopeSha = String(request.route?.scopeSha || '');
-          const text = request.message || `GATE: plan framework=${framework} slug=${request.runId} stage=plan repo=${repo}${scopeSha ? ` scope-sha=${scopeSha}` : ''}`;
-          const messageId = sendMessage(paths, this.name, worker, 'normal', text);
-          return { messageId, inputSha: request.inputSha, scopeSha: scopeSha || undefined };
-        },
-        onEvent: (event) => this.log(`[pipeline] ${event.action ?? event.type} ${event.runId}/${event.workstreamId ?? ''}`),
-      });
-    }
   }
 
   /**
@@ -273,13 +247,6 @@ export class AgentProcess {
     if (this.status === 'running') {
       this.log('Already running');
       return;
-    }
-
-    // Start the supervisor before the PTY so startup recovery is independent
-    // of whether a model runtime is currently healthy.
-    if (this.pipelineSupervisor) {
-      const acquired = await this.pipelineSupervisor.start();
-      if (!acquired) this.log('[pipeline] supervisor lock held by another owner; continuing without duplicate supervisor');
     }
 
     // Apply startup delay
@@ -498,7 +465,6 @@ export class AgentProcess {
     // cleared by handleExit when the intentional exit fires (or by start()
     // when a new lifecycle begins). See BUG-040 fix in handleExit().
     this.status = 'stopped';
-    await this.pipelineSupervisor?.stop();
     this.notifyStatusChange();
     this.log('Stopped');
   }
@@ -613,10 +579,6 @@ export class AgentProcess {
       sessionStart: this.sessionStart?.toISOString(),
       crashCount: this.crashCount,
       model: this.config.model,
-      awaitingConfirmation:
-        this.pty && 'isAwaitingInteractiveConfirmation' in this.pty
-          ? this.pty.isAwaitingInteractiveConfirmation()
-          : false,
     };
   }
 
@@ -771,15 +733,15 @@ export class AgentProcess {
    * during crash storms. The try/catch below stays as defense in depth.
    */
   private isDisabled(): boolean {
+    if (this.config.enabled === false) {
+      return true;
+    }
     try {
       const entry = readEnabledAgentsMap(this.env.ctxRoot)[this.name];
-      if (entry && typeof entry.enabled === 'boolean') {
-        return entry.enabled === false;
-      }
+      return entry?.enabled === false;
     } catch {
-      // Fall through to the per-agent config default below.
+      return false;
     }
-    return this.config.enabled === false;
   }
 
   private handleExit(exitCode: number): void {
@@ -1156,10 +1118,7 @@ export class AgentProcess {
     const onlineMessage = isHandoffRestart || !systemPingsEnabled || !shouldPromptTelegram
       ? ''
       : ' Send a Telegram message to the user saying you are back online.';
-    const startupInstructions = isHandoffRestart
-      ? ' This is a context handoff restart. Read only the handoff document and the live tail below; do NOT re-read AGENTS.md or bootstrap files, because replaying them wastes the fresh thread context. External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.'
-      : ' Read AGENTS.md and all bootstrap files listed there. External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.';
-    return `You are starting a new session. Current UTC time: ${nowUtc}.${startupInstructions}${reminderBlock}${deliverablesBlock}${missionBlock}${handoffBlock}${liveTailBlock}${handoffUxOverride}${onlineMessage}${onboardingAppend}`;
+    return `You are starting a new session. Current UTC time: ${nowUtc}. Read AGENTS.md and all bootstrap files listed there. External crons are auto-loaded by the daemon — do NOT call CronCreate or CronList for cron restoration.${reminderBlock}${deliverablesBlock}${missionBlock}${handoffBlock}${liveTailBlock}${handoffUxOverride}${onlineMessage}${onboardingAppend}`;
   }
 
   private buildContinuePrompt(): string {

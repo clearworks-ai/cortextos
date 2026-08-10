@@ -263,6 +263,15 @@ export interface AgentConfig {
    */
   codex_context_cap?: number;
   /**
+   * Explicit real context-window size (tokens) for this agent's model. When set,
+   * the daemon's context-% monitor (fast-checker realContextWindow) uses THIS instead
+   * of guessing from a hardcoded model-family table — which only knew Anthropic 1M
+   * models and mis-sized every other 1M-window model (e.g. gpt-5.6, real 1.05M) to
+   * 200K, producing false 150-340% readings → a false context-handoff restart loop
+   * (root cause of the 2026-08-10 fleet crash-loop).
+   */
+  model_context_window?: number;
+  /**
    * Fallback context window cap (tokens) for opencode agents when the OpenCode
    * model cache does not expose a context limit. Only applies to runtime:
    * 'opencode'.

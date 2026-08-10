@@ -227,8 +227,6 @@ class Daemon {
   private instanceId: string;
   private ctxRoot: string;
   private markerDriftTimer: NodeJS.Timeout | null = null;
-  private selfHealTimer: NodeJS.Timeout | null = null;
-  private selfHealRunning = false;
 
   constructor() {
     // Resolve through the ONE shared chain (CTX_INSTANCE_ID > ACTIVE_INSTANCE
@@ -310,24 +308,13 @@ class Daemon {
     });
     this.ptyHostReaper.start();
 
-    // Periodic liveness self-heal (root fix, 2026-08-10): boot self-heal only runs once,
-    // so an ENABLED agent that drops out of the registry mid-run (errant `cortextos stop`,
-    // a restart deduped/failed during churn — the storm — or a crash not re-launched) stayed
-    // absent until reboot/manual `enable`. This timer restarts any enabled-but-absent agent
-    // automatically. Narrow + additive (start-only; no task mutation/blocking) — NOT the
-    // heavy ReconcileTrigger removed in RW-8. Overlap-guarded so a slow heal can't stack.
-    const runSelfHeal = async () => {
-      if (this.selfHealRunning) return;
-      this.selfHealRunning = true;
-      try {
-        await this.agentManager?.periodicSelfHeal();
-      } catch (err) {
-        console.error(`[daemon] periodic self-heal error: ${err instanceof Error ? err.message : String(err)}`);
-      } finally {
-        this.selfHealRunning = false;
-      }
-    };
-    this.selfHealTimer = setInterval(runSelfHeal, 60_000);
+    // NOTE: a periodic liveness self-heal was tried here (2026-08-10) and REVERTED same day —
+    // it treated "enabled && absent from registry" as failure and auto-restarted agents, which
+    // (a) resurrected deliberate operator/orchestrator containment stops and (b) fought the
+    // crash-limiter's HALT, re-launching a crash-halted agent every interval. Liveness intent
+    // (run/halt/quarantine) must be explicit persisted state before any auto-heal is safe; see
+    // memory incident_fleet_root_cause_realcontextwindow_gpt_200k_2026-08-10. Boot self-heal
+    // (once, at daemon start) remains the only automatic recovery.
 
     console.log(`[daemon] Running (pid: ${process.pid})`);
 
@@ -337,10 +324,6 @@ class Daemon {
       if (this.markerDriftTimer) {
         clearInterval(this.markerDriftTimer);
         this.markerDriftTimer = null;
-      }
-      if (this.selfHealTimer) {
-        clearInterval(this.selfHealTimer);
-        this.selfHealTimer = null;
       }
       try {
         if (this.ptyHostReaper) {

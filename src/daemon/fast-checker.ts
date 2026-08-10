@@ -1260,8 +1260,21 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     // providing current_usage. On a 1M model this makes a 60% handoff fire at
     // ~600K real tokens (a genuine backstop that lets CC compact along the way)
     // rather than at ~120K, which is what caused the restart churn.
-    const model = this.agent.getConfig().model;
-    const realWindow = realContextWindow(model);
+    const cfg = this.agent.getConfig();
+    const model = cfg.model;
+    // ROOT FIX (2026-08-10): prefer the agent's EXPLICIT configured window over the
+    // hardcoded model-family table. realContextWindow() only knew Anthropic 1M models,
+    // so gpt-5.6-sol (real window 1_050_000) fell through to 200_000 → real token counts
+    // read as 150-340% → false [CONTEXT HANDOFF REQUIRED] → hard-restart metronome that
+    // crashed the fleet. model_context_window / codex_context_cap come from the agent's
+    // config.json and are authoritative for its runtime; the table is only a last resort.
+    const configuredWindow =
+      (typeof cfg.model_context_window === 'number' && cfg.model_context_window > 0)
+        ? cfg.model_context_window
+        : (typeof cfg.codex_context_cap === 'number' && cfg.codex_context_cap > 0)
+          ? cfg.codex_context_cap
+          : null;
+    const realWindow = configuredWindow ?? realContextWindow(model);
     let realPct: number | null;
     if (rawTokens !== null) {
       realPct = (rawTokens / realWindow) * 100;

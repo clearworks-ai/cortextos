@@ -52,7 +52,11 @@ Deterministic spawn confirmed. Worker `meeting-writeback-stagingtest02` spawned 
 Bridge launchd service restarted via `launchctl kickstart -k gui/<uid>/com.cortextos.webhook-bridge`
 (ONLY the bridge — fleet daemon PID 70914 NOT touched).
 
-**Prod receipt:** (appended after restart)
+**Prod receipt:**
+```json
+{"ok":true,"worker":"meeting-writeback-liveprodtest01"}
+```
+Bridge PID 15830 (started 15:09) — confirmed running new dist. PROD ASSERT: PASS.
 
 ## Daemon Safety
 

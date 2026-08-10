@@ -37,3 +37,13 @@ to `grandamenium/cortextos` once stabilized.
 Note: the Track A path-parameterization fix (running-agent dir resolution via `$CTX_*`
 in `meeting-writeback-worker/SKILL.md`) is an agent-local skill edit, not a `src/`
 change, so it is NOT an upstream-PR candidate — it stays on our fork.
+## 2026-08-10 — A6 commitment triple-sink (NO src/ delta — recorded for traceability)
+
+Track A6 (commitment triple-sink: BUS + BRIEFS + Telegram) was implemented WITHOUT touching
+`src/` — it reuses the existing bus CLI surface (`bus create-task --assignee human`,
+`bus create-approval`, `bus event-dedup`) as-is. The change lives entirely in the org's
+meeting pipeline: `orgs/clearworksai/agents/pa/scripts/ff-extractor.py` (new pure
+`bus_task_entries()` / `is_client_visible()` + `busTasks[]` in the run-output contract) and the
+`meeting-commitments-worker` SKILL (new Step 4b bus sink gated on
+`bus event-dedup --source commitment:<id>`). **No fork-delta / upstream-PR candidate** — this is
+additive org config, not a `src/` modification, so the P7 invariant does not apply.

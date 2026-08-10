@@ -107,6 +107,48 @@ Old-format lines (`TRANSCRIPT_ID:RECIPIENT:first_3_words`) remain in the file ha
 
 ---
 
+## Step 4b — BUS human-task sink (A6 triple-sink, mandatory)
+
+Every extracted commitment fans out to THREE sinks — BRIEFS (the extractor already POSTed), Telegram (Step 5), and the BUS. This step is the BUS sink. It runs for the FULL `busTasks[]` array the extractor emits (not just P0 — the bus is the durable human board, same coverage as BRIEFS), and it is idempotent by the SAME deterministic commitment id shared with the other two sinks: the extractor pre-computes each entry's `dedupSource` = `commitment:<id>`, and `cortextos bus event-dedup --source <dedupSource>` is the atomic first-sight gate, so a re-run never creates a second task/card.
+
+The extractor stdout also contains a `busTasks` array of `{id, dedupSource, title, assignee, direction, sourceRef, priority, needsApproval, approval?}`. Iterate it (`assignee` is always `human`; `needsApproval=true` + an `approval` block only for client-visible outbound items). Do NOT re-derive any of these from the LLM — the extractor owns the spec so the id is shared across sinks.
+
+```bash
+# DEGRADED (dry-run) still emits busTasks so the bus sink stays live even when
+# BRIEFS ingest env is unset. The event-dedup gate is what makes it idempotent.
+python3 - /tmp/ff-commitments.json <<'PY' > /tmp/ff-bus-tasks.jsonl || true
+import json, sys
+try:
+    data = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+for t in data.get("busTasks", []):
+    print(json.dumps(t))
+PY
+
+while IFS= read -r row; do
+  [ -z "$row" ] && continue
+  DEDUP_SOURCE=$(printf '%s' "$row" | python3 -c 'import json,sys;print(json.load(sys.stdin)["dedupSource"])')
+  TITLE=$(printf '%s' "$row" | python3 -c 'import json,sys;print(json.load(sys.stdin)["title"])')
+  NEEDS_APPROVAL=$(printf '%s' "$row" | python3 -c 'import json,sys;print("1" if json.load(sys.stdin).get("needsApproval") else "0")')
+  # Atomic first-sight gate on the SHARED commitment id — SKIP on re-run.
+  GATE=$(cortextos bus event-dedup --source "$DEDUP_SOURCE" --json 2>/dev/null | python3 -c 'import json,sys;print("SURFACE" if json.load(sys.stdin).get("surface") else "SKIP")' 2>/dev/null || echo SURFACE)
+  [ "$GATE" = "SKIP" ] && continue
+  if [ "$NEEDS_APPROVAL" = "1" ]; then
+    CTX=$(printf '%s' "$row" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("approval",{}).get("context",""))')
+    cortextos bus create-task "$TITLE" --assignee human --needs-approval --desc "Meeting commitment (client-visible) — $CTX" 2>/dev/null
+    cortextos bus create-approval "$TITLE" external-comms "$CTX" 2>/dev/null
+  else
+    cortextos bus create-task "$TITLE" --assignee human --desc "Meeting commitment" 2>/dev/null
+  fi
+done < /tmp/ff-bus-tasks.jsonl
+echo "bus_sink_done"
+```
+
+`/tmp/ff-commitments.json` is the extractor output written in Step 2. If `EXTRACTOR_RC` was nonzero, skip this step (Step 2's failure rule already routes straight to Step 6). This sink is ADDITIVE — it does not replace or gate the BRIEFS POST or the Telegram surface.
+
+---
+
 ## Step 5 — Surface new commitments
 
 For NEW `P0` commitments only, send ONE Telegram to 6690120787, grouped by `direction`. Use `sourceRef` for the meeting title.

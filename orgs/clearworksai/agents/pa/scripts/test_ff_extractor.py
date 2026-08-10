@@ -1476,5 +1476,91 @@ class RecapModeTests(unittest.TestCase):
             self.assertEqual(meeting["deal_state"], "")
 
 
+class A6TripleSinkTests(unittest.TestCase):
+    """A6 — each commitment fans out to BUS + BRIEFS + Telegram, idempotent by
+    ONE deterministic commitment id shared across all three sinks."""
+
+    def make_commitment(
+        self,
+        *,
+        id: str = "ff_meeting_123_abcdefabcdef",
+        text: str = "Send the proposal to Acme (due 2026-06-10)",
+        direction: str = "outbound",
+        relevance_score: float = 0.0,
+        priority: str = "P2",
+    ) -> object:
+        return MODULE.RefinedCommitment(
+            id=id,
+            text=text,
+            source="ff",
+            source_ref="meeting_123 · Acme Follow Up",
+            direction=direction,
+            priority=priority,
+            relevance_score=relevance_score,
+        )
+
+    def test_bus_task_dedup_source_is_the_shared_commitment_id(self) -> None:
+        commitment = self.make_commitment()
+        [bus_entry] = MODULE.bus_task_entries([commitment])
+        briefs_entry = MODULE.commitment_payload_entries([commitment])[0]
+        # BUS dedup key, BRIEFS id, and the id the SKILL keys Telegram on are ONE id.
+        self.assertEqual(bus_entry["id"], commitment.id)
+        self.assertEqual(bus_entry["dedupSource"], f"commitment:{commitment.id}")
+        self.assertEqual(briefs_entry["id"], commitment.id)
+        self.assertEqual(bus_entry["assignee"], "human")
+
+    def test_bus_task_entries_are_deterministic_across_reruns(self) -> None:
+        commitment = self.make_commitment()
+        first = MODULE.bus_task_entries([commitment])
+        second = MODULE.bus_task_entries([commitment])
+        # Same input -> byte-identical spec -> the event-dedup gate SKIPs the
+        # re-run, so no duplicate bus task / POST / Telegram ping is created.
+        self.assertEqual(first, second)
+        self.assertEqual(first[0]["dedupSource"], second[0]["dedupSource"])
+
+    def test_inbound_and_outbound_same_action_get_distinct_bus_dedup_keys(self) -> None:
+        action = "Send the signed contract"
+        outbound = self.make_commitment(
+            id=MODULE.directional_commitment_id("meeting_123", action, "outbound"),
+            direction="outbound",
+        )
+        inbound = self.make_commitment(
+            id=MODULE.directional_commitment_id("meeting_123", action, "inbound"),
+            direction="inbound",
+        )
+        entries = MODULE.bus_task_entries([outbound, inbound])
+        keys = {e["dedupSource"] for e in entries}
+        # Two directions of the same action -> two ids -> two distinct bus tasks,
+        # matching the BRIEFS/Telegram id split (regression guard for A6).
+        self.assertEqual(len(keys), 2)
+
+    def test_client_visible_outbound_needs_approval_card(self) -> None:
+        commitment = self.make_commitment(
+            relevance_score=MODULE.CLIENT_VISIBLE_RELEVANCE_MIN + 0.1,
+        )
+        [entry] = MODULE.bus_task_entries([commitment])
+        self.assertTrue(entry["needsApproval"])
+        self.assertIn("approval", entry)
+        self.assertEqual(entry["approval"]["category"], "external-comms")
+        # The approval card is keyed to the same commitment (shared id -> idempotent).
+        self.assertEqual(entry["approval"]["context"], commitment.source_ref)
+
+    def test_inbound_never_needs_approval(self) -> None:
+        commitment = self.make_commitment(
+            direction="inbound",
+            relevance_score=MODULE.CLIENT_VISIBLE_RELEVANCE_MIN + 0.5,
+        )
+        [entry] = MODULE.bus_task_entries([commitment])
+        self.assertFalse(entry["needsApproval"])
+        self.assertNotIn("approval", entry)
+
+    def test_non_client_outbound_is_a_plain_human_task(self) -> None:
+        commitment = self.make_commitment(relevance_score=0.0)
+        [entry] = MODULE.bus_task_entries([commitment])
+        self.assertFalse(entry["needsApproval"])
+        self.assertNotIn("approval", entry)
+        self.assertEqual(entry["assignee"], "human")
+
+
 if __name__ == "__main__":
     unittest.main()

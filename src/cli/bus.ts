@@ -64,6 +64,7 @@ import { withFileLockSync } from '../utils/lock.js';
 import { IPCClient } from '../daemon/ipc-server.js';
 import { TelegramAPI } from '../telegram/api.js';
 import { logOutboundMessage, cacheLastSent } from '../telegram/logging.js';
+import { classifyRoutineAuthorizationDisclaimer } from '../utils/outbound-policy.js';
 import { checkAndRecord, removeRecord } from '../telegram/dedup.js';
 import { appendToBuffer } from '../daemon/conversation-buffer.js';
 import { findBannedCronPrompts } from '../utils/cron-prompt-validator.js';
@@ -1953,6 +1954,11 @@ busCommand
     // does not expand escapes, so they arrive at argv as 2-char literals and
     // Telegram renders them as visible text. Normalize before send + log.
     message = message.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+    const outboundPolicyReason = classifyRoutineAuthorizationDisclaimer(message);
+    if (outboundPolicyReason) {
+      process.stderr.write(`[outbound-policy] HOLD: ${outboundPolicyReason}\n`);
+      process.exit(2);
+    }
     // Resolve bot token: agent .env first, then process.env
     const env = resolveEnv();
     let kind: BusSendKind;

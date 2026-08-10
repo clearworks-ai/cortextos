@@ -1,165 +1,165 @@
 {
-  "agent_name": "larry",
-  "model": "claude-sonnet-5[1m]",
-  "enabled": true,
-  "startup_delay": 0,
-  "max_session_seconds": 255600,
-  "max_crashes_per_day": 30,
-  "emit_system_telegram_pings": false,
-  "ctx_warning_threshold": 60,
-  "ctx_handoff_threshold": 70,
-  "working_directory": "",
-  "timezone": "America/Los_Angeles",
-  "day_mode_start": "08:00",
-  "day_mode_end": "18:00",
-  "communication_style": "casual",
-  "approval_rules": {
-    "always_ask": [
-      "external-comms",
-      "deployment",
-      "data-deletion",
-      "financial",
-      "upstream-merge",
-      "release-window",
-      "dependency-update-major",
-      "schema-migration-breaking",
-      "scope-validation"
-    ],
-    "never_ask": [
-      "repo-health-check",
-      "health-check",
-      "status-report",
-      "pr-list"
-    ]
-  },
-  "crons": [
-    {
-      "name": "heartbeat",
-      "type": "recurring",
-      "interval": "4h",
-      "prompt": "cortextos bus update-cron-fire heartbeat --interval 4h 2>/dev/null; TASK_ID=$(cortextos bus create-task \"Cron: heartbeat\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; Read HEARTBEAT.md and follow its instructions. Update heartbeat, check inbox, run fleet health check across all 3 repos."
-    },
-    {
-      "name": "repo-health",
-      "type": "recurring",
-      "interval": "4h",
-      "prompt": "cortextos bus update-cron-fire repo-health --interval 4h 2>/dev/null; TASK_ID=$(cortextos bus create-task \"Cron: repo-health\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; REPO HEALTH CHECK \u2014 Check git log --oneline -5 for each repo (~/code/clearpath, ~/code/lifecycle-killer [cxportal, active app, not deprecated]). Check Railway deploy status if any recent commits. Report anomalies to Josh via Telegram 6690120787. If all healthy, skip silently. Format: *Repo Health \u2014 [date]* with bullet list of issues. SILENT-OK if all healthy."
-    },
-    {
-      "name": "uptime-check",
-      "type": "recurring",
-      "interval": "4h",
-      "prompt": "cortextos bus update-cron-fire uptime-check --interval 4h 2>/dev/null; bash $CTX_AGENT_DIR/bin/uptime-check.sh"
-    },
-    {
-      "name": "upstream-sync",
-      "type": "recurring",
-      "cron": "0 9 * * 1",
-      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: upstream-sync\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire upstream-sync --interval 7d 2>/dev/null; UPSTREAM SYNC CHECK \u2014 Run: cd /Users/joshweiss/cortextos && git fetch upstream. Check: git log --oneline HEAD..upstream/main | wc -l. If >0 commits pending: extract list (git log --oneline HEAD..upstream/main) and changed files (git diff HEAD..upstream/main --name-only). ALSO run: gh pr list --repo grandamenium/cortextos --state open (per P7 rule 3 \u2014 forks are invisible to branch scans, so this must run every time, not just when upstream/main has new commits). Telegram to 6690120787 with summary of pending commits, file categories (skills, dashboard, core, tests), and any open upstream PRs worth adopting. Reference .claude/orchestration-fleet-build/research/upstream-merge-conflict-map.md for conflict resolution strategy. NEVER auto-merge \u2014 present to Josh and wait for approval. SILENT-OK if up-to-date and no relevant open PRs."
-    },
-    {
-      "name": "test-status",
-      "type": "recurring",
-      "cron": "0 6 * * 1-5",
-      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: test-status\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire test-status --interval 24h 2>/dev/null; TEST STATUS \u2014 Run npm test in each active repo (~/code/clearpath, ~/code/lifecycle-killer [cxportal, active app]). Report failures to Josh immediately via Telegram 6690120787. If all tests pass, skip silently. For failures: diagnose root cause, draft fix proposal, present to Josh before applying. Log result via cortextos bus log-event action test_run info --meta '{\"repos\":3}'."
-    },
-    {
-      "name": "release-coordinator",
-      "type": "recurring",
-      "cron": "0 17 * * 5",
-      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: release-coordinator\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire release-coordinator --interval 7d 2>/dev/null; FRIDAY RELEASE REVIEW \u2014 Check git log since Monday across active repos (~/code/clearpath, ~/code/lifecycle-killer [cxportal, active app]). Summarize: what shipped this week, what is in progress, what is blocked. Check open PRs via gh pr list --state open for each repo. Send weekly engineering digest to Josh via Telegram 6690120787. Format: *Weekly Engineering Review \u2014 [week]* with per-repo status bullets."
-    },
-    {
-      "name": "playwright-coverage",
-      "type": "recurring",
-      "cron": "0 9 * * 2",
-      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: playwright-coverage\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire playwright-coverage --interval 7d 2>/dev/null; PLAYWRIGHT COVERAGE \u2014 Run Playwright test suites where available (~/code/clearpath, ~/code/lifecycle-killer [cxportal, active app]). Extract pass rates and failing tests. Telegram to 6690120787: *Playwright Coverage \u2014 [date]* with pass rates per repo and any new failures. Propose coverage gaps if >3 features have failing tests. SILENT-OK if all passing."
-    },
-    {
-      "name": "dependency-audit",
-      "type": "recurring",
-      "cron": "0 11 * * 4",
-      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: dependency-audit\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire dependency-audit --interval 7d 2>/dev/null; DEPENDENCY AUDIT \u2014 For each repo (~/code/clearpath, ~/code/lifecycle-killer [cxportal, active app]): (1) npm audit \u2014 flag high/critical vulnerabilities. (2) npm outdated \u2014 identify major version bumps. Telegram to 6690120787: *Dependency Audit \u2014 [date]* with critical vulnerabilities and recommended updates. For major version bumps: always ask Josh. For patch/minor: propose PR. SILENT-OK if no vulnerabilities and <5 outdated packages."
-    },
-    {
-      "name": "pr-review-reminder",
-      "type": "recurring",
-      "interval": "8h",
-      "prompt": "cortextos bus update-cron-fire pr-review-reminder --interval 8h 2>/dev/null; TASK_ID=$(cortextos bus create-task \"Cron: pr-review-reminder\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; PR REVIEW REMINDER \u2014 Check open PRs via gh pr list --state open --repo clearworks-ai/clearpath, clearworks-ai/cxportal. For PRs older than 4 hours: extract title, number, time pending. Telegram to 6690120787 ONLY if PRs pending >4h. Format: *Open PRs \u2014 [date]* with repo + PR title + time pending. SILENT-OK if all PRs <4h old or no open PRs."
-    },
-    {
-      "name": "usage-audit",
-      "type": "recurring",
-      "cron": "7 23 * * *",
-      "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: usage-audit\" --desc \"Nightly Claude usage + engineering-agent performance audit\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire usage-audit --interval 24h 2>/dev/null; Read .claude/skills/usage-audit/SKILL.md and execute the nightly usage audit. Produce one friction point, one agent failure, one concrete change. Write report to memory/reports/ and send short Telegram to 6690120787 (SILENT-OK on low-signal days). When complete: cortextos bus complete-task $TASK_ID --result \"Usage audit shipped \u2014 [signal strength]\""
-    },
-    {
-      "name": "plan-adherence-audit",
-      "type": "recurring",
-      "cron": "7 6 * * *",
-      "prompt": "TASK_ID=$(cortextos bus create-task 'Cron: plan-adherence-audit' --desc 'Daily plan adherence audit \u2014 scan 24h transcripts for unplanned work' 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire plan-adherence-audit --interval 24h 2>/dev/null; PLAN ADHERENCE AUDIT \u2014 Run: python3 ~/code/cortextos/orgs/clearworksai/agents/larry/bin/plan-adherence-audit.py 2>&1; cortextos bus log-event action plan_adherence_audit info --meta '{\"source\":\"daily-cron\"}'; cortextos bus complete-task $TASK_ID --result 'Plan adherence audit complete' 2>/dev/null; Your entire response must be literally 'OK' unless the script fails."
-    },
-    {
-      "name": "pipeline-bypass-audit",
-      "type": "recurring",
-      "cron": "30 2 * * *",
-      "prompt": "TASK_ID=$(cortextos bus create-task 'Cron: pipeline-bypass-audit' --desc 'Nightly pipeline bypass audit' 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire pipeline-bypass-audit --interval 24h 2>/dev/null; bash $CTX_AGENT_DIR/scripts/pipeline-bypass-audit.sh; STATUS=$?; if [ \"$STATUS\" -eq 0 ]; then cortextos bus complete-task $TASK_ID --result 'Pipeline bypass audit complete' 2>/dev/null; fi; exit $STATUS"
-    },
-    {
-      "name": "weekly-security-audit",
-      "type": "recurring",
-      "cron": "7 3 * * 3",
-      "prompt": "TASK_ID=$(cortextos bus create-task 'Cron: weekly-security-audit' --desc 'Weekly 10-vector security audit across all clearworksai agents' 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire weekly-security-audit --interval 7d 2>/dev/null; WEEKLY SECURITY AUDIT \u2014 (1) Create output dir: mkdir -p ~/code/knowledge-sync/raw/areas/clearworks/security-audits. (2) For each agent in ~/code/cortextos/orgs/clearworksai/agents/ (academy, auditos, auditos2, frank2, hunter, larry, maven, muse, sage, sre): invoke the /agent-security-audit skill with AGENT_DIR=<full path>, save full report to ~/code/knowledge-sync/raw/areas/clearworks/security-audits/<agent>-$(date +%Y-%m-%d).md. (3) After all 10 done: cd ~/code/knowledge-sync && git add raw/areas/clearworks/security-audits/ && git commit -m 'chore: weekly agent security audit '$(date +%Y-%m-%d) && git push. (4) Build Telegram message: each agent score/100 with CRITICAL+HIGH counts, all CRITICAL findings (text + file:line), top 3 cross-agent fixes, and GitHub links: https://github.com/clearworks-ai/knowledge-sync/blob/main/raw/areas/clearworks/security-audits/<agent>-$(date +%Y-%m-%d).md. (5) Send to 6690120787. Max 3000 chars."
-    },
-    {
-      "name": "staging-health",
-      "type": "interval",
-      "interval": "4h",
-      "prompt": "cortextos bus update-cron-fire staging-health --interval 4h 2>/dev/null; bash $CTX_AGENT_DIR/bin/staging-health.sh"
-    },
-    {
-      "name": "cxportal-pull-nightly",
-      "type": "recurring",
-      "cron": "52 2 * * *",
-      "prompt": "TASK_ID=$(cortextos bus create-task 'Cron: cxportal-pull-nightly' --desc 'Nightly cxportal pull: import entities to knowledge-sync' 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire cxportal-pull-nightly --interval 24h 2>/dev/null; NIGHTLY CXPORTAL PULL \u2014 (1) Check the PREVIOUS run's row: tail -1 $CTX_AGENT_DIR/state/cxportal-pull-ledger.jsonl. If it is missing or has \\\"green\\\": false, send Telegram 6690120787 with the row \u2014 silent failure on a cxportal cron is NOT acceptable. (2) Run tonight's pull in the FOREGROUND (timeout 600000 ~ 10 minutes): python3 ~/code/cortextos/orgs/clearworksai/skills/cxportal-import/pull_cxportal.py run --source-task $TASK_ID. (3) cortextos bus complete-task $TASK_ID --result 'cxportal-pull complete; previous night checked' 2>/dev/null. SILENT-OK if previous row green and tonight's run green."
-    },
-    {
-      "name": "kb-reconcile-nightly",
-      "type": "recurring",
-      "cron": "37 3 * * *",
-      "prompt": "TASK_ID=$(cortextos bus create-task 'Cron: kb-reconcile-nightly' --desc 'Nightly KB reconcile: mmrag reconcile all roots + kb-extract-edges refresh + counts row' 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire kb-reconcile-nightly --interval 24h 2>/dev/null; NIGHTLY KB RECONCILE \u2014 (1) Check the PREVIOUS run's row: tail -1 $CTX_AGENT_DIR/state/kb-reconcile-ledger.jsonl. If it is missing or has \"green\": false, send Telegram 6690120787 with the row \u2014 silent failure on a KB cron is NOT acceptable. (2) Launch tonight's run in the BACKGROUND (it can take hours on backlog nights; do not wait for it): run bash $CTX_AGENT_DIR/bin/kb-reconcile-nightly.sh as a background Bash call. The script writes its own ledger row when it finishes. (3) cortextos bus complete-task $TASK_ID --result 'kb-reconcile launched; previous night checked' 2>/dev/null. SILENT-OK if previous row green and launch succeeded."
-    },
-    {
-      "name": "claude-mem-export",
-      "type": "recurring",
-      "cron": "12 3 * * *",
-      "prompt": "TASK_ID=$(cortextos bus create-task 'Cron: claude-mem-export' --desc 'Nightly claude-mem exporter: new observations/summaries -> session-memory markdown for 03:37 kb-reconcile ingest' 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire claude-mem-export --interval 24h 2>/dev/null; CLAUDE-MEM EXPORT \u2014 (1) Check the PREVIOUS run's row: tail -1 $CTX_AGENT_DIR/state/claude-mem-export-ledger.jsonl. If it is missing or has \\\"green\\\": false, send Telegram 6690120787 with the row \u2014 silent failure on a KB feed cron is NOT acceptable. (2) Run bash $CTX_AGENT_DIR/bin/claude-mem-export.sh $TASK_ID (foreground \u2014 it finishes in seconds; it writes its own ledger row). (3) If it exited 0: cortextos bus complete-task $TASK_ID --result 'claude-mem export ok' 2>/dev/null. SILENT-OK if previous row green and tonight's run exited 0."
-    },
-    {
-      "name": "kb-maintenance-sweep",
-      "type": "recurring",
-      "cron": "47 4 * * *",
-      "prompt": "TASK_ID=$(cortextos bus create-task 'Cron: kb-maintenance-sweep' --desc 'Nightly Tier-1 KB content-health sweep (dead-link/orphan/junk/dup/freshness/canary) + findings' 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire kb-maintenance-sweep --interval 24h 2>/dev/null; NIGHTLY KB MAINTENANCE SWEEP (Tier 1, zero-LLM) \u2014 (1) Check the PREVIOUS run's row: tail -1 $CTX_AGENT_DIR/state/kb-maintenance-ledger.jsonl. If it is missing or has \"green\": false (a scan crashed), send Telegram 6690120787 with the row \u2014 silent failure on a KB cron is NOT acceptable. (2) Feed Tier-3 event marks from last night's reconcile: CHANGED=$(tail -1 $CTX_AGENT_DIR/state/kb-reconcile-ledger.jsonl | python3 -c 'import sys,json;print(\",\".join((json.load(sys.stdin).get(\"reconcile\") or {}).get(\"failed_paths\",[]) or []))' 2>/dev/null). (3) Launch tonight's sweep in the BACKGROUND: run bash $CTX_AGENT_DIR/bin/kb-maintenance-sweep.sh --canary ${CHANGED:+--changed-files \"$CHANGED\"} as a background Bash call. It writes its own ledger row + a dated findings file under knowledge-sync/system/kb-maintenance/. (4) cortextos bus complete-task $TASK_ID --result 'kb-maintenance launched; previous night checked' 2>/dev/null. SILENT-OK if previous row green and launch succeeded. Do NOT auto-apply any finding \u2014 mechanical fixes route to auto-PR, merges/deletions/rewrites route to bus tasks for approval."
-    },
-    {
-      "name": "kb-maintenance-digest",
-      "type": "recurring",
-      "cron": "23 5 * * 0",
-      "prompt": "TASK_ID=$(cortextos bus create-task 'Cron: kb-maintenance-digest' --desc 'Weekly KB content-health digest: Tier-2 LLM verify over Tier-1 candidates + ONE Telegram digest' 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire kb-maintenance-digest --interval 168h 2>/dev/null; WEEKLY KB MAINTENANCE DIGEST \u2014 (1) Run the Tier-2 verify layer over this week's Tier-1 candidates only (near-dup / staleness / contradiction / one-fact-one-home): export MMRAG_DIR=\"$HOME/.cortextos/${CTX_INSTANCE_ID:-default}/orgs/clearworksai/knowledge-base\"; $CTX_REPO/knowledge-base/venv/bin/python3 $CTX_REPO/knowledge-base/scripts/kb_maintenance.py --tier all --dry-run > /tmp/kb-maint-weekly.json (LLM step is a documented stub unless KB_MAINT_ENABLE_LLM=1). (2) Summarize the week's findings files under knowledge-sync/system/kb-maintenance/ into ONE digest and send it to Telegram 6690120787 \u2014 one weekly digest, NOT per-item pings (comms doctrine). (3) For approval-required items (merges/deletions/rewrites/quarantine), create bus tasks assigned to larry with the finding file attached. (4) cortextos bus complete-task $TASK_ID --result 'weekly KB digest sent' 2>/dev/null."
-    },
-    {
-      "name": "production-stack-sweep",
-      "type": "recurring",
-      "cron": "17 6 * * *",
-      "prompt": "TASK_ID=$(cortextos bus create-task 'Cron: production-stack-sweep' --desc 'Daily client-facing-automation stall sweep (DESIGN-G lane G)' 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire production-stack-sweep --interval 24h 2>/dev/null; PRODUCTION-STACK STALL SWEEP \u2014 Run: bash ~/code/cortextos/orgs/clearworksai/agents/larry/bin/production-stack-sweep.sh 2>&1. The script classifies every automation in knowledge-sync/raw/areas/clearworks/production-stack.md and, ONLY for a client-facing STALLED/FAILING row, Telegrams 6690120787 + opens a deduped bus task (silent otherwise; it logs its own summary bus event). cortextos bus complete-task $TASK_ID --result 'production-stack sweep complete' 2>/dev/null. Your entire response must be literally 'OK' unless the script fails."
-    }
+ "agent_name": "larry",
+ "model": "claude-sonnet-5[1m]",
+ "enabled": true,
+ "startup_delay": 0,
+ "max_session_seconds": 255600,
+ "max_crashes_per_day": 30,
+ "emit_system_telegram_pings": false,
+ "ctx_warning_threshold": 60,
+ "ctx_handoff_threshold": 0,
+ "working_directory": "",
+ "timezone": "America/Los_Angeles",
+ "day_mode_start": "08:00",
+ "day_mode_end": "18:00",
+ "communication_style": "casual",
+ "approval_rules": {
+  "always_ask": [
+   "external-comms",
+   "deployment",
+   "data-deletion",
+   "financial",
+   "upstream-merge",
+   "release-window",
+   "dependency-update-major",
+   "schema-migration-breaking",
+   "scope-validation"
   ],
-  "ecosystem": {
-    "local_version_control": {
-      "enabled": false
-    },
-    "upstream_sync": {
-      "enabled": false
-    }
+  "never_ask": [
+   "repo-health-check",
+   "health-check",
+   "status-report",
+   "pr-list"
+  ]
+ },
+ "crons": [
+  {
+   "name": "heartbeat",
+   "type": "recurring",
+   "interval": "4h",
+   "prompt": "cortextos bus update-cron-fire heartbeat --interval 4h 2>/dev/null; TASK_ID=$(cortextos bus create-task \"Cron: heartbeat\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; Read HEARTBEAT.md and follow its instructions. Update heartbeat, check inbox, run fleet health check across all 3 repos."
+  },
+  {
+   "name": "repo-health",
+   "type": "recurring",
+   "interval": "4h",
+   "prompt": "cortextos bus update-cron-fire repo-health --interval 4h 2>/dev/null; TASK_ID=$(cortextos bus create-task \"Cron: repo-health\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; REPO HEALTH CHECK \u2014 Check git log --oneline -5 for each repo (~/code/clearpath, ~/code/lifecycle-killer [cxportal, active app, not deprecated]). Check Railway deploy status if any recent commits. Report anomalies to Josh via Telegram 6690120787. If all healthy, skip silently. Format: *Repo Health \u2014 [date]* with bullet list of issues. SILENT-OK if all healthy."
+  },
+  {
+   "name": "uptime-check",
+   "type": "recurring",
+   "interval": "4h",
+   "prompt": "cortextos bus update-cron-fire uptime-check --interval 4h 2>/dev/null; bash $CTX_AGENT_DIR/bin/uptime-check.sh"
+  },
+  {
+   "name": "upstream-sync",
+   "type": "recurring",
+   "cron": "0 9 * * 1",
+   "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: upstream-sync\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire upstream-sync --interval 7d 2>/dev/null; UPSTREAM SYNC CHECK \u2014 Run: cd /Users/joshweiss/cortextos && git fetch upstream. Check: git log --oneline HEAD..upstream/main | wc -l. If >0 commits pending: extract list (git log --oneline HEAD..upstream/main) and changed files (git diff HEAD..upstream/main --name-only). ALSO run: gh pr list --repo grandamenium/cortextos --state open (per P7 rule 3 \u2014 forks are invisible to branch scans, so this must run every time, not just when upstream/main has new commits). Telegram to 6690120787 with summary of pending commits, file categories (skills, dashboard, core, tests), and any open upstream PRs worth adopting. Reference .claude/orchestration-fleet-build/research/upstream-merge-conflict-map.md for conflict resolution strategy. NEVER auto-merge \u2014 present to Josh and wait for approval. SILENT-OK if up-to-date and no relevant open PRs."
+  },
+  {
+   "name": "test-status",
+   "type": "recurring",
+   "cron": "0 6 * * 1-5",
+   "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: test-status\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire test-status --interval 24h 2>/dev/null; TEST STATUS \u2014 Run npm test in each active repo (~/code/clearpath, ~/code/lifecycle-killer [cxportal, active app]). Report failures to Josh immediately via Telegram 6690120787. If all tests pass, skip silently. For failures: diagnose root cause, draft fix proposal, present to Josh before applying. Log result via cortextos bus log-event action test_run info --meta '{\"repos\":3}'."
+  },
+  {
+   "name": "release-coordinator",
+   "type": "recurring",
+   "cron": "0 17 * * 5",
+   "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: release-coordinator\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire release-coordinator --interval 7d 2>/dev/null; FRIDAY RELEASE REVIEW \u2014 Check git log since Monday across active repos (~/code/clearpath, ~/code/lifecycle-killer [cxportal, active app]). Summarize: what shipped this week, what is in progress, what is blocked. Check open PRs via gh pr list --state open for each repo. Send weekly engineering digest to Josh via Telegram 6690120787. Format: *Weekly Engineering Review \u2014 [week]* with per-repo status bullets."
+  },
+  {
+   "name": "playwright-coverage",
+   "type": "recurring",
+   "cron": "0 9 * * 2",
+   "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: playwright-coverage\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire playwright-coverage --interval 7d 2>/dev/null; PLAYWRIGHT COVERAGE \u2014 Run Playwright test suites where available (~/code/clearpath, ~/code/lifecycle-killer [cxportal, active app]). Extract pass rates and failing tests. Telegram to 6690120787: *Playwright Coverage \u2014 [date]* with pass rates per repo and any new failures. Propose coverage gaps if >3 features have failing tests. SILENT-OK if all passing."
+  },
+  {
+   "name": "dependency-audit",
+   "type": "recurring",
+   "cron": "0 11 * * 4",
+   "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: dependency-audit\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire dependency-audit --interval 7d 2>/dev/null; DEPENDENCY AUDIT \u2014 For each repo (~/code/clearpath, ~/code/lifecycle-killer [cxportal, active app]): (1) npm audit \u2014 flag high/critical vulnerabilities. (2) npm outdated \u2014 identify major version bumps. Telegram to 6690120787: *Dependency Audit \u2014 [date]* with critical vulnerabilities and recommended updates. For major version bumps: always ask Josh. For patch/minor: propose PR. SILENT-OK if no vulnerabilities and <5 outdated packages."
+  },
+  {
+   "name": "pr-review-reminder",
+   "type": "recurring",
+   "interval": "8h",
+   "prompt": "cortextos bus update-cron-fire pr-review-reminder --interval 8h 2>/dev/null; TASK_ID=$(cortextos bus create-task \"Cron: pr-review-reminder\" --desc \"Scheduled cron run\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; PR REVIEW REMINDER \u2014 Check open PRs via gh pr list --state open --repo clearworks-ai/clearpath, clearworks-ai/cxportal. For PRs older than 4 hours: extract title, number, time pending. Telegram to 6690120787 ONLY if PRs pending >4h. Format: *Open PRs \u2014 [date]* with repo + PR title + time pending. SILENT-OK if all PRs <4h old or no open PRs."
+  },
+  {
+   "name": "usage-audit",
+   "type": "recurring",
+   "cron": "7 23 * * *",
+   "prompt": "TASK_ID=$(cortextos bus create-task \"Cron: usage-audit\" --desc \"Nightly Claude usage + engineering-agent performance audit\" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire usage-audit --interval 24h 2>/dev/null; Read .claude/skills/usage-audit/SKILL.md and execute the nightly usage audit. Produce one friction point, one agent failure, one concrete change. Write report to memory/reports/ and send short Telegram to 6690120787 (SILENT-OK on low-signal days). When complete: cortextos bus complete-task $TASK_ID --result \"Usage audit shipped \u2014 [signal strength]\""
+  },
+  {
+   "name": "plan-adherence-audit",
+   "type": "recurring",
+   "cron": "7 6 * * *",
+   "prompt": "TASK_ID=$(cortextos bus create-task 'Cron: plan-adherence-audit' --desc 'Daily plan adherence audit \u2014 scan 24h transcripts for unplanned work' 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire plan-adherence-audit --interval 24h 2>/dev/null; PLAN ADHERENCE AUDIT \u2014 Run: python3 ~/code/cortextos/orgs/clearworksai/agents/larry/bin/plan-adherence-audit.py 2>&1; cortextos bus log-event action plan_adherence_audit info --meta '{\"source\":\"daily-cron\"}'; cortextos bus complete-task $TASK_ID --result 'Plan adherence audit complete' 2>/dev/null; Your entire response must be literally 'OK' unless the script fails."
+  },
+  {
+   "name": "pipeline-bypass-audit",
+   "type": "recurring",
+   "cron": "30 2 * * *",
+   "prompt": "TASK_ID=$(cortextos bus create-task 'Cron: pipeline-bypass-audit' --desc 'Nightly pipeline bypass audit' 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire pipeline-bypass-audit --interval 24h 2>/dev/null; bash $CTX_AGENT_DIR/scripts/pipeline-bypass-audit.sh; STATUS=$?; if [ \"$STATUS\" -eq 0 ]; then cortextos bus complete-task $TASK_ID --result 'Pipeline bypass audit complete' 2>/dev/null; fi; exit $STATUS"
+  },
+  {
+   "name": "weekly-security-audit",
+   "type": "recurring",
+   "cron": "7 3 * * 3",
+   "prompt": "TASK_ID=$(cortextos bus create-task 'Cron: weekly-security-audit' --desc 'Weekly 10-vector security audit across all clearworksai agents' 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire weekly-security-audit --interval 7d 2>/dev/null; WEEKLY SECURITY AUDIT \u2014 (1) Create output dir: mkdir -p ~/code/knowledge-sync/raw/areas/clearworks/security-audits. (2) For each agent in ~/code/cortextos/orgs/clearworksai/agents/ (academy, auditos, auditos2, frank2, hunter, larry, maven, muse, sage, sre): invoke the /agent-security-audit skill with AGENT_DIR=<full path>, save full report to ~/code/knowledge-sync/raw/areas/clearworks/security-audits/<agent>-$(date +%Y-%m-%d).md. (3) After all 10 done: cd ~/code/knowledge-sync && git add raw/areas/clearworks/security-audits/ && git commit -m 'chore: weekly agent security audit '$(date +%Y-%m-%d) && git push. (4) Build Telegram message: each agent score/100 with CRITICAL+HIGH counts, all CRITICAL findings (text + file:line), top 3 cross-agent fixes, and GitHub links: https://github.com/clearworks-ai/knowledge-sync/blob/main/raw/areas/clearworks/security-audits/<agent>-$(date +%Y-%m-%d).md. (5) Send to 6690120787. Max 3000 chars."
+  },
+  {
+   "name": "staging-health",
+   "type": "interval",
+   "interval": "4h",
+   "prompt": "cortextos bus update-cron-fire staging-health --interval 4h 2>/dev/null; bash $CTX_AGENT_DIR/bin/staging-health.sh"
+  },
+  {
+   "name": "cxportal-pull-nightly",
+   "type": "recurring",
+   "cron": "52 2 * * *",
+   "prompt": "TASK_ID=$(cortextos bus create-task 'Cron: cxportal-pull-nightly' --desc 'Nightly cxportal pull: import entities to knowledge-sync' 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire cxportal-pull-nightly --interval 24h 2>/dev/null; NIGHTLY CXPORTAL PULL \u2014 (1) Check the PREVIOUS run's row: tail -1 $CTX_AGENT_DIR/state/cxportal-pull-ledger.jsonl. If it is missing or has \\\"green\\\": false, send Telegram 6690120787 with the row \u2014 silent failure on a cxportal cron is NOT acceptable. (2) Run tonight's pull in the FOREGROUND (timeout 600000 ~ 10 minutes): python3 ~/code/cortextos/orgs/clearworksai/skills/cxportal-import/pull_cxportal.py run --source-task $TASK_ID. (3) cortextos bus complete-task $TASK_ID --result 'cxportal-pull complete; previous night checked' 2>/dev/null. SILENT-OK if previous row green and tonight's run green."
+  },
+  {
+   "name": "kb-reconcile-nightly",
+   "type": "recurring",
+   "cron": "37 3 * * *",
+   "prompt": "TASK_ID=$(cortextos bus create-task 'Cron: kb-reconcile-nightly' --desc 'Nightly KB reconcile: mmrag reconcile all roots + kb-extract-edges refresh + counts row' 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire kb-reconcile-nightly --interval 24h 2>/dev/null; NIGHTLY KB RECONCILE \u2014 (1) Check the PREVIOUS run's row: tail -1 $CTX_AGENT_DIR/state/kb-reconcile-ledger.jsonl. If it is missing or has \"green\": false, send Telegram 6690120787 with the row \u2014 silent failure on a KB cron is NOT acceptable. (2) Launch tonight's run in the BACKGROUND (it can take hours on backlog nights; do not wait for it): run bash $CTX_AGENT_DIR/bin/kb-reconcile-nightly.sh as a background Bash call. The script writes its own ledger row when it finishes. (3) cortextos bus complete-task $TASK_ID --result 'kb-reconcile launched; previous night checked' 2>/dev/null. SILENT-OK if previous row green and launch succeeded."
+  },
+  {
+   "name": "claude-mem-export",
+   "type": "recurring",
+   "cron": "12 3 * * *",
+   "prompt": "TASK_ID=$(cortextos bus create-task 'Cron: claude-mem-export' --desc 'Nightly claude-mem exporter: new observations/summaries -> session-memory markdown for 03:37 kb-reconcile ingest' 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire claude-mem-export --interval 24h 2>/dev/null; CLAUDE-MEM EXPORT \u2014 (1) Check the PREVIOUS run's row: tail -1 $CTX_AGENT_DIR/state/claude-mem-export-ledger.jsonl. If it is missing or has \\\"green\\\": false, send Telegram 6690120787 with the row \u2014 silent failure on a KB feed cron is NOT acceptable. (2) Run bash $CTX_AGENT_DIR/bin/claude-mem-export.sh $TASK_ID (foreground \u2014 it finishes in seconds; it writes its own ledger row). (3) If it exited 0: cortextos bus complete-task $TASK_ID --result 'claude-mem export ok' 2>/dev/null. SILENT-OK if previous row green and tonight's run exited 0."
+  },
+  {
+   "name": "kb-maintenance-sweep",
+   "type": "recurring",
+   "cron": "47 4 * * *",
+   "prompt": "TASK_ID=$(cortextos bus create-task 'Cron: kb-maintenance-sweep' --desc 'Nightly Tier-1 KB content-health sweep (dead-link/orphan/junk/dup/freshness/canary) + findings' 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire kb-maintenance-sweep --interval 24h 2>/dev/null; NIGHTLY KB MAINTENANCE SWEEP (Tier 1, zero-LLM) \u2014 (1) Check the PREVIOUS run's row: tail -1 $CTX_AGENT_DIR/state/kb-maintenance-ledger.jsonl. If it is missing or has \"green\": false (a scan crashed), send Telegram 6690120787 with the row \u2014 silent failure on a KB cron is NOT acceptable. (2) Feed Tier-3 event marks from last night's reconcile: CHANGED=$(tail -1 $CTX_AGENT_DIR/state/kb-reconcile-ledger.jsonl | python3 -c 'import sys,json;print(\",\".join((json.load(sys.stdin).get(\"reconcile\") or {}).get(\"failed_paths\",[]) or []))' 2>/dev/null). (3) Launch tonight's sweep in the BACKGROUND: run bash $CTX_AGENT_DIR/bin/kb-maintenance-sweep.sh --canary ${CHANGED:+--changed-files \"$CHANGED\"} as a background Bash call. It writes its own ledger row + a dated findings file under knowledge-sync/system/kb-maintenance/. (4) cortextos bus complete-task $TASK_ID --result 'kb-maintenance launched; previous night checked' 2>/dev/null. SILENT-OK if previous row green and launch succeeded. Do NOT auto-apply any finding \u2014 mechanical fixes route to auto-PR, merges/deletions/rewrites route to bus tasks for approval."
+  },
+  {
+   "name": "kb-maintenance-digest",
+   "type": "recurring",
+   "cron": "23 5 * * 0",
+   "prompt": "TASK_ID=$(cortextos bus create-task 'Cron: kb-maintenance-digest' --desc 'Weekly KB content-health digest: Tier-2 LLM verify over Tier-1 candidates + ONE Telegram digest' 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire kb-maintenance-digest --interval 168h 2>/dev/null; WEEKLY KB MAINTENANCE DIGEST \u2014 (1) Run the Tier-2 verify layer over this week's Tier-1 candidates only (near-dup / staleness / contradiction / one-fact-one-home): export MMRAG_DIR=\"$HOME/.cortextos/${CTX_INSTANCE_ID:-default}/orgs/clearworksai/knowledge-base\"; $CTX_REPO/knowledge-base/venv/bin/python3 $CTX_REPO/knowledge-base/scripts/kb_maintenance.py --tier all --dry-run > /tmp/kb-maint-weekly.json (LLM step is a documented stub unless KB_MAINT_ENABLE_LLM=1). (2) Summarize the week's findings files under knowledge-sync/system/kb-maintenance/ into ONE digest and send it to Telegram 6690120787 \u2014 one weekly digest, NOT per-item pings (comms doctrine). (3) For approval-required items (merges/deletions/rewrites/quarantine), create bus tasks assigned to larry with the finding file attached. (4) cortextos bus complete-task $TASK_ID --result 'weekly KB digest sent' 2>/dev/null."
+  },
+  {
+   "name": "production-stack-sweep",
+   "type": "recurring",
+   "cron": "17 6 * * *",
+   "prompt": "TASK_ID=$(cortextos bus create-task 'Cron: production-stack-sweep' --desc 'Daily client-facing-automation stall sweep (DESIGN-G lane G)' 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire production-stack-sweep --interval 24h 2>/dev/null; PRODUCTION-STACK STALL SWEEP \u2014 Run: bash ~/code/cortextos/orgs/clearworksai/agents/larry/bin/production-stack-sweep.sh 2>&1. The script classifies every automation in knowledge-sync/raw/areas/clearworks/production-stack.md and, ONLY for a client-facing STALLED/FAILING row, Telegrams 6690120787 + opens a deduped bus task (silent otherwise; it logs its own summary bus event). cortextos bus complete-task $TASK_ID --result 'production-stack sweep complete' 2>/dev/null. Your entire response must be literally 'OK' unless the script fails."
   }
+ ],
+ "ecosystem": {
+  "local_version_control": {
+   "enabled": false
+  },
+  "upstream_sync": {
+   "enabled": false
+  }
+ }
 }

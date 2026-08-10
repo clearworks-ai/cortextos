@@ -1,0 +1,24 @@
+{
+  "slug": "acme-co",
+  "client": "Acme Co",
+  "engagement": "lead-triage + quote automation",
+  "phases": [
+    {
+      "id": "phase-0-audit",
+      "name": "Audit & Pilot"
+    },
+    {
+      "id": "phase-1-build",
+      "name": "Lead-Triage Build"
+    },
+    {
+      "id": "ongoing-retainer",
+      "name": "Retainer & Iteration"
+    }
+  ],
+  "artifacts": {
+    "proposal": "proposal.md",
+    "pricing": "pricing.md",
+    "dealRoom": "deal-room.md"
+  }
+}

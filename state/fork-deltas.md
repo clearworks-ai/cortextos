@@ -47,3 +47,15 @@ meeting pipeline: `orgs/clearworksai/agents/pa/scripts/ff-extractor.py` (new pur
 `meeting-commitments-worker` SKILL (new Step 4b bus sink gated on
 `bus event-dedup --source commitment:<id>`). **No fork-delta / upstream-PR candidate** — this is
 additive org config, not a `src/` modification, so the P7 invariant does not apply.
+## 2026-08-10 — S1 lane (solution-design 5-stack, on-demand)
+
+| Lane | Branch | src touched | Upstream candidate |
+|---|---|---|---|
+| S1 | `larry/s1-solution-design-5stack` | `src/pipeline/deal-context.ts` (new), `src/pipeline/scoping-gate.ts` (filename-guard fix), `tsup.config.ts` (add deal-context entry) | YES — `deal-context.ts` is a pure pipeline util with no org-specific logic; upstream PR candidate once fork #172 merges |
+
+**What S1 adds:** `dist/pipeline/deal-context.js` CLI (`init` + `coherence-check`) threads a
+single JSON deal spine (slug + phase ids + artifact paths) across the 5-stack producers so
+proposal scope == pricing line items == deal-room sections provably. Scoping-gate guard fix stops
+the entry from firing when inlined into the deal-context bundle. Fixture at
+`state/skill-tests/solution-design-chain/` (positive PASS + negative named-violations).
+No event/cron wiring; Josh-driven only.

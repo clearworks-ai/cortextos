@@ -1,0 +1,18 @@
+{
+  "slug": "acme-co",
+  "workers": [
+    {
+      "id": "crm-sync",
+      "touchesLiveExternalSystem": true,
+      "integrationEngineerRan": true,
+      "exemplarGroundingPass1": true
+    },
+    {
+      "id": "calendar-sync",
+      "touchesLiveExternalSystem": true,
+      "integrationEngineerRan": true,
+      "exemplarGroundingPass1": true
+    }
+  ],
+  "exemplarGroundingPass2": true
+}

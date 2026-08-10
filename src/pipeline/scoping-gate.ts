@@ -321,6 +321,9 @@ export function main(argv: string[] = process.argv.slice(2)): void {
   );
 }
 
-if (require.main === module) {
+// Guard on the actual entry filename, not just `require.main === module`: the bundler
+// inlines this module into sibling pipeline CLIs (e.g. deal-context.js), where the
+// naked `require.main === module` guard would otherwise fire this CLI first.
+if (require.main === module && /(?:^|[\\/])scoping-gate(?:\.js|\.ts)?$/.test(process.argv[1] ?? '')) {
   main();
 }

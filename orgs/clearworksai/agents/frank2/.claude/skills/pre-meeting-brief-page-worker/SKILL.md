@@ -167,3 +167,36 @@ cortextos terminate-worker $CTX_AGENT_NAME
 ```
 
 Output literally: `DONE`
+
+---
+
+## cortextOS wiring (v9 finish — Track F, job: Pre-Call Briefing)
+
+> Canonical runbook + crons + live-receipt commands: `orgs/clearworksai/skills/F-P2-JOBS-WIRING.md`.
+> This job is ALREADY the strongest-wired of the three (cron-scan → atomic claim → BRIEFS publish →
+> bus task → verified link). This section pins its trigger/output/bus-row contract and names the
+> event-lane upgrade so Track E's calendar watch can drive it deterministically once live.
+
+**Trigger surface.**
+- **Schedule (live today):** `pre-meeting-brief-page` (`*/15 7-19 * * 1-5`) — every 15 min on weekday
+  business hours, scans upcoming calendar events ~45 min out via `cortextos bus meeting-brief-scan`
+  (already excludes surfaced/claimed events). This IS a real trigger that fires against real calendar
+  data — not a synthetic fixture.
+- **Event (deterministic upgrade — Track E `calendar.event.upcoming`):** when the Calendar watch lane
+  is live, a `calendar.event.upcoming` push (~45m pre-start) spawns THIS worker directly for the one
+  event, and the `*/15` poll drops to a once-hourly safety sweep (Track D). Idempotency is already
+  event-scoped via the surfaced-mark + the 20-min atomic claim, so the poll and the push can co-exist
+  during cutover without double-publishing (the claim is the cross-process gate — Step 2b).
+
+**Real-path output (NOT a synthetic fixture dir):**
+- The published BRIEFS page (`publish_brief.py`, CODE=200 verified) — the link Josh actually opens.
+- Surfaced-mark state file `state/pre-meeting-brief-surfaced.txt` (permanent per-event dedup).
+
+**Structured bus row (mandatory).** Already emitted: Step 1 opens `Cron: pre-meeting-brief-page` via
+`cortextos bus create-task ... --assignee "${CTX_PARENT_AGENT:-frank2}"` and Step 8 closes it with
+`complete-task --result "...published + link delivered"`. The task id is the observable run row on the
+board; the surfaced-mark + `event-dedup --source calendar:<eventId> --fire-once` is the idempotency key
+for the event-lane cutover. Do NOT add a duplicate row — the create/complete pair IS the bus receipt.
+
+**Live receipt** = a verified BRIEFS publish (CODE=200) for one REAL upcoming external meeting + the
+`Cron: pre-meeting-brief-page` task moving create→complete on the bus + the new surfaced-mark line.

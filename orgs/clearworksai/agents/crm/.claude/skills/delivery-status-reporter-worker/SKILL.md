@@ -151,3 +151,41 @@ Output `DONE` and stop.
 - Draft a client message for bad/mixed news.
 - Invent progress a source row doesn't support.
 - Report to a client not on the blessed roster.
+
+---
+
+## cortextOS wiring (v9 finish — Track F, job: Status Updates)
+
+> Canonical runbook + crons + live-receipt commands: `orgs/clearworksai/skills/F-P2-JOBS-WIRING.md`.
+> This job runs as a SKILL on the `crm` agent (holds client data + `external-comms` always-ask), not
+> as an inline cron prompt.
+
+**Trigger surface.**
+- **Schedule (primary — by design a cadence sweep, NOT event-driven):** `delivery-status-reporter`
+  (`0 9 * * 1`, Mon 9am) walks the blessed roster (5 clients) and drafts per client. This is a REAL
+  trigger against real client `interactions/`/`followups/` data — the missed-event safety net + cadence
+  engine per DESIGN-F §2. Bookkeeping is Step 1: `cortextos bus create-task "Cron: delivery-status-reporter"`
+  + `cortextos bus update-cron-fire delivery-status-reporter --interval 7d`.
+- **Event (optional accelerator):** a `crm.deal.stage_changed` to `active_client`/`won` may fire an
+  off-cadence single-client draft for that one client — idempotent by the same per-client key below —
+  so a milestone doesn't wait up to a week. The weekly sweep stays the backbone.
+
+**Real-path output (NOT a synthetic fixture dir):**
+- Per-client status DRAFTS filed under the crm agent's `outputs/delivery-status-reporter/` (Step 3
+  files the draft + the `draft.approval` spec), never a client channel.
+- The client tracker refresh (`last_update`) so the next sweep honors `action: skip`.
+
+**Structured bus row (mandatory).** Already emitted, pinned here as contract + made idempotent:
+- Step 1: `create-task "Cron: delivery-status-reporter"` (the run row).
+- Step 3 (good/neutral news): `cortextos bus create-approval "$TITLE" external-comms "$CONTEXT" --client "$CLIENT"`
+  → the `/approvals` lane. Gate each on the per-client idempotency key so a re-fire in the same week
+  never double-cards. `event-dedup` keys are `<namespace>:<id>` with EXACTLY ONE colon
+  (`SOURCE_KEY_PATTERN` in `src/utils/event-dedup.ts`) — the compound id uses a dot, never a second
+  colon, or the key fails-open (`invalid-key`) and every re-run falsely SURFACEs: `status:<client>.<isoweek>`
+  via `cortextos bus event-dedup --source "status:${CLIENT}.${ISOWEEK}" --json` (SURFACE-gate before the card).
+- Step 4: `cortextos bus post-activity "Weekly status update drafted for $N clients · pending approval"`
+  + `complete-task`.
+
+**Live receipt** = the filed per-client DRAFT `outputs/delivery-status-reporter/*.md` + the
+`external-comms` approval card on the bus (`status:<client>:<isoweek>` keyed) + the `post-activity` line.
+Config/test-green is NOT a receipt.

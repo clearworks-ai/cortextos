@@ -531,16 +531,29 @@ export class CodexAppServerPTY {
 
       const latest = await this.findLatestThreadForCwd();
       if (latest) {
-        const resumed = await this.request<ThreadResponse>('thread/resume', {
-          threadId: latest,
-          cwd: this._cwd,
-          ...THREAD_PERMISSION_OVERRIDES,
-          config: { features: { goals: true } },
-          excludeTurns: true,
-          persistExtendedHistory: true,
-        });
-        this.setThreadId(resumed.result?.thread.id || latest);
-        return;
+        try {
+          const resumed = await this.request<ThreadResponse>('thread/resume', {
+            threadId: latest,
+            cwd: this._cwd,
+            ...THREAD_PERMISSION_OVERRIDES,
+            config: { features: { goals: true } },
+            excludeTurns: true,
+            persistExtendedHistory: true,
+          });
+          this.setThreadId(resumed.result?.thread.id || latest);
+          return;
+        } catch (err) {
+          // ROOT FIX (2026-08-10): a thread/resume can throw "thread-store conflict: thread
+          // <id> already has an active writer" — a stale persistence lock left when the prior
+          // session was killed uncleanly (a daemon reboot / kill mid-turn, e.g. during the
+          // restart storm). This branch had NO catch, so the throw crashed startup and the
+          // agent crash-looped forever (larry-codex boot instability). Do NOT crash: log and
+          // fall through to `thread/start` below — a FRESH thread always succeeds, so the agent
+          // recovers on its own instead of needing a manual reset.
+          this._outputBuffer.push(
+            `[codex-app-server] latest-thread resume failed (${err}) — starting a FRESH thread instead of crash-looping\n`,
+          );
+        }
       }
     }
 

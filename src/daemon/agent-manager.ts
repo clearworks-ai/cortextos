@@ -336,6 +336,42 @@ export class AgentManager {
   }
 
   /**
+   * Periodic liveness self-heal (root fix, 2026-08-10). Same recovery as bootSelfHeal but
+   * callable on a timer, so ANY enabled agent that drops out of the registry mid-run —
+   * errant `cortextos stop`, a restart deduped/failed during churn (the storm), or a crash
+   * the limiter didn't re-launch — is restarted WITHOUT a daemon reboot or a manual `enable`.
+   * This is the durable answer to the storm-induced registry-drift where larry-codex stayed
+   * absent after a stop. Narrow + additive: it ONLY starts enabled-but-absent agents — no task
+   * mutation, no Atomics.wait, no signal handling (deliberately NOT the heavy ReconcileTrigger
+   * removed in RW-8). Quiet when the fleet is healthy; logs only when it recovers something.
+   * Guarded against overlapping runs by the caller.
+   */
+  async periodicSelfHeal(): Promise<void> {
+    const instanceEnabled = this.readInstanceEnableList();
+    const agentDirs = this.discoverAgents();
+    const recovered: string[] = [];
+    for (const { name, dir, org, config } of agentDirs) {
+      if (config.enabled === false) continue;
+      const entry = instanceEnabled[name];
+      if (entry && entry.enabled === false) continue; // respect explicit disable
+      if (this.agents.has(name)) continue;            // already running — leave it
+      console.warn(`[agent-manager] Liveness self-heal: ${name} is enabled but absent from the registry — restarting.`);
+      try {
+        await this.startAgent(name, dir, config, org);
+        recovered.push(name);
+      } catch (err) {
+        console.error(
+          `[agent-manager] Liveness self-heal: ${name} recovery failed — ` +
+          `${err instanceof Error ? err.message : String(err)}.`,
+        );
+      }
+    }
+    if (recovered.length > 0) {
+      console.log(`[agent-manager] Liveness self-heal recovered ${recovered.length} agent(s): ${recovered.join(', ')}.`);
+    }
+  }
+
+  /**
    * BUG-043 fix: resolve the canonical org for a given agent without
    * defaulting to the daemon's startup `this.org`.
    *

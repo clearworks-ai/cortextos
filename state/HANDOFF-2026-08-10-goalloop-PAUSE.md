@@ -28,13 +28,22 @@ Nothing merged, no daemon restart, no prod agent-dir mutation.
   fail OPEN (`SOURCE_KEY_PATTERN` allows one colon) → switched to single-colon dotted ids. Runbook
   `orgs/clearworksai/skills/F-P2-JOBS-WIRING.md`.
 
-## STAGING-RECEIPT GATE (Josh 2026-08-10 — HARD, now in the GOAL condition)
+## STAGING-RECEIPT GATE (Josh 2026-08-10 — HARD, now in the GOAL condition) — ALL RECEIPTS DONE
 No lane merges until it has a REAL receipt on the isolated `cortextos-staging` daemon. Data-touching
 lanes = A6, F, CRM1. Low-risk exempt (fixture/local) = S1, G. A already staging-proven.
-- **A6 receipt** — proven but FILE unwritten (see above). Re-run the receipt runner to write
-  `state/staging-receipts/a6-2026-08-10.md` and push to #330.
-- **CRM1 receipt** — NOT run yet.
-- **F receipt** — NOT run yet.
+Staging receipts captured 2026-08-10 (via codex-rescue; staging daemon torn down after; prod 0 restarts):
+- **A6 — PASS** #330 commit 8fb09ea1. staging `[human]` task `task_1786395958246_37243539`, key
+  `commitment:ff_staging_test_2026_08_10_abc123`; run1 SURFACE → run2 SKIP (0 dup). Receipt
+  `state/staging-receipts/a6-2026-08-10.md`.
+- **CRM1 — PASS** #329 commit 34a19867. staging task `task_1786395980256_17171940` (needs-approval),
+  key `crm-pipeline:staging-deal-001.20260810`; SURFACE→SKIP. **SEAM:** `CRM1-WIRING.md` example keys
+  use colons in the compound id (`crm-pipeline:<deal>:<date>`) which the CLI rejects — must be dots
+  (`.<date>`). One-line doc fix needed before apply (same class as F's fixed bug).
+- **F — PASS** #332 commit 18c80054. staging task `task_1786395963596_33314825` (needs-approval), key
+  `followup-recap:kadre.2026-08-10`; SURFACE→SKIP (single-colon constraint validated). **SEAM:** the
+  real-path output file (`outputs/followups/*.md`) needs live Fireflies+OpenRouter creds — staging
+  proved the BUS-SINK half; the output write is covered by `tests/test_f_p2_jobs_wiring.py`. Real
+  output receipt comes at the prod live-verify step.
 Staging gotchas (critical): pin `CTX_INSTANCE_ID=cortextos-staging CTX_ROOT=~/.cortextos/cortextos-staging
 CTX_FRAMEWORK_ROOT=~/.cortextos/cortextos-staging-fw CTX_ORG=clearworksai` on EVERY cli/daemon call
 (bare call resolves PROD cortextos1 — INSTANCE MARKER DRIFT). Launch staging daemon from

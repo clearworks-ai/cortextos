@@ -256,6 +256,15 @@ function isKnownAgent(target: string, ctxRoot: string, frameworkRoot: string, or
   return withRegistryEnv(frameworkRoot, () => listAgents(ctxRoot, org).some((agent) => agent.name === target));
 }
 
+function resolveActiveTarget(target: string, ctxRoot: string, frameworkRoot: string, org?: string): string {
+  const agents = withRegistryEnv(frameworkRoot, () => listAgents(ctxRoot, org));
+  const resolvedTarget = agents.find((agent) => agent.name === target);
+  if (resolvedTarget?.last_heartbeat && resolvedTarget.running) return target;
+
+  const codexTarget = agents.find((agent) => agent.name === `${target}-codex`);
+  return codexTarget?.running ? codexTarget.name : target;
+}
+
 function resolveBusPaths(ctxRoot: string, target: string, instanceId: string, org?: string): BusPaths {
   const resolved = resolvePaths(target, instanceId, org);
   const orgRoot = org ? join(ctxRoot, 'orgs', org) : ctxRoot;
@@ -331,13 +340,16 @@ export function planMeetingWritebackSpawn(args: {
   if (!safeId) return null;
   const workerName = `meeting-writeback-${safeId}`.slice(0, 64);
   const dir = join(args.frameworkRoot, 'orgs', args.org, 'agents', args.target);
-  const skillPath = join(dir, '.claude', 'skills', 'meeting-writeback-worker', 'SKILL.md');
   const exists = args.skillExists ?? ((p: string) => existsSync(p));
-  if (!exists(skillPath)) return null;
+  const skillRelativePath = [
+    join('.claude', 'skills', 'meeting-writeback-worker', 'SKILL.md'),
+    join('plugins', 'meeting-writeback-worker', 'SKILL.md'),
+  ].find((candidate) => exists(join(dir, candidate)));
+  if (!skillRelativePath) return null;
   const prompt = [
     'You are the meeting-writeback worker (short-lived session).',
     `FF_MEETING_ID=${args.meetingId} is set in your environment.`,
-    'Read .claude/skills/meeting-writeback-worker/SKILL.md and execute every bash block in order,',
+    `Read ${skillRelativePath} and execute every bash block in order,`,
     'then output DONE. Do nothing else — no heartbeat, no daily memory, no Telegram.',
   ].join(' ');
   return { workerName, dir, prompt };
@@ -382,7 +394,7 @@ function buildRelayMessage(integration: string, event: string, envelope: RelayEn
   const meetingId = extractMeetingId(envelope);
 
   if (integration === 'fireflies' && meetingId) {
-    return `WEBHOOK ${integration} ${event} — meeting ${meetingId}. Spawn meeting-commitments-worker with FF_MEETING_ID=${meetingId} set so the single-meeting fast path runs now instead of waiting for the 2h poll: cd pa agent dir, source env, then python3 scripts/ff-extractor.py --mode full --meeting-id ${meetingId}.`;
+    return `WEBHOOK ${integration} ${event} — meeting ${meetingId}. Spawn meeting-writeback-worker with FF_MEETING_ID=${meetingId} set so the single-meeting fast path runs now instead of waiting for the 2h poll: cd pa agent dir, source env, read .claude/skills/meeting-writeback-worker/SKILL.md and execute every bash block in order, then python3 scripts/ff-extractor.py --mode full --meeting-id ${meetingId}.`;
   }
 
   if (integration === 'ops-check-lead') {
@@ -885,11 +897,12 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
       // below if the daemon spawn cannot be reached (no regression).
       const meetingId = extractMeetingId(envelope);
       if (integration === 'fireflies' && meetingId) {
+        const spawnTarget = resolveActiveTarget(target, options.ctxRoot, options.frameworkRoot, options.org);
         const spawned = await trySpawnMeetingWriteback({
           instanceId: options.instanceId,
           frameworkRoot: options.frameworkRoot,
           org: options.org,
-          target,
+          target: spawnTarget,
           meetingId,
         });
         if (spawned.ok) {

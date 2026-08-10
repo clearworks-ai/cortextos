@@ -296,6 +296,21 @@ export class AgentPTY {
       args.push('--continue');
     }
 
+    // Worker sessions (ephemeral, short-lived) must be isolated from the parent
+    // agent's CLAUDE.md bootstrap and settings.json hooks. Without --bare, a
+    // worker spawned in the pa agent dir inherits:
+    //   1. pa's CLAUDE.md → AGENTS.md §"On Session Start" → reads 10+ bootstrap
+    //      files (IDENTITY, SOUL, MEMORY, GUARDRAILS, etc.)
+    //   2. pa's settings.json → hook-retrieval-enforcer runs MMRAG KB queries +
+    //      transcript searches on the initial prompt (20s+ blocking I/O)
+    // Together these cause an 8+ minute "bootstrap hang" where the worker never
+    // reaches its actual task. --bare skips CLAUDE.md dirs, hooks, and MCP config
+    // while keeping --dangerously-skip-permissions effective. Workers carry all
+    // necessary context in their spawned prompt — no bootstrap files are needed.
+    if (this.env.worker) {
+      args.push('--bare');
+    }
+
     // Skip Claude Code's permission system by default (back-compat: agents have
     // historically run unattended). Set `dangerously_skip_permissions: false` in
     // the agent config to KEEP the gate on — then Claude Code's PermissionRequest

@@ -69,9 +69,24 @@ CTX_FRAMEWORK_ROOT=~/.cortextos/cortextos-staging-fw CTX_ORG=clearworksai` on EV
   `larry/goal-durable-runner` branch (commit 678ea11a) to PRESERVE the realContextWindow fix (which is
   NOT on main), rebuilt dist (both fixes verified present), gated `pm2 restart` via the hour override
   (removed immediately). Post-restart: 14/14 agents running, 0 crash-loop/false-handoff, 0 halted.
-- STILL TODO (delegated / next): (c) live-verify A with a REAL fireflies meeting; (d) apply the additive
-  runbooks to prod agent dirs (CRM1 wiring — FIX the colon→dot seam first; F wiring; G manifest apply;
-  A6 SKILL path-fix 20704fa6); (e) build E → D → H.
+- **DONE (Codex ~14:45):** CRM1 colon→dot seam fixed (#334 merged). Additive runbooks APPLIED to prod
+  (CRM1 crm-codex runbook+cron+symlink; F crons; A6 SKILL path-fix into pa-codex/frank2-codex runtime
+  copies; G mirrored 290 files to knowledge-sync). Receipts PR #335 merged
+  (`state/live-receipts/2026-08-10-prod-activation.md`, branch `larry/prod-activation-receipts` @ 6461cafe).
+- **Track A LIVE RECEIPT:** 10 real meetings filed `knowledge/meetings/*.md` + ledger + bus task
+  `task_1786397906430_99094078` (written=10 created_clients=2) + event log. Filing pipeline proven on
+  prod (triggered via direct IPC spawn).
+- **OPEN SEAM — Track A last mile (Codex fixing, agent a7dc6ddbcf4e8ae5c):** webhook-bridge
+  `trySpawnMeetingWriteback` returns ok:false on a real fireflies event → NL-nudge fallback (the very
+  thing Track A replaces). Direct IPC works; the BRIDGE trigger doesn't. Likely target=`pa` vs running
+  `pa-codex` skill-presence gate, or bridge frameworkRoot/org resolution. Fix must staging-verify
+  (assert ok:true not messageId), then promote ONLY the launchd bridge (`com.cortextos.webhook-bridge`),
+  NOT the fleet daemon.
+- **PROCESS NOTE:** the activation Codex agent ran `git checkout` in the MAIN checkout (violated
+  worktree-only), leaving it on `larry/prod-activation-receipts`. Restored to `larry/goal-durable-runner`.
+  dist is gitignored so it was untouched (still carries both fixes). Promote branch = `larry/goal-durable-runner`
+  (13 commits ahead of origin, intentionally unpushed — carries the realContextWindow fix NOT on main).
+- STILL TODO after bridge fix: (e) build E (gsuite-first, now unblocked — A live) → D → H.
 
 ## RESUME NEXT SESSION (order)
 1. Finish staging receipts: A6 (write file), CRM1, F → push to their PRs. (re-dispatch the receipt runner.)

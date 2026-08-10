@@ -24,3 +24,16 @@ started counting for any of the 3 PRs.
 scheduled and running); if any of the 3 is still OPEN more than 2 weeks after that start date,
 cherry-pick that PR's branch onto our fork per the plan's fallback rule rather than continuing to
 wait on upstream.
+
+## 2026-08-10 — fork-additive `src/` deltas (upstream-PR candidates, P7 invariant)
+
+Changes we carry on the fork ahead of upstream. Each is a candidate to push upstream
+to `grandamenium/cortextos` once stabilized.
+
+| Fork branch / PR | `src/` files | What it adds | Upstream-PR candidate? |
+|---|---|---|---|
+| `larry/track-a-meeting-deterministic-spawn` — [fork PR #328](https://github.com/clearworks-ai/cortextos/pull/328), commit `933279dc` | `src/cli/webhook-bridge.ts`, `src/cli/workers.ts`, `src/daemon/agent-manager.ts`, `src/daemon/ipc-server.ts` | Track A / FR-A1: deterministic daemon `spawn-worker` on a fireflies `meeting.completed` event (`planMeetingWritebackSpawn`/`trySpawnMeetingWriteback`), dynamic agent-dir resolution (no hardcoded path), `CtxEnv.extraEnv` threading `FF_MEETING_ID` into the worker PTY, `spawn-worker --env KEY=VAL` IPC/CLI. Falls back to the NL relay when the daemon is unreachable. | YES — generic webhook→deterministic-worker-spawn plumbing, not Clearworks-specific. |
+
+Note: the Track A path-parameterization fix (running-agent dir resolution via `$CTX_*`
+in `meeting-writeback-worker/SKILL.md`) is an agent-local skill edit, not a `src/`
+change, so it is NOT an upstream-PR candidate — it stays on our fork.

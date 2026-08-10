@@ -62,6 +62,17 @@ CTX_FRAMEWORK_ROOT=~/.cortextos/cortextos-staging-fw CTX_ORG=clearworksai` on EV
 - **D** (retire 11 poll crons) — needs A+E live.
 - **H** (weekly-review upgrade) — needs A+CRM live. last.
 
+## PROMOTE STATUS (2026-08-10 ~14:17 PDT — Josh said "go")
+- **All 6 PRs MERGED to fork main:** A #328, CRM1 #329, A6 #330, G #331, F #332, S1 #333 (A6+S1 needed a
+  fork-deltas.md union-rebase; resolved). 
+- **Track A daemon PROMOTED + fleet HEALTHY.** Cherry-picked Track A src (933279dc) ONTO the running
+  `larry/goal-durable-runner` branch (commit 678ea11a) to PRESERVE the realContextWindow fix (which is
+  NOT on main), rebuilt dist (both fixes verified present), gated `pm2 restart` via the hour override
+  (removed immediately). Post-restart: 14/14 agents running, 0 crash-loop/false-handoff, 0 halted.
+- STILL TODO (delegated / next): (c) live-verify A with a REAL fireflies meeting; (d) apply the additive
+  runbooks to prod agent dirs (CRM1 wiring — FIX the colon→dot seam first; F wiring; G manifest apply;
+  A6 SKILL path-fix 20704fa6); (e) build E → D → H.
+
 ## RESUME NEXT SESSION (order)
 1. Finish staging receipts: A6 (write file), CRM1, F → push to their PRs. (re-dispatch the receipt runner.)
 2. Finish S1 → PR.

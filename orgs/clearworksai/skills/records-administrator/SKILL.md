@@ -169,18 +169,18 @@ Additive/evidence-backed fixes (STALE updates, MISSING creates) auto-apply via t
 - **DUPLICATE / ORPHAN (merge/delete):** never auto-apply. One approval card each (individual click, no batch):
   ```bash
   cortextos bus create-task "Records: merge/delete <record>" --assignee human --needs-approval \
-    --desc "records-administrator · DUPLICATE|ORPHAN · <evidence> · key: crm-records:<record_id>:<yyyymmdd>"
+    --desc "records-administrator · DUPLICATE|ORPHAN · <evidence> · key: crm-records:<record_id>.<yyyymmdd>"
   cortextos bus create-approval "Merge/delete: <record>" data-deletion "<per-record evidence>"
   ```
 - **CONFLICT (both sides changed since last sync):** human picks the winner:
   ```bash
   cortextos bus create-task "Records CONFLICT: <field> on <record>" --assignee human --priority high \
-    --desc "A=<val@ts> B=<val@ts> · key: crm-records:<record_id>:<field>:<yyyymmdd>"
+    --desc "A=<val@ts> B=<val@ts> · key: crm-records:<record_id>.<field>.<yyyymmdd>"
   ```
 - **Compliance deadline (≤30/14/3 days):** fold the sweep hits into the daily-checkin activity-feed post; a filing due ≤14d that needs Josh action becomes a human task:
   ```bash
   cortextos bus create-task "Compliance: <entity> <obligation> due <date>" --assignee human --priority high \
-    --desc "records-administrator deadline sweep · key: crm-compliance:<entity>:<obligation>:<due>"
+    --desc "records-administrator deadline sweep · key: crm-compliance:<entity>.<obligation>.<due>"
   ```
 
 **Idempotency:** every task's `--desc` carries a deterministic key (`crm-records:*` / `crm-compliance:*`); a re-run for the same record/day reuses the key and files no duplicate.

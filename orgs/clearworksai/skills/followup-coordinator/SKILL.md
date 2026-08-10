@@ -191,4 +191,54 @@ After saving, show the user the recap email draft · that's the thing that needs
 - **Always save the output** to `outputs/followups/` and update the tracker. Chat-only output doesn't survive the session.
 
 ---
+
+## cortextOS wiring (v9 finish — Track F, job: Meeting Follow-Ups)
+
+> This section makes the skill run on a REAL trigger with a structured bus row, instead of
+> only when a human types "run the Follow-Up Coordinator". Canonical runbook + crons +
+> live-receipt commands: `orgs/clearworksai/skills/F-P2-JOBS-WIRING.md`.
+
+**Trigger surface (deterministic, primary):** the `crm.meeting.completed` bus event — the SAME
+event Track A's deterministic fireflies spawn already emits when a meeting is filed. When an inbox
+message starts with `EVENT crm.meeting.completed`, the running agent (crm / pa) invokes THIS skill
+for the just-filed transcript so the closed loop happens same-day instead of at the next human ask.
+**Schedule (backstop):** `followup-sweep` (`0 18 * * 1-5`, 6pm weekday) chases overdue-unconfirmed
+open items across all client trackers — the missed-event safety net, NOT a re-extraction of every meeting.
+
+**Real-path output (NOT a synthetic fixture dir):**
+- `outputs/followups/[client]-[YYYY-MM-DD].md` (the Output Format block above).
+- The client tracker `knowledge/clients/[client].md` → `## Open Items` table (Step 4).
+
+**Structured bus row (mandatory, idempotent).** After the output is filed, surface each unconfirmed
+OUR-side commitment and the recap-send decision to the bus — never a freeform Telegram DM. Gate every
+row on the SHARED deterministic id so a re-fire of the same meeting never double-creates:
+
+```bash
+# One idempotency key per follow-up item, shared across re-runs. cortextos bus event-dedup
+# keys are <namespace>:<id> with EXACTLY ONE colon (SOURCE_KEY_PATTERN in event-dedup.ts) —
+# the compound id uses dots, never extra colons, or the key fails-open (invalid-key) and
+# every re-run falsely SURFACEs, breaking idempotency:
+#   followup:<client>.<meeting-date>.<slug(item)>       (per open OUR-commitment)
+#   followup-recap:<client>.<meeting-date>              (the send-the-recap decision)
+KEY="followup-recap:${CLIENT}.${MEETING_DATE}"
+GATE=$(cortextos bus event-dedup --source "$KEY" --json 2>/dev/null \
+  | python3 -c 'import json,sys;print("SURFACE" if json.load(sys.stdin).get("surface") else "SKIP")' 2>/dev/null || echo SURFACE)
+if [ "$GATE" = "SURFACE" ]; then
+  # The recap email is client-visible → human task + approval card (never auto-sends).
+  cortextos bus create-task "Send recap: ${CLIENT} (${MEETING_DATE})" \
+    --assignee human --needs-approval \
+    --desc "Follow-Up Coordinator drafted recap at outputs/followups/${CLIENT}-${MEETING_DATE}.md · key ${KEY}" 2>/dev/null
+  cortextos bus create-approval "Recap email — ${CLIENT} (${MEETING_DATE})" external-comms \
+    "Draft ready at outputs/followups/${CLIENT}-${MEETING_DATE}.md; a human sends." --client "${CLIENT}" 2>/dev/null
+fi
+# Overdue OUR-commitments become plain human tasks (no send, so no approval card):
+#   for each: cortextos bus event-dedup --source "followup:${CLIENT}.${MEETING_DATE}.${SLUG}" (SURFACE-gate),
+#             then cortextos bus create-task "<item>" --assignee human --desc "... key followup:..."
+cortextos bus post-activity "Follow-up closed-loop filed for ${CLIENT} · recap draft pending approval" 2>/dev/null
+```
+
+**Live receipt** = the filed `outputs/followups/*.md` + the updated client tracker + the `followup-recap:*`
+keyed human task/approval card. Config/test-green is NOT a receipt. Apply + capture per F-P2-JOBS-WIRING.md.
+
+---
 *From SkillTree by Altari · the map of every AI job-to-be-done in a business. The brain (the company knowledge base) makes every skill sharper · build it first.*

@@ -23,6 +23,15 @@ cat > "$HOME_DIR/config/enabled-agents.json" <<EOF
 { "tlab": { "enabled": true, "org": "$ORG", "status": "configured" } }
 EOF
 
+# framework-root marker: findFrameworkRoot() validates a candidate by reading a
+# package.json with name==='cortextos'. Prod's fw-root IS the repo (has one); staging
+# needs its own or the bridge silently resolves the framework root elsewhere and the
+# FR-A1 deterministic spawn skill-lookup misses -> false-negative NL fallback.
+mkdir -p "$FW_ROOT"
+cat > "$FW_ROOT/package.json" <<EOF
+{ "name": "cortextos", "private": true, "version": "0.0.0-staging" }
+EOF
+
 # staging framework root — minimal agent dirs, EMPTY .env (no creds = no side effects)
 for a in "${AGENTS[@]}"; do
   d="$FW_ROOT/orgs/$ORG/agents/$a"
@@ -34,6 +43,16 @@ EOF
   cat > "$d/AGENTS.md" <<EOF
 # $a (STAGING — muted)
 Staging test agent. No credentials. Do nothing but acknowledge injected prompts.
+EOF
+  # meeting-writeback-worker skill stub — REQUIRED for FR-A1 validation:
+  # planMeetingWritebackSpawn() gates on existsSync(.../meeting-writeback-worker/SKILL.md).
+  # Without it the deterministic path returns null and we only ever exercise the NL
+  # fallback, never proving the daemon spawn. Stub only — staging worker is muted.
+  sk="$d/.claude/skills/meeting-writeback-worker"
+  mkdir -p "$sk"
+  cat > "$sk/SKILL.md" <<EOF
+# meeting-writeback-worker (STAGING STUB)
+FF_MEETING_ID is injected. Real writeback is muted in staging. Acknowledge and output DONE.
 EOF
 done
 # org secrets.env intentionally ABSENT in staging fw root -> no shared creds

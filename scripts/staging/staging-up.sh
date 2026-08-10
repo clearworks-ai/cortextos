@@ -15,6 +15,12 @@ bash "$REPO/scripts/staging/staging-verify.sh" >/dev/null 2>&1 || { echo "REFUSE
 
 mkdir -p "$HOME_DIR/logs"
 echo "== launching $INSTANCE (fw=$FW_ROOT) =="
+# CWD MUST be FW_ROOT: the spawn-worker IPC guard accepts a worker dir only when it is
+# under CTX_ROOT or the daemon's process.cwd(). Staging worker dirs live under FW_ROOT
+# (a sibling of CTX_ROOT, not under it), so launching from any other cwd makes the guard
+# reject the FR-A1 deterministic spawn -> silent NL fallback (false negative). Prod is fine
+# because its cwd IS the repo==fw-root. See reference_spawn_worker_dir_guard_requires_cwd.
+cd "$FW_ROOT" || { echo "REFUSE: fw-root missing ($FW_ROOT) — run staging-seed first"; exit 2; }
 # NOTE: CTX_PROJECT_ROOT intentionally UNSET (resolveEnv rejects fw!=project if both set).
 CTX_INSTANCE_ID="$INSTANCE" \
 CTX_ROOT="$HOME_DIR" \

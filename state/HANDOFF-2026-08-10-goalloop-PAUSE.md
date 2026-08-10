@@ -76,12 +76,18 @@ CTX_FRAMEWORK_ROOT=~/.cortextos/cortextos-staging-fw CTX_ORG=clearworksai` on EV
 - **Track A LIVE RECEIPT:** 10 real meetings filed `knowledge/meetings/*.md` + ledger + bus task
   `task_1786397906430_99094078` (written=10 created_clients=2) + event log. Filing pipeline proven on
   prod (triggered via direct IPC spawn).
-- **OPEN SEAM — Track A last mile (Codex fixing, agent a7dc6ddbcf4e8ae5c):** webhook-bridge
-  `trySpawnMeetingWriteback` returns ok:false on a real fireflies event → NL-nudge fallback (the very
-  thing Track A replaces). Direct IPC works; the BRIDGE trigger doesn't. Likely target=`pa` vs running
-  `pa-codex` skill-presence gate, or bridge frameworkRoot/org resolution. Fix must staging-verify
-  (assert ok:true not messageId), then promote ONLY the launchd bridge (`com.cortextos.webhook-bridge`),
-  NOT the fleet daemon.
+- **Track A FULLY DONE — bridge seam RESOLVED (merged #337 to main; franken PR #336 CLOSED).** Root
+  cause: launchd bridge ran pre-Track-A stale code (process started 12:24, before the 14:16 dist
+  rebuild) → every webhook bypassed the spawn → NL fallback. Fix (commit 50aff940): restart the bridge +
+  `resolveActiveTarget` (prefer running codex-variant when base agent stopped) + `plugins/` skill probe +
+  NL relay text fix. Staging PASS + prod PASS (`{ok:true,worker:...}`). Bridge promoted via
+  `launchctl kickstart com.cortextos.webhook-bridge` ONLY (no fleet daemon bounce). Prod bridge = PID
+  15830 on port 20242. Also killed a stray test bridge on 20244. Receipt
+  `state/staging-receipts/trackA-bridge-fix-2026-08-10.md`.
+- **P7 EXTRACTION CHORE (still open):** the promote branch `larry/goal-durable-runner` carries the
+  realContextWindow daemon fix (running in prod) that is NOT on main. It needs a CLEAN extraction to main
+  (single-commit PR off main, like the bridge fix #337 was) — do NOT PR the franken branch directly
+  (quarantine, do-not-merge). Track A backbone (#328) + bridge (#337) are already cleanly on main.
 - **PROCESS NOTE:** the activation Codex agent ran `git checkout` in the MAIN checkout (violated
   worktree-only), leaving it on `larry/prod-activation-receipts`. Restored to `larry/goal-durable-runner`.
   dist is gitignored so it was untouched (still carries both fixes). Promote branch = `larry/goal-durable-runner`

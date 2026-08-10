@@ -20,10 +20,23 @@ This worker intentionally stops after file writeback. `kb-dream` emission stays 
 
 ## Step 1 — Task + ledger setup (Bash)
 
+Everything below resolves against the RUNNING agent's own dir via `$CTX_*`
+(never a hardcoded absolute path). The daemon sets, for a spawned worker:
+`CTX_AGENT_DIR` (this worker's cwd = the running agent's dir), `CTX_PARENT_AGENT`
+(the agent that owns this writeback, e.g. `pa` or `pa-codex`), `CTX_FRAMEWORK_ROOT`,
+and `CTX_ORG`. When run outside the daemon (manual/poll), they fall back to `pwd`
+and the current org layout.
+
 ```bash
-TASK_ID=$(cortextos bus create-task "Cron: meeting-writeback" --desc "File new meeting intelligence into knowledge/meetings and knowledge/clients" --assignee "${CTX_PARENT_AGENT:-pa}" 2>/dev/null)
+AGENT_DIR="${CTX_AGENT_DIR:-$(pwd)}"
+FW_ROOT="${CTX_FRAMEWORK_ROOT:-$(cd "$AGENT_DIR/../../../.." && pwd)}"
+ORG="${CTX_ORG:-clearworksai}"
+ORG_ROOT="$FW_ROOT/orgs/$ORG"
+OWNER_AGENT="${CTX_PARENT_AGENT:-$(basename "$AGENT_DIR")}"
+
+TASK_ID=$(cortextos bus create-task "Cron: meeting-writeback" --desc "File new meeting intelligence into knowledge/meetings and knowledge/clients" --assignee "$OWNER_AGENT" 2>/dev/null)
 cortextos bus update-task $TASK_ID in_progress 2>/dev/null
-LEDGER_FILE='/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/state/ff-full-writeback-surfaced.txt'
+LEDGER_FILE="$AGENT_DIR/state/ff-full-writeback-surfaced.txt"
 mkdir -p "$(dirname "$LEDGER_FILE")"
 [[ -f "$LEDGER_FILE" ]] || touch "$LEDGER_FILE"
 echo "ledger=$(wc -l < "$LEDGER_FILE")"
@@ -33,16 +46,18 @@ echo "ledger=$(wc -l < "$LEDGER_FILE")"
 
 ## Step 2 — Run the extractor in full mode (Bash)
 
-Working directory MUST be the frank2 agent dir so `scripts/` and `state/` resolve correctly.
+Working directory MUST be the RUNNING agent's dir (`$CTX_AGENT_DIR`) so `scripts/`
+and `state/` resolve correctly. Org secrets are already sourced into a daemon-spawned
+worker's env; we re-source defensively for the manual/poll path.
 
 ```bash
-cd /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2
+cd "$AGENT_DIR"
 set -a
-source /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/.env 2>/dev/null
-source /Users/joshweiss/code/cortextos/orgs/clearworksai/secrets.env 2>/dev/null
+source "$AGENT_DIR/.env" 2>/dev/null
+source "$ORG_ROOT/secrets.env" 2>/dev/null
 set +a
 
-python3 scripts/ff-extractor.py --mode full --limit 20 --full-ledger state/ff-full-writeback-surfaced.txt > /tmp/ff-writeback.json
+python3 scripts/ff-extractor.py --mode full --limit 20 --full-ledger "$LEDGER_FILE" > /tmp/ff-writeback.json
 EXTRACTOR_RC=$?
 echo "extractor_rc=$EXTRACTOR_RC"
 ```
@@ -63,19 +78,28 @@ For each meeting in `/tmp/ff-writeback.json`:
 - Append the Fireflies meeting id to the ledger ONLY after both writes succeed for that meeting
 
 ```bash
+# Re-derive in case this block runs in a fresh shell; export for the heredoc.
+AGENT_DIR="${CTX_AGENT_DIR:-$(pwd)}"
+FW_ROOT="${CTX_FRAMEWORK_ROOT:-$(cd "$AGENT_DIR/../../../.." && pwd)}"
+ORG="${CTX_ORG:-clearworksai}"
+export ORG_ROOT="$FW_ROOT/orgs/$ORG"
+export LEDGER_FILE="$AGENT_DIR/state/ff-full-writeback-surfaced.txt"
+
 python3 - <<'PY' > /tmp/ff-writeback-result.json
 import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-ROOT = Path("/Users/joshweiss/code/cortextos/orgs/clearworksai")
+import os
+
+ROOT = Path(os.environ["ORG_ROOT"])
 KNOWLEDGE_DIR = ROOT / "knowledge"
 MEETINGS_DIR = KNOWLEDGE_DIR / "meetings"
 CLIENTS_DIR = KNOWLEDGE_DIR / "clients"
 TEMPLATE_PATH = CLIENTS_DIR / "_template.md"
 PAYLOAD_PATH = Path("/tmp/ff-writeback.json")
-LEDGER_PATH = Path("/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/state/ff-full-writeback-surfaced.txt")
+LEDGER_PATH = Path(os.environ["LEDGER_FILE"])
 
 MEETINGS_DIR.mkdir(parents=True, exist_ok=True)
 CLIENTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -517,8 +541,9 @@ print(
 PY
 )
 fi
+OWNER_AGENT="${CTX_PARENT_AGENT:-${CTX_AGENT_NAME:-pa}}"
 cortextos bus complete-task $TASK_ID --result "$RESULT" 2>/dev/null
-cortextos bus log-event action cron_completed info --meta '{"cron":"meeting-writeback","agent":"pa"}' 2>/dev/null
+cortextos bus log-event action cron_completed info --meta "{\"cron\":\"meeting-writeback\",\"agent\":\"$OWNER_AGENT\"}" 2>/dev/null
 cortextos terminate-worker "$CTX_AGENT_NAME"
 ```
 

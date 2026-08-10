@@ -111,6 +111,17 @@ export class AgentPTY {
     // Source agent .env file after org secrets.env so agent-specific keys override org values.
     await loadEnvFileIntoAsync(join(this.env.agentDir, '.env'), ptyEnv);
 
+    // Caller-supplied worker env (e.g. FF_MEETING_ID for a deterministic
+    // meeting-writeback spawn). Applied last so it authoritatively overrides
+    // any inherited/secret value for the same key.
+    if (this.env.extraEnv) {
+      for (const [key, value] of Object.entries(this.env.extraEnv)) {
+        if (typeof key === 'string' && key && typeof value === 'string') {
+          ptyEnv[key] = value;
+        }
+      }
+    }
+
     // Loud degraded-boot marker (M6): if any values are STILL literal op:// refs, this
     // agent would boot "successfully" with unusable secrets (the silent Telegram-401
     // class). Mark the child env so agents/hooks can detect degradation, and log at

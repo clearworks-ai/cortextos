@@ -826,6 +826,12 @@ export interface CtxEnv {
   parentAgent?: string;
   /** True only for ephemeral worker PTYs spawned by spawnWorker. */
   worker?: boolean;
+  /**
+   * Extra environment variables injected into the worker PTY (e.g. FF_MEETING_ID
+   * for a deterministic meeting-writeback spawn). Flat string map; applied after
+   * org/agent secrets so a caller-provided value wins.
+   */
+  extraEnv?: Record<string, string>;
 }
 
 // Bus Path Types

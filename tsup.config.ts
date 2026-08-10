@@ -7,6 +7,7 @@ export default defineConfig({
     'pipeline/bypass-audit': 'src/pipeline/bypass-audit.ts',
     'pipeline/stage-emit': 'src/pipeline/stage-emit.ts',
     'pipeline/scoping-gate': 'src/pipeline/scoping-gate.ts',
+    'pipeline/deal-context': 'src/pipeline/deal-context.ts',
     'pipeline/staging-verify/cli': 'src/pipeline/staging-verify/cli.ts',
     'pipeline/pr-target': 'src/pipeline/pr-target.ts',
 

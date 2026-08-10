@@ -884,6 +884,56 @@ describe('pipeline ledger', () => {
     expect(drift).toMatchObject({ ok: false, code: 'SCOPE_SHA_MISMATCH' });
   });
 
+  it('selects a later directory-scoped specs receipt without removing the earlier file receipt', () => {
+    const rows: LedgerRow[] = [
+      {
+        slug: 'hard-spec-gate',
+        stage: 'research',
+        ts: 100,
+        artifact_sha256: describeArtifact(researchPath).sha256,
+        prev_sha256: '',
+        sig: 'research-signature',
+      },
+      {
+        slug: 'hard-spec-gate',
+        stage: 'plan',
+        ts: 200,
+        artifact_sha256: describeArtifact(planPath).sha256,
+        prev_sha256: 'research-hash',
+        sig: 'plan-signature',
+      },
+      {
+        slug: 'hard-spec-gate',
+        stage: 'specs',
+        ts: 300,
+        artifact_sha256: describeArtifact(specPath).sha256,
+        prev_sha256: 'plan-hash',
+        sig: 'file-specs-signature',
+      },
+      {
+        slug: 'hard-spec-gate',
+        stage: 'specs',
+        ts: 400,
+        artifact_sha256: describeArtifact(specsDir).sha256,
+        prev_sha256: 'file-specs-hash',
+        sig: 'directory-specs-signature',
+      },
+    ];
+    const rowsBeforeVerification = [...rows];
+
+    const result = verifyOneBigFeatureArtifacts({
+      projectRoot: repoRoot,
+      slug: 'hard-spec-gate',
+      rows,
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(rows).toEqual(rowsBeforeVerification);
+    expect(rows.filter((row) => row.stage === 'specs')).toHaveLength(2);
+    expect(rows[2]?.artifact_sha256).toBe(describeArtifact(specPath).sha256);
+    expect(rows[3]?.artifact_sha256).toBe(describeArtifact(specsDir).sha256);
+  });
+
   it('verifies a chain whose adjacent stages share the same whole-second ts', () => {
     const sessionId = 'plan-session-tie';
     const transcript = join(projectsRoot, 'larry', sessionId, 'subagents', 'agent-plan.jsonl');

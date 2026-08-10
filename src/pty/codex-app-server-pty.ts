@@ -1040,7 +1040,8 @@ export class CodexAppServerPTY {
    *
    * Mapping (per codex schema ThreadTokenUsageUpdatedNotification):
    *   - used_percentage = last.totalTokens / cap * 100  (clamped to [0, 100])
-   *   - context_window_size = modelContextWindow ?? config.codex_context_cap ?? 256000
+   *   - context_window_size = config.model_context_window ?? config.codex_context_cap
+   *     ?? modelContextWindow ?? 256000
    *   - exceeds_200k_tokens = last.totalTokens > 200000
    *   - current_usage.{input,output,cache_read} from last.{input,output,cachedInput}Tokens
    *   - session_id = current threadId
@@ -1058,9 +1059,9 @@ export class CodexAppServerPTY {
     const modelContextWindow = typeof tokenUsage.modelContextWindow === 'number'
       ? tokenUsage.modelContextWindow
       : null;
-    const cap = modelContextWindow
-      ?? this._config.model_context_window
+    const cap = this._config.model_context_window
       ?? this._config.codex_context_cap
+      ?? modelContextWindow
       ?? 256000;
     const usedPct = cap > 0 && currentTokens !== null
       ? Math.min(100, (currentTokens / cap) * 100)

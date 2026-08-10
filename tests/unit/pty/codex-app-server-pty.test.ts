@@ -1164,6 +1164,20 @@ describe('CodexAppServerPTY thread/tokenUsage/updated → context_status.json', 
     });
   });
 
+  it('prefers configured model_context_window over conflicting bridge telemetry', () => {
+    const pty = new CodexAppServerPTY(mockEnv, { model_context_window: 1_050_000 });
+    (pty as unknown as { _threadId: string })._threadId = 'thread-9';
+    feedTokenUsage(pty, {
+      last: { cachedInputTokens: 0, inputTokens: 225000, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 225000 },
+      total: { cachedInputTokens: 0, inputTokens: 225000, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 225000 },
+      modelContextWindow: 258400,
+    });
+
+    const payload = lastWrittenPayload()!;
+    expect(payload.context_window_size).toBe(1_050_000);
+    expect(payload.used_percentage).toBeCloseTo(21.4286, 4);
+  });
+
   it('falls back to default 256000 cap when modelContextWindow is null', () => {
     const pty = new CodexAppServerPTY(mockEnv, {});
     (pty as unknown as { _threadId: string })._threadId = 'thread-9';

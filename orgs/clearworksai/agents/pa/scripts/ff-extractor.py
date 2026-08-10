@@ -224,8 +224,10 @@ SUPPORT_TIMEFRAME_RE = re.compile(
     r"|\b\d{4}-\d{2}-\d{2}\b",
     re.IGNORECASE,
 )
-# Fleet rule: Marcos Santa Ana is a hard-no — must never become a task or ping.
-SUPPRESSED_NAMES = ("marcos", "santa ana")
+# NOTE: legacy exclusion removed 2026-08-09 — this was a months-old "drop Marcos from a
+# sales reminder" ask that had grown into a hard-no substring filter, which silently dropped
+# Marcos Santa Ana (a real client) from ALL meeting writeback/extraction. Marcos is a client.
+SUPPRESSED_NAMES = ()
 # Owner strings that are not a concrete named person — never inbound-worthy.
 GENERIC_OWNERS = {
     "", "unassigned", "team", "the team", "everyone", "client", "we", "they",

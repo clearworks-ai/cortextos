@@ -1350,9 +1350,12 @@ export function verifyOneBigFeatureArtifacts(opts: {
     };
   }
 
-  const researchRow = opts.rows.find((row) => row.stage === 'research');
-  const planRow = opts.rows.find((row) => row.stage === 'plan');
-  const specsRow = opts.rows.find((row) => row.stage === 'specs');
+  const latestRowForStage = (stage: Stage): LedgerRow | undefined => opts.rows
+    .filter((row) => row.stage === stage)
+    .sort((left, right) => right.ts - left.ts)[0];
+  const researchRow = latestRowForStage('research');
+  const planRow = latestRowForStage('plan');
+  const specsRow = latestRowForStage('specs');
   if (!researchRow || !planRow || !specsRow) {
     return {
       ok: false,

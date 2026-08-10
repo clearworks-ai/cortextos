@@ -8,6 +8,7 @@ import {
   FastChecker,
   handoffGraceMs,
   realContextWindow,
+  resolveContextWindow,
   shouldLogContextBaseline,
   shouldUseCurrentUsageOccupancy,
 } from '../../../src/daemon/fast-checker.js';
@@ -575,6 +576,31 @@ describe('realPct replaces CC 200K-based used_percentage', () => {
     const r = decide('claude-sonnet-5[1m]', null, { input_tokens: 600_000 }, 0);
     expect(r.realPct).toBeCloseTo(60, 5); // 600K / 1M
     expect(r.fires).toBe(true);
+  });
+
+  it('uses GPT-5.6 configured capacity over conflicting Codex bridge telemetry', () => {
+    const result = resolveContextWindow(
+      'codex-app-server',
+      'gpt-5.6-luna',
+      258_400,
+      1_050_000,
+      undefined,
+    );
+    const r = decide('gpt-5.6-luna', null, { input_tokens: 225_000 }, result.contextWindow);
+
+    expect(result).toEqual({ contextWindow: 1_050_000, source: 'configured context window' });
+    expect(r.realPct).toBeCloseTo(21.4286, 4);
+    expect(r.fires).toBe(false);
+  });
+
+  it('retains bridge-first selection for non-Codex runtimes', () => {
+    expect(resolveContextWindow(
+      'claude-code',
+      'claude-sonnet-5[1m]',
+      997_500,
+      1_050_000,
+      undefined,
+    )).toEqual({ contextWindow: 997_500, source: 'bridge context_window_size' });
   });
 
   it('formats the corrected live baseline with numerator and denominator', () => {

@@ -10,14 +10,24 @@ export const spawnWorkerCommand = new Command('spawn-worker')
   .requiredOption('--prompt <text>', 'Task prompt to inject at session start')
   .option('--parent <agent>', 'Parent agent name (for bus reply routing)')
   .option('--model <model>', 'Claude model to use (defaults to org default)')
-  .action(async (name: string, opts: { dir: string; prompt: string; parent?: string; model?: string }) => {
+  .option('--env <pairs...>', 'Extra env vars for the worker PTY, as KEY=VALUE (repeatable)')
+  .action(async (name: string, opts: { dir: string; prompt: string; parent?: string; model?: string; env?: string[] }) => {
     const env = resolveEnv();
     const client = new IPCClient(env.instanceId);
     const dir = resolve(opts.dir);
 
+    let extraEnv: Record<string, string> | undefined;
+    if (Array.isArray(opts.env) && opts.env.length > 0) {
+      extraEnv = {};
+      for (const pair of opts.env) {
+        const eq = pair.indexOf('=');
+        if (eq > 0) extraEnv[pair.slice(0, eq)] = pair.slice(eq + 1);
+      }
+    }
+
     const response = await client.send({
       type: 'spawn-worker',
-      data: { name, dir, prompt: opts.prompt, parent: opts.parent, model: opts.model },
+      data: { name, dir, prompt: opts.prompt, parent: opts.parent, model: opts.model, env: extraEnv },
     });
 
     if (response.success) {

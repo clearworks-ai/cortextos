@@ -663,7 +663,7 @@ export class IPCServer {
           break;
 
         case 'spawn-worker': {
-          const d = request.data as { name?: string; dir?: string; prompt?: string; parent?: string; model?: string } | undefined;
+          const d = request.data as { name?: string; dir?: string; prompt?: string; parent?: string; model?: string; env?: Record<string, unknown> } | undefined;
           if (!d?.name || !d?.dir || !d?.prompt) {
             response = { success: false, error: 'spawn-worker requires: name, dir, prompt' };
           } else if (!WORKER_NAME_REGEX.test(d.name) || d.name.length > 64) {
@@ -677,7 +677,18 @@ export class IPCServer {
             if (!underCtxRoot && !underCwd) {
               response = { success: false, error: 'Invalid worker dir' };
             } else {
-              this.agentManager.spawnWorker(d.name, resolvedDir, d.prompt, d.parent, d.model)
+              // Accept only a flat string->string env map; drop anything else.
+              let extraEnv: Record<string, string> | undefined;
+              if (d.env && typeof d.env === 'object') {
+                const clean: Record<string, string> = {};
+                for (const [k, v] of Object.entries(d.env)) {
+                  if (typeof k === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && typeof v === 'string') {
+                    clean[k] = v;
+                  }
+                }
+                if (Object.keys(clean).length > 0) extraEnv = clean;
+              }
+              this.agentManager.spawnWorker(d.name, resolvedDir, d.prompt, d.parent, d.model, extraEnv)
                 .catch(err => console.error(`[ipc] spawn-worker failed:`, err));
               response = { success: true, data: `Spawning worker ${d.name}` };
             }

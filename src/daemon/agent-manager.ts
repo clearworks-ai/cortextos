@@ -1206,7 +1206,7 @@ export class AgentManager {
   /**
    * Spawn an ephemeral worker session for a parallelized task.
    */
-  async spawnWorker(name: string, dir: string, prompt: string, parent?: string, model?: string): Promise<void> {
+  async spawnWorker(name: string, dir: string, prompt: string, parent?: string, model?: string, extraEnv?: Record<string, string>): Promise<void> {
     const existing = this.workers.get(name);
     if (existing) {
       if (existing.isFinished()) {
@@ -1235,6 +1235,7 @@ export class AgentManager {
       projectRoot: this.frameworkRoot,
       parentAgent: parent,
       worker: true,
+      extraEnv,
     };
 
     const config = model ? { model } : {};

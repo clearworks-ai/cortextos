@@ -11,6 +11,7 @@ import { loadEnvFileInto } from '../utils/env.js';
 import { resolvePaths } from '../utils/paths.js';
 import type { BusPaths } from '../types/index.js';
 import { resolveInstanceId } from './resolve-instance-id.js';
+import { IPCClient } from '../daemon/ipc-server.js';
 import {
   ZOOM_OFFICEHOURS_MEETING_ID,
   ZOOM_MAILCHIMP_LIST_ID,
@@ -304,10 +305,81 @@ function appendInboundLog(ctxRoot: string, target: string, messageId: string, te
   appendFileSync(logFile, logEntry + '\n');
 }
 
-function buildRelayMessage(integration: string, event: string, envelope: RelayEnvelope): string {
-  const meetingId = envelope.meeting_id === undefined || envelope.meeting_id === null
+export function extractMeetingId(envelope: RelayEnvelope): string {
+  return envelope.meeting_id === undefined || envelope.meeting_id === null
     ? ''
     : String(envelope.meeting_id).trim();
+}
+
+/**
+ * Pure planner for a deterministic meeting-writeback spawn. Resolves the worker
+ * name (lowercased/sanitized to satisfy the daemon's WORKER_NAME_REGEX), the agent
+ * dir (dynamic — from framework root/org, never a hardcoded absolute), and the
+ * prompt. Returns null when the inputs can't produce a valid, filed-capable spawn
+ * (missing org, empty id after sanitization, or the target has no writeback skill),
+ * so the caller falls back to the NL relay. No IPC here — kept pure for testing.
+ */
+export function planMeetingWritebackSpawn(args: {
+  frameworkRoot: string;
+  org?: string;
+  target: string;
+  meetingId: string;
+  skillExists?: (dir: string) => boolean;
+}): { workerName: string; dir: string; prompt: string } | null {
+  if (!args.org || !args.frameworkRoot || !args.target || !args.meetingId) return null;
+  const safeId = args.meetingId.toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 40);
+  if (!safeId) return null;
+  const workerName = `meeting-writeback-${safeId}`.slice(0, 64);
+  const dir = join(args.frameworkRoot, 'orgs', args.org, 'agents', args.target);
+  const skillPath = join(dir, '.claude', 'skills', 'meeting-writeback-worker', 'SKILL.md');
+  const exists = args.skillExists ?? ((p: string) => existsSync(p));
+  if (!exists(skillPath)) return null;
+  const prompt = [
+    'You are the meeting-writeback worker (short-lived session).',
+    `FF_MEETING_ID=${args.meetingId} is set in your environment.`,
+    'Read .claude/skills/meeting-writeback-worker/SKILL.md and execute every bash block in order,',
+    'then output DONE. Do nothing else — no heartbeat, no daily memory, no Telegram.',
+  ].join(' ');
+  return { workerName, dir, prompt };
+}
+
+/**
+ * Deterministic meeting-writeback: spawn the writeback worker directly via the
+ * daemon (IPC spawn-worker) for a fireflies meeting event, resolving the target
+ * agent's dir dynamically from the framework root/org (no hardcoded absolute path).
+ * FF_MEETING_ID is injected into the worker env so the skill's single-meeting fast
+ * path runs. Returns ok:false on any failure so the caller can fall back to the
+ * NL inbox relay (no regression if the daemon is unreachable).
+ */
+async function trySpawnMeetingWriteback(args: {
+  instanceId?: string;
+  frameworkRoot: string;
+  org?: string;
+  target: string;
+  meetingId: string;
+}): Promise<{ ok: true; workerName: string } | { ok: false }> {
+  const plan = planMeetingWritebackSpawn(args);
+  if (!plan) return { ok: false };
+  try {
+    const client = new IPCClient(args.instanceId || 'default');
+    const response = await client.send({
+      type: 'spawn-worker',
+      data: {
+        name: plan.workerName,
+        dir: plan.dir,
+        prompt: plan.prompt,
+        parent: args.target,
+        env: { FF_MEETING_ID: args.meetingId },
+      },
+    });
+    return response.success ? { ok: true, workerName: plan.workerName } : { ok: false };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function buildRelayMessage(integration: string, event: string, envelope: RelayEnvelope): string {
+  const meetingId = extractMeetingId(envelope);
 
   if (integration === 'fireflies' && meetingId) {
     return `WEBHOOK ${integration} ${event} — meeting ${meetingId}. Spawn meeting-commitments-worker with FF_MEETING_ID=${meetingId} set so the single-meeting fast path runs now instead of waiting for the 2h poll: cd pa agent dir, source env, then python3 scripts/ff-extractor.py --mode full --meeting-id ${meetingId}.`;
@@ -805,6 +877,33 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
       if (!isKnownAgent(target, options.ctxRoot, options.frameworkRoot, options.org)) {
         jsonResponse(response, 404, { error: 'unknown_agent', tier: 'target' });
         return;
+      }
+
+      // Deterministic path: for a fireflies meeting event, spawn the writeback
+      // worker directly via the daemon rather than posting an NL nudge that depends
+      // on the long-running agent noticing and acting. Falls through to the NL relay
+      // below if the daemon spawn cannot be reached (no regression).
+      const meetingId = extractMeetingId(envelope);
+      if (integration === 'fireflies' && meetingId) {
+        const spawned = await trySpawnMeetingWriteback({
+          instanceId: options.instanceId,
+          frameworkRoot: options.frameworkRoot,
+          org: options.org,
+          target,
+          meetingId,
+        });
+        if (spawned.ok) {
+          wakeFastChecker(options.ctxRoot, target);
+          appendInboundLog(
+            options.ctxRoot,
+            target,
+            spawned.workerName,
+            `SPAWN meeting-writeback ${spawned.workerName} FF_MEETING_ID=${meetingId}`,
+          );
+          jsonResponse(response, 200, { ok: true, worker: spawned.workerName });
+          return;
+        }
+        // else: fall through to the NL relay below.
       }
 
       const text = buildRelayMessage(integration, envelope.event.trim(), envelope);

@@ -5,7 +5,8 @@ import { join } from 'path';
 import { recordIngressReceipt, recordRejectedIngressReceipt, type EventReceipt, type IngressEvent } from '../bus/event-delivery.js';
 import { advanceNumericEventCursor, assertCanonicalNumericCursor, compareCanonicalNumericCursors, getEventCursor } from '../bus/event-receipt-index.js';
 import { ShadowRouter } from '../bus/shadow-router.js';
-import { resolveLaneMode, type ProviderLane } from './provider-lane-config.js';
+import { resolveLaneMode, type LaneMode, type ProviderLane } from './provider-lane-config.js';
+import { planWorkerSpawn, trySpawnWorkerForEvent, type WorkerSpawnTemplate } from '../daemon/worker-spawn-plan.js';
 import { atomicWriteSync, ensureDir } from '../utils/atomic.js';
 
 const GMAIL_BODY_LIMIT = 32 * 1024;
@@ -22,6 +23,14 @@ export interface ProviderIngressDependencies {
   getCursor?: typeof getEventCursor;
   advanceCursor?: typeof advanceNumericEventCursor;
   makeRouter?: (stateDir: string, lane: ProviderLane) => ShadowRouter;
+  /**
+   * FR-E3 test seam: the guarded worker spawn used by a lane's ACTIVE path.
+   * Defaults to the real `trySpawnWorkerForEvent` (IPC to the daemon). Tests
+   * inject a stub to assert the plan (name + env) without a live daemon.
+   */
+  spawnWorker?: typeof trySpawnWorkerForEvent;
+  /** Test seam for skill-path existence checks in the spawn template. */
+  skillExists?: (path: string) => boolean;
 }
 export interface GmailShadowOptions {
   audience: string;
@@ -45,6 +54,16 @@ export interface ProviderShadowOptions {
    * its safe `shadow` default, so behavior is unchanged from before FR-E2.
    */
   configDir?: string;
+  /**
+   * Framework root (absolute). Required for a lane's ACTIVE path to resolve the
+   * target agent dir dynamically for a worker spawn (FR-E3). Absent => the active
+   * path cannot file a spawn and falls back to shadow routing (no regression).
+   */
+  frameworkRoot?: string;
+  /** Org name; required alongside frameworkRoot for a filable ACTIVE spawn. */
+  org?: string;
+  /** Instance id passed to the daemon IPC client for the ACTIVE spawn. */
+  instanceId?: string;
 }
 export interface CalendarShadowChannel { channelId: string; resourceId: string; channelToken: string; expiresAt: string; }
 
@@ -105,7 +124,48 @@ function dependencies(options: ProviderShadowOptions) {
     const mode = options.configDir ? resolveLaneMode(options.configDir, lane) : 'shadow';
     return new ShadowRouter(mode, { stateDir });
   };
-  return { recordIngress: options.dependencies?.recordIngress ?? recordIngressReceipt, recordRejected: options.dependencies?.recordRejected ?? recordRejectedIngressReceipt, getCursor: options.dependencies?.getCursor ?? getEventCursor, advanceCursor: options.dependencies?.advanceCursor ?? advanceNumericEventCursor, makeRouter: options.dependencies?.makeRouter ?? defaultMakeRouter };
+  return { recordIngress: options.dependencies?.recordIngress ?? recordIngressReceipt, recordRejected: options.dependencies?.recordRejected ?? recordRejectedIngressReceipt, getCursor: options.dependencies?.getCursor ?? getEventCursor, advanceCursor: options.dependencies?.advanceCursor ?? advanceNumericEventCursor, makeRouter: options.dependencies?.makeRouter ?? defaultMakeRouter, spawnWorker: options.dependencies?.spawnWorker ?? trySpawnWorkerForEvent };
+}
+
+/** Resolve a lane's mode the same way the router does — shadow unless a well-formed config flips it. */
+function resolveMode(options: ProviderShadowOptions, lane: ProviderLane): LaneMode {
+  return options.configDir ? resolveLaneMode(options.configDir, lane) : 'shadow';
+}
+
+/**
+ * The Gmail (mail.human) comms-check lane, expressed as a generic worker-spawn
+ * template (FR-E3) — the exact mirror of the fireflies meeting-writeback lane.
+ * When the gmail lane is flipped to `active`, an inbound Pub/Sub notification
+ * deterministically spawns the comms-check-worker with GMAIL_HISTORY_ID set (the
+ * monotonic notification id), so a single-event triage runs now instead of
+ * waiting for the poll. Returns null (caller stays in shadow) when the target
+ * has no comms-check-worker skill or the inputs can't produce a filable spawn.
+ */
+function commsCheckWorkerTemplate(args: {
+  frameworkRoot: string;
+  org?: string;
+  target: string;
+  skillExists?: (path: string) => boolean;
+}): WorkerSpawnTemplate {
+  return {
+    frameworkRoot: args.frameworkRoot,
+    org: args.org,
+    target: args.target,
+    workerNamePrefix: 'comms-check',
+    skillRelativePaths: [
+      join('.claude', 'skills', 'comms-check-worker', 'SKILL.md'),
+      join('plugins', 'comms-check-worker', 'SKILL.md'),
+    ],
+    buildPrompt: ({ skillRelativePath, eventId }) =>
+      [
+        'You are the comms-check worker (short-lived session).',
+        `GMAIL_HISTORY_ID=${eventId} is set in your environment.`,
+        `Read ${skillRelativePath} and execute it exactly,`,
+        'then output DONE. Do nothing else — no heartbeat, no daily memory, no prose.',
+      ].join(' '),
+    buildEnv: (eventId) => ({ GMAIL_HISTORY_ID: eventId }),
+    skillExists: args.skillExists,
+  };
 }
 function processMonotonic(options: ProviderShadowOptions, event: IngressEvent, cursorKey: string, value: string, route: string | undefined, lane: ProviderLane): { disposition: string; receipt: EventReceipt } {
   const deps = dependencies(options); const current = deps.getCursor(options.stateDir, cursorKey);
@@ -124,8 +184,23 @@ async function handleGmail(request: IncomingMessage, response: ServerResponse, o
   let decoded: unknown; try { decoded = JSON.parse(strictBase64(envelope.message.data).toString('utf8')); } catch (error) { if (error instanceof ProviderError) throw error; throw new ProviderError(400, 'gmail_invalid_payload'); }
   if (!exactObject(decoded, ['emailAddress', 'historyId']) || Object.keys(decoded).length !== 2) throw new ProviderError(400, 'gmail_invalid_payload');
   const mailbox = canonicalMailbox(decoded.emailAddress); const historyId = canonicalNumber(decoded.historyId, 'gmail_invalid_history_id');
-  const result = processMonotonic(options, { provider: 'gmail', eventType: 'notification', sourceId: `${mailbox}\u0000${historyId}` }, 'gmail.shadow.notification_high_water', historyId, 'pa.comms-check-worker', 'gmail');
-  json(response, 200, { ok: true, mode: 'shadow', disposition: result.disposition });
+  const mode = resolveMode(options, 'gmail');
+  // ACTIVE (FR-E3): the spawn IS the delivery, so skip shadow routing (an active
+  // ShadowRouter would demand a transport capability). SHADOW keeps today's
+  // behavior — record the routing proposal, spawn nothing.
+  const shadowRoute = mode === 'active' ? undefined : 'pa.comms-check-worker';
+  const result = processMonotonic(options, { provider: 'gmail', eventType: 'notification', sourceId: `${mailbox}\u0000${historyId}` }, 'gmail.shadow.notification_high_water', historyId, shadowRoute, 'gmail');
+  // Spawn exactly once per event: gated on first-seen (`accepted`) — the monotonic
+  // cursor already deduped duplicates/stale to non-accepted, so no double-fire.
+  if (mode === 'active' && result.disposition === 'accepted' && options.frameworkRoot && options.org) {
+    const deps = dependencies(options);
+    await deps.spawnWorker(
+      'gmail',
+      () => planWorkerSpawn(commsCheckWorkerTemplate({ frameworkRoot: options.frameworkRoot as string, org: options.org, target: 'pa', skillExists: options.dependencies?.skillExists }), historyId),
+      { instanceId: options.instanceId, parent: 'pa' },
+    );
+  }
+  json(response, 200, { ok: true, mode, disposition: result.disposition });
 }
 
 interface StoredCalendarChannel { version: 1; channel: string; resource: string; token: string; expiresAt: string; }

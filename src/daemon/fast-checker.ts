@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, existsSync, writeFileSync, unlinkSync, statS
 import { execFile } from 'child_process';
 import { join } from 'path';
 import { createHash } from 'crypto';
-import { hardRestart } from '../bus/system.js';
+import { hardRestart, planContextHardRestart } from '../bus/system.js';
 import type { InboxMessage, BusPaths, TelegramMessage, TelegramCallbackQuery } from '../types/index.js';
 import { checkInbox, ackInbox } from '../bus/message.js';
 import { updateApproval } from '../bus/approval.js';
@@ -16,6 +16,7 @@ import {
   DEFAULT_WEDGE_HEARTBEAT_FRESH_MS,
   DEFAULT_WEDGE_RESTART_COOLDOWN_MS,
 } from './wedge-detector.js';
+import { findFreshRecentHandoffDoc } from './restart-context.js';
 
 type LogFn = (msg: string) => void;
 
@@ -1225,6 +1226,8 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       // This handles the case where the agent self-restarts (voluntary handoff) and the
       // 5-min deadline timer would otherwise fire on the fresh low-context session.
       const incomingSessionId = typeof data.session_id === 'string' ? data.session_id : null;
+      const resumedMeasurement = data.measurement_source === 'resume_rollout'
+        || data.measurement_source === 'resume_response';
       if (incomingSessionId && incomingSessionId !== this.ctxLastSessionId) {
         // Release any context-handoff lease held by this agent on a fresh session.
         // This MUST be unconditional — released by agent name, not gated on
@@ -1249,7 +1252,14 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
         // avoid acting on a transient/stale high reading (observed on fresh codex
         // app-server threads that briefly report prior prompt-cache tokens) that
         // would otherwise fire an immediate handoff → restart → fresh-session loop.
-        this.ctxSessionStartedAt = now;
+        // A usage pull from thread/resume describes an OLD, already-occupied
+        // thread. Treating it as a fresh low-context session would apply the
+        // codex 10-minute spike grace and recreate the context-full deadlock.
+        // Notification-backed new threads retain the grace; resumed usage does not.
+        this.ctxSessionStartedAt = resumedMeasurement ? 0 : now;
+        if (resumedMeasurement) {
+          this.log('Resumed Codex thread usage loaded — fresh-thread handoff grace bypassed');
+        }
       }
     } catch { return; }
 
@@ -1458,24 +1468,18 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     this.ctxCircuitRestarts.push(now);
     this.saveCtxCircuit();
 
-    // If the agent wrote a handoff doc in the last 15 minutes but didn't get to call
-    // hard-restart --handoff-doc (e.g. Tier 3 force-restart cut it short), pick it up
-    // so the new session still receives handoff context.
+    // If the agent wrote a handoff doc in the current handoff attempt but didn't
+    // get to call hard-restart --handoff-doc (e.g. Tier 3 cut it short), preserve it.
+    let handoffDoc: string | null = null;
     try {
       const handoffsDir = join(this.agent.getAgentDir(), 'memory', 'handoffs');
-      if (existsSync(handoffsDir)) {
-        const cutoff = now - 15 * 60_000;
-        const recent = readdirSync(handoffsDir)
-          .filter(f => f.startsWith('handoff-') && f.endsWith('.md'))
-          .map(f => ({ f, mtime: statSync(join(handoffsDir, f)).mtimeMs }))
-          .filter(({ mtime }) => mtime >= cutoff)
-          .sort((a, b) => b.mtime - a.mtime);
-        if (recent.length > 0) {
-          const docPath = join(handoffsDir, recent[0].f);
-          const markerPath = join(this.paths.stateDir, '.handoff-doc-path');
-          writeFileSync(markerPath, docPath, 'utf-8');
-          this.log(`Tier 3 restart: found recent handoff doc, writing marker → ${docPath}`);
-        }
+      handoffDoc = findFreshRecentHandoffDoc(
+        handoffsDir,
+        now - 15 * 60_000,
+        this.ctxHandoffFiredAt,
+      );
+      if (handoffDoc) {
+        this.log(`Tier 3 restart: found recent handoff doc, writing marker → ${handoffDoc}`);
       }
     } catch { /* non-fatal — proceed without handoff context */ }
 
@@ -1497,15 +1501,9 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     releaseContextHandoffLease(this.paths.ctxRoot, this.agent.name);
     this.ctxHandoffLeaseId = null;
 
-    // Write .force-fresh + .restart-planned (hardRestart from src/bus/system.ts)
-    hardRestart(this.paths, this.agent.name, `CONTEXT-FORCE-RESTART: ${reason}`);
-
-    // Reset context_status.json so the new session's FastChecker doesn't re-trigger
-    // Tier 2 immediately by reading the stale high-% value from the previous session.
-    const statusPath = join(this.paths.stateDir, 'context_status.json');
-    try {
-      writeFileSync(statusPath, JSON.stringify({ used_percentage: 0, exceeds_200k_tokens: false, written_at: new Date().toISOString() }));
-    } catch { /* non-fatal */ }
+    // Shared marker path used by cooperative bus hard-restarts and the Codex
+    // turn-error safety net: force fresh, planned exit, durable handoff, reset bridge.
+    planContextHardRestart(this.paths, this.agent.name, reason, handoffDoc);
 
     // sessionRefresh() does stop() + start(); shouldContinue() will return false
     // because .force-fresh was just written, giving us a clean fresh session.

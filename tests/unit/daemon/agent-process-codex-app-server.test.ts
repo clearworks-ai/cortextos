@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 let capturedOnExit: ((exitCode: number, signal?: number) => void) | null = null;
+let capturedContextRecovery: ((reason: string) => void) | null = null;
 
 const mockCodexAppServerPty = {
   spawn: vi.fn().mockResolvedValue(undefined),
@@ -13,11 +14,15 @@ const mockCodexAppServerPty = {
   }),
   getOutputBuffer: vi.fn().mockReturnValue({ isBootstrapped: vi.fn().mockReturnValue(true) }),
   setTelegramHandle: vi.fn(),
+  setContextRecoveryHandler: vi.fn().mockImplementation((cb: (reason: string) => void) => {
+    capturedContextRecovery = cb;
+  }),
 };
 
 const mockAgentPty = {
   ...mockCodexAppServerPty,
   setTelegramHandle: undefined,
+  setContextRecoveryHandler: undefined,
 };
 
 vi.mock('../../../src/pty/agent-pty.js', () => ({
@@ -93,6 +98,7 @@ const mockEnv = {
 
 beforeEach(() => {
   capturedOnExit = null;
+  capturedContextRecovery = null;
   for (const pty of [mockCodexAppServerPty, mockAgentPty]) {
     pty.spawn.mockClear();
     pty.kill.mockClear();
@@ -103,6 +109,7 @@ beforeEach(() => {
     pty.getOutputBuffer.mockClear();
   }
   mockCodexAppServerPty.setTelegramHandle.mockClear();
+  mockCodexAppServerPty.setContextRecoveryHandler.mockClear();
   mockInjectMessage.mockClear();
   fsMocks.existsSync.mockReset().mockReturnValue(false);
   fsMocks.readFileSync.mockReset();
@@ -128,6 +135,20 @@ describe('AgentProcess codex-app-server runtime', () => {
     await ap.start();
 
     expect(mockCodexAppServerPty.setTelegramHandle).toHaveBeenCalledWith(api, '12345');
+  });
+
+  it('wires context-window recovery to the daemon session refresh path', async () => {
+    const ap = new AgentProcess('codex-app-agent', mockEnv, { runtime: 'codex-app-server' });
+    const refresh = vi.spyOn(ap, 'sessionRefresh').mockResolvedValue(undefined);
+
+    await ap.start();
+    expect(mockCodexAppServerPty.setContextRecoveryHandler).toHaveBeenCalledTimes(1);
+    expect(capturedContextRecovery).not.toBeNull();
+
+    capturedContextRecovery!('context window exhausted');
+    await Promise.resolve();
+
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it('sends back-online Telegram directly from daemon on fresh start (issue #392)', async () => {

@@ -6,6 +6,8 @@ import { ensureDir } from '../utils/atomic.js';
 import { TelegramAPI } from '../telegram/api.js';
 import type { BusPaths } from '../types/index.js';
 
+type HardRestartPaths = Pick<BusPaths, 'stateDir' | 'logDir'>;
+
 // --- Types ---
 
 export interface AutoCommitReport {
@@ -75,7 +77,7 @@ export function selfRestart(paths: BusPaths, agentName: string, reason?: string)
  * Creates .force-fresh marker file; daemon checks this on next restart.
  * Mirrors bash bus/hard-restart.sh.
  */
-export function hardRestart(paths: BusPaths, agentName: string, reason?: string): void {
+export function hardRestart(paths: HardRestartPaths, agentName: string, reason?: string): void {
   const resolvedReason = reason || 'no reason specified';
 
   // Create force-fresh marker (agent-process.ts checks this on restart)
@@ -90,6 +92,35 @@ export function hardRestart(paths: BusPaths, agentName: string, reason?: string)
   const timestamp = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
   const logLine = `[${timestamp}] HARD-RESTART: ${resolvedReason}\n`;
   appendFileSync(join(paths.logDir, 'restarts.log'), logLine, 'utf-8');
+}
+
+/**
+ * Plan the daemon-owned fresh-session recovery used for context exhaustion.
+ * Keeps every context restart on the same marker contract consumed by
+ * AgentProcess: planned exit, force-fresh, optional durable handoff, and a
+ * cleared context bridge so FastChecker cannot re-fire on the dead session.
+ */
+export function planContextHardRestart(
+  paths: HardRestartPaths,
+  agentName: string,
+  reason: string,
+  handoffDoc?: string | null,
+): void {
+  hardRestart(paths, agentName, `CONTEXT-FORCE-RESTART: ${reason}`);
+
+  if (handoffDoc) {
+    writeFileSync(join(paths.stateDir, '.handoff-doc-path'), handoffDoc, 'utf-8');
+  }
+
+  writeFileSync(
+    join(paths.stateDir, 'context_status.json'),
+    JSON.stringify({
+      used_percentage: 0,
+      exceeds_200k_tokens: false,
+      written_at: new Date().toISOString(),
+    }),
+    'utf-8',
+  );
 }
 
 /**

@@ -951,10 +951,15 @@ describe('FastChecker', () => {
       writeFileSync(join(testDir, 'config.json'), JSON.stringify(cfg), 'utf-8');
     }
 
-    function writeCtxStatus(pct: number) {
+    function writeCtxStatus(pct: number, extra: Record<string, unknown> = {}) {
       writeFileSync(
         join(paths.stateDir, 'context_status.json'),
-        JSON.stringify({ used_percentage: pct, exceeds_200k_tokens: false, written_at: new Date().toISOString() }),
+        JSON.stringify({
+          used_percentage: pct,
+          exceeds_200k_tokens: false,
+          written_at: new Date().toISOString(),
+          ...extra,
+        }),
         'utf-8',
       );
     }
@@ -976,6 +981,30 @@ describe('FastChecker', () => {
       writeConfig({});
       writeCtxStatus(60);
       await (checker as any).checkContextStatus();
+      expect(injected(agent).some(m => m.includes('CONTEXT HANDOFF REQUIRED'))).toBe(true);
+      expect((checker as any).ctxHandoffFiredAt).toBeGreaterThan(0);
+    });
+
+    it('resume-rollout measurement bypasses fresh-thread grace and fires the normal handoff', async () => {
+      const agent = makeCtxAgent();
+      const config = agent.getConfig();
+      config.runtime = 'codex-app-server';
+      config.model_context_window = 200_000;
+      const checker = new FastChecker(agent, paths, '/tmp/framework');
+      writeConfig({ runtime: 'codex-app-server', model_context_window: 200_000 });
+      writeCtxStatus(90, {
+        session_id: 'resumed-full-thread',
+        measurement_source: 'resume_rollout',
+        current_usage: {
+          input_tokens: 165_000,
+          output_tokens: 5_000,
+          cache_read_input_tokens: 10_000,
+          cache_creation_input_tokens: 0,
+        },
+      });
+
+      await (checker as any).checkContextStatus();
+
       expect(injected(agent).some(m => m.includes('CONTEXT HANDOFF REQUIRED'))).toBe(true);
       expect((checker as any).ctxHandoffFiredAt).toBeGreaterThan(0);
     });

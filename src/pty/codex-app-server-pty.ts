@@ -8,6 +8,8 @@ import type { TelegramAPI } from '../telegram/api.js';
 import { ensureDir, atomicWriteSync } from '../utils/atomic.js';
 import { resolvePaths } from '../utils/paths.js';
 import { logEvent } from '../bus/event.js';
+import { planContextHardRestart } from '../bus/system.js';
+import { findFreshRecentHandoffDoc } from '../daemon/restart-context.js';
 import { WsUnixJsonRpcClient, type JsonRpcResponse } from '../utils/ws-unix-client.js';
 import { hostSpawn } from './pty-host-client.js';
 
@@ -49,6 +51,8 @@ interface ThreadResponse {
   thread: {
     id: string;
     status?: unknown;
+    path?: string | null;
+    tokenUsage?: unknown;
   };
 }
 
@@ -84,6 +88,10 @@ const TURN_PERMISSION_OVERRIDES = {
 const SOCKET_BASENAME = 'codex.sock';
 const SOCKET_PATH_WARN_BYTES = 100;
 const BOOTSTRAP_PATTERN = '[codex-app-server] ready';
+const CONTEXT_WINDOW_ERROR = /ran out of room|context window/i;
+const CONTEXT_RECOVERY_WINDOW_MS = 5 * 60_000;
+const CONTEXT_RECOVERY_LIMIT = 2;
+const contextRecoveryFallback = new Map<string, number[]>();
 
 const SLASH_REWRITE_RE = /^\/([a-z][a-z0-9_-]*)(?:\s+([\s\S]*))?$/i;
 const LOCAL_SLASH_COMMANDS = new Set(['goal']);
@@ -126,6 +134,7 @@ export class CodexAppServerPTY {
   private _telegramApi: TelegramAPI | null = null;
   private _chatId: string | null = null;
   private _typingLastSent = 0;
+  private _contextRecoveryHandler: ((reason: string) => void) | null = null;
 
   constructor(env: CtxEnv, config: AgentConfig, logPath?: string) {
     this._env = env;
@@ -232,6 +241,10 @@ export class CodexAppServerPTY {
   setTelegramHandle(api: TelegramAPI, chatId: string): void {
     this._telegramApi = api;
     this._chatId = chatId;
+  }
+
+  setContextRecoveryHandler(handler: (reason: string) => void): void {
+    this._contextRecoveryHandler = handler;
   }
 
   private async handleInput(content: string): Promise<void> {
@@ -523,6 +536,7 @@ export class CodexAppServerPTY {
             persistExtendedHistory: true,
           });
           this.setThreadId(resumed.result?.thread.id || persisted.threadId);
+          this.pullResumedContextUsage(resumed.result?.thread);
           return;
         } catch (err) {
           this._outputBuffer.push(`[codex-app-server] persisted resume failed: ${err}\n`);
@@ -540,6 +554,7 @@ export class CodexAppServerPTY {
           persistExtendedHistory: true,
         });
         this.setThreadId(resumed.result?.thread.id || latest);
+        this.pullResumedContextUsage(resumed.result?.thread);
         return;
       }
     }
@@ -609,9 +624,92 @@ export class CodexAppServerPTY {
     this._turnQueue.push(input);
     if (!this._executing) {
       this.drainQueue().catch((err) => {
-        this._outputBuffer.push(`[codex-app-server] turn queue failed: ${err}\n`);
+        this.handleTurnQueueFailure(err);
       });
     }
+  }
+
+  private handleTurnQueueFailure(err: unknown): void {
+    const errorText = err instanceof Error ? err.message : String(err);
+    this._outputBuffer.push(`[codex-app-server] turn queue failed: ${errorText}\n`);
+    if (!CONTEXT_WINDOW_ERROR.test(errorText)) return;
+
+    const recovery = this.reserveContextWindowRecovery();
+    if (!recovery.allowed) {
+      this._outputBuffer.push(
+        `[codex-app-server] context-window recovery suppressed: ${recovery.count} in 5 minutes\n`,
+      );
+      return;
+    }
+
+    let handoffDoc: string | null = null;
+    try {
+      handoffDoc = findFreshRecentHandoffDoc(
+        join(this._env.agentDir, 'memory', 'handoffs'),
+        0,
+        0,
+      );
+    } catch {
+      // Recovery must still proceed with the mission anchor when no handoff is readable.
+    }
+
+    const reason = `Codex context-window turn failure: ${errorText}`;
+    planContextHardRestart(
+      {
+        stateDir: this._stateDir,
+        logDir: join(this._env.ctxRoot, 'logs', this._env.agentName),
+      },
+      this._env.agentName,
+      reason,
+      handoffDoc,
+    );
+    this._outputBuffer.push(
+      `[codex-app-server] context-window recovery ${recovery.count}/${CONTEXT_RECOVERY_LIMIT}`
+      + `${handoffDoc ? ` using ${handoffDoc}` : ' using mission anchor only'}\n`,
+    );
+
+    if (this._contextRecoveryHandler) {
+      try {
+        this._contextRecoveryHandler(reason);
+        return;
+      } catch (handlerError) {
+        this._outputBuffer.push(`[codex-app-server] daemon recovery callback failed: ${handlerError}\n`);
+      }
+    }
+    // Standalone/test fallback. In the daemon, the callback above owns stop()+start().
+    this.kill();
+  }
+
+  private reserveContextWindowRecovery(now: number = Date.now()): { allowed: boolean; count: number } {
+    const guardPath = join(this._stateDir, 'codex-context-recoveries.json');
+    let timestamps = contextRecoveryFallback.get(guardPath) ?? [];
+    try {
+      if (existsSync(guardPath)) {
+        const parsed = JSON.parse(readFileSync(guardPath, 'utf-8')) as { timestamps?: unknown };
+        if (Array.isArray(parsed.timestamps)) {
+          timestamps = parsed.timestamps.filter((value): value is number => typeof value === 'number');
+        }
+      }
+    } catch {
+      // Fall back to daemon-process memory if the persisted guard is malformed/unreadable.
+    }
+
+    const recent = timestamps.filter(
+      (timestamp) => timestamp <= now && now - timestamp < CONTEXT_RECOVERY_WINDOW_MS,
+    );
+    if (recent.length >= CONTEXT_RECOVERY_LIMIT) {
+      contextRecoveryFallback.set(guardPath, recent);
+      return { allowed: false, count: recent.length };
+    }
+
+    recent.push(now);
+    contextRecoveryFallback.set(guardPath, recent);
+    try {
+      atomicWriteSync(guardPath, JSON.stringify({ timestamps: recent }));
+    } catch {
+      // The in-process fallback still caps retries for this daemon lifetime.
+    }
+    return { allowed: true, count: recent.length };
   }
 
   private async drainQueue(): Promise<void> {
@@ -854,6 +952,64 @@ export class CodexAppServerPTY {
   }
 
   /**
+   * Codex app-server has no token-usage read request. `thread/resume` does,
+   * however, return the authoritative rollout path. Pull the newest persisted
+   * token_count event from that app-server-owned JSONL so a full resumed thread
+   * is measurable before another model turn succeeds.
+   */
+  private pullResumedContextUsage(thread: ThreadResponse['thread'] | undefined): void {
+    if (!thread) return;
+    if (isRecord(thread.tokenUsage)) {
+      this.writeContextStatus({ tokenUsage: thread.tokenUsage }, 'resume_response');
+      return;
+    }
+    if (typeof thread.path !== 'string' || !thread.path || !existsSync(thread.path)) {
+      this._outputBuffer.push('[codex-app-server] resumed context usage unavailable (no rollout path)\n');
+      return;
+    }
+
+    try {
+      const lines = readFileSync(thread.path, 'utf-8').split('\n');
+      for (let index = lines.length - 1; index >= 0; index -= 1) {
+        const line = lines[index].trim();
+        if (!line) continue;
+        let event: unknown;
+        try {
+          event = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (!isRecord(event) || !isRecord(event.payload) || event.payload.type !== 'token_count') continue;
+        const info = isRecord(event.payload.info) ? event.payload.info : null;
+        const last = info && isRecord(info.last_token_usage) ? info.last_token_usage : null;
+        if (!last || typeof last.total_tokens !== 'number') continue;
+        const total = info && isRecord(info.total_token_usage) ? info.total_token_usage : last;
+        const mapBreakdown = (usage: Record<string, unknown>) => ({
+          cachedInputTokens: typeof usage.cached_input_tokens === 'number' ? usage.cached_input_tokens : 0,
+          inputTokens: typeof usage.input_tokens === 'number' ? usage.input_tokens : 0,
+          outputTokens: typeof usage.output_tokens === 'number' ? usage.output_tokens : 0,
+          reasoningOutputTokens: typeof usage.reasoning_output_tokens === 'number' ? usage.reasoning_output_tokens : 0,
+          totalTokens: usage.total_tokens,
+        });
+        this.writeContextStatus({
+          tokenUsage: {
+            last: mapBreakdown(last),
+            total: mapBreakdown(total),
+            modelContextWindow: typeof info?.model_context_window === 'number'
+              ? info.model_context_window
+              : null,
+          },
+        }, 'resume_rollout');
+        this._outputBuffer.push('[codex-app-server] resumed context usage pulled from rollout\n');
+        return;
+      }
+      this._outputBuffer.push('[codex-app-server] resumed context usage unavailable (no token_count event)\n');
+    } catch (err) {
+      this._outputBuffer.push(`[codex-app-server] resumed context usage pull failed: ${err}\n`);
+    }
+  }
+
+  /**
    * Translate a `thread/tokenUsage/updated` notification from codex-app-server
    * into the context_status.json shape consumed by the FastChecker context
    * monitor. Writes atomically; failures are non-fatal (observability only).
@@ -869,7 +1025,10 @@ export class CodexAppServerPTY {
    * beyond the active model window. Context handoff must use the current window
    * occupancy (`last`) so long-lived threads do not report false 100%.
    */
-  private writeContextStatus(params: Record<string, unknown>): void {
+  private writeContextStatus(
+    params: Record<string, unknown>,
+    measurementSource: 'notification' | 'resume_response' | 'resume_rollout' = 'notification',
+  ): void {
     const tokenUsage = isRecord(params.tokenUsage) ? params.tokenUsage : null;
     if (!tokenUsage) return;
     const current = isRecord(tokenUsage.last) ? tokenUsage.last : null;
@@ -898,6 +1057,7 @@ export class CodexAppServerPTY {
         cache_creation_input_tokens: 0,
       },
       session_id: this._threadId,
+      measurement_source: measurementSource,
       written_at: new Date().toISOString(),
     });
 

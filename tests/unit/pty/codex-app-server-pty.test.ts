@@ -6,6 +6,8 @@ const fsMocks = {
   writeFileSync: vi.fn(),
   unlinkSync: vi.fn(),
   appendFileSync: vi.fn(),
+  readdirSync: vi.fn(),
+  statSync: vi.fn(),
 };
 
 vi.mock('fs', async () => {
@@ -17,6 +19,8 @@ vi.mock('fs', async () => {
     get writeFileSync() { return fsMocks.writeFileSync; },
     get unlinkSync() { return fsMocks.unlinkSync; },
     get appendFileSync() { return fsMocks.appendFileSync; },
+    get readdirSync() { return fsMocks.readdirSync; },
+    get statSync() { return fsMocks.statSync; },
   };
 });
 
@@ -82,6 +86,8 @@ beforeEach(() => {
   fsMocks.writeFileSync.mockReset();
   fsMocks.unlinkSync.mockReset();
   fsMocks.appendFileSync.mockReset();
+  fsMocks.readdirSync.mockReset();
+  fsMocks.statSync.mockReset();
   requestMock.mockReset();
   notifyMock.mockReset();
   closeMock.mockReset();
@@ -1017,6 +1023,60 @@ describe('CodexAppServerPTY thread lifecycle', () => {
     });
   });
 
+  it('pulls persisted usage after resume even when no tokenUsage notification fires', async () => {
+    const threadStatePath = '/tmp/ctx/state/codex-app-agent/codex-app-server-thread.json';
+    const rolloutPath = '/tmp/codex-rollout.jsonl';
+    fsMocks.existsSync.mockImplementation((path: string) => (
+      path === threadStatePath || path === rolloutPath
+    ));
+    fsMocks.readFileSync.mockImplementation((path: string) => {
+      if (path === threadStatePath) {
+        return JSON.stringify({
+          threadId: 'persisted-thread',
+          cwd: '/tmp/fw/orgs/acme/agents/codex-app-agent',
+          updatedAt: '2026-08-10T20:00:00Z',
+        });
+      }
+      if (path === rolloutPath) {
+        return [
+          JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: null } }),
+          JSON.stringify({
+            type: 'event_msg',
+            payload: {
+              type: 'token_count',
+              info: {
+                last_token_usage: {
+                  input_tokens: 165000,
+                  cached_input_tokens: 10000,
+                  output_tokens: 5000,
+                  total_tokens: 180000,
+                },
+                model_context_window: 200000,
+              },
+            },
+          }),
+        ].join('\n');
+      }
+      throw new Error(`unexpected read: ${path}`);
+    });
+    requestMock.mockResolvedValue({
+      result: { thread: { id: 'persisted-thread', path: rolloutPath } },
+    });
+    const pty = new CodexAppServerPTY(mockEnv, {});
+    (pty as unknown as { _rpc: { request: typeof requestMock } })._rpc = { request: requestMock };
+
+    await (pty as unknown as { startOrResumeThread(mode: 'fresh' | 'continue'): Promise<void> })
+      .startOrResumeThread('continue');
+
+    expect(atomicWriteSyncMock).toHaveBeenCalledTimes(1);
+    const [statusPath, rawPayload] = atomicWriteSyncMock.mock.calls[0] as [string, string];
+    expect(statusPath).toBe('/tmp/ctx/state/codex-app-agent/context_status.json');
+    const payload = JSON.parse(rawPayload) as Record<string, unknown>;
+    expect(payload.used_percentage).toBe(90);
+    expect(payload.context_window_size).toBe(200000);
+    expect(payload.session_id).toBe('persisted-thread');
+  });
+
   it('starts a new thread in fresh mode even when persisted thread state exists', async () => {
     fsMocks.existsSync.mockReturnValue(true);
     fsMocks.readFileSync.mockReturnValue(JSON.stringify({
@@ -1049,6 +1109,103 @@ describe('CodexAppServerPTY thread lifecycle', () => {
       expect.stringContaining('"threadId": "new-fresh-thread"'),
       'utf-8',
     );
+  });
+});
+
+describe('CodexAppServerPTY context-window turn recovery', () => {
+  type RecoveryInternals = {
+    _alive: boolean;
+    _appServerPty: { kill: ReturnType<typeof vi.fn> } | null;
+    handleTurnQueueFailure(err: unknown): void;
+  };
+
+  function recoveryInternals(pty: InstanceType<typeof CodexAppServerPTY>): RecoveryInternals {
+    return pty as unknown as RecoveryInternals;
+  }
+
+  it('routes a context-window turn queue failure through planned hard restart with latest handoff', () => {
+    const handoffsDir = '/tmp/fw/orgs/acme/agents/codex-app-agent/memory/handoffs';
+    fsMocks.existsSync.mockImplementation((path: string) => path === handoffsDir);
+    fsMocks.readdirSync.mockReturnValue(['handoff-old.md', 'handoff-new.md']);
+    fsMocks.statSync.mockImplementation((path: string) => ({
+      mtimeMs: path.endsWith('handoff-new.md') ? 200 : 100,
+    }));
+    const pty = new CodexAppServerPTY(mockEnv, {});
+    const internals = recoveryInternals(pty);
+    const appServerKill = vi.fn();
+    internals._alive = true;
+    internals._appServerPty = { kill: appServerKill };
+
+    internals.handleTurnQueueFailure(new Error('ran out of room in the model\'s context window'));
+
+    expect(fsMocks.writeFileSync).toHaveBeenCalledWith(
+      '/tmp/ctx/state/codex-app-agent/.handoff-doc-path',
+      `${handoffsDir}/handoff-new.md`,
+      'utf-8',
+    );
+    expect(fsMocks.writeFileSync).toHaveBeenCalledWith(
+      '/tmp/ctx/state/codex-app-agent/.force-fresh',
+      expect.stringContaining('CONTEXT-FORCE-RESTART'),
+      'utf-8',
+    );
+    expect(fsMocks.writeFileSync).toHaveBeenCalledWith(
+      '/tmp/ctx/state/codex-app-agent/.restart-planned',
+      expect.stringContaining('CONTEXT-FORCE-RESTART'),
+      'utf-8',
+    );
+    expect(appServerKill).toHaveBeenCalledTimes(1);
+    expect(pty.getOutputBuffer().getRecent()).toContain('context-window recovery 1/2');
+  });
+
+  it('does not recover for a non-context turn queue failure', () => {
+    const pty = new CodexAppServerPTY(mockEnv, {});
+    const internals = recoveryInternals(pty);
+    const appServerKill = vi.fn();
+    internals._alive = true;
+    internals._appServerPty = { kill: appServerKill };
+
+    internals.handleTurnQueueFailure(new Error('MCP transport closed'));
+
+    expect(fsMocks.writeFileSync).not.toHaveBeenCalledWith(
+      expect.stringContaining('.force-fresh'),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(appServerKill).not.toHaveBeenCalled();
+    expect(pty.getOutputBuffer().getRecent()).toContain('turn queue failed');
+  });
+
+  it('caps persisted context-window recoveries at two within five minutes', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-10T23:00:00Z'));
+    const files = new Map<string, string>();
+    const guardPath = '/tmp/ctx/state/codex-app-agent/codex-context-recoveries.json';
+    fsMocks.existsSync.mockImplementation((path: string) => files.has(path));
+    fsMocks.readFileSync.mockImplementation((path: string) => files.get(path));
+    atomicWriteSyncMock.mockImplementation((path: string, content: string) => {
+      files.set(path, content);
+    });
+
+    const adapters: Array<InstanceType<typeof CodexAppServerPTY>> = [];
+    try {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const pty = new CodexAppServerPTY(mockEnv, {});
+        const internals = recoveryInternals(pty);
+        internals._alive = true;
+        internals._appServerPty = { kill: vi.fn() };
+        internals.handleTurnQueueFailure(new Error('context window exhausted'));
+        adapters.push(pty);
+      }
+
+      const forceFreshWrites = fsMocks.writeFileSync.mock.calls.filter(
+        ([path]) => path === '/tmp/ctx/state/codex-app-agent/.force-fresh',
+      );
+      expect(forceFreshWrites).toHaveLength(2);
+      expect(files.has(guardPath)).toBe(true);
+      expect(adapters[2].getOutputBuffer().getRecent()).toContain('recovery suppressed: 2 in 5 minutes');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

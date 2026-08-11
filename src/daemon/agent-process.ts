@@ -322,6 +322,17 @@ export class AgentProcess {
     if (this.config.runtime === 'codex-app-server' && this.telegramApi && this.telegramChatId) {
       (this.pty as CodexAppServerPTY).setTelegramHandle(this.telegramApi, this.telegramChatId);
     }
+    if (effectiveConfig.runtime === 'codex-app-server') {
+      const codexPty = this.pty as CodexAppServerPTY;
+      if (typeof codexPty.setContextRecoveryHandler === 'function') {
+        codexPty.setContextRecoveryHandler((reason) => {
+          this.log(`Codex context-window recovery requested: ${reason}`);
+          Promise.resolve()
+            .then(() => this.sessionRefresh())
+            .catch((err) => this.log(`Codex context-window recovery failed: ${err}`));
+        });
+      }
+    }
 
     // BUG-011 fix: create a fresh exit signal for this run. resolveExit is
     // called from the onExit handler below; stop() awaits exitPromise to

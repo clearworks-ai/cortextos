@@ -167,6 +167,41 @@ function commsCheckWorkerTemplate(args: {
     skillExists: args.skillExists,
   };
 }
+
+/**
+ * The Calendar (booking) delta lane, expressed as the same generic worker-spawn
+ * template (FR-E3) as the gmail comms-check lane. When the calendar lane is
+ * flipped to `active`, a change notification (any non-`sync` state) deterministically
+ * spawns the booking-calendar-delta worker, which diffs the agenda snapshot and
+ * files pre-meeting prep now instead of waiting for the pre-meeting-brief poll.
+ * Returns null (caller stays in shadow) when the target has no booking-calendar-delta
+ * skill or the inputs can't produce a filable spawn.
+ */
+function bookingCalendarDeltaTemplate(args: {
+  frameworkRoot: string;
+  org?: string;
+  target: string;
+  skillExists?: (path: string) => boolean;
+}): WorkerSpawnTemplate {
+  return {
+    frameworkRoot: args.frameworkRoot,
+    org: args.org,
+    target: args.target,
+    workerNamePrefix: 'calendar-delta',
+    skillRelativePaths: [
+      join('.claude', 'skills', 'booking-calendar-delta', 'SKILL.md'),
+      join('plugins', 'booking-calendar-delta', 'SKILL.md'),
+    ],
+    buildPrompt: ({ skillRelativePath }) =>
+      [
+        'You are the booking-calendar-delta worker (short-lived session).',
+        `Read ${skillRelativePath} and execute it exactly,`,
+        'then output DONE. Do nothing else — no heartbeat, no daily memory, no prose.',
+      ].join(' '),
+    buildEnv: () => ({ CALENDAR_TRIGGER: 'watch-push' }),
+    skillExists: args.skillExists,
+  };
+}
 function processMonotonic(options: ProviderShadowOptions, event: IngressEvent, cursorKey: string, value: string, route: string | undefined, lane: ProviderLane): { disposition: string; receipt: EventReceipt } {
   const deps = dependencies(options); const current = deps.getCursor(options.stateDir, cursorKey);
   if (current !== undefined && compareCanonicalNumericCursors(current, value) > 0) return { disposition: 'stale', receipt: deps.recordRejected(options.stateDir, event, 'stale_cursor') };
@@ -220,8 +255,23 @@ async function handleCalendar(request: IncomingMessage, response: ServerResponse
   const channelId = uniqueHeader(request, 'x-goog-channel-id')!; const resourceId = uniqueHeader(request, 'x-goog-resource-id')!; const state = uniqueHeader(request, 'x-goog-resource-state')!; const messageNumber = canonicalNumber(uniqueHeader(request, 'x-goog-message-number')!, 'calendar_invalid_message_number'); const expiration = uniqueHeader(request, 'x-goog-channel-expiration')!; const token = uniqueHeader(request, 'x-goog-channel-token')!;
   if (!['sync', 'exists', 'not_exists'].includes(state)) throw new ProviderError(400, 'calendar_invalid_state');
   const configured = readCalendarChannel(options.stateDir, channelId); const expires = Date.parse(expiration); if (configured.channel !== digestHex(channelId) || configured.resource !== digestHex(resourceId)) throw new ProviderError(401, 'calendar_channel_mismatch'); if (!safeEqual(token, configured.token)) throw new ProviderError(401, 'calendar_token_mismatch'); if (!Number.isFinite(expires) || expires <= options.now() || new Date(expires).toISOString() !== configured.expiresAt || Date.parse(configured.expiresAt) <= options.now()) throw new ProviderError(401, 'calendar_channel_expired');
-  const scope = digestHex(`${channelId}\u0000${resourceId}`).slice(0, 40); const result = processMonotonic(options, { provider: 'calendar', eventType: 'notification', sourceId: `${digestHex(channelId)}\u0000${digestHex(resourceId)}\u0000${messageNumber}` }, `calendar.shadow.notification_high_water:${scope}`, messageNumber, state === 'sync' ? undefined : 'pa.booking-calendar-delta', 'calendar');
-  json(response, 200, { ok: true, mode: 'shadow', disposition: state === 'sync' && result.disposition === 'accepted' ? 'sync' : result.disposition });
+  const scope = digestHex(`${channelId}\u0000${resourceId}`).slice(0, 40);
+  const mode = resolveMode(options, 'calendar');
+  // ACTIVE (FR-E3): the spawn IS the delivery, so skip shadow routing (mirrors
+  // gmail). A `sync` notification never routes/spawns in any mode — it is the
+  // channel-establishment ping, not a change.
+  const shadowRoute = state === 'sync' || mode === 'active' ? undefined : 'pa.booking-calendar-delta';
+  const result = processMonotonic(options, { provider: 'calendar', eventType: 'notification', sourceId: `${digestHex(channelId)}\u0000${digestHex(resourceId)}\u0000${messageNumber}` }, `calendar.shadow.notification_high_water:${scope}`, messageNumber, shadowRoute, 'calendar');
+  // Spawn exactly once per change: active + a real change state (not sync) + first-seen.
+  if (mode === 'active' && state !== 'sync' && result.disposition === 'accepted' && options.frameworkRoot && options.org) {
+    const deps = dependencies(options);
+    await deps.spawnWorker(
+      'calendar',
+      () => planWorkerSpawn(bookingCalendarDeltaTemplate({ frameworkRoot: options.frameworkRoot as string, org: options.org, target: 'pa', skillExists: options.dependencies?.skillExists }), messageNumber),
+      { instanceId: options.instanceId, parent: 'pa' },
+    );
+  }
+  json(response, 200, { ok: true, mode, disposition: state === 'sync' && result.disposition === 'accepted' ? 'sync' : result.disposition });
 }
 
 export async function handleProviderShadowIngress(integration: string, request: IncomingMessage, response: ServerResponse, options: ProviderShadowOptions, buckets: ProviderRateBuckets): Promise<boolean> {

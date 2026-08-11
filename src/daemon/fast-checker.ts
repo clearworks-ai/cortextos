@@ -1209,6 +1209,7 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     let pct: number | null = null;
     let exceeds200k = false;
     let rawTokens: number | null = null;
+    let reportedWindow: number | null = null;
     try {
       const raw = readFileSync(statusPath, 'utf-8');
       const data = JSON.parse(raw);
@@ -1256,6 +1257,14 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
         if (sum > 0) rawTokens = sum;
       }
 
+      // The ACTUAL context window the runtime reported for this session. The codex
+      // pty writes the true cap here (codex_context_cap, ~1M); Claude Code writes its
+      // own. This is ground truth — prefer it over the realContextWindow(model) guess
+      // table, which does not know codex model ids and would return 200K for them.
+      if (typeof data.context_window_size === 'number' && data.context_window_size > 0) {
+        reportedWindow = data.context_window_size;
+      }
+
       // Detect new session: if session_id changed, clear stale per-session ctx state.
       // This handles the case where the agent self-restarts (voluntary handoff) and the
       // 5-min deadline timer would otherwise fire on the fresh low-context session.
@@ -1296,7 +1305,15 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     // ~600K real tokens (a genuine backstop that lets CC compact along the way)
     // rather than at ~120K, which is what caused the restart churn.
     const model = this.agent.getConfig().model;
-    const realWindow = realContextWindow(model);
+    // Prefer the window the runtime actually reported (codex writes its true ~1M cap;
+    // codex model ids are unknown to realContextWindow and would wrongly map to 200K,
+    // over-reporting ~5x → premature handoff → restart treadmill). Fall back to the
+    // model guess only when the reported window is absent or the untrustworthy 200K
+    // that Claude Code reports even on 1M models (the original reason this override
+    // exists — the guess upgrades known Claude 1M models above that 200K floor).
+    const realWindow = (reportedWindow !== null && reportedWindow > 200_000)
+      ? reportedWindow
+      : realContextWindow(model);
     let realPct: number | null;
     if (rawTokens !== null) {
       realPct = (rawTokens / realWindow) * 100;

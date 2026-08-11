@@ -130,6 +130,26 @@ export function resolveCoordinatorDir(
 }
 
 /**
+ * Resolve the directory of the agent that runs the `deal-debrief-analyst` skill (FR-006,
+ * sales-only). Mirrors resolveCoordinatorDir: checks the per-agent crm copy then the central
+ * org store (`orgs/<org>/skills/deal-debrief-analyst/SKILL.md`). Runs in the `crm` agent dir
+ * (the org's deal owner). Returns null if the skill is absent (caller records `skipped`).
+ */
+export function resolveDebriefDir(
+  frameworkRoot: string,
+  org: string,
+  exists: (path: string) => boolean,
+): { dir: string; parent: string } | null {
+  const crmAgentDir = join(frameworkRoot, 'orgs', org, 'agents', 'crm');
+  const perAgentSkill = join(crmAgentDir, '.claude', 'skills', 'deal-debrief-analyst', 'SKILL.md');
+  const centralSkill = join(frameworkRoot, 'orgs', org, 'skills', 'deal-debrief-analyst', 'SKILL.md');
+  if (exists(perAgentSkill) || exists(centralSkill)) {
+    return { dir: crmAgentDir, parent: 'crm' };
+  }
+  return null;
+}
+
+/**
  * Dispatch the meeting consumers for a `completed` meeting event. Each consumer is
  * independently dedup-gated + isolated. Returns per-consumer outcomes for logging/tests.
  * The daemon calls this from `onDone` right after `maybeEmitMeetingEvent` returns
@@ -195,23 +215,38 @@ export function dispatchMeetingConsumers(
     });
   });
 
-  // --- FR-006 deal-debrief (sales ONLY) — DEFERRED --------------------------------------
-  // TODO FR-006: the deal-debrief-analyst skill is not yet in the org store. When it
-  // lands, spawn a short-lived debrief worker here, gated `meeting-debrief:<meeting_id>`,
-  // ONLY for sales meetings. meetingType is threaded through the input so wiring this is
-  // trivial. Example (do NOT enable until the skill exists):
-  //
-  //   if (meetingType === 'sales') {
-  //     runConsumer(outcomes, 'debrief', `meeting-debrief:${meetingId}`, input.ctxRoot, recordEvent, () => {
-  //       const resolved = resolveDebriefDir(input.frameworkRoot, input.org!, exists);
-  //       void spawnWorker!(`meeting-debrief-${safeId(meetingId)}`, resolved.dir, debriefPrompt, resolved.parent, undefined, { FF_MEETING_ID: meetingId });
-  //     });
-  //   }
-  outcomes.push({
-    consumer: 'debrief',
-    status: 'deferred',
-    reason: meetingType === 'sales' ? 'sales-meeting-fr006-deferred' : 'non-sales-no-debrief',
-  });
+  // --- FR-006 deal-debrief (sales ONLY) — LLM worker, deal-debrief-analyst skill --------
+  // WHEN meeting_type==sales THE SYSTEM SHALL spawn deal-debrief; WHEN !=sales it SHALL NOT.
+  if (meetingType === 'sales') {
+    runConsumer(outcomes, 'debrief', `meeting-debrief:${meetingId}`, input.ctxRoot, recordEvent, () => {
+      const resolved = resolveDebriefDir(input.frameworkRoot, input.org!, exists);
+      if (!resolved) {
+        // Skill not resolvable → record skipped + undo the dedup surface so a later
+        // dispatch can still spawn it once the skill exists.
+        throw new DispatchSkip('debrief-skill-not-found');
+      }
+      if (!spawnWorker) {
+        throw new DispatchSkip('no-spawnWorker-dep');
+      }
+      const workerName = `meeting-debrief-${safeId(meetingId)}`.slice(0, 64);
+      const prompt = [
+        'You are the deal-debrief-analyst worker (short-lived).',
+        `FF_MEETING_ID=${meetingId}.`,
+        'Read the deal-debrief-analyst SKILL and produce the post-call debrief',
+        '(outcomes, decisions, action items with owners, deal-state change) + the recap',
+        'draft for this SALES meeting, filed per the skill. Output DONE.',
+      ].join(' ');
+      // Fire-and-forget: spawnWorker is async; the daemon must not block onDone on it.
+      void spawnWorker(workerName, resolved.dir, prompt, resolved.parent, undefined, {
+        FF_MEETING_ID: meetingId,
+      }).catch((err) => {
+        console.error(`[meeting-dispatch] debrief worker spawn failed for ${meetingId}: ${String(err)}`);
+      });
+    });
+  } else {
+    // Non-sales: deal-debrief SHALL NOT spawn (spec FR-006).
+    outcomes.push({ consumer: 'debrief', status: 'skipped', reason: 'non-sales-no-debrief' });
+  }
 
   return { meetingId, meetingType, outcomes };
 }

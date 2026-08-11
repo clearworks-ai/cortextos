@@ -46,7 +46,7 @@ requirement? Cite file:line. Flag any gap between "merged" and "correct."
 | FR-005 | ✅ | daemon spawns coordinator all types (meeting-consumer-dispatch.ts:191-216); dedup `meeting-coord:<id>`; creates NO followups (recap+tracker only). Minor: dedup-undo comment/code mismatch on skip (non-blocking). |
 | FR-006 | ✅ | sales-only gate real (meeting-consumer-dispatch.ts:220 `=== 'sales'`); non-sales excluded; dedup `meeting-debrief:<id>`; daemon-spawned. Minor: strict-lowercase compare, no case-normalize (non-blocking). |
 | FR-007 | 🟡 | universal interaction + sales-only deal-stage correct. **PARTIAL: 4/26 engagements have clearpath_id:null → deal-stage write silently skipped (meeting-crm-sync.py:296-309), fails-safe. `--engagement-name` fallback exists but unused.** → FIX in Phase 1b. |
-| FR-008 | ❌ | idempotency + zero-commitment OK. **GAP: per-client-file lock (meeting_writeback.py:40-58) does NOT span `sync_client_context.py`, which is unlocked + destructive unlink/rewrite (:352-354,:377) → concurrent writeback+context-sync loses History append.** → FIX in Phase 1b. |
+| FR-008 | ✅ | idempotency + zero-commitment OK. "Race" was vs `sync_client_context`, which is DEAD in prod (no cron/worker) → writeback is sole live `.md` writer, already locked. NO fix needed. Latent note: don't revive sync as a `.md` writer. |
 
 ---
 
@@ -54,10 +54,9 @@ requirement? Cite file:line. Flag any gap between "merged" and "correct."
 - ✅ **FR-007 fix**: `meeting-crm-sync.py` now selects the matched engagement via
   `--engagement-name` when `clearpath_id` is null. Regression test added (11/11 pass).
   **PR #352** (`fix/fr-007-name-only-engagement-dealstage`) — pending merge + staging receipt.
-- ⏳ **FR-008 fix**: NOT patched blind — it's a two-writer design conflict, not just a missing
-  lock. Documented in `state/specs/FR-008-client-md-writer-conflict-2026-08-10.md` with
-  Option A (single owner, recommended) vs Option B (coexist+serialize). **Needs Josh's design
-  call + staging validation** (client-file data-plane → staging-first non-negotiable).
+- ✅ **FR-008**: CLOSED, no fix needed. The second writer (`sync_client_context`) is dead in prod;
+  writeback is sole live `.md` owner, already locked. Option A was built + rejected at staging
+  (would drop curated History). See Phase 2 + the spec. Net: no code change.
 
 ---
 
@@ -66,15 +65,14 @@ Staging-first is non-negotiable. Inject a synthetic meeting event through the ch
 staging instance; capture receipts; confirm coverage-equivalence vs the 2 dupes.
 Scripts: `scripts/staging/{staging-up,staging-seed,staging-verify,staging-down}.sh`.
 
-### FR-008 Option A — ❌ REJECTED at staging (2026-08-10)
-Built `fix/fr-008-client-md-single-owner` (944278e1, 55 tests green), then ran the single-client
-rebuild against a copy of real `alloi.md` + live CRM. **Real data loss:** curated History lines
-that live only in the `.md` (invoice sent, audit-delivered/gmail-verify, discovery interviews
-#5/#3, Alloi//AllSafe proposal) were DROPPED because they aren't in `interactions.jsonl`; curated
-Open-Items were replaced by raw fanout rows. The `.md` is a multi-source curated ACCUMULATOR, not
-a CRM read-cache. **Branch NOT merged.** Corrected plan = Option C (writeback stays sole `.md`
-owner, retire/guard sync) — see `state/specs/FR-008-client-md-writer-conflict-2026-08-10.md`.
-Awaiting Josh confirm on C. This gate FAILED as designed → halted, no fix-forward.
+### FR-008 — CLOSED, NO FIX NEEDED (2026-08-10)
+The flagged "race" is writeback vs `sync_client_context`. But `sync_client_context` is DEAD in
+prod (no live cron, missing worker skill) → there is no second live `.md` writer. Writeback is
+sole owner and already lock-guarded for writeback-vs-writeback. **No live data-loss risk; no code
+required.** (Confirmed the inverse the hard way: building Option A + validating on real `alloi.md`
+showed a CRM-rebuild would DROP curated multi-source History — the `.md` is a curated accumulator,
+not a read-cache. `fix/fr-008-client-md-single-owner` abandoned, not merged.) Latent caveat only:
+never revive `sync_client_context` as a `.md` writer; a CRM view goes to a separate file.
 
 ### Meeting-chain end-to-end staging (still to run once FR-008 is settled)
 - ⬜ staging daemon up (cwd=FW_ROOT, `CTX_INSTANCE_ID=cortextos-staging` pinned every call)

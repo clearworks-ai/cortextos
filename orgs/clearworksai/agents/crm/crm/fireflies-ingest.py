@@ -506,48 +506,6 @@ def upsert_contacts(attendees: list[dict[str, str]], source_ref: str) -> list[di
     return contacts
 
 
-def build_followups(
-    transcript: dict[str, Any],
-    primary_contact_id: str,
-    meeting_path: Path,
-    source_ref: str,
-) -> list[dict[str, str]]:
-    summary = transcript.get("summary") or {}
-    if not isinstance(summary, dict):
-        summary = {}
-    meeting_dt = parse_transcript_datetime(transcript.get("date"))
-    title = collapse_ws(transcript.get("title") or "Untitled meeting")
-    actions = split_action_items(summary.get("action_items"))
-    if not actions:
-        actions = [f"Follow up on {title} meeting"]
-
-    followups: list[dict[str, str]] = []
-    for action in actions:
-        due_date = resolve_due_date(action, meeting_dt)
-        reason = collapse_ws(f"{title}: {action}")
-        followup_id = collapse_ws(
-            run_helper(
-                "add-followup.py",
-                [
-                    "--contact-id",
-                    primary_contact_id,
-                    "--due-date",
-                    due_date,
-                    "--reason",
-                    reason,
-                    "--priority",
-                    followup_priority(action),
-                    "--source-ref",
-                    source_ref,
-                    "--suggested-action",
-                    f"See meetings/{meeting_path.name}",
-                ],
-            )
-        )
-        followups.append({"id": followup_id, "reason": reason, "due_date": due_date})
-    return followups
-
-
 def write_meeting_file(
     transcript: dict[str, Any],
     attendees: list[dict[str, str]],
@@ -610,11 +568,10 @@ def ingest_transcript(transcript: dict[str, Any]) -> dict[str, Any]:
     except Exception as exc:
         raise IngestStepError(transcript_id, "add_interaction", str(exc), partial_writes) from exc
 
-    try:
-        followups = build_followups(transcript, primary_contact["id"], meeting_path, source_ref)
-        partial_writes["followups_created"] = [followup["id"] for followup in followups]
-    except Exception as exc:
-        raise IngestStepError(transcript_id, "add_followup", str(exc), partial_writes) from exc
+    # Blanket followup generation retired (the abbey bug): owner-matched followup
+    # rows are now produced by the new chain's FR-004 fanout (meeting-fanout.py),
+    # not by this ingest path. ``ingest_transcript`` no longer creates followups.
+    followups: list[dict[str, str]] = []
 
     try:
         partial_writes["meeting_file"] = write_meeting_file(transcript, attendees, followups, meeting_path)

@@ -19,6 +19,7 @@ import { stripBom } from '../utils/strip-bom.js';
 import { readEnabledAgentsMap } from '../bus/enabled-agents-io.js';
 import { killProcessTree, getProcessElapsedSeconds } from '../utils/process-tree.js';
 import { maybeEmitMeetingEvent } from './meeting-event-emit.js';
+import { dispatchMeetingConsumers } from './meeting-consumer-dispatch.js';
 
 type LogFn = (msg: string) => void;
 
@@ -1250,13 +1251,34 @@ export class AgentManager {
       // file the SKILL wrote. This is the single-owner code path that replaces the old
       // SKILL bash-fence emit (which lost WRITEBACK_RC across tool-calls → silent no-emit).
       try {
-        maybeEmitMeetingEvent({
+        const emitResult = maybeEmitMeetingEvent({
           workerName,
           exitCode,
           extraEnv,
           ctxRoot: this.ctxRoot,
           org: this.org,
         });
+        // FR-004/005/007: after a `completed` meeting event, the DAEMON deterministically
+        // dispatches the consumer workers (crm-sync + fanout scripts detached, coordinator
+        // LLM worker). Each is independently dedup-gated + isolated. NON-BLOCKING: the two
+        // scripts are detached subprocesses and spawnWorker is fire-and-forget inside the
+        // dispatch — so onDone never blocks. FR-006 debrief is DEFERRED (skill not in store).
+        if (emitResult.outcome === 'completed' && emitResult.meetingId) {
+          try {
+            dispatchMeetingConsumers(
+              {
+                meetingId: emitResult.meetingId,
+                meetingType: emitResult.meetingType ?? 'other',
+                ctxRoot: this.ctxRoot,
+                frameworkRoot: this.frameworkRoot,
+                org: this.org,
+              },
+              { spawnWorker: this.spawnWorker.bind(this) },
+            );
+          } catch (dispatchErr) {
+            console.error(`[agent-manager] meeting-consumer dispatch failed for ${workerName}: ${String(dispatchErr)}`);
+          }
+        }
       } catch (err) {
         console.error(`[agent-manager] meeting-event emit failed for ${workerName}: ${String(err)}`);
       }

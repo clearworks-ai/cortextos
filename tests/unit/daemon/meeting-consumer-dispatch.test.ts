@@ -19,6 +19,8 @@ describe('meeting-consumer-dispatch — FR-004/005/007 daemon dispatch', () => {
   const crmDir = `${frameworkRoot}/orgs/${org}/agents/crm/crm`;
   const paDir = `${frameworkRoot}/orgs/${org}/agents/pa`;
   const centralSkill = `${frameworkRoot}/orgs/${org}/skills/followup-coordinator/SKILL.md`;
+  const debriefSkill = `${frameworkRoot}/orgs/${org}/skills/deal-debrief-analyst/SKILL.md`;
+  const crmDebriefDir = `${frameworkRoot}/orgs/${org}/agents/crm`;
 
   let ledger: Set<string>;
   let scripts: Array<{ cmd: string; args: string[] }>;
@@ -37,8 +39,8 @@ describe('meeting-consumer-dispatch — FR-004/005/007 daemon dispatch', () => {
       workers.push({ name, dir, prompt, parent, extraEnv });
     },
   );
-  // By default the coordinator skill exists in the central store only.
-  const exists = (p: string): boolean => p === centralSkill;
+  // By default the coordinator + deal-debrief skills exist in the central store only.
+  const exists = (p: string): boolean => p === centralSkill || p === debriefSkill;
 
   const deps = (over: Partial<MeetingDispatchDeps> = {}): Partial<MeetingDispatchDeps> => ({
     recordEvent,
@@ -78,8 +80,9 @@ describe('meeting-consumer-dispatch — FR-004/005/007 daemon dispatch', () => {
   });
 
   it('(a) completed → crm-sync + fanout scripts run + coordinator worker spawned, each once, correct args', () => {
+    // non-sales meeting isolates the 3 universal consumers (debrief is sales-only)
     const res = dispatchMeetingConsumers(
-      { meetingId: 'MTG1', meetingType: 'sales', ctxRoot, frameworkRoot, org },
+      { meetingId: 'MTG1', meetingType: 'delivery', ctxRoot, frameworkRoot, org },
       deps(),
     );
 
@@ -153,28 +156,41 @@ describe('meeting-consumer-dispatch — FR-004/005/007 daemon dispatch', () => {
     expect(byConsumer(res.outcomes, 'coordinator').status).toBe('dispatched');
   });
 
-  it('(e) sales meeting → meetingType threaded through; FR-006 debrief DEFERRED, NOT spawned', () => {
+  it('(e) sales meeting → FR-006 deal-debrief worker spawned (sales-only), in the crm agent dir', () => {
     const res = dispatchMeetingConsumers(
       { meetingId: 'MTG3', meetingType: 'sales', ctxRoot, frameworkRoot, org },
       deps(),
     );
     expect(res.meetingType).toBe('sales');
-    const debrief = byConsumer(res.outcomes, 'debrief');
-    expect(debrief.status).toBe('deferred');
-    // sales path is reachable (distinct reason) but no debrief worker was spawned
-    expect(debrief.reason).toBe('sales-meeting-fr006-deferred');
-    // only the coordinator worker was spawned — never a debrief worker
-    expect(spawnWorker).toHaveBeenCalledTimes(1);
-    expect(workers.every((w) => w.name.startsWith('meeting-coord-'))).toBe(true);
+    expect(byConsumer(res.outcomes, 'debrief').status).toBe('dispatched');
+    // both coordinator AND debrief workers spawned for a sales meeting
+    expect(spawnWorker).toHaveBeenCalledTimes(2);
+    const debriefWorker = workers.find((w) => w.name.startsWith('meeting-debrief-'));
+    expect(debriefWorker).toBeTruthy();
+    expect(debriefWorker!.dir).toBe(crmDebriefDir);
+    expect(debriefWorker!.parent).toBe('crm');
+    expect(debriefWorker!.extraEnv?.FF_MEETING_ID).toBe('MTG3');
   });
 
-  it('non-sales meeting → debrief deferred with non-sales reason', () => {
+  it('non-sales meeting → deal-debrief NOT spawned (skipped)', () => {
     const res = dispatchMeetingConsumers(
       { meetingId: 'MTG4', meetingType: 'other', ctxRoot, frameworkRoot, org },
       deps(),
     );
-    expect(byConsumer(res.outcomes, 'debrief').status).toBe('deferred');
+    expect(byConsumer(res.outcomes, 'debrief').status).toBe('skipped');
     expect(byConsumer(res.outcomes, 'debrief').reason).toBe('non-sales-no-debrief');
+    // no debrief worker was spawned
+    expect(workers.some((w) => w.name.startsWith('meeting-debrief-'))).toBe(false);
+  });
+
+  it('sales meeting but deal-debrief skill missing → debrief skipped, others unaffected', () => {
+    const res = dispatchMeetingConsumers(
+      { meetingId: 'MTG5', meetingType: 'sales', ctxRoot, frameworkRoot, org },
+      deps({ exists: (p: string) => p === centralSkill }), // only coordinator skill present
+    );
+    expect(byConsumer(res.outcomes, 'debrief').status).toBe('skipped');
+    expect(byConsumer(res.outcomes, 'debrief').reason).toBe('debrief-skill-not-found');
+    expect(workers.some((w) => w.name.startsWith('meeting-debrief-'))).toBe(false);
   });
 
   it('coordinator skill missing everywhere → coordinator skipped, scripts still run', () => {

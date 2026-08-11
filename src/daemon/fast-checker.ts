@@ -351,7 +351,19 @@ export class FastChecker {
     // (see AgentConfig.wedge_restart_min JSDoc). An explicit <= 0 also disables.
     // detectWedge treats a non-positive bufferStaleThresholdMs as disabled, so we
     // can pass the raw computed value straight through.
-    const wedgeMin = config.wedge_restart_min ?? 0;
+    // Runtime-keyed default: codex-app-server agents get the wedge net armed at 20min
+    // even when config.json omits wedge_restart_min. This is the buffer-staleness
+    // backstop for the context-full silent-death (no turns completing → stale buffer,
+    // while the 50-min heartbeat watchdog keeps heartbeat.json fresh → false health).
+    // It catches any silent stall the primary context_full signal misses (e.g. the
+    // app-server emits a differently-worded error, or stalls without an error at all).
+    // An EXPLICIT wedge_restart_min in config still wins (including an explicit <= 0
+    // opt-out); only an UNSET value inherits this default, and only for codex.
+    const codexWedgeDefault =
+      config.runtime === 'codex-app-server' && config.wedge_restart_min === undefined
+        ? 20
+        : 0;
+    const wedgeMin = config.wedge_restart_min ?? codexWedgeDefault;
     const bufferStaleThresholdMs = wedgeMin * 60_000;
     if (bufferStaleThresholdMs <= 0) return; // disabled — skip the file reads entirely
 
@@ -1202,6 +1214,29 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       const data = JSON.parse(raw);
       const age = now - new Date(data.written_at || 0).getTime();
       if (age > 10 * 60_000) return; // stale file — skip
+
+      // ── Codex context-full: recover on the FAILURE SIGNAL, never on the token
+      // number ──────────────────────────────────────────────────────────────────
+      // A context-full codex thread fails every turn BEFORE emitting token usage, so
+      // used_percentage stays frozen at the false 0% a prior reset wrote. The adapter
+      // detects the "ran out of room" error at the source and writes context_full:true
+      // here (codex-app-server-pty.ts signalContextFull). Act on that flag directly,
+      // BEFORE any token/percent math — running it through realPct would divide by the
+      // 1.05M window and read ~0%, defeating recovery. This is the one line that all six
+      // prior measure-better attempts were missing. Gated to the codex runtime; exempt
+      // from the handoff grace window (a genuine "ran out of room" is never a transient
+      // boot spike); routed through forceContextRestart so it counts toward the ≤3/15min
+      // circuit breaker and can never storm. The .force-fresh forceContextRestart writes
+      // → shouldContinue() false → a genuinely FRESH thread/start, not a resume.
+      if (
+        data.context_full === true
+        && this.agent.getConfig().runtime === 'codex-app-server'
+      ) {
+        this.log('Codex context-full signal detected — force restarting (bypassing token math)');
+        this.forceContextRestart('codex context-full');
+        return;
+      }
+
       pct = typeof data.used_percentage === 'number' ? data.used_percentage : null;
       exceeds200k = Boolean(data.exceeds_200k_tokens);
 

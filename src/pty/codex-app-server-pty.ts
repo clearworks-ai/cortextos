@@ -89,6 +89,21 @@ const SLASH_REWRITE_RE = /^\/([a-z][a-z0-9_-]*)(?:\s+([\s\S]*))?$/i;
 const LOCAL_SLASH_COMMANDS = new Set(['goal']);
 
 /**
+ * Matches the app-server's context-exhaustion error text. The observed message is
+ * "Codex ran out of room in the model's context window. Start a new thread"; the
+ * other alternatives cover reworded variants (context-length errors, "conversation
+ * too long", etc.) so a slightly-different phrasing still classifies. Case-insensitive
+ * substring match against the serialized error params. This is the ONLY signal present
+ * exactly when the failure is present — a context-full thread fails every turn BEFORE
+ * emitting token usage, so token telemetry can never see this state.
+ */
+const CONTEXT_FULL_RE =
+  /ran out of room|context window|conversation too long|maximum context|context length exceeded/i;
+
+/** Marker file dropped alongside .force-fresh when a thread is poisoned by context-full. */
+const CONTEXT_FULL_MARKER = '.codex-context-full';
+
+/**
  * Codex app-server PTY adapter for cortextOS.
  *
  * Uses a persistent `codex app-server` process and speaks JSON-RPC over the
@@ -123,6 +138,14 @@ export class CodexAppServerPTY {
   private _threadStatePath: string;
   private _socketPointerPath: string;
   private _threadId: string | null = null;
+  /**
+   * Once-per-thread debounce for the context-full signal. A context-full thread
+   * fails EVERY queued turn with the same "ran out of room" error — potentially
+   * many per second. We must raise the overflow signal / write the marker at most
+   * once per poisoned threadId, so a burst of failed turns produces ONE recovery
+   * attempt, not N (storm guard #2 in the root-cause diagnosis).
+   */
+  private _contextFullSignaledForThread: string | null = null;
   private _telegramApi: TelegramAPI | null = null;
   private _chatId: string | null = null;
   private _typingLastSent = 0;
@@ -512,7 +535,19 @@ export class CodexAppServerPTY {
   private async startOrResumeThread(mode: 'fresh' | 'continue'): Promise<void> {
     if (mode === 'continue') {
       const persisted = this.readThreadState();
-      if (persisted) {
+      // Fix C: a plain `cortextos restart` is a --continue. If the persisted thread
+      // is the one we marked context-full, RESUMING it fails identically (a full
+      // thread resumes without error, then every turn "runs out of room"). Refuse the
+      // resume deterministically — even without .force-fresh — delete the marker, and
+      // fall through to thread/start (fresh). Guarded to the exact poisoned threadId so
+      // a healthy continue is never affected.
+      if (persisted && this.isContextFullMarkedThread(persisted.threadId)) {
+        this._outputBuffer.push(
+          `[codex-app-server] context-full thread ${persisted.threadId} refused for resume — starting fresh\n`,
+        );
+        this.clearContextFullMarker();
+        this._contextFullSignaledForThread = null;
+      } else if (persisted) {
         try {
           const resumed = await this.request<ThreadResponse>('thread/resume', {
             threadId: persisted.threadId,
@@ -530,7 +565,16 @@ export class CodexAppServerPTY {
       }
 
       const latest = await this.findLatestThreadForCwd();
-      if (latest) {
+      // Also refuse the latest-for-cwd thread if it is the poisoned one — after
+      // refusing the persisted thread above, thread/list would return that same
+      // context-full thread as "latest" and resuming it would loop identically.
+      if (latest && this.isContextFullMarkedThread(latest)) {
+        this._outputBuffer.push(
+          `[codex-app-server] context-full thread ${latest} refused for resume (latest) — starting fresh\n`,
+        );
+        this.clearContextFullMarker();
+        this._contextFullSignaledForThread = null;
+      } else if (latest) {
         const resumed = await this.request<ThreadResponse>('thread/resume', {
           threadId: latest,
           cwd: this._cwd,
@@ -601,6 +645,11 @@ export class CodexAppServerPTY {
       // Do not retry steer here: the rejection may be a non-steerable turn
       // (review/compact). Queueing guarantees delivery right after it ends.
       this._outputBuffer.push(`[codex-app-server] steer rejected, queueing: ${err}\n`);
+      // Belt-and-suspenders: a steer that fails with the context-full phrase raises
+      // the same overflow signal (the `error` notification is the primary trigger).
+      if (CONTEXT_FULL_RE.test(String(err))) {
+        this.signalContextFull();
+      }
       this.enqueueTurn(input);
     }
   }
@@ -610,6 +659,11 @@ export class CodexAppServerPTY {
     if (!this._executing) {
       this.drainQueue().catch((err) => {
         this._outputBuffer.push(`[codex-app-server] turn queue failed: ${err}\n`);
+        // Belt-and-suspenders: a drain that fails with the context-full phrase
+        // raises the overflow signal too (the `error` notification is primary).
+        if (CONTEXT_FULL_RE.test(String(err))) {
+          this.signalContextFull();
+        }
       });
     }
   }
@@ -766,11 +820,20 @@ export class CodexAppServerPTY {
       case 'thread/goal/cleared':
         this._outputBuffer.push('[goal] cleared\n');
         break;
-      case 'error':
+      case 'error': {
         this._activeTurnId = null;
-        this._outputBuffer.push(`[codex-app-server] error: ${JSON.stringify(params)}\n`);
-        this.rejectTurnCompletion(new Error(JSON.stringify(params)));
+        const serialized = JSON.stringify(params);
+        this._outputBuffer.push(`[codex-app-server] error: ${serialized}\n`);
+        this.rejectTurnCompletion(new Error(serialized));
+        // A context-full thread fails the turn BEFORE emitting any token usage, so
+        // token telemetry can never see this. Detect the failure directly here — the
+        // only place the signal is present — and write an authoritative overflow
+        // signal the daemon acts on independent of the (frozen, false-0) token file.
+        if (CONTEXT_FULL_RE.test(serialized)) {
+          this.signalContextFull();
+        }
         break;
+      }
       case 'thread/tokenUsage/updated':
         this.writeContextStatus(params);
         this.appendCodexTokenLog(params);
@@ -841,6 +904,77 @@ export class CodexAppServerPTY {
     } catch {
       // OutputBuffer warning above is the user-visible fallback.
     }
+  }
+
+  /**
+   * Authoritative context-full recovery signal. Fired when the app-server rejects a
+   * turn with the "ran out of room"/context-window error — the ONLY moment the
+   * failure is observable, since a full thread never emits token usage. Writes three
+   * things, debounced once per poisoned threadId so a burst of failed turns produces
+   * exactly one signal (storm guard):
+   *   1. context_status.json {context_full:true, used_percentage:100, ...} — reuses
+   *      the existing bridge file so the daemon's checkContextStatus picks it up with
+   *      no new plumbing and bypasses the (frozen, false-0) token math.
+   *   2. .codex-context-full marker (names the poisoned threadId) — so a plain
+   *      `cortextos restart` (a --continue) refuses to resume this thread and starts
+   *      fresh instead (see startOrResumeThread).
+   *   3. a codex_context_full structured event for observability.
+   * Actual recovery is performed by the daemon (forceContextRestart → .force-fresh →
+   * fresh thread), which routes through the circuit breaker so it can never storm.
+   */
+  private signalContextFull(): void {
+    // Once-per-thread debounce: a context-full thread fails EVERY queued turn.
+    if (!this._threadId || this._contextFullSignaledForThread === this._threadId) return;
+    this._contextFullSignaledForThread = this._threadId;
+    const nowIso = new Date().toISOString();
+
+    // 1. Overflow bridge file — the signal the existing monitor already reads.
+    const overflowPayload = JSON.stringify({
+      used_percentage: 100,
+      context_window_size: this._config.codex_context_cap ?? 256000,
+      exceeds_200k_tokens: true,
+      context_full: true,
+      session_id: this._threadId,
+      written_at: nowIso,
+    });
+    try {
+      atomicWriteSync(join(this._stateDir, 'context_status.json'), overflowPayload);
+    } catch {
+      // Non-fatal — the marker + wedge backstop still drive recovery.
+    }
+
+    // 2. Poisoned-thread marker — refused for resume by startOrResumeThread.
+    try {
+      atomicWriteSync(
+        join(this._stateDir, CONTEXT_FULL_MARKER),
+        JSON.stringify({ threadId: this._threadId, written_at: nowIso }) + '\n',
+      );
+    } catch {
+      // Non-fatal.
+    }
+
+    // 3. Observability event (same pattern as emitUnsupportedRequestEvent).
+    try {
+      const paths = resolvePaths(this._env.agentName, this._env.instanceId, this._env.org);
+      logEvent(
+        paths,
+        this._env.agentName,
+        this._env.org,
+        'error',
+        'codex_context_full',
+        'error',
+        {
+          runtime: 'codex-app-server',
+          thread_id: this._threadId,
+        },
+      );
+    } catch {
+      // Non-fatal — the bridge file + marker are the load-bearing signals.
+    }
+
+    this._outputBuffer.push(
+      `[codex-app-server] context-full detected on thread ${this._threadId} — overflow signal + marker written\n`,
+    );
   }
 
   private setThreadId(threadId: string): void {
@@ -950,6 +1084,31 @@ export class CodexAppServerPTY {
       return parsed.cwd === this._cwd && parsed.threadId ? parsed : null;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * True when the .codex-context-full marker exists AND names the given threadId.
+   * Guards resume so ONLY the poisoned thread is refused — a healthy continue is
+   * never affected. A malformed marker is treated as "not this thread" (safe).
+   */
+  private isContextFullMarkedThread(threadId: string): boolean {
+    const markerPath = join(this._stateDir, CONTEXT_FULL_MARKER);
+    if (!existsSync(markerPath)) return false;
+    try {
+      const parsed = JSON.parse(readFileSync(markerPath, 'utf-8')) as { threadId?: string };
+      return parsed.threadId === threadId;
+    } catch {
+      return false;
+    }
+  }
+
+  private clearContextFullMarker(): void {
+    const markerPath = join(this._stateDir, CONTEXT_FULL_MARKER);
+    try {
+      if (existsSync(markerPath)) unlinkSync(markerPath);
+    } catch {
+      // Non-fatal.
     }
   }
 

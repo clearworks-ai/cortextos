@@ -994,7 +994,9 @@ describe('CodexAppServerPTY thread lifecycle', () => {
   });
 
   it('resumes the persisted thread in continue mode', async () => {
-    fsMocks.existsSync.mockReturnValue(true);
+    // Only the thread-state file exists — no .codex-context-full marker, so the
+    // context-full resume-refusal guard is inert and normal resume proceeds.
+    fsMocks.existsSync.mockImplementation((p: string) => !String(p).includes('.codex-context-full'));
     fsMocks.readFileSync.mockReturnValue(JSON.stringify({
       threadId: 'persisted-thread',
       cwd: '/tmp/fw/orgs/acme/agents/codex-app-agent',
@@ -1533,5 +1535,126 @@ describe('CodexAppServerPTY kill-during-spawn race (RW-7)', () => {
 
     // Attempt 1 only — no retry attempts against a dead adapter.
     expect(spawnCalls).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('CodexAppServerPTY context-full detection (attempt-7 durable fix)', () => {
+  function makeReadyPty(threadId = 'thread-full') {
+    const pty = new CodexAppServerPTY(mockEnv, { codex_context_cap: 1050000 });
+    (pty as unknown as { _alive: boolean })._alive = true;
+    (pty as unknown as { _threadId: string })._threadId = threadId;
+    return pty;
+  }
+
+  function rpc(pty: InstanceType<typeof CodexAppServerPTY>) {
+    return pty as unknown as { handleRpcMessage(message: unknown): void };
+  }
+
+  // atomicWriteSync is the only writer of both the overflow bridge file and the
+  // marker. Find each by target path.
+  function writtenTo(substr: string): Record<string, unknown> | null {
+    const call = atomicWriteSyncMock.mock.calls.find(([p]) => String(p).includes(substr));
+    if (!call) return null;
+    try { return JSON.parse(String(call[1])) as Record<string, unknown>; } catch { return null; }
+  }
+
+  it('context-full error notification writes context_status {context_full:true,100%} + marker', () => {
+    const pty = makeReadyPty('thread-full');
+    rpc(pty).handleRpcMessage({
+      method: 'error',
+      params: { message: "Codex ran out of room in the model's context window. Start a new thread" },
+    });
+
+    const status = writtenTo('context_status.json');
+    expect(status).not.toBeNull();
+    expect(status!.context_full).toBe(true);
+    expect(status!.used_percentage).toBe(100);
+    expect(status!.exceeds_200k_tokens).toBe(true);
+    expect(status!.session_id).toBe('thread-full');
+
+    const marker = writtenTo('.codex-context-full');
+    expect(marker).not.toBeNull();
+    expect(marker!.threadId).toBe('thread-full');
+
+    // Observability event fired.
+    expect(logEventMock).toHaveBeenCalledWith(
+      expect.anything(), 'codex-app-agent', 'acme', 'error', 'codex_context_full', 'error',
+      expect.objectContaining({ runtime: 'codex-app-server', thread_id: 'thread-full' }),
+    );
+  });
+
+  it('a generic (non-context) error writes NEITHER the overflow status NOR the marker', () => {
+    const pty = makeReadyPty('thread-ok');
+    rpc(pty).handleRpcMessage({ method: 'error', params: { message: 'Tool failed: timeout' } });
+
+    expect(writtenTo('context_status.json')).toBeNull();
+    expect(writtenTo('.codex-context-full')).toBeNull();
+    expect(logEventMock).not.toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.anything(), expect.anything(),
+      'codex_context_full', expect.anything(), expect.anything(),
+    );
+  });
+
+  it('debounces to ONE signal per poisoned thread across a burst of failed turns', () => {
+    const pty = makeReadyPty('thread-burst');
+    for (let i = 0; i < 5; i++) {
+      rpc(pty).handleRpcMessage({
+        method: 'error',
+        params: { message: 'Codex ran out of room in the model context window' },
+      });
+    }
+    // 5 failed turns → exactly 1 overflow write + 1 marker write (2 atomic writes), 1 event.
+    const statusWrites = atomicWriteSyncMock.mock.calls.filter(([p]) => String(p).includes('context_status.json'));
+    const markerWrites = atomicWriteSyncMock.mock.calls.filter(([p]) => String(p).includes('.codex-context-full'));
+    expect(statusWrites).toHaveLength(1);
+    expect(markerWrites).toHaveLength(1);
+    expect(logEventMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('startOrResumeThread refuses a poisoned persisted thread and starts FRESH, deleting the marker', async () => {
+    // Persisted thread file names thread-poison; marker names the SAME thread.
+    fsMocks.existsSync.mockReturnValue(true);
+    fsMocks.readFileSync.mockImplementation((p: string) => {
+      if (String(p).includes('.codex-context-full')) {
+        return JSON.stringify({ threadId: 'thread-poison', written_at: new Date().toISOString() });
+      }
+      return JSON.stringify({
+        threadId: 'thread-poison',
+        cwd: '/tmp/fw/orgs/acme/agents/codex-app-agent',
+        updatedAt: '2026-08-10T00:00:00Z',
+      });
+    });
+    requestMock.mockResolvedValue({ result: { thread: { id: 'fresh-thread' } } });
+
+    const pty = new CodexAppServerPTY(mockEnv, {});
+    (pty as unknown as { _rpc: { request: typeof requestMock } })._rpc = { request: requestMock };
+
+    await (pty as unknown as { startOrResumeThread(m: 'fresh' | 'continue'): Promise<void> }).startOrResumeThread('continue');
+
+    // No resume of the poisoned thread — went straight to thread/start.
+    expect(requestMock).toHaveBeenCalledWith('thread/start', expect.objectContaining({
+      cwd: '/tmp/fw/orgs/acme/agents/codex-app-agent',
+    }));
+    expect(requestMock).not.toHaveBeenCalledWith('thread/resume', expect.anything());
+    // Marker deleted.
+    expect(fsMocks.unlinkSync).toHaveBeenCalledWith(expect.stringContaining('.codex-context-full'));
+  });
+
+  it('a healthy persisted thread with NO marker resumes normally (no behavior change)', async () => {
+    fsMocks.existsSync.mockImplementation((p: string) => !String(p).includes('.codex-context-full'));
+    fsMocks.readFileSync.mockReturnValue(JSON.stringify({
+      threadId: 'thread-healthy',
+      cwd: '/tmp/fw/orgs/acme/agents/codex-app-agent',
+      updatedAt: '2026-08-10T00:00:00Z',
+    }));
+    requestMock.mockResolvedValue({ result: { thread: { id: 'thread-healthy' } } });
+
+    const pty = new CodexAppServerPTY(mockEnv, {});
+    (pty as unknown as { _rpc: { request: typeof requestMock } })._rpc = { request: requestMock };
+
+    await (pty as unknown as { startOrResumeThread(m: 'fresh' | 'continue'): Promise<void> }).startOrResumeThread('continue');
+
+    expect(requestMock).toHaveBeenCalledWith('thread/resume', expect.objectContaining({ threadId: 'thread-healthy' }));
+    expect(requestMock).not.toHaveBeenCalledWith('thread/start', expect.anything());
   });
 });

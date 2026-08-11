@@ -5,6 +5,7 @@ import { join } from 'path';
 import { recordIngressReceipt, recordRejectedIngressReceipt, type EventReceipt, type IngressEvent } from '../bus/event-delivery.js';
 import { advanceNumericEventCursor, assertCanonicalNumericCursor, compareCanonicalNumericCursors, getEventCursor } from '../bus/event-receipt-index.js';
 import { ShadowRouter } from '../bus/shadow-router.js';
+import { resolveLaneMode, type ProviderLane } from './provider-lane-config.js';
 import { atomicWriteSync, ensureDir } from '../utils/atomic.js';
 
 const GMAIL_BODY_LIMIT = 32 * 1024;
@@ -20,7 +21,7 @@ export interface ProviderIngressDependencies {
   recordRejected?: typeof recordRejectedIngressReceipt;
   getCursor?: typeof getEventCursor;
   advanceCursor?: typeof advanceNumericEventCursor;
-  makeRouter?: (stateDir: string) => ShadowRouter;
+  makeRouter?: (stateDir: string, lane: ProviderLane) => ShadowRouter;
 }
 export interface GmailShadowOptions {
   audience: string;
@@ -38,6 +39,12 @@ export interface ProviderShadowOptions {
   gmail?: GmailShadowOptions;
   calendar?: CalendarShadowOptions;
   dependencies?: ProviderIngressDependencies;
+  /**
+   * Directory holding provider-config.json — the per-lane shadow|active flag
+   * (FR-E2). When unset (or the file is absent/malformed) every lane resolves to
+   * its safe `shadow` default, so behavior is unchanged from before FR-E2.
+   */
+  configDir?: string;
 }
 export interface CalendarShadowChannel { channelId: string; resourceId: string; channelToken: string; expiresAt: string; }
 
@@ -89,13 +96,22 @@ async function authenticateGmail(request: IncomingMessage, config: GmailShadowOp
   if (!GOOGLE_ISSUERS.has(String(claims.iss)) || claims.aud !== config.audience || typeof claims.exp !== 'number' || !Number.isFinite(claims.exp) || !Number.isInteger(claims.exp) || typeof claims.iat !== 'number' || !Number.isFinite(claims.iat) || !Number.isInteger(claims.iat) || claims.exp < now - skew || claims.iat > now + skew || claims.iat < now - maxAge - skew || claims.email_verified !== true || claims.email !== config.serviceAccount) throw new ProviderError(401, 'gmail_auth_invalid');
 }
 function dependencies(options: ProviderShadowOptions) {
-  return { recordIngress: options.dependencies?.recordIngress ?? recordIngressReceipt, recordRejected: options.dependencies?.recordRejected ?? recordRejectedIngressReceipt, getCursor: options.dependencies?.getCursor ?? getEventCursor, advanceCursor: options.dependencies?.advanceCursor ?? advanceNumericEventCursor, makeRouter: options.dependencies?.makeRouter ?? ((stateDir: string) => new ShadowRouter('shadow', { stateDir })) };
+  // FR-E2: the per-lane mode is resolved from provider-config.json (default
+  // `shadow`) at router-construction time. With no config dir/file the lane
+  // stays shadow, identical to pre-FR-E2 behavior. Reaching `active` also needs
+  // a delivery capability (ShadowRouter enforces this) which is intentionally
+  // NOT wired here — that is the gated activation (FR-E3).
+  const defaultMakeRouter = (stateDir: string, lane: ProviderLane): ShadowRouter => {
+    const mode = options.configDir ? resolveLaneMode(options.configDir, lane) : 'shadow';
+    return new ShadowRouter(mode, { stateDir });
+  };
+  return { recordIngress: options.dependencies?.recordIngress ?? recordIngressReceipt, recordRejected: options.dependencies?.recordRejected ?? recordRejectedIngressReceipt, getCursor: options.dependencies?.getCursor ?? getEventCursor, advanceCursor: options.dependencies?.advanceCursor ?? advanceNumericEventCursor, makeRouter: options.dependencies?.makeRouter ?? defaultMakeRouter };
 }
-function processMonotonic(options: ProviderShadowOptions, event: IngressEvent, cursorKey: string, value: string, route: string | undefined): { disposition: string; receipt: EventReceipt } {
+function processMonotonic(options: ProviderShadowOptions, event: IngressEvent, cursorKey: string, value: string, route: string | undefined, lane: ProviderLane): { disposition: string; receipt: EventReceipt } {
   const deps = dependencies(options); const current = deps.getCursor(options.stateDir, cursorKey);
   if (current !== undefined && compareCanonicalNumericCursors(current, value) > 0) return { disposition: 'stale', receipt: deps.recordRejected(options.stateDir, event, 'stale_cursor') };
   const receipt = deps.recordIngress(options.stateDir, event);
-  if (route) deps.makeRouter(options.stateDir).route(receipt, route, 'provider_shadow');
+  if (route) deps.makeRouter(options.stateDir, lane).route(receipt, route, 'provider_shadow');
   deps.advanceCursor(options.stateDir, cursorKey, value);
   return { disposition: receipt.disposition ?? 'duplicate', receipt };
 }
@@ -108,7 +124,7 @@ async function handleGmail(request: IncomingMessage, response: ServerResponse, o
   let decoded: unknown; try { decoded = JSON.parse(strictBase64(envelope.message.data).toString('utf8')); } catch (error) { if (error instanceof ProviderError) throw error; throw new ProviderError(400, 'gmail_invalid_payload'); }
   if (!exactObject(decoded, ['emailAddress', 'historyId']) || Object.keys(decoded).length !== 2) throw new ProviderError(400, 'gmail_invalid_payload');
   const mailbox = canonicalMailbox(decoded.emailAddress); const historyId = canonicalNumber(decoded.historyId, 'gmail_invalid_history_id');
-  const result = processMonotonic(options, { provider: 'gmail', eventType: 'notification', sourceId: `${mailbox}\u0000${historyId}` }, 'gmail.shadow.notification_high_water', historyId, 'pa.comms-check-worker');
+  const result = processMonotonic(options, { provider: 'gmail', eventType: 'notification', sourceId: `${mailbox}\u0000${historyId}` }, 'gmail.shadow.notification_high_water', historyId, 'pa.comms-check-worker', 'gmail');
   json(response, 200, { ok: true, mode: 'shadow', disposition: result.disposition });
 }
 
@@ -129,7 +145,7 @@ async function handleCalendar(request: IncomingMessage, response: ServerResponse
   const channelId = uniqueHeader(request, 'x-goog-channel-id')!; const resourceId = uniqueHeader(request, 'x-goog-resource-id')!; const state = uniqueHeader(request, 'x-goog-resource-state')!; const messageNumber = canonicalNumber(uniqueHeader(request, 'x-goog-message-number')!, 'calendar_invalid_message_number'); const expiration = uniqueHeader(request, 'x-goog-channel-expiration')!; const token = uniqueHeader(request, 'x-goog-channel-token')!;
   if (!['sync', 'exists', 'not_exists'].includes(state)) throw new ProviderError(400, 'calendar_invalid_state');
   const configured = readCalendarChannel(options.stateDir, channelId); const expires = Date.parse(expiration); if (configured.channel !== digestHex(channelId) || configured.resource !== digestHex(resourceId)) throw new ProviderError(401, 'calendar_channel_mismatch'); if (!safeEqual(token, configured.token)) throw new ProviderError(401, 'calendar_token_mismatch'); if (!Number.isFinite(expires) || expires <= options.now() || new Date(expires).toISOString() !== configured.expiresAt || Date.parse(configured.expiresAt) <= options.now()) throw new ProviderError(401, 'calendar_channel_expired');
-  const scope = digestHex(`${channelId}\u0000${resourceId}`).slice(0, 40); const result = processMonotonic(options, { provider: 'calendar', eventType: 'notification', sourceId: `${digestHex(channelId)}\u0000${digestHex(resourceId)}\u0000${messageNumber}` }, `calendar.shadow.notification_high_water:${scope}`, messageNumber, state === 'sync' ? undefined : 'pa.booking-calendar-delta');
+  const scope = digestHex(`${channelId}\u0000${resourceId}`).slice(0, 40); const result = processMonotonic(options, { provider: 'calendar', eventType: 'notification', sourceId: `${digestHex(channelId)}\u0000${digestHex(resourceId)}\u0000${messageNumber}` }, `calendar.shadow.notification_high_water:${scope}`, messageNumber, state === 'sync' ? undefined : 'pa.booking-calendar-delta', 'calendar');
   json(response, 200, { ok: true, mode: 'shadow', disposition: state === 'sync' && result.disposition === 'accepted' ? 'sync' : result.disposition });
 }
 

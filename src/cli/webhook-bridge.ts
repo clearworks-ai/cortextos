@@ -11,7 +11,7 @@ import { loadEnvFileInto } from '../utils/env.js';
 import { resolvePaths } from '../utils/paths.js';
 import type { BusPaths } from '../types/index.js';
 import { resolveInstanceId } from './resolve-instance-id.js';
-import { IPCClient } from '../daemon/ipc-server.js';
+import { planWorkerSpawn, trySpawnWorkerForEvent, type WorkerSpawnTemplate } from '../daemon/worker-spawn-plan.js';
 import {
   ZOOM_OFFICEHOURS_MEETING_ID,
   ZOOM_MAILCHIMP_LIST_ID,
@@ -65,6 +65,7 @@ export interface BridgeServerOptions {
   allowedIntegrations?: readonly string[];
   now?: () => number;
   providerShadowStateDir?: string;
+  providerConfigDir?: string;
   gmailShadow?: GmailShadowOptions;
   calendarShadow?: CalendarShadowOptions;
   providerIngressDependencies?: ProviderIngressDependencies;
@@ -348,7 +349,42 @@ export function extractMeetingId(envelope: RelayEnvelope): string {
 }
 
 /**
- * Pure planner for a deterministic meeting-writeback spawn. Resolves the worker
+ * The fireflies meeting-writeback lane, expressed as a generic worker-spawn
+ * template (FR-E1). This is the working reference every other event lane clones;
+ * the spawn mechanics live in `daemon/worker-spawn-plan.ts`. The prompt and env
+ * are byte-for-byte what the fireflies path emitted before the extraction, so
+ * `planMeetingWritebackSpawn` remains a behavior-preserving thin wrapper.
+ */
+function firefliesWritebackTemplate(args: {
+  frameworkRoot: string;
+  org?: string;
+  target: string;
+  skillExists?: (path: string) => boolean;
+}): WorkerSpawnTemplate {
+  return {
+    frameworkRoot: args.frameworkRoot,
+    org: args.org,
+    target: args.target,
+    workerNamePrefix: 'meeting-writeback',
+    skillRelativePaths: [
+      join('.claude', 'skills', 'meeting-writeback-worker', 'SKILL.md'),
+      join('plugins', 'meeting-writeback-worker', 'SKILL.md'),
+    ],
+    buildPrompt: ({ skillRelativePath, eventId }) =>
+      [
+        'You are the meeting-writeback worker (short-lived session).',
+        `FF_MEETING_ID=${eventId} is set in your environment.`,
+        `Read ${skillRelativePath} and execute every bash block in order,`,
+        'then output DONE. Do nothing else — no heartbeat, no daily memory, no Telegram.',
+      ].join(' '),
+    buildEnv: (eventId) => ({ FF_MEETING_ID: eventId }),
+    skillExists: args.skillExists,
+  };
+}
+
+/**
+ * Pure planner for a deterministic meeting-writeback spawn. Behavior-preserving
+ * wrapper over the generic `planWorkerSpawn` backbone (FR-E1): resolves the worker
  * name (lowercased/sanitized to satisfy the daemon's WORKER_NAME_REGEX), the agent
  * dir (dynamic — from framework root/org, never a hardcoded absolute), and the
  * prompt. Returns null when the inputs can't produce a valid, filed-capable spawn
@@ -362,24 +398,9 @@ export function planMeetingWritebackSpawn(args: {
   meetingId: string;
   skillExists?: (dir: string) => boolean;
 }): { workerName: string; dir: string; prompt: string } | null {
-  if (!args.org || !args.frameworkRoot || !args.target || !args.meetingId) return null;
-  const safeId = args.meetingId.toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 40);
-  if (!safeId) return null;
-  const workerName = `meeting-writeback-${safeId}`.slice(0, 64);
-  const dir = join(args.frameworkRoot, 'orgs', args.org, 'agents', args.target);
-  const exists = args.skillExists ?? ((p: string) => existsSync(p));
-  const skillRelativePath = [
-    join('.claude', 'skills', 'meeting-writeback-worker', 'SKILL.md'),
-    join('plugins', 'meeting-writeback-worker', 'SKILL.md'),
-  ].find((candidate) => exists(join(dir, candidate)));
-  if (!skillRelativePath) return null;
-  const prompt = [
-    'You are the meeting-writeback worker (short-lived session).',
-    `FF_MEETING_ID=${args.meetingId} is set in your environment.`,
-    `Read ${skillRelativePath} and execute every bash block in order,`,
-    'then output DONE. Do nothing else — no heartbeat, no daily memory, no Telegram.',
-  ].join(' ');
-  return { workerName, dir, prompt };
+  const plan = planWorkerSpawn(firefliesWritebackTemplate(args), args.meetingId);
+  if (!plan) return null;
+  return { workerName: plan.workerName, dir: plan.dir, prompt: plan.prompt };
 }
 
 /**
@@ -397,24 +418,12 @@ async function trySpawnMeetingWriteback(args: {
   target: string;
   meetingId: string;
 }): Promise<{ ok: true; workerName: string } | { ok: false }> {
-  const plan = planMeetingWritebackSpawn(args);
-  if (!plan) return { ok: false };
-  try {
-    const client = new IPCClient(args.instanceId || 'default');
-    const response = await client.send({
-      type: 'spawn-worker',
-      data: {
-        name: plan.workerName,
-        dir: plan.dir,
-        prompt: plan.prompt,
-        parent: args.target,
-        env: { FF_MEETING_ID: args.meetingId },
-      },
-    });
-    return response.success ? { ok: true, workerName: plan.workerName } : { ok: false };
-  } catch {
-    return { ok: false };
-  }
+  const result = await trySpawnWorkerForEvent(
+    'fireflies',
+    () => planWorkerSpawn(firefliesWritebackTemplate(args), args.meetingId),
+    { instanceId: args.instanceId, parent: args.target },
+  );
+  return result.ok ? { ok: true, workerName: result.workerName } : { ok: false };
 }
 
 function buildRelayMessage(integration: string, event: string, envelope: RelayEnvelope): string {
@@ -697,6 +706,9 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
         gmail: options.gmailShadow,
         calendar: options.calendarShadow,
         dependencies: options.providerIngressDependencies,
+        // FR-E2: per-lane shadow|active flag lives in provider-config.json under
+        // the framework root. Absent/malformed => every lane defaults to shadow.
+        configDir: options.providerConfigDir ?? options.frameworkRoot,
       }, providerRateBuckets)) return;
 
       const currentWindow = now();

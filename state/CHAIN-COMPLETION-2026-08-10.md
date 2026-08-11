@@ -39,14 +39,24 @@ requirement? Cite file:line. Flag any gap between "merged" and "correct."
 
 | FR | Verdict | Notes |
 |----|---------|-------|
-| FR-001 | ⬜ | |
-| FR-002 | ⬜ | |
-| FR-003 | ⬜ | |
-| FR-004 | ⬜ | |
-| FR-005 | ⬜ | |
-| FR-006 | ⬜ | |
-| FR-007 | ⬜ | |
-| FR-008 | ⬜ | |
+| FR-001 | ✅ | meeting_type + confidence in output (ff-extractor.py:2162-2163); conf<0.6→other+NEEDS-REVIEW real (:1074-1075, :2105-2111). |
+| FR-002 | ✅ | daemon onDone code path (agent-manager.ts:1247-1260, meeting-event-emit.ts:110-191); exactly-once dedup `crm.meeting.completed:<id>`; failure→`crm.meeting.failed`; per-meeting payload file (no /tmp collision). |
+| FR-003 | ✅ | ordered match email>name>unique-first (ff-extractor.py:377-447); NEEDS-OWNER routed not dropped; commitmentId sha1 per spec (:450-457); contacts[0] blanket bypassed (retired path). |
+| FR-004 | ✅ | triple-sink all present (meeting-fanout.py:294/304-315/346); approval only client-facing; dedup by commitmentId; Telegram batched per-meeting; NEEDS-OWNER→triage. 20/20 tests. |
+| FR-005 | ✅ | daemon spawns coordinator all types (meeting-consumer-dispatch.ts:191-216); dedup `meeting-coord:<id>`; creates NO followups (recap+tracker only). Minor: dedup-undo comment/code mismatch on skip (non-blocking). |
+| FR-006 | ✅ | sales-only gate real (meeting-consumer-dispatch.ts:220 `=== 'sales'`); non-sales excluded; dedup `meeting-debrief:<id>`; daemon-spawned. Minor: strict-lowercase compare, no case-normalize (non-blocking). |
+| FR-007 | 🟡 | universal interaction + sales-only deal-stage correct. **PARTIAL: 4/26 engagements have clearpath_id:null → deal-stage write silently skipped (meeting-crm-sync.py:296-309), fails-safe. `--engagement-name` fallback exists but unused.** → FIX in Phase 1b. |
+| FR-008 | ❌ | idempotency + zero-commitment OK. **GAP: per-client-file lock (meeting_writeback.py:40-58) does NOT span `sync_client_context.py`, which is unlocked + destructive unlink/rewrite (:352-354,:377) → concurrent writeback+context-sync loses History append.** → FIX in Phase 1b. |
+
+---
+
+## PHASE 1b — Gap fixes (from Phase 1 verification)
+- ⬜ **FR-008 fix**: `sync_client_context.py` must acquire the same per-client-file lock as
+  `meeting_writeback.py` (or convert its destructive rewrite to a locked RMW) so the two `.md`
+  writers are mutually exclusive. Add a cross-writer test.
+- ⬜ **FR-007 fix**: `meeting-crm-sync.py` deal-stage lookup must fall back to
+  `--engagement-name` when `clearpath_id` is null, so name-only engagements (4/26) get the
+  sales deal-stage write.
 
 ---
 

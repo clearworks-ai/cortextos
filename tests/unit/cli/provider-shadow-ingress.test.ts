@@ -145,6 +145,64 @@ describe('Gmail lane → comms-check-worker spawn (FR-E3)', () => {
   });
 });
 
+describe('Calendar lane → booking-calendar-delta spawn (FR-E3)', () => {
+  const installSkill = () => { const dir = join(root, 'orgs', 'clearworksai', 'agents', 'pa', '.claude', 'skills', 'booking-calendar-delta'); mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'SKILL.md'), '# Booking Calendar Delta'); };
+  const writeLaneConfig = (mode: string) => writeFileSync(join(root, 'provider-config.json'), JSON.stringify({ lanes: { calendar: mode } }));
+  const spawnRecorder = () => { const spawns: Array<{ integration: string; name: string; env: Record<string, string>; dir: string; parent: string }> = []; const spawnWorker: NonNullable<BridgeServerOptions['providerIngressDependencies']>['spawnWorker'] = async (integration, planFn, opts) => { const plan = planFn(); if (!plan) return { ok: false }; spawns.push({ integration, name: plan.workerName, env: plan.extraEnv, dir: plan.dir, parent: opts.parent }); return { ok: true, integration, workerName: plan.workerName }; }; return { spawns, spawnWorker }; };
+
+  it('active mode spawns booking-calendar-delta on a change, skipping shadow routing', async () => {
+    installSkill(); writeLaneConfig('active'); const { spawns, spawnWorker } = spawnRecorder();
+    const { server, base } = await listen({ providerIngressDependencies: { spawnWorker } });
+    try {
+      const response = await post(base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-resource-state': 'exists', 'x-goog-message-number': '5' }));
+      expect(response.json).toEqual({ ok: true, mode: 'active', disposition: 'accepted' });
+      expect(spawns).toEqual([{ integration: 'calendar', name: 'calendar-delta-5', env: { CALENDAR_TRIGGER: 'watch-push' }, dir: join(root, 'orgs', 'clearworksai', 'agents', 'pa'), parent: 'pa' }]);
+      expect(readEventReceipts(stateDir).filter((entry) => entry.stage === 'routing')).toEqual([]);
+    } finally { await close(server); }
+  });
+
+  it('a sync notification never spawns even when active', async () => {
+    installSkill(); writeLaneConfig('active'); const { spawns, spawnWorker } = spawnRecorder();
+    const { server, base } = await listen({ providerIngressDependencies: { spawnWorker } });
+    try {
+      const response = await post(base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-resource-state': 'sync', 'x-goog-message-number': '1' }));
+      expect(response.json.disposition).toBe('sync');
+      expect(spawns).toEqual([]);
+    } finally { await close(server); }
+  });
+
+  it('shadow mode (the default) spawns nothing and preserves the routing-proposal behavior', async () => {
+    installSkill(); const { spawns, spawnWorker } = spawnRecorder(); // no config file → shadow default
+    const { server, base } = await listen({ providerIngressDependencies: { spawnWorker } });
+    try {
+      const response = await post(base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-resource-state': 'exists', 'x-goog-message-number': '5' }));
+      expect(response.json).toEqual({ ok: true, mode: 'shadow', disposition: 'accepted' });
+      expect(spawns).toEqual([]);
+      expect(readEventReceipts(stateDir).find((entry) => entry.stage === 'routing')).toMatchObject({ routing_state: 'proposed', route: 'pa.booking-calendar-delta' });
+    } finally { await close(server); }
+  });
+
+  it('spawns at most once per change id (duplicate + stale never re-fire)', async () => {
+    installSkill(); writeLaneConfig('active'); const { spawns, spawnWorker } = spawnRecorder();
+    const { server, base } = await listen({ providerIngressDependencies: { spawnWorker } });
+    try {
+      expect((await post(base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-resource-state': 'exists', 'x-goog-message-number': '9' }))).json.disposition).toBe('accepted');
+      expect((await post(base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-resource-state': 'exists', 'x-goog-message-number': '9' }))).json.disposition).toBe('duplicate');
+      expect((await post(base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-resource-state': 'exists', 'x-goog-message-number': '8' }))).json.disposition).toBe('stale');
+      expect(spawns.map((entry) => entry.name)).toEqual(['calendar-delta-9']);
+    } finally { await close(server); }
+  });
+
+  it('active mode falls back (no spawn) when the target has no booking-calendar-delta skill', async () => {
+    writeLaneConfig('active'); const { spawns, spawnWorker } = spawnRecorder(); // skill NOT installed
+    const { server, base } = await listen({ providerIngressDependencies: { spawnWorker } });
+    try {
+      expect((await post(base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-resource-state': 'exists', 'x-goog-message-number': '7' }))).json).toEqual({ ok: true, mode: 'active', disposition: 'accepted' });
+      expect(spawns).toEqual([]);
+    } finally { await close(server); }
+  });
+});
+
 describe('Calendar watch shadow ingress', () => {
   it.each([
     ['missing header', { 'x-goog-channel-id': '' }, 'calendar_missing_header'],

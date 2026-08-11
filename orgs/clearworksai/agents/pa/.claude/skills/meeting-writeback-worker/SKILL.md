@@ -20,10 +20,23 @@ This worker intentionally stops after file writeback. `kb-dream` emission stays 
 
 ## Step 1 — Task + ledger setup (Bash)
 
+Everything below resolves against the RUNNING agent's own dir via `$CTX_*`
+(never a hardcoded absolute path). The daemon sets, for a spawned worker:
+`CTX_AGENT_DIR` (this worker's cwd = the running agent's dir), `CTX_PARENT_AGENT`
+(the agent that owns this writeback, e.g. `pa` or `pa-codex`), `CTX_FRAMEWORK_ROOT`,
+and `CTX_ORG`. When run outside the daemon (manual/poll), they fall back to `pwd`
+and the current org layout.
+
 ```bash
-TASK_ID=$(cortextos bus create-task "Cron: meeting-writeback" --desc "File new meeting intelligence into knowledge/meetings and knowledge/clients" --assignee "${CTX_PARENT_AGENT:-pa}" 2>/dev/null)
+AGENT_DIR="${CTX_AGENT_DIR:-$(pwd)}"
+FW_ROOT="${CTX_FRAMEWORK_ROOT:-$(cd "$AGENT_DIR/../../../.." && pwd)}"
+ORG="${CTX_ORG:-clearworksai}"
+ORG_ROOT="$FW_ROOT/orgs/$ORG"
+OWNER_AGENT="${CTX_PARENT_AGENT:-$(basename "$AGENT_DIR")}"
+
+TASK_ID=$(cortextos bus create-task "Cron: meeting-writeback" --desc "File new meeting intelligence into knowledge/meetings and knowledge/clients" --assignee "$OWNER_AGENT" 2>/dev/null)
 cortextos bus update-task $TASK_ID in_progress 2>/dev/null
-LEDGER_FILE='/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/state/ff-full-writeback-surfaced.txt'
+LEDGER_FILE="$AGENT_DIR/state/ff-full-writeback-surfaced.txt"
 mkdir -p "$(dirname "$LEDGER_FILE")"
 [[ -f "$LEDGER_FILE" ]] || touch "$LEDGER_FILE"
 echo "ledger=$(wc -l < "$LEDGER_FILE")"
@@ -33,19 +46,21 @@ echo "ledger=$(wc -l < "$LEDGER_FILE")"
 
 ## Step 2 — Run the extractor in full mode (Bash)
 
-Working directory MUST be the pa agent dir so `scripts/` and `state/` resolve correctly.
+Working directory MUST be the RUNNING agent's dir (`$CTX_AGENT_DIR`) so `scripts/`
+and `state/` resolve correctly. Org secrets are already sourced into a daemon-spawned
+worker's env; we re-source defensively for the manual/poll path.
 
 ```bash
-cd /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa
+cd "$AGENT_DIR"
 set -a
-source /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/.env 2>/dev/null
-source /Users/joshweiss/code/cortextos/orgs/clearworksai/secrets.env 2>/dev/null
+source "$AGENT_DIR/.env" 2>/dev/null
+source "$ORG_ROOT/secrets.env" 2>/dev/null
 set +a
 
 if [[ -n "${FF_MEETING_ID:-}" ]]; then
-  python3 scripts/ff-extractor.py --mode full --meeting-id "$FF_MEETING_ID" --limit 1 --full-ledger state/ff-full-writeback-surfaced.txt > /tmp/ff-writeback.json
+  python3 scripts/ff-extractor.py --mode full --meeting-id "$FF_MEETING_ID" --limit 1 --full-ledger "$LEDGER_FILE" > /tmp/ff-writeback.json
 else
-  python3 scripts/ff-extractor.py --mode full --limit 20 --full-ledger state/ff-full-writeback-surfaced.txt > /tmp/ff-writeback.json
+  python3 scripts/ff-extractor.py --mode full --limit 20 --full-ledger "$LEDGER_FILE" > /tmp/ff-writeback.json
 fi
 EXTRACTOR_RC=$?
 echo "extractor_rc=$EXTRACTOR_RC"
@@ -67,19 +82,28 @@ For each meeting in `/tmp/ff-writeback.json`:
 - Append the Fireflies meeting id to the ledger ONLY after both writes succeed for that meeting
 
 ```bash
+# Re-derive in case this block runs in a fresh shell; export for the heredoc.
+AGENT_DIR="${CTX_AGENT_DIR:-$(pwd)}"
+FW_ROOT="${CTX_FRAMEWORK_ROOT:-$(cd "$AGENT_DIR/../../../.." && pwd)}"
+ORG="${CTX_ORG:-clearworksai}"
+export ORG_ROOT="$FW_ROOT/orgs/$ORG"
+export LEDGER_FILE="$AGENT_DIR/state/ff-full-writeback-surfaced.txt"
+
 python3 - <<'PY' > /tmp/ff-writeback-result.json
 import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-ROOT = Path("/Users/joshweiss/code/cortextos/orgs/clearworksai")
+import os
+
+ROOT = Path(os.environ["ORG_ROOT"])
 KNOWLEDGE_DIR = ROOT / "knowledge"
 MEETINGS_DIR = KNOWLEDGE_DIR / "meetings"
 CLIENTS_DIR = KNOWLEDGE_DIR / "clients"
 TEMPLATE_PATH = CLIENTS_DIR / "_template.md"
 PAYLOAD_PATH = Path("/tmp/ff-writeback.json")
-LEDGER_PATH = Path("/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/state/ff-full-writeback-surfaced.txt")
+LEDGER_PATH = Path(os.environ["LEDGER_FILE"])
 
 MEETINGS_DIR.mkdir(parents=True, exist_ok=True)
 CLIENTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -351,6 +375,7 @@ existing_clients = {
 written_meetings: list[str] = []
 created_clients: list[str] = []
 flags: list[str] = []
+event_payloads: list[dict[str, object]] = []
 
 with LEDGER_PATH.open("a", encoding="utf-8") as ledger_handle:
     for meeting in meetings:
@@ -484,6 +509,59 @@ with LEDGER_PATH.open("a", encoding="utf-8") as ledger_handle:
         ledger_handle.write(f"{meeting_id} {int(datetime.now(timezone.utc).timestamp())}\n")
         written_meetings.append(meeting_rel)
 
+        # FR-002: per-meeting event payload. Keyed by safeId(meeting_id) so concurrent
+        # meetings never collide on a shared /tmp file (FR-008). The daemon on-worker-
+        # success hook reads this file to emit crm.meeting.completed exactly once.
+        event_meeting_type = collapse_ws(str(meeting.get("meeting_type") or "")) or "other"
+        event_attendees = [
+            collapse_ws(str(a))
+            for a in (meeting.get("attendees") or [])
+            if collapse_ws(str(a))
+        ]
+        # commitmentIds pass THROUGH — emit whatever ids are already present; else [].
+        raw_commitment_ids = meeting.get("commitmentIds") or meeting.get("commitment_ids") or []
+        if not isinstance(raw_commitment_ids, list):
+            raw_commitment_ids = []
+        event_commitment_ids = [collapse_ws(str(c)) for c in raw_commitment_ids if collapse_ws(str(c))]
+        event_payloads.append(
+            {
+                "meeting_id": meeting_id,
+                "meeting_type": event_meeting_type,
+                "attendees": event_attendees,
+                "client": client_name,
+                "commitmentIds": event_commitment_ids,
+                "writeback_ok": True,
+            }
+        )
+
+# FR-002: write the per-meeting event payload file(s) the daemon hook consumes.
+# Path derivation MUST match src/daemon/meeting-event-emit.ts + webhook-bridge safeId:
+#   safeId = re.sub(r'[^a-z0-9_-]','', meeting_id.lower())[:40]
+#   path   = FF_EVENT_PAYLOAD_PATH if set else f"{CTX_TMP or /tmp}/ff-meeting-event-{safeId}.json"
+FF_MEETING_ID = collapse_ws(os.environ.get("FF_MEETING_ID") or "")
+CTX_TMP = (os.environ.get("CTX_TMP") or "/tmp").strip() or "/tmp"
+
+
+def _safe_id(value: str) -> str:
+    return re.sub(r"[^a-z0-9_-]", "", value.lower())[:40]
+
+
+def _event_path_for(meeting_id: str) -> Path:
+    override = (os.environ.get("FF_EVENT_PAYLOAD_PATH") or "").strip()
+    if override and FF_MEETING_ID and _safe_id(meeting_id) == _safe_id(FF_MEETING_ID):
+        return Path(override)
+    return Path(CTX_TMP) / f"ff-meeting-event-{_safe_id(meeting_id)}.json"
+
+
+for _event in event_payloads:
+    _mid = _event.get("meeting_id") or ""
+    if not _mid:
+        continue
+    # Webhook fast path: only the FF_MEETING_ID meeting; poll path: all written meetings.
+    if FF_MEETING_ID and _safe_id(_mid) != _safe_id(FF_MEETING_ID):
+        continue
+    _event_path_for(_mid).write_text(json.dumps(_event), encoding="utf-8")
+
 print(
     json.dumps(
         {
@@ -502,13 +580,7 @@ echo "writeback_rc=$WRITEBACK_RC"
 
 If `WRITEBACK_RC` is nonzero, skip straight to Step 4.
 
-When this worker was launched for a Fireflies webhook (`FF_MEETING_ID` is set), notify CRM only after the writeback block reports a successful meeting write. The event is the handoff for deterministic CRM persistence, not a substitute for the meeting/client file writes:
-
-```bash
-if [[ -n "${FF_MEETING_ID:-}" && "$WRITEBACK_RC" -eq 0 ]]; then
-  cortextos bus send-message crm normal "EVENT crm.meeting.completed — {\"meeting_id\":\"$FF_MEETING_ID\"}"
-fi
-```
+The `crm.meeting.completed` emit is now owned by the daemon on-worker-success hook (FR-002, `src/daemon/meeting-event-emit.ts`), NOT this SKILL. The writeback heredoc above writes the per-meeting payload file (`ff-meeting-event-<safeId>.json`); on worker exit the daemon reads it and emits exactly once (deduped by meeting_id). Do NOT re-add a `cortextos bus send-message crm ...` emit here — it was the broken separate-bash-fence path (WRITEBACK_RC was lost across tool-calls → silent no-emit).
 
 ---
 
@@ -529,8 +601,9 @@ print(
 PY
 )
 fi
+OWNER_AGENT="${CTX_PARENT_AGENT:-${CTX_AGENT_NAME:-pa}}"
 cortextos bus complete-task $TASK_ID --result "$RESULT" 2>/dev/null
-cortextos bus log-event action cron_completed info --meta '{"cron":"meeting-writeback","agent":"pa"}' 2>/dev/null
+cortextos bus log-event action cron_completed info --meta "{\"cron\":\"meeting-writeback\",\"agent\":\"$OWNER_AGENT\"}" 2>/dev/null
 cortextos terminate-worker "$CTX_AGENT_NAME"
 ```
 

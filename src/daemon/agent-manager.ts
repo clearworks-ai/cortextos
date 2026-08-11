@@ -18,6 +18,7 @@ import { processMediaMessage } from '../telegram/media.js';
 import { stripBom } from '../utils/strip-bom.js';
 import { readEnabledAgentsMap } from '../bus/enabled-agents-io.js';
 import { killProcessTree, getProcessElapsedSeconds } from '../utils/process-tree.js';
+import { maybeEmitMeetingEvent } from './meeting-event-emit.js';
 
 type LogFn = (msg: string) => void;
 
@@ -1242,7 +1243,23 @@ export class AgentManager {
 
     this.workers.set(name, worker);
 
-    worker.onDone((workerName) => {
+    worker.onDone((workerName, exitCode) => {
+      // FR-002: deterministic meeting-event emit. On a finished meeting-writeback
+      // worker (name prefix or FF_MEETING_ID in the captured spawn env), emit exactly
+      // one crm.meeting.completed / crm.meeting.failed off the per-meeting payload
+      // file the SKILL wrote. This is the single-owner code path that replaces the old
+      // SKILL bash-fence emit (which lost WRITEBACK_RC across tool-calls → silent no-emit).
+      try {
+        maybeEmitMeetingEvent({
+          workerName,
+          exitCode,
+          extraEnv,
+          ctxRoot: this.ctxRoot,
+          org: this.org,
+        });
+      } catch (err) {
+        console.error(`[agent-manager] meeting-event emit failed for ${workerName}: ${String(err)}`);
+      }
       // Auto-remove finished workers after a short delay so list-workers
       // can still show the final status briefly before cleanup
       setTimeout(() => {

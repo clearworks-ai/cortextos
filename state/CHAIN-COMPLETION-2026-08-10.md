@@ -122,7 +122,7 @@ Per `state/specs/retirement-plan-2026-08-10.md`. Both dupes still present as of 
 | P4 — prod receipt | ⏳ | No post-restart consumer keys yet. Wait for a REAL Fireflies meeting; do not synthesize a receipt. |
 | P5 — retire dupes | ⏳ GATED | Draft #349 is green and scoped to three files, but needs P4 + Josh approval. The live migrated `meeting-commitments` cron also remains enabled and must be removed at retirement. |
 | P6 — activate Gmail | ⏳ GATED | Depends on P2 + P4. No staging or prod lane flip performed. |
-| P7 — deterministic cron rollout | ⏳ GATED | Staging snapshot parity at `2026-08-11T08:00:45.896Z`: prod and isolated staging inputs produced byte-identical five-candidate JSON; thin verification rejected all five and matched the legacy same-input final decision (`[]`). Only the Josh-gated prod `update-cron` remains. See `state/staging-receipts/p7-nightly-fleet-2026-08-11.md`. |
+| P7 — deterministic cron rollout | ✅ | Staging input + final-decision parity passed; Josh approved `approval_1786436408_3w2la`; canonical live owner `frank2-codex/nightly-fleet-analysis` was rewired to the deterministic core + thin verifier with schedule/enabled/history preserved. Daemon log proves live reload of 15 crons; no restart or manual fire. See `state/live-receipts/p7-nightly-fleet-cron-2026-08-11.md`. |
 
 ---
 
@@ -137,5 +137,5 @@ Per `state/specs/retirement-plan-2026-08-10.md`. Both dupes still present as of 
 - 2026-08-11: P1 #354, P2 replacement #357, and P3 #355 merged with green CI. Prod daemon is
   armed, but P4 remains unproven because no real post-restart meeting has traversed the consumers.
   P7 deterministic input + thin-verifier decision parity passed on an isolated staging snapshot;
-  prod rewire not performed.
-- NEXT: capture the next real P4 receipt; then request Josh's explicit P5/P6/P7 gated approvals.
+  Josh later approved P7 and the canonical `frank2-codex` cron reloaded live without a restart.
+- NEXT: capture the next real P4 receipt; then request Josh's explicit P5/P6 gated approvals.

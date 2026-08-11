@@ -1,0 +1,12 @@
+TASK_ID=$(cortextos bus create-task "Cron: nightly-fleet-analysis" --desc "Nightly fleet analysis: active canonical agent logs, crashes, and workarounds" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire nightly-fleet-analysis --interval 24h 2>/dev/null; NIGHTLY FLEET ANALYSIS — read /tmp/frank-now.json for date ground truth. Spawn one bounded Sonnet worker. Before reading logs, discover the exact current Clearworks fleet with `cortextos bus list-agents --format json`. Analyze only entries where org is `clearworksai`, enabled is true, and name matches `^[a-z0-9][a-z0-9_-]*$`. Exclude Hunter permanently. Never substitute legacy aliases (`frank2`, `larry`, `sage`, `maven`, etc.) for active `*-codex` agents, and do not treat intentionally disabled agents as silent or crashed.
+
+For each discovered active canonical agent, read the last 24 hours only from its exact-name paths:
+- ~/.cortextos/cortextos1/logs/<exact-agent-name>/restarts.log
+- ~/.cortextos/cortextos1/logs/<exact-agent-name>/stdout.log (bounded tail; inspect hook errors, frozen points, kb-query hangs)
+- the exact agent workspace memory/YYYY-MM-DD.md when present
+
+Also inspect ~/.cortextos/cortextos1/logs/crashes.log and ~/code/knowledge-sync/daily/YYYY-MM-DD.md. Detect crash loops (>2 watchdog hard restarts for the same active agent in 24h), hook errors, documented workarounds/frustration, and active agents whose authoritative bus heartbeat is older than 5h. Validate every finding against the current enabled registry and exact process/log namespace before returning it.
+
+Return ONLY a valid JSON array of objects with exactly: `agent`, `issue_type`, `severity` (`CRITICAL|HIGH|MEDIUM|LOW`), `root_cause`, `recommended_fix`, `auto_fixable`, and `evidence`. Include no issue-free agents. Do not implement fixes.
+
+Frank2 then validates the JSON against current bus state. CRITICAL/HIGH findings may be surfaced only when evidence remains current and exact-name grounded. Internal reversible orchestrator fixes may be applied and logged; specialist code/config work must be assigned to the current canonical owner. Any restart, deployment, external communication beyond the required Josh alert, deletion, merge, or push follows the approval gate. MEDIUM/LOW go to nightly memory only. Write the validated analysis to memory/YYYY-MM-DD.md, log `action/nightly_analysis_complete`, alert Josh only for validated CRITICAL/HIGH, then run: `cortextos bus complete-task $TASK_ID --result 'Cron: nightly-fleet-analysis complete' 2>/dev/null`.

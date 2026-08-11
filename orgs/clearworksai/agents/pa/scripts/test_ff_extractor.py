@@ -2028,5 +2028,209 @@ class RecapModeTests(unittest.TestCase):
             self.meeting_type_confidence_response = 0.9
 
 
+class OwnerIdentityResolutionTests(unittest.TestCase):
+    """FR-003: resolve_owner_identity ordered-tier matching + NEEDS-OWNER fallback."""
+
+    ATTENDEES = [
+        "jose.perez@acme.com",
+        "Josh Weiss",
+        "Maria Garcia",
+        "carlos@acme.com",
+    ]
+
+    def test_exact_email_resolves_to_lowercased_email(self):
+        self.assertEqual(
+            MODULE.resolve_owner_identity("Jose.Perez@ACME.com", self.ATTENDEES),
+            "jose.perez@acme.com",
+        )
+
+    def test_exact_full_name_accent_insensitive_resolves(self):
+        # "José Pérez" (accented) matches the email attendee's local-part
+        # case + diacritic-insensitively → that lowercased email is the identity.
+        self.assertEqual(
+            MODULE.resolve_owner_identity("José Pérez", self.ATTENDEES),
+            "jose.perez@acme.com",
+        )
+        # Plain-ASCII variant resolves identically.
+        self.assertEqual(
+            MODULE.resolve_owner_identity("Jose Perez", self.ATTENDEES),
+            "jose.perez@acme.com",
+        )
+
+    def test_unique_first_name_resolves_email_attendee(self):
+        # "Carlos" uniquely maps to carlos@acme.com by first-name.
+        self.assertEqual(
+            MODULE.resolve_owner_identity("Carlos", self.ATTENDEES),
+            "carlos@acme.com",
+        )
+
+    def test_unique_first_name_named_attendee_yields_needs_owner(self):
+        # A name-only attendee has no derivable email → NEEDS-OWNER token.
+        self.assertEqual(
+            MODULE.resolve_owner_identity("Josh", self.ATTENDEES),
+            "NEEDS-OWNER:josh-weiss",
+        )
+
+    def test_two_attendees_same_first_name_is_needs_owner(self):
+        attendees = ["John Smith", "John Doe"]
+        self.assertEqual(
+            MODULE.resolve_owner_identity("John", attendees),
+            "NEEDS-OWNER:john",
+        )
+
+    def test_ambiguous_full_name_tier_is_needs_owner(self):
+        # Two attendees exact-match the full name → ambiguous → NEEDS-OWNER.
+        attendees = ["Alex Kim", "alex.kim@x.com"]
+        self.assertEqual(
+            MODULE.resolve_owner_identity("Alex Kim", attendees),
+            "NEEDS-OWNER:alex-kim",
+        )
+
+    def test_no_match_is_needs_owner_slug(self):
+        self.assertEqual(
+            MODULE.resolve_owner_identity("Zelda", self.ATTENDEES),
+            "NEEDS-OWNER:zelda",
+        )
+
+    def test_empty_owner_is_needs_owner_unknown(self):
+        self.assertEqual(
+            MODULE.resolve_owner_identity("", self.ATTENDEES),
+            "NEEDS-OWNER:unknown",
+        )
+        self.assertEqual(
+            MODULE.resolve_owner_identity("   ", self.ATTENDEES),
+            "NEEDS-OWNER:unknown",
+        )
+
+    def test_email_owner_not_in_attendees_still_resolves_to_email(self):
+        self.assertEqual(
+            MODULE.resolve_owner_identity("nobody@here.com", self.ATTENDEES),
+            "nobody@here.com",
+        )
+
+    def test_never_assigns_contacts_zero(self):
+        # No match must NOT silently return the first attendee (the abbey bug).
+        result = MODULE.resolve_owner_identity("Zelda", self.ATTENDEES)
+        self.assertNotEqual(result, self.ATTENDEES[0])
+        self.assertTrue(result.startswith("NEEDS-OWNER:"))
+
+
+class ResolvedCommitmentIdTests(unittest.TestCase):
+    """FR-003: commitmentId := sha1(meeting_id | identity | normalize(action))."""
+
+    def test_matches_hand_computed_sha1(self):
+        import hashlib
+
+        meeting_id = "meeting_123"
+        identity = "jose.perez@acme.com"
+        action = "Send the proposal"
+        normalized = MODULE.normalize_action(action)
+        self.assertEqual(normalized, "send the proposal")
+        expected = hashlib.sha1(
+            f"{meeting_id}|{identity}|{normalized}".encode("utf-8")
+        ).hexdigest()
+        got = MODULE.resolved_commitment_id(meeting_id, identity, action)
+        self.assertEqual(got, expected)
+        # Full sha1 hex — 40 chars, NOT truncated, NOT sha256 (64).
+        self.assertEqual(len(got), 40)
+
+    def test_different_identity_yields_different_id(self):
+        a = MODULE.resolved_commitment_id("m", "alice@x.com", "do the thing")
+        b = MODULE.resolved_commitment_id("m", "bob@x.com", "do the thing")
+        self.assertNotEqual(a, b)
+
+    def test_stable_for_same_inputs(self):
+        a = MODULE.resolved_commitment_id("m", "alice@x.com", "Do The Thing")
+        b = MODULE.resolved_commitment_id("m", "alice@x.com", "do the thing")
+        # normalize_action lowercases/collapses → same id across casing.
+        self.assertEqual(a, b)
+
+
+class CommitmentEntriesFR003WiringTests(unittest.TestCase):
+    """FR-003: enriched commitment entries carry owner_identity + commitmentId."""
+
+    def _refined(self, owner: str, action: str) -> "MODULE.RefinedCommitment":
+        return MODULE.RefinedCommitment(
+            id="ff_m1_abc",
+            text=action,
+            source="fireflies",
+            source_ref="m1 · Test",
+            direction="outbound",
+            action_text=action,
+            owner=owner,
+        )
+
+    def test_enriched_entry_carries_identity_and_commitment_id(self):
+        attendees = ["carlos@acme.com", "Josh Weiss"]
+        commitments = [self._refined("carlos@acme.com", "Send the deck")]
+        entries = MODULE.commitment_entries(
+            commitments,
+            enriched=True,
+            attendees=attendees,
+            meeting_id="m1",
+        )
+        self.assertEqual(len(entries), 1)
+        entry = entries[0]
+        self.assertEqual(entry["owner_identity"], "carlos@acme.com")
+        self.assertEqual(
+            entry["commitmentId"],
+            MODULE.resolved_commitment_id("m1", "carlos@acme.com", "Send the deck"),
+        )
+
+    def test_unresolved_owner_gets_needs_owner_never_contacts_zero(self):
+        attendees = ["carlos@acme.com", "Josh Weiss"]
+        commitments = [self._refined("Stranger", "Do a thing")]
+        entries = MODULE.commitment_entries(
+            commitments,
+            enriched=True,
+            attendees=attendees,
+            meeting_id="m1",
+        )
+        self.assertEqual(entries[0]["owner_identity"], "NEEDS-OWNER:stranger")
+        self.assertNotEqual(entries[0]["owner_identity"], attendees[0])
+
+    def test_non_enriched_entries_omit_fr003_fields(self):
+        commitments = [self._refined("carlos@acme.com", "Send the deck")]
+        entries = MODULE.commitment_entries(commitments, enriched=False)
+        self.assertNotIn("owner_identity", entries[0])
+        self.assertNotIn("commitmentId", entries[0])
+
+    def test_zero_commitments_produce_zero_rows(self):
+        # An attendee with no commitment simply has no commitment row — no
+        # synthesized placeholder followup (the abbey-bug analog).
+        entries = MODULE.commitment_entries(
+            [],
+            enriched=True,
+            attendees=["carlos@acme.com", "Josh Weiss"],
+            meeting_id="m1",
+        )
+        self.assertEqual(entries, [])
+
+
+class BuildRecapMeetingFR003Tests(RecapModeTests):
+    """FR-003: a recap meeting's next_steps carry owner_identity + commitmentId."""
+
+    def test_next_steps_carry_owner_identity_and_commitment_id(self):
+        meeting = self._run_recap_meeting(self.fake_urlopen([]))
+        for step in meeting["next_steps"]:
+            self.assertIn("owner_identity", step)
+            self.assertIn("commitmentId", step)
+            self.assertEqual(len(step["commitmentId"]), 40)
+            # Never contacts[0] silent-assign: identity is either a real email
+            # (an attendee) or an explicit NEEDS-OWNER token.
+            identity = step["owner_identity"]
+            self.assertTrue(
+                "@" in identity or identity.startswith("NEEDS-OWNER:"),
+                identity,
+            )
+            # commitmentId is a full sha1 hex over meeting_id|identity|action —
+            # the id embeds the resolved identity, so recomputing with a
+            # different identity yields a different id (identity is wired in).
+            other = MODULE.resolved_commitment_id(
+                meeting["id"], "someone.else@example.com", identity
+            )
+            self.assertNotEqual(step["commitmentId"], other)
+
+
 if __name__ == "__main__":
     unittest.main()

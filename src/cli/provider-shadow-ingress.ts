@@ -167,6 +167,37 @@ function commsCheckWorkerTemplate(args: {
     skillExists: args.skillExists,
   };
 }
+
+/**
+ * The Calendar delta lane, expressed as the same generic worker-spawn template
+ * as Gmail. In active mode, each first-seen non-sync notification spawns the
+ * tracked central booking-calendar-delta skill from the pa-codex agent dir.
+ */
+function bookingCalendarDeltaTemplate(args: {
+  frameworkRoot: string;
+  org?: string;
+  target: string;
+  skillExists?: (path: string) => boolean;
+}): WorkerSpawnTemplate {
+  return {
+    frameworkRoot: args.frameworkRoot,
+    org: args.org,
+    target: args.target,
+    workerNamePrefix: 'calendar-delta',
+    skillRelativePaths: [
+      join('..', '..', 'skills', 'booking-calendar-delta', 'SKILL.md'),
+    ],
+    buildPrompt: ({ skillRelativePath }) =>
+      [
+        'You are the booking-calendar-delta worker (short-lived session).',
+        `Read ${skillRelativePath} and execute it exactly,`,
+        'then output DONE. Do nothing else — no heartbeat, no daily memory, no prose.',
+      ].join(' '),
+    buildEnv: () => ({ CALENDAR_TRIGGER: 'watch-push' }),
+    skillExists: args.skillExists,
+  };
+}
+
 function processMonotonic(options: ProviderShadowOptions, event: IngressEvent, cursorKey: string, value: string, route: string | undefined, lane: ProviderLane): { disposition: string; receipt: EventReceipt } {
   const deps = dependencies(options); const current = deps.getCursor(options.stateDir, cursorKey);
   if (current !== undefined && compareCanonicalNumericCursors(current, value) > 0) return { disposition: 'stale', receipt: deps.recordRejected(options.stateDir, event, 'stale_cursor') };
@@ -220,8 +251,19 @@ async function handleCalendar(request: IncomingMessage, response: ServerResponse
   const channelId = uniqueHeader(request, 'x-goog-channel-id')!; const resourceId = uniqueHeader(request, 'x-goog-resource-id')!; const state = uniqueHeader(request, 'x-goog-resource-state')!; const messageNumber = canonicalNumber(uniqueHeader(request, 'x-goog-message-number')!, 'calendar_invalid_message_number'); const expiration = uniqueHeader(request, 'x-goog-channel-expiration')!; const token = uniqueHeader(request, 'x-goog-channel-token')!;
   if (!['sync', 'exists', 'not_exists'].includes(state)) throw new ProviderError(400, 'calendar_invalid_state');
   const configured = readCalendarChannel(options.stateDir, channelId); const expires = Date.parse(expiration); if (configured.channel !== digestHex(channelId) || configured.resource !== digestHex(resourceId)) throw new ProviderError(401, 'calendar_channel_mismatch'); if (!safeEqual(token, configured.token)) throw new ProviderError(401, 'calendar_token_mismatch'); if (!Number.isFinite(expires) || expires <= options.now() || new Date(expires).toISOString() !== configured.expiresAt || Date.parse(configured.expiresAt) <= options.now()) throw new ProviderError(401, 'calendar_channel_expired');
-  const scope = digestHex(`${channelId}\u0000${resourceId}`).slice(0, 40); const result = processMonotonic(options, { provider: 'calendar', eventType: 'notification', sourceId: `${digestHex(channelId)}\u0000${digestHex(resourceId)}\u0000${messageNumber}` }, `calendar.shadow.notification_high_water:${scope}`, messageNumber, state === 'sync' ? undefined : 'pa-codex.booking-calendar-delta', 'calendar');
-  json(response, 200, { ok: true, mode: 'shadow', disposition: state === 'sync' && result.disposition === 'accepted' ? 'sync' : result.disposition });
+  const scope = digestHex(`${channelId}\u0000${resourceId}`).slice(0, 40);
+  const mode = resolveMode(options, 'calendar');
+  const shadowRoute = state === 'sync' || mode === 'active' ? undefined : 'pa-codex.booking-calendar-delta';
+  const result = processMonotonic(options, { provider: 'calendar', eventType: 'notification', sourceId: `${digestHex(channelId)}\u0000${digestHex(resourceId)}\u0000${messageNumber}` }, `calendar.shadow.notification_high_water:${scope}`, messageNumber, shadowRoute, 'calendar');
+  if (mode === 'active' && state !== 'sync' && result.disposition === 'accepted' && options.frameworkRoot && options.org) {
+    const deps = dependencies(options);
+    await deps.spawnWorker(
+      'calendar',
+      () => planWorkerSpawn(bookingCalendarDeltaTemplate({ frameworkRoot: options.frameworkRoot as string, org: options.org, target: 'pa-codex', skillExists: options.dependencies?.skillExists }), messageNumber),
+      { instanceId: options.instanceId, parent: 'pa-codex' },
+    );
+  }
+  json(response, 200, { ok: true, mode, disposition: state === 'sync' && result.disposition === 'accepted' ? 'sync' : result.disposition });
 }
 
 export async function handleProviderShadowIngress(integration: string, request: IncomingMessage, response: ServerResponse, options: ProviderShadowOptions, buckets: ProviderRateBuckets): Promise<boolean> {

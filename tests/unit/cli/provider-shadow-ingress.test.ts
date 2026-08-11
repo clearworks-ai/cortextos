@@ -145,6 +145,63 @@ describe('Gmail lane → comms-check-worker spawn (FR-E3)', () => {
   });
 });
 
+describe('Calendar lane → booking-calendar-delta spawn (FR-E3)', () => {
+  const installSkill = () => { const dir = join(root, 'orgs', 'clearworksai', 'skills', 'booking-calendar-delta'); mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'SKILL.md'), '# Booking Calendar Delta'); };
+  const writeLaneConfig = (mode: string) => writeFileSync(join(root, 'provider-config.json'), JSON.stringify({ lanes: { calendar: mode } }));
+  const spawnRecorder = () => { const spawns: Array<{ integration: string; name: string; env: Record<string, string>; dir: string; parent: string; prompt: string }> = []; const spawnWorker: NonNullable<BridgeServerOptions['providerIngressDependencies']>['spawnWorker'] = async (integration, planFn, opts) => { const plan = planFn(); if (!plan) return { ok: false }; spawns.push({ integration, name: plan.workerName, env: plan.extraEnv, dir: plan.dir, parent: opts.parent, prompt: plan.prompt }); return { ok: true, integration, workerName: plan.workerName }; }; return { spawns, spawnWorker }; };
+
+  it('active mode spawns pa-codex from the tracked central skill and skips shadow routing', async () => {
+    installSkill(); writeLaneConfig('active'); const { spawns, spawnWorker } = spawnRecorder();
+    const { server, base } = await listen({ providerIngressDependencies: { spawnWorker } });
+    try {
+      const response = await post(base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-resource-state': 'exists', 'x-goog-message-number': '5' }));
+      expect(response.json).toEqual({ ok: true, mode: 'active', disposition: 'accepted' });
+      expect(spawns).toEqual([{
+        integration: 'calendar',
+        name: 'calendar-delta-5',
+        env: { CALENDAR_TRIGGER: 'watch-push' },
+        dir: join(root, 'orgs', 'clearworksai', 'agents', 'pa-codex'),
+        parent: 'pa-codex',
+        prompt: expect.stringContaining(join('..', '..', 'skills', 'booking-calendar-delta', 'SKILL.md')),
+      }]);
+      expect(spawns[0].prompt).not.toContain('.claude');
+      expect(spawns[0].prompt).not.toContain('plugins');
+      expect(readEventReceipts(stateDir).filter((entry) => entry.stage === 'routing')).toEqual([]);
+    } finally { await close(server); }
+  });
+
+  it('never spawns for sync notifications, duplicate changes, or stale changes', async () => {
+    installSkill(); writeLaneConfig('active'); const { spawns, spawnWorker } = spawnRecorder();
+    const { server, base } = await listen({ providerIngressDependencies: { spawnWorker } });
+    try {
+      expect((await post(base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-resource-state': 'sync', 'x-goog-message-number': '1' }))).json.disposition).toBe('sync');
+      expect((await post(base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-resource-state': 'exists', 'x-goog-message-number': '9' }))).json.disposition).toBe('accepted');
+      expect((await post(base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-resource-state': 'exists', 'x-goog-message-number': '9' }))).json.disposition).toBe('duplicate');
+      expect((await post(base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-resource-state': 'not_exists', 'x-goog-message-number': '8' }))).json.disposition).toBe('stale');
+      expect(spawns.map((entry) => entry.name)).toEqual(['calendar-delta-9']);
+    } finally { await close(server); }
+  });
+
+  it('keeps shadow mode routing unchanged and does not spawn', async () => {
+    installSkill(); const { spawns, spawnWorker } = spawnRecorder();
+    const { server, base } = await listen({ providerIngressDependencies: { spawnWorker } });
+    try {
+      expect((await post(base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-message-number': '5' }))).json).toEqual({ ok: true, mode: 'shadow', disposition: 'accepted' });
+      expect(spawns).toEqual([]);
+      expect(readEventReceipts(stateDir).find((entry) => entry.stage === 'routing')).toMatchObject({ route: 'pa-codex.booking-calendar-delta', routing_state: 'proposed' });
+    } finally { await close(server); }
+  });
+
+  it('does not spawn when the tracked central skill is missing', async () => {
+    writeLaneConfig('active'); const { spawns, spawnWorker } = spawnRecorder();
+    const { server, base } = await listen({ providerIngressDependencies: { spawnWorker } });
+    try {
+      expect((await post(base, '/relay/calendar-watch', '', calendarHeaders({ 'x-goog-message-number': '7' }))).json).toEqual({ ok: true, mode: 'active', disposition: 'accepted' });
+      expect(spawns).toEqual([]);
+    } finally { await close(server); }
+  });
+});
+
 describe('Calendar watch shadow ingress', () => {
   it.each([
     ['missing header', { 'x-goog-channel-id': '' }, 'calendar_missing_header'],

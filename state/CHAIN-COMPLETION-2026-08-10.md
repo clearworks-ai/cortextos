@@ -51,12 +51,13 @@ requirement? Cite file:line. Flag any gap between "merged" and "correct."
 ---
 
 ## PHASE 1b — Gap fixes (from Phase 1 verification)
-- ⬜ **FR-008 fix**: `sync_client_context.py` must acquire the same per-client-file lock as
-  `meeting_writeback.py` (or convert its destructive rewrite to a locked RMW) so the two `.md`
-  writers are mutually exclusive. Add a cross-writer test.
-- ⬜ **FR-007 fix**: `meeting-crm-sync.py` deal-stage lookup must fall back to
-  `--engagement-name` when `clearpath_id` is null, so name-only engagements (4/26) get the
-  sales deal-stage write.
+- ✅ **FR-007 fix**: `meeting-crm-sync.py` now selects the matched engagement via
+  `--engagement-name` when `clearpath_id` is null. Regression test added (11/11 pass).
+  **PR #352** (`fix/fr-007-name-only-engagement-dealstage`) — pending merge + staging receipt.
+- ⏳ **FR-008 fix**: NOT patched blind — it's a two-writer design conflict, not just a missing
+  lock. Documented in `state/specs/FR-008-client-md-writer-conflict-2026-08-10.md` with
+  Option A (single owner, recommended) vs Option B (coexist+serialize). **Needs Josh's design
+  call + staging validation** (client-file data-plane → staging-first non-negotiable).
 
 ---
 
@@ -98,3 +99,10 @@ Per `state/specs/retirement-plan-2026-08-10.md`. Both dupes still present as of 
 - 2026-08-10: Tracker created. Established FR-001–008 all merged to main, FR-009 done (doc),
   FR-010 deferred. Both dupes confirmed still present. Staging scripts present. Kicking off
   Phase 1 adversarial code verification.
+- 2026-08-10: Phase 1 complete (8 parallel skeptics). FR-001/002/003/004/005/006 PASS.
+  FR-007 PARTIAL (name-only engagements drop deal-stage). FR-008 GAP (two-writer `.md` conflict).
+- 2026-08-10: Phase 1b — FR-007 fixed + tested → PR #352. FR-008 documented as a design
+  decision (spec FR-008-client-md-writer-conflict) — needs Josh's A/B call + staging.
+- NEXT (blocked on Josh): Phase 2 staging validation needs a running staging daemon; Phase 4
+  prod daemon restart + prod live receipt are Josh-gated HALT points. Autonomous work is at
+  its gate — merged code verified, one fix PR'd, one design decision surfaced.

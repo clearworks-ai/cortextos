@@ -388,8 +388,17 @@ describe('realPct replaces CC 200K-based used_percentage', () => {
     return sum > 0 ? sum : null;
   }
 
-  function decide(model: string | undefined, ccPct: number | null, cu: Record<string, number> | null) {
-    const realWindow = realContextWindow(model);
+  function decide(
+    model: string | undefined,
+    ccPct: number | null,
+    cu: Record<string, number> | null,
+    reportedWindow: number | null = null,
+  ) {
+    // Mirror fast-checker: prefer the runtime-reported window when it is a trustworthy
+    // value (>200K); else the realContextWindow(model) guess.
+    const realWindow = (reportedWindow !== null && reportedWindow > 200_000)
+      ? reportedWindow
+      : realContextWindow(model);
     const rawTokens = sumUsage(cu);
     const realPct = rawTokens !== null ? (rawTokens / realWindow) * 100 : ccPct;
     const fires = realPct !== null && realPct >= HANDOFF;
@@ -417,6 +426,32 @@ describe('realPct replaces CC 200K-based used_percentage', () => {
   it('current_usage absent → falls back to CC used_percentage', () => {
     const r = decide('claude-sonnet-5[1m]', 70, null);
     expect(r.realPct).toBe(70);
+    expect(r.fires).toBe(true);
+  });
+
+  it('codex agent uses the runtime-REPORTED window, not the 200K guess (larry-codex bootloop regression)', () => {
+    // gpt-5.6-sol is unknown to realContextWindow → would map to 200K. The codex pty
+    // reports the true ~1M cap in context_status.json (997500). At 152,276 tokens the
+    // guess gives 76% (false handoff → 11-min restart treadmill); the reported window
+    // gives ~15% → NO handoff.
+    const guess = decide('gpt-5.6-sol', 7.9, {
+      input_tokens: 77_572, output_tokens: 1_232, cache_read_input_tokens: 73_472,
+    });
+    expect(guess.realPct).toBeCloseTo(76.1, 1); // the bug: 200K window
+    expect(guess.fires).toBe(true);
+
+    const fixed = decide('gpt-5.6-sol', 7.9, {
+      input_tokens: 77_572, output_tokens: 1_232, cache_read_input_tokens: 73_472,
+    }, 997_500);
+    expect(fixed.realPct).toBeCloseTo(15.3, 1);
+    expect(fixed.fires).toBe(false);
+  });
+
+  it('ignores an untrustworthy 200K reported window (Claude Code lies on 1M models)', () => {
+    // CC reports context_window_size=200000 even on a 1M model → must NOT be trusted;
+    // fall back to the model guess (1M) so 620K reads as 62%, not 310%.
+    const r = decide('claude-sonnet-5[1m]', 100, { input_tokens: 620_000 }, 200_000);
+    expect(r.realPct).toBeCloseTo(62, 5);
     expect(r.fires).toBe(true);
   });
 

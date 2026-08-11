@@ -5,7 +5,7 @@ import { request as httpRequest } from 'http';
 import { type AddressInfo } from 'net';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createBridgeServer, webhookBridgeCommand } from '../../../src/cli/webhook-bridge';
+import { createBridgeServer, webhookBridgeCommand, readFrameworkEnv, listOrgDirs } from '../../../src/cli/webhook-bridge';
 
 interface ResponseShape {
   status: number;
@@ -750,3 +750,41 @@ describe('webhook-bridge command', () => {
 });
 
 const RATE_LIMIT_RESET_MS = 60_001;
+
+describe('readFrameworkEnv — org-independent secret load (bridge-dies-on-restart fix)', () => {
+  let root: string;
+  const savedOrg = process.env.CTX_ORG;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'wb-orgenv-'));
+    delete process.env.CTX_ORG; // simulate the launchd plist that omits CTX_ORG
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+    if (savedOrg === undefined) delete process.env.CTX_ORG;
+    else process.env.CTX_ORG = savedOrg;
+  });
+
+  it('loads WEBHOOK_BRIDGE_SECRET from orgs/<org>/secrets.env even with no CTX_ORG set', () => {
+    mkdirSync(join(root, 'orgs', 'clearworksai'), { recursive: true });
+    writeFileSync(join(root, 'orgs', 'clearworksai', 'secrets.env'), 'WEBHOOK_BRIDGE_SECRET=s3cr3t\n');
+    const env = readFrameworkEnv(root);
+    expect(env.WEBHOOK_BRIDGE_SECRET).toBe('s3cr3t');
+  });
+
+  it('lists org dirs (drives the single-org CTX_ORG plist default)', () => {
+    mkdirSync(join(root, 'orgs', 'clearworksai'), { recursive: true });
+    mkdirSync(join(root, 'orgs', 'personal'), { recursive: true });
+    expect(listOrgDirs(root).sort()).toEqual(['clearworksai', 'personal']);
+  });
+
+  it('frameworkRoot/.cortextos-env is loaded unconditionally (org-independent runtime fix)', () => {
+    writeFileSync(join(root, '.cortextos-env'), 'WEBHOOK_BRIDGE_SECRET=fromdotenv\n');
+    expect(readFrameworkEnv(root).WEBHOOK_BRIDGE_SECRET).toBe('fromdotenv');
+  });
+
+  it('returns empty (no throw) when there is no orgs dir', () => {
+    expect(listOrgDirs(root)).toEqual([]);
+    expect(readFrameworkEnv(root)).toEqual({});
+  });
+});

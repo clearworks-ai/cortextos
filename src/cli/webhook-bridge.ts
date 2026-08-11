@@ -709,6 +709,11 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
         // FR-E2: per-lane shadow|active flag lives in provider-config.json under
         // the framework root. Absent/malformed => every lane defaults to shadow.
         configDir: options.providerConfigDir ?? options.frameworkRoot,
+        // FR-E3: a lane's ACTIVE path resolves the target agent dir dynamically
+        // for the deterministic worker spawn (comms-check-worker for gmail).
+        frameworkRoot: options.frameworkRoot,
+        org: options.org,
+        instanceId: options.instanceId,
       }, providerRateBuckets)) return;
 
       const currentWindow = now();

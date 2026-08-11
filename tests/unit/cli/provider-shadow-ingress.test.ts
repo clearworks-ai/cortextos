@@ -91,6 +91,60 @@ describe('Gmail Pub/Sub shadow ingress', () => {
   it('never advances before receipt persistence and heals cursor failure on duplicate retry', async () => { const receiptFailure = await listen({ providerIngressDependencies: { recordIngress: () => { throw new Error(`receipt secret ${serviceAccount} ${subscription} ${token}`); } } }); try { const failed = await post(receiptFailure.base, '/relay/gmail-pubsub', gmailBody(), gmailHeaders); expect(failed.status).toBe(503); expect(failed.json).toEqual({ error: 'provider_storage_failed' }); for (const secret of [serviceAccount, subscription, token]) expect(failed.text).not.toContain(secret); expect(getEventCursor(stateDir, 'gmail.shadow.notification_high_water')).toBeUndefined(); } finally { await close(receiptFailure.server); } let fail = true; const realAdvance = (await import('../../../src/bus/event-receipt-index')).advanceNumericEventCursor; const fixture = await listen({ providerIngressDependencies: { advanceCursor: (dir, key, value) => { if (fail) { fail = false; throw new Error('cursor secret'); } return realAdvance(dir, key, value); } } }); try { expect((await post(fixture.base, '/relay/gmail-pubsub', gmailBody(), gmailHeaders)).status).toBe(503); expect((await post(fixture.base, '/relay/gmail-pubsub', gmailBody(), gmailHeaders)).json.disposition).toBe('duplicate'); expect(getEventCursor(stateDir, 'gmail.shadow.notification_high_water')).toBe('10'); const index = JSON.parse(readFileSync(join(stateDir, 'event-receipt-index.json'), 'utf8')) as { cursors: Record<string, string> }; expect(Object.keys(index.cursors)).toEqual(['gmail.shadow.notification_high_water']); expect(index.cursors).not.toHaveProperty('gmail.processed_history_cursor'); } finally { await close(fixture.server); } });
 });
 
+describe('Gmail lane → comms-check-worker spawn (FR-E3)', () => {
+  // The comms-check-worker skill the ACTIVE-lane template probes for. Present by
+  // default so the active path can produce a filable spawn.
+  const installSkill = () => { const dir = join(root, 'orgs', 'clearworksai', 'agents', 'pa', '.claude', 'skills', 'comms-check-worker'); mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'SKILL.md'), '# Comms Check Worker'); };
+  // provider-config.json is a TEST fixture only — never shipped. Written into the
+  // config dir (which defaults to the framework root) to flip the gmail lane.
+  const writeLaneConfig = (mode: string) => writeFileSync(join(root, 'provider-config.json'), JSON.stringify({ lanes: { gmail: mode } }));
+  const spawnRecorder = () => { const spawns: Array<{ integration: string; name: string; env: Record<string, string>; dir: string; parent: string }> = []; const spawnWorker: NonNullable<BridgeServerOptions['providerIngressDependencies']>['spawnWorker'] = async (integration, planFn, opts) => { const plan = planFn(); if (!plan) return { ok: false }; spawns.push({ integration, name: plan.workerName, env: plan.extraEnv, dir: plan.dir, parent: opts.parent }); return { ok: true, integration, workerName: plan.workerName }; }; return { spawns, spawnWorker }; };
+
+  it('active mode spawns comms-check-worker with the right name + GMAIL_HISTORY_ID env, skipping shadow routing', async () => {
+    installSkill(); writeLaneConfig('active'); const { spawns, spawnWorker } = spawnRecorder();
+    const { server, base } = await listen({ providerIngressDependencies: { spawnWorker } });
+    try {
+      const response = await post(base, '/relay/gmail-pubsub', gmailBody('55'), gmailHeaders);
+      expect(response.status).toBe(200);
+      expect(response.json).toEqual({ ok: true, mode: 'active', disposition: 'accepted' });
+      expect(spawns).toEqual([{ integration: 'gmail', name: 'comms-check-55', env: { GMAIL_HISTORY_ID: '55' }, dir: join(root, 'orgs', 'clearworksai', 'agents', 'pa'), parent: 'pa' }]);
+      // The spawn IS the delivery — no shadow routing proposal is recorded.
+      expect(readEventReceipts(stateDir).filter((entry) => entry.stage === 'routing')).toEqual([]);
+    } finally { await close(server); }
+  });
+
+  it('shadow mode (the default) spawns nothing and preserves the routing-proposal behavior', async () => {
+    installSkill(); const { spawns, spawnWorker } = spawnRecorder(); // no config file → shadow default
+    const { server, base } = await listen({ providerIngressDependencies: { spawnWorker } });
+    try {
+      const response = await post(base, '/relay/gmail-pubsub', gmailBody('55'), gmailHeaders);
+      expect(response.json).toEqual({ ok: true, mode: 'shadow', disposition: 'accepted' });
+      expect(spawns).toEqual([]);
+      expect(readEventReceipts(stateDir).find((entry) => entry.stage === 'routing')).toMatchObject({ routing_state: 'proposed', route: 'pa.comms-check-worker' });
+    } finally { await close(server); }
+  });
+
+  it('spawns at most once per event id (duplicate + stale never re-fire)', async () => {
+    installSkill(); writeLaneConfig('active'); const { spawns, spawnWorker } = spawnRecorder();
+    const { server, base } = await listen({ providerIngressDependencies: { spawnWorker } });
+    try {
+      expect((await post(base, '/relay/gmail-pubsub', gmailBody('60'), gmailHeaders)).json.disposition).toBe('accepted');
+      expect((await post(base, '/relay/gmail-pubsub', gmailBody('60'), gmailHeaders)).json.disposition).toBe('duplicate'); // same id
+      expect((await post(base, '/relay/gmail-pubsub', gmailBody('59'), gmailHeaders)).json.disposition).toBe('stale'); // older id
+      expect(spawns.map((entry) => entry.name)).toEqual(['comms-check-60']);
+    } finally { await close(server); }
+  });
+
+  it('active mode falls back (no spawn) when the target has no comms-check-worker skill', async () => {
+    writeLaneConfig('active'); const { spawns, spawnWorker } = spawnRecorder(); // skill NOT installed
+    const { server, base } = await listen({ providerIngressDependencies: { spawnWorker } });
+    try {
+      expect((await post(base, '/relay/gmail-pubsub', gmailBody('77'), gmailHeaders)).json).toEqual({ ok: true, mode: 'active', disposition: 'accepted' });
+      expect(spawns).toEqual([]);
+    } finally { await close(server); }
+  });
+});
+
 describe('Calendar watch shadow ingress', () => {
   it.each([
     ['missing header', { 'x-goog-channel-id': '' }, 'calendar_missing_header'],

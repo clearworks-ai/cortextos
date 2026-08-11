@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { execSync, spawnSync } from 'child_process';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'http';
@@ -119,7 +119,22 @@ function hmacSignatureMatches(rawBody: string, providedHeader: string, secret: s
   return timingSafeEqual(sha256Digest(providedHex), sha256Digest(expectedHex));
 }
 
-function readFrameworkEnv(frameworkRoot: string): Record<string, string> {
+/**
+ * List the org names under `<frameworkRoot>/orgs` (directories only). Used both to
+ * load org secrets when CTX_ORG is unset and to resolve a single-org default so the
+ * generated launchd plist can pin CTX_ORG going forward.
+ */
+export function listOrgDirs(frameworkRoot: string): string[] {
+  try {
+    return readdirSync(join(frameworkRoot, 'orgs'), { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name);
+  } catch {
+    return [];
+  }
+}
+
+export function readFrameworkEnv(frameworkRoot: string): Record<string, string> {
   const resolved: Record<string, string> = {};
   if (!frameworkRoot) return resolved;
   loadEnvFileInto(join(frameworkRoot, '.cortextos-env'), resolved);
@@ -127,6 +142,14 @@ function readFrameworkEnv(frameworkRoot: string): Record<string, string> {
   const org = process.env.CTX_ORG || resolved.CTX_ORG || '';
   if (org) {
     loadEnvFileInto(join(frameworkRoot, 'orgs', org, 'secrets.env'), resolved);
+  } else {
+    // CTX_ORG unresolved (the launchd plist omits it unless a prior start pinned it —
+    // the chicken-and-egg that silently crash-looped the bridge on "WEBHOOK_BRIDGE_SECRET
+    // required"). Load EVERY org's secrets.env so the bridge secret is still found,
+    // org-independent. See incident_webhook_bridge_dies_on_restart_missing_ctx_org.
+    for (const name of listOrgDirs(frameworkRoot)) {
+      loadEnvFileInto(join(frameworkRoot, 'orgs', name, 'secrets.env'), resolved);
+    }
   }
   return resolved;
 }
@@ -165,7 +188,11 @@ function findFrameworkRoot(): string {
 function resolveBridgeRuntimeContext(instanceId: string): BridgeRuntimeContext {
   const frameworkRoot = findFrameworkRoot();
   const envFromFiles = readFrameworkEnv(frameworkRoot);
-  const org = process.env.CTX_ORG || envFromFiles.CTX_ORG || '';
+  // Resolve org from env, then fall back to the sole org dir when unambiguous, so the
+  // generated plist pins CTX_ORG (line ~627) and future starts load that org's secrets
+  // directly instead of relying on the org-independent all-orgs fallback.
+  const orgDirs = listOrgDirs(frameworkRoot);
+  const org = process.env.CTX_ORG || envFromFiles.CTX_ORG || (orgDirs.length === 1 ? orgDirs[0] : '');
   const ctxRoot = process.env.CTX_ROOT || envFromFiles.CTX_ROOT || join(homedir(), '.cortextos', instanceId);
   const bridgeSecret = process.env.WEBHOOK_BRIDGE_SECRET || envFromFiles.WEBHOOK_BRIDGE_SECRET || '';
   const firefliesWebhookSecret = process.env.FIREFLIES_WEBHOOK_SECRET || envFromFiles.FIREFLIES_WEBHOOK_SECRET || undefined;

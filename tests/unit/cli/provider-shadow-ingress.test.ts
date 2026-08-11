@@ -94,11 +94,11 @@ describe('Gmail Pub/Sub shadow ingress', () => {
 describe('Gmail lane → comms-check-worker spawn (FR-E3)', () => {
   // The comms-check-worker skill the ACTIVE-lane template probes for. Present by
   // default so the active path can produce a filable spawn.
-  const installSkill = () => { const dir = join(root, 'orgs', 'clearworksai', 'agents', 'pa-codex', '.claude', 'skills', 'comms-check-worker'); mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'SKILL.md'), '# Comms Check Worker'); };
+  const installSkill = () => { const dir = join(root, 'orgs', 'clearworksai', 'skills', 'comms-check-worker'); mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'SKILL.md'), '# Comms Check Worker'); };
   // provider-config.json is a TEST fixture only — never shipped. Written into the
   // config dir (which defaults to the framework root) to flip the gmail lane.
   const writeLaneConfig = (mode: string) => writeFileSync(join(root, 'provider-config.json'), JSON.stringify({ lanes: { gmail: mode } }));
-  const spawnRecorder = () => { const spawns: Array<{ integration: string; name: string; env: Record<string, string>; dir: string; parent: string }> = []; const spawnWorker: NonNullable<BridgeServerOptions['providerIngressDependencies']>['spawnWorker'] = async (integration, planFn, opts) => { const plan = planFn(); if (!plan) return { ok: false }; spawns.push({ integration, name: plan.workerName, env: plan.extraEnv, dir: plan.dir, parent: opts.parent }); return { ok: true, integration, workerName: plan.workerName }; }; return { spawns, spawnWorker }; };
+  const spawnRecorder = () => { const spawns: Array<{ integration: string; name: string; env: Record<string, string>; dir: string; parent: string; prompt: string }> = []; const spawnWorker: NonNullable<BridgeServerOptions['providerIngressDependencies']>['spawnWorker'] = async (integration, planFn, opts) => { const plan = planFn(); if (!plan) return { ok: false }; spawns.push({ integration, name: plan.workerName, env: plan.extraEnv, dir: plan.dir, parent: opts.parent, prompt: plan.prompt }); return { ok: true, integration, workerName: plan.workerName }; }; return { spawns, spawnWorker }; };
 
   it('active mode spawns comms-check-worker with the right name + GMAIL_HISTORY_ID env, skipping shadow routing', async () => {
     installSkill(); writeLaneConfig('active'); const { spawns, spawnWorker } = spawnRecorder();
@@ -107,7 +107,16 @@ describe('Gmail lane → comms-check-worker spawn (FR-E3)', () => {
       const response = await post(base, '/relay/gmail-pubsub', gmailBody('55'), gmailHeaders);
       expect(response.status).toBe(200);
       expect(response.json).toEqual({ ok: true, mode: 'active', disposition: 'accepted' });
-      expect(spawns).toEqual([{ integration: 'gmail', name: 'comms-check-55', env: { GMAIL_HISTORY_ID: '55' }, dir: join(root, 'orgs', 'clearworksai', 'agents', 'pa-codex'), parent: 'pa-codex' }]);
+      expect(spawns).toEqual([{
+        integration: 'gmail',
+        name: 'comms-check-55',
+        env: { GMAIL_HISTORY_ID: '55' },
+        dir: join(root, 'orgs', 'clearworksai', 'agents', 'pa-codex'),
+        parent: 'pa-codex',
+        prompt: expect.stringContaining(join('..', '..', 'skills', 'comms-check-worker', 'SKILL.md')),
+      }]);
+      expect(spawns[0].prompt).not.toContain('.claude');
+      expect(spawns[0].prompt).not.toContain('plugins');
       // The spawn IS the delivery — no shadow routing proposal is recorded.
       expect(readEventReceipts(stateDir).filter((entry) => entry.stage === 'routing')).toEqual([]);
     } finally { await close(server); }
@@ -135,7 +144,7 @@ describe('Gmail lane → comms-check-worker spawn (FR-E3)', () => {
     } finally { await close(server); }
   });
 
-  it('active mode falls back (no spawn) when the target has no comms-check-worker skill', async () => {
+  it('active mode does not spawn when the tracked central comms skill is missing', async () => {
     writeLaneConfig('active'); const { spawns, spawnWorker } = spawnRecorder(); // skill NOT installed
     const { server, base } = await listen({ providerIngressDependencies: { spawnWorker } });
     try {

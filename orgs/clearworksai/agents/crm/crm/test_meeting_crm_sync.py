@@ -241,6 +241,24 @@ class RealWriteTests(unittest.TestCase):
         # interaction still logged with the deal_state on the row
         self.assertEqual(self._rows()[0]["deal_state"], "They gave a verbal yes")
 
+    # (c2) sales meeting, name-only engagement (clearpath_id null) -> select by --engagement-name (FR-007)
+    def test_sales_name_only_engagement_uses_engagement_name(self):
+        ev = _write_event(self.tmp, meeting_id="MR3b", meeting_type="sales", attendees=["jane@acme.com"])
+        os.environ["FF_EVENT_PAYLOAD_PATH"] = str(ev)
+        (self.tmp / "pipeline.json").write_text(json.dumps(
+            {"engagements": [{"clearpath_id": None, "name": "Acme Local Deal",
+                              "primary_contact_id": "jane", "contact_ids": ["jane"]}]}))
+        self._ff_meetings = [{"id": "MR3b", "meeting_type": "sales",
+                              "deal_state": "They gave a verbal yes"}]
+
+        result = self.mod.process(meeting_id="MR3b", event_file=None)
+
+        self.assertEqual(len(self._engagement_calls), 1)          # NOT silently skipped
+        argv = self._engagement_calls[0]
+        self.assertNotIn("--clearpath-id", argv)                  # no null id passed
+        self.assertEqual(argv[argv.index("--engagement-name") + 1], "Acme Local Deal")
+        self.assertEqual(result["deal_stage"], "written")
+
     # (d) non-sales -> pipeline.json UNTOUCHED
     def test_non_sales_pipeline_untouched(self):
         ev = _write_event(self.tmp, meeting_id="MR4", meeting_type="delivery", attendees=["jane@acme.com"])

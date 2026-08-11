@@ -32,6 +32,7 @@ OFFER_PATH = KNOWLEDGE_DIR / "offer.md"
 STATE_PATH = KNOWLEDGE_DIR / "STATE.md"
 STATE_DIR = AGENT_DIR / "state"
 DEFAULT_WATERMARK_PATH = STATE_DIR / "ff-extractor-watermark.json"
+ZERO_YIELD_LEDGER_PATH = STATE_DIR / "ff-extractor-zero-yield.jsonl"
 DEFAULT_TRANSCRIPT_LIMIT = 20
 FIREFLIES_API_URL = "https://api.fireflies.ai/graphql"
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -95,12 +96,17 @@ Identify every task, commitment, follow-up, or to-do mentioned. Be specific — 
 Only include forward-looking work or business commitments that still need to be done AFTER the meeting ends. Exclude personal or social errands (e.g. saying goodbye, returning home, travel logistics), small talk, and anything that was already completed during the meeting itself.
 Client context:
 {client_context}
+Only surface items material to an active Clearworks engagement; ignore unrelated personal or social chatter.
 
 For each action item, ALL of the following must be true or the item must be dropped:
-- A SPECIFIC named owner — a real person mentioned by name in the transcript (not "the team,"
-  not a generic/implied party, not "Unassigned"). If no real person is named, drop it.
+- An attributable owner — preferably a real person named in the transcript. First-person promises
+  ("I", "I'll", "I'm going to") may be returned with that self-reference when the transcript's
+  speaker label is the only reliable owner; never guess a different person's name. Generic plural
+  owners such as "the team" remain insufficient unless the transcript contains an explicit promise.
 - A CONCRETE due date or explicit near-term timeframe stated in the transcript (e.g. "by Friday,"
-  "next week"). Vague or absent timing ("eventually," "at some point," unstated) means: drop it.
+  "next week", "a day or so"). Preserve imprecise phrases verbatim in dueDate; never turn them into
+  an exact calendar date. Vague or absent timing ("eventually," "at some point," unstated) means:
+  drop it.
 - Explicit commitment language — "I will," "I'll send," "let's do X by Y" — not hedged or
   speculative language ("could," "might," "worth considering," "an option would be to").
 This bar applies REGARDLESS of whether client context is populated or empty, and regardless of
@@ -108,8 +114,9 @@ whether the other party is a prospect or an existing client — the test is alwa
 specifically-owned, specifically-dated commitment, not whether the relationship is established.
 Explicitly REJECT: descriptions of what a company/service offers in the abstract, self-referential
 pitch or business-model narration (e.g. "the way my company works is...", "we typically do X for
-clients"), and hypothetical/illustrative examples — these are never action items even if phrased
-with task-like structure.
+clients"), hypothetical/illustrative examples, and casual personal self-disclosures (e.g. "I'll be
+learning more about coding in the next few weeks") — these are context, never action items even if
+phrased with future-tense or task-like structure.
 No artificial limit on count. Zero acceptable if none found — that is the expected result for a
 call with no real commitments.
 IMPORTANT: Return ONLY a valid JSON array with objects using exactly these fields:
@@ -193,13 +200,53 @@ VAGUE_ACTION_PREFIXES = (
     "think about",
     "work on",
 )
-# Fleet rule: Marcos Santa Ana is a hard-no — must never become a task or ping.
-SUPPRESSED_NAMES = ("marcos", "santa ana")
+# Personal learning chatter commonly arrives with future-tense language and a
+# broad timeframe. Keep this deliberately narrow so a concrete work commitment
+# such as "learn the Acme API by Friday" still survives.
+CASUAL_LEARNING_ACTION_RE = re.compile(
+    r"^(?:learn|learning|study|studying|read|reading|watch|watching|build|develop|practice)\b"
+    r".*\b(?:coding|programming)\b",
+    re.IGNORECASE,
+)
+IMPRECISE_TIMEFRAME_RE = re.compile(
+    r"\b(?:in\s+)?(?:a|one)\s+(?:business\s+)?day\s+or\s+so\b"
+    r"|\b(?:in|within)\s+(?:a\s+)?(?:couple|few)\s+(?:of\s+)?(?:days?|weeks?)\b"
+    r"|\bnext\s+(?:few|couple(?:\s+of)?)\s+weeks?\b",
+    re.IGNORECASE,
+)
+CASUAL_CONTEXT_TIMEFRAME_RE = re.compile(
+    rf"(?:{IMPRECISE_TIMEFRAME_RE.pattern})|\b(?:soon|sometime|later)\b",
+    re.IGNORECASE,
+)
+SUPPORT_TIMEFRAME_RE = re.compile(
+    r"\b(?:today|tomorrow|(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b"
+    r"|\b(?:this|next)\s+week\b"
+    r"|\b\d{4}-\d{2}-\d{2}\b",
+    re.IGNORECASE,
+)
+# NOTE: legacy exclusion removed 2026-08-09 — this was a months-old "drop Marcos from a
+# sales reminder" ask that had grown into a hard-no substring filter, which silently dropped
+# Marcos Santa Ana (a real client) from ALL meeting writeback/extraction. Marcos is a client.
+SUPPRESSED_NAMES = ()
 # Owner strings that are not a concrete named person — never inbound-worthy.
-GENERIC_OWNERS = {"", "unassigned", "team", "the team", "everyone", "client", "we", "they"}
+GENERIC_OWNERS = {
+    "", "unassigned", "team", "the team", "everyone", "client", "we", "they",
+}
+FIRST_PERSON_OWNER_RE = re.compile(
+    r"^(?:i|me|myself|i\s+(?:ll|will|m|am)(?:\s+going\s+to)?|im(?:\s+going\s+to)?)$"
+)
+COLLECTIVE_OWNER_RE = re.compile(
+    r"^we(?:\s+(?:ll|will|re|are)(?:\s+going\s+to)?)?$"
+)
+EXPLICIT_COMMITMENT_RE = re.compile(
+    r"\b(?:i(?:['’]?ll|\s+will)|i(?:['’]?m|\s+am)\s+going\s+to"
+    r"|we(?:['’]?ll|\s+will)|we(?:['’]?re|\s+are)\s+going\s+to|let\s+me|let['’]?s)\b",
+    re.IGNORECASE,
+)
 COUNTERPARTY_RE = re.compile(
     r"\b(?:call|email|text|send|share|follow up with|ask|tell|schedule with|meet with)\s+([A-Z][A-Za-z0-9&.-]*(?:\s+[A-Z][A-Za-z0-9&.-]*){0,3})\b"
     r"|\b(?:to|with|for)\s+([A-Z][A-Za-z0-9&.-]*(?:\s+[A-Z][A-Za-z0-9&.-]*){0,3})\b"
+    r"|\b([A-Z][A-Za-z0-9&.-]+)(?:'s|’s)\b"
 )
 MARKDOWN_TABLE_SEPARATOR = re.compile(r"^[\s:|-]+$")
 PRIORITY_ORDER = ("P0", "P1", "P2", "P3")
@@ -599,6 +646,35 @@ def save_watermark(path: Path, transcript: dict[str, Any]) -> None:
     os.replace(temp_path, path)
 
 
+DROP_REASONS = ("empty_text", "casual", "zero_extracted", "all_refined_out")
+
+
+def empty_drop_reason_counts() -> dict[str, int]:
+    return {reason: 0 for reason in DROP_REASONS}
+
+
+def single_drop_reason_counts(reason: str) -> dict[str, int]:
+    counts = empty_drop_reason_counts()
+    if reason in counts:
+        counts[reason] = 1
+    return counts
+
+
+def append_zero_yield_row(path: Path, transcript: dict[str, Any], drop_reason: str) -> None:
+    payload = {
+        "meeting_id": str(transcript.get("id") or ""),
+        "meeting_date": collapse_ws(str(transcript.get("date") or "")),
+        "title": collapse_ws(str(transcript.get("title") or "")),
+        "timestamp": now_utc_iso(),
+        "drop_reason": drop_reason,
+        "drop_reason_counts": single_drop_reason_counts(drop_reason),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, sort_keys=True))
+        handle.write("\n")
+
+
 def is_newer_than_watermark(
     transcript: dict[str, Any],
     watermark_timestamp: datetime | None,
@@ -866,7 +942,62 @@ def fuzzy_similarity(left: str, right: str) -> float:
 
 def is_josh_owner(owner: str) -> bool:
     normalized = normalize_action(owner)
-    return normalized in {"josh", "josh weiss", "me", "i", "myself"}
+    return normalized in {"josh", "josh weiss"}
+
+
+def is_first_person_owner(owner: str) -> bool:
+    return FIRST_PERSON_OWNER_RE.fullmatch(normalize_action(owner)) is not None
+
+
+def is_generic_owner(owner: str) -> bool:
+    normalized = normalize_action(owner)
+    return (
+        normalized in GENERIC_OWNERS
+        or FIRST_PERSON_OWNER_RE.fullmatch(normalized) is not None
+        or COLLECTIVE_OWNER_RE.fullmatch(normalized) is not None
+    )
+
+
+def infer_first_person_speaker(
+    transcript: dict[str, Any],
+    action: str,
+    due_date: str = "",
+) -> str | None:
+    """Resolve a self-referential owner from its explicit promise sentence."""
+    sentences = transcript.get("sentences")
+    if not isinstance(sentences, list):
+        return None
+    action_tokens = normalized_tokens(action)
+    if not action_tokens:
+        return None
+    due_tokens = normalized_tokens(due_date)
+    best_name: str | None = None
+    best_score: tuple[float, int, int] | None = None
+    tied_speakers: set[str] = set()
+    for index, sentence in enumerate(sentences):
+        if not isinstance(sentence, dict):
+            continue
+        speaker = collapse_ws(str(sentence.get("speaker_name") or ""))
+        text = collapse_ws(str(sentence.get("text") or sentence.get("raw_text") or ""))
+        if not speaker or not text or EXPLICIT_COMMITMENT_RE.search(text) is None:
+            continue
+        sentence_tokens = normalized_tokens(text)
+        action_overlap = len(action_tokens & sentence_tokens)
+        if action_overlap == 0:
+            continue
+        due_overlap = len(due_tokens & sentence_tokens)
+        # Speaker attribution must remain ambiguous when otherwise-equal
+        # evidence appears under multiple speakers.  Sentence order is only a
+        # tiebreaker for selecting one best sentence, never for declaring a
+        # unique owner.
+        score = (action_overlap / len(action_tokens), due_overlap, action_overlap)
+        if best_score is None or score > best_score:
+            best_score = score
+            best_name = speaker
+            tied_speakers = {speaker}
+        elif score == best_score:
+            tied_speakers.add(speaker)
+    return best_name if len(tied_speakers) == 1 else None
 
 
 def extract_josh_sentences(transcript: dict[str, Any]) -> list[str]:
@@ -941,6 +1072,92 @@ def resolve_due_date(raw_due: str, meeting_day: date) -> str | None:
     return None
 
 
+def has_imprecise_timeframe(value: str) -> bool:
+    return IMPRECISE_TIMEFRAME_RE.search(collapse_ws(value)) is not None
+
+
+def source_has_explicit_timeframe(source_quote: str) -> bool:
+    source = collapse_ws(source_quote)
+    return bool(source and (IMPRECISE_TIMEFRAME_RE.search(source) or SUPPORT_TIMEFRAME_RE.search(source)))
+
+
+def source_matches_timeframe(raw_due: str, meeting_day: date, source_quote: str) -> bool:
+    """Check that the model's due phrase has evidence in the supporting sentence."""
+    source = collapse_ws(source_quote)
+    due = collapse_ws(raw_due)
+    if not source or not due:
+        return False
+    if has_imprecise_timeframe(due):
+        return has_imprecise_timeframe(source)
+
+    source_normalized = normalize_action(source)
+    due_normalized = normalize_action(due)
+    if due_normalized in source_normalized:
+        return True
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", due):
+        return False
+
+    for phrase in (
+        "today",
+        "tomorrow",
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+        "next monday",
+        "next tuesday",
+        "next wednesday",
+        "next thursday",
+        "next friday",
+        "next saturday",
+        "next sunday",
+    ):
+        if re.search(rf"\b{re.escape(phrase)}\b", source_normalized) and resolve_due_date(
+            phrase,
+            meeting_day,
+        ) == due:
+            return True
+    return False
+
+
+def has_explicit_timeframe(raw_due: str, meeting_day: date, source_quote: str = "") -> bool:
+    if raw_due and source_quote:
+        return source_matches_timeframe(raw_due, meeting_day, source_quote)
+    return (
+        resolve_due_date(raw_due, meeting_day) is not None
+        or has_imprecise_timeframe(raw_due)
+        or source_has_explicit_timeframe(source_quote)
+    )
+
+
+def has_unsupported_imprecise_due(raw_due: str, meeting_day: date, source_quote: str) -> bool:
+    return bool(raw_due and has_imprecise_timeframe(raw_due) and not source_matches_timeframe(
+        raw_due,
+        meeting_day,
+        source_quote,
+    ))
+
+
+def resolve_grounded_due_date(raw_due: str, meeting_day: date, source_quote: str = "") -> str | None:
+    """Resolve exact dates, but never sharpen an imprecise source phrase."""
+    if raw_due and source_quote and source_has_explicit_timeframe(source_quote):
+        if not source_matches_timeframe(raw_due, meeting_day, source_quote):
+            return None
+    if has_imprecise_timeframe(raw_due):
+        return None
+    return resolve_due_date(raw_due, meeting_day)
+
+
+def is_casual_self_disclosure(action: str, due: str, source_quote: str = "") -> bool:
+    """Reject narrow personal-learning chatter without swallowing real work."""
+    if CASUAL_LEARNING_ACTION_RE.search(normalize_action(action)) is None:
+        return False
+    return CASUAL_CONTEXT_TIMEFRAME_RE.search(collapse_ws(f"{due} {source_quote}")) is not None
+
+
 def has_concrete_action(action: str) -> bool:
     normalized = normalize_action(action)
     if not normalized:
@@ -971,7 +1188,7 @@ def is_already_handled(raw_due: str) -> bool:
 
 def extract_counterparty(text: str) -> str | None:
     for match in COUNTERPARTY_RE.finditer(text):
-        candidate = collapse_ws(match.group(1) or match.group(2) or "")
+        candidate = collapse_ws(match.group(1) or match.group(2) or match.group(3) or "")
         if candidate:
             return candidate
     return None
@@ -1145,12 +1362,23 @@ def refine_outbound_item(
         return None
     if is_already_handled(item.due_date):
         return None
-    due = resolve_due_date(item.due_date, meeting_day)
     support = best_support_sentence(item.action, josh_sentences)
+    if is_casual_self_disclosure(item.action, item.due_date, support or ""):
+        return None
+    if has_unsupported_imprecise_due(item.due_date, meeting_day, support or ""):
+        return None
+    due = resolve_grounded_due_date(item.due_date, meeting_day, support or "")
     counterparty = extract_counterparty(item.action) or (
         extract_counterparty(support) if support else None
     )
-    if due is None and counterparty is None:
+    if due is None and counterparty is None and not (
+        # A source-backed timeframe may be imprecise, or the model may have
+        # sharpened it into an unsupported exact date. Keep the commitment but
+        # leave deadline blank in either case; only unsupported vague phrases
+        # are rejected above.
+        source_has_explicit_timeframe(support or "")
+        or has_explicit_timeframe(item.due_date, meeting_day, support or "")
+    ):
         return None
     if is_suppressed(item.owner, item.action, counterparty):
         return None
@@ -1176,24 +1404,29 @@ def refine_inbound_item(
     all_sentences: list[str] | None = None,
 ) -> RefinedCommitment | None:
     # Conservative inbound gate (client → Josh): concrete named owner only.
-    if normalize_action(item.owner) in GENERIC_OWNERS:
+    if is_generic_owner(item.owner):
         return None
     if not has_concrete_action(item.action):
         return None
     if is_already_handled(item.due_date):
         return None
-    due = resolve_due_date(item.due_date, meeting_day)
+    quote = best_support_sentence(item.action, all_sentences or []) or ""
+    if is_casual_self_disclosure(item.action, item.due_date, quote):
+        return None
+    if has_unsupported_imprecise_due(item.due_date, meeting_day, quote):
+        return None
+    due = resolve_grounded_due_date(item.due_date, meeting_day, quote)
     counterparty = extract_counterparty(item.action)
     josh_tied = (
         "josh" in normalized_tokens(item.action)
         or (counterparty is not None and "josh" in normalize_action(counterparty))
-        or due is not None
+        or source_has_explicit_timeframe(quote)
+        or has_explicit_timeframe(item.due_date, meeting_day, quote)
     )
     if not josh_tied:
         return None
     if is_suppressed(item.owner, item.action, counterparty):
         return None
-    quote = best_support_sentence(item.action, all_sentences or []) or ""
     return RefinedCommitment(
         id=directional_commitment_id(meeting_id, item.action, "inbound"),
         text=build_commitment_text(f"[inbound] {item.owner}: {item.action}", due),
@@ -1204,6 +1437,45 @@ def refine_inbound_item(
         owner=item.owner,
         deadline=due or "",
         source_quote=quote,
+    )
+
+
+def refine_generic_owner_item(
+    item: ExtractedItem,
+    *,
+    meeting_id: str,
+    meeting_day: date,
+    all_sentences: list[str],
+    source_ref: str,
+) -> RefinedCommitment | None:
+    """Keep only transcript-grounded generic-owner promises for later assignment."""
+    if not is_generic_owner(item.owner):
+        return None
+    if not has_concrete_action(item.action) or is_already_handled(item.due_date):
+        return None
+    support = best_support_sentence(item.action, all_sentences)
+    if support is None or EXPLICIT_COMMITMENT_RE.search(support) is None:
+        return None
+    if not source_has_explicit_timeframe(support):
+        return None
+    if item.due_date and not source_matches_timeframe(item.due_date, meeting_day, support):
+        return None
+    if is_casual_self_disclosure(item.action, item.due_date, support):
+        return None
+    due = resolve_grounded_due_date(item.due_date, meeting_day, support)
+    counterparty = extract_counterparty(item.action) or extract_counterparty(support)
+    if is_suppressed(item.owner, item.action, counterparty):
+        return None
+    return RefinedCommitment(
+        id=commitment_id(meeting_id, item.action),
+        text=build_commitment_text(item.action, due),
+        source="ff",
+        source_ref=source_ref,
+        direction="unassigned",
+        action_text=item.action,
+        owner="NEEDS-OWNER",
+        deadline=due or "",
+        source_quote=support,
     )
 
 
@@ -1225,21 +1497,47 @@ def refine_items(
     seen_ids: set[str] = set()
 
     for item in extracted_items:
-        if is_josh_owner(item.owner):
+        effective_item = item
+        inferred_speaker: str | None = None
+        if is_first_person_owner(item.owner):
+            speaker = infer_first_person_speaker(transcript, item.action, item.due_date)
+            if speaker:
+                effective_item = replace(item, owner=speaker)
+                inferred_speaker = speaker
+        if is_josh_owner(effective_item.owner):
             commitment = refine_outbound_item(
-                item,
+                effective_item,
                 meeting_id=meeting_id,
                 meeting_day=meeting_day,
                 josh_sentences=josh_sentences,
                 source_ref=source_ref,
             )
+        elif is_generic_owner(effective_item.owner):
+            commitment = refine_generic_owner_item(
+                effective_item,
+                meeting_id=meeting_id,
+                meeting_day=meeting_day,
+                all_sentences=all_sentences,
+                source_ref=source_ref,
+            )
         else:
+            inbound_sentences = all_sentences
+            if inferred_speaker:
+                raw_sentences = transcript.get("sentences")
+                if isinstance(raw_sentences, list):
+                    inbound_sentences = [
+                        collapse_ws(str(sentence.get("text") or sentence.get("raw_text") or ""))
+                        for sentence in raw_sentences
+                        if isinstance(sentence, dict)
+                        and collapse_ws(str(sentence.get("speaker_name") or "")) == inferred_speaker
+                        and collapse_ws(str(sentence.get("text") or sentence.get("raw_text") or ""))
+                    ]
             commitment = refine_inbound_item(
-                item,
+                effective_item,
                 meeting_id=meeting_id,
                 meeting_day=meeting_day,
                 source_ref=source_ref,
-                all_sentences=all_sentences,
+                all_sentences=inbound_sentences,
             )
         if commitment is None or commitment.id in seen_ids:
             continue
@@ -1284,75 +1582,6 @@ def commitment_payload_entries(commitments: list[RefinedCommitment]) -> list[dic
     return commitment_entries(commitments, enriched=False)
 
 
-# --- A6: commitment triple-sink (BUS + BRIEFS + Telegram) -------------------
-# Each extracted commitment must fan out to THREE sinks, all idempotent by the
-# SAME deterministic commitment id (`ff_…` / `ffin_…`):
-#   1. BUS human task  — `cortextos bus create-task --assignee human`
-#      (client-visible → `--needs-approval` + a `create-approval` card),
-#      deduped by `cortextos bus event-dedup --source commitment:<id>`.
-#   2. BRIEFS POST     — `post_commitments()` (server-side dedup by id). KEEP.
-#   3. Telegram        — surfaced by the SKILL, deduped by id in the surfaced
-#      ledger. KEEP.
-# The extractor OWNS the deterministic bus-task spec so the id is shared across
-# all three sinks; the SKILL only executes the spec through the dedup gate. This
-# keeps the fan-out deterministic (not LLM-driven) and unit-testable in Python.
-
-# A matched-client outbound commitment is client-visible → route it through the
-# human approval card before it can turn into an external action. `relevance_score`
-# is >0 only when a client context record actually matched (see
-# relevance_score_for_commitment), so it is a deterministic client-visible signal.
-CLIENT_VISIBLE_RELEVANCE_MIN = RELEVANCE_P1_MIN
-
-
-def is_client_visible(commitment: RefinedCommitment) -> bool:
-    """True when the commitment is a client-facing action Josh owns.
-
-    Only OUTBOUND (WE committed) items can be client-visible — an inbound item is
-    someone else's action and is FYI/tracking only, never an approval-gated task.
-    """
-    if commitment.direction != "outbound":
-        return False
-    return commitment.relevance_score >= CLIENT_VISIBLE_RELEVANCE_MIN
-
-
-def bus_task_entries(commitments: list[RefinedCommitment]) -> list[dict[str, Any]]:
-    """Deterministic bus-sink spec, one entry per commitment, keyed by the SAME
-    commitment id used by BRIEFS and Telegram.
-
-    Every entry carries:
-      - `dedupSource` = `commitment:<id>` — the atomic first-sight gate the SKILL
-        passes to `cortextos bus event-dedup` so a re-run never creates a second
-        task (and inbound/outbound ids differ, so the same action in both
-        directions stays two distinct tasks, matching BRIEFS/Telegram).
-      - `assignee` = `human` — surfaces on the [HUMAN] board.
-      - `needsApproval` + `approval` card metadata for client-visible items.
-
-    Pure/deterministic: no I/O, no time, no LLM. The SKILL is the only caller
-    that shells out to the bus, so this stays testable in isolation.
-    """
-    entries: list[dict[str, Any]] = []
-    for item in commitments:
-        client_visible = is_client_visible(item)
-        entry: dict[str, Any] = {
-            "id": item.id,
-            "dedupSource": f"commitment:{item.id}",
-            "title": item.text,
-            "assignee": "human",
-            "direction": item.direction,
-            "sourceRef": item.source_ref,
-            "priority": item.priority,
-            "needsApproval": client_visible,
-        }
-        if client_visible:
-            entry["approval"] = {
-                "title": item.text,
-                "category": "external-comms",
-                "context": item.source_ref,
-            }
-        entries.append(entry)
-    return entries
-
-
 def post_commitments(
     *,
     ingest_url: str,
@@ -1384,19 +1613,57 @@ def require_env(name: str) -> str:
     return value
 
 
+def extract_commitments_for_transcript(
+    transcript: dict[str, Any],
+    *,
+    openrouter_api_key: str,
+    urlopen: Urlopen = urllib.request.urlopen,
+) -> tuple[list[RefinedCommitment], str | None]:
+    transcript_text = build_transcript_text(transcript.get("sentences", []), limit=CLASSIFIER_MAX_CHARS)
+    if not transcript_text:
+        return [], "empty_text"
+
+    if is_casual_transcript(transcript_text, openrouter_api_key=openrouter_api_key, urlopen=urlopen):
+        return [], "casual"
+
+    client_record = matched_client_context_record_for_transcript(transcript)
+    client_context = str(client_record.get("context") or "") if client_record is not None else ""
+    extraction_text = build_transcript_text(transcript.get("sentences", []), limit=EXTRACTOR_MAX_CHARS)
+    extracted = extract_action_items(
+        extraction_text,
+        client_context=client_context,
+        openrouter_api_key=openrouter_api_key,
+        urlopen=urlopen,
+    )
+    if not extracted:
+        return [], "zero_extracted"
+
+    commitments = refine_items(transcript, extracted, client_record=client_record)
+    if not commitments:
+        return [], "all_refined_out"
+    return commitments, None
+
+
 def execute(
     *,
     limit: int,
     dry_run: bool,
+    meeting_id: str = "",
     watermark_path: Path,
     urlopen: Urlopen = urllib.request.urlopen,
 ) -> int:
     try:
-        return run(limit=limit, dry_run=dry_run, watermark_path=watermark_path, urlopen=urlopen)
+        return run(
+            limit=limit,
+            dry_run=dry_run,
+            meeting_id=meeting_id,
+            watermark_path=watermark_path,
+            urlopen=urlopen,
+        )
     except (RuntimeError, ValueError, urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError) as exc:
         reason = collapse_ws(str(exc)) or exc.__class__.__name__
         LOGGER.error("ff-extractor failed: %s", reason)
-        print(json.dumps({"error": reason, "items": [], "dry_run": dry_run}))
+        print(json.dumps({"error": reason, "items": [], "dry_run": dry_run, **empty_drop_reason_counts()}))
         return 1
 
 
@@ -1404,6 +1671,7 @@ def run(
     *,
     limit: int,
     dry_run: bool,
+    meeting_id: str = "",
     watermark_path: Path,
     urlopen: Urlopen = urllib.request.urlopen,
 ) -> int:
@@ -1420,40 +1688,45 @@ def run(
 
     watermark_timestamp, watermark_meeting_id = load_watermark(watermark_path)
     recent = fetch_recent_transcripts(fireflies_api_key, limit=limit, urlopen=urlopen)
-    fresh = select_recent_transcripts(recent, watermark_timestamp, watermark_meeting_id, limit=limit)
+    if meeting_id:
+        fresh = [t for t in recent if str(t.get("id") or "") == meeting_id]
+    else:
+        fresh = select_recent_transcripts(recent, watermark_timestamp, watermark_meeting_id, limit=limit)
     if not fresh:
-        print(json.dumps({"meetings": 0, "commitments": 0, "posted": False, "dry_run": dry_run, "items": [], "busTasks": []}))
+        print(
+            json.dumps(
+                {
+                    "meetings": 0,
+                    "commitments": 0,
+                    "posted": False,
+                    "dry_run": dry_run,
+                    "items": [],
+                    **empty_drop_reason_counts(),
+                }
+            )
+        )
         return 0
 
     all_commitments: list[RefinedCommitment] = []
     processed: list[dict[str, Any]] = []
+    zero_yield_transcripts: list[tuple[dict[str, Any], str]] = []
+    drop_reason_counts = empty_drop_reason_counts()
     for transcript in fresh:
-        transcript_text = build_transcript_text(transcript.get("sentences", []), limit=CLASSIFIER_MAX_CHARS)
-        if not transcript_text:
-            processed.append(transcript)
-            continue
-        if is_casual_transcript(transcript_text, openrouter_api_key=openrouter_api_key, urlopen=urlopen):
-            processed.append(transcript)
-            continue
-        client_record = matched_client_context_record_for_transcript(transcript)
-        client_context = str(client_record.get("context") or "") if client_record is not None else ""
-        extraction_text = build_transcript_text(transcript.get("sentences", []), limit=EXTRACTOR_MAX_CHARS)
-        extracted = extract_action_items(
-            extraction_text,
-            client_context=client_context,
+        commitments, drop_reason = extract_commitments_for_transcript(
+            transcript,
             openrouter_api_key=openrouter_api_key,
             urlopen=urlopen,
         )
-        all_commitments.extend(refine_items(transcript, extracted, client_record=client_record))
+        all_commitments.extend(commitments)
+        if drop_reason is not None:
+            drop_reason_counts[drop_reason] += 1
+            zero_yield_transcripts.append((transcript, drop_reason))
         processed.append(transcript)
 
     items = commitment_entries(all_commitments, enriched=True)
     payload = {"commitments": commitment_payload_entries(all_commitments)}
-    # A6: emit the deterministic BUS sink spec (shared id) alongside items so the
-    # SKILL can fan out to the bus without re-deriving anything from the LLM.
-    bus_tasks = bus_task_entries(all_commitments)
     if dry_run:
-        print(json.dumps({"dry_run": True, "items": items, "payload": payload, "busTasks": bus_tasks}, indent=2))
+        print(json.dumps({"dry_run": True, "items": items, "payload": payload, **drop_reason_counts}, indent=2))
         return 0
 
     if payload["commitments"]:
@@ -1471,15 +1744,30 @@ def run(
                     "posted": True,
                     "result": result,
                     "items": items,
-                    "busTasks": bus_tasks,
+                    **drop_reason_counts,
                 }
             )
         )
     else:
-        print(json.dumps({"meetings": len(processed), "commitments": 0, "posted": False, "noop": True, "items": items, "busTasks": bus_tasks}))
+        print(
+            json.dumps(
+                {
+                    "meetings": len(processed),
+                    "commitments": 0,
+                    "posted": False,
+                    "noop": True,
+                    "items": items,
+                    **drop_reason_counts,
+                }
+            )
+        )
 
-    newest = max(processed, key=transcript_sort_key)
-    save_watermark(watermark_path, newest)
+    for transcript, drop_reason in zero_yield_transcripts:
+        append_zero_yield_row(ZERO_YIELD_LEDGER_PATH, transcript, drop_reason)
+
+    if not meeting_id:
+        newest = max(processed, key=transcript_sort_key)
+        save_watermark(watermark_path, newest)
     return 0
 
 
@@ -1504,7 +1792,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--meeting-id",
         default="",
-        help="Only honored in full mode: filter to one Fireflies transcript id",
+        help="Filter to one Fireflies transcript id in commitments or full mode",
     )
     return parser.parse_args(argv)
 
@@ -1820,6 +2108,7 @@ def main(argv: list[str] | None = None) -> int:
     return execute(
         limit=max(1, args.limit),
         dry_run=args.dry_run,
+        meeting_id=str(args.meeting_id or ""),
         watermark_path=Path(args.watermark_path),
     )
 

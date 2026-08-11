@@ -37,6 +37,14 @@ class FirefliesExtractorTests(unittest.TestCase):
             ],
         }
 
+    def test_action_prompt_preserves_imprecise_timeframes_and_rejects_casual_context(self) -> None:
+        prompt = " ".join(MODULE.ACTION_ITEMS_PROMPT.split())
+
+        self.assertIn('"a day or so"', prompt)
+        self.assertIn("never turn them into an exact calendar date", prompt)
+        self.assertIn("casual personal self-disclosures", prompt)
+        self.assertIn("learning more about coding", prompt)
+
     def test_refine_keeps_due_based_first_person_commitment(self) -> None:
         transcript = self.make_transcript("I'll send the proposal to Acme by Wednesday.")
         items = [
@@ -56,6 +64,37 @@ class FirefliesExtractorTests(unittest.TestCase):
         self.assertEqual(commitments[0].source, "ff")
         self.assertEqual(commitments[0].source_ref, "meeting_123 · Acme Follow Up")
 
+    def test_refine_keeps_explicit_dated_generic_owner_as_needs_owner(self) -> None:
+        transcript = self.make_transcript("We'll send the revised scope to Acme by Friday.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Send the revised scope to Acme",
+                owner="we",
+                due_date="Friday",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].owner, "NEEDS-OWNER")
+        self.assertEqual(commitments[0].deadline, "2026-06-12")
+        self.assertEqual(commitments[0].source_quote, "We'll send the revised scope to Acme by Friday.")
+
+    def test_refine_drops_generic_owner_without_explicit_commitment(self) -> None:
+        transcript = self.make_transcript("We should send the revised scope to Acme by Friday.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Send the revised scope to Acme",
+                owner="we",
+                due_date="Friday",
+                status="pending",
+            )
+        ]
+
+        self.assertEqual(MODULE.refine_items(transcript, items), [])
+
     def test_refine_keeps_named_counterparty_without_due(self) -> None:
         transcript = self.make_transcript("Let me call Sara about the contract this afternoon.")
         items = [
@@ -71,6 +110,38 @@ class FirefliesExtractorTests(unittest.TestCase):
 
         self.assertEqual(len(commitments), 1)
         self.assertEqual(commitments[0].text, "Call Sara about the contract")
+
+    def test_refine_keeps_possessive_counterparty_name(self) -> None:
+        transcript = self.make_transcript("I'll automate Wendy's spreadsheet process.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Automate Wendy's spreadsheet process",
+                owner="Josh",
+                due_date="",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].text, "Automate Wendy's spreadsheet process")
+
+    def test_refine_keeps_for_counterparty_name(self) -> None:
+        transcript = self.make_transcript("I'll build spreadsheet automation for Wendy.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Build spreadsheet automation for Wendy",
+                owner="Josh",
+                due_date="",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].text, "Build spreadsheet automation for Wendy")
 
     def test_refine_keeps_llm_assigned_josh_owner_without_verbatim_first_person(self) -> None:
         # We now trust the model's owner=Josh assignment rather than requiring a
@@ -135,6 +206,256 @@ class FirefliesExtractorTests(unittest.TestCase):
 
         self.assertEqual(commitments, [])
 
+    def test_refine_drops_casual_learning_self_disclosure(self) -> None:
+        transcript = self.make_transcript("I'll be learning more about coding in the next few weeks.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Learn more about coding",
+                owner="Josh",
+                due_date="next few weeks",
+                status="pending",
+            )
+        ]
+
+        self.assertEqual(MODULE.refine_items(transcript, items), [])
+
+    def test_refine_drops_casual_learning_wording_variant(self) -> None:
+        transcript = self.make_transcript("I'll be learning more about coding in the next few weeks.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Build coding skills",
+                owner="Josh",
+                due_date="next few weeks",
+                status="pending",
+            )
+        ]
+
+        self.assertEqual(MODULE.refine_items(transcript, items), [])
+
+    def test_refine_drops_non_commitment_thinking_statement(self) -> None:
+        transcript = self.make_transcript("I'm going to think about it.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Think about it",
+                owner="Josh",
+                due_date="next few weeks",
+                status="pending",
+            )
+        ]
+
+        self.assertEqual(MODULE.refine_items(transcript, items), [])
+
+    def test_refine_keeps_real_learning_commitment(self) -> None:
+        transcript = self.make_transcript("I'll learn coding standards for Acme by Friday.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Learn coding standards for Acme",
+                owner="Josh",
+                due_date="Friday",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].owner, "Josh")
+        self.assertEqual(commitments[0].deadline, "2026-06-12")
+
+    def test_refine_keeps_a_day_or_so_without_fabricating_deadline(self) -> None:
+        sentence = (
+            "It'll be a day or so, but I'm going to analyze the interviews "
+            "and send them both emails with Mark on copy."
+        )
+        transcript = self.make_transcript(sentence)
+        items = [
+            MODULE.ExtractedItem(
+                action="Analyze the interviews and send them both emails with Mark on copy",
+                owner="I'm going to",
+                due_date="a day or so",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].direction, "outbound")
+        self.assertEqual(commitments[0].owner, "Josh")
+        self.assertEqual(commitments[0].deadline, "")
+        self.assertNotIn("(due ", commitments[0].text)
+        self.assertEqual(commitments[0].source_quote, sentence)
+
+    def test_refine_discards_llm_date_invented_from_a_day_or_so(self) -> None:
+        sentence = "I'm going to analyze the interviews in a day or so."
+        transcript = self.make_transcript(sentence)
+        items = [
+            MODULE.ExtractedItem(
+                action="Analyze the interviews",
+                owner="I",
+                due_date="2026-06-09",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].owner, "Josh")
+        self.assertEqual(commitments[0].deadline, "")
+        self.assertNotIn("2026-06-09", commitments[0].text)
+
+    def test_refine_drops_unsupported_vague_due_phrase(self) -> None:
+        transcript = self.make_transcript("I'm going to analyze the interviews by Friday.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Analyze the interviews",
+                owner="I",
+                due_date="a day or so",
+                status="pending",
+            )
+        ]
+
+        self.assertEqual(MODULE.refine_items(transcript, items), [])
+
+    def test_refine_preserves_supported_friday_with_unrelated_vague_clause(self) -> None:
+        sentence = "It may take a day or so to review, but I'll send the report by Friday."
+        transcript = self.make_transcript(sentence)
+        items = [
+            MODULE.ExtractedItem(
+                action="Send the report",
+                owner="I",
+                due_date="Friday",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].owner, "Josh")
+        self.assertEqual(commitments[0].deadline, "2026-06-12")
+
+    def test_refine_keeps_unresolved_promise_as_needs_owner(self) -> None:
+        sentence = "I'm going to analyze the interviews in a day or so."
+        transcript = {
+            **self.make_transcript(sentence),
+            "sentences": [{"speaker_name": "", "text": sentence}],
+        }
+        items = [
+            MODULE.ExtractedItem(
+                action="Analyze the interviews",
+                owner="I",
+                due_date="a day or so",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].owner, "NEEDS-OWNER")
+        self.assertEqual(commitments[0].direction, "unassigned")
+        self.assertEqual(commitments[0].deadline, "")
+
+    def test_refine_drops_generic_owner_with_llm_invented_due_date(self) -> None:
+        transcript = self.make_transcript("We're going to analyze the interviews.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Analyze the interviews",
+                owner="we",
+                due_date="Friday",
+                status="pending",
+            )
+        ]
+
+        self.assertEqual(MODULE.refine_items(transcript, items), [])
+
+    def test_first_person_owner_uses_sentence_speaker_not_josh_default(self) -> None:
+        transcript = {
+            **self.make_transcript("I'll send the routing file by Friday."),
+            "sentences": [{"speaker_name": "Sarah Chen", "text": "I'll send the routing file by Friday."}],
+        }
+        items = [
+            MODULE.ExtractedItem(
+                action="Send the routing file",
+                owner="I",
+                due_date="Friday",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].direction, "inbound")
+        self.assertEqual(commitments[0].owner, "Sarah Chen")
+
+    def test_first_person_josh_speaker_remains_outbound(self) -> None:
+        transcript = self.make_transcript("I'll send the routing file by Friday.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Send the routing file",
+                owner="I'll",
+                due_date="Friday",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].direction, "outbound")
+        self.assertEqual(commitments[0].owner, "Josh")
+
+    def test_first_person_owner_uses_due_phrase_to_disambiguate_speaker(self) -> None:
+        transcript = {
+            **self.make_transcript("I'll send the routing file on Monday."),
+            "sentences": [
+                {"speaker_name": "Josh Weiss", "text": "I'll send the routing file on Monday."},
+                {"speaker_name": "Sarah Chen", "text": "I'll send the routing file on Friday."},
+            ],
+        }
+        items = [
+            MODULE.ExtractedItem(
+                action="Send the routing file",
+                owner="I",
+                due_date="Friday",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].direction, "inbound")
+        self.assertEqual(commitments[0].owner, "Sarah Chen")
+
+    def test_equal_first_person_evidence_stays_unassigned(self) -> None:
+        sentence = "I'll send the routing file by Friday."
+        transcript = {
+            **self.make_transcript(sentence),
+            "sentences": [
+                {"speaker_name": "Josh Weiss", "text": sentence},
+                {"speaker_name": "Sarah Chen", "text": sentence},
+            ],
+        }
+        items = [
+            MODULE.ExtractedItem(
+                action="Send the routing file",
+                owner="I",
+                due_date="Friday",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].owner, "NEEDS-OWNER")
+        self.assertEqual(commitments[0].direction, "unassigned")
+        self.assertNotEqual(commitments[0].direction, "inbound")
+
     def test_commitment_id_is_deterministic_after_normalization(self) -> None:
         first = MODULE.commitment_id("meeting_123", "Call Sara about the contract")
         second = MODULE.commitment_id("meeting_123", "  call  Sara about the contract!!! ")
@@ -149,6 +470,7 @@ class FirefliesExtractorTests(unittest.TestCase):
         self.assertEqual(MODULE.resolve_due_date("Wednesday", meeting_day), "2026-06-10")
         self.assertEqual(MODULE.resolve_due_date("next Wednesday", meeting_day), "2026-06-10")
         self.assertIsNone(MODULE.resolve_due_date("later soon", meeting_day))
+        self.assertIsNone(MODULE.resolve_due_date("a day or so", meeting_day))
 
     def test_outbound_metadata_unchanged(self) -> None:
         transcript = self.make_transcript("I'll send the proposal to Acme by Wednesday.")
@@ -351,7 +673,11 @@ class InboundDirectionTests(unittest.TestCase):
 
         self.assertEqual(commitments, [])
 
-    def test_marcos_suppressed_in_both_directions(self) -> None:
+    def test_client_marcos_not_suppressed_either_direction(self) -> None:
+        # Regression guard: the legacy name-based suppression that wrongly dropped
+        # Marcos Santa Ana (a real client) from ALL writeback was removed 2026-08-09
+        # (SUPPRESSED_NAMES == ()). His commitments MUST now survive refine in both
+        # directions — re-introducing client suppression must fail this test.
         outbound_items = [
             MODULE.ExtractedItem(
                 action="Send proposal to Marcos Santa Ana",
@@ -369,8 +695,8 @@ class InboundDirectionTests(unittest.TestCase):
             )
         ]
 
-        self.assertEqual(MODULE.refine_items(self.make_transcript(), outbound_items), [])
-        self.assertEqual(MODULE.refine_items(self.make_transcript(), inbound_items), [])
+        self.assertEqual(len(MODULE.refine_items(self.make_transcript(), outbound_items)), 1)
+        self.assertEqual(len(MODULE.refine_items(self.make_transcript(), inbound_items)), 1)
 
     def test_inbound_and_outbound_ids_differ_for_same_action(self) -> None:
         action = "Send the signed contract"
@@ -639,6 +965,58 @@ class RunStdoutContractTests(unittest.TestCase):
         printed = json.loads(stdout.getvalue())
         self.assertTrue(printed["noop"])
         self.assertEqual(printed["items"], [])
+        self.assertEqual(printed["casual"], 1)
+        self.assertEqual(printed["empty_text"], 0)
+        self.assertEqual(printed["zero_extracted"], 0)
+        self.assertEqual(printed["all_refined_out"], 0)
+        self.assertFalse(any("briefs.example" in url for url in calls))
+
+    def test_zero_yield_run_writes_auditable_ledger_row(self) -> None:
+        calls: list[str] = []
+
+        def casual_urlopen(request: object, timeout: int | None = None) -> FakeResponse:
+            url = request.full_url
+            calls.append(url)
+            if "fireflies" in url:
+                body: dict[str, object] = {"data": {"transcripts": [self.make_transcript()]}}
+            elif "openrouter" in url:
+                body = {"choices": [{"message": {"content": json.dumps({"is_casual": True})}}]}
+            else:
+                body = {"ok": True}
+            return FakeResponse(json.dumps(body).encode("utf-8"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            watermark_path = Path(tmp) / "watermark.json"
+            zero_yield_path = Path(tmp) / "ff-extractor-zero-yield.jsonl"
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, self.ENV):
+                with unittest.mock.patch.object(MODULE, "ZERO_YIELD_LEDGER_PATH", zero_yield_path):
+                    with contextlib.redirect_stdout(stdout):
+                        exit_code = MODULE.run(
+                            limit=5,
+                            dry_run=False,
+                            meeting_id="",
+                            watermark_path=watermark_path,
+                            urlopen=casual_urlopen,
+                        )
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(watermark_path.exists())
+            self.assertTrue(zero_yield_path.exists())
+            rows = [
+                json.loads(line)
+                for line in zero_yield_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+
+        printed = json.loads(stdout.getvalue())
+        self.assertTrue(printed["noop"])
+        self.assertEqual(printed["casual"], 1)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["meeting_id"], "meeting_123")
+        self.assertEqual(rows[0]["drop_reason"], "casual")
+        self.assertEqual(rows[0]["drop_reason_counts"]["casual"], 1)
+        self.assertEqual(rows[0]["drop_reason_counts"]["empty_text"], 0)
         self.assertFalse(any("briefs.example" in url for url in calls))
 
     def test_posted_print_includes_items(self) -> None:
@@ -1158,7 +1536,10 @@ class RecapModeTests(unittest.TestCase):
             self.assertEqual(printed["skipped_ledger"], 1)
             self.assertEqual(len(openrouter_calls), 0)  # No LLM calls due to ledger skip
 
-    def test_run_recap_suppresses_marcos_meeting(self):
+    def test_run_recap_does_not_suppress_client_marcos(self):
+        # Regression guard: legacy client-name suppression removed 2026-08-09.
+        # A meeting with a real client (Marcos Santa Ana) must NOT be dropped by
+        # recap mode — it flows through to `meetings` with skipped_suppressed == 0.
         marcos_transcript = self.make_recap_transcript(title="Sync with Marcos Santa Ana")
         
         with tempfile.TemporaryDirectory() as tmp:
@@ -1182,9 +1563,9 @@ class RecapModeTests(unittest.TestCase):
             
             self.assertEqual(exit_code, 0)
             printed = json.loads(stdout.getvalue())
-            self.assertEqual(printed["meetings"], [])
-            self.assertEqual(printed["skipped_suppressed"], 1)
-            self.assertEqual(len(openrouter_calls), 0)
+            self.assertEqual(len(printed["meetings"]), 1)
+            self.assertEqual(printed["skipped_suppressed"], 0)
+            self.assertGreater(len(openrouter_calls), 0)
 
     def test_run_recap_skips_casual_meeting(self):
         # Create a transcript that will be classified as casual
@@ -1474,92 +1855,6 @@ class RecapModeTests(unittest.TestCase):
             meeting = json.loads(stdout.getvalue())["meetings"][0]
             self.assertEqual(meeting["decisions"], [])
             self.assertEqual(meeting["deal_state"], "")
-
-
-class A6TripleSinkTests(unittest.TestCase):
-    """A6 — each commitment fans out to BUS + BRIEFS + Telegram, idempotent by
-    ONE deterministic commitment id shared across all three sinks."""
-
-    def make_commitment(
-        self,
-        *,
-        id: str = "ff_meeting_123_abcdefabcdef",
-        text: str = "Send the proposal to Acme (due 2026-06-10)",
-        direction: str = "outbound",
-        relevance_score: float = 0.0,
-        priority: str = "P2",
-    ) -> object:
-        return MODULE.RefinedCommitment(
-            id=id,
-            text=text,
-            source="ff",
-            source_ref="meeting_123 · Acme Follow Up",
-            direction=direction,
-            priority=priority,
-            relevance_score=relevance_score,
-        )
-
-    def test_bus_task_dedup_source_is_the_shared_commitment_id(self) -> None:
-        commitment = self.make_commitment()
-        [bus_entry] = MODULE.bus_task_entries([commitment])
-        briefs_entry = MODULE.commitment_payload_entries([commitment])[0]
-        # BUS dedup key, BRIEFS id, and the id the SKILL keys Telegram on are ONE id.
-        self.assertEqual(bus_entry["id"], commitment.id)
-        self.assertEqual(bus_entry["dedupSource"], f"commitment:{commitment.id}")
-        self.assertEqual(briefs_entry["id"], commitment.id)
-        self.assertEqual(bus_entry["assignee"], "human")
-
-    def test_bus_task_entries_are_deterministic_across_reruns(self) -> None:
-        commitment = self.make_commitment()
-        first = MODULE.bus_task_entries([commitment])
-        second = MODULE.bus_task_entries([commitment])
-        # Same input -> byte-identical spec -> the event-dedup gate SKIPs the
-        # re-run, so no duplicate bus task / POST / Telegram ping is created.
-        self.assertEqual(first, second)
-        self.assertEqual(first[0]["dedupSource"], second[0]["dedupSource"])
-
-    def test_inbound_and_outbound_same_action_get_distinct_bus_dedup_keys(self) -> None:
-        action = "Send the signed contract"
-        outbound = self.make_commitment(
-            id=MODULE.directional_commitment_id("meeting_123", action, "outbound"),
-            direction="outbound",
-        )
-        inbound = self.make_commitment(
-            id=MODULE.directional_commitment_id("meeting_123", action, "inbound"),
-            direction="inbound",
-        )
-        entries = MODULE.bus_task_entries([outbound, inbound])
-        keys = {e["dedupSource"] for e in entries}
-        # Two directions of the same action -> two ids -> two distinct bus tasks,
-        # matching the BRIEFS/Telegram id split (regression guard for A6).
-        self.assertEqual(len(keys), 2)
-
-    def test_client_visible_outbound_needs_approval_card(self) -> None:
-        commitment = self.make_commitment(
-            relevance_score=MODULE.CLIENT_VISIBLE_RELEVANCE_MIN + 0.1,
-        )
-        [entry] = MODULE.bus_task_entries([commitment])
-        self.assertTrue(entry["needsApproval"])
-        self.assertIn("approval", entry)
-        self.assertEqual(entry["approval"]["category"], "external-comms")
-        # The approval card is keyed to the same commitment (shared id -> idempotent).
-        self.assertEqual(entry["approval"]["context"], commitment.source_ref)
-
-    def test_inbound_never_needs_approval(self) -> None:
-        commitment = self.make_commitment(
-            direction="inbound",
-            relevance_score=MODULE.CLIENT_VISIBLE_RELEVANCE_MIN + 0.5,
-        )
-        [entry] = MODULE.bus_task_entries([commitment])
-        self.assertFalse(entry["needsApproval"])
-        self.assertNotIn("approval", entry)
-
-    def test_non_client_outbound_is_a_plain_human_task(self) -> None:
-        commitment = self.make_commitment(relevance_score=0.0)
-        [entry] = MODULE.bus_task_entries([commitment])
-        self.assertFalse(entry["needsApproval"])
-        self.assertNotIn("approval", entry)
-        self.assertEqual(entry["assignee"], "human")
 
 
 if __name__ == "__main__":

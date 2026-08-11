@@ -4,6 +4,12 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { buildReplyContext } from '../../../src/daemon/agent-manager.js';
 
+const maybeEmitMeetingEventMock = vi.hoisted(() => vi.fn(() => ({ outcome: 'skipped' })));
+
+vi.mock('../../../src/daemon/meeting-event-emit.js', () => ({
+  maybeEmitMeetingEvent: maybeEmitMeetingEventMock,
+}));
+
 // Mock the PTY layer so we don't load native bindings or spawn real processes.
 // AgentManager → AgentProcess → AgentPTY → node-pty. We mock at AgentProcess.
 vi.mock('../../../src/daemon/agent-process.js', () => ({
@@ -51,6 +57,7 @@ vi.mock('../../../src/daemon/worker-process.js', () => ({
     dir: string;
     parent: string | undefined;
     finished = false;
+    doneCallback?: (workerName: string, exitCode: number) => void;
     constructor(name: string, dir: string, parent?: string) {
       this.name = name;
       this.dir = dir;
@@ -58,7 +65,11 @@ vi.mock('../../../src/daemon/worker-process.js', () => ({
     }
     async spawn() { /* no-op */ }
     async terminate() { this.finished = true; }
-    onDone() { /* no-op */ }
+    onDone(callback: (workerName: string, exitCode: number) => void) { this.doneCallback = callback; }
+    finish(exitCode = 0) {
+      this.finished = true;
+      this.doneCallback?.(this.name, exitCode);
+    }
     isFinished() { return this.finished; }
     getStatus() {
       return { name: this.name, status: this.finished ? 'reaped' : 'running', dir: this.dir, spawnedAt: '' };
@@ -507,6 +518,8 @@ describe('AgentManager.spawnWorker — RW-10 stale-entry eviction', () => {
   let frameworkRoot: string;
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    maybeEmitMeetingEventMock.mockClear();
     testDir = mkdtempSync(join(tmpdir(), 'cortextos-am-worker-test-'));
     ctxRoot = join(testDir, 'instance');
     frameworkRoot = join(testDir, 'framework');
@@ -515,6 +528,7 @@ describe('AgentManager.spawnWorker — RW-10 stale-entry eviction', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     rmSync(testDir, { recursive: true, force: true });
   });
 
@@ -538,5 +552,43 @@ describe('AgentManager.spawnWorker — RW-10 stale-entry eviction', () => {
     await expect(am.spawnWorker('fuse-worker', '/tmp/proj', 'next fire'))
       .resolves.toBeUndefined();
     expect((am as any).workers.get('fuse-worker').finished).toBe(false);
+  });
+
+  it('does not treat a meeting coordinator carrying FF_MEETING_ID as an event owner', async () => {
+    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
+    await am.spawnWorker(
+      'meeting-coord-mtg1',
+      '/tmp/proj',
+      'coordinate the meeting',
+      'crm',
+      undefined,
+      { FF_MEETING_ID: 'MTG1' },
+    );
+
+    (am as any).workers.get('meeting-coord-mtg1').finish(0);
+
+    expect(maybeEmitMeetingEventMock).toHaveBeenCalledWith(expect.objectContaining({
+      workerName: 'meeting-coord-mtg1',
+      extraEnv: undefined,
+    }));
+  });
+
+  it('preserves FF_MEETING_ID for deterministic meeting-writeback event owners', async () => {
+    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
+    await am.spawnWorker(
+      'meeting-writeback-mtg1',
+      '/tmp/proj',
+      'write back the meeting',
+      'pa-codex',
+      undefined,
+      { FF_MEETING_ID: 'MTG1' },
+    );
+
+    (am as any).workers.get('meeting-writeback-mtg1').finish(0);
+
+    expect(maybeEmitMeetingEventMock).toHaveBeenCalledWith(expect.objectContaining({
+      workerName: 'meeting-writeback-mtg1',
+      extraEnv: { FF_MEETING_ID: 'MTG1' },
+    }));
   });
 });

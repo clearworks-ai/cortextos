@@ -293,7 +293,7 @@ def map_deal_state_to_stage(deal_state: str | None) -> str | None:
     return None
 
 
-def find_engagement_clearpath_id(contact_ids: list[str]) -> int | None:
+def find_matching_engagement(contact_ids: list[str]) -> dict | None:
     """Match a contact to a pipeline engagement (primary_contact_id or contact_ids)."""
     wanted = set(contact_ids)
     if not wanted:
@@ -301,11 +301,27 @@ def find_engagement_clearpath_id(contact_ids: list[str]) -> int | None:
     for eng in _load_json(_pipeline_path()).get("engagements", []) or []:
         cids = set(eng.get("contact_ids") or [])
         if eng.get("primary_contact_id") in wanted or (cids & wanted):
-            cid = eng.get("clearpath_id")
-            try:
-                return int(cid) if cid is not None else None
-            except (TypeError, ValueError):
-                return None
+            return eng
+    return None
+
+
+def engagement_selector(eng: dict) -> list[str] | None:
+    """upsert-engagement selector args for an engagement.
+
+    Prefer the canonical --clearpath-id; fall back to --engagement-name for
+    name-only (locally-created) engagements whose clearpath_id is still null,
+    so a SALES meeting's deal-stage write is NOT silently dropped (FR-007).
+    Returns None when neither a usable clearpath_id nor a name is present.
+    """
+    cid = eng.get("clearpath_id")
+    if cid is not None:
+        try:
+            return ["--clearpath-id", str(int(cid))]
+        except (TypeError, ValueError):
+            pass
+    name = str(eng.get("name") or "").strip()
+    if name:
+        return ["--engagement-name", name]
     return None
 
 
@@ -327,24 +343,28 @@ def sync_deal_stage(
     if not mapped_stage:
         return {"deal_stage": "skipped", "reason": "deal_state_unmapped_preserved_as_text"}
 
-    clearpath_id = find_engagement_clearpath_id(contact_ids)
-    if clearpath_id is None:
+    eng = find_matching_engagement(contact_ids)
+    if eng is None:
         return {"deal_stage": "skipped", "reason": "no_engagement_for_contact", "mapped_stage": mapped_stage}
+    selector = engagement_selector(eng)
+    if selector is None:
+        return {"deal_stage": "skipped", "reason": "engagement_unaddressable", "mapped_stage": mapped_stage}
 
     argv = [
         "python3", str(UPSERT_ENGAGEMENT),
-        "--clearpath-id", str(clearpath_id),
+        *selector,
         "--stage", mapped_stage,
         "--source-ref", source_ref,
         "--note", deal_state,
     ]
+    eng_ref = eng.get("clearpath_id") if eng.get("clearpath_id") is not None else eng.get("name")
     res = _run(argv, env=os.environ.copy())
     if res.returncode != 0:
         _log(f"upsert-engagement failed rc={res.returncode}: {(res.stderr or '').strip()}")
-        return {"deal_stage": "error", "clearpath_id": clearpath_id, "mapped_stage": mapped_stage}
+        return {"deal_stage": "error", "engagement": eng_ref, "mapped_stage": mapped_stage}
     return {
         "deal_stage": "written",
-        "clearpath_id": clearpath_id,
+        "engagement": eng_ref,
         "mapped_stage": mapped_stage,
         "result": (res.stdout or "").strip(),
     }

@@ -347,6 +347,116 @@ def directional_commitment_id(meeting_id: str, action: str, direction: str) -> s
     return commitment_id(meeting_id, action)
 
 
+# ── FR-003: spec-compliant owner→attendee resolution + commitmentId ──────────
+# attendee identity := an external attendee's normalized lowercased email; when
+# no email is derivable, a NEEDS-OWNER:<slug> token. See spec Definitions.
+
+
+def strip_accents(value: str) -> str:
+    """Return `value` with combining diacritics removed (NFKD → drop marks)."""
+    decomposed = unicodedata.normalize("NFKD", value)
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+
+
+def owner_slug(value: str) -> str:
+    """Diacritic-insensitive, lowercase, hyphenated slug for NEEDS-OWNER tokens."""
+    folded = strip_accents(value or "").lower()
+    folded = re.sub(r"[^a-z0-9]+", "-", folded).strip("-")
+    return folded or "unknown"
+
+
+def _attendee_name_key(value: str) -> str:
+    """Case/diacritic-insensitive comparison key for a full name."""
+    return collapse_ws(strip_accents(value or "").lower())
+
+
+def _is_email(value: str) -> bool:
+    return "@" in value and " " not in value.strip()
+
+
+def resolve_owner_identity(owner_name: str, attendees: list[str]) -> str:
+    """Resolve a commitment owner to a spec attendee-identity string.
+
+    `attendees` is the meeting's mixed list of participant emails and speaker
+    display names (the real shape emitted by build_recap_meeting). Ordered rule
+    (FR-003): (1) exact email, (2) exact full name (case/diacritic-insensitive),
+    (3) UNIQUE first name. Ambiguity (2+ matches at a tier), no match, or empty
+    owner → NEEDS-OWNER:<slug> (never contacts[0]). When a name-tier match lands
+    on an attendee that is itself an email, that lowercased email is the identity;
+    otherwise (name-only attendee) there is no derivable email → NEEDS-OWNER:<slug>.
+    """
+    owner = (owner_name or "").strip()
+    if not owner:
+        return f"NEEDS-OWNER:{owner_slug('unknown')}"
+
+    # Split attendees into emails and named entries once.
+    emails: list[str] = [a.strip() for a in attendees if a and _is_email(a)]
+    named: list[str] = [a.strip() for a in attendees if a and not _is_email(a)]
+
+    # Tier 1: exact email — owner_name itself is/maps to an attendee email.
+    if _is_email(owner):
+        owner_email = owner.lower()
+        for email in emails:
+            if email.lower() == owner_email:
+                return owner_email
+        # An owner given as an email that no attendee shares still resolves to
+        # that lowercased email (the identity IS the email per spec Definitions).
+        return owner_email
+
+    owner_key = _attendee_name_key(owner)
+
+    def _local_part_key(email: str) -> str:
+        # Best-effort name derived from an email local-part ("jose.perez" → "jose perez").
+        local = email.split("@", 1)[0]
+        local = re.sub(r"[._+-]+", " ", local)
+        return _attendee_name_key(local)
+
+    # Tier 2: exact full-name match (case + diacritic-insensitive).
+    full_matches: list[str] = []  # resolved identities
+    for email in emails:
+        if _local_part_key(email) == owner_key:
+            full_matches.append(email.lower())
+    for name in named:
+        if _attendee_name_key(name) == owner_key:
+            # Name-only attendee: no email derivable → NEEDS-OWNER token.
+            full_matches.append(f"NEEDS-OWNER:{owner_slug(name)}")
+    # Dedupe while preserving order.
+    full_matches = list(dict.fromkeys(full_matches))
+    if len(full_matches) == 1:
+        return full_matches[0]
+    if len(full_matches) >= 2:
+        return f"NEEDS-OWNER:{owner_slug(owner)}"
+
+    # Tier 3: UNIQUE first-name match.
+    owner_first = owner_key.split(" ", 1)[0] if owner_key else ""
+    first_matches: list[str] = []
+    if owner_first:
+        for email in emails:
+            local_key = _local_part_key(email)
+            if local_key.split(" ", 1)[0] == owner_first:
+                first_matches.append(email.lower())
+        for name in named:
+            name_key = _attendee_name_key(name)
+            if name_key.split(" ", 1)[0] == owner_first:
+                first_matches.append(f"NEEDS-OWNER:{owner_slug(name)}")
+    first_matches = list(dict.fromkeys(first_matches))
+    if len(first_matches) == 1:
+        return first_matches[0]
+
+    # Ambiguous or no match → never contacts[0]; emit NEEDS-OWNER token.
+    return f"NEEDS-OWNER:{owner_slug(owner)}"
+
+
+def resolved_commitment_id(meeting_id: str, attendee_identity: str, action_text: str) -> str:
+    """Spec commitmentId := sha1(meeting_id | attendeeIdentity | normalize(action)).
+
+    Full sha1 hex (NOT truncated, NOT sha256). Additive — does not replace the
+    existing commitment_id/directional_commitment_id that dedup ledgers depend on.
+    """
+    payload = f"{meeting_id}|{attendee_identity}|{normalize_action(action_text)}"
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+
 def normalize_json_text(value: str) -> str:
     return CONTROL_RE.sub("", value.replace("```json", "").replace("```", "")).strip()
 
@@ -1634,8 +1744,11 @@ def commitment_entries(
     commitments: list[RefinedCommitment],
     *,
     enriched: bool,
+    attendees: list[str] | None = None,
+    meeting_id: str = "",
 ) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
+    attendee_list = attendees or []
     for item in commitments:
         entry: dict[str, Any] = {
             "id": item.id,
@@ -1650,6 +1763,13 @@ def commitment_entries(
             entry["sourceQuote"] = item.source_quote
             entry["priority"] = item.priority
             entry["relevanceScore"] = item.relevance_score
+            # FR-003: resolve owner→attendee identity + derive spec commitmentId.
+            action_text = item.action_text or item.text
+            owner_identity = resolve_owner_identity(item.owner, attendee_list)
+            entry["owner_identity"] = owner_identity
+            entry["commitmentId"] = resolved_commitment_id(
+                meeting_id, owner_identity, action_text
+            )
         entries.append(entry)
     return entries
 
@@ -2043,7 +2163,12 @@ def build_recap_meeting(
         "meeting_type_confidence": meeting_type_confidence,
         "decisions": decisions,
         "deal_state": deal_state,
-        "next_steps": commitment_entries(refine_items(transcript, extracted, client_record=client_record), enriched=True),
+        "next_steps": commitment_entries(
+            refine_items(transcript, extracted, client_record=client_record),
+            enriched=True,
+            attendees=attendees,
+            meeting_id=meeting_id,
+        ),
     }
 
 

@@ -153,8 +153,7 @@ function commsCheckWorkerTemplate(args: {
     target: args.target,
     workerNamePrefix: 'comms-check',
     skillRelativePaths: [
-      join('.claude', 'skills', 'comms-check-worker', 'SKILL.md'),
-      join('plugins', 'comms-check-worker', 'SKILL.md'),
+      join('..', '..', 'skills', 'comms-check-worker', 'SKILL.md'),
     ],
     buildPrompt: ({ skillRelativePath, eventId }) =>
       [

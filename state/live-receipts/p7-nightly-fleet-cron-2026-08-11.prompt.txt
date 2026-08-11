@@ -1,0 +1,25 @@
+TASK_ID=$(cortextos bus create-task "Cron: nightly-fleet-analysis" --desc "Nightly fleet analysis: deterministic candidate scan plus thin verification" 2>/dev/null); cortextos bus update-task $TASK_ID in_progress 2>/dev/null; cortextos bus update-cron-fire nightly-fleet-analysis --interval 24h 2>/dev/null; P7 NIGHTLY FLEET ANALYSIS — deterministic bulk core plus thin candidate verification.
+
+1. Run `cortextos bus list-agents --format json`. From that authoritative live registry, derive a comma-separated list containing only agents where org is `clearworksai`, enabled is true, and the exact name matches `^[a-z0-9][a-z0-9_-]*$`. Exclude Hunter permanently. Never substitute disabled legacy aliases for active `*-codex` agents.
+
+2. Run the deterministic core exactly once with that comma-separated list:
+
+`python3 /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/scripts/nightly-fleet-scan.py --logs-dir /Users/joshweiss/.cortextos/cortextos1/logs --state-dir /Users/joshweiss/.cortextos/cortextos1/.cortextOS/state/agents --memory-dir /Users/joshweiss/code/cortextos/orgs/clearworksai/agents --agents "<ACTIVE_AGENTS_CSV>"`
+
+Capture its JSON output as `SCAN_JSON`. Do not give an LLM the raw fleet logs or memory corpus.
+
+3. If `SCAN_JSON.candidates` is empty: log `action/nightly_analysis_complete` at info with candidate_count=0, complete `$TASK_ID` with result `Cron: nightly-fleet-analysis complete — 0 candidates`, and stop. Do not spawn a verifier and do not send Telegram.
+
+4. If candidates exist: spawn one bounded Sonnet verifier and give it ONLY (a) the candidate JSON and (b) the current live agent-registry JSON. For each candidate only, it may inspect the minimum exact-name evidence lines needed to validate or reject that row; it must never perform another fleet-wide raw scan. It MUST:
+- reject intentionally disabled or non-canonical identities;
+- validate heartbeat findings against current bus state;
+- deduplicate the same crash event when represented in both `restarts.log` and `crashes.log`;
+- classify crash_loop only when the same active agent has more than two distinct `WATCHDOG-HARD-RESTART` events in the last 24 hours;
+- return ONLY a valid JSON array with exactly: `agent`, `issue_type`, `severity` (`CRITICAL|HIGH|MEDIUM|LOW`), `root_cause`, `recommended_fix`, `auto_fixable`, and `evidence`.
+Include no rejected or issue-free agents. Do not implement fixes inside the verifier.
+
+5. Validate the returned JSON against current bus state. Route only still-current, exact-name findings:
+- CRITICAL/HIGH: internal reversible orchestrator fixes may be applied and logged; specialist code/config work must be assigned to the current canonical owner. Any restart, deployment, external communication beyond the required Josh alert, deletion, merge, or push follows its approval gate.
+- MEDIUM/LOW: write to nightly memory only; no Telegram.
+
+Write the validated analysis to `memory/$(date -u +%Y-%m-%d).md`, log `action/nightly_analysis_complete` with candidate and validated counts, alert Josh only for validated CRITICAL/HIGH findings, then run: `cortextos bus complete-task $TASK_ID --result 'Cron: nightly-fleet-analysis complete' 2>/dev/null`.

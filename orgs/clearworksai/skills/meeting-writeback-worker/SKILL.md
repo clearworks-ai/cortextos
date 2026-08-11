@@ -375,6 +375,7 @@ existing_clients = {
 written_meetings: list[str] = []
 created_clients: list[str] = []
 flags: list[str] = []
+event_payloads: list[dict[str, object]] = []
 
 with LEDGER_PATH.open("a", encoding="utf-8") as ledger_handle:
     for meeting in meetings:
@@ -508,6 +509,59 @@ with LEDGER_PATH.open("a", encoding="utf-8") as ledger_handle:
         ledger_handle.write(f"{meeting_id} {int(datetime.now(timezone.utc).timestamp())}\n")
         written_meetings.append(meeting_rel)
 
+        # FR-002: per-meeting event payload. Keyed by safeId(meeting_id) so concurrent
+        # meetings never collide on a shared /tmp file (FR-008). The daemon on-worker-
+        # success hook reads this file to emit crm.meeting.completed exactly once.
+        event_meeting_type = collapse_ws(str(meeting.get("meeting_type") or "")) or "other"
+        event_attendees = [
+            collapse_ws(str(a))
+            for a in (meeting.get("attendees") or [])
+            if collapse_ws(str(a))
+        ]
+        # commitmentIds pass THROUGH — emit whatever ids are already present; else [].
+        raw_commitment_ids = meeting.get("commitmentIds") or meeting.get("commitment_ids") or []
+        if not isinstance(raw_commitment_ids, list):
+            raw_commitment_ids = []
+        event_commitment_ids = [collapse_ws(str(c)) for c in raw_commitment_ids if collapse_ws(str(c))]
+        event_payloads.append(
+            {
+                "meeting_id": meeting_id,
+                "meeting_type": event_meeting_type,
+                "attendees": event_attendees,
+                "client": client_name,
+                "commitmentIds": event_commitment_ids,
+                "writeback_ok": True,
+            }
+        )
+
+# FR-002: write the per-meeting event payload file(s) the daemon hook consumes.
+# Path derivation MUST match src/daemon/meeting-event-emit.ts + webhook-bridge safeId:
+#   safeId = re.sub(r'[^a-z0-9_-]','', meeting_id.lower())[:40]
+#   path   = FF_EVENT_PAYLOAD_PATH if set else f"{CTX_TMP or /tmp}/ff-meeting-event-{safeId}.json"
+FF_MEETING_ID = collapse_ws(os.environ.get("FF_MEETING_ID") or "")
+CTX_TMP = (os.environ.get("CTX_TMP") or "/tmp").strip() or "/tmp"
+
+
+def _safe_id(value: str) -> str:
+    return re.sub(r"[^a-z0-9_-]", "", value.lower())[:40]
+
+
+def _event_path_for(meeting_id: str) -> Path:
+    override = (os.environ.get("FF_EVENT_PAYLOAD_PATH") or "").strip()
+    if override and FF_MEETING_ID and _safe_id(meeting_id) == _safe_id(FF_MEETING_ID):
+        return Path(override)
+    return Path(CTX_TMP) / f"ff-meeting-event-{_safe_id(meeting_id)}.json"
+
+
+for _event in event_payloads:
+    _mid = _event.get("meeting_id") or ""
+    if not _mid:
+        continue
+    # Webhook fast path: only the FF_MEETING_ID meeting; poll path: all written meetings.
+    if FF_MEETING_ID and _safe_id(_mid) != _safe_id(FF_MEETING_ID):
+        continue
+    _event_path_for(_mid).write_text(json.dumps(_event), encoding="utf-8")
+
 print(
     json.dumps(
         {
@@ -526,13 +580,7 @@ echo "writeback_rc=$WRITEBACK_RC"
 
 If `WRITEBACK_RC` is nonzero, skip straight to Step 4.
 
-When this worker was launched for a Fireflies webhook (`FF_MEETING_ID` is set), notify CRM only after the writeback block reports a successful meeting write. The event is the handoff for deterministic CRM persistence, not a substitute for the meeting/client file writes:
-
-```bash
-if [[ -n "${FF_MEETING_ID:-}" && "$WRITEBACK_RC" -eq 0 ]]; then
-  cortextos bus send-message crm normal "EVENT crm.meeting.completed — {\"meeting_id\":\"$FF_MEETING_ID\"}"
-fi
-```
+The `crm.meeting.completed` emit is now owned by the daemon on-worker-success hook (FR-002, `src/daemon/meeting-event-emit.ts`), NOT this SKILL. The writeback heredoc above writes the per-meeting payload file (`ff-meeting-event-<safeId>.json`); on worker exit the daemon reads it and emits exactly once (deduped by meeting_id). Do NOT re-add a `cortextos bus send-message crm ...` emit here — it was the broken separate-bash-fence path (WRITEBACK_RC was lost across tool-calls → silent no-emit).
 
 ---
 

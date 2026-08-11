@@ -66,6 +66,17 @@ Staging-first is non-negotiable. Inject a synthetic meeting event through the ch
 staging instance; capture receipts; confirm coverage-equivalence vs the 2 dupes.
 Scripts: `scripts/staging/{staging-up,staging-seed,staging-verify,staging-down}.sh`.
 
+### FR-008 Option A — ❌ REJECTED at staging (2026-08-10)
+Built `fix/fr-008-client-md-single-owner` (944278e1, 55 tests green), then ran the single-client
+rebuild against a copy of real `alloi.md` + live CRM. **Real data loss:** curated History lines
+that live only in the `.md` (invoice sent, audit-delivered/gmail-verify, discovery interviews
+#5/#3, Alloi//AllSafe proposal) were DROPPED because they aren't in `interactions.jsonl`; curated
+Open-Items were replaced by raw fanout rows. The `.md` is a multi-source curated ACCUMULATOR, not
+a CRM read-cache. **Branch NOT merged.** Corrected plan = Option C (writeback stays sole `.md`
+owner, retire/guard sync) — see `state/specs/FR-008-client-md-writer-conflict-2026-08-10.md`.
+Awaiting Josh confirm on C. This gate FAILED as designed → halted, no fix-forward.
+
+### Meeting-chain end-to-end staging (still to run once FR-008 is settled)
 - ⬜ staging daemon up (cwd=FW_ROOT, `CTX_INSTANCE_ID=cortextos-staging` pinned every call)
 - ⬜ synthetic sales meeting injected → receipts captured
 - ⬜ synthetic delivery meeting injected → NO deal-stage touched

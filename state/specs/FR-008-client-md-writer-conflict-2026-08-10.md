@@ -44,3 +44,40 @@ owner. That is an architecture decision for Josh.
 ## Gate
 Josh picks A or B → build on a branch → validate on `cortextos-staging` → prod only after
 the daemon-restart gate.
+
+---
+
+## STAGING RESULT (2026-08-10) — Option A REJECTED: real data loss
+
+Josh picked A. Built on `fix/fr-008-client-md-single-owner` (commit 944278e1), then validated
+the single-client rebuild against a COPY of real `alloi.md` + live CRM data. **The rebuild-from-CRM
+destroyed curated History that exists only in the `.md`, never in `interactions.jsonl`:**
+- `2026-07-19 — Invoice AI-2026-2 ($2500) sent…` — dropped
+- `2026-07-21 — Alloi AI-ops audit delivered to Marcos via Slack` + the gmail delivery-verify
+  line — dropped
+- `2026-07-14 / 2026-07-10 — discovery interviews #5 / #3` — dropped
+- `2026-06-26 — Proposal: Alloi // AllSafe IT` — dropped
+- curated Open-Items replaced by a flood of raw per-commitment fanout rows; the clean contact
+  line `Marcos Santa Ana` overwritten with the messy CRM contact name.
+
+**Root premise was FALSE.** The client `.md` is NOT a CRM read-cache — it is a **multi-source
+curated accumulator**: invoices, email delivery-verifications, calendar RSVPs, proposal notes,
+and hand edits that never flowed through the meeting→CRM path. Regenerating from CRM wipes all
+of it. (Prose sections Current-state/Delivering/Financials WERE preserved by the merge — but
+History + Open-Items are regenerated, and that is where the loss is.)
+
+## Corrected recommendation — Option C (single owner = writeback, retire sync)
+Given the accumulator reality + that `sync_client_context` is already DEAD (no live cron, worker
+skill missing):
+- **Keep `meeting_writeback` as the single `.md` owner** (append/accumulate model — it preserves
+  everything and is the only live writer). Do NOT ship the FR-008 branch's writeback change.
+- **Retire / guard `sync_client_context` as a `.md` writer** so no future revival can wipe: leave
+  it unscheduled and add a hard guard/flag requiring explicit opt-in, OR delete the destructive
+  full-rebuild path. The concurrency "race" is moot once there is one writer.
+- Residual FR-008 concurrency requirement is then satisfied trivially (single writer, already
+  lock-guarded for writeback-vs-writeback).
+- If a CRM-derived VIEW is ever wanted, render it to a SEPARATE file (e.g. `*.crm-view.md`), never
+  overwrite the curated `.md`.
+
+`fix/fr-008-client-md-single-owner` is kept for reference but must NOT merge. Awaiting Josh's
+confirm on Option C before implementing.

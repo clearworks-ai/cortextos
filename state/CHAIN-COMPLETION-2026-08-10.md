@@ -96,11 +96,19 @@ Per `state/specs/retirement-plan-2026-08-10.md`. Both dupes still present as of 
 
 ---
 
-## PHASE 4 — Josh-gated (HALT — do NOT auto-execute)
-- ⏳ prod-promote new `dist/` + daemon restart (`touch /tmp/josh-approved-daemon-restart-<YYYYMMDDHH>`)
-- ⏳ prod live receipt: a REAL fireflies meeting through the running daemon → real artifacts
-- ⏳ merge retirement PR (only after prod live receipt confirms coverage)
-- ⏳ PR #338 (`--bare` lean worker) promote before real spawns run lean
+## PHASE 4 — Josh-gated
+- ✅ FR-007 fix merged to main (PR #352 → 40037d5c). `dist/` clean-rebuilt from main (removed a
+  stale FR-008-branch build the subagent left in dist — restart landmine, now gone).
+- ⚠️ **BLOCKER — no safe restart mechanism.** Prod daemon (pm2 `cortextos-daemon`, id 1) is
+  supervised ONLY by pm2, but the GOAL bans `pm2 restart cortextos-daemon` (fleet kill-switch).
+  The prescribed `/tmp/josh-approved-daemon-restart-*` gate has NO watcher in code (grep empty).
+  So arming the chain (loading new `dist/`) has no documented safe path. **Needs Josh: the actual
+  restart procedure, or Josh restarts.**
+- ⏳ prod live receipt: consumers have NEVER fired live (no `meeting-fanout`/`meeting-crm-sync`
+  worker logs in prod). After a clean restart, the next REAL fireflies meeting produces the
+  receipt (bus task + interaction + deal-stage + recap doc) — true-verify it.
+- ⏳ merge retirement PR (only after that prod live receipt confirms coverage).
+- ⏳ PR #338 (`--bare` lean worker) promote before real spawns run lean.
 
 ---
 

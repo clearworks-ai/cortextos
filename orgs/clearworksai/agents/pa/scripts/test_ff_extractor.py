@@ -1411,6 +1411,9 @@ class RecapModeTests(unittest.TestCase):
     # Defaults for the decisions/deal-state extractor mock; individual tests override.
     decisions_response: list[str] = []
     deal_state_response: str = ""
+    # Defaults for the meeting_type classifier mock; individual tests override.
+    meeting_type_response: str = "delivery"
+    meeting_type_confidence_response: float = 0.9
 
     def make_recap_transcript(self, **overrides) -> dict[str, object]:
         base = {
@@ -1469,6 +1472,18 @@ class RecapModeTests(unittest.TestCase):
                                     "content": json.dumps({
                                         "decisions": self.decisions_response,
                                         "deal_state": self.deal_state_response,
+                                    })
+                                }
+                            }]
+                        }).encode("utf-8"))
+                    elif "meeting_type" in content:
+                        # Meeting-type classifier prompt
+                        return FakeResponse(json.dumps({
+                            "choices": [{
+                                "message": {
+                                    "content": json.dumps({
+                                        "meeting_type": self.meeting_type_response,
+                                        "confidence": self.meeting_type_confidence_response,
                                     })
                                 }
                             }]
@@ -1855,6 +1870,162 @@ class RecapModeTests(unittest.TestCase):
             meeting = json.loads(stdout.getvalue())["meetings"][0]
             self.assertEqual(meeting["decisions"], [])
             self.assertEqual(meeting["deal_state"], "")
+
+    # --- FR-001: meeting_type classification ---
+
+    def test_parse_meeting_type_payload_parses_each_type(self):
+        for mtype in ("sales", "delivery", "internal", "other"):
+            meeting_type, confidence = MODULE.parse_meeting_type_payload(
+                json.dumps({"meeting_type": mtype, "confidence": 0.85})
+            )
+            self.assertEqual(meeting_type, mtype)
+            self.assertAlmostEqual(confidence, 0.85)
+
+    def test_parse_meeting_type_payload_case_insensitive(self):
+        meeting_type, confidence = MODULE.parse_meeting_type_payload(
+            json.dumps({"meeting_type": "SALES", "confidence": 0.7})
+        )
+        self.assertEqual(meeting_type, "sales")
+        self.assertAlmostEqual(confidence, 0.7)
+
+    def test_parse_meeting_type_payload_low_confidence_forces_other(self):
+        # confidence below the 0.6 threshold → forced to "other", real confidence preserved.
+        meeting_type, confidence = MODULE.parse_meeting_type_payload(
+            json.dumps({"meeting_type": "sales", "confidence": 0.4})
+        )
+        self.assertEqual(meeting_type, "other")
+        self.assertAlmostEqual(confidence, 0.4)
+
+    def test_parse_meeting_type_payload_out_of_set_forces_other(self):
+        meeting_type, confidence = MODULE.parse_meeting_type_payload(
+            json.dumps({"meeting_type": "kickoff", "confidence": 0.95})
+        )
+        self.assertEqual(meeting_type, "other")
+        self.assertAlmostEqual(confidence, 0.95)
+
+    def test_parse_meeting_type_payload_malformed_json_yields_other(self):
+        self.assertEqual(MODULE.parse_meeting_type_payload("not json"), ("other", 0.0))
+        # A JSON array (wrong shape) also degrades to other/0.0, never raises.
+        self.assertEqual(
+            MODULE.parse_meeting_type_payload(json.dumps(["sales", 0.9])),
+            ("other", 0.0),
+        )
+
+    def test_parse_meeting_type_payload_missing_confidence_yields_other(self):
+        meeting_type, confidence = MODULE.parse_meeting_type_payload(
+            json.dumps({"meeting_type": "sales"})
+        )
+        self.assertEqual(meeting_type, "other")
+        self.assertEqual(confidence, 0.0)
+
+    def test_classify_meeting_type_uses_classify_prompt(self):
+        captured = {}
+
+        def fake_urlopen(request, timeout: int | None = None):
+            body = json.loads(request.data)
+            captured["content"] = body["messages"][0]["content"]
+            return FakeResponse(json.dumps({
+                "choices": [{"message": {"content": json.dumps({
+                    "meeting_type": "sales",
+                    "confidence": 0.82,
+                })}}]
+            }).encode("utf-8"))
+
+        meeting_type, confidence = MODULE.classify_meeting_type(
+            "Josh Weiss: Here's the pricing for the pilot. Prospect: Great, send the proposal.",
+            client_context="client=Acme",
+            openrouter_api_key="or-test",
+            urlopen=fake_urlopen,
+        )
+        self.assertIn("meeting_type", captured["content"])
+        self.assertIn("client=Acme", captured["content"])
+        self.assertEqual(meeting_type, "sales")
+        self.assertAlmostEqual(confidence, 0.82)
+
+    def test_classify_meeting_type_malformed_response_yields_other(self):
+        def fake_urlopen(request, timeout: int | None = None):
+            return FakeResponse(json.dumps({
+                "choices": [{"message": {"content": "totally not json"}}]
+            }).encode("utf-8"))
+
+        meeting_type, confidence = MODULE.classify_meeting_type(
+            "some transcript",
+            openrouter_api_key="or-test",
+            urlopen=fake_urlopen,
+        )
+        self.assertEqual(meeting_type, "other")
+        self.assertEqual(confidence, 0.0)
+
+    def _run_full_meeting(self, urlopen):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / "full-ledger.txt"
+            ledger_path.write_text("")
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, self.ENV, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run_full(
+                        limit=10,
+                        meeting_id="",
+                        full_ledger_path=ledger_path,
+                        urlopen=urlopen,
+                    )
+            self.assertEqual(exit_code, 0)
+            return json.loads(stdout.getvalue())["meetings"][0]
+
+    def _run_recap_meeting(self, urlopen):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / "ledger.txt"
+            ledger_path.write_text("")
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, self.ENV, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run_recap(
+                        limit=10,
+                        ledger_path=ledger_path,
+                        urlopen=urlopen,
+                    )
+            self.assertEqual(exit_code, 0)
+            return json.loads(stdout.getvalue())["meetings"][0]
+
+    def test_full_payload_carries_meeting_type_and_confidence(self):
+        self.meeting_type_response = "sales"
+        self.meeting_type_confidence_response = 0.88
+        try:
+            meeting = self._run_full_meeting(self.fake_urlopen([]))
+            self.assertEqual(meeting["meeting_type"], "sales")
+            self.assertAlmostEqual(meeting["meeting_type_confidence"], 0.88)
+        finally:
+            self.meeting_type_response = "delivery"
+            self.meeting_type_confidence_response = 0.9
+
+    def test_recap_payload_carries_meeting_type_and_confidence(self):
+        self.meeting_type_response = "internal"
+        self.meeting_type_confidence_response = 0.75
+        try:
+            meeting = self._run_recap_meeting(self.fake_urlopen([]))
+            self.assertEqual(meeting["meeting_type"], "internal")
+            self.assertAlmostEqual(meeting["meeting_type_confidence"], 0.75)
+        finally:
+            self.meeting_type_response = "delivery"
+            self.meeting_type_confidence_response = 0.9
+
+    def test_low_confidence_forces_other_and_logs_needs_review(self):
+        # Classifier returns a confident-looking type but low confidence → forced to
+        # "other" in the payload AND a NEEDS-REVIEW line is emitted (deal-stage never
+        # silently dropped).
+        self.meeting_type_response = "sales"
+        self.meeting_type_confidence_response = 0.3
+        try:
+            with self.assertLogs(MODULE.LOGGER, level="WARNING") as logctx:
+                meeting = self._run_full_meeting(self.fake_urlopen([]))
+            self.assertEqual(meeting["meeting_type"], "other")
+            self.assertAlmostEqual(meeting["meeting_type_confidence"], 0.3)
+            joined = "\n".join(logctx.output)
+            self.assertIn("NEEDS-REVIEW", joined)
+            self.assertIn("meeting_r1", joined)
+        finally:
+            self.meeting_type_response = "delivery"
+            self.meeting_type_confidence_response = 0.9
 
 
 if __name__ == "__main__":

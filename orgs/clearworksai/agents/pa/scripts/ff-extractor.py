@@ -151,6 +151,30 @@ Client context (for grounding only, do not copy verbatim):
 
 TRANSCRIPT:
 {transcript}"""
+CLASSIFY_PROMPT = """Classify this meeting transcript into exactly one meeting_type:
+
+- "sales" — a prospect/deal conversation: pricing, proposal, scope, discovery, negotiation,
+  or anything oriented toward winning new business from someone who is not yet a paying client.
+- "delivery" — work with or for an EXISTING client: status update, implementation, review,
+  support, or ongoing project execution on a signed engagement.
+- "internal" — a Clearworks-only team meeting with no client/prospect present: planning,
+  standup, retro, hiring, or internal operations.
+- "other" — anything else, or when the type is genuinely unclear from the transcript.
+
+Return ONLY a valid JSON object with exactly these fields:
+{{"meeting_type": "sales|delivery|internal|other", "confidence": 0.0-1.0}}
+where confidence is your calibrated certainty (0.0 = no idea, 1.0 = certain).
+Example: {{"meeting_type": "sales", "confidence": 0.82}}
+
+Client context (for grounding only, do not copy verbatim):
+{client_context}
+
+TRANSCRIPT:
+{transcript}"""
+# Below this confidence, meeting_type is forced to "other" and a NEEDS-REVIEW line is logged
+# so a low-confidence deal-stage classification is never silently trusted or dropped.
+MEETING_TYPE_CONFIDENCE_THRESHOLD = 0.6
+MEETING_TYPES = ("sales", "delivery", "internal", "other")
 PUNCT_RE = re.compile(r"[^\w\s-]+", re.UNICODE)
 SPACE_RE = re.compile(r"\s+")
 TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -914,6 +938,58 @@ def parse_decisions_payload(value: str) -> tuple[list[str], str]:
             decisions.append(text)
     deal_state = collapse_ws(str(payload.get("deal_state") or ""))
     return decisions, deal_state
+
+
+def parse_meeting_type_payload(value: str) -> tuple[str, float]:
+    """Parse a classifier response into (meeting_type, confidence).
+
+    Falls back to ("other", <confidence or 0.0>) on parse failure, an out-of-set
+    meeting_type, or confidence below MEETING_TYPE_CONFIDENCE_THRESHOLD. Never
+    silently trusts a low-confidence deal-stage classification.
+    """
+    try:
+        payload = parse_json_payload(value)
+    except (json.JSONDecodeError, ValueError):
+        return "other", 0.0
+    if not isinstance(payload, dict):
+        return "other", 0.0
+    try:
+        confidence = float(payload.get("confidence"))
+    except (TypeError, ValueError):
+        confidence = 0.0
+    if confidence != confidence:  # NaN guard
+        confidence = 0.0
+    confidence = max(0.0, min(1.0, confidence))
+    meeting_type = collapse_ws(str(payload.get("meeting_type") or "")).lower()
+    if meeting_type not in MEETING_TYPES or confidence < MEETING_TYPE_CONFIDENCE_THRESHOLD:
+        return "other", confidence
+    return meeting_type, confidence
+
+
+def classify_meeting_type(
+    transcript_text: str,
+    *,
+    client_context: str = "",
+    openrouter_api_key: str,
+    urlopen: Urlopen = urllib.request.urlopen,
+) -> tuple[str, float]:
+    """Return (meeting_type, confidence) for a transcript.
+
+    meeting_type is always one of MEETING_TYPES. When the model is unsure
+    (confidence < MEETING_TYPE_CONFIDENCE_THRESHOLD), the type is forced to
+    "other" — the raw confidence is still returned so callers can log NEEDS-REVIEW.
+    """
+    response_text = openrouter_request(
+        openrouter_api_key,
+        model=EXTRACTOR_MODEL,
+        prompt=CLASSIFY_PROMPT.format(
+            transcript=transcript_text,
+            client_context=client_context or "",
+        ),
+        max_tokens=200,
+        urlopen=urlopen,
+    )
+    return parse_meeting_type_payload(response_text)
 
 
 def normalized_tokens(value: str) -> set[str]:
@@ -1897,6 +1973,23 @@ def build_recap_meeting(
         urlopen=urlopen,
     )
 
+    # Classify the meeting into sales/delivery/internal/other. Below the confidence
+    # threshold the type is forced to "other" and a NEEDS-REVIEW line is logged — a
+    # low-confidence deal-stage classification is surfaced, never silently dropped.
+    meeting_type, meeting_type_confidence = classify_meeting_type(
+        extractor_text,
+        client_context=client_context,
+        openrouter_api_key=openrouter_api_key,
+        urlopen=urlopen,
+    )
+    if meeting_type_confidence < MEETING_TYPE_CONFIDENCE_THRESHOLD:
+        LOGGER.warning(
+            "NEEDS-REVIEW meeting_type: id=%s title=%r low confidence=%.2f (forced to 'other')",
+            meeting_id,
+            collapse_ws(str(transcript.get("title") or "Untitled Meeting")),
+            meeting_type_confidence,
+        )
+
     # Build participants list defensively
     participants = transcript.get("participants") or []
     if isinstance(participants, list):
@@ -1946,6 +2039,8 @@ def build_recap_meeting(
             "action_items": collapse_ws(str(summary.get("action_items") or "")),
         },
         "client_context": client_context,
+        "meeting_type": meeting_type,
+        "meeting_type_confidence": meeting_type_confidence,
         "decisions": decisions,
         "deal_state": deal_state,
         "next_steps": commitment_entries(refine_items(transcript, extracted, client_record=client_record), enriched=True),

@@ -188,7 +188,7 @@ async function handleGmail(request: IncomingMessage, response: ServerResponse, o
   // ACTIVE (FR-E3): the spawn IS the delivery, so skip shadow routing (an active
   // ShadowRouter would demand a transport capability). SHADOW keeps today's
   // behavior — record the routing proposal, spawn nothing.
-  const shadowRoute = mode === 'active' ? undefined : 'pa.comms-check-worker';
+  const shadowRoute = mode === 'active' ? undefined : 'pa-codex.comms-check-worker';
   const result = processMonotonic(options, { provider: 'gmail', eventType: 'notification', sourceId: `${mailbox}\u0000${historyId}` }, 'gmail.shadow.notification_high_water', historyId, shadowRoute, 'gmail');
   // Spawn exactly once per event: gated on first-seen (`accepted`) — the monotonic
   // cursor already deduped duplicates/stale to non-accepted, so no double-fire.
@@ -196,8 +196,8 @@ async function handleGmail(request: IncomingMessage, response: ServerResponse, o
     const deps = dependencies(options);
     await deps.spawnWorker(
       'gmail',
-      () => planWorkerSpawn(commsCheckWorkerTemplate({ frameworkRoot: options.frameworkRoot as string, org: options.org, target: 'pa', skillExists: options.dependencies?.skillExists }), historyId),
-      { instanceId: options.instanceId, parent: 'pa' },
+      () => planWorkerSpawn(commsCheckWorkerTemplate({ frameworkRoot: options.frameworkRoot as string, org: options.org, target: 'pa-codex', skillExists: options.dependencies?.skillExists }), historyId),
+      { instanceId: options.instanceId, parent: 'pa-codex' },
     );
   }
   json(response, 200, { ok: true, mode, disposition: result.disposition });
@@ -220,7 +220,7 @@ async function handleCalendar(request: IncomingMessage, response: ServerResponse
   const channelId = uniqueHeader(request, 'x-goog-channel-id')!; const resourceId = uniqueHeader(request, 'x-goog-resource-id')!; const state = uniqueHeader(request, 'x-goog-resource-state')!; const messageNumber = canonicalNumber(uniqueHeader(request, 'x-goog-message-number')!, 'calendar_invalid_message_number'); const expiration = uniqueHeader(request, 'x-goog-channel-expiration')!; const token = uniqueHeader(request, 'x-goog-channel-token')!;
   if (!['sync', 'exists', 'not_exists'].includes(state)) throw new ProviderError(400, 'calendar_invalid_state');
   const configured = readCalendarChannel(options.stateDir, channelId); const expires = Date.parse(expiration); if (configured.channel !== digestHex(channelId) || configured.resource !== digestHex(resourceId)) throw new ProviderError(401, 'calendar_channel_mismatch'); if (!safeEqual(token, configured.token)) throw new ProviderError(401, 'calendar_token_mismatch'); if (!Number.isFinite(expires) || expires <= options.now() || new Date(expires).toISOString() !== configured.expiresAt || Date.parse(configured.expiresAt) <= options.now()) throw new ProviderError(401, 'calendar_channel_expired');
-  const scope = digestHex(`${channelId}\u0000${resourceId}`).slice(0, 40); const result = processMonotonic(options, { provider: 'calendar', eventType: 'notification', sourceId: `${digestHex(channelId)}\u0000${digestHex(resourceId)}\u0000${messageNumber}` }, `calendar.shadow.notification_high_water:${scope}`, messageNumber, state === 'sync' ? undefined : 'pa.booking-calendar-delta', 'calendar');
+  const scope = digestHex(`${channelId}\u0000${resourceId}`).slice(0, 40); const result = processMonotonic(options, { provider: 'calendar', eventType: 'notification', sourceId: `${digestHex(channelId)}\u0000${digestHex(resourceId)}\u0000${messageNumber}` }, `calendar.shadow.notification_high_water:${scope}`, messageNumber, state === 'sync' ? undefined : 'pa-codex.booking-calendar-delta', 'calendar');
   json(response, 200, { ok: true, mode: 'shadow', disposition: state === 'sync' && result.disposition === 'accepted' ? 'sync' : result.disposition });
 }
 

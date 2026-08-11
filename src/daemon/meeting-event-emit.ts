@@ -49,6 +49,8 @@ export interface MeetingEventResult {
   event?: 'crm.meeting.completed' | 'crm.meeting.failed';
   sourceKey?: string;
   meetingId?: string;
+  /** Meeting type from the writeback payload — surfaced so the consumer dispatch (FR-004+) can gate on it. */
+  meetingType?: string;
   reason?: string;
 }
 
@@ -161,7 +163,13 @@ export function maybeEmitMeetingEvent(
       commitmentIds: Array.isArray(payload.commitmentIds) ? payload.commitmentIds : [],
     };
     send(params.ctxRoot, params.org, `EVENT crm.meeting.completed — ${compact(body)}`);
-    return { outcome: 'completed', event: 'crm.meeting.completed', sourceKey, meetingId };
+    return {
+      outcome: 'completed',
+      event: 'crm.meeting.completed',
+      sourceKey,
+      meetingId,
+      meetingType: (payload.meeting_type ?? 'other') as string,
+    };
   }
 
   // Failure path: exit≠0, or missing/invalid payload, or writeback_ok !== true.

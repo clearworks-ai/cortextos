@@ -5,7 +5,14 @@ import { request as httpRequest } from 'http';
 import { type AddressInfo } from 'net';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createBridgeServer, webhookBridgeCommand, readFrameworkEnv, listOrgDirs } from '../../../src/cli/webhook-bridge';
+import {
+  createBridgeServer,
+  webhookBridgeCommand,
+  readFrameworkEnv,
+  listOrgDirs,
+  planMeetingWritebackSpawn,
+  resolveBridgeRuntimeContext,
+} from '../../../src/cli/webhook-bridge';
 
 interface ResponseShape {
   status: number;
@@ -370,6 +377,43 @@ describe('webhook-bridge server', () => {
     expect(inboxPayload.text).toContain('WEBHOOK fireflies transcription.completed');
     expect(inboxPayload.text).toContain('meeting-123');
     expect(inboxPayload.text).toContain('cd pa agent dir');
+
+    await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  });
+
+  it('falls back to the active pa-codex inbox when pa is inactive', async () => {
+    setupRegistry(tempRoot, 'pa-codex');
+    const heartbeatDir = join(tempRoot, 'state', 'pa-codex');
+    mkdirSync(heartbeatDir, { recursive: true });
+    writeFileSync(
+      join(heartbeatDir, 'heartbeat.json'),
+      JSON.stringify({ last_heartbeat: new Date().toISOString() }),
+      'utf-8',
+    );
+
+    const server = buildServer();
+    const baseUrl = await listen(server);
+    const response = await sendRequest(baseUrl, '/relay/fireflies', {
+      method: 'POST',
+      headers: { 'x-webhook-bridge-secret': 'top-secret' },
+      body: JSON.stringify({
+        integration: 'fireflies',
+        target: 'pa',
+        event: 'transcription.completed',
+        meeting_id: 'meeting-123',
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(existsSync(join(tempRoot, 'inbox', 'pa'))).toBe(false);
+    const inboxDir = join(tempRoot, 'inbox', 'pa-codex');
+    const inboxFiles = readdirSync(inboxDir);
+    expect(inboxFiles).toHaveLength(1);
+    const inboxPayload = JSON.parse(readFileSync(join(inboxDir, inboxFiles[0]), 'utf-8')) as { text: string };
+    expect(inboxPayload.text).toContain('cd pa-codex agent dir');
+
+    const logLine = readFileSync(join(tempRoot, 'logs', 'pa-codex', 'inbound-messages.jsonl'), 'utf-8');
+    expect(JSON.parse(logLine)).toMatchObject({ agent: 'pa-codex' });
 
     await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
   });
@@ -747,11 +791,82 @@ describe('webhook-bridge command', () => {
     expect(errorSpy).toHaveBeenCalled();
     expect(String(errorSpy.mock.calls[0]?.[0] ?? '')).toContain('WEBHOOK_BRIDGE_SECRET is required');
   });
+
+  it('requires an explicit org before reading secrets when a framework contains multiple orgs', () => {
+    process.env.CTX_FRAMEWORK_ROOT = tempRoot;
+    process.env.CTX_PROJECT_ROOT = tempRoot;
+    process.env.CTX_ROOT = tempRoot;
+    delete process.env.WEBHOOK_BRIDGE_SECRET;
+    delete process.env.CTX_ORG;
+    mkdirSync(join(tempRoot, 'orgs', 'personal'), { recursive: true });
+    mkdirSync(join(tempRoot, 'orgs', 'client-a'), { recursive: true });
+    mkdirSync(join(tempRoot, 'orgs', 'client-b'), { recursive: true });
+    writeFileSync(join(tempRoot, 'orgs', 'clearworksai', 'secrets.env'), 'WEBHOOK_BRIDGE_SECRET=clearworks\n');
+    writeFileSync(join(tempRoot, 'orgs', 'personal', 'secrets.env'), 'WEBHOOK_BRIDGE_SECRET=personal\n');
+
+    expect(() => resolveBridgeRuntimeContext('test-instance')).toThrow(
+      'Organization is required because 4 orgs exist',
+    );
+
+    process.env.CTX_ORG = 'personal';
+    expect(resolveBridgeRuntimeContext('test-instance').bridgeSecret).toBe('personal');
+    expect(resolveBridgeRuntimeContext('test-instance', 'clearworksai')).toMatchObject({
+      org: 'clearworksai',
+      bridgeSecret: 'clearworks',
+    });
+  });
+
+  it('rejects unknown and unsafe org selections', () => {
+    process.env.CTX_FRAMEWORK_ROOT = tempRoot;
+    process.env.CTX_PROJECT_ROOT = tempRoot;
+    process.env.CTX_ROOT = tempRoot;
+    process.env.WEBHOOK_BRIDGE_SECRET = 'top-secret';
+    delete process.env.CTX_ORG;
+
+    expect(() => resolveBridgeRuntimeContext('test-instance', 'missing')).toThrow(
+      'Unknown organization "missing"',
+    );
+    expect(() => resolveBridgeRuntimeContext('test-instance', '../clearworksai')).toThrow(
+      'Invalid org name',
+    );
+  });
+});
+
+describe('meeting-writeback planner', () => {
+  it('prefers the centralized pa-codex meeting-writeback skill', () => {
+    const centralSkill = join(
+      tempRoot,
+      'orgs',
+      'clearworksai',
+      'agents',
+      'pa-codex',
+      'plugins',
+      'cortextos-agent-skills',
+      'skills',
+      'meeting-writeback-worker',
+      'SKILL.md',
+    );
+    mkdirSync(join(centralSkill, '..'), { recursive: true });
+    writeFileSync(centralSkill, '---\nname: meeting-writeback-worker\n---\n', 'utf-8');
+
+    const plan = planMeetingWritebackSpawn({
+      frameworkRoot: tempRoot,
+      org: 'clearworksai',
+      target: 'pa-codex',
+      meetingId: 'meeting-123',
+    });
+
+    expect(plan).not.toBeNull();
+    expect(plan?.dir).toBe(join(tempRoot, 'orgs', 'clearworksai', 'agents', 'pa-codex'));
+    expect(plan?.prompt).toContain(
+      join('plugins', 'cortextos-agent-skills', 'skills', 'meeting-writeback-worker', 'SKILL.md'),
+    );
+  });
 });
 
 const RATE_LIMIT_RESET_MS = 60_001;
 
-describe('readFrameworkEnv — org-independent secret load (bridge-dies-on-restart fix)', () => {
+describe('readFrameworkEnv — org secret selection (bridge-dies-on-restart fix)', () => {
   let root: string;
   const savedOrg = process.env.CTX_ORG;
 
@@ -770,6 +885,24 @@ describe('readFrameworkEnv — org-independent secret load (bridge-dies-on-resta
     writeFileSync(join(root, 'orgs', 'clearworksai', 'secrets.env'), 'WEBHOOK_BRIDGE_SECRET=s3cr3t\n');
     const env = readFrameworkEnv(root);
     expect(env.WEBHOOK_BRIDGE_SECRET).toBe('s3cr3t');
+  });
+
+  it('loads secrets only from an explicit org in a multi-org framework', () => {
+    mkdirSync(join(root, 'orgs', 'clearworksai'), { recursive: true });
+    mkdirSync(join(root, 'orgs', 'personal'), { recursive: true });
+    writeFileSync(join(root, 'orgs', 'clearworksai', 'secrets.env'), 'WEBHOOK_BRIDGE_SECRET=clearworks\n');
+    writeFileSync(join(root, 'orgs', 'personal', 'secrets.env'), 'WEBHOOK_BRIDGE_SECRET=personal\n');
+
+    expect(readFrameworkEnv(root, 'clearworksai').WEBHOOK_BRIDGE_SECRET).toBe('clearworks');
+  });
+
+  it('does not merge secrets from multiple orgs when no org is selected', () => {
+    mkdirSync(join(root, 'orgs', 'clearworksai'), { recursive: true });
+    mkdirSync(join(root, 'orgs', 'personal'), { recursive: true });
+    writeFileSync(join(root, 'orgs', 'clearworksai', 'secrets.env'), 'WEBHOOK_BRIDGE_SECRET=clearworks\n');
+    writeFileSync(join(root, 'orgs', 'personal', 'secrets.env'), 'WEBHOOK_BRIDGE_SECRET=personal\n');
+
+    expect(readFrameworkEnv(root).WEBHOOK_BRIDGE_SECRET).toBeUndefined();
   });
 
   it('lists org dirs (drives the single-org CTX_ORG plist default)', () => {

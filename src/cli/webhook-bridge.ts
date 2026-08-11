@@ -9,6 +9,7 @@ import { listAgents } from '../bus/agents.js';
 import { sendMessage } from '../bus/message.js';
 import { loadEnvFileInto } from '../utils/env.js';
 import { resolvePaths } from '../utils/paths.js';
+import { validateOrgName } from '../utils/validate.js';
 import type { BusPaths } from '../types/index.js';
 import { resolveInstanceId } from './resolve-instance-id.js';
 import { planWorkerSpawn, trySpawnWorkerForEvent, type WorkerSpawnTemplate } from '../daemon/worker-spawn-plan.js';
@@ -121,9 +122,9 @@ function hmacSignatureMatches(rawBody: string, providedHeader: string, secret: s
 }
 
 /**
- * List the org names under `<frameworkRoot>/orgs` (directories only). Used both to
- * load org secrets when CTX_ORG is unset and to resolve a single-org default so the
- * generated launchd plist can pin CTX_ORG going forward.
+ * List the org names under `<frameworkRoot>/orgs` (directories only). Used to
+ * resolve a single-org default so the generated launchd plist can pin CTX_ORG
+ * going forward.
  */
 export function listOrgDirs(frameworkRoot: string): string[] {
   try {
@@ -135,22 +136,30 @@ export function listOrgDirs(frameworkRoot: string): string[] {
   }
 }
 
-export function readFrameworkEnv(frameworkRoot: string): Record<string, string> {
+function selectFrameworkOrg(
+  orgDirs: string[],
+  envFromFiles: Record<string, string>,
+  orgOverride?: string,
+): string {
+  const org = orgOverride
+    || process.env.CTX_ORG
+    || envFromFiles.CTX_ORG
+    || (orgDirs.length === 1 ? orgDirs[0] : '');
+  if (org) validateOrgName(org);
+  return org;
+}
+
+export function readFrameworkEnv(frameworkRoot: string, orgOverride?: string): Record<string, string> {
   const resolved: Record<string, string> = {};
   if (!frameworkRoot) return resolved;
   loadEnvFileInto(join(frameworkRoot, '.cortextos-env'), resolved);
   loadEnvFileInto(join(frameworkRoot, '.env'), resolved);
-  const org = process.env.CTX_ORG || resolved.CTX_ORG || '';
+  const orgDirs = listOrgDirs(frameworkRoot);
+  const org = selectFrameworkOrg(orgDirs, resolved, orgOverride);
   if (org) {
     loadEnvFileInto(join(frameworkRoot, 'orgs', org, 'secrets.env'), resolved);
-  } else {
-    // CTX_ORG unresolved (the launchd plist omits it unless a prior start pinned it —
-    // the chicken-and-egg that silently crash-looped the bridge on "WEBHOOK_BRIDGE_SECRET
-    // required"). Load EVERY org's secrets.env so the bridge secret is still found,
-    // org-independent. See incident_webhook_bridge_dies_on_restart_missing_ctx_org.
-    for (const name of listOrgDirs(frameworkRoot)) {
-      loadEnvFileInto(join(frameworkRoot, 'orgs', name, 'secrets.env'), resolved);
-    }
+    // Do not let a secrets file redirect the resolved org after its path was chosen.
+    resolved.CTX_ORG = org;
   }
   return resolved;
 }
@@ -186,20 +195,27 @@ function findFrameworkRoot(): string {
   return cliDirCandidate;
 }
 
-function resolveBridgeRuntimeContext(instanceId: string): BridgeRuntimeContext {
+export function resolveBridgeRuntimeContext(instanceId: string, orgOverride?: string): BridgeRuntimeContext {
   const frameworkRoot = findFrameworkRoot();
-  const envFromFiles = readFrameworkEnv(frameworkRoot);
+  const envFromFiles = readFrameworkEnv(frameworkRoot, orgOverride);
   // Resolve org from env, then fall back to the sole org dir when unambiguous, so the
-  // generated plist pins CTX_ORG (line ~627) and future starts load that org's secrets
-  // directly instead of relying on the org-independent all-orgs fallback.
+  // generated plist pins CTX_ORG and future starts load that org's secrets directly.
   const orgDirs = listOrgDirs(frameworkRoot);
-  const org = process.env.CTX_ORG || envFromFiles.CTX_ORG || (orgDirs.length === 1 ? orgDirs[0] : '');
+  const org = selectFrameworkOrg(orgDirs, envFromFiles, orgOverride);
   const ctxRoot = process.env.CTX_ROOT || envFromFiles.CTX_ROOT || join(homedir(), '.cortextos', instanceId);
   const bridgeSecret = process.env.WEBHOOK_BRIDGE_SECRET || envFromFiles.WEBHOOK_BRIDGE_SECRET || '';
   const firefliesWebhookSecret = process.env.FIREFLIES_WEBHOOK_SECRET || envFromFiles.FIREFLIES_WEBHOOK_SECRET || undefined;
   const zoomWebhookSecretToken = process.env.ZOOM_WEBHOOK_SECRET_TOKEN || envFromFiles.ZOOM_WEBHOOK_SECRET_TOKEN || undefined;
   const mailchimpApiKey = process.env.MAILCHIMP_API_KEY || envFromFiles.MAILCHIMP_API_KEY || undefined;
 
+  if (!org && orgDirs.length > 1) {
+    throw new Error(
+      `Organization is required because ${orgDirs.length} orgs exist (${orgDirs.join(', ')}). Pass --org <id> or set CTX_ORG.`,
+    );
+  }
+  if (org && !orgDirs.includes(org)) {
+    throw new Error(`Unknown organization "${org}". Expected one of: ${orgDirs.join(', ') || '(none)'}.`);
+  }
   if (!bridgeSecret) {
     throw new Error(
       'WEBHOOK_BRIDGE_SECRET is required. Set it in the environment, .cortextos-env, or orgs/<org>/secrets.env before starting webhook-bridge.',
@@ -367,6 +383,7 @@ function firefliesWritebackTemplate(args: {
     target: args.target,
     workerNamePrefix: 'meeting-writeback',
     skillRelativePaths: [
+      join('plugins', 'cortextos-agent-skills', 'skills', 'meeting-writeback-worker', 'SKILL.md'),
       join('.claude', 'skills', 'meeting-writeback-worker', 'SKILL.md'),
       join('plugins', 'meeting-writeback-worker', 'SKILL.md'),
     ],
@@ -426,11 +443,11 @@ async function trySpawnMeetingWriteback(args: {
   return result.ok ? { ok: true, workerName: result.workerName } : { ok: false };
 }
 
-function buildRelayMessage(integration: string, event: string, envelope: RelayEnvelope): string {
+function buildRelayMessage(integration: string, event: string, envelope: RelayEnvelope, target = 'pa'): string {
   const meetingId = extractMeetingId(envelope);
 
   if (integration === 'fireflies' && meetingId) {
-    return `WEBHOOK ${integration} ${event} — meeting ${meetingId}. Spawn meeting-writeback-worker with FF_MEETING_ID=${meetingId} set so the single-meeting fast path runs now instead of waiting for the 2h poll: cd pa agent dir, source env, read .claude/skills/meeting-writeback-worker/SKILL.md and execute every bash block in order, then python3 scripts/ff-extractor.py --mode full --meeting-id ${meetingId}.`;
+    return `WEBHOOK ${integration} ${event} — meeting ${meetingId}. Spawn meeting-writeback-worker with FF_MEETING_ID=${meetingId} set so the single-meeting fast path runs now instead of waiting for the 2h poll: cd ${target} agent dir, source env, read plugins/cortextos-agent-skills/skills/meeting-writeback-worker/SKILL.md and execute every bash block in order, then python3 scripts/ff-extractor.py --mode full --meeting-id ${meetingId}.`;
   }
 
   if (integration === 'ops-check-lead') {
@@ -940,8 +957,10 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
       // on the long-running agent noticing and acting. Falls through to the NL relay
       // below if the daemon spawn cannot be reached (no regression).
       const meetingId = extractMeetingId(envelope);
+      let relayTarget = target;
       if (integration === 'fireflies' && meetingId) {
         const spawnTarget = resolveActiveTarget(target, options.ctxRoot, options.frameworkRoot, options.org);
+        relayTarget = spawnTarget;
         const spawned = await trySpawnMeetingWriteback({
           instanceId: options.instanceId,
           frameworkRoot: options.frameworkRoot,
@@ -950,10 +969,10 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
           meetingId,
         });
         if (spawned.ok) {
-          wakeFastChecker(options.ctxRoot, target);
+          wakeFastChecker(options.ctxRoot, spawnTarget);
           appendInboundLog(
             options.ctxRoot,
-            target,
+            spawnTarget,
             spawned.workerName,
             `SPAWN meeting-writeback ${spawned.workerName} FF_MEETING_ID=${meetingId}`,
           );
@@ -963,17 +982,17 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
         // else: fall through to the NL relay below.
       }
 
-      const text = buildRelayMessage(integration, envelope.event.trim(), envelope);
+      const text = buildRelayMessage(integration, envelope.event.trim(), envelope, relayTarget);
       const messageId = sendMessage(
-        resolveBusPaths(options.ctxRoot, target, options.instanceId || 'default', options.org),
+        resolveBusPaths(options.ctxRoot, relayTarget, options.instanceId || 'default', options.org),
         SOURCE_NAME,
-        target,
+        relayTarget,
         'normal',
         text,
       );
 
-      wakeFastChecker(options.ctxRoot, target);
-      appendInboundLog(options.ctxRoot, target, messageId, text);
+      wakeFastChecker(options.ctxRoot, relayTarget);
+      appendInboundLog(options.ctxRoot, relayTarget, messageId, text);
       jsonResponse(response, 200, { ok: true, messageId });
     } catch {
       jsonResponse(response, 500, { error: 'relay_failed' });
@@ -983,6 +1002,7 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
 
 type StartOptions = {
   instance?: string;
+  org?: string;
   port: string;
 };
 
@@ -990,6 +1010,7 @@ type RunOptions = StartOptions;
 
 const startCommand = new Command('start')
   .option('--instance <id>', 'Instance ID')
+  .option('--org <id>', 'Organization ID (required when the framework contains multiple orgs)')
   .option('--port <port>', 'Webhook bridge port', String(DEFAULT_PORT))
   .description('Start the webhook bridge as a launchd service')
   .addHelpText(
@@ -1001,7 +1022,7 @@ const startCommand = new Command('start')
       checkPlatform();
       const instanceId = resolveInstanceId(options.instance);
       const port = parsePort(options.port, '--port');
-      const context = resolveBridgeRuntimeContext(instanceId);
+      const context = resolveBridgeRuntimeContext(instanceId, options.org);
 
       console.log('\ncortextOS Webhook Bridge\n');
       writePlist(context, port);
@@ -1077,6 +1098,7 @@ const statusCommand = new Command('status')
 
 const runCommand = new Command('run')
   .option('--instance <id>', 'Instance ID')
+  .option('--org <id>', 'Organization ID (required when the framework contains multiple orgs)')
   .option('--port <port>', 'Webhook bridge port', String(DEFAULT_PORT))
   .description('Run the webhook bridge in the foreground')
   .addHelpText(
@@ -1087,7 +1109,7 @@ const runCommand = new Command('run')
     try {
       const instanceId = resolveInstanceId(options.instance);
       const port = parsePort(options.port, '--port');
-      const context = resolveBridgeRuntimeContext(instanceId);
+      const context = resolveBridgeRuntimeContext(instanceId, options.org);
       const server = createBridgeServer({
         instanceId,
         ctxRoot: context.ctxRoot,

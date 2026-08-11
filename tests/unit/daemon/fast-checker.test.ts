@@ -1213,3 +1213,192 @@ describe('FastChecker wedge watchdog — default opt-in (wedge-watchdog-default-
     expect(sessionRefresh).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('FastChecker codex context-full recovery (attempt-7 durable fix)', () => {
+  let testDir: string;
+  let paths: BusPaths;
+
+  beforeEach(() => {
+    vi.mocked(hardRestart).mockClear();
+    testDir = mkdtempSync(join(tmpdir(), 'fastcheck-ctxfull-'));
+    paths = createTestPaths(testDir);
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  // Mock agent surface checkContextStatus + forceContextRestart touch. runtime is
+  // codex-app-server (the gate for the context_full short-circuit). sessionRefresh
+  // is the observable proxy for "a restart fired".
+  function makeCodexAgent(configOverride: Record<string, unknown> = {}) {
+    const config: any = { runtime: 'codex-app-server', model: 'gpt-5.6-luna', ...configOverride };
+    const sessionRefresh = vi.fn().mockResolvedValue(undefined);
+    return {
+      agent: {
+        name: 'codex-agent',
+        isBootstrapped: vi.fn().mockReturnValue(true),
+        injectMessage: vi.fn().mockReturnValue(true),
+        write: vi.fn(),
+        getAgentDir: () => testDir,
+        getConfig: () => config,
+        getOutputBuffer: () => ({ getRecent: () => '' }),
+        sessionRefresh,
+      } as any,
+      sessionRefresh,
+    };
+  }
+
+  function writeStatus(obj: Record<string, unknown>) {
+    writeFileSync(
+      join(paths.stateDir, 'context_status.json'),
+      JSON.stringify({ written_at: new Date().toISOString(), ...obj }),
+      'utf-8',
+    );
+  }
+
+  it('context_full:true triggers forceContextRestart EVEN when used_percentage reads 0% (the false-0 case)', async () => {
+    const { agent, sessionRefresh } = makeCodexAgent();
+    const checker = new FastChecker(agent, paths, '/tmp/framework');
+    // Exactly the poisoned-state file the adapter writes vs. the frozen 0% token math.
+    writeStatus({
+      used_percentage: 0,
+      current_usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      context_full: true,
+      session_id: 'thread-full',
+    });
+
+    await (checker as any).checkContextStatus();
+
+    // Recovery fired despite 0% — proves token math is bypassed.
+    expect(hardRestart).toHaveBeenCalledTimes(1);
+    expect(sessionRefresh).toHaveBeenCalledTimes(1);
+    // No handoff-prompt injection — this is a force path, not the cooperative Tier-2.
+    expect(agent.injectMessage).not.toHaveBeenCalled();
+  });
+
+  it('0% WITHOUT context_full does NOT restart (guards against making 0% always restart / fresh-session storm)', async () => {
+    const { agent, sessionRefresh } = makeCodexAgent();
+    const checker = new FastChecker(agent, paths, '/tmp/framework');
+    writeStatus({
+      used_percentage: 0,
+      current_usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      session_id: 'fresh-thread',
+    });
+
+    await (checker as any).checkContextStatus();
+
+    expect(hardRestart).not.toHaveBeenCalled();
+    expect(sessionRefresh).not.toHaveBeenCalled();
+  });
+
+  it('context_full is ignored for a non-codex runtime (gate holds)', async () => {
+    const { agent, sessionRefresh } = makeCodexAgent({ runtime: 'claude-code' });
+    const checker = new FastChecker(agent, paths, '/tmp/framework');
+    writeStatus({ used_percentage: 0, context_full: true, session_id: 't' });
+
+    await (checker as any).checkContextStatus();
+
+    expect(hardRestart).not.toHaveBeenCalled();
+    expect(sessionRefresh).not.toHaveBeenCalled();
+  });
+
+  it('circuit breaker: a burst of context_full events yields at most 3 restarts / 15min, then pauses (no storm)', async () => {
+    const { agent, sessionRefresh } = makeCodexAgent();
+    const checker = new FastChecker(agent, paths, '/tmp/framework');
+
+    // Fire 5 context-full ticks. forceContextRestart's ≤3/15min window must cap it.
+    for (let i = 0; i < 5; i++) {
+      writeStatus({ used_percentage: 0, context_full: true, session_id: `thread-${i}` });
+      await (checker as any).checkContextStatus();
+    }
+
+    // Exactly 3 real restarts; the 4th trips the breaker, the 5th is paused out.
+    expect(sessionRefresh).toHaveBeenCalledTimes(3);
+    expect(hardRestart).toHaveBeenCalledTimes(3);
+    expect((checker as any).ctxCircuitBrokenAt).not.toBeNull();
+  });
+});
+
+describe('FastChecker wedge default armed for codex runtime (attempt-7 Fix B)', () => {
+  let testDir: string;
+  let paths: BusPaths;
+
+  beforeEach(() => {
+    vi.mocked(hardRestart).mockClear();
+    testDir = mkdtempSync(join(tmpdir(), 'fastcheck-wedge-codex-'));
+    paths = createTestPaths(testDir);
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  function createAgent(config: Record<string, unknown>, name = 'codex-wedge-agent') {
+    const sessionRefresh = vi.fn().mockResolvedValue(undefined);
+    return {
+      agent: {
+        name,
+        getConfig: vi.fn().mockReturnValue(config),
+        isRunning: vi.fn().mockReturnValue(true),
+        isRestartInFlight: vi.fn().mockReturnValue(false),
+        sessionRefresh,
+      } as any,
+      sessionRefresh,
+    };
+  }
+
+  function writeWedgeFixtures(staleMinutes: number): void {
+    mkdirSync(paths.stateDir, { recursive: true });
+    const bufferPath = join(paths.stateDir, 'conversation-buffer.jsonl');
+    writeFileSync(bufferPath, '{"turn":1}\n', 'utf-8');
+    const staleSec = Math.floor((Date.now() - staleMinutes * 60_000) / 1000);
+    utimesSync(bufferPath, staleSec, staleSec);
+    writeFileSync(join(paths.stateDir, 'heartbeat.json'), '{"ts":1}', 'utf-8');
+    writeFileSync(join(paths.inbox, 'msg-1.json'), '{"id":"m1"}', 'utf-8');
+  }
+
+  it('codex-app-server with UNSET wedge_restart_min wedge-restarts at the 20min default', () => {
+    const { agent, sessionRefresh } = createAgent({ runtime: 'codex-app-server' });
+    writeWedgeFixtures(25); // 25min stale > 20min default → wedged
+    const checker = new FastChecker(agent, paths, '/tmp/framework');
+
+    (checker as any).checkWedgeInner();
+
+    expect(hardRestart).toHaveBeenCalledTimes(1);
+    expect(sessionRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('codex-app-server default does NOT fire below the 20min default', () => {
+    const { agent, sessionRefresh } = createAgent({ runtime: 'codex-app-server' });
+    writeWedgeFixtures(10); // 10min stale < 20min default → not wedged
+    const checker = new FastChecker(agent, paths, '/tmp/framework');
+
+    (checker as any).checkWedgeInner();
+
+    expect(hardRestart).not.toHaveBeenCalled();
+    expect(sessionRefresh).not.toHaveBeenCalled();
+  });
+
+  it('non-codex runtime with UNSET wedge_restart_min stays disabled (default unchanged)', () => {
+    const { agent, sessionRefresh } = createAgent({ runtime: 'claude-code' });
+    writeWedgeFixtures(25);
+    const checker = new FastChecker(agent, paths, '/tmp/framework');
+
+    (checker as any).checkWedgeInner();
+
+    expect(hardRestart).not.toHaveBeenCalled();
+    expect(sessionRefresh).not.toHaveBeenCalled();
+  });
+
+  it('explicit wedge_restart_min:0 opts a codex agent OUT (explicit config still wins)', () => {
+    const { agent, sessionRefresh } = createAgent({ runtime: 'codex-app-server', wedge_restart_min: 0 });
+    writeWedgeFixtures(25);
+    const checker = new FastChecker(agent, paths, '/tmp/framework');
+
+    (checker as any).checkWedgeInner();
+
+    expect(hardRestart).not.toHaveBeenCalled();
+    expect(sessionRefresh).not.toHaveBeenCalled();
+  });
+});

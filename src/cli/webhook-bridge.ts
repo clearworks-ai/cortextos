@@ -383,6 +383,7 @@ function firefliesWritebackTemplate(args: {
     target: args.target,
     workerNamePrefix: 'meeting-writeback',
     skillRelativePaths: [
+      join('..', '..', 'skills', 'meeting-writeback-worker', 'SKILL.md'),
       join('plugins', 'cortextos-agent-skills', 'skills', 'meeting-writeback-worker', 'SKILL.md'),
       join('.claude', 'skills', 'meeting-writeback-worker', 'SKILL.md'),
       join('plugins', 'meeting-writeback-worker', 'SKILL.md'),
@@ -447,7 +448,7 @@ function buildRelayMessage(integration: string, event: string, envelope: RelayEn
   const meetingId = extractMeetingId(envelope);
 
   if (integration === 'fireflies' && meetingId) {
-    return `WEBHOOK ${integration} ${event} — meeting ${meetingId}. Spawn meeting-writeback-worker with FF_MEETING_ID=${meetingId} set so the single-meeting fast path runs now instead of waiting for the 2h poll: cd ${target} agent dir, source env, read plugins/cortextos-agent-skills/skills/meeting-writeback-worker/SKILL.md and execute every bash block in order, then python3 scripts/ff-extractor.py --mode full --meeting-id ${meetingId}.`;
+    return `WEBHOOK ${integration} ${event} — meeting ${meetingId}. Spawn meeting-writeback-worker with FF_MEETING_ID=${meetingId} set so the single-meeting fast path runs now instead of waiting for the 2h poll: cd ${target} agent dir, source env, read ../../skills/meeting-writeback-worker/SKILL.md and execute every bash block in order, then python3 scripts/ff-extractor.py --mode full --meeting-id ${meetingId}.`;
   }
 
   if (integration === 'ops-check-lead') {

@@ -838,10 +838,6 @@ describe('meeting-writeback planner', () => {
       tempRoot,
       'orgs',
       'clearworksai',
-      'agents',
-      'pa-codex',
-      'plugins',
-      'cortextos-agent-skills',
       'skills',
       'meeting-writeback-worker',
       'SKILL.md',
@@ -859,7 +855,7 @@ describe('meeting-writeback planner', () => {
     expect(plan).not.toBeNull();
     expect(plan?.dir).toBe(join(tempRoot, 'orgs', 'clearworksai', 'agents', 'pa-codex'));
     expect(plan?.prompt).toContain(
-      join('plugins', 'cortextos-agent-skills', 'skills', 'meeting-writeback-worker', 'SKILL.md'),
+      join('..', '..', 'skills', 'meeting-writeback-worker', 'SKILL.md'),
     );
   });
 });

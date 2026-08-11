@@ -19,6 +19,7 @@ function firefliesTemplate(overrides: Partial<WorkerSpawnTemplate> = {}): Worker
     target: 'pa',
     workerNamePrefix: 'meeting-writeback',
     skillRelativePaths: [
+      join('..', '..', 'skills', 'meeting-writeback-worker', 'SKILL.md'),
       join('plugins', 'cortextos-agent-skills', 'skills', 'meeting-writeback-worker', 'SKILL.md'),
       join('.claude', 'skills', 'meeting-writeback-worker', 'SKILL.md'),
       join('plugins', 'meeting-writeback-worker', 'SKILL.md'),
@@ -54,7 +55,7 @@ describe('planWorkerSpawn (FR-E1 backbone)', () => {
     const plan = planWorkerSpawn(firefliesTemplate(), 'abc');
     expect(plan!.prompt).toContain('FF_MEETING_ID=abc');
     expect(plan!.prompt).toContain(
-      join('plugins', 'cortextos-agent-skills', 'skills', 'meeting-writeback-worker', 'SKILL.md'),
+      join('..', '..', 'skills', 'meeting-writeback-worker', 'SKILL.md'),
     );
   });
 
@@ -63,9 +64,9 @@ describe('planWorkerSpawn (FR-E1 backbone)', () => {
     expect(plan!.extraEnv).toEqual({ FF_MEETING_ID: 'abc' });
   });
 
-  it('falls back to a legacy skill path when the centralized skill is absent', () => {
-    const primary = join('plugins', 'cortextos-agent-skills', 'skills', 'meeting-writeback-worker', 'SKILL.md');
-    const secondary = join('.claude', 'skills', 'meeting-writeback-worker', 'SKILL.md');
+  it('falls back to an agent-local skill when the tracked org skill is absent', () => {
+    const primary = join('..', '..', 'skills', 'meeting-writeback-worker', 'SKILL.md');
+    const secondary = join('plugins', 'cortextos-agent-skills', 'skills', 'meeting-writeback-worker', 'SKILL.md');
     const plan = planWorkerSpawn(
       firefliesTemplate({ skillExists: (p) => p.endsWith(secondary) && !p.endsWith(primary) }),
       'abc',

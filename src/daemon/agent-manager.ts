@@ -1246,15 +1246,14 @@ export class AgentManager {
 
     worker.onDone((workerName, exitCode) => {
       // FR-002: deterministic meeting-event emit. On a finished meeting-writeback
-      // worker (name prefix or FF_MEETING_ID in the captured spawn env), emit exactly
-      // one crm.meeting.completed / crm.meeting.failed off the per-meeting payload
-      // file the SKILL wrote. This is the single-owner code path that replaces the old
-      // SKILL bash-fence emit (which lost WRITEBACK_RC across tool-calls → silent no-emit).
+      // worker, emit exactly one crm.meeting.completed / crm.meeting.failed off the
+      // per-meeting payload file the SKILL wrote. Ownership is name-based: downstream
+      // meeting consumers also carry FF_MEETING_ID as context and must never re-emit.
       try {
         const emitResult = maybeEmitMeetingEvent({
           workerName,
           exitCode,
-          extraEnv,
+          extraEnv: workerName.startsWith('meeting-writeback-') ? extraEnv : undefined,
           ctxRoot: this.ctxRoot,
           org: this.org,
         });

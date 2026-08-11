@@ -98,6 +98,9 @@ function mockExit(): ReturnType<typeof vi.spyOn> {
 
 beforeEach(() => {
   tempRoot = mkdtempSync(join(tmpdir(), 'webhook-bridge-'));
+  // Make the isolated root a valid framework root so command tests never
+  // fall back to the real checkout (and its launchd-owned port 20242).
+  writeFileSync(join(tempRoot, 'package.json'), JSON.stringify({ name: 'cortextos' }), 'utf-8');
   setupRegistry(tempRoot, 'crm');
   setupRegistry(tempRoot, 'pa');
   savedEnv = {
@@ -329,7 +332,7 @@ describe('webhook-bridge server', () => {
     };
     expect(inboxPayload.text).toContain('WEBHOOK fireflies transcription.completed');
     expect(inboxPayload.text).toContain('meeting-123');
-    expect(inboxPayload.text).toContain('meeting-commitments-worker');
+    expect(inboxPayload.text).toContain('meeting-writeback-worker');
     expect(inboxPayload.text).toContain('FF_MEETING_ID=meeting-123');
     expect(inboxPayload.text).toContain('cd pa agent dir');
     expect(inboxPayload.text).not.toContain('cd frank2 agent dir');

@@ -1,5 +1,9 @@
 # Heartbeat Checklist
 
+## ⛔ SILENT HEARTBEAT — DO NOT TELEGRAM THE USER
+
+A heartbeat is SILENT to the user. Do NOT send the user a Telegram summarizing your heartbeat — no "heartbeat complete", "inbox clear", "goals stale", "review-only / nothing changed", "back — …", or any routine or negative-assurance status. These are FORBIDDEN (SOUL Silent Constraints). Step 1 `update-heartbeat` (dashboard) is your ONLY routine status signal. Telegram the user ONLY for: a real blocker needing their decision, an approval request, or a failure. Stale goals → message the ORCHESTRATOR (Step 6), never the user. On a heartbeat-cron or CONTEXT-HANDOFF session start, send the user NOTHING.
+
 Execute every step.
 
 ## 1. Update Heartbeat

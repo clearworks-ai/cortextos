@@ -1,0 +1,27 @@
+SOURCE OF TRUTH
+- Deterministic Fireflies Meeting Execution (BINDING — schema, invariant sinks, typed outcomes, non-narrowable DONE): state/specs/deterministic-fireflies-meeting-execution-spec-2026-08-11.md → §4, §7, §12, "Testing gate". Repo clearworks-ai/cortextos.
+
+STANDING RULES:
+- Canonical chain lives at src/meeting-chain/, NEVER under orgs/clearworksai/agents/*, no hardcoded per-agent paths. pa is DEAD.
+- CRM writes only via canonical upsert-contact.py/add-interaction.py/upsert-engagement.py; org-scoped; no raw JSON edits.
+- Atomic writes (src/utils/atomic.ts). npm run build (tsc clean) + npm test must pass; TS strict, no `any`/console.log.
+- Staging = cortextos-staging (CTX_INSTANCE_ID=cortextos-staging) w/ FROZEN redacted committed fixtures + staging stores; fail closed if any path resolves to prod. The spec "Testing gate" fixture matrix IS /test-on-staging — GREEN = every fixture's positive+negative assertions hold.
+- Classification is advisory metadata; it may NEVER gate a sink.
+
+SUB-PHASE (BATCH 2/4 — needs batch 1 P1b manifest staged):
+P2 FR-001/002/003 canonical module + fail-closed schema + provenance. DONE when: whole chain (ff-extractor, meeting_writeback, meeting-fanout, meeting-crm-sync, meeting_recap_draft) at src/meeting-chain/; pa/pa-codex/frank2-codex copies deleted + fanout/crm-sync/daemon de-hardcoded (grep clean); schema emits meeting_type + next_steps[].{commitmentId,owner_identity,direction,due|NEEDS-DATE,sourceQuote,text} + explicit []; writeback reads next_steps[].commitmentId not top-level; TS boundary meeting-event-emit.ts validates not casts; missing field → schema_invalid in manifest (fail closed); per-run provenance recorded + compared to state/meeting-chain/PROMOTED.json, mismatch fails that run + notifies; corrupt-field fixture fails visibly.
+
+EACH ITERATION
+1. git log + manifest/ledger → this sub-phase; re-read its FRs + live code.
+2. superpowers:writing-plans → gated tasks.
+3. superpowers:subagent-driven-development task-by-task; N+1 waits for N.
+4. /codex review (--base origin/main); if it touches money/data-migration/identity → also /codex challenge; fix Critical/Important + re-run build+test.
+5. /stage (PR to clearworks-ai/cortextos, let it merge), then run the spec Testing-gate matrix in cortextos-staging — GREEN before done.
+6. EMIT RECEIPT: bin/pipeline-stage-emit --slug <slug> --stage true-verify --artifact <build> --evidence <matrix> --runner <agent>. No receipt = NOT done (gate-pr-push.sh blocks).
+
+DONE (P2): DONE-when holds, verified from this session's output (build+test, codex, fixture GREEN — not assumed), with an emitted true-verify row + staged. No row = not done. Never narrow DONE to "buildable scope"; drop a requirement only if Josh removes it explicitly.
+
+ENVIRONMENT
+- Fixtures are FROZEN redacted committed transcripts — never live-fetch. Deleting the pa/pa-codex/frank2-codex copies must not orphan any still-referenced caller — de-hardcode in the same PR.
+
+HALT: Staging merges are pre-authorized — run /stage and let the PR merge without asking. Do not pause to confirm opening or merging a PR to staging; this loop runs unattended. After each merge, run /test-on-staging against the deployed staging env; its spec-coverage matrix must be GREEN before the sub-phase counts as done. HALT only on: (1) a gate fails (a RED /test-on-staging matrix counts) — stop, report gate+diff+error, no silent fix-forward; (2) spec ambiguity or conflict — stop, ask; (3) all sub-phases staged — stop, report, await the explicit /promote decision (do not auto-promote to main unless this spec's own DONE section says otherwise).

@@ -19,12 +19,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
 
 CRM_DIR = Path(__file__).resolve().parent
-PIPELINE_PATH = CRM_DIR / "pipeline.json"
+PIPELINE_PATH = Path(os.environ.get("CRM_PIPELINE_PATH", CRM_DIR / "pipeline.json"))
 
 KNOWN_STAGES = {
     "lead", "qualified", "proposal_sent", "negotiation", "audit", "implementation",
@@ -46,6 +47,7 @@ def main() -> int:
     parser.add_argument("--last-signal-at")
     parser.add_argument("--primary-contact-id")
     parser.add_argument("--dossier", help="Canonical CRM-relative dossier reference")
+    parser.add_argument("--next-action")
     parser.add_argument("--open-commitment", action="append", default=[], help="Open commitment; may be supplied more than once")
     parser.add_argument("--misclassified", action="store_true", help="Flag only when evidence contradicts the current stage")
     parser.add_argument("--note", default="")
@@ -105,6 +107,10 @@ def main() -> int:
     if args.dossier and eng.get("_dossier") != args.dossier:
         eng["_dossier"] = args.dossier
         changes.append("_dossier")
+
+    if args.next_action is not None and eng.get("next_action") != args.next_action:
+        eng["next_action"] = args.next_action
+        changes.append("next_action")
 
     if args.open_commitment:
         existing = eng.get("_open_commitments", [])

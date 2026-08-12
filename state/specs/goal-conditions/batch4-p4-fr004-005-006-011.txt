@@ -1,0 +1,27 @@
+SOURCE OF TRUTH
+- Deterministic Fireflies Meeting Execution (BINDING — schema, invariant sinks, typed outcomes, non-narrowable DONE): state/specs/deterministic-fireflies-meeting-execution-spec-2026-08-11.md → §4, §7, §12, "Testing gate". Repo clearworks-ai/cortextos.
+
+STANDING RULES:
+- Canonical chain lives at src/meeting-chain/, NEVER under orgs/clearworksai/agents/*, no hardcoded per-agent paths. pa is DEAD.
+- CRM writes only via canonical upsert-contact.py/add-interaction.py/upsert-engagement.py; org-scoped; no raw JSON edits.
+- Atomic writes (src/utils/atomic.ts). npm run build (tsc clean) + npm test must pass; TS strict, no `any`/console.log.
+- Staging = cortextos-staging (CTX_INSTANCE_ID=cortextos-staging) w/ FROZEN redacted committed fixtures + staging stores; fail closed if any path resolves to prod. The spec "Testing gate" fixture matrix IS /test-on-staging — GREEN = every fixture's positive+negative assertions hold.
+- Classification is advisory metadata; it may NEVER gate a sink.
+
+SUB-PHASE (BATCH 4/4 — needs P3 staged):
+P4 FR-004/005/006/011 sinks + advisory + proposal + Gmail. DONE when: meaningful_external produces recap + OUR candidate tasks (bus human-task surface + BRIEFS, same commitmentId) + Josh-only Gmail draft+approval + CRM interaction + explicit commercial outcome + terminal receipt to Josh, each verified-or-partial_failed+escalate; internal meeting gets ONLY recap + OUR tasks + BRIEFS + internal_skip manifest; BOTH sales gates removed (meeting-crm-sync + dispatch), meeting_type sales/other/absent → identical artifact set (comparator); FR-006 emits one of no_evidence|matched_existing|proposed_new|ambiguous|failed by a deterministic evidence rule, proposed_new/stage-change = approval carrying an executable upsert-engagement payload applied only post-approval, keyed meeting_id+evidence-hash; Gmail wired as event sink, draft-only Josh-only, captures draft id, reconciles by marker; all 6 fixtures GREEN.
+
+EACH ITERATION
+1. git log + manifest/ledger → this sub-phase; re-read its FRs + live code.
+2. superpowers:writing-plans → gated tasks.
+3. superpowers:subagent-driven-development task-by-task; N+1 waits for N.
+4. /codex review (--base origin/main); if it touches money/data-migration/identity → also /codex challenge; fix Critical/Important + re-run build+test.
+5. /stage (PR to clearworks-ai/cortextos, let it merge), then run the spec Testing-gate matrix in cortextos-staging — GREEN before done.
+6. EMIT RECEIPT: bin/pipeline-stage-emit --slug <slug> --stage true-verify --artifact <build> --evidence <matrix> --runner <agent>. No receipt = NOT done (gate-pr-push.sh blocks).
+
+DONE (whole spec): P4 DONE-when holds AND FR-012 GUARD holds — met=true requires every FR-004 invariant sink verified on BOTH frozen fixtures MSIA(01KZCGVH6HYN9XX4124033CTJV) + Kadre(01KZMNH3A753Z6Z9JAAJ1V19PC) with terminal receipts, verified from this session (build+test, codex, matrix GREEN) + a true-verify row + staged. Deferred/gated work CANNOT satisfy DONE; DONE MUST NOT narrow to "buildable scope" (the 2026-08-10 cycle failed that way). Drop a requirement only if Josh removes it explicitly.
+
+ENVIRONMENT
+- Gmail send-disabled; draft-only, Josh-only, no send path. A-04: gws gmail +draft must return a parseable draft id (may need a small gws change).
+
+HALT: Staging merges are pre-authorized — run /stage and let the PR merge without asking. Do not pause to confirm opening or merging a PR to staging; this loop runs unattended. After each merge, run /test-on-staging against the deployed staging env; its spec-coverage matrix must be GREEN before the sub-phase counts as done. HALT only on: (1) a gate fails (a RED /test-on-staging matrix counts) — stop, report gate+diff+error, no silent fix-forward; (2) spec ambiguity or conflict — stop, ask; (3) all sub-phases staged — stop, report, await the explicit /promote decision (do not auto-promote to main unless this spec's own DONE section says otherwise).

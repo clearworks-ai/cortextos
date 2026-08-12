@@ -139,6 +139,7 @@ def main() -> int:
     parser.add_argument("--location")
     parser.add_argument("--context", default="")
     parser.add_argument("--notes", default="")
+    parser.add_argument("--important-date", action="append", default=[])
     parser.add_argument("--source-ref", action="append", default=[])
     parser.add_argument("--match-email", action="store_true")
     args = parser.parse_args()
@@ -220,6 +221,9 @@ def main() -> int:
     contact["phones"] = merge_unique(contact.get("phones", []), args.phone)
     contact["tags"] = merge_unique(contact.get("tags", []), args.tag)
     contact["aliases"] = merge_unique(contact.get("aliases", []), args.alias)
+    contact["important_dates"] = merge_unique(
+        contact.get("important_dates", []), args.important_date
+    )
     contact["source_refs"] = merge_unique(contact.get("source_refs", []), args.source_ref)
 
     CONTACTS_PATH.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")

@@ -319,7 +319,11 @@ def build_company_timeline_payload(
         if not isinstance(engagement, dict):
             continue
         if slug in engagement_company_slugs(engagement, contact_index, aliases):
-            matched_engagements.append(dict(engagement))
+            matched_engagement = dict(engagement)
+            display_name = matched_engagement.get("_display_name")
+            if isinstance(display_name, str) and display_name.strip():
+                matched_engagement["name"] = display_name.strip()
+            matched_engagements.append(matched_engagement)
     matched_engagements.sort(
         key=lambda engagement: sort_key_for_timestamp(
             engagement.get("last_signal_at") or engagement.get("stage_changed_at")

@@ -1137,12 +1137,21 @@ describe('CodexAppServerPTY thread/tokenUsage/updated → context_status.json', 
     expect(payload.exceeds_200k_tokens).toBe(false);
     expect(payload.session_id).toBe('thread-9');
     expect(typeof payload.written_at).toBe('string');
+    // input_tokens is the FRESH (non-cached) input = 60000 − 5000 cached, so the
+    // buckets are non-overlapping (Claude convention) and FastChecker's bucket sum
+    // does not double-count the cached tokens.
     expect(payload.current_usage).toEqual({
-      input_tokens: 60000,
+      input_tokens: 55000,
       output_tokens: 4000,
       cache_read_input_tokens: 5000,
       cache_creation_input_tokens: 0,
     });
+    // Regression for the ~2x context bug: FastChecker sums these buckets as
+    // input + cache_creation + cache_read + output. That sum MUST equal
+    // inputTokens + outputTokens (64000), NOT double-count the 5000 cached (69000).
+    const cu = payload.current_usage as Record<string, number>;
+    expect(cu.input_tokens + cu.cache_creation_input_tokens + cu.cache_read_input_tokens + cu.output_tokens)
+      .toBe(64000);
   });
 
   it('falls back to default 256000 cap when modelContextWindow is null', () => {
@@ -1211,12 +1220,15 @@ describe('CodexAppServerPTY thread/tokenUsage/updated → context_status.json', 
     const payload = lastWrittenPayload()!;
     expect(payload.used_percentage).toBeCloseTo((82000 / 258400) * 100, 5);
     expect(payload.used_percentage).not.toBe(100);
+    // fresh input = 80000 − 30000 cached; buckets sum to totalTokens (82000), no double-count.
     expect(payload.current_usage).toEqual({
-      input_tokens: 80000,
+      input_tokens: 50000,
       output_tokens: 2000,
       cache_read_input_tokens: 30000,
       cache_creation_input_tokens: 0,
     });
+    const cu = payload.current_usage as Record<string, number>;
+    expect(cu.input_tokens + cu.cache_creation_input_tokens + cu.cache_read_input_tokens + cu.output_tokens).toBe(82000);
   });
 
   it('writes null used_percentage instead of false-100 when current-window data is missing', () => {

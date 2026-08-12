@@ -1021,12 +1021,21 @@ export class CodexAppServerPTY {
     const outputTokens = current && typeof current.outputTokens === 'number' ? current.outputTokens : 0;
     const cachedInputTokens = current && typeof current.cachedInputTokens === 'number' ? current.cachedInputTokens : 0;
 
+    // Codex/OpenAI accounting: `inputTokens` (prompt_tokens) ALREADY INCLUDES the
+    // cache-read tokens (cachedInputTokens ⊆ inputTokens). FastChecker sums the
+    // current_usage buckets as NON-overlapping (Claude convention:
+    // input + cache_creation + cache_read + output), so emitting the raw inputTokens
+    // here alongside cache_read_input_tokens double-counts the cached portion and
+    // reports ~2x context (e.g. 74% vs the true 37%). Emit the fresh (non-cached)
+    // input so the bucket sum equals totalTokens — the same value used_percentage uses.
+    const freshInputTokens = Math.max(0, inputTokens - cachedInputTokens);
+
     const payload = JSON.stringify({
       used_percentage: usedPct,
       context_window_size: cap,
       exceeds_200k_tokens: currentTokens !== null ? currentTokens > 200000 : false,
       current_usage: {
-        input_tokens: inputTokens,
+        input_tokens: freshInputTokens,
         output_tokens: outputTokens,
         cache_read_input_tokens: cachedInputTokens,
         cache_creation_input_tokens: 0,

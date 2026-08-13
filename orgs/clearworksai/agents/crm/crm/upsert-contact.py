@@ -100,16 +100,44 @@ def contact_emails(contact: dict) -> list[str]:
     return values
 
 
-def find_contact_by_email(contacts: list[dict], emails: list[str]) -> dict | None:
+def _company_domain(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    normalized = re.sub(r"^https?://", "", normalized)
+    normalized = normalized.lstrip("@").removeprefix("www.").split("/", 1)[0]
+    return normalized
+
+
+def find_contact_by_email(
+    contacts: list[dict], emails: list[str], name: str = ""
+) -> dict | None:
     wanted = {normalize_email(email) for email in emails if normalize_email(email)}
     if not wanted:
         return None
 
+    matches = []
     for contact in contacts:
         existing = {normalize_email(email) for email in contact_emails(contact) if normalize_email(email)}
         if existing & wanted:
-            return contact
-    return None
+            matches.append(contact)
+    if len(matches) <= 1:
+        return matches[0] if matches else None
+
+    wanted_domains = {email.rsplit("@", 1)[1] for email in wanted if "@" in email}
+    domain_matches = [
+        contact
+        for contact in matches
+        if _company_domain(str(contact.get("company") or "")) in wanted_domains
+    ]
+    if len(domain_matches) == 1:
+        return domain_matches[0]
+
+    normalized_name = _norm(name)
+    name_matches = [
+        contact for contact in matches if normalized_name and _norm(contact.get("name") or "") == normalized_name
+    ]
+    if len(name_matches) == 1:
+        return name_matches[0]
+    return matches[0]
 
 
 def merge_unique(existing: list, additions: list) -> list:
@@ -157,7 +185,7 @@ def main() -> int:
     contacts = data.setdefault("contacts", [])
     matched_contact = None
     if args.match_email and not args.contact_id:
-        matched_contact = find_contact_by_email(contacts, args.email)
+        matched_contact = find_contact_by_email(contacts, args.email, args.name)
     contact_id = args.contact_id or matched_contact.get("id") if matched_contact else args.contact_id or slugify(args.name)
 
     blocked = check_suppressed(contact_id, args.name, args.email)

@@ -477,8 +477,6 @@ def upsert_contacts(attendees: list[dict[str, str]], source_ref: str) -> list[di
     seen_ids: set[str] = set()
     for attendee in attendees:
         args = [
-            "--id",
-            slugify(attendee["name"] or attendee["email"]),
             "--name",
             attendee["name"] or guess_name_from_email(attendee["email"]),
             "--type",
@@ -490,6 +488,8 @@ def upsert_contacts(attendees: list[dict[str, str]], source_ref: str) -> list[di
         ]
         if attendee.get("email"):
             args.extend(["--email", attendee["email"], "--match-email"])
+        else:
+            args.extend(["--id", slugify(attendee["name"])])
         contact_id = collapse_ws(run_helper("upsert-contact.py", args))
         if not contact_id or contact_id in seen_ids:
             continue

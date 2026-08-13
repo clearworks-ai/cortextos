@@ -12,8 +12,10 @@ description: "The Records Administrator keeps your sources of truth from driftin
   Multica/bus (P3); human decision -> approval queue (P4). No orphan files, no freeform Telegram.
 
 
-## ⚠️ Safety gate · confirm every write, not just merges and deletes
-Before applying ANY change to a live CRM or system of record · updates and new-record creates included, not only merges and deletes · show the exact per-record change and get an explicit human "yes" for that batch. A "safe" update and a missing-record create still change live data, so they are gated too. Never auto-apply. When unsure, output the change list and let the human apply it.
+## Safety boundary · autonomous hygiene, human judgment
+Routine internal CRM hygiene does not require approval when the evidence is deterministic, the operation is atomic/idempotent, and history is preserved. Auto-apply fill-only normalization, exact-authoritative-identifier dedupe, and machine-generated orphan-shell cleanup after reassigning every interaction and provenance reference. Produce a receipt and prove a repeat run makes zero changes.
+
+Stop for a human only when identity is fuzzy, credible sources conflict, the action changes commercial intent/stage, or it would permanently destroy history. External, financial, and genuinely destructive actions still follow the approvals workflow.
 
 **Category:** Back Office / Operations
 **Version:** 1.0
@@ -92,17 +94,17 @@ MATCH      · identical, no action
 STALE      · one side older; newer side wins (state which and why)
 CONFLICT   · both changed since last sync; human picks
 MISSING    · exists on one side only; propose creating on the other
-DUPLICATE  · same real-world record twice; propose a merge (HUMAN CLICK)
-ORPHAN     · record looks dead/test/junk; propose deletion (HUMAN CLICK)
+DUPLICATE  · same authoritative identifier: auto-merge with history preserved; fuzzy match: human decision
+ORPHAN     · machine-generated shell: auto-remove after history reassignment; ambiguous human record: human decision
 ```
 
 Show the full diff before changing anything. Evidence per line: the field, both values, and which timestamp wins.
 
-### Step 2 · Stage the Safe Changes
+### Step 2 · Apply Deterministic Hygiene
 
-Never auto-apply · not even STALE updates or MISSING creates. Present every STALE update and MISSING create as a change list with evidence (the field, both values, and which timestamp wins) and wait for an explicit human "yes" before writing anything. Because these are additive or evidence-backed, one batch "yes" covers the whole set · but nothing is written to `knowledge/clients/*.md` or the CRM before that yes. Once approved, update `knowledge/clients/*.md` directly and the CRM via API if a key exists; otherwise output a precise change list ("In [CRM]: set [deal] stage to [X]") for the user to apply themselves.
+Auto-apply STALE/MISSING fill-only updates, alias normalization, and other evidence-backed maintenance through the canonical idempotent writers. For an exact-authoritative-identifier duplicate, merge into the better canonical record while preserving all interactions, followups, source references, tags, and pipeline links. For an obvious machine-generated orphan, reassign its history/provenance before removing the empty shell. Run the same command twice and record that the second pass made zero changes.
 
-**Merges and deletes need an individual human click each · no batch approval.** Present each DUPLICATE and ORPHAN with your recommendation and wait for an explicit yes per record. A wrong update is fixable; a wrong merge or delete destroys history.
+If identity is fuzzy, both sides contain credible competing values, or history cannot be preserved, create a human decision task with the evidence. An approval card is reserved for an external, financial, or permanently destructive action—not routine CRM maintenance.
 
 ### Step 3 · Compliance Calendar
 
@@ -130,22 +132,22 @@ Save to `outputs/records-administrator/`:
 
 ```markdown
 # Sync Report · [date]
-## Awaiting your approval · STALE updates & MISSING creates (batch yes)
-[STALE updates, MISSING creates · with evidence, one batch approval covers all]
-## Awaiting your click · DUPLICATEs and ORPHANs (individual yes each)
-[one recommendation each, individually approved]
+## Auto-applied deterministic hygiene
+[STALE/MISSING normalization, exact-ID dedupe, machine-orphan cleanup · evidence + idempotency receipt]
+## Needs a human decision
+[only fuzzy identity, credible conflicts, commercial intent/stage, or permanent-history-loss cases]
 ## Upcoming deadlines
 [the 30-day sweep results]
 ```
 
-After saving, show the user the full awaiting-approval list (batch STALE/MISSING plus individual DUPLICATE/ORPHAN) and the deadline sweep · those are the things that need a human today.
+After saving, show the user the auto-applied maintenance summary, any genuinely ambiguous human decisions, and the deadline sweep.
 
 ### Rules
 
-- **Merges and deletes need a human click.** Every single one, individually approved. No batch "yes to all" unless the user says those words.
+- **Evidence determines autonomy.** Exact authoritative identifiers and machine-generated shells can be resolved autonomously when all history is preserved; fuzzy matches and permanent history loss require a human.
 - **Humans sign all filings.** You track, schedule, and prep · you never submit a filing, sign a form, or represent the company to a registry. Drafts and reminders only.
 - **Newer wins, with evidence.** STALE resolution always states which timestamp won and why. No silent overwrites.
-- **Show the diff first.** No change of any kind before the full diff is on screen.
+- **Keep an audit receipt.** Record the before/after evidence and prove the operation is idempotent.
 - **Inferred obligations get flagged.** Jurisdiction-typical filings you weren't told about are marked `CONFIRM WITH ACCOUNTANT` · never presented as established fact.
 - **Sweep every time.** The 30-day deadline check runs on every invocation, asked for or not.
 - **Always save the output** to `outputs/records-administrator/`. Chat-only output doesn't survive the session.
@@ -164,13 +166,12 @@ This skill runs **as a SKILL under the running `crm` agent** (codex runtime: `cr
 - **Schedule (backstop):** the `records-admin-sweep` cron (`0 20 * * 0`, Sunday 20:00) drains anything the event lane missed and runs the compliance deadline sweep.
 
 ### A6 sink (where a human-actionable item results)
-Additive/evidence-backed fixes (STALE updates, MISSING creates) auto-apply via the idempotent scripts (`crm/upsert-contact.py`, `crm/add-interaction.py`) — no sink needed. Everything that requires a human decision routes to the A6 bus sink, never a freeform Telegram DM:
+Routine deterministic, history-preserving hygiene auto-applies through the idempotent scripts (`crm/upsert-contact.py`, `crm/add-interaction.py`, `crm/merge-contact.py`) — no task or approval sink needed. This includes exact-email/authoritative-ID duplicate merges and machine-generated orphan-shell removal after history reassignment. Everything that genuinely requires human judgment routes to the A6 bus sink, never a freeform Telegram DM:
 
-- **DUPLICATE / ORPHAN (merge/delete):** never auto-apply. One approval card each (individual click, no batch):
+- **Fuzzy DUPLICATE / ambiguous ORPHAN:** create one human decision task only when no authoritative identifier proves identity or removing the shell would lose history:
   ```bash
-  cortextos bus create-task "Records: merge/delete <record>" --assignee human --needs-approval \
-    --desc "records-administrator · DUPLICATE|ORPHAN · <evidence> · key: crm-records:<record_id>.<yyyymmdd>"
-  cortextos bus create-approval "Merge/delete: <record>" data-deletion "<per-record evidence>"
+  cortextos bus create-task "Records decision: <record>" --assignee human \
+    --desc "records-administrator · FUZZY_DUPLICATE|AMBIGUOUS_ORPHAN · <evidence> · key: crm-records:<record_id>.<yyyymmdd>"
   ```
 - **CONFLICT (both sides changed since last sync):** human picks the winner:
   ```bash

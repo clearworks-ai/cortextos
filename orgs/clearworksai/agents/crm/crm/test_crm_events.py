@@ -83,6 +83,70 @@ class EmitSeamTests(unittest.TestCase):
         self.assertEqual(len(_read_events(self.log)), 1)
 
 
+class CommsSecretRedactionTests(unittest.TestCase):
+    def test_redacts_labeled_credentials_and_bearer_tokens(self) -> None:
+        module = _load("comms_backfill_redaction", "comms-backfill.py")
+        source = (
+            "API key / Client ID: abcDEF123456789 "
+            "Authorization: Bearer token.value-123456789"
+        )
+        self.assertEqual(
+            module.redact_secrets(source),
+            "API key / Client ID: [REDACTED] Authorization: Bearer [REDACTED]",
+        )
+
+    def test_does_not_redact_benign_support_language(self) -> None:
+        module = _load("comms_backfill_benign", "comms-backfill.py")
+        source = "We need help with an API key limit issue."
+        self.assertEqual(module.redact_secrets(source), source)
+
+    def test_existing_interaction_scrub_is_atomic_and_idempotent(self) -> None:
+        module = _load("comms_backfill_existing", "comms-backfill.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "interactions.jsonl"
+            path.write_text(
+                json.dumps(
+                    {
+                        "contact_id": "person",
+                        "summary": "Password: secret-value",
+                        "source_ref": "gmail:1",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(module.redact_existing_interactions(path), 1)
+            self.assertEqual(
+                json.loads(path.read_text(encoding="utf-8"))["summary"],
+                "Password: [REDACTED]",
+            )
+            self.assertEqual(module.redact_existing_interactions(path), 0)
+
+
+class CommsContactBoundaryTests(unittest.TestCase):
+    def test_github_reply_relay_is_not_a_contact(self) -> None:
+        module = _load("comms_backfill_relay", "comms-backfill.py")
+        self.assertTrue(
+            module.is_skip_email(
+                "reply+opaque-token@reply.github.com"
+            )
+        )
+
+    def test_upsert_returns_canonical_writer_id(self) -> None:
+        module = _load("comms_backfill_upsert_id", "comms-backfill.py")
+        original_run = module.subprocess.run
+        try:
+            module.subprocess.run = lambda *args, **kwargs: subprocess.CompletedProcess(
+                args=args, returncode=0, stdout="canonical-id\n", stderr=""
+            )
+            self.assertEqual(
+                module.upsert("Name / With Slash", "name@example.com"),
+                "canonical-id",
+            )
+        finally:
+            module.subprocess.run = original_run
+
+
 class ContactCreatedEndToEndTests(unittest.TestCase):
     """E3 through the real choke point: upsert-contact.py, which every ingest path funnels through."""
 
@@ -208,10 +272,22 @@ class CRM1ClusterWiringTests(unittest.TestCase):
             "crm.meeting.completed", "crm.email.captured", "crm.doc.received",
         ):
             self.assertIn(event_type, text, f"wiring doc missing runbook row for {event_type}")
-        # the A6 human-task sink line
+        # the A6 human-task sink remains for genuinely ambiguous decisions,
+        # while deterministic history-preserving hygiene must not be approval-gated.
         self.assertIn("create-task", text)
         self.assertIn("--assignee human", text)
-        self.assertIn("create-approval", text)
+        self.assertIn("exact-authoritative-identifier dedupe", text)
+        self.assertIn("maintenance, not `data-deletion`", text)
+        self.assertIn("permanently destructive", text)
+
+    def test_records_admin_autonomy_boundary(self) -> None:
+        text = (ORG_SKILLS / "records-administrator" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("exact-authoritative-identifier duplicate", text)
+        self.assertIn("machine-generated orphan", text)
+        self.assertIn("no task or approval sink needed", text)
+        self.assertIn("fuzzy matches and permanent history loss require a human", text)
 
 
 if __name__ == "__main__":

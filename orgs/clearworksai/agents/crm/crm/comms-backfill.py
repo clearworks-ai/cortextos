@@ -4,13 +4,59 @@ never produced. Pulls sent + received, upserts contacts via helper, logs interac
 helper, dedupes by (gmail message id). NOT a replacement for the cron — this is the
 recovery pass while we diagnose the scheduler.
 """
-import json, os, re, subprocess
+import json, os, re, subprocess, tempfile
 from pathlib import Path
 
 CRM = Path("/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm/crm")
 
 EMAIL_RE = re.compile(r"<([^>]+@[^>]+)>|([\w.+-]+@[\w.-]+\.\w+)")
 NAME_RE = re.compile(r"^([^<]+?)\s*<")
+SECRET_ASSIGNMENT_RE = re.compile(
+    r"\b(?P<label>(?:api[\s_-]*key|client[\s_-]*(?:secret|id)|"
+    r"access[\s_-]*token|refresh[\s_-]*token|password|passwd|pwd)"
+    r"(?:\s*/\s*(?:api[\s_-]*key|client[\s_-]*(?:secret|id)))?)"
+    r"\s*(?P<sep>[:=])\s*(?P<value>[^\s<>&]+)",
+    re.IGNORECASE,
+)
+BEARER_TOKEN_RE = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/-]{12,}", re.IGNORECASE)
+
+
+def redact_secrets(text):
+    """Remove credential values from email-derived CRM summaries."""
+    value = str(text or "")
+    value = SECRET_ASSIGNMENT_RE.sub(
+        lambda match: f"{match.group('label')}{match.group('sep')} [REDACTED]",
+        value,
+    )
+    return BEARER_TOKEN_RE.sub("Bearer [REDACTED]", value)
+
+
+def redact_existing_interactions(path):
+    """Atomically scrub already-captured summaries; return changed record count."""
+    if not path.exists():
+        return 0
+    changed = 0
+    rendered = []
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        summary = row.get("summary")
+        redacted = redact_secrets(summary)
+        if summary != redacted:
+            row["summary"] = redacted
+            changed += 1
+        rendered.append(json.dumps(row, sort_keys=True))
+    if changed:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=path.parent, delete=False
+        ) as handle:
+            handle.write("\n".join(rendered) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+            temporary = Path(handle.name)
+        os.replace(temporary, path)
+    return changed
 
 def parse_addr(s):
     """'Lori Bodenhamer <lori@abundowealth.com>' -> ('Lori Bodenhamer', 'lori@abundowealth.com')"""
@@ -30,12 +76,15 @@ def slugify(s):
 JOSH_EMAILS = {"josh@clearworks.ai", "weissjosh0@gmail.com"}
 NOREPLY_PATTERNS = ("noreply", "no-reply", "notifications@", "bounce", "mailer-daemon",
                     "postmaster", "support@", "info@", "billing@", "alerts@")
+RELAY_DOMAINS = {"reply.github.com"}
 
 def is_skip_email(email):
     if not email or "@" not in email: return True
     e = email.lower()
     if e in JOSH_EMAILS: return True
     domain = e.rsplit("@", 1)[-1]
+    if domain in RELAY_DOMAINS:
+        return True
     if domain == "clearworks.ai" or domain.endswith(".clearworks.ai"):
         return True
     for p in NOREPLY_PATTERNS:
@@ -60,7 +109,11 @@ def upsert(name, email, company=None):
             "--match-email", "--name", name, "--type", "person",
             "--email", email, "--source-ref", "comms-ingest-backfill-2026-06-01"]
     if company: args += ["--company", company]
-    subprocess.run(args, capture_output=True, text=True, cwd=str(CRM))
+    result = subprocess.run(args, capture_output=True, text=True, cwd=str(CRM))
+    if result.returncode != 0:
+        return None
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    return lines[-1] if lines else None
 
 def log_interaction(cid, typ, summary, source_ref):
     subprocess.run(
@@ -112,7 +165,8 @@ def main():
 
     stats = {"sent_msgs": 0, "received_msgs": 0,
              "new_contacts": 0, "existing_contacts_touched": 0,
-             "interactions_logged": 0, "skipped_already": 0, "skipped_noreply": 0}
+             "interactions_logged": 0, "skipped_already": 0, "skipped_noreply": 0,
+             "secrets_redacted": redact_existing_interactions(CRM / "interactions.jsonl")}
 
     # ---------- SENT (Josh → others) ----------
     sent = gws_query("from:josh@clearworks.ai newer_than:7d -from:sanebox.com")
@@ -130,13 +184,20 @@ def main():
                 stats["skipped_noreply"] += 1; continue
             cid = email_to_id.get(em) or slugify(nm) or em.split("@")[0]
             if cid not in {c.get("id") for c in contacts}:
-                upsert(nm or em.split("@")[0], em, company=company_hint(em))
+                canonical_id = upsert(
+                    nm or em.split("@")[0], em, company=company_hint(em)
+                )
+                if not canonical_id:
+                    continue
+                cid = canonical_id
                 email_to_id[em] = cid
                 contacts.append({"id": cid, "emails": [em]})
                 stats["new_contacts"] += 1
             else:
                 stats["existing_contacts_touched"] += 1
-            summary = f"SENT: {m.get('subject','')[:120]} | {m.get('snippet','')[:200]}"
+            summary = redact_secrets(
+                f"SENT: {m.get('subject','')[:120]} | {m.get('snippet','')[:200]}"
+            )
             log_interaction(cid, "email", summary, ref)
             stats["interactions_logged"] += 1
             seen_refs.add(ref)
@@ -155,13 +216,22 @@ def main():
             stats["skipped_noreply"] += 1; continue
         cid = email_to_id.get(em) or slugify(nm) or em.split("@")[0]
         if cid not in {c.get("id") for c in contacts}:
-            upsert(nm or em.split("@")[0], em, company=em.split("@")[1] if "@" in em else None)
+            canonical_id = upsert(
+                nm or em.split("@")[0],
+                em,
+                company=em.split("@")[1] if "@" in em else None,
+            )
+            if not canonical_id:
+                continue
+            cid = canonical_id
             email_to_id[em] = cid
             contacts.append({"id": cid, "emails": [em]})
             stats["new_contacts"] += 1
         else:
             stats["existing_contacts_touched"] += 1
-        summary = f"RECEIVED: {m.get('subject','')[:120]} | {m.get('snippet','')[:200]}"
+        summary = redact_secrets(
+            f"RECEIVED: {m.get('subject','')[:120]} | {m.get('snippet','')[:200]}"
+        )
         log_interaction(cid, "email", summary, ref)
         stats["interactions_logged"] += 1
         seen_refs.add(ref)

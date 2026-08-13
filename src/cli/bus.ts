@@ -792,11 +792,12 @@ busCommand
   .option('--real-build', 'Only real build work (excludes system + human)')
   .option('--someday', 'Show only someday/backlog tasks')
   .option('--by-project', 'Group text output by project name')
+  .option('--project <name>', 'Filter by project (e.g. human-tasks)')
   .option('--format <fmt>', 'Output format: json or text', 'text')
   .option('--respect-deps', 'Sort DAG-aware: unblocked tasks first, blocked tasks last')
   .option('--limit <n>', `Cap results: positive integer, max ${LIST_TASKS_MAX_LIMIT} (values above are clamped). With --open and no --limit, defaults to 50.`)
   .option('--open', 'Only open statuses (pending, in_progress, blocked, waiting); defaults --class to build unless one is given')
-  .action((opts: { agent?: string; status?: string; priority?: string; class?: string; realBuild?: boolean; someday?: boolean; byProject?: boolean; format?: string; respectDeps?: boolean; limit?: string; open?: boolean }) => {
+  .action((opts: { agent?: string; status?: string; priority?: string; class?: string; project?: string; realBuild?: boolean; someday?: boolean; byProject?: boolean; format?: string; respectDeps?: boolean; limit?: string; open?: boolean }) => {
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
     const requestedClass = (opts.realBuild
@@ -834,6 +835,7 @@ busCommand
       status: opts.status as TaskStatus,
       priority: priorities,
       class: requestedClass,
+      project: opts.project,
       respectDeps: opts.respectDeps ?? false,
       openOnly: opts.open ?? false,
       limit,
@@ -854,7 +856,10 @@ busCommand
       console.log('  No tasks found.');
       return;
     }
-
+    if (!opts.byProject) {
+      console.log(formatTaskTable(decoratedTasks));
+      return;
+    }
     const PRIORITY_ICON: Record<string, string> = { urgent: '🔴', high: '🟠', normal: '🔵', low: '⚪' };
     const STATUS_ICON: Record<string, string> = { pending: '○', in_progress: '●', waiting: '⏸', blocked: '◑', completed: '✓', done: '✓', cancelled: '✗', someday: '◌' };
     const header = '  Class     Status  Pri  Project          From             Assignee         Title';
@@ -871,7 +876,6 @@ busCommand
     };
 
     console.log(`\n  Tasks (${visibleTasks.length})\n`);
-    if (opts.byProject) {
       const groups = new Map<string, Array<Task & { class: TaskClass }>>();
       for (const task of decoratedTasks) {
         const key = task.project || '';
@@ -894,13 +898,41 @@ busCommand
         console.log('');
       }
       return;
-    }
-
-    console.log(header);
-    console.log(separator);
-    for (const t of decoratedTasks) console.log(renderRow(t));
-    console.log('');
   });
+
+/**
+ * Render the list-tasks text table. IDs are copy-paste targets for
+ * update-task/complete-task, so they are NEVER truncated — column widths
+ * come from the data (same pattern as the crons table). Every column is
+ * separated by 2+ spaces; the only column that may truncate is the trailing
+ * title, and truncation is marked with "…". (The previous fixed-width render
+ * cut every 27-char id to 26 with no delimiter before the assignee, which
+ * produced plausible-but-wrong ids when copied.)
+ */
+export function formatTaskTable(tasks: Task[]): string {
+  const PRIORITY_ICON: Record<string, string> = { urgent: '🔴', high: '🟠', normal: '🔵', low: '⚪' };
+  const STATUS_ICON: Record<string, string> = { pending: '○', in_progress: '●', blocked: '◑', completed: '✓', done: '✓', cancelled: '✗' };
+  const TITLE_MAX = 50;
+
+  const idW = Math.max(2, ...tasks.map(t => t.id.length));
+  const assigneeW = Math.max(8, ...tasks.map(t => (t.assigned_to || '-').length));
+
+  const lines: string[] = [];
+  lines.push(`\n  Tasks (${tasks.length})\n`);
+  const header = `  Status  Pri  ${'ID'.padEnd(idW)}  ${'Assignee'.padEnd(assigneeW)}  Title`;
+  lines.push(header);
+  lines.push('  ' + '-'.repeat(header.length - 2));
+  for (const t of tasks) {
+    const statusIcon = (STATUS_ICON[t.status] || '?').padEnd(8);
+    const priIcon = (PRIORITY_ICON[t.priority] || '·').padEnd(5);
+    const id = t.id.padEnd(idW);
+    const assignee = (t.assigned_to || '-').padEnd(assigneeW);
+    const title = t.title.length > TITLE_MAX ? t.title.substring(0, TITLE_MAX - 1) + '…' : t.title;
+    lines.push(`  ${statusIcon}${priIcon}${id}  ${assignee}  ${title}`);
+  }
+  lines.push('');
+  return lines.join('\n');
+}
 
 busCommand
   .command('log-event')

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import os
 import re
@@ -150,6 +151,31 @@ def merge_unique(existing: list, additions: list) -> list:
     return merged
 
 
+def latest_iso_timestamp(existing: str | None, candidate: str | None) -> str | None:
+    """Return the later valid ISO timestamp without regressing contact recency."""
+    if not candidate:
+        return existing
+
+    def parse(value: str) -> dt.datetime:
+        normalized = value.strip().replace("Z", "+00:00")
+        parsed = dt.datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt.timezone.utc)
+        return parsed.astimezone(dt.timezone.utc)
+
+    try:
+        candidate_dt = parse(candidate)
+    except (TypeError, ValueError):
+        raise ValueError(f"invalid --last-meaningful-contact timestamp: {candidate}")
+    if not existing:
+        return candidate_dt.isoformat()
+    try:
+        existing_dt = parse(existing)
+    except (TypeError, ValueError):
+        return candidate_dt.isoformat()
+    return candidate_dt.isoformat() if candidate_dt > existing_dt else existing
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Create or update a CRM contact")
     parser.add_argument("--id", dest="contact_id")
@@ -169,6 +195,7 @@ def main() -> int:
     parser.add_argument("--notes", default="")
     parser.add_argument("--important-date", action="append", default=[])
     parser.add_argument("--source-ref", action="append", default=[])
+    parser.add_argument("--last-meaningful-contact")
     parser.add_argument("--match-email", action="store_true")
     args = parser.parse_args()
 
@@ -253,6 +280,9 @@ def main() -> int:
         contact.get("important_dates", []), args.important_date
     )
     contact["source_refs"] = merge_unique(contact.get("source_refs", []), args.source_ref)
+    contact["last_meaningful_contact"] = latest_iso_timestamp(
+        contact.get("last_meaningful_contact"), args.last_meaningful_contact
+    )
 
     CONTACTS_PATH.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
     print(contact_id)

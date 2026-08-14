@@ -250,10 +250,24 @@ def collect_external_attendees(transcript: dict[str, Any]) -> list[dict[str, str
                         attendee["name"] = normalized_name
                     return
         if normalized_name:
-            first_name = normalized_name.lower().split(" ", 1)[0]
+            normalized_name_key = normalized_name.lower()
             for attendee in attendees:
                 existing_email = attendee.get("email", "")
-                if existing_email and guess_name_from_email(existing_email).lower() == first_name:
+                guessed_name_key = collapse_ws(
+                    guess_name_from_email(existing_email)
+                ).lower()
+                names_match = normalized_name_key == guessed_name_key
+                first_name_only_match = (
+                    " " not in normalized_name_key
+                    and normalized_name_key == guessed_name_key.split(" ", 1)[0]
+                )
+                email_local_part_match = (
+                    " " not in guessed_name_key
+                    and normalized_name_key.split(" ", 1)[0] == guessed_name_key
+                )
+                if existing_email and (
+                    names_match or first_name_only_match or email_local_part_match
+                ):
                     if normalized_name and len(normalized_name) > len(attendee.get("name", "")):
                         attendee["name"] = normalized_name
                     return
@@ -472,7 +486,11 @@ def run_helper(script: str, args: list[str]) -> str:
     return result.stdout.strip()
 
 
-def upsert_contacts(attendees: list[dict[str, str]], source_ref: str) -> list[dict[str, str]]:
+def upsert_contacts(
+    attendees: list[dict[str, str]],
+    source_ref: str,
+    last_meaningful_contact: str = "",
+) -> list[dict[str, str]]:
     contacts: list[dict[str, str]] = []
     seen_ids: set[str] = set()
     for attendee in attendees:
@@ -490,6 +508,8 @@ def upsert_contacts(attendees: list[dict[str, str]], source_ref: str) -> list[di
             args.extend(["--email", attendee["email"], "--match-email"])
         else:
             args.extend(["--id", slugify(attendee["name"])])
+        if last_meaningful_contact:
+            args.extend(["--last-meaningful-contact", last_meaningful_contact])
         contact_id = collapse_ws(run_helper("upsert-contact.py", args))
         if not contact_id or contact_id in seen_ids:
             continue
@@ -582,7 +602,8 @@ def ingest_transcript(transcript: dict[str, Any]) -> dict[str, Any]:
         )
 
     try:
-        contacts = upsert_contacts(attendees, source_ref)
+        meeting_timestamp = parse_transcript_datetime(transcript.get("date")).isoformat()
+        contacts = upsert_contacts(attendees, source_ref, meeting_timestamp)
         partial_writes["contacts_upserted"] = [contact["id"] for contact in contacts]
     except Exception as exc:
         raise IngestStepError(transcript_id, "upsert_contact", str(exc), partial_writes) from exc

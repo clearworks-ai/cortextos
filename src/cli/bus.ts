@@ -1015,7 +1015,7 @@ busCommand
       // even if the agent itself forgets to call log-event. This makes the
       // dashboard "agents" list derive from heartbeats, not just explicit events.
       try {
-        logEvent(paths, env.agentName, env.org, 'heartbeat', 'heartbeat', 'info', JSON.stringify({ status, task: opts.task ?? '' }));
+        logEvent(paths, env.agentName, env.org, 'heartbeat', 'heartbeat', 'info', JSON.stringify({ status, task: opts.task ?? '' }), { refreshHeartbeat: true });
       } catch {
         // Non-fatal: heartbeat write already succeeded
       }

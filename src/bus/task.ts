@@ -1305,7 +1305,7 @@ export function completeTask(
         task_id: taskId,
         ...(result ? { result } : {}),
         ...(forced ? { forced: true, force_reason: opts.forceReason } : {}),
-      });
+      }, { refreshHeartbeat: true });
     } catch {
       // Never let observability break task completion.
     }

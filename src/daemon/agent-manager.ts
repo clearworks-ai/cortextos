@@ -24,7 +24,6 @@ import { killProcessTree, getProcessElapsedSeconds } from '../utils/process-tree
 import { maybeEmitMeetingEvent } from './meeting-event-emit.js';
 import { dispatchMeetingConsumers } from './meeting-consumer-dispatch.js';
 import { BuzzRelayClient, BuzzDispatcher, loadBuzzConfig, type NostrEvent } from '../buzz/index.js';
-import { BuzzRelayClient, BuzzDispatcher, loadBuzzConfig, type NostrEvent } from '../buzz/index.js';
 
 type LogFn = (msg: string) => void;
 

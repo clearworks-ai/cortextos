@@ -657,6 +657,16 @@ describe('Task Management', () => {
 
       expect(tasks.map(task => task.id)).toEqual([peerId, dependencyId]);
     });
+
+    it('filters by project (human-tasks detector path)', () => {
+      createTask(paths, 'paul', 'acme', 'Approve the invoice', { project: 'human-tasks' });
+      createTask(paths, 'paul', 'acme', 'Regular agent work');
+
+      const human = listTasks(paths, { project: 'human-tasks' });
+      expect(human.length).toBe(1);
+      expect(human[0].title).toBe('Approve the invoice');
+      expect(listTasks(paths, { project: 'no-such-project' }).length).toBe(0);
+    });
   });
 
   describe('fleetTaskHealth', () => {

@@ -1305,7 +1305,7 @@ export function completeTask(
         task_id: taskId,
         ...(result ? { result } : {}),
         ...(forced ? { forced: true, force_reason: opts.forceReason } : {}),
-      });
+      }, { refreshHeartbeat: true });
     } catch {
       // Never let observability break task completion.
     }
@@ -1364,6 +1364,7 @@ export function listTasks(
     status?: TaskStatus;
     priority?: Priority | Priority[];
     class?: TaskClass;
+    project?: string;
     respectDeps?: boolean;
     /**
      * Cap the returned list, applied AFTER ordering (created_at DESC or the
@@ -1401,6 +1402,7 @@ export function listTasks(
         const wanted = Array.isArray(filters.priority) ? filters.priority : [filters.priority];
         if (!wanted.includes(task.priority)) continue;
       }
+      if (filters?.project && task.project !== filters.project) continue;
       if (task.archived) continue;
       // Cancelled tasks are hidden from every default view (like archived).
       // An explicit `--status cancelled` query still surfaces them for audit/recovery.

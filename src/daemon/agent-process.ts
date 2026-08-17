@@ -19,6 +19,9 @@ import { readEnabledAgentsMap } from '../bus/enabled-agents-io.js';
 
 type LogFn = (msg: string) => void;
 
+const OPENCODE_CONTINUE_WEDGE_THRESHOLD = 3;
+const OPENCODE_CONTINUE_WEDGE_FAST_EXIT_MS = 60_000;
+
 // ---------------------------------------------------------------------------
 // WS8 Layer A — fleet-degrade marker support
 // ---------------------------------------------------------------------------
@@ -183,6 +186,9 @@ export class AgentProcess {
   // a handoff doc marker. start() reads this after spawn to decide whether the
   // daemon should fire runtime-owned lifecycle Telegram directly.
   private lastSpawnWasHandoff = false;
+  private lastSpawnMode: 'fresh' | 'continue' | null = null;
+  private lastStartAtMs = 0;
+  private opencodeContinueWedgeCount = 0;
 
   constructor(name: string, env: CtxEnv, config: AgentConfig, log?: LogFn) {
     this.name = name;
@@ -272,6 +278,8 @@ export class AgentProcess {
     if (mode === 'fresh') {
       ensureMissionAnchorFromBuffer(this.env.agentDir, this.env.ctxRoot, this.name);
     }
+    this.lastSpawnMode = mode;
+    this.lastStartAtMs = Date.now();
     const prompt = mode === 'fresh'
       ? this.buildStartupPrompt()
       : this.buildContinuePrompt();
@@ -897,6 +905,33 @@ export class AgentProcess {
     if (exitCode === 0) {
       const now = Date.now();
 
+      // Recover an opencode session that repeatedly exits cleanly immediately
+      // after a --continue attach. The next restart starts fresh instead of
+      // consuming the crash budget in a wedged continuation loop.
+      if (
+        this.config.runtime === 'opencode' &&
+        this.lastSpawnMode === 'continue' &&
+        now - this.lastStartAtMs < OPENCODE_CONTINUE_WEDGE_FAST_EXIT_MS
+      ) {
+        this.opencodeContinueWedgeCount++;
+        if (this.opencodeContinueWedgeCount >= OPENCODE_CONTINUE_WEDGE_THRESHOLD) {
+          this.log(`opencode --continue wedge: ${this.opencodeContinueWedgeCount} fast exit_code=0 continues — arming .force-fresh.`);
+          this.armForceFresh('opencode --continue wedge auto-recovery');
+          this.appendCrashToRestartsLog(exitCode, 5000, 'OPENCODE_CONTINUE_WEDGE_RECOVERY');
+          this.opencodeContinueWedgeCount = 0;
+          this.status = 'crashed';
+          this.notifyStatusChange();
+          setTimeout(() => {
+            if (this.status === 'crashed') {
+              this.start().catch(err => this.log(`opencode wedge recovery restart failed: ${err}`));
+            }
+          }, 5000);
+          return;
+        }
+      } else {
+        this.opencodeContinueWedgeCount = 0;
+      }
+
       // Startup-failure guard (completes #242): #242 correctly stopped charging
       // the crash counter for ALL code-0 exits, but it treats every code-0 exit
       // as a benign turn-completion. A code-0 exit that fires BEFORE the session
@@ -1502,7 +1537,7 @@ export class AgentProcess {
   private appendCrashToRestartsLog(
     exitCode: number,
     backoffMs: number,
-    kind: 'CRASH' | 'HALTED' | 'CRASH_LOOP' | 'IMAGE_POISON_RECOVERY' | 'CLEAN_EXIT' | 'CLEAN_EXIT_STARTUP_FAIL',
+    kind: 'CRASH' | 'HALTED' | 'CRASH_LOOP' | 'IMAGE_POISON_RECOVERY' | 'CLEAN_EXIT' | 'CLEAN_EXIT_STARTUP_FAIL' | 'OPENCODE_CONTINUE_WEDGE_RECOVERY',
   ): void {
     try {
       const logDir = join(this.env.ctxRoot, 'logs', this.name);
@@ -1513,7 +1548,7 @@ export class AgentProcess {
           ? `exit_code=${exitCode} crash_count=${this.crashCount} max_crashes=${this.maxCrashesPerDay}`
           : kind === 'CLEAN_EXIT_STARTUP_FAIL'
             ? `exit_code=${exitCode} startup_failures=${this.cleanExitStartupFailures.length} (exited before ready — auto-restart paused, alerted)`
-            : kind === 'IMAGE_POISON_RECOVERY' || kind === 'CLEAN_EXIT'
+            : kind === 'IMAGE_POISON_RECOVERY' || kind === 'CLEAN_EXIT' || kind === 'OPENCODE_CONTINUE_WEDGE_RECOVERY'
               ? `exit_code=${exitCode} backoff_s=${backoffMs / 1000} (not counted toward max_crashes)`
               : `exit_code=${exitCode} crash_count=${this.crashCount} backoff_s=${backoffMs / 1000}`;
       const logLine = `[${timestamp}] ${kind}: ${details}\n`;

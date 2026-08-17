@@ -62,7 +62,7 @@ describe('AgentManager occupied-slot recovery', () => {
     rmSync(testDir, { recursive: true, force: true });
   });
 
-  it('reconciles a dead occupied slot before starting, without pendingRestarts noise', async () => {
+  it('evicts a dead occupied slot before starting, without pendingRestarts noise', async () => {
     const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
     const fakeEntry = {
       process: {
@@ -84,7 +84,7 @@ describe('AgentManager occupied-slot recovery', () => {
     expect((am as unknown as { agents: Map<string, unknown> }).agents.has('alice')).toBe(true);
   });
 
-  it('falls back to pendingRestarts when a live occupied slot survives PID reconciliation', async () => {
+  it('treats a live occupied slot as an idempotent duplicate start', async () => {
     const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
     const fakeEntry = {
       process: {
@@ -102,6 +102,7 @@ describe('AgentManager occupied-slot recovery', () => {
 
     await am.startAgent('alice', agentDir, {}, 'acme');
 
-    expect((am as unknown as { pendingRestarts: Map<string, unknown> }).pendingRestarts.has('alice')).toBe(true);
+    expect((am as unknown as { pendingRestarts: Map<string, unknown> }).pendingRestarts.has('alice')).toBe(false);
+    expect((am as unknown as { agents: Map<string, unknown> }).agents.has('alice')).toBe(true);
   });
 });

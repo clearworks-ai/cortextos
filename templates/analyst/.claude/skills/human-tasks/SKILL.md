@@ -43,7 +43,7 @@ cortextos bus send-message "$CTX_ORCHESTRATOR_AGENT" normal \
 
 # 4. Notify user directly if urgent
 cortextos bus send-telegram "$CTX_TELEGRAM_CHAT_ID" \
-  "I need your help: [HUMAN] <title> — I've created a task with instructions. Check dashboard."
+  "I need your help: [HUMAN] <title> — I've created a task with instructions. reply here in Telegram."
 ```
 
 ---

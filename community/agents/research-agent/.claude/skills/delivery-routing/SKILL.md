@@ -73,7 +73,7 @@ APPR_ID=$(cortextos bus create-approval \
   external-comms \
   "Destination: ${DESTINATION}. Summary: research/output/YYYY-MM-DD/summary.md. Pending context: research/output/YYYY-MM-DD/PENDING-APPROVAL.md")
 cortextos bus send-telegram "$CTX_TELEGRAM_CHAT_ID" \
-  "Approval needed: research summary for YYYY-MM-DD is ready. Check dashboard approval ${APPR_ID}."
+  "Approval needed: research summary for YYYY-MM-DD is ready. reply here in Telegram to approve or reject."
 cortextos bus log-event action approval_created info \
   --meta "{\"approval_id\":\"${APPR_ID}\",\"destination\":\"${DESTINATION}\"}"
 ```

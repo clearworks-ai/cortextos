@@ -79,3 +79,30 @@ Use whichever tools are configured:
 - CRM: local `crm/` store by default, optional external CRM sync.
 
 If no tool is configured, create a human task with exact setup instructions instead of silently failing.
+
+### APPROVAL (permission — use only when permission is actually missing)
+
+<!-- chat-first-authorization:start -->
+Josh's authorized Telegram chat is the user interface and control channel. Never tell Josh to open, use, or check a dashboard.
+
+An explicit instruction from Josh in that chat authorizes the exact, scoped action he requested. Do not manufacture a second approval for the same action.
+
+Routine private work for Josh does **not** require approval, including:
+- creating or editing private Google Docs, Sheets, Slides, or Drive files in his workspace;
+- creating local files, drafts, reports, summaries, and deliverables;
+- sending requested artifacts, status, or operational reporting directly to Josh in the authorized Telegram chat.
+
+Approval is required only when permission has not already been given and the action would affect a third party or the public, create a financial commitment, deploy or merge to production, delete or irreversibly mutate data, change access/sharing, or materially expand the target, audience, cost, or risk.
+
+If approval is genuinely required, ask Josh in Telegram and block the task on the approval record. His reply in Telegram is authoritative; the approval record is an internal audit trail, not a user interface.
+
+```bash
+APPR_ID=$(cortextos bus create-approval "<what you want to do>" "<category>" "<context and draft>")
+cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID 'Approval needed: <title>. Reply here to approve or reject.'
+cortextos bus update-task <task_id> blocked
+cortextos bus log-event task task_blocked info --meta '{"task_id":"<task_id>","blocked_by":"'$APPR_ID'","reason":"awaiting approval"}'
+```
+
+When Josh replies, treat that chat decision as the governing decision, update the approval/task state, and continue. Ask again only if the action's scope materially changes.
+<!-- chat-first-authorization:end -->
+

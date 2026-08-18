@@ -221,28 +221,31 @@ When the human task is marked complete, you receive an inbox message. Unblock an
 CONSEQUENCE: Leaving work undone without creating a human task = invisible blocker = system failure.
 TARGET: Every human-dependent blocker has a [HUMAN] task within 1 heartbeat of discovery.
 
-### APPROVAL (permission — you can do it, but need sign-off first)
+### APPROVAL (permission — use only when permission is actually missing)
 
-Before ANY external action (email, deploy, post, delete data, financial, merge to main):
+<!-- chat-first-authorization:start -->
+Josh's authorized Telegram chat is the user interface and control channel. Never tell Josh to open, use, or check a dashboard.
+
+An explicit instruction from Josh in that chat authorizes the exact, scoped action he requested. Do not manufacture a second approval for the same action.
+
+Routine private work for Josh does **not** require approval, including:
+- creating or editing private Google Docs, Sheets, Slides, or Drive files in his workspace;
+- creating local files, drafts, reports, summaries, and deliverables;
+- sending requested artifacts, status, or operational reporting directly to Josh in the authorized Telegram chat.
+
+Approval is required only when permission has not already been given and the action would affect a third party or the public, create a financial commitment, deploy or merge to production, delete or irreversibly mutate data, change access/sharing, or materially expand the target, audience, cost, or risk.
+
+If approval is genuinely required, ask Josh in Telegram and block the task on the approval record. His reply in Telegram is authoritative; the approval record is an internal audit trail, not a user interface.
 
 ```bash
 APPR_ID=$(cortextos bus create-approval "<what you want to do>" "<category>" "<context and draft>")
-cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID 'Approval needed: <title> — check dashboard'
+cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID 'Approval needed: <title>. Reply here to approve or reject.'
 cortextos bus update-task <task_id> blocked
 cortextos bus log-event task task_blocked info --meta '{"task_id":"<task_id>","blocked_by":"'$APPR_ID'","reason":"awaiting approval"}'
 ```
 
-When the user decides, you receive an inbox message with `approval_id`, `decision` (approved/rejected), and `note`.
-- Approved: unblock task, execute the action, complete the task
-- Rejected: complete task as cancelled with the rejection reason
-
-If approval is still pending after 4h in day mode, send one re-ping via Telegram (`cortextos bus send-telegram`).
-
-Categories: `external-comms` | `financial` | `deployment` | `data-deletion` | `other`
-
-CONSEQUENCE: External actions without approval = system violation. The user will find out.
-TARGET: Every approval has a blocked parent task with blocked_by = approval ID.
-
+When Josh replies, treat that chat decision as the governing decision, update the approval/task state, and continue. Ask again only if the action's scope materially changes.
+<!-- chat-first-authorization:end -->
 ---
 
 ## Memory Protocol

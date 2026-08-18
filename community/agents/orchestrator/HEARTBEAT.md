@@ -57,7 +57,7 @@ For any [HUMAN] task pending longer than 4 hours: ping the user via Telegram.
 
 ```bash
 # Example: ping user about stale approval or human task
-cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID "Pending approval needs your decision: <title> — check dashboard"
+cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID "Pending approval needs your decision: <title> — reply here in Telegram"
 cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID "[HUMAN] task waiting on you: <title> — blocking <agent> on <parent task>"
 ```
 

@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import type { AgentConfig, CtxEnv } from '../types/index.js';
 import { OutputBuffer } from './output-buffer.js';
 import type { TelegramAPI } from '../telegram/api.js';
@@ -10,6 +10,11 @@ import { resolvePaths } from '../utils/paths.js';
 import { logEvent } from '../bus/event.js';
 import { WsUnixJsonRpcClient, type JsonRpcResponse } from '../utils/ws-unix-client.js';
 import { hostSpawn } from './pty-host-client.js';
+import { DEFAULT_GOAL_CONFIG, loadGoalConfig, type GoalAcceptanceCheck, type GoalRun } from '../types/goal-run.js';
+import { GoalRunStore } from '../daemon/goal-run-store.js';
+import { GoalRunner } from '../daemon/goal-runner.js';
+import { GoalThreadManager, type GoalCodexApi } from '../daemon/goal-thread-manager.js';
+import { GoalStateMachine } from '../daemon/goal-state-machine.js';
 
 interface IPty {
   pid: number;
@@ -149,6 +154,9 @@ export class CodexAppServerPTY {
   private _telegramApi: TelegramAPI | null = null;
   private _chatId: string | null = null;
   private _typingLastSent = 0;
+  /** Durable goals are strictly opt-in until rollout enables CXR_GOAL_DURABLE. */
+  private goalRunStore?: GoalRunStore;
+  private goalRunner?: GoalRunner;
 
   constructor(env: CtxEnv, config: AgentConfig, logPath?: string) {
     this._env = env;
@@ -177,6 +185,7 @@ export class CodexAppServerPTY {
       await this.connectRpc();
       await this.initializeRpc();
       await this.startOrResumeThread(mode);
+      if (process.env.CXR_GOAL_DURABLE === 'true') await this.initializeGoalIntegration();
       this._outputBuffer.push(`${BOOTSTRAP_PATTERN} thread=${this._threadId}\n`);
       if (prompt.trim()) {
         this.queueTurn([{ type: 'text', text: prompt, text_elements: [] }]);
@@ -262,15 +271,15 @@ export class CodexAppServerPTY {
     const input = extracted?.payload ?? content;
     const goalCommand = this.parseGoalCommand(input);
     if (goalCommand?.type === 'get') {
-      await this.getGoal();
+      await this.handleGoalList();
       return;
     }
     if (goalCommand?.type === 'clear') {
-      await this.clearGoal();
+      await this.handleGoalClear(goalCommand.runId);
       return;
     }
     if (goalCommand?.type === 'set') {
-      await this.setGoal(goalCommand.objective);
+      await this.handleGoalCommand(goalCommand.objective);
       return;
     }
     if (input.startsWith('$')) {
@@ -414,13 +423,15 @@ export class CodexAppServerPTY {
     }
   }
 
-  private parseGoalCommand(content: string): { type: 'get' | 'clear' } | { type: 'set'; objective: string } | null {
+  private parseGoalCommand(content: string): { type: 'get' } | { type: 'clear'; runId?: string } | { type: 'set'; objective: string } | null {
     const match = content.trim().match(/^\/goal(?:@[A-Za-z0-9_]+)?(?:\s+([\s\S]*))?$/i);
     if (!match) return null;
 
     const objective = match[1]?.trim();
     if (!objective) return { type: 'get' };
     if (objective.toLowerCase() === 'clear') return { type: 'clear' };
+    const clearMatch = objective.match(/^clear\s+([\w-]+)$/i);
+    if (clearMatch) return { type: 'clear', runId: clearMatch[1] };
     return { type: 'set', objective };
   }
 
@@ -461,10 +472,15 @@ export class CodexAppServerPTY {
       }
 
       const spawnFn = this._spawnFn!;
-      Promise.resolve(spawnFn('codex', [
+      const codexArgs = [
         'app-server',
+        '-c', `model=${JSON.stringify(this._config.model || 'gpt-5-codex')}`,
+        '-c', `model_reasoning_effort=${JSON.stringify(this._config.reasoning_effort || 'high')}`,
         '--enable', 'goals',
         '--listen', this._socketListenArg,
+      ];
+      Promise.resolve(spawnFn('codex', [
+        ...codexArgs,
       ], {
         name: 'xterm-256color',
         cols: 200,
@@ -721,6 +737,54 @@ export class CodexAppServerPTY {
     if (!this._threadId) throw new Error('No Codex app-server thread is active');
     await this.request('thread/goal/clear', { threadId: this._threadId });
     this.replyLocal('[goal] cleared');
+  }
+
+  private async initializeGoalIntegration(): Promise<void> {
+    this.goalRunStore = new GoalRunStore(this._stateDir);
+    await this.goalRunStore.initialize();
+    const api: GoalCodexApi = {
+      createThread: async ({ repo }) => {
+        const response = await this.request<ThreadResponse>('thread/start', { cwd: repo, ...THREAD_PERMISSION_OVERRIDES, config: { features: { goals: true } }, sessionStartSource: 'goal-run', persistExtendedHistory: true });
+        return { id: response.result!.thread.id };
+      },
+      resumeThread: async (threadId) => { await this.request('thread/resume', { threadId, cwd: this._cwd, ...THREAD_PERMISSION_OVERRIDES, config: { features: { goals: true } }, excludeTurns: true, persistExtendedHistory: true }); },
+      setThreadGoal: async (threadId, goal) => { await this.request('thread/goal/set', { threadId, objective: goal }); },
+      getThreadStatus: async (threadId) => { const response = await this.request<GoalResponse>('thread/goal/get', { threadId }); return { active: Boolean(response.result?.goal), goal: response.result?.goal?.objective ?? null, lastActivity: new Date().toISOString() }; },
+      dispatchPrompt: async (threadId, prompt) => { await this.request('turn/start', { threadId, input: [{ type: 'text', text: prompt, text_elements: [] }], ...TURN_PERMISSION_OVERRIDES }); },
+    };
+    this.goalRunner = new GoalRunner(this.goalRunStore, loadGoalConfig(), new GoalThreadManager(api));
+  }
+
+  private async handleGoalCommand(objective: string): Promise<void> {
+    if (!this.goalRunStore || !this.goalRunner) return this.setGoal(objective);
+    const now = new Date().toISOString();
+    const run: GoalRun = { id: randomUUID(), agentName: this._env.agentName, goal: objective, repo: this._cwd, state: 'queued', attempt: 0, maxAttempts: DEFAULT_GOAL_CONFIG.maxAttempts, acceptanceChecks: this.getDefaultAcceptanceChecks(), artifacts: [], events: [{ id: randomUUID(), type: 'run_created', timestamp: now, data: { objective } }], createdAt: now, updatedAt: now };
+    await this.goalRunStore.create(run);
+    this.replyLocal(`[goal] queued ${run.id}: ${objective}`);
+    // Work is initiated asynchronously so local command response is never held by a long goal.
+    this.goalRunner.processTick(this._env.agentName).catch(error => this._outputBuffer.push(`[goal] runner failed: ${error}\n`));
+  }
+
+  private async handleGoalList(): Promise<void> {
+    if (!this.goalRunStore) return this.getGoal();
+    const runs = await this.goalRunStore.list(this._env.agentName);
+    this.replyLocal(runs.length ? `Active goal runs:\n${runs.map(run => `- ${run.id}: ${run.goal} (${run.state})`).join('\n')}` : 'No active goal runs');
+  }
+
+  private async handleGoalClear(runId?: string): Promise<void> {
+    if (!this.goalRunStore) return this.clearGoal();
+    if (!runId) { this.replyLocal('Use /goal clear <id> to cancel a specific run'); return; }
+    try {
+      await this.goalRunStore.updateUnleased(this._env.agentName, runId, run => GoalStateMachine.transition(run, 'cancelled'));
+      this.replyLocal(`[goal] cancelled ${runId}`);
+    } catch (error) { this.replyLocal(`[goal] unable to cancel ${runId}: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+
+  private getDefaultAcceptanceChecks(): GoalAcceptanceCheck[] {
+    return [
+      { id: 'build', command: ['npm', 'run', 'build'], timeoutMs: DEFAULT_GOAL_CONFIG.checkTimeoutMs, required: true, description: 'Project builds successfully' },
+      { id: 'test', command: ['npm', 'test'], timeoutMs: DEFAULT_GOAL_CONFIG.checkTimeoutMs, required: true, description: 'All tests pass' },
+    ];
   }
 
   private async handleSkillInput(content: string): Promise<void> {

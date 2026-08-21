@@ -1,0 +1,6 @@
+# Denylist-first framework/infra roots. Every descendant is included unless a
+# specific rebuildable or ephemeral path is listed in fleet-restic-excludes.txt.
+/Users/joshweiss/code/cortextos
+/Users/joshweiss/.cortextos
+/Users/joshweiss/.claude
+/Users/joshweiss/.codex

@@ -1,0 +1,10 @@
+# Copy this file outside git to:
+#   ~/.config/cortextos/fleet-restic-paths-business.txt
+# Then add one absolute export root per line. Keep business exports in a
+# separate restic repository/config from the framework profile.
+#
+# Example entries (comments are ignored):
+# /Users/your-user/exports/cxportal
+# /Users/your-user/exports/knowledge-sync
+#
+# An empty file is intentionally a hard failure, never a green no-op.

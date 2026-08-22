@@ -9,7 +9,8 @@ snapshot and a restore from that snapshot are both green.
 
 The framework profile is denylist-first and includes every descendant of:
 
-- `/Users/joshweiss/code/cortextos` — working source plus root manifests
+- `/Users/joshweiss/code` — every current and future repo/folder under the code
+  root, including working source and uncommitted files
 - `/Users/joshweiss/.cortextos` — daemon state, logs, messages, crons, tasks,
   approvals, deliverables, RAG data, and agent state
 - `/Users/joshweiss/.claude` — project transcripts and CLI state
@@ -166,7 +167,7 @@ scripts/fleet-restic-restore.sh \
 The command refuses `/`, `$HOME`, the cortextOS repository root, symlinks, and
 non-empty targets. It verifies all four recovery sentinels:
 
-1. restored framework `package.json`;
+1. restored `code/cortextos/package.json` inside the full code-root restore;
 2. restored runtime logs or message history;
 3. restored Claude projects/settings;
 4. restored Codex sessions, skills, or config.

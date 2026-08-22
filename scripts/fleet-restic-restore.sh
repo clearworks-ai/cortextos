@@ -247,8 +247,13 @@ if [ "$PROFILE" = "framework" ]; then
   claude_root="$(restored_path "${PATH_ROOTS[2]}")"
   codex_root="$(restored_path "${PATH_ROOTS[3]}")"
 
-  [ -f "${source_root}/package.json" ] \
-    || fail_restore "missing_source_manifest" "restored framework manifest is missing"
+  if [ "${PATH_ROOTS[0]}" = "${HOME}/code" ]; then
+    [ -f "${source_root}/cortextos/package.json" ] \
+      || fail_restore "missing_source_manifest" "restored cortextOS manifest is missing under the code root"
+  else
+    [ -f "${source_root}/package.json" ] \
+      || fail_restore "missing_source_manifest" "restored framework manifest is missing"
+  fi
   VERIFIED_ROOT_COUNT=$((VERIFIED_ROOT_COUNT + 1))
 
   runtime_history=0

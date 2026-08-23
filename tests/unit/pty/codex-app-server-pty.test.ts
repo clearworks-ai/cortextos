@@ -1550,6 +1550,45 @@ describe('CodexAppServerPTY kill-during-spawn race (RW-7)', () => {
   });
 });
 
+describe('CodexAppServerPTY shutdown acknowledgement', () => {
+  it('reports exit only after the app-server pty confirms termination', async () => {
+    let appServerExit: ((event: { exitCode: number; signal?: number }) => void) | undefined;
+    const fakePty = {
+      pid: 4242,
+      write: vi.fn(),
+      onData: vi.fn(),
+      onExit: vi.fn((handler: (event: { exitCode: number; signal?: number }) => void) => {
+        appServerExit = handler;
+      }),
+      kill: vi.fn(),
+    };
+    const pty = new CodexAppServerPTY(mockEnv, {});
+    const onExit = vi.fn();
+    pty.onExit(onExit);
+    const inner = pty as unknown as {
+      _alive: boolean;
+      _appServerPty: unknown;
+      _spawnFn: unknown;
+      startAppServer(): Promise<void>;
+    };
+    inner._alive = true;
+    inner._spawnFn = () => Promise.resolve(fakePty);
+    fsMocks.existsSync.mockReturnValue(true);
+    await inner.startAppServer();
+
+    pty.kill();
+
+    expect(fakePty.kill).toHaveBeenCalledTimes(1);
+    expect(onExit).not.toHaveBeenCalled();
+    expect(inner._appServerPty).toBe(fakePty);
+
+    appServerExit?.({ exitCode: 0 });
+
+    expect(onExit).toHaveBeenCalledWith(0, undefined);
+    expect(inner._appServerPty).toBeNull();
+  });
+});
+
 describe('CodexAppServerPTY context-full detection (attempt-7 durable fix)', () => {
   function makeReadyPty(threadId = 'thread-full') {
     const pty = new CodexAppServerPTY(mockEnv, { codex_context_cap: 1050000 });

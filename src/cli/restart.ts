@@ -2,6 +2,15 @@ import { Command } from 'commander';
 import { IPCClient } from '../daemon/ipc-server.js';
 import { writeStopMarker } from './stop.js';
 import { resolveInstanceId } from './resolve-instance-id.js';
+import type { IPCResponse } from '../types/index.js';
+
+type RestartIPC = {
+  send(request: { type: 'restart-agent'; agent: string; source: string }): Promise<IPCResponse>;
+};
+
+export function requestSerializedRestart(ipc: RestartIPC, agent: string): Promise<IPCResponse> {
+  return ipc.send({ type: 'restart-agent', agent, source: 'cortextos restart' });
+}
 
 export const restartCommand = new Command('restart')
   .argument('<agent>', 'Agent name to restart')
@@ -19,26 +28,19 @@ export const restartCommand = new Command('restart')
 
     console.log(`Restarting agent: ${agent}`);
 
-    // Stop phase mirrors `cortextos stop <agent>` — write the .user-stop marker
-    // before the IPC stop so the SessionEnd crash-alert hook does not fire a
-    // false 🚨 CRASH alarm during the brief stop window. (BUG-036 pattern.)
+    // Write the .user-stop marker before the daemon-owned restart so the
+    // SessionEnd crash-alert hook does not fire a false crash alarm during the
+    // brief stop window. (BUG-036 pattern.)
     writeStopMarker(instanceId, agent, 'stopped via cortextos restart');
-    const stopResponse = await ipc.send({ type: 'stop-agent', agent, source: 'cortextos restart' });
-    if (!stopResponse.success) {
-      console.error(`  Stop failed: ${stopResponse.error}`);
+    // One daemon-owned restart request is required here. Sending independent
+    // stop-agent and start-agent requests only waits for IPC acknowledgement,
+    // not operation completion, so start can overtake the asynchronous stop
+    // and the late stop can remove the replacement PID. AgentManager.restartAgent
+    // awaits stopAgent before startAgent and owns the serialization contract.
+    const response = await requestSerializedRestart(ipc, agent);
+    if (!response.success) {
+      console.error(`  Restart failed: ${response.error}`);
       process.exit(1);
     }
-    console.log(`  ${stopResponse.data}`);
-
-    // Start phase — daemon's start-agent handler re-reads config.json + .env
-    // and spawns a fresh PTY. Same code path as `cortextos start <agent>`
-    // when the daemon is already running, so env reload / config re-read /
-    // PTY respawn semantics match exactly.
-    const startResponse = await ipc.send({ type: 'start-agent', agent, source: 'cortextos restart' });
-    if (!startResponse.success) {
-      console.error(`  Start failed: ${startResponse.error}`);
-      console.error(`  Agent is now stopped. Recover with: cortextos start ${agent}`);
-      process.exit(1);
-    }
-    console.log(`  ${startResponse.data}`);
+    console.log(`  ${response.data}`);
   });

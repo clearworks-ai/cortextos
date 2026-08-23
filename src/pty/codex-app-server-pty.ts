@@ -223,7 +223,12 @@ export class CodexAppServerPTY {
       } catch {
         // Ignore shutdown errors.
       }
-      this._appServerPty = null;
+      // Do not report adapter exit until the pty-host confirms that the Codex
+      // app-server process actually exited. AgentProcess.stop() awaits this
+      // callback before starting a replacement; firing it synchronously here
+      // lets the replacement resume the persisted thread while the old
+      // app-server still owns its writer lock.
+      return;
     }
     this.removeSocket();
     this._onExitHandler?.(0, undefined);

@@ -5,8 +5,8 @@
  * pins the command-level wiring (name, required argument, --instance
  * option, description) instead of duplicating the marker-write tests.
  */
-import { describe, it, expect } from 'vitest';
-import { restartCommand } from '../../../src/cli/restart';
+import { describe, it, expect, vi } from 'vitest';
+import { restartCommand, requestSerializedRestart } from '../../../src/cli/restart';
 
 describe('issue #328: cortextos restart <agent>', () => {
   it('is registered as `restart`', () => {
@@ -39,5 +39,19 @@ describe('issue #328: cortextos restart <agent>', () => {
     expect(desc).toContain('stop');
     expect(desc).toContain('start');
     expect(desc).toContain('daemon');
+  });
+
+  it('delegates restart serialization to one daemon restart-agent request', async () => {
+    const send = vi.fn().mockResolvedValue({ success: true, data: 'Restarting alice' });
+
+    const response = await requestSerializedRestart({ send }, 'alice');
+
+    expect(response).toEqual({ success: true, data: 'Restarting alice' });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith({
+      type: 'restart-agent',
+      agent: 'alice',
+      source: 'cortextos restart',
+    });
   });
 });

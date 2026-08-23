@@ -56,7 +56,7 @@ function makeEntry(opts: { pid?: number; sessionStart?: string; hostPid?: number
   };
 }
 
-describe('RW-3: reconcileDeadRegistryEntry (via inspectAgentOp start path)', () => {
+describe('RW-3: stale registry reconciliation on the startAgent runtime path', () => {
   let testDir: string;
   let am: InstanceType<typeof AgentManager>;
 
@@ -73,7 +73,7 @@ describe('RW-3: reconcileDeadRegistryEntry (via inspectAgentOp start path)', () 
     rmSync(testDir, { recursive: true, force: true });
   });
 
-  it('MUSE WEDGE REGRESSION: EPERM pid is treated as recycled/dead, entry is reaped, start proceeds', () => {
+  it('MUSE WEDGE REGRESSION: EPERM pid is treated as recycled/dead, entry is reaped, start proceeds', async () => {
     const entry = makeEntry({ pid: 4242, hostPid: 4241 });
     (am as unknown as AgentsMap).agents.set('muse', entry);
     vi.spyOn(process, 'kill').mockImplementation(() => {
@@ -82,15 +82,14 @@ describe('RW-3: reconcileDeadRegistryEntry (via inspectAgentOp start path)', () 
       throw err;
     });
 
-    const r = am.inspectAgentOp('start', 'muse');
-    // Pre-fix: EPERM → "alive" → DEDUPED forever. Post-fix: entry reaped, start ok.
-    expect(r.ok).toBe(true);
+    await am.startAgent('muse', '');
+    // Pre-fix: EPERM → "alive" → duplicate-start no-op forever. Post-fix: entry reaped and start may proceed.
     expect((am as unknown as AgentsMap).agents.has('muse')).toBe(false);
     expect(entry.checker.stop).toHaveBeenCalled();
     expect(entry.poller.stop).toHaveBeenCalled();
   });
 
-  it('EPERM (foreign-uid recycled) pid is EXCLUDED from the kill sweep; host tree still killed', () => {
+  it('EPERM (foreign-uid recycled) pid is EXCLUDED from the kill sweep; host tree still killed', async () => {
     (am as unknown as AgentsMap).agents.set('muse', makeEntry({ pid: 4242, hostPid: 4241 }));
     vi.spyOn(process, 'kill').mockImplementation(() => {
       const err = new Error('kill EPERM') as NodeJS.ErrnoException;
@@ -98,14 +97,14 @@ describe('RW-3: reconcileDeadRegistryEntry (via inspectAgentOp start path)', () 
       throw err;
     });
 
-    am.inspectAgentOp('start', 'muse');
+    await am.startAgent('muse', '');
     expect(killProcessTreeMock).toHaveBeenCalledTimes(1);
     const roots = killProcessTreeMock.mock.calls[0][0];
     expect(roots).toContain(4241);      // pty-host: unambiguously ours
     expect(roots).not.toContain(4242);  // recycled pid: innocent process, never signal
   });
 
-  it('ESRCH-dead pid: full tree kill fires with BOTH roots (pty-host + inner pid) before Map delete', () => {
+  it('ESRCH-dead pid: full tree kill fires with BOTH roots (pty-host + inner pid) before Map delete', async () => {
     (am as unknown as AgentsMap).agents.set('muse', makeEntry({ pid: 4242, hostPid: 4241 }));
     const deleteOrder: string[] = [];
     killProcessTreeMock.mockImplementation(() => {
@@ -120,8 +119,7 @@ describe('RW-3: reconcileDeadRegistryEntry (via inspectAgentOp start path)', () 
       throw err;
     });
 
-    const r = am.inspectAgentOp('start', 'muse');
-    expect(r.ok).toBe(true);
+    await am.startAgent('muse', '');
     expect(deleteOrder).toEqual(['kill']);
     const roots = killProcessTreeMock.mock.calls[0][0];
     expect(roots).toContain(4241);
@@ -129,69 +127,61 @@ describe('RW-3: reconcileDeadRegistryEntry (via inspectAgentOp start path)', () 
     expect((am as unknown as AgentsMap).agents.has('muse')).toBe(false);
   });
 
-  it('entry with NO pid at all is reaped (dead), killing the host tree if known', () => {
+  it('entry with NO pid at all is reaped (dead), killing the host tree if known', async () => {
     (am as unknown as AgentsMap).agents.set('muse', makeEntry({ pid: undefined, hostPid: 4241 }));
-    const r = am.inspectAgentOp('start', 'muse');
-    expect(r.ok).toBe(true);
+    await am.startAgent('muse', '');
     expect(killProcessTreeMock).toHaveBeenCalledTimes(1);
     expect(killProcessTreeMock.mock.calls[0][0]).toEqual([4241]);
   });
 
-  it('genuinely alive pid keeps the entry: DEDUPED, no kill sweep', () => {
+  it('genuinely alive pid keeps the entry: duplicate start is a no-op, no kill sweep', async () => {
     (am as unknown as AgentsMap).agents.set('muse', makeEntry({ pid: 4242, hostPid: 4241 }));
     vi.spyOn(process, 'kill').mockImplementation(() => true as never);
     getProcessElapsedSecondsMock.mockReturnValue(3600); // long-lived process
 
-    const r = am.inspectAgentOp('start', 'muse');
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.code).toBe('DEDUPED');
+    await am.startAgent('muse', '');
     expect((am as unknown as AgentsMap).agents.has('muse')).toBe(true);
     expect(killProcessTreeMock).not.toHaveBeenCalled();
   });
 
-  it('same-uid RECYCLED pid (process much younger than the session) is reaped and excluded from the kill sweep', () => {
+  it('same-uid RECYCLED pid (process much younger than the session) is reaped and excluded from the kill sweep', async () => {
     const sessionStart = new Date(Date.now() - 2 * 3600 * 1000).toISOString(); // 2h-old session
     (am as unknown as AgentsMap).agents.set('muse', makeEntry({ pid: 4242, sessionStart, hostPid: 4241 }));
     vi.spyOn(process, 'kill').mockImplementation(() => true as never); // pid responds to signal 0
     getProcessElapsedSecondsMock.mockReturnValue(30); // but the process is 30s old → recycled
 
-    const r = am.inspectAgentOp('start', 'muse');
-    expect(r.ok).toBe(true);
+    await am.startAgent('muse', '');
     expect((am as unknown as AgentsMap).agents.has('muse')).toBe(false);
     const roots = killProcessTreeMock.mock.calls[0][0];
     expect(roots).toContain(4241);
     expect(roots).not.toContain(4242);
   });
 
-  it('alive pid with UNKNOWN elapsed time (ps unavailable) is kept — never reconcile on uncertainty', () => {
+  it('alive pid with UNKNOWN elapsed time (ps unavailable) is kept — never reconcile on uncertainty', async () => {
     const sessionStart = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
     (am as unknown as AgentsMap).agents.set('muse', makeEntry({ pid: 4242, sessionStart, hostPid: 4241 }));
     vi.spyOn(process, 'kill').mockImplementation(() => true as never);
     getProcessElapsedSecondsMock.mockReturnValue(null);
 
-    const r = am.inspectAgentOp('start', 'muse');
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.code).toBe('DEDUPED');
+    await am.startAgent('muse', '');
     expect(killProcessTreeMock).not.toHaveBeenCalled();
   });
 
-  it('alive pid slightly younger than session (within 120s slack) is kept', () => {
+  it('alive pid slightly younger than session (within 120s slack) is kept', async () => {
     const sessionStart = new Date(Date.now() - 100 * 1000).toISOString(); // 100s session
     (am as unknown as AgentsMap).agents.set('muse', makeEntry({ pid: 4242, sessionStart, hostPid: 4241 }));
     vi.spyOn(process, 'kill').mockImplementation(() => true as never);
     getProcessElapsedSecondsMock.mockReturnValue(60); // 60 + 120 > 100 → within slack
 
-    const r = am.inspectAgentOp('start', 'muse');
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.code).toBe('DEDUPED');
+    await am.startAgent('muse', '');
   });
 
-  it('fake entries without getHostPid do not crash the reconciler (typeof guard)', () => {
+  it('fake entries without getHostPid do not crash the reconciler (typeof guard)', async () => {
     (am as unknown as AgentsMap).agents.set('muse', {
       process: { getStatus: () => ({ pid: undefined }) },
       checker: { stop: vi.fn() },
     });
-    expect(() => am.inspectAgentOp('start', 'muse')).not.toThrow();
+    await expect(am.startAgent('muse', '')).resolves.toBeUndefined();
     expect((am as unknown as AgentsMap).agents.has('muse')).toBe(false);
   });
 });

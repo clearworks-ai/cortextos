@@ -84,7 +84,7 @@ describe('AgentManager occupied-slot recovery', () => {
     expect((am as unknown as { agents: Map<string, unknown> }).agents.has('alice')).toBe(true);
   });
 
-  it('falls back to pendingRestarts when a live occupied slot survives PID reconciliation', async () => {
+  it('treats a live occupied slot as an idempotent duplicate start', async () => {
     const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
     const fakeEntry = {
       process: {
@@ -98,10 +98,11 @@ describe('AgentManager occupied-slot recovery', () => {
     (am as unknown as { agents: Map<string, unknown> }).agents.set('alice', fakeEntry);
 
     vi.spyOn(am as unknown as { isPidAlive(pid: number): boolean }, 'isPidAlive').mockReturnValue(true);
-    vi.spyOn(am, 'stopAgent').mockResolvedValue(false);
+    const stopSpy = vi.spyOn(am, 'stopAgent').mockResolvedValue(false);
 
     await am.startAgent('alice', agentDir, {}, 'acme');
 
-    expect((am as unknown as { pendingRestarts: Map<string, unknown> }).pendingRestarts.has('alice')).toBe(true);
+    expect(stopSpy).not.toHaveBeenCalled();
+    expect((am as unknown as { pendingRestarts: Map<string, unknown> }).pendingRestarts.has('alice')).toBe(false);
   });
 });

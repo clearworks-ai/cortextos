@@ -908,7 +908,7 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
               timestamp: new Date(now()).toISOString(),
               nonce: `relay_nonce_${randomBytes(10).toString('hex')}`,
             });
-            acceptInternalRelay({
+            const relayed = acceptInternalRelay({
               storeDir: join(options.ctxRoot, 'state', 'meeting-observations'),
               observationId: persist.observation.observationId,
               method: INTERNAL_RELAY_METHOD,
@@ -922,6 +922,17 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
               replayWindowSeconds: relay.replayWindowSeconds,
               maximumClockSkewSeconds: relay.maximumClockSkewSeconds,
             });
+            if (
+              relayed.status >= 400
+              || relayed.observation === undefined
+              || relayed.observation.relay.state !== 'RELAYED'
+            ) {
+              jsonResponse(response, relayed.status >= 400 ? relayed.status : 502, {
+                error: relayed.error ?? 'internal_relay_failed',
+                tier: 'relay',
+              });
+              return;
+            }
           }
         }
       } else {

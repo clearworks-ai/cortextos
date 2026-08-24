@@ -6,7 +6,7 @@ import { withFileLockSync } from '../utils/lock.js';
 const SIGNATURE_HEADER = 'X-Hub-Signature';
 const SIGNATURE_EXACT = /^sha256=[0-9a-f]{64}$/;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
-const STORE_ID = 'meeting-observation-store-v1';
+const STORE_ID = 'meeting-observation-store-v1' as const;
 
 export interface FirefliesVerificationConfigV1 {
   schemaVersion: string;

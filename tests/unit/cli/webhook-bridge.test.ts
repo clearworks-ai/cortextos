@@ -571,6 +571,65 @@ describe('webhook-bridge server', () => {
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
     });
 
+    it('does not 2xx Fireflies when the signed internal relay after persist fails', async () => {
+      const contractsRoot = join(process.cwd(), 'state/specs/contracts');
+      const verificationConfig = JSON.parse(
+        readFileSync(join(contractsRoot, 'fireflies-verification-config-v1.golden.json'), 'utf8'),
+      );
+      const configDigest = JSON.parse(
+        readFileSync(join(contractsRoot, 'fireflies-verification-config-pin-v1.json'), 'utf8'),
+      ).verificationConfigDigest as string;
+      const secrets = JSON.parse(
+        readFileSync(join(contractsRoot, 'fireflies-webhook-v2.test-secrets.json'), 'utf8'),
+      ) as { secretsByKeyId: Record<string, string> };
+      const relaySecrets = JSON.parse(
+        readFileSync(join(contractsRoot, 'relay-auth-v1.test-secrets.json'), 'utf8'),
+      ) as { secretsByKeyId: Record<string, string>; replayWindowSeconds: number; maximumClockSkewSeconds: number };
+      const valid = JSON.parse(
+        readFileSync(join(contractsRoot, 'fireflies-webhook-v2-test-vectors.json'), 'utf8'),
+      ).vectors.find((vector: { name: string }) => vector.name === 'valid-raw-body') as {
+        rawBodyUtf8: string;
+        headerValue: string;
+      };
+
+      const server = createBridgeServer({
+        instanceId: 'test-instance',
+        ctxRoot: tempRoot,
+        frameworkRoot: tempRoot,
+        org: 'clearworksai',
+        bridgeSecret: 'top-secret',
+        firefliesWebhookSecret: secrets.secretsByKeyId['fireflies-webhook-v2-test-key'],
+        firefliesVerification: {
+          config: verificationConfig,
+          configDigest,
+          secretsByKeyId: secrets.secretsByKeyId,
+        },
+        firefliesRelay: {
+          keyId: 'cortext-relay-key-v1',
+          secret: relaySecrets.secretsByKeyId['cortext-relay-key-v1'],
+          trustedKeyIds: ['not-the-signing-key'],
+          trustedOrgId: 'clearworksai',
+          replayWindowSeconds: relaySecrets.replayWindowSeconds,
+          maximumClockSkewSeconds: relaySecrets.maximumClockSkewSeconds,
+        },
+      });
+      const baseUrl = await listen(server);
+      const response = await sendRequest(baseUrl, '/relay/fireflies', {
+        method: 'POST',
+        headers: { 'x-hub-signature': valid.headerValue },
+        body: valid.rawBodyUtf8,
+      });
+
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      const storedDir = join(tempRoot, 'state', 'meeting-observations', 'observations');
+      const stored = JSON.parse(readFileSync(join(storedDir, readdirSync(storedDir)[0]), 'utf8')) as {
+        relay: { state: string };
+      };
+      expect(stored.relay.state).toBe('RELAY_PENDING');
+
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    });
+
     it('accepts POST /internal/v1/meeting-observations with X-Service-Key-Id and X-Request-* after persist', async () => {
       const contractsRoot = join(process.cwd(), 'state/specs/contracts');
       const verificationConfig = JSON.parse(

@@ -13,7 +13,7 @@ import {
 
 export const INTERNAL_RELAY_METHOD = 'POST';
 export const INTERNAL_RELAY_PATH = '/internal/v1/meeting-observations';
-export const RELAY_NONCE_STORE_ID = 'meeting-relay-nonce-store-v1';
+export const RELAY_NONCE_STORE_ID = 'meeting-relay-nonce-store-v1' as const;
 export const RELAY_LEASE_OWNER = 'cortext:fireflies-relay';
 const NONCE_RE = /^[A-Za-z0-9_-]{16,128}$/;
 const SHA256_HEX = /^[0-9a-f]{64}$/;

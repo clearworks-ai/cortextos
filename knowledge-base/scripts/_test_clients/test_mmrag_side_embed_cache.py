@@ -130,3 +130,38 @@ def test_copy_from_live_fails_closed_when_live_cache_missing(tmp_path, monkeypat
     side.mkdir()
     with pytest.raises(FileNotFoundError):
         mmrag.prepare_side_embed_cache(side, copy_from_live=True)
+
+
+def test_side_persist_without_cache_override_refuses_live_cache(tmp_path, monkeypatch):
+    live_cache = _bind_tmp(monkeypatch, tmp_path)
+    side_persist = tmp_path / "chromadb.recovery"
+    side_persist.mkdir()
+    monkeypatch.setenv("MMRAG_SIDE_CHROMADB_DIR", str(side_persist))
+    mmrag.set_mmrag_operation("ingest")
+
+    with pytest.raises(mmrag.NativeHoldError) as exc_info:
+        mmrag._open_embed_cache()
+
+    payload = exc_info.value.to_dict()
+    assert payload["result"] == "INVALID_CONFIG"
+    assert not live_cache.exists()
+
+
+def test_prepare_refuses_cache_inside_chroma_persist_dir(tmp_path, monkeypatch):
+    _bind_tmp(monkeypatch, tmp_path)
+    persist = tmp_path / "chromadb.recovery"
+    persist.mkdir()
+    (persist / "chroma.sqlite3").write_bytes(b"not-a-work-tree")
+    with pytest.raises(mmrag.NativeHoldError) as exc_info:
+        mmrag.prepare_side_embed_cache(persist)
+    assert exc_info.value.to_dict()["result"] == "INVALID_CONFIG"
+
+
+def test_writers_hold_also_refuses_live_embed_cache(tmp_path, monkeypatch):
+    live_cache = _bind_tmp(monkeypatch, tmp_path)
+    _write_hold(tmp_path, "writers")
+    mmrag.set_mmrag_operation("query")
+    with pytest.raises(mmrag.NativeHoldError) as exc_info:
+        mmrag._open_embed_cache()
+    assert exc_info.value.to_dict()["hold_mode"] == "writers"
+    assert not live_cache.exists()

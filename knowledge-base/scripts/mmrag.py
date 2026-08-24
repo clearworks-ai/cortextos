@@ -718,12 +718,22 @@ def _embed_cache_path():
 
 
 def _assert_embed_cache_allowed(cache_path=None):
-    """Refuse live embedding-cache.sqlite while NATIVE_HOLD is active."""
+    """Refuse live embedding-cache.sqlite while hold is active or a side persist is set."""
     resolved = _resolve_fs_path(cache_path or _embed_cache_path())
+    live_cache = _live_embed_cache_path()
     hold = _load_native_hold()
+    side = _side_capability_dir()
+    if side is not None and resolved == live_cache:
+        raise NativeHoldError(
+            "INVALID_CONFIG",
+            hold_mode=(hold or {}).get("mode", "") if hold else "",
+            operation=_mmrag_operation() or "embed-cache",
+            chroma_dir=CHROMADB_DIR,
+            live_dir=CHROMADB_DIR,
+            detail="side worker must set MMRAG_EMBED_CACHE_PATH under the side tree",
+        )
     if hold is None:
         return resolved
-    live_cache = _live_embed_cache_path()
     if resolved == live_cache:
         raise NativeHoldError(
             hold_mode=hold["mode"],
@@ -735,6 +745,17 @@ def _assert_embed_cache_allowed(cache_path=None):
     return resolved
 
 
+def _is_chroma_persist_dir(path):
+    candidate = _resolve_fs_path(path)
+    if (candidate / "chroma.sqlite3").exists():
+        return True
+    live = _resolve_fs_path(CHROMADB_DIR)
+    if candidate == live:
+        return True
+    side = _side_capability_dir()
+    return side is not None and candidate == side
+
+
 def prepare_side_embed_cache(side_dir, *, copy_from_live=False):
     """Point MMRAG_EMBED_CACHE_PATH at a file under the side work tree.
 
@@ -742,6 +763,14 @@ def prepare_side_embed_cache(side_dir, *, copy_from_live=False):
     live, write of side). Never sqlite-opens the live cache for write.
     """
     side = _resolve_fs_path(side_dir)
+    if _is_chroma_persist_dir(side):
+        raise NativeHoldError(
+            "INVALID_CONFIG",
+            operation=_mmrag_operation() or "embed-cache",
+            chroma_dir=CHROMADB_DIR,
+            live_dir=CHROMADB_DIR,
+            detail="side embedding-cache must not live inside a chroma persist dir",
+        )
     side.mkdir(parents=True, exist_ok=True)
     prepared = (side / DEFAULT_EMBED_CACHE_FILENAME).resolve()
     live_cache = _live_embed_cache_path()

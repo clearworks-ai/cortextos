@@ -23,6 +23,7 @@ import {
   type ZoomRegistrant,
 } from './zoom-officehours-crm.js';
 import { handleProviderShadowIngress, type CalendarShadowOptions, type GmailShadowOptions, type ProviderIngressDependencies, type ProviderRateBuckets } from './provider-shadow-ingress.js';
+import { acceptFirefliesIngress, type FirefliesVerificationConfigV1 } from '../bus/meeting-observation-ingress.js';
 
 export const DEFAULT_PORT = 20242;
 const DEFAULT_HOST = '127.0.0.1';
@@ -70,6 +71,11 @@ export interface BridgeServerOptions {
   gmailShadow?: GmailShadowOptions;
   calendarShadow?: CalendarShadowOptions;
   providerIngressDependencies?: ProviderIngressDependencies;
+  firefliesVerification?: {
+    config: FirefliesVerificationConfigV1;
+    configDigest: string;
+    secretsByKeyId: Record<string, string>;
+  };
 }
 
 interface RelayEnvelope {
@@ -799,6 +805,26 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
         if (!hmacSignatureMatches(rawBody, providedSignature, options.firefliesWebhookSecret as string)) {
           jsonResponse(response, 401, { error: 'secret_mismatch', tier: 'auth' });
           return;
+        }
+        if (options.firefliesVerification) {
+          const persist = acceptFirefliesIngress({
+            rawBody,
+            headerName: 'X-Hub-Signature',
+            signatureHeader: providedSignature,
+            orgId: options.org || 'clearworksai',
+            now: () => new Date(now()),
+            storeDir: join(options.ctxRoot, 'state', 'meeting-observations'),
+            secretsByKeyId: options.firefliesVerification.secretsByKeyId,
+            verificationConfig: options.firefliesVerification.config,
+            verificationConfigDigest: options.firefliesVerification.configDigest,
+          });
+          if (persist.status >= 400 || persist.observation === undefined) {
+            jsonResponse(response, persist.status >= 400 ? persist.status : 500, {
+              error: persist.error ?? 'observation_persist_failed',
+              tier: 'observation',
+            });
+            return;
+          }
         }
       } else {
         const secretHeader = request.headers['x-webhook-bridge-secret'];

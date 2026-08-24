@@ -249,3 +249,68 @@ def materialize_backup_work_tree(archive_path, work_dir):
     with tarfile.open(archive, "r:*") as tar:
         tar.extractall(work)
     return work
+
+
+class InventoryRefused(Exception):
+    result = "INVENTORY_REFUSED"
+
+
+def _is_chroma_persist_root(path):
+    root = Path(path).resolve()
+    return root.name == "chromadb" or (root / "chroma.sqlite3").is_file()
+
+
+def _ignore_like_ingest(path):
+    import mmrag
+    return mmrag._is_ignored(Path(path))
+
+
+def inventory_corpus_roots(roots, *, ignore_fn=None):
+    """Oracle A: canonical ingest-root file list. Never opens Chroma."""
+    if not roots:
+        raise InventoryRefused(
+            "corpus inventory requires explicit roots; refusing implicit live reconcile roots"
+        )
+    ignore = ignore_fn or _ignore_like_ingest
+    files = []
+    seen = set()
+    resolved_roots = []
+    for raw_root in roots:
+        root = Path(raw_root).expanduser().resolve()
+        assert_not_live_epoch(root)
+        if _is_chroma_persist_root(root):
+            raise InventoryRefused(f"refuse chroma persist dir as corpus root: {root}")
+        if not root.is_dir():
+            raise InventoryRefused(f"corpus root missing: {root}")
+        resolved_roots.append(str(root))
+        for dirpath, dirnames, filenames in os.walk(root):
+            current = Path(dirpath)
+            dirnames[:] = sorted(
+                name for name in dirnames
+                if not ignore(current / name)
+            )
+            for name in sorted(filenames):
+                if name.startswith("."):
+                    continue
+                path = current / name
+                if ignore(path) or not path.is_file():
+                    continue
+                resolved = str(path.resolve())
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                info = path.stat()
+                files.append({
+                    "path": resolved,
+                    "size": info.st_size,
+                    "mtime_ns": info.st_mtime_ns,
+                    "sha256": _sha256_file(path),
+                })
+    files.sort(key=lambda row: row["path"])
+    return {
+        "result": "INVENTORY_OK",
+        "files": files,
+        "count": len(files),
+        "roots": resolved_roots,
+    }
+

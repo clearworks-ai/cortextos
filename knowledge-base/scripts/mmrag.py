@@ -714,6 +714,14 @@ def _embed_cache_path():
     override = os.environ.get("MMRAG_EMBED_CACHE_PATH", "").strip()
     if override:
         return Path(override).expanduser().resolve()
+    if _side_capability_dir() is not None:
+        raise NativeHoldError(
+            "INVALID_CONFIG",
+            operation=_mmrag_operation() or "embed-cache",
+            chroma_dir=CHROMADB_DIR,
+            live_dir=CHROMADB_DIR,
+            detail="side worker must set MMRAG_EMBED_CACHE_PATH under the side tree",
+        )
     return _live_embed_cache_path()
 
 

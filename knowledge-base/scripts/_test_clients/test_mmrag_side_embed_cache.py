@@ -165,3 +165,34 @@ def test_writers_hold_also_refuses_live_embed_cache(tmp_path, monkeypatch):
         mmrag._open_embed_cache()
     assert exc_info.value.to_dict()["hold_mode"] == "writers"
     assert not live_cache.exists()
+
+
+def test_embed_cache_path_refuses_live_default_when_side_persist_set(tmp_path, monkeypatch):
+    live_cache = _bind_tmp(monkeypatch, tmp_path)
+    side_persist = tmp_path / "chromadb.recovery"
+    side_persist.mkdir()
+    monkeypatch.setenv("MMRAG_SIDE_CHROMADB_DIR", str(side_persist))
+    with pytest.raises(mmrag.NativeHoldError) as exc_info:
+        mmrag._embed_cache_path()
+    assert exc_info.value.to_dict()["result"] == "INVALID_CONFIG"
+    assert not live_cache.exists()
+
+
+def test_side_owned_cache_write_leaves_live_bytes_untouched(tmp_path, monkeypatch):
+    live_cache = _bind_tmp(monkeypatch, tmp_path)
+    live_cache.write_bytes(b"live-cache-bytes")
+    live_stat = live_cache.stat()
+    work = tmp_path / "recovery-side"
+    work.mkdir()
+    prepared = mmrag.prepare_side_embed_cache(work, copy_from_live=False)
+    mmrag.set_mmrag_operation("ingest")
+    conn = mmrag._open_embed_cache()
+    conn.execute("INSERT INTO embedding_cache VALUES ('k','m',1,'t','[]','2026-08-24')")
+    conn.commit()
+    conn.close()
+    assert prepared.is_file()
+    assert live_cache.read_bytes() == b"live-cache-bytes"
+    assert live_cache.stat().st_mtime_ns == live_stat.st_mtime_ns
+    assert sqlite3.connect(str(prepared)).execute(
+        "SELECT content_key FROM embedding_cache"
+    ).fetchone() == ("k",)

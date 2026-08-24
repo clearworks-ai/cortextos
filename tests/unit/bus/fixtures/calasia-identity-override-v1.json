@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0",
+  "orgId": "clearworksai",
+  "overrideId": "identity-override:calasia-gey-geza",
+  "overrideVersion": 1,
+  "overrideDigest": "a2f9c1493e7221b0110303594182134782317c82e5ac463d6d3ddf81e45ef8dd",
+  "supersedesOverrideDigest": null,
+  "sourceIds": [
+    "01M0GEY1NZXDXA1GWED2AY68G9",
+    "01M0GEZAAB40M8ESPY3PSC4MRX"
+  ],
+  "canonicalSourceId": "01M0GEY1NZXDXA1GWED2AY68G9",
+  "reason": "Approved CalAsia duplicate recording: GEY is the complete observation; GEZA is the accidental duplicate.",
+  "selectionPolicyVersion": "meeting-identity-v1",
+  "authority": {
+    "kind": "admin",
+    "actorId": "admin:josh",
+    "policyVersion": "identity-adjudication-v1",
+    "decisionDigest": "e672975b53e5ede2164f796c98a2940c0098685237728954be7eea0b3f0dfe77",
+    "decidedAt": "2026-08-24T04:00:00Z"
+  },
+  "createdAt": "2026-08-24T04:00:00Z"
+}

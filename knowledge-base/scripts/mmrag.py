@@ -706,18 +706,68 @@ def _embed_cache_enabled():
     return os.environ.get("MMRAG_EMBED_CACHE", "1").strip() != "0"
 
 
+def _live_embed_cache_path():
+    return (Path(MMRAG_DIR) / DEFAULT_EMBED_CACHE_FILENAME).resolve()
+
+
 def _embed_cache_path():
     override = os.environ.get("MMRAG_EMBED_CACHE_PATH", "").strip()
     if override:
         return Path(override).expanduser().resolve()
-    return (MMRAG_DIR / DEFAULT_EMBED_CACHE_FILENAME).resolve()
+    return _live_embed_cache_path()
+
+
+def _assert_embed_cache_allowed(cache_path=None):
+    """Refuse live embedding-cache.sqlite while NATIVE_HOLD is active."""
+    resolved = _resolve_fs_path(cache_path or _embed_cache_path())
+    hold = _load_native_hold()
+    if hold is None:
+        return resolved
+    live_cache = _live_embed_cache_path()
+    if resolved == live_cache:
+        raise NativeHoldError(
+            hold_mode=hold["mode"],
+            operation=_mmrag_operation() or "embed-cache",
+            chroma_dir=CHROMADB_DIR,
+            live_dir=CHROMADB_DIR,
+            detail="hold refuses opening the live embedding-cache.sqlite",
+        )
+    return resolved
+
+
+def prepare_side_embed_cache(side_dir, *, copy_from_live=False):
+    """Point MMRAG_EMBED_CACHE_PATH at a file under the side work tree.
+
+    Optionally copies the live cache bytes into the side file first (read of
+    live, write of side). Never sqlite-opens the live cache for write.
+    """
+    side = _resolve_fs_path(side_dir)
+    side.mkdir(parents=True, exist_ok=True)
+    prepared = (side / DEFAULT_EMBED_CACHE_FILENAME).resolve()
+    live_cache = _live_embed_cache_path()
+    if prepared == live_cache:
+        raise NativeHoldError(
+            "INVALID_CONFIG",
+            operation=_mmrag_operation() or "embed-cache",
+            chroma_dir=CHROMADB_DIR,
+            live_dir=CHROMADB_DIR,
+            detail="side embedding-cache path must not resolve to the live cache",
+        )
+    if copy_from_live:
+        if not live_cache.is_file():
+            raise FileNotFoundError(
+                f"live embedding-cache.sqlite missing; cannot copy into side cache: {live_cache}"
+            )
+        shutil.copyfile(live_cache, prepared)
+    os.environ["MMRAG_EMBED_CACHE_PATH"] = str(prepared)
+    return prepared
 
 
 def _open_embed_cache():
     if not _embed_cache_enabled():
         return None
 
-    cache_path = _embed_cache_path()
+    cache_path = _assert_embed_cache_allowed()
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(cache_path))
     conn.execute(

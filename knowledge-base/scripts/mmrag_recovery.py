@@ -314,3 +314,79 @@ def inventory_corpus_roots(roots, *, ignore_fn=None):
         "roots": resolved_roots,
     }
 
+
+class RebuildRefused(Exception):
+    result = "REBUILD_REFUSED"
+
+
+SIDE_WORK_DIRNAME = "recovery-side"
+
+
+def assert_side_rebuild_target(live_chromadb, target):
+    """Refuse live persist and live rebuild-temp names as recovery targets."""
+    live = Path(live_chromadb).expanduser().resolve()
+    dest = Path(target).expanduser().resolve()
+    assert_not_live_epoch(live)
+    assert_not_live_epoch(dest)
+    if dest == live:
+        raise RebuildRefused("recovery refuses native client construction against live chromadb")
+    if dest.name.startswith("chromadb.rebuild-"):
+        raise RebuildRefused("recovery refuses live rebuild temp persist names")
+
+
+def prepare_side_rebuild_scaffold(kb_root, *, copy_live_cache=False):
+    """Create an empty sibling persist plus FR-015 side cache. Does not ingest."""
+    kb = Path(kb_root).expanduser().resolve()
+    assert_not_live_epoch(kb)
+    live_chromadb = (kb / "chromadb").resolve()
+    work_dir = (kb / SIDE_WORK_DIRNAME).resolve()
+    persist_dir = (work_dir / "chromadb").resolve()
+    if persist_dir.exists() and any(persist_dir.iterdir()):
+        raise RebuildRefused(f"side persist already populated: {persist_dir}")
+    work_dir.mkdir(parents=True, exist_ok=True)
+    persist_dir.mkdir(parents=True, exist_ok=True)
+    if any(path.is_file() for path in persist_dir.rglob("*")):
+        raise RebuildRefused(f"side persist is not empty: {persist_dir}")
+    assert_side_rebuild_target(live_chromadb, persist_dir)
+
+    import mmrag
+    previous_dir = mmrag.MMRAG_DIR
+    previous_chroma = mmrag.CHROMADB_DIR
+    previous_cache = os.environ.get("MMRAG_EMBED_CACHE_PATH")
+    previous_side = os.environ.get("MMRAG_SIDE_CHROMADB_DIR")
+    try:
+        mmrag.MMRAG_DIR = kb
+        mmrag.CHROMADB_DIR = live_chromadb
+        os.environ.pop("MMRAG_EMBED_CACHE_PATH", None)
+        os.environ.pop("MMRAG_SIDE_CHROMADB_DIR", None)
+        cache_path = mmrag.prepare_side_embed_cache(
+            work_dir,
+            copy_from_live=copy_live_cache,
+        )
+    finally:
+        mmrag.MMRAG_DIR = previous_dir
+        mmrag.CHROMADB_DIR = previous_chroma
+        if previous_cache is None:
+            os.environ.pop("MMRAG_EMBED_CACHE_PATH", None)
+        else:
+            os.environ["MMRAG_EMBED_CACHE_PATH"] = previous_cache
+        if previous_side is None:
+            os.environ.pop("MMRAG_SIDE_CHROMADB_DIR", None)
+        else:
+            os.environ["MMRAG_SIDE_CHROMADB_DIR"] = previous_side
+
+    return {
+        "result": "SIDE_SCAFFOLD_OK",
+        "work_dir": str(work_dir),
+        "persist_dir": str(persist_dir),
+        "embed_cache_path": str(cache_path),
+        "live_chromadb": str(live_chromadb),
+        "env": {
+            "MMRAG_DIR": str(kb),
+            "MMRAG_CHROMADB_DIR": str(persist_dir),
+            "MMRAG_SIDE_CHROMADB_DIR": str(persist_dir),
+            "MMRAG_EMBED_CACHE_PATH": str(cache_path),
+        },
+    }
+
+

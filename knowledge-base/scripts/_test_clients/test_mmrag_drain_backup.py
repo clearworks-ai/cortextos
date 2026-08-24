@@ -7,6 +7,7 @@ Never SIGKILL. Live ~/.cortextos KB roots are blocked until human L0.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import stat
 import tarfile
@@ -147,3 +148,41 @@ def test_wal_and_shm_are_included_in_opener_scan(tmp_path):
         assert str(shm) in receipt["checked_paths"]
     finally:
         os.close(fd)
+
+
+def test_backup_records_drain_receipt_as_sha_predecessor(tmp_path):
+    kb = _seed_kb(tmp_path)
+    dest = tmp_path / "backup"
+    receipt = mmrag_recovery.snapshot_kb_surfaces(kb, dest, drain_timeout_s=1)
+    assert receipt["drain"]["result"] == "DRAIN_PASS"
+    assert receipt["drain_sha256"]
+    drain_canonical = json.dumps(receipt["drain"], sort_keys=True, separators=(",", ":"))
+    assert receipt["drain_sha256"] == hashlib.sha256(drain_canonical.encode("utf-8")).hexdigest()
+    assert receipt["archive_sha256"] != receipt["drain_sha256"]
+
+
+def test_materialize_work_tree_does_not_mutate_backup_or_source(tmp_path):
+    kb = _seed_kb(tmp_path)
+    dest = tmp_path / "backup"
+    receipt = mmrag_recovery.snapshot_kb_surfaces(kb, dest, drain_timeout_s=1)
+    archive = Path(receipt["archive_path"])
+    before_sha = archive.read_bytes()
+    work = tmp_path / "work-tree"
+
+    copied = mmrag_recovery.materialize_backup_work_tree(archive, work)
+    assert (copied / "config.json").read_text(encoding="utf-8") == '{"default_collection":"shared"}\n'
+    (copied / "config.json").write_text('{"default_collection":"mutated"}\n', encoding="utf-8")
+
+    assert archive.read_bytes() == before_sha
+    assert receipt["archive_sha256"] == hashlib.sha256(archive.read_bytes()).hexdigest()
+    assert (kb / "config.json").read_text(encoding="utf-8") == '{"default_collection":"shared"}\n'
+    mode = stat.S_IMODE(archive.stat().st_mode)
+    assert mode & 0o222 == 0
+
+
+def test_materialize_refuses_live_destination():
+    with pytest.raises(mmrag_recovery.LiveEpochBlocked):
+        mmrag_recovery.materialize_backup_work_tree(
+            LIVE_KB / "not-used.tar.gz",
+            LIVE_KB / "work",
+        )

@@ -180,6 +180,9 @@ def snapshot_kb_surfaces(kb_root, dest_dir, *, drain_timeout_s=30):
     if drain["result"] != "DRAIN_PASS":
         raise DrainFailed(drain)
 
+    drain_canonical = json.dumps(drain, sort_keys=True, separators=(",", ":"))
+    drain_sha256 = hashlib.sha256(drain_canonical.encode("utf-8")).hexdigest()
+
     dest.mkdir(parents=True, exist_ok=False)
     archive = dest / "kb-surfaces.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
@@ -199,9 +202,28 @@ def snapshot_kb_surfaces(kb_root, dest_dir, *, drain_timeout_s=30):
         "archive_path": str(archive),
         "archive_sha256": _sha256_file(archive),
         "drain": drain,
+        "drain_sha256": drain_sha256,
         "members": ["chromadb/", "config.json", "embedding-cache.sqlite"],
     }
     receipt_path = dest / "backup-receipt.json"
     receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
     os.chmod(receipt_path, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
     return receipt
+
+
+def materialize_backup_work_tree(archive_path, work_dir):
+    """Copy backup members into a disposable work tree. Never mutate the archive."""
+    archive = Path(archive_path).expanduser().resolve()
+    work = Path(work_dir).expanduser().resolve()
+    assert_not_live_epoch(archive)
+    assert_not_live_epoch(work)
+    if not archive.is_file():
+        raise BackupRefused(f"backup archive missing: {archive}")
+    if stat.S_IMODE(archive.stat().st_mode) & 0o222:
+        raise BackupRefused(f"backup archive is writable; refuse to treat as immutable: {archive}")
+    if work.exists():
+        raise BackupRefused(f"work tree already exists: {work}")
+    work.mkdir(parents=True, exist_ok=False)
+    with tarfile.open(archive, "r:*") as tar:
+        tar.extractall(work)
+    return work

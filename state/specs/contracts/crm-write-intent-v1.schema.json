@@ -1,0 +1,951 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clearworks.ai/contracts/crm-write-intent-v1.schema.json",
+  "title": "CrmWriteIntentV1",
+  "description": "CRM-owned immutable write intent. intentDigest is SHA-256 of RFC 8785 JCS bytes after removing only intentDigest.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "orgId",
+    "intentId",
+    "intentDigest",
+    "clientRequestId",
+    "requestDigest",
+    "canonicalMeetingId",
+    "recordVersion",
+    "recordDigest",
+    "canonicalClaimId",
+    "claimId",
+    "baseCrmVersion",
+    "baseCrmDigest",
+    "requestKind",
+    "operation",
+    "target",
+    "proposedValue",
+    "proposedValueDigest",
+    "evidenceRefs",
+    "idempotencyKey",
+    "submittedAt",
+    "submittedBy",
+    "acceptedAt",
+    "state",
+    "stateVersion",
+    "previousIntentDigest",
+    "authoritativeReadbackVersion",
+    "authoritativeReadbackDigest",
+    "reconciliationReceipt",
+    "rejectionCode",
+    "updatedAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "orgId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "intentId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "intentDigest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "clientRequestId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requestDigest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "canonicalMeetingId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "recordVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "recordDigest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "canonicalClaimId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "claimId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "baseCrmVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "baseCrmDigest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "requestKind": {
+      "enum": [
+        "system_exact",
+        "user_proposal"
+      ]
+    },
+    "operation": {
+      "enum": [
+        "upsert_account",
+        "upsert_contact",
+        "upsert_engagement",
+        "upsert_interaction",
+        "upsert_lifecycle",
+        "propose_account_change",
+        "propose_contact_change",
+        "propose_engagement_change",
+        "propose_opportunity_change"
+      ]
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entityType",
+        "entityId"
+      ],
+      "properties": {
+        "entityType": {
+          "enum": [
+            "account",
+            "contact",
+            "engagement",
+            "interaction",
+            "lifecycle",
+            "opportunity"
+          ]
+        },
+        "entityId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "proposedValue": {
+      "type": "object"
+    },
+    "proposedValueDigest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1
+    },
+    "submittedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "acceptedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "submittedBy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subjectId",
+        "sessionId",
+        "auditReceiptId",
+        "policyVersion"
+      ],
+      "properties": {
+        "subjectId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "auditReceiptId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "policyVersion": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "state": {
+      "enum": [
+        "accepted_pending",
+        "applied",
+        "rejected",
+        "unknown_commit",
+        "terminal_failed"
+      ]
+    },
+    "stateVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "previousIntentDigest": {
+      "anyOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/sha256" }
+      ]
+    },
+    "authoritativeReadbackVersion": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "authoritativeReadbackDigest": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "reconciliationReceipt": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/reconciliationReceipt"
+        }
+      ]
+    },
+    "rejectionCode": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "upsert_account"
+          }
+        },
+        "required": [
+          "operation"
+        ]
+      },
+      "then": {
+        "properties": {
+          "requestKind": {
+            "const": "system_exact"
+          },
+          "target": {
+            "properties": {
+              "entityType": {
+                "const": "account"
+              },
+              "entityId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "proposedValue": {
+            "$ref": "#/$defs/exactAccountValue"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "upsert_contact"
+          }
+        },
+        "required": [
+          "operation"
+        ]
+      },
+      "then": {
+        "properties": {
+          "requestKind": {
+            "const": "system_exact"
+          },
+          "target": {
+            "properties": {
+              "entityType": {
+                "const": "contact"
+              },
+              "entityId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "proposedValue": {
+            "$ref": "#/$defs/exactContactValue"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "upsert_engagement"
+          }
+        },
+        "required": [
+          "operation"
+        ]
+      },
+      "then": {
+        "properties": {
+          "requestKind": {
+            "const": "system_exact"
+          },
+          "target": {
+            "properties": {
+              "entityType": {
+                "const": "engagement"
+              },
+              "entityId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "proposedValue": {
+            "$ref": "#/$defs/exactEngagementValue"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "upsert_interaction"
+          }
+        },
+        "required": [
+          "operation"
+        ]
+      },
+      "then": {
+        "properties": {
+          "requestKind": {
+            "const": "system_exact"
+          },
+          "target": {
+            "properties": {
+              "entityType": {
+                "const": "interaction"
+              },
+              "entityId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "proposedValue": {
+            "$ref": "#/$defs/exactInteractionValue"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "upsert_lifecycle"
+          }
+        },
+        "required": [
+          "operation"
+        ]
+      },
+      "then": {
+        "properties": {
+          "requestKind": {
+            "const": "system_exact"
+          },
+          "target": {
+            "properties": {
+              "entityType": {
+                "const": "lifecycle"
+              },
+              "entityId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "proposedValue": {
+            "$ref": "#/$defs/exactLifecycleValue"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "propose_account_change"
+          }
+        },
+        "required": [
+          "operation"
+        ]
+      },
+      "then": {
+        "properties": {
+          "requestKind": {
+            "const": "user_proposal"
+          },
+          "target": {
+            "properties": {
+              "entityType": {
+                "const": "account"
+              },
+              "entityId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "proposedValue": {
+            "$ref": "#/$defs/changeValue"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "propose_contact_change"
+          }
+        },
+        "required": [
+          "operation"
+        ]
+      },
+      "then": {
+        "properties": {
+          "requestKind": {
+            "const": "user_proposal"
+          },
+          "target": {
+            "properties": {
+              "entityType": {
+                "const": "contact"
+              },
+              "entityId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "proposedValue": {
+            "$ref": "#/$defs/changeValue"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "propose_engagement_change"
+          }
+        },
+        "required": [
+          "operation"
+        ]
+      },
+      "then": {
+        "properties": {
+          "requestKind": {
+            "const": "user_proposal"
+          },
+          "target": {
+            "properties": {
+              "entityType": {
+                "const": "engagement"
+              },
+              "entityId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "proposedValue": {
+            "$ref": "#/$defs/changeValue"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "propose_opportunity_change"
+          }
+        },
+        "required": [
+          "operation"
+        ]
+      },
+      "then": {
+        "properties": {
+          "requestKind": {
+            "const": "user_proposal"
+          },
+          "target": {
+            "properties": {
+              "entityType": {
+                "const": "opportunity"
+              },
+              "entityId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "proposedValue": {
+            "$ref": "#/$defs/changeValue"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "applied"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "authoritativeReadbackVersion": {
+            "type": "string",
+            "minLength": 1
+          },
+          "authoritativeReadbackDigest": {
+            "$ref": "#/$defs/sha256"
+          },
+          "rejectionCode": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "rejected"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "rejectionCode": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "dateTime": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "reconciliationReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "orgId",
+        "intentId",
+        "requestDigest",
+        "unknownIntentDigest",
+        "operation",
+        "target",
+        "proposedValueDigest",
+        "outcome",
+        "authoritativeReadbackVersion",
+        "authoritativeReadbackDigest",
+        "authority",
+        "reconciledAt",
+        "receiptDigest"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "orgId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "intentId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requestDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "unknownIntentDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "operation": {
+          "enum": [
+            "upsert_account",
+            "upsert_contact",
+            "upsert_engagement",
+            "upsert_interaction",
+            "upsert_lifecycle",
+            "propose_account_change",
+            "propose_contact_change",
+            "propose_engagement_change",
+            "propose_opportunity_change"
+          ]
+        },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "entityType",
+            "entityId"
+          ],
+          "properties": {
+            "entityType": {
+              "enum": [
+                "account",
+                "contact",
+                "engagement",
+                "interaction",
+                "lifecycle",
+                "opportunity"
+              ]
+            },
+            "entityId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "proposedValueDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "outcome": {
+          "enum": [
+            "applied",
+            "rejected",
+            "terminal_failed"
+          ]
+        },
+        "authoritativeReadbackVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authoritativeReadbackDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "authority": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "owner",
+            "policyVersion"
+          ],
+          "properties": {
+            "owner": {
+              "const": "crm-agent"
+            },
+            "policyVersion": {
+              "const": "crm-unknown-reconciliation-v1"
+            }
+          }
+        },
+        "reconciledAt": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "receiptDigest": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "changeValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "value",
+        "reason"
+      ],
+      "properties": {
+        "field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "exactAccountValue": {
+      "required": [
+        "accountId",
+        "name",
+        "relationshipClass",
+        "status"
+      ],
+      "properties": {
+        "accountId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relationshipClass": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "type": "object",
+      "additionalProperties": false
+    },
+    "exactContactValue": {
+      "required": [
+        "contactId",
+        "accountId",
+        "displayName",
+        "role"
+      ],
+      "properties": {
+        "contactId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "accountId": {
+          "type": ["string", "null"]
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object",
+      "additionalProperties": false
+    },
+    "exactEngagementValue": {
+      "required": [
+        "engagementId",
+        "accountId",
+        "name",
+        "state"
+      ],
+      "properties": {
+        "engagementId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "accountId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "type": "object",
+      "additionalProperties": false
+    },
+    "exactInteractionValue": {
+      "required": [
+        "interactionId",
+        "occurredAt",
+        "title",
+        "accountIds",
+        "contactIds",
+        "engagementIds"
+      ],
+      "properties": {
+        "interactionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "occurredAt": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "accountIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "contactIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "engagementIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "type": "object",
+      "additionalProperties": false
+    },
+    "exactLifecycleValue": {
+      "required": [
+        "lifecycleId",
+        "canonicalClaimId",
+        "claimId",
+        "recordDigest",
+        "bucket",
+        "direction",
+        "workState",
+        "ownerId",
+        "dueAt",
+        "dependencyState"
+      ],
+      "properties": {
+        "lifecycleId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "canonicalClaimId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "claimId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "recordDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "bucket": {
+          "enum": [
+            "my_task",
+            "waiting_on_them",
+            "completed_closed",
+            "not_a_task"
+          ]
+        },
+        "direction": {
+          "enum": [
+            "josh_owned",
+            "external_owned",
+            "shared",
+            "unassigned",
+            "not_applicable"
+          ]
+        },
+        "workState": {
+          "enum": [
+            "open",
+            "waiting",
+            "contingent",
+            "completed",
+            "closed_abandoned",
+            "not_a_task",
+            "not_applicable"
+          ]
+        },
+        "ownerId": {
+          "type": ["string", "null"]
+        },
+        "dueAt": {
+          "anyOf": [
+            { "$ref": "#/$defs/dateTime" },
+            { "type": "null" }
+          ]
+        },
+        "dependencyState": {
+          "enum": ["none", "unsatisfied", "satisfied", "unknown"]
+        }
+      },
+      "type": "object",
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1.0",
+  "orgId": "clearworksai",
+  "clockId": "coverage-evaluation:2026-08-24T04:06:00Z",
+  "clockDigest": "c31867bdb3ac6ff00d194492c10fd0be76fece3ae4bea28b6957c210deec47b2",
+  "policyVersion": "coverage-freshness-v1",
+  "asOf": "2026-08-24T04:06:00Z",
+  "maxSnapshotAgeSeconds": 900,
+  "maxSourceLagSeconds": 300,
+  "issuedAt": "2026-08-24T04:05:59Z",
+  "nonce": "coverage_clock_nonce_0001",
+  "authorityPolicyDigest": "c2c32ef422d602145572b96972e4e03352d43fb307581c73258bc1bf58a1ba3d",
+  "authorityKeyId": "coverage-clock-test-key-v1",
+  "authorityReceiptMacHex": "e4dfcee6849295ecf9fd891ed23c0c426c2559a8c4ea937708bada31ed030ab7"
+}

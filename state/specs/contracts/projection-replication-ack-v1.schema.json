@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clearworks.ai/contracts/projection-replication-ack-v1.schema.json",
+  "title": "ProjectionReplicationAckV1",
+  "description": "External monotonic acknowledgement for replicating a mutable delivery-envelope revision to Briefs. ackDigest is SHA-256 of RFC 8785 JCS bytes after removing only ackDigest.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "orgId",
+    "ackId",
+    "ackDigest",
+    "canonicalMeetingId",
+    "recordDigest",
+    "manifestRevision",
+    "manifestDigest",
+    "state",
+    "attempt",
+    "leaseVersion",
+    "readbackDigest",
+    "storedProjectionDigest",
+    "storedProjectionVersion",
+    "updatedAt",
+    "errorCode"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "orgId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ackId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ackDigest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "canonicalMeetingId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "recordDigest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "manifestRevision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "manifestDigest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "state": {
+      "enum": [
+        "PENDING",
+        "LEASED",
+        "SUCCEEDED",
+        "RETRYABLE",
+        "TERMINAL_FAILED",
+        "UNKNOWN_COMMIT"
+      ]
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "leaseVersion": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "readbackDigest": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "updatedAt": {
+      "$ref": "#/$defs/dateTime"
+    },
+    "errorCode": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "storedProjectionVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "storedProjectionDigest": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "SUCCEEDED"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "readbackDigest": {
+            "$ref": "#/$defs/sha256"
+          },
+          "errorCode": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "enum": [
+              "RETRYABLE",
+              "TERMINAL_FAILED"
+            ]
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "errorCode": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "dateTime": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

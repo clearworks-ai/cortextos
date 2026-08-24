@@ -1,0 +1,1018 @@
+{
+  "schemaVersion": "1.0",
+  "orgId": "clearworksai",
+  "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+  "recordVersion": 1,
+  "previousRecordDigest": null,
+  "recordDigest": "be66407f98eeb28dc3063c31f800096f8bb3ab06681a56b415f57ca83f1833ba",
+  "producer": {
+    "service": "cortextos-meeting-intelligence",
+    "repo": "clearworks-ai/cortextos",
+    "gitSha": "15defb1307df39f2df77522e70737c46dac52079",
+    "generatedAt": "2026-08-24T04:00:00Z"
+  },
+  "identityPolicy": {
+    "version": "meeting-identity-v1",
+    "groupingMode": "exact_provider_id_or_versioned_override",
+    "selectionOrder": [
+      "override_pin:first",
+      "transcript_available:true_first",
+      "evidence_artifact_count:desc",
+      "segment_count:desc",
+      "normalized_word_count:desc",
+      "duration_seconds:desc",
+      "captured_at:asc",
+      "source_id:asc"
+    ],
+    "overrideId": "identity-override:demo-pair",
+    "overrideVersion": 1,
+    "overrideDigest": "a501f7519a98156014ef205cc25f0dbbda48da51aac22f1e7bef669a1b097279"
+  },
+  "extractionBinding": {
+    "evidenceVersion": "evidence-v1",
+    "extractorVersion": "extractor-demo-v1",
+    "promptVersion": "prompt-demo-v1",
+    "requestDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+    "promptDigest": "1212121212121212121212121212121212121212121212121212121212121212",
+    "transcriptDigest": "1313131313131313131313131313131313131313131313131313131313131313",
+    "contextDigest": "1414141414141414141414141414141414141414141414141414141414141414",
+    "providerResponseDigest": "1515151515151515151515151515151515151515151515151515151515151515",
+    "normalizedOutputDigest": "1616161616161616161616161616161616161616161616161616161616161616"
+  },
+  "candidateSetDigest": "4d16b46572bf11b4fd9c79bc0b0b73b68eb7bd3887767004d89c049eaf8cb7c4",
+  "claimDispositionSetDigest": "d50f7f77efcc10653022cfa4e3b6bd76b6205c56bac74eb8f5993a8143c79b5b",
+  "claimAuthorityRegistryDigest": "fdb0ced747812742c1d5c03301c68c3b6718c9e615d1fb936fdb34c601f3a3c9",
+  "sourceObservations": [
+    {
+      "sourceId": "01DEMOACTIVE0000000000000000",
+      "provider": "fireflies",
+      "capturedAt": "2026-08-24T03:59:00Z",
+      "startedAt": "2026-08-24T03:00:00Z",
+      "state": "active",
+      "supersededBy": null,
+      "transcriptState": "available",
+      "transcriptDigest": "1313131313131313131313131313131313131313131313131313131313131313",
+      "evidenceDigest": "1717171717171717171717171717171717171717171717171717171717171717",
+      "lineageDigest": "1818181818181818181818181818181818181818181818181818181818181818",
+      "dispositionReason": null,
+      "tombstoneId": null,
+      "reingestAllowed": true,
+      "retiredIdentity": false,
+      "selectionPolicyVersion": "meeting-identity-v1",
+      "segmentCount": 1000,
+      "normalizedWordCount": 9000,
+      "durationSeconds": 3300,
+      "evidenceArtifactCount": 2,
+      "title": "Acme workflow review"
+    },
+    {
+      "sourceId": "01DEMOSUPERSEDED000000000000",
+      "provider": "fireflies",
+      "capturedAt": "2026-08-24T03:58:00Z",
+      "startedAt": "2026-08-24T03:00:30Z",
+      "state": "quarantined",
+      "supersededBy": "01DEMOACTIVE0000000000000000",
+      "transcriptState": "available",
+      "transcriptDigest": "1919191919191919191919191919191919191919191919191919191919191919",
+      "evidenceDigest": "2020202020202020202020202020202020202020202020202020202020202020",
+      "lineageDigest": "1818181818181818181818181818181818181818181818181818181818181818",
+      "dispositionReason": "versioned identity override selects the more complete observation",
+      "tombstoneId": "tombstone:demo:duplicate",
+      "reingestAllowed": false,
+      "retiredIdentity": true,
+      "selectionPolicyVersion": "meeting-identity-v1",
+      "segmentCount": 980,
+      "normalizedWordCount": 8800,
+      "durationSeconds": 3240,
+      "evidenceArtifactCount": 0,
+      "title": "Acme workflow review duplicate"
+    }
+  ],
+  "meeting": {
+    "title": "Acme workflow review",
+    "startedAt": "2026-08-24T03:00:00Z",
+    "endedAt": "2026-08-24T03:55:00Z",
+    "contextClassClaimId": "claim:context:v1",
+    "associationState": "proposed",
+    "crmContextVersion": null,
+    "crmContextDigest": null,
+    "accountIds": [
+      "crm:account:acme"
+    ],
+    "contactIds": [
+      "crm:contact:alex"
+    ],
+    "engagementIds": [
+      "crm:engagement:acme-automation"
+    ]
+  },
+  "participants": [
+    {
+      "participantId": "person:josh-weiss",
+      "displayName": "Josh Weiss",
+      "crmContactId": null,
+      "roleClaimIds": [
+        "claim:role-josh:v1"
+      ],
+      "relationshipClassClaimId": "claim:relationship-josh:v1"
+    },
+    {
+      "participantId": "crm:contact:alex",
+      "displayName": "Alex Example",
+      "crmContactId": "crm:contact:alex",
+      "roleClaimIds": [
+        "claim:role-alex:v1"
+      ],
+      "relationshipClassClaimId": "claim:relationship-alex:v1"
+    }
+  ],
+  "semanticViews": {
+    "headlineClaimId": "claim:headline:v1",
+    "narrativeClaimId": "claim:narrative:v1",
+    "consequentialDeltaClaimIds": [
+      "claim:decision:v1",
+      "claim:waiting:v1"
+    ],
+    "topicClaimIds": [
+      "claim:topic:v1"
+    ],
+    "decisionClaimIds": [
+      "claim:decision:v1"
+    ],
+    "needClaimIds": [
+      "claim:need:v1"
+    ],
+    "questionClaimIds": [
+      "claim:question:v1"
+    ],
+    "objectionClaimIds": [],
+    "opportunityClaimIds": [
+      "claim:opportunity:v1"
+    ],
+    "relationshipChangeClaimIds": [
+      "claim:relationship-change:v1"
+    ],
+    "rationaleClaimIds": [],
+    "subtopicClaimIds": [],
+    "projectChangeClaimIds": [],
+    "dealChangeClaimIds": [],
+    "accountChangeClaimIds": [],
+    "recurringThemeClaimIds": []
+  },
+  "claims": [
+    {
+      "claimId": "claim:context:v1",
+      "canonicalClaimId": "canonical:context",
+      "supersedesClaimId": null,
+      "identityPolicyVersion": "claim-identity-v1",
+      "identityBasisDigest": "a88dd544cc203e2925bf4b3184f1400a9ac770684a6d01345110f50c30fec84d",
+      "claimKind": "fact",
+      "semanticClass": "context_class",
+      "statement": "client",
+      "ownerId": null,
+      "direction": "not_applicable",
+      "workState": "not_applicable",
+      "dependency": {
+        "kind": "none",
+        "description": null,
+        "ownerId": null,
+        "satisfied": null
+      },
+      "due": {
+        "state": "not_applicable",
+        "at": null,
+        "groundingEvidenceRefs": []
+      },
+      "closure": {
+        "reason": null,
+        "completedAt": null
+      },
+      "evidenceRefs": [
+        "ev:context"
+      ],
+      "origin": {
+        "actor": "crm",
+        "actorVersion": "crm-v42",
+        "observedAt": "2026-08-24T03:00:00Z"
+      },
+      "disposition": {
+        "state": "accepted",
+        "authority": {
+          "kind": "crm",
+          "actorId": "crm-agent",
+          "policyVersion": "crm-authority-v1",
+          "decisionDigest": "b57979c6682d31edcf3c5d90ae1f1cdef64a62725419c5384e6c87d8985740d9",
+          "decidedAt": "2026-08-24T04:00:00Z"
+        }
+      },
+      "materialization": {
+        "task": false,
+        "crm": true,
+        "aggregate": true
+      },
+      "candidateContentDigest": "08096e54d73a40bda52db7714fa29a2b2123df380175043f5cc9f06a64bc4b58"
+    },
+    {
+      "claimId": "claim:role-josh:v1",
+      "canonicalClaimId": "canonical:role-josh",
+      "supersedesClaimId": null,
+      "identityPolicyVersion": "claim-identity-v1",
+      "identityBasisDigest": "c2cea6c37bc82edff9044914b7115c2e9a997373ddd32d4c5ad7c9bb9d1ef1ca",
+      "claimKind": "fact",
+      "semanticClass": "participant_role",
+      "statement": "advisor",
+      "ownerId": "person:josh-weiss",
+      "direction": "not_applicable",
+      "workState": "not_applicable",
+      "dependency": {
+        "kind": "none",
+        "description": null,
+        "ownerId": null,
+        "satisfied": null
+      },
+      "due": {
+        "state": "not_applicable",
+        "at": null,
+        "groundingEvidenceRefs": []
+      },
+      "closure": {
+        "reason": null,
+        "completedAt": null
+      },
+      "evidenceRefs": [
+        "ev:role-josh"
+      ],
+      "origin": {
+        "actor": "deterministic_parser",
+        "actorVersion": "participants-v1",
+        "observedAt": "2026-08-24T03:00:00Z"
+      },
+      "disposition": {
+        "state": "accepted",
+        "authority": {
+          "kind": "deterministic_policy",
+          "actorId": "meeting-validator",
+          "policyVersion": "participant-policy-v1",
+          "decisionDigest": "2d4b38dde3607ce8f65f1cf91fe91e25b06869ae6e49dda72401eb930ac85c0b",
+          "decidedAt": "2026-08-24T04:00:00Z"
+        }
+      },
+      "materialization": {
+        "task": false,
+        "crm": false,
+        "aggregate": true
+      },
+      "candidateContentDigest": "656223a3322042dda51164938de9cb9a7834d6e42256d25d4508827978fb0096"
+    },
+    {
+      "claimId": "claim:relationship-josh:v1",
+      "canonicalClaimId": "canonical:relationship-josh",
+      "supersedesClaimId": null,
+      "identityPolicyVersion": "claim-identity-v1",
+      "identityBasisDigest": "56a4ed2666daf33766afdad630e64611dd83b0ed6d95207d01d8f65b1f3b773a",
+      "claimKind": "fact",
+      "semanticClass": "relationship_class",
+      "statement": "internal",
+      "ownerId": "person:josh-weiss",
+      "direction": "not_applicable",
+      "workState": "not_applicable",
+      "dependency": {
+        "kind": "none",
+        "description": null,
+        "ownerId": null,
+        "satisfied": null
+      },
+      "due": {
+        "state": "not_applicable",
+        "at": null,
+        "groundingEvidenceRefs": []
+      },
+      "closure": {
+        "reason": null,
+        "completedAt": null
+      },
+      "evidenceRefs": [
+        "ev:role-josh"
+      ],
+      "origin": {
+        "actor": "deterministic_parser",
+        "actorVersion": "participants-v1",
+        "observedAt": "2026-08-24T03:00:00Z"
+      },
+      "disposition": {
+        "state": "accepted",
+        "authority": {
+          "kind": "deterministic_policy",
+          "actorId": "meeting-validator",
+          "policyVersion": "participant-policy-v1",
+          "decisionDigest": "911cb4b526ac8c8b121a3649f9cb763a9005aeec4a0c650df42efed972dad734",
+          "decidedAt": "2026-08-24T04:00:00Z"
+        }
+      },
+      "materialization": {
+        "task": false,
+        "crm": false,
+        "aggregate": true
+      },
+      "candidateContentDigest": "b1cd3a992297877f613bdb06998a573cd46849eb4c380c34fda9d7d75bc2c476"
+    },
+    {
+      "claimId": "claim:role-alex:v1",
+      "canonicalClaimId": "canonical:role-alex",
+      "supersedesClaimId": null,
+      "identityPolicyVersion": "claim-identity-v1",
+      "identityBasisDigest": "1f4e69074c641b0067544d49e9eeec726f42c44fda23ffdd8e8797037353cf4f",
+      "claimKind": "fact",
+      "semanticClass": "participant_role",
+      "statement": "operations lead",
+      "ownerId": "crm:contact:alex",
+      "direction": "not_applicable",
+      "workState": "not_applicable",
+      "dependency": {
+        "kind": "none",
+        "description": null,
+        "ownerId": null,
+        "satisfied": null
+      },
+      "due": {
+        "state": "not_applicable",
+        "at": null,
+        "groundingEvidenceRefs": []
+      },
+      "closure": {
+        "reason": null,
+        "completedAt": null
+      },
+      "evidenceRefs": [
+        "ev:role-alex"
+      ],
+      "origin": {
+        "actor": "semantic_provider",
+        "actorVersion": "extractor-demo-v1",
+        "observedAt": "2026-08-24T03:05:00Z"
+      },
+      "disposition": {
+        "state": "accepted",
+        "authority": {
+          "kind": "user",
+          "actorId": "user:josh",
+          "policyVersion": "manual-review-v1",
+          "decisionDigest": "6381e0a21852157367d17b478ee5c88545bca0471b0b5a64093f6383a420574b",
+          "decidedAt": "2026-08-24T04:00:00Z"
+        }
+      },
+      "materialization": {
+        "task": false,
+        "crm": false,
+        "aggregate": true
+      },
+      "candidateContentDigest": "c503c20934acf08ad2930b85c789104dcf1c76e157a2c17e0f2a9c3ea628b66d"
+    },
+    {
+      "claimId": "claim:relationship-alex:v1",
+      "canonicalClaimId": "canonical:relationship-alex",
+      "supersedesClaimId": null,
+      "identityPolicyVersion": "claim-identity-v1",
+      "identityBasisDigest": "02c1a1b5bd72d69d65fef66305048f00e7882befa7faf54c2e041ee9d9e465db",
+      "claimKind": "fact",
+      "semanticClass": "relationship_class",
+      "statement": "client",
+      "ownerId": "crm:contact:alex",
+      "direction": "not_applicable",
+      "workState": "not_applicable",
+      "dependency": {
+        "kind": "none",
+        "description": null,
+        "ownerId": null,
+        "satisfied": null
+      },
+      "due": {
+        "state": "not_applicable",
+        "at": null,
+        "groundingEvidenceRefs": []
+      },
+      "closure": {
+        "reason": null,
+        "completedAt": null
+      },
+      "evidenceRefs": [
+        "ev:role-alex"
+      ],
+      "origin": {
+        "actor": "crm",
+        "actorVersion": "crm-v42",
+        "observedAt": "2026-08-24T03:00:00Z"
+      },
+      "disposition": {
+        "state": "accepted",
+        "authority": {
+          "kind": "crm",
+          "actorId": "crm-agent",
+          "policyVersion": "crm-authority-v1",
+          "decisionDigest": "b8d55533dbb6e72d764dc5038dd950d14996b1fa947d105442395fe247c6481e",
+          "decidedAt": "2026-08-24T04:00:00Z"
+        }
+      },
+      "materialization": {
+        "task": false,
+        "crm": false,
+        "aggregate": true
+      },
+      "candidateContentDigest": "e822325d582e3034798b6a401ab11882add6764b1ee7ed73c15a6717a16c430b"
+    },
+    {
+      "claimId": "claim:headline:v1",
+      "canonicalClaimId": "canonical:headline",
+      "supersedesClaimId": null,
+      "identityPolicyVersion": "claim-identity-v1",
+      "identityBasisDigest": "43199051cbb6fdab3b6f643fde70adb18705b34ff776c614d1e44d9ec7061eee",
+      "claimKind": "inference",
+      "semanticClass": "headline",
+      "statement": "Acme chose the intake-routing pilot",
+      "ownerId": null,
+      "direction": "not_applicable",
+      "workState": "not_applicable",
+      "dependency": {
+        "kind": "none",
+        "description": null,
+        "ownerId": null,
+        "satisfied": null
+      },
+      "due": {
+        "state": "not_applicable",
+        "at": null,
+        "groundingEvidenceRefs": []
+      },
+      "closure": {
+        "reason": null,
+        "completedAt": null
+      },
+      "evidenceRefs": [
+        "ev:decision"
+      ],
+      "origin": {
+        "actor": "semantic_provider",
+        "actorVersion": "extractor-demo-v1",
+        "observedAt": "2026-08-24T03:35:00Z"
+      },
+      "disposition": {
+        "state": "proposed",
+        "authority": null
+      },
+      "materialization": {
+        "task": false,
+        "crm": false,
+        "aggregate": false
+      },
+      "candidateContentDigest": "24bf7b4036474551ca082f3eb81c7e03e3da5d0f1c3a4b8340d0060669ee56c3"
+    },
+    {
+      "claimId": "claim:narrative:v1",
+      "canonicalClaimId": "canonical:narrative",
+      "supersedesClaimId": null,
+      "identityPolicyVersion": "claim-identity-v1",
+      "identityBasisDigest": "01dd3f413d95f0804885eaca82f91f4cc0b46cc9fb9ded4d6a656b77a8a2c443",
+      "claimKind": "inference",
+      "semanticClass": "narrative",
+      "statement": "The team selected a bounded intake-routing pilot and clarified the evidence needed before the next phase.",
+      "ownerId": null,
+      "direction": "not_applicable",
+      "workState": "not_applicable",
+      "dependency": {
+        "kind": "none",
+        "description": null,
+        "ownerId": null,
+        "satisfied": null
+      },
+      "due": {
+        "state": "not_applicable",
+        "at": null,
+        "groundingEvidenceRefs": []
+      },
+      "closure": {
+        "reason": null,
+        "completedAt": null
+      },
+      "evidenceRefs": [
+        "ev:decision",
+        "ev:waiting"
+      ],
+      "origin": {
+        "actor": "semantic_provider",
+        "actorVersion": "extractor-demo-v1",
+        "observedAt": "2026-08-24T03:55:00Z"
+      },
+      "disposition": {
+        "state": "proposed",
+        "authority": null
+      },
+      "materialization": {
+        "task": false,
+        "crm": false,
+        "aggregate": false
+      },
+      "candidateContentDigest": "bde6eb4c859a407a34763454b7f76637d7828dcd361448b7a647b028573e0f48"
+    },
+    {
+      "claimId": "claim:topic:v1",
+      "canonicalClaimId": "canonical:topic-intake-routing",
+      "supersedesClaimId": null,
+      "identityPolicyVersion": "claim-identity-v1",
+      "identityBasisDigest": "16e5573970e07e5bebb7d0cb194a5b052b9c048c845a7203f2097f7c6d40d632",
+      "claimKind": "inference",
+      "semanticClass": "topic",
+      "statement": "Intake routing / recipient selection / pilot evidence",
+      "ownerId": null,
+      "direction": "not_applicable",
+      "workState": "not_applicable",
+      "dependency": {
+        "kind": "none",
+        "description": null,
+        "ownerId": null,
+        "satisfied": null
+      },
+      "due": {
+        "state": "not_applicable",
+        "at": null,
+        "groundingEvidenceRefs": []
+      },
+      "closure": {
+        "reason": null,
+        "completedAt": null
+      },
+      "evidenceRefs": [
+        "ev:decision"
+      ],
+      "origin": {
+        "actor": "semantic_provider",
+        "actorVersion": "extractor-demo-v1",
+        "observedAt": "2026-08-24T03:35:00Z"
+      },
+      "disposition": {
+        "state": "proposed",
+        "authority": null
+      },
+      "materialization": {
+        "task": false,
+        "crm": false,
+        "aggregate": false
+      },
+      "candidateContentDigest": "8fe0cb5a135fdfc20cf1e7250443c35cfad624a923e97c1e4fe7cddc5cb35aa0"
+    },
+    {
+      "claimId": "claim:decision:v1",
+      "canonicalClaimId": "canonical:decision-pilot",
+      "supersedesClaimId": null,
+      "identityPolicyVersion": "claim-identity-v1",
+      "identityBasisDigest": "ed775946222bb9e44739f088b8b8c960051fe3bc94e80e0dfb487a832e9a63cc",
+      "claimKind": "fact",
+      "semanticClass": "decision",
+      "statement": "The intake-routing workflow is the first pilot.",
+      "ownerId": null,
+      "direction": "not_applicable",
+      "workState": "not_applicable",
+      "dependency": {
+        "kind": "none",
+        "description": null,
+        "ownerId": null,
+        "satisfied": null
+      },
+      "due": {
+        "state": "not_applicable",
+        "at": null,
+        "groundingEvidenceRefs": []
+      },
+      "closure": {
+        "reason": null,
+        "completedAt": null
+      },
+      "evidenceRefs": [
+        "ev:decision"
+      ],
+      "origin": {
+        "actor": "semantic_provider",
+        "actorVersion": "extractor-demo-v1",
+        "observedAt": "2026-08-24T03:35:00Z"
+      },
+      "disposition": {
+        "state": "accepted",
+        "authority": {
+          "kind": "deterministic_policy",
+          "actorId": "meeting-validator",
+          "policyVersion": "explicit-assignment-v1",
+          "decisionDigest": "7c61ef280b059d0cbf7ec090ea7529d36daecf5f16eb0a8b19596fd24b88bad6",
+          "decidedAt": "2026-08-24T04:00:00Z"
+        }
+      },
+      "materialization": {
+        "task": false,
+        "crm": true,
+        "aggregate": true
+      },
+      "candidateContentDigest": "4a5844312454547f6adbd6f3ffbc1b798c7da68ff4157b1ee28eb81ad26d5c29"
+    },
+    {
+      "claimId": "claim:need:v1",
+      "canonicalClaimId": "canonical:need-routing",
+      "supersedesClaimId": null,
+      "identityPolicyVersion": "claim-identity-v1",
+      "identityBasisDigest": "73a924fb601adc2fa73761c4f593232952ac75362f1d4ee0b7a562757537a0f0",
+      "claimKind": "proposal",
+      "semanticClass": "need",
+      "statement": "Reduce manual routing.",
+      "ownerId": "crm:contact:alex",
+      "direction": "external_owned",
+      "workState": "not_applicable",
+      "dependency": {
+        "kind": "none",
+        "description": null,
+        "ownerId": null,
+        "satisfied": null
+      },
+      "due": {
+        "state": "not_applicable",
+        "at": null,
+        "groundingEvidenceRefs": []
+      },
+      "closure": {
+        "reason": null,
+        "completedAt": null
+      },
+      "evidenceRefs": [
+        "ev:need"
+      ],
+      "origin": {
+        "actor": "semantic_provider",
+        "actorVersion": "extractor-demo-v1",
+        "observedAt": "2026-08-24T03:15:00Z"
+      },
+      "disposition": {
+        "state": "proposed",
+        "authority": null
+      },
+      "materialization": {
+        "task": false,
+        "crm": false,
+        "aggregate": false
+      },
+      "candidateContentDigest": "1b3a20f98623db06fb790cec071d020496cbdbbec7d62b9079f84dcbb4092f27"
+    },
+    {
+      "claimId": "claim:question:v1",
+      "canonicalClaimId": "canonical:question-first-workflow",
+      "supersedesClaimId": null,
+      "identityPolicyVersion": "claim-identity-v1",
+      "identityBasisDigest": "d508b98f5797da41bebbbe75b489d60940a639fecbbccb3f3ba032c58502e4bf",
+      "claimKind": "fact",
+      "semanticClass": "question",
+      "statement": "Which workflow should launch first?",
+      "ownerId": "crm:contact:alex",
+      "direction": "external_owned",
+      "workState": "completed",
+      "dependency": {
+        "kind": "none",
+        "description": null,
+        "ownerId": null,
+        "satisfied": null
+      },
+      "due": {
+        "state": "not_applicable",
+        "at": null,
+        "groundingEvidenceRefs": []
+      },
+      "closure": {
+        "reason": "answered in meeting",
+        "completedAt": "2026-08-24T03:35:00Z"
+      },
+      "evidenceRefs": [
+        "ev:question",
+        "ev:decision"
+      ],
+      "origin": {
+        "actor": "semantic_provider",
+        "actorVersion": "extractor-demo-v1",
+        "observedAt": "2026-08-24T03:20:00Z"
+      },
+      "disposition": {
+        "state": "accepted",
+        "authority": {
+          "kind": "deterministic_policy",
+          "actorId": "meeting-validator",
+          "policyVersion": "explicit-question-v1",
+          "decisionDigest": "b1fcfe59be67a34887555c635b9b1f87f2bd68df2e9eb953fa515780168bc345",
+          "decidedAt": "2026-08-24T04:00:00Z"
+        }
+      },
+      "materialization": {
+        "task": false,
+        "crm": false,
+        "aggregate": true
+      },
+      "candidateContentDigest": "18f228911a60367de0583434cf4452cc330d03019c3cbc6c6b97b0ab06339f5c"
+    },
+    {
+      "claimId": "claim:opportunity:v1",
+      "canonicalClaimId": "canonical:opportunity-expand",
+      "supersedesClaimId": null,
+      "identityPolicyVersion": "claim-identity-v1",
+      "identityBasisDigest": "8c46395f11d0ca57914a7eb2bbcee7f2ac87089fda07d71862f28217b486336f",
+      "claimKind": "proposal",
+      "semanticClass": "opportunity",
+      "statement": "Expand the pilot after recipient-level evidence is reviewed.",
+      "ownerId": null,
+      "direction": "unassigned",
+      "workState": "not_applicable",
+      "dependency": {
+        "kind": "condition",
+        "description": "recipient-level evidence reviewed",
+        "ownerId": null,
+        "satisfied": false
+      },
+      "due": {
+        "state": "unknown",
+        "at": null,
+        "groundingEvidenceRefs": []
+      },
+      "closure": {
+        "reason": null,
+        "completedAt": null
+      },
+      "evidenceRefs": [
+        "ev:opportunity"
+      ],
+      "origin": {
+        "actor": "semantic_provider",
+        "actorVersion": "extractor-demo-v1",
+        "observedAt": "2026-08-24T03:50:00Z"
+      },
+      "disposition": {
+        "state": "proposed",
+        "authority": null
+      },
+      "materialization": {
+        "task": false,
+        "crm": false,
+        "aggregate": false
+      },
+      "candidateContentDigest": "7b5dee6e9e61b273313e22e7555c04fcf721931d55ff96f411c552e43bcbe9a6"
+    },
+    {
+      "claimId": "claim:relationship-change:v1",
+      "canonicalClaimId": "canonical:relationship-change-expand",
+      "supersedesClaimId": null,
+      "identityPolicyVersion": "claim-identity-v1",
+      "identityBasisDigest": "bdeae1caf6afd37c5e4bda6304ec7df6a335182919af798b532125e3135a48f7",
+      "claimKind": "proposal",
+      "semanticClass": "relationship_change",
+      "statement": "Acme may expand beyond the pilot.",
+      "ownerId": null,
+      "direction": "unassigned",
+      "workState": "not_applicable",
+      "dependency": {
+        "kind": "condition",
+        "description": "pilot evidence accepted",
+        "ownerId": null,
+        "satisfied": false
+      },
+      "due": {
+        "state": "unknown",
+        "at": null,
+        "groundingEvidenceRefs": []
+      },
+      "closure": {
+        "reason": null,
+        "completedAt": null
+      },
+      "evidenceRefs": [
+        "ev:opportunity"
+      ],
+      "origin": {
+        "actor": "semantic_provider",
+        "actorVersion": "extractor-demo-v1",
+        "observedAt": "2026-08-24T03:50:00Z"
+      },
+      "disposition": {
+        "state": "proposed",
+        "authority": null
+      },
+      "materialization": {
+        "task": false,
+        "crm": false,
+        "aggregate": false
+      },
+      "candidateContentDigest": "a48bce2d1195c59e2b56c8731b48cc72722cb87532be9d5ec8190bfa621ad85c"
+    },
+    {
+      "claimId": "claim:task:v1",
+      "canonicalClaimId": "canonical:task-send-pilot-outline",
+      "supersedesClaimId": null,
+      "identityPolicyVersion": "claim-identity-v1",
+      "identityBasisDigest": "010219af24dfec239dcb9081bd5bf224db02eacfb685ac7b78d92c5062b1b128",
+      "claimKind": "fact",
+      "semanticClass": "work_item",
+      "statement": "Send the pilot outline.",
+      "ownerId": "person:josh-weiss",
+      "direction": "josh_owned",
+      "workState": "open",
+      "dependency": {
+        "kind": "none",
+        "description": null,
+        "ownerId": null,
+        "satisfied": null
+      },
+      "due": {
+        "state": "known",
+        "at": "2026-08-26T19:00:00Z",
+        "groundingEvidenceRefs": [
+          "ev:task"
+        ]
+      },
+      "closure": {
+        "reason": null,
+        "completedAt": null
+      },
+      "evidenceRefs": [
+        "ev:task"
+      ],
+      "origin": {
+        "actor": "semantic_provider",
+        "actorVersion": "extractor-demo-v1",
+        "observedAt": "2026-08-24T03:42:00Z"
+      },
+      "disposition": {
+        "state": "accepted",
+        "authority": {
+          "kind": "deterministic_policy",
+          "actorId": "meeting-validator",
+          "policyVersion": "explicit-assignment-v1",
+          "decisionDigest": "5535488de582c9c0be1b0f2d4a6f08f401bbe30c9ba848a1555b211cc423663b",
+          "decidedAt": "2026-08-24T04:00:00Z"
+        }
+      },
+      "materialization": {
+        "task": true,
+        "crm": false,
+        "aggregate": true
+      },
+      "candidateContentDigest": "2ae2ba5df322fd88eb2370b5aa53888fc2157814f90aead355fc44300867dd15"
+    },
+    {
+      "claimId": "claim:waiting:v1",
+      "canonicalClaimId": "canonical:waiting-recipient-list",
+      "supersedesClaimId": null,
+      "identityPolicyVersion": "claim-identity-v1",
+      "identityBasisDigest": "3c66b4ec7e9f1ca2116c09e17e37e98de5b0d61f42483a48ef9cf3a901fb1edb",
+      "claimKind": "fact",
+      "semanticClass": "work_item",
+      "statement": "Send the recipient list.",
+      "ownerId": "crm:contact:alex",
+      "direction": "external_owned",
+      "workState": "waiting",
+      "dependency": {
+        "kind": "person",
+        "description": "Alex sends the selected recipient list",
+        "ownerId": "crm:contact:alex",
+        "satisfied": false
+      },
+      "due": {
+        "state": "unknown",
+        "at": null,
+        "groundingEvidenceRefs": []
+      },
+      "closure": {
+        "reason": null,
+        "completedAt": null
+      },
+      "evidenceRefs": [
+        "ev:waiting"
+      ],
+      "origin": {
+        "actor": "semantic_provider",
+        "actorVersion": "extractor-demo-v1",
+        "observedAt": "2026-08-24T03:43:00Z"
+      },
+      "disposition": {
+        "state": "accepted",
+        "authority": {
+          "kind": "deterministic_policy",
+          "actorId": "meeting-validator",
+          "policyVersion": "explicit-assignment-v1",
+          "decisionDigest": "8891baa3b3bd679cbde627fd3b78c817c897a1a69e633667168184906d08bf18",
+          "decidedAt": "2026-08-24T04:00:00Z"
+        }
+      },
+      "materialization": {
+        "task": true,
+        "crm": false,
+        "aggregate": true
+      },
+      "candidateContentDigest": "f9a07d78cab06aae9dbbbfa1d768c3728bf7e11bd2fe3aa0946f484e38e75fb3"
+    }
+  ],
+  "lifecycle": {
+    "myTasks": [
+      "canonical:task-send-pilot-outline"
+    ],
+    "waitingOnThem": [
+      "canonical:waiting-recipient-list"
+    ],
+    "completedClosed": [],
+    "notTasks": []
+  },
+  "evidenceRegistry": [
+    {
+      "evidenceId": "ev:context",
+      "sourceId": "01DEMOACTIVE0000000000000000",
+      "startMs": 0,
+      "endMs": 2000,
+      "quoteDigest": "4545454545454545454545454545454545454545454545454545454545454545",
+      "artifactId": "artifact:transcript"
+    },
+    {
+      "evidenceId": "ev:role-josh",
+      "sourceId": "01DEMOACTIVE0000000000000000",
+      "startMs": 2000,
+      "endMs": 4000,
+      "quoteDigest": "4646464646464646464646464646464646464646464646464646464646464646",
+      "artifactId": "artifact:transcript"
+    },
+    {
+      "evidenceId": "ev:role-alex",
+      "sourceId": "01DEMOACTIVE0000000000000000",
+      "startMs": 4000,
+      "endMs": 6000,
+      "quoteDigest": "4747474747474747474747474747474747474747474747474747474747474747",
+      "artifactId": "artifact:transcript"
+    },
+    {
+      "evidenceId": "ev:need",
+      "sourceId": "01DEMOACTIVE0000000000000000",
+      "startMs": 900000,
+      "endMs": 930000,
+      "quoteDigest": "4848484848484848484848484848484848484848484848484848484848484848",
+      "artifactId": "artifact:transcript"
+    },
+    {
+      "evidenceId": "ev:question",
+      "sourceId": "01DEMOACTIVE0000000000000000",
+      "startMs": 1200000,
+      "endMs": 1220000,
+      "quoteDigest": "4949494949494949494949494949494949494949494949494949494949494949",
+      "artifactId": "artifact:transcript"
+    },
+    {
+      "evidenceId": "ev:decision",
+      "sourceId": "01DEMOACTIVE0000000000000000",
+      "startMs": 2100000,
+      "endMs": 2130000,
+      "quoteDigest": "5050505050505050505050505050505050505050505050505050505050505050",
+      "artifactId": "artifact:transcript"
+    },
+    {
+      "evidenceId": "ev:task",
+      "sourceId": "01DEMOACTIVE0000000000000000",
+      "startMs": 2520000,
+      "endMs": 2550000,
+      "quoteDigest": "5151515151515151515151515151515151515151515151515151515151515151",
+      "artifactId": "artifact:transcript"
+    },
+    {
+      "evidenceId": "ev:waiting",
+      "sourceId": "01DEMOACTIVE0000000000000000",
+      "startMs": 2580000,
+      "endMs": 2610000,
+      "quoteDigest": "5252525252525252525252525252525252525252525252525252525252525252",
+      "artifactId": "artifact:transcript"
+    },
+    {
+      "evidenceId": "ev:opportunity",
+      "sourceId": "01DEMOACTIVE0000000000000000",
+      "startMs": 3000000,
+      "endMs": 3040000,
+      "quoteDigest": "5353535353535353535353535353535353535353535353535353535353535353",
+      "artifactId": "artifact:transcript"
+    }
+  ],
+  "artifacts": [
+    {
+      "artifactId": "artifact:transcript",
+      "sourceId": "01DEMOACTIVE0000000000000000",
+      "sourceLineageDigest": "1818181818181818181818181818181818181818181818181818181818181818",
+      "kind": "transcript",
+      "owner": "cortextos-evidence",
+      "digest": "1313131313131313131313131313131313131313131313131313131313131313",
+      "accessClass": "private",
+      "resolutionState": "available"
+    },
+    {
+      "artifactId": "artifact:video",
+      "sourceId": "01DEMOACTIVE0000000000000000",
+      "sourceLineageDigest": "1818181818181818181818181818181818181818181818181818181818181818",
+      "kind": "video",
+      "owner": "fireflies",
+      "digest": "5454545454545454545454545454545454545454545454545454545454545454",
+      "accessClass": "restricted_media",
+      "resolutionState": "available"
+    }
+  ]
+}

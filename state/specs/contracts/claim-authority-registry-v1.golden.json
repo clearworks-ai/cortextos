@@ -1,0 +1,159 @@
+{
+  "schemaVersion": "1.0",
+  "orgId": "clearworksai",
+  "registryId": "claim-authority-registry-v1",
+  "registryDigest": "fdb0ced747812742c1d5c03301c68c3b6718c9e615d1fb936fdb34c601f3a3c9",
+  "policies": [
+    {
+      "kind": "crm",
+      "actorId": "crm-agent",
+      "policyVersion": "crm-authority-v1",
+      "semanticClasses": [
+        "context_class",
+        "participant_role",
+        "relationship_class",
+        "headline",
+        "narrative",
+        "topic",
+        "decision",
+        "need",
+        "question",
+        "opportunity",
+        "relationship_change",
+        "work_item",
+        "rationale",
+        "subtopic",
+        "project_change",
+        "deal_change",
+        "account_change",
+        "recurring_theme"
+      ],
+      "claimKinds": [
+        "fact"
+      ],
+      "dispositionStates": [
+        "accepted",
+        "rejected",
+        "superseded"
+      ],
+      "allowedMaterialization": {
+        "task": false,
+        "crm": true,
+        "aggregate": true
+      }
+    },
+    {
+      "kind": "deterministic_policy",
+      "actorId": "meeting-validator",
+      "policyVersion": "participant-policy-v1",
+      "semanticClasses": [
+        "context_class",
+        "participant_role",
+        "relationship_class"
+      ],
+      "claimKinds": [
+        "fact"
+      ],
+      "dispositionStates": [
+        "accepted",
+        "rejected",
+        "superseded"
+      ],
+      "allowedMaterialization": {
+        "task": false,
+        "crm": false,
+        "aggregate": true
+      }
+    },
+    {
+      "kind": "deterministic_policy",
+      "actorId": "meeting-validator",
+      "policyVersion": "explicit-assignment-v1",
+      "semanticClasses": [
+        "decision",
+        "work_item",
+        "consequential_delta",
+        "crm_fact"
+      ],
+      "claimKinds": [
+        "fact"
+      ],
+      "dispositionStates": [
+        "accepted",
+        "rejected",
+        "superseded"
+      ],
+      "allowedMaterialization": {
+        "task": true,
+        "crm": true,
+        "aggregate": true
+      }
+    },
+    {
+      "kind": "deterministic_policy",
+      "actorId": "meeting-validator",
+      "policyVersion": "explicit-question-v1",
+      "semanticClasses": [
+        "question",
+        "need",
+        "objection",
+        "opportunity",
+        "topic",
+        "subtopic"
+      ],
+      "claimKinds": [
+        "fact"
+      ],
+      "dispositionStates": [
+        "accepted",
+        "rejected",
+        "superseded"
+      ],
+      "allowedMaterialization": {
+        "task": false,
+        "crm": false,
+        "aggregate": true
+      }
+    },
+    {
+      "kind": "user",
+      "actorId": "user:josh",
+      "policyVersion": "manual-review-v1",
+      "semanticClasses": [
+        "context_class",
+        "participant_role",
+        "relationship_class",
+        "headline",
+        "narrative",
+        "topic",
+        "decision",
+        "need",
+        "question",
+        "opportunity",
+        "relationship_change",
+        "work_item",
+        "rationale",
+        "subtopic",
+        "project_change",
+        "deal_change",
+        "account_change",
+        "recurring_theme"
+      ],
+      "claimKinds": [
+        "fact",
+        "inference",
+        "proposal"
+      ],
+      "dispositionStates": [
+        "accepted",
+        "rejected",
+        "superseded"
+      ],
+      "allowedMaterialization": {
+        "task": true,
+        "crm": true,
+        "aggregate": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clearworks.ai/schemas/meeting-processing-failure-v1.schema.json",
+  "title": "MeetingProcessingFailureV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "orgId", "failureId", "failureDigest", "observationId", "observationDigest", "providerSourceId", "stage", "errorCode", "failedAt", "processingStatusPath", "paExceptionReceipt"],
+  "$defs": { "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "dateTime": { "type": "string", "format": "date-time" } },
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "orgId": { "type": "string", "minLength": 1 },
+    "failureId": { "type": "string", "minLength": 1 },
+    "failureDigest": { "$ref": "#/$defs/sha256" },
+    "observationId": { "type": "string", "minLength": 1 },
+    "observationDigest": { "$ref": "#/$defs/sha256" },
+    "providerSourceId": { "type": "string", "minLength": 1 },
+    "stage": { "enum": ["identity", "extraction", "record_schema"] },
+    "errorCode": { "type": "string", "minLength": 1 },
+    "failedAt": { "$ref": "#/$defs/dateTime" },
+    "processingStatusPath": { "type": "string", "pattern": "^/business/crm/processing/" },
+    "paExceptionReceipt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["notificationKind", "sourceKey", "outboundDigest", "providerMessageId", "policyVersion", "processingStatusPath", "state", "attempt", "readbackDigest", "updatedAt"],
+      "properties": {
+        "notificationKind": { "const": "terminal_exception" },
+        "sourceKey": { "type": "string", "minLength": 1 },
+        "outboundDigest": { "$ref": "#/$defs/sha256" },
+        "providerMessageId": { "type": ["string", "null"] },
+        "policyVersion": { "type": "string", "minLength": 1 },
+        "processingStatusPath": { "type": "string", "pattern": "^/business/crm/processing/" },
+        "state": { "enum": ["PENDING", "LEASED", "SUCCEEDED", "RETRYABLE", "TERMINAL_FAILED", "UNKNOWN_COMMIT"] },
+        "attempt": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "readbackDigest": { "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "updatedAt": { "$ref": "#/$defs/dateTime" }
+      }
+    }
+  }
+}

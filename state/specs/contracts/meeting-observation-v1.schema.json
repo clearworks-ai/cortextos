@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clearworks.ai/schemas/meeting-observation-v1.schema.json",
+  "title": "MeetingObservationV1",
+  "description": "Durable provider observation with state-specific relay artifacts. Persistence precedes relay attempts; success-only auth and replay receipts are required only for completed relay.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "orgId", "observationId", "observationDigest", "provider", "providerSourceId", "receivedAt", "rawBodyDigest", "signatureVerification", "relay"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "orgId": { "type": "string", "minLength": 1 },
+    "observationId": { "type": "string", "minLength": 1 },
+    "observationDigest": { "$ref": "#/$defs/sha256" },
+    "provider": { "const": "fireflies" },
+    "providerSourceId": { "type": "string", "minLength": 1 },
+    "receivedAt": { "$ref": "#/$defs/dateTime" },
+    "rawBodyDigest": { "$ref": "#/$defs/sha256" },
+    "signatureVerification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scheme", "headerName", "headerValueDigest", "keyId", "keyConfigVersion", "verificationConfigDigest", "providerDocsSource", "verifiedAt", "verificationReceiptDigest", "verified"],
+      "properties": {
+        "scheme": { "const": "hmac-sha256-raw-body" },
+        "headerName": { "const": "X-Hub-Signature" },
+        "headerValueDigest": { "$ref": "#/$defs/sha256" },
+        "keyId": { "type": "string", "minLength": 1 },
+        "keyConfigVersion": { "type": "string", "minLength": 1 },
+        "verificationConfigDigest": { "$ref": "#/$defs/sha256" },
+        "providerDocsSource": { "const": "https://docs.fireflies.ai/graphql-api/webhooks-v2" },
+        "verifiedAt": { "$ref": "#/$defs/dateTime" },
+        "verificationReceiptDigest": { "$ref": "#/$defs/sha256" },
+        "verified": { "const": true }
+      }
+    },
+    "relay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "intentDigest", "relayReceiptDigest", "idempotencyKey", "durableReceipt", "internalAuth", "replayReceipt", "previousState", "attempt", "leaseVersion", "firstAttemptAt", "deadlineAt", "leaseOwner", "leaseExpiresAt", "lastUpdatedAt", "errorCode"],
+      "properties": {
+        "state": { "enum": ["RELAY_PENDING", "LEASED", "RETRYABLE", "RELAYED", "TERMINAL_FAILED", "UNKNOWN_COMMIT"] },
+        "intentDigest": { "$ref": "#/$defs/sha256" },
+        "relayReceiptDigest": { "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "idempotencyKey": { "type": "string", "minLength": 1 },
+        "durableReceipt": { "$ref": "#/$defs/durableReceipt" },
+        "internalAuth": { "anyOf": [{ "$ref": "#/$defs/internalAuth" }, { "type": "null" }] },
+        "replayReceipt": { "anyOf": [{ "$ref": "#/$defs/replayReceipt" }, { "type": "null" }] },
+        "previousState": { "type": ["string", "null"], "enum": [null, "RELAY_PENDING", "LEASED", "RETRYABLE", "UNKNOWN_COMMIT"] },
+        "attempt": { "type": "integer", "minimum": 0, "maximum": 5 },
+        "leaseVersion": { "type": "integer", "minimum": 0 },
+        "firstAttemptAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
+        "deadlineAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
+        "leaseOwner": { "type": ["string", "null"] },
+        "leaseExpiresAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
+        "lastUpdatedAt": { "$ref": "#/$defs/dateTime" },
+        "errorCode": { "type": ["string", "null"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "state": { "const": "RELAY_PENDING" } }, "required": ["state"] },
+          "then": { "properties": { "relayReceiptDigest": { "type": "null" }, "internalAuth": { "type": "null" }, "replayReceipt": { "type": "null" }, "previousState": { "type": "null" }, "attempt": { "const": 0 }, "leaseVersion": { "const": 0 }, "firstAttemptAt": { "type": "null" }, "deadlineAt": { "type": "null" }, "leaseOwner": { "type": "null" }, "leaseExpiresAt": { "type": "null" }, "errorCode": { "type": "null" } } }
+        },
+        {
+          "if": { "properties": { "state": { "const": "LEASED" } }, "required": ["state"] },
+          "then": { "properties": { "relayReceiptDigest": { "type": "null" }, "internalAuth": { "type": "null" }, "replayReceipt": { "type": "null" }, "previousState": { "enum": ["RELAY_PENDING", "RETRYABLE"] }, "attempt": { "minimum": 1 }, "leaseVersion": { "minimum": 1 }, "firstAttemptAt": { "$ref": "#/$defs/dateTime" }, "deadlineAt": { "$ref": "#/$defs/dateTime" }, "leaseOwner": { "type": "string", "minLength": 1 }, "leaseExpiresAt": { "$ref": "#/$defs/dateTime" }, "errorCode": { "type": "null" } } }
+        },
+        {
+          "if": { "properties": { "state": { "const": "RETRYABLE" } }, "required": ["state"] },
+          "then": { "properties": { "relayReceiptDigest": { "type": "null" }, "internalAuth": { "type": "null" }, "replayReceipt": { "type": "null" }, "previousState": { "const": "LEASED" }, "attempt": { "minimum": 1 }, "firstAttemptAt": { "$ref": "#/$defs/dateTime" }, "deadlineAt": { "$ref": "#/$defs/dateTime" }, "errorCode": { "type": "string", "minLength": 1 } } }
+        },
+        {
+          "if": { "properties": { "state": { "const": "RELAYED" } }, "required": ["state"] },
+          "then": { "properties": { "relayReceiptDigest": { "$ref": "#/$defs/sha256" }, "internalAuth": { "$ref": "#/$defs/internalAuth" }, "replayReceipt": { "$ref": "#/$defs/replayReceipt" }, "previousState": { "enum": ["LEASED", "UNKNOWN_COMMIT"] }, "firstAttemptAt": { "$ref": "#/$defs/dateTime" }, "deadlineAt": { "$ref": "#/$defs/dateTime" }, "errorCode": { "type": "null" } } }
+        },
+        {
+          "if": { "properties": { "state": { "const": "TERMINAL_FAILED" } }, "required": ["state"] },
+          "then": { "properties": { "relayReceiptDigest": { "type": "null" }, "internalAuth": { "type": "null" }, "replayReceipt": { "type": "null" }, "previousState": { "enum": ["LEASED", "RETRYABLE", "UNKNOWN_COMMIT"] }, "firstAttemptAt": { "$ref": "#/$defs/dateTime" }, "deadlineAt": { "$ref": "#/$defs/dateTime" }, "errorCode": { "type": "string", "minLength": 1 } } }
+        },
+        {
+          "if": { "properties": { "state": { "const": "UNKNOWN_COMMIT" } }, "required": ["state"] },
+          "then": { "properties": { "relayReceiptDigest": { "type": "null" }, "internalAuth": { "$ref": "#/$defs/internalAuth" }, "previousState": { "const": "LEASED" }, "attempt": { "minimum": 1 }, "leaseVersion": { "minimum": 1 }, "firstAttemptAt": { "$ref": "#/$defs/dateTime" }, "deadlineAt": { "$ref": "#/$defs/dateTime" } } }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "dateTime": { "type": "string", "format": "date-time" },
+    "durableReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["storeId", "storageKey", "observationId", "rawBodyDigest", "persistedAt", "durability", "receiptDigest"],
+      "properties": {
+        "storeId": { "const": "meeting-observation-store-v1" },
+        "storageKey": { "type": "string", "minLength": 1 },
+        "observationId": { "type": "string", "minLength": 1 },
+        "rawBodyDigest": { "$ref": "#/$defs/sha256" },
+        "persistedAt": { "$ref": "#/$defs/dateTime" },
+        "durability": { "const": "fsync_committed" },
+        "receiptDigest": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "internalAuth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scheme", "keyId", "method", "path", "timestamp", "nonce", "bodyDigest", "canonicalRequestDigest", "macHex"],
+      "properties": {
+        "scheme": { "const": "hmac-sha256-canonical-request-v1" },
+        "keyId": { "type": "string", "minLength": 1 },
+        "method": { "const": "POST" },
+        "path": { "const": "/internal/v1/meeting-observations" },
+        "timestamp": { "$ref": "#/$defs/dateTime" },
+        "nonce": { "type": "string", "pattern": "^[A-Za-z0-9_-]{16,128}$" },
+        "bodyDigest": { "$ref": "#/$defs/sha256" },
+        "canonicalRequestDigest": { "$ref": "#/$defs/sha256" },
+        "macHex": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "replayReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["storeId", "nonceKey", "decision", "acceptedAt", "expiresAt", "receiptMacHex"],
+      "properties": {
+        "storeId": { "const": "meeting-relay-nonce-store-v1" },
+        "nonceKey": { "$ref": "#/$defs/sha256" },
+        "decision": { "const": "accepted_new" },
+        "acceptedAt": { "$ref": "#/$defs/dateTime" },
+        "expiresAt": { "$ref": "#/$defs/dateTime" },
+        "receiptMacHex": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  }
+}

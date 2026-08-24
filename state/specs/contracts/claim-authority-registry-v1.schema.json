@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clearworks.ai/contracts/claim-authority-registry-v1.schema.json",
+  "title": "ClaimAuthorityRegistryV1",
+  "description": "Trusted claim-disposition authorities and policy versions. registryDigest is SHA-256 of RFC 8785 JCS bytes after removing only registryDigest.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "orgId",
+    "registryId",
+    "registryDigest",
+    "policies"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "orgId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "registryId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "registryDigest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "policies": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "actorId",
+          "policyVersion",
+          "allowedMaterialization",
+          "dispositionStates",
+          "claimKinds",
+          "semanticClasses"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "deterministic_policy",
+              "user",
+              "crm"
+            ]
+          },
+          "actorId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "policyVersion": {
+            "type": "string",
+            "minLength": 1
+          },
+          "semanticClasses": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "headline",
+                "narrative",
+                "context_class",
+                "participant_role",
+                "relationship_class",
+                "topic",
+                "decision",
+                "need",
+                "question",
+                "objection",
+                "opportunity",
+                "relationship_change",
+                "crm_fact",
+                "work_item",
+                "consequential_delta",
+                "rationale",
+                "subtopic",
+                "project_change",
+                "deal_change",
+                "account_change",
+                "recurring_theme"
+              ]
+            }
+          },
+          "claimKinds": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "fact",
+                "inference",
+                "proposal"
+              ]
+            }
+          },
+          "dispositionStates": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "accepted",
+                "rejected",
+                "superseded"
+              ]
+            }
+          },
+          "allowedMaterialization": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "task",
+              "crm",
+              "aggregate"
+            ],
+            "properties": {
+              "task": {
+                "type": "boolean"
+              },
+              "crm": {
+                "type": "boolean"
+              },
+              "aggregate": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

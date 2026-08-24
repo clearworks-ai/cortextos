@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "1.0",
+  "orgId": "clearworksai",
+  "rootId": "meeting-authority-root:clearworksai",
+  "rootVersion": 1,
+  "rootDigest": "98cf10a485937fde4abfa104f2ebc69631faa90ff7cdd4f71beb55f8abd72100",
+  "claimRegistryDigest": "fdb0ced747812742c1d5c03301c68c3b6718c9e615d1fb936fdb34c601f3a3c9",
+  "authorizedClaimDecisionDigests": [
+    "b57979c6682d31edcf3c5d90ae1f1cdef64a62725419c5384e6c87d8985740d9",
+    "2d4b38dde3607ce8f65f1cf91fe91e25b06869ae6e49dda72401eb930ac85c0b",
+    "911cb4b526ac8c8b121a3649f9cb763a9005aeec4a0c650df42efed972dad734",
+    "6381e0a21852157367d17b478ee5c88545bca0471b0b5a64093f6383a420574b",
+    "b8d55533dbb6e72d764dc5038dd950d14996b1fa947d105442395fe247c6481e",
+    "7c61ef280b059d0cbf7ec090ea7529d36daecf5f16eb0a8b19596fd24b88bad6",
+    "b1fcfe59be67a34887555c635b9b1f87f2bd68df2e9eb953fa515780168bc345",
+    "5535488de582c9c0be1b0f2d4a6f08f401bbe30c9ba848a1555b211cc423663b",
+    "8891baa3b3bd679cbde627fd3b78c817c897a1a69e633667168184906d08bf18"
+  ],
+  "authorizedIdentityDecisionDigests": [
+    "cbe29b854079e7e354b3aa21d2bd5183811324496efda5303cce6ed3d3787e19"
+  ],
+  "relayInternalAuthKeyIds": [
+    "cortext-relay-key-v1"
+  ],
+  "coverageEnumeratorKeyIds": [
+    "fireflies-connector-v1"
+  ],
+  "identityPolicies": [
+    {
+      "kind": "user",
+      "actorId": "user:josh",
+      "policyVersion": "identity-adjudication-v1"
+    }
+  ],
+  "issuedBy": {
+    "kind": "user",
+    "actorId": "user:josh",
+    "policyVersion": "meeting-authority-root-v1",
+    "auditReceiptDigest": "9090909090909090909090909090909090909090909090909090909090909090",
+    "issuedAt": "2026-08-24T04:00:00Z"
+  }
+}

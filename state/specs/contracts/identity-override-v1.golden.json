@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0",
+  "orgId": "clearworksai",
+  "overrideId": "identity-override:demo-pair",
+  "overrideVersion": 1,
+  "overrideDigest": "a501f7519a98156014ef205cc25f0dbbda48da51aac22f1e7bef669a1b097279",
+  "supersedesOverrideDigest": null,
+  "sourceIds": [
+    "01DEMOACTIVE0000000000000000",
+    "01DEMOSUPERSEDED000000000000"
+  ],
+  "canonicalSourceId": "01DEMOACTIVE0000000000000000",
+  "reason": "Explicitly adjudicated duplicate recording pair",
+  "selectionPolicyVersion": "meeting-identity-v1",
+  "authority": {
+    "kind": "user",
+    "actorId": "user:josh",
+    "policyVersion": "identity-adjudication-v1",
+    "decisionDigest": "cbe29b854079e7e354b3aa21d2bd5183811324496efda5303cce6ed3d3787e19",
+    "decidedAt": "2026-08-24T04:00:00Z"
+  },
+  "createdAt": "2026-08-24T04:00:00Z"
+}

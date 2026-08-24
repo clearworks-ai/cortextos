@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clearworks.ai/contracts/fireflies-verification-config-v1.schema.json",
+  "title": "FirefliesVerificationConfigV1",
+  "description": "Deployment-pinned Fireflies webhook verification policy. configDigest is SHA-256 of RFC 8785 JCS bytes after removing only configDigest.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "orgId", "provider", "configId", "configVersion", "configDigest", "validFrom", "validUntil", "scheme", "headerName", "providerDocsSource", "activeKeyId", "keys", "rotation"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "orgId": { "type": "string", "minLength": 1 },
+    "provider": { "const": "fireflies" },
+    "configId": { "type": "string", "minLength": 1 },
+    "configVersion": { "type": "string", "minLength": 1 },
+    "configDigest": { "$ref": "#/$defs/sha256" },
+    "validFrom": { "$ref": "#/$defs/dateTime" },
+    "validUntil": { "$ref": "#/$defs/dateTime" },
+    "scheme": { "const": "hmac-sha256-raw-body" },
+    "headerName": { "const": "X-Hub-Signature" },
+    "providerDocsSource": { "const": "https://docs.fireflies.ai/graphql-api/webhooks-v2" },
+    "activeKeyId": { "type": "string", "minLength": 1 },
+    "keys": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["keyId", "status", "validFrom", "validUntil"],
+        "properties": {
+          "keyId": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["active", "previous", "next"] },
+          "validFrom": { "$ref": "#/$defs/dateTime" },
+          "validUntil": { "$ref": "#/$defs/dateTime" }
+        }
+      }
+    },
+    "rotation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["policyVersion", "previousKeyId", "nextKeyId", "nextRotationAt", "overlapUntil"],
+      "properties": {
+        "policyVersion": { "const": "fireflies-key-rotation-v1" },
+        "previousKeyId": { "type": ["string", "null"] },
+        "nextKeyId": { "type": ["string", "null"] },
+        "nextRotationAt": { "$ref": "#/$defs/dateTime" },
+        "overlapUntil": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "dateTime": { "type": "string", "format": "date-time" }
+  }
+}

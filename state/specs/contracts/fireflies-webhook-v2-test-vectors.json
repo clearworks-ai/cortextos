@@ -1,0 +1,80 @@
+{
+  "schemaVersion": "fireflies-webhook-v2-test-vectors-v2",
+  "authoritativeSource": "https://docs.fireflies.ai/graphql-api/webhooks-v2",
+  "retrievedAt": "2026-08-24T06:55:00Z",
+  "scope": "Planning fixture for exact provider header, lowercase sha256 prefix/hex, configured test-secret lookup, and unmodified raw-body binding.",
+  "vectors": [
+    {
+      "name": "valid-raw-body",
+      "scheme": "hmac-sha256-raw-body",
+      "secretKeyId": "fireflies-webhook-v2-test-key",
+      "rawBodyUtf8": "{\"event\":\"meeting.transcribed\",\"timestamp\":1787544000000,\"meeting_id\":\"demo\"}",
+      "headerName": "X-Hub-Signature",
+      "headerValue": "sha256=f5dab27998d870ad4356e2a4a93ae17ac7f0b34f09af66451962701d8faff992",
+      "expected": "accept"
+    },
+    {
+      "name": "wrong-header",
+      "scheme": "hmac-sha256-raw-body",
+      "secretKeyId": "fireflies-webhook-v2-test-key",
+      "rawBodyUtf8": "{\"event\":\"meeting.transcribed\",\"timestamp\":1787544000000,\"meeting_id\":\"demo\"}",
+      "headerName": "Authorization",
+      "headerValue": "sha256=f5dab27998d870ad4356e2a4a93ae17ac7f0b34f09af66451962701d8faff992",
+      "expected": "reject"
+    },
+    {
+      "name": "wrong-prefix",
+      "scheme": "hmac-sha256-raw-body",
+      "secretKeyId": "fireflies-webhook-v2-test-key",
+      "rawBodyUtf8": "{\"event\":\"meeting.transcribed\",\"timestamp\":1787544000000,\"meeting_id\":\"demo\"}",
+      "headerName": "X-Hub-Signature",
+      "headerValue": "hmac=f5dab27998d870ad4356e2a4a93ae17ac7f0b34f09af66451962701d8faff992",
+      "expected": "reject"
+    },
+    {
+      "name": "non-hex",
+      "scheme": "hmac-sha256-raw-body",
+      "secretKeyId": "fireflies-webhook-v2-test-key",
+      "rawBodyUtf8": "{\"event\":\"meeting.transcribed\",\"timestamp\":1787544000000,\"meeting_id\":\"demo\"}",
+      "headerName": "X-Hub-Signature",
+      "headerValue": "sha256=gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+      "expected": "reject"
+    },
+    {
+      "name": "uppercase-hex",
+      "scheme": "hmac-sha256-raw-body",
+      "secretKeyId": "fireflies-webhook-v2-test-key",
+      "rawBodyUtf8": "{\"event\":\"meeting.transcribed\",\"timestamp\":1787544000000,\"meeting_id\":\"demo\"}",
+      "headerName": "X-Hub-Signature",
+      "headerValue": "sha256=F5DAB27998D870AD4356E2A4A93AE17AC7F0B34F09AF66451962701D8FAFF992",
+      "expected": "reject"
+    },
+    {
+      "name": "wrong-secret",
+      "scheme": "hmac-sha256-raw-body",
+      "secretKeyId": "fireflies-webhook-v2-test-key",
+      "rawBodyUtf8": "{\"event\":\"meeting.transcribed\",\"timestamp\":1787544000000,\"meeting_id\":\"demo\"}",
+      "headerName": "X-Hub-Signature",
+      "headerValue": "sha256=7241c4537b54fc2d0f0ad221d39db8d097e3e251035a385a14978e849326b74b",
+      "expected": "reject"
+    },
+    {
+      "name": "same-json-different-bytes",
+      "scheme": "hmac-sha256-raw-body",
+      "secretKeyId": "fireflies-webhook-v2-test-key",
+      "rawBodyUtf8": "{ \"event\": \"meeting.transcribed\", \"timestamp\": 1787544000000, \"meeting_id\": \"demo\" }",
+      "headerName": "X-Hub-Signature",
+      "headerValue": "sha256=f5dab27998d870ad4356e2a4a93ae17ac7f0b34f09af66451962701d8faff992",
+      "expected": "reject"
+    },
+    {
+      "name": "unsupported-scheme",
+      "scheme": "sha256-body-digest",
+      "secretKeyId": "fireflies-webhook-v2-test-key",
+      "rawBodyUtf8": "{\"event\":\"meeting.transcribed\",\"timestamp\":1787544000000,\"meeting_id\":\"demo\"}",
+      "headerName": "X-Hub-Signature",
+      "headerValue": "sha256=f5dab27998d870ad4356e2a4a93ae17ac7f0b34f09af66451962701d8faff992",
+      "expected": "reject"
+    }
+  ]
+}

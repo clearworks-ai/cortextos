@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1.0",
+  "orgId": "clearworksai",
+  "provider": "fireflies",
+  "configId": "fireflies:webhook-verification:clearworksai",
+  "configVersion": "fireflies-webhook-v2-key-v1",
+  "configDigest": "10c067d772450f32c52e8de7e16b3f409ae2f4fb7e31ac72d3c043a0020bc30b",
+  "validFrom": "2026-01-01T00:00:00Z",
+  "validUntil": "2027-01-01T00:00:00Z",
+  "scheme": "hmac-sha256-raw-body",
+  "headerName": "X-Hub-Signature",
+  "providerDocsSource": "https://docs.fireflies.ai/graphql-api/webhooks-v2",
+  "activeKeyId": "fireflies-webhook-v2-test-key",
+  "keys": [
+    {
+      "keyId": "fireflies-webhook-v2-test-key",
+      "status": "active",
+      "validFrom": "2026-01-01T00:00:00Z",
+      "validUntil": "2027-01-01T00:00:00Z"
+    }
+  ],
+  "rotation": {
+    "policyVersion": "fireflies-key-rotation-v1",
+    "previousKeyId": null,
+    "nextKeyId": null,
+    "nextRotationAt": "2026-12-01T00:00:00Z",
+    "overlapUntil": null
+  }
+}

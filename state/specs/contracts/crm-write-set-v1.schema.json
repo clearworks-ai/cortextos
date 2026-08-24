@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clearworks.ai/contracts/crm-write-set-v1.schema.json",
+  "title": "CrmWriteSetV1",
+  "description": "Meeting-bound exact CRM write-set commitment. writeSetDigest is SHA-256 of RFC 8785 JCS bytes after removing only writeSetDigest.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "orgId", "writeSetId", "writeSetDigest", "canonicalMeetingId", "recordVersion", "recordDigest", "expectedWrites"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "orgId": { "type": "string", "minLength": 1 },
+    "writeSetId": { "type": "string", "minLength": 1 },
+    "writeSetDigest": { "$ref": "#/$defs/sha256" },
+    "canonicalMeetingId": { "type": "string", "minLength": 1 },
+    "recordVersion": { "type": "integer", "minimum": 1 },
+    "recordDigest": { "$ref": "#/$defs/sha256" },
+    "expectedWrites": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/expectedWrite" }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "expectedWrite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["clientRequestId", "requestDigest", "intentId", "intentDigest", "canonicalClaimId", "claimId", "requestKind", "operation", "target", "proposedValueDigest", "evidenceRefs", "idempotencyKey", "state"],
+      "properties": {
+        "clientRequestId": { "type": "string", "minLength": 1 },
+        "requestDigest": { "$ref": "#/$defs/sha256" },
+        "intentId": { "type": "string", "minLength": 1 },
+        "intentDigest": { "$ref": "#/$defs/sha256" },
+        "canonicalClaimId": { "type": "string", "minLength": 1 },
+        "claimId": { "type": "string", "minLength": 1 },
+        "requestKind": { "enum": ["system_exact", "user_proposal"] },
+        "operation": { "enum": ["upsert_account", "upsert_contact", "upsert_engagement", "upsert_interaction", "upsert_lifecycle", "propose_account_change", "propose_contact_change", "propose_engagement_change", "propose_opportunity_change"] },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["entityType", "entityId"],
+          "properties": {
+            "entityType": { "enum": ["account", "contact", "engagement", "interaction", "lifecycle", "opportunity"] },
+            "entityId": { "type": ["string", "null"] }
+          }
+        },
+        "proposedValueDigest": { "$ref": "#/$defs/sha256" },
+        "evidenceRefs": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "idempotencyKey": { "type": "string", "minLength": 1 },
+        "state": { "enum": ["accepted_pending", "applied", "rejected", "unknown_commit", "terminal_failed"] }
+      }
+    }
+  }
+}

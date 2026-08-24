@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clearworks.ai/contracts/coverage-evaluation-clock-v1.schema.json",
+  "title": "CoverageEvaluationClockV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "orgId", "clockId", "clockDigest", "policyVersion", "asOf", "issuedAt", "nonce", "authorityPolicyDigest", "authorityKeyId", "authorityReceiptMacHex", "maxSnapshotAgeSeconds", "maxSourceLagSeconds"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "orgId": { "type": "string", "minLength": 1 },
+    "clockId": { "type": "string", "minLength": 1 },
+    "clockDigest": { "$ref": "#/$defs/sha256" },
+    "policyVersion": { "const": "coverage-freshness-v1" },
+    "asOf": { "$ref": "#/$defs/dateTime" },
+    "issuedAt": { "$ref": "#/$defs/dateTime" },
+    "nonce": { "type": "string", "pattern": "^[A-Za-z0-9_-]{16,128}$" },
+    "authorityPolicyDigest": { "$ref": "#/$defs/sha256" },
+    "authorityKeyId": { "type": "string", "minLength": 1 },
+    "authorityReceiptMacHex": { "$ref": "#/$defs/sha256" },
+    "maxSnapshotAgeSeconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
+    "maxSourceLagSeconds": { "type": "integer", "minimum": 1, "maximum": 86400 }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "dateTime": { "type": "string", "format": "date-time" }
+  }
+}

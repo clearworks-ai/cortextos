@@ -1,0 +1,1489 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clearworks.ai/contracts/meeting-delivery-envelope-v1.schema.json",
+  "title": "MeetingDeliveryEnvelopeV1",
+  "description": "CAS-versioned mutable delivery projection keyed to an immutable MeetingRecordV1 digest. manifestDigest is SHA-256 of RFC 8785 JCS bytes after removing only manifestDigest. Readiness and freshness are derived by the normative reducer and are never caller-supplied.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "orgId",
+    "canonicalMeetingId",
+    "recordVersion",
+    "recordDigest",
+    "manifestRevision",
+    "previousManifestDigest",
+    "manifestDigest",
+    "generatedAt",
+    "crm",
+    "followUpDraft",
+    "upstreamReceipts",
+    "paDeliveryReceipt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "orgId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "canonicalMeetingId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "recordVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "recordDigest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "manifestRevision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "previousManifestDigest": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "manifestDigest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "generatedAt": {
+      "$ref": "#/$defs/dateTime"
+    },
+    "crm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authority",
+        "sourceVersion",
+        "sourceDigest",
+        "projectionVersion",
+        "projectionDigest",
+        "interactionId",
+        "writeSetId",
+        "writeSetDigest",
+        "writeIntents"
+      ],
+      "properties": {
+        "authority": {
+          "const": "crm-agent"
+        },
+        "sourceVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourceDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "projectionVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "projectionDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "interactionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "writeSetId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "writeSetDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "writeIntents": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/crmIntentState"
+          }
+        }
+      }
+    },
+    "followUpDraft": {
+      "$ref": "#/$defs/followUpDraft"
+    },
+    "upstreamReceipts": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "$ref": "#/$defs/sinkReceipt"
+      },
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "properties": {
+              "sink": {
+                "const": "briefs_projection"
+              }
+            },
+            "required": [
+              "sink"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": {
+              "sink": {
+                "const": "crm_interaction"
+              }
+            },
+            "required": [
+              "sink"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": {
+              "sink": {
+                "const": "lifecycle_projection"
+              }
+            },
+            "required": [
+              "sink"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": {
+              "sink": {
+                "const": "followup_draft"
+              }
+            },
+            "required": [
+              "sink"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
+    },
+    "paDeliveryReceipt": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/paDeliveryReceipt"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "dateTime": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "crmIntentState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "intentId",
+        "intentDigest",
+        "clientRequestId",
+        "requestDigest",
+        "canonicalClaimId",
+        "claimId",
+        "baseCrmVersion",
+        "baseCrmDigest",
+        "requestKind",
+        "operation",
+        "target",
+        "proposedValueDigest",
+        "evidenceRefs",
+        "idempotencyKey",
+        "submittedBy",
+        "state",
+        "authoritativeReadbackVersion",
+        "authoritativeReadbackDigest",
+        "rejectionCode"
+      ],
+      "properties": {
+        "intentId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "intentDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "clientRequestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requestDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "canonicalClaimId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "claimId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "baseCrmVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "baseCrmDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "operation": {
+          "enum": [
+            "upsert_account",
+            "upsert_contact",
+            "upsert_engagement",
+            "upsert_interaction",
+            "upsert_lifecycle",
+            "propose_account_change",
+            "propose_contact_change",
+            "propose_engagement_change",
+            "propose_opportunity_change"
+          ]
+        },
+        "proposedValueDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state": {
+          "enum": [
+            "accepted_pending",
+            "applied",
+            "rejected",
+            "unknown_commit",
+            "terminal_failed"
+          ]
+        },
+        "authoritativeReadbackVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "authoritativeReadbackDigest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rejectionCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requestKind": {
+          "enum": [
+            "system_exact",
+            "user_proposal"
+          ]
+        },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "entityType",
+            "entityId"
+          ],
+          "properties": {
+            "entityType": {
+              "enum": [
+                "account",
+                "contact",
+                "engagement",
+                "interaction",
+                "lifecycle",
+                "opportunity"
+              ]
+            },
+            "entityId": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "submittedBy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "subjectId",
+            "sessionId",
+            "auditReceiptId",
+            "policyVersion"
+          ],
+          "properties": {
+            "subjectId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sessionId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "auditReceiptId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "policyVersion": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "applied"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "authoritativeReadbackVersion": {
+                "type": "string",
+                "minLength": 1
+              },
+              "authoritativeReadbackDigest": {
+                "$ref": "#/$defs/sha256"
+              },
+              "rejectionCode": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "rejected"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "rejectionCode": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "terminal_failed"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "rejectionCode": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "upsert_account"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "requestKind": {
+                "const": "system_exact"
+              },
+              "target": {
+                "properties": {
+                  "entityType": {
+                    "const": "account"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "upsert_contact"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "requestKind": {
+                "const": "system_exact"
+              },
+              "target": {
+                "properties": {
+                  "entityType": {
+                    "const": "contact"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "upsert_engagement"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "requestKind": {
+                "const": "system_exact"
+              },
+              "target": {
+                "properties": {
+                  "entityType": {
+                    "const": "engagement"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "upsert_interaction"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "requestKind": {
+                "const": "system_exact"
+              },
+              "target": {
+                "properties": {
+                  "entityType": {
+                    "const": "interaction"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "upsert_lifecycle"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "requestKind": {
+                "const": "system_exact"
+              },
+              "target": {
+                "properties": {
+                  "entityType": {
+                    "const": "lifecycle"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "followUpDraft": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "applicability",
+        "policyVersion",
+        "reason",
+        "state",
+        "draftId",
+        "subject",
+        "bodyDigest",
+        "sendAuthorized"
+      ],
+      "properties": {
+        "applicability": {
+          "enum": [
+            "required",
+            "not_required"
+          ]
+        },
+        "policyVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "enum": [
+            "pending",
+            "drafted",
+            "terminal_failed",
+            "not_required"
+          ]
+        },
+        "draftId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "subject": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bodyDigest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sendAuthorized": {
+          "const": false
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "drafted"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "applicability": {
+                "const": "required"
+              },
+              "draftId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "subject": {
+                "type": "string",
+                "minLength": 1
+              },
+              "bodyDigest": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "not_required"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "applicability": {
+                "const": "not_required"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "draftId": {
+                "type": "null"
+              },
+              "bodyDigest": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "unknownCommitReconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "sink", "idempotencyKey", "unknownStateDigest", "outcome", "outcomeVersion", "outcomeDigest", "authority", "reconciledAt", "receiptDigest"],
+      "properties": {
+        "schemaVersion": { "const": "1.0" },
+        "sink": { "type": "string", "minLength": 1 },
+        "idempotencyKey": { "type": "string", "minLength": 1 },
+        "unknownStateDigest": { "$ref": "#/$defs/sha256" },
+        "outcome": { "enum": ["SUCCEEDED", "TERMINAL_FAILED"] },
+        "outcomeVersion": { "type": "string", "minLength": 1 },
+        "outcomeDigest": { "$ref": "#/$defs/sha256" },
+        "authority": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["owner", "policyVersion"],
+          "properties": {
+            "owner": { "type": "string", "minLength": 1 },
+            "policyVersion": { "type": "string", "minLength": 1 }
+          }
+        },
+        "reconciledAt": { "$ref": "#/$defs/dateTime" },
+        "receiptDigest": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "sinkReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sink",
+        "idempotencyKey",
+        "state",
+        "attempt",
+        "leaseVersion",
+        "readbackObjectDigest",
+        "readbackVersion",
+        "leaseExpiresAt",
+        "leaseOwner",
+        "lastProbeAt",
+        "unknownProbeCount",
+        "nextAttemptAt",
+        "deadlineAt",
+        "firstAttemptAt",
+        "previousState",
+        "recordDigest",
+        "readbackDigest",
+        "providerId",
+        "policyVersion",
+        "reason",
+        "updatedAt",
+        "errorCode",
+        "reconciliationReceipt"
+      ],
+      "properties": {
+        "sink": {
+          "enum": [
+            "briefs_projection",
+            "crm_interaction",
+            "lifecycle_projection",
+            "followup_draft"
+          ]
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state": {
+          "enum": [
+            "PENDING",
+            "LEASED",
+            "SUCCEEDED",
+            "SKIPPED_POLICY",
+            "RETRYABLE",
+            "TERMINAL_FAILED",
+            "UNKNOWN_COMMIT"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "leaseVersion": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recordDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "readbackDigest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "providerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "policyVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "errorCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "previousState": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            null,
+            "PENDING",
+            "LEASED",
+            "RETRYABLE",
+            "UNKNOWN_COMMIT"
+          ]
+        },
+        "firstAttemptAt": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "deadlineAt": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "nextAttemptAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/dateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unknownProbeCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lastProbeAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/dateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "leaseOwner": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "leaseExpiresAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/dateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "readbackVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "readbackObjectDigest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reconciliationReceipt": {
+          "anyOf": [
+            { "$ref": "#/$defs/unknownCommitReconciliation" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "state": { "const": "LEASED" } },
+            "required": ["state"]
+          },
+          "then": {
+            "properties": {
+              "leaseOwner": { "type": "string", "minLength": 1 },
+              "leaseExpiresAt": { "$ref": "#/$defs/dateTime" },
+              "nextAttemptAt": { "type": "null" },
+              "unknownProbeCount": { "const": 0 },
+              "lastProbeAt": { "type": "null" },
+              "reconciliationReceipt": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "SUCCEEDED"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "readbackDigest": {
+                "$ref": "#/$defs/sha256"
+              },
+              "providerId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "errorCode": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "SKIPPED_POLICY"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "sink": {
+                "const": "followup_draft"
+              },
+              "policyVersion": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "readbackDigest": {
+                "type": "null"
+              },
+              "providerId": {
+                "type": "null"
+              },
+              "errorCode": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "RETRYABLE",
+                  "TERMINAL_FAILED"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "errorCode": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "UNKNOWN_COMMIT"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "unknownProbeCount": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3
+              },
+              "lastProbeAt": {
+                "$ref": "#/$defs/dateTime"
+              },
+              "nextAttemptAt": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "unknownProbeCount": {
+                "const": 0
+              },
+              "lastProbeAt": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "paDeliveryReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sink",
+        "notificationKind",
+        "sourceKey",
+        "outboundDigest",
+        "consequentialDeltaDigest",
+        "providerMessageId",
+        "correctsProviderMessageId",
+        "policyVersion",
+        "linkKind",
+        "durablePath",
+        "failedSink",
+        "idempotencyKey",
+        "state",
+        "attempt",
+        "leaseVersion",
+        "readbackObjectDigest",
+        "readbackVersion",
+        "leaseExpiresAt",
+        "leaseOwner",
+        "lastProbeAt",
+        "unknownProbeCount",
+        "nextAttemptAt",
+        "deadlineAt",
+        "firstAttemptAt",
+        "previousState",
+        "recordDigest",
+        "readbackDigest",
+        "updatedAt",
+        "errorCode",
+        "reconciliationReceipt"
+      ],
+      "properties": {
+        "sink": {
+          "const": "pa_telegram"
+        },
+        "notificationKind": {
+          "enum": [
+            "normal_completion",
+            "terminal_exception",
+            "correction"
+          ]
+        },
+        "sourceKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "outboundDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "consequentialDeltaDigest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "providerMessageId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "correctsProviderMessageId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "predecessorReceiptDigest": {
+          "anyOf": [
+            { "$ref": "#/$defs/sha256" },
+            { "type": "null" }
+          ]
+        },
+        "predecessorSourceKey": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "predecessorProviderMessageId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "correctionDeltaDigest": {
+          "anyOf": [
+            { "$ref": "#/$defs/sha256" },
+            { "type": "null" }
+          ]
+        },
+        "policyVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "linkKind": {
+          "enum": [
+            "meeting_record",
+            "processing_status"
+          ]
+        },
+        "durablePath": {
+          "type": "string",
+          "pattern": "^/business/crm/"
+        },
+        "failedSink": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state": {
+          "enum": [
+            "PENDING",
+            "LEASED",
+            "SUCCEEDED",
+            "RETRYABLE",
+            "TERMINAL_FAILED",
+            "UNKNOWN_COMMIT"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "leaseVersion": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recordDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "readbackDigest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "errorCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "previousState": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            null,
+            "PENDING",
+            "LEASED",
+            "RETRYABLE",
+            "UNKNOWN_COMMIT"
+          ]
+        },
+        "firstAttemptAt": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "deadlineAt": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "nextAttemptAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/dateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unknownProbeCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lastProbeAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/dateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "leaseOwner": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "leaseExpiresAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/dateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "readbackVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "readbackObjectDigest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reconciliationReceipt": {
+          "anyOf": [
+            { "$ref": "#/$defs/unknownCommitReconciliation" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "state": { "const": "LEASED" } },
+            "required": ["state"]
+          },
+          "then": {
+            "properties": {
+              "leaseOwner": { "type": "string", "minLength": 1 },
+              "leaseExpiresAt": { "$ref": "#/$defs/dateTime" },
+              "nextAttemptAt": { "type": "null" },
+              "unknownProbeCount": { "const": 0 },
+              "lastProbeAt": { "type": "null" },
+              "reconciliationReceipt": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "SUCCEEDED"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "providerMessageId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "readbackDigest": {
+                "$ref": "#/$defs/sha256"
+              },
+              "errorCode": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "notificationKind": {
+                "const": "normal_completion"
+              }
+            },
+            "required": [
+              "notificationKind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "linkKind": {
+                "const": "meeting_record"
+              },
+              "consequentialDeltaDigest": {
+                "$ref": "#/$defs/sha256"
+              },
+              "failedSink": {
+                "type": "null"
+              },
+              "correctsProviderMessageId": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "notificationKind": {
+                "const": "terminal_exception"
+              }
+            },
+            "required": [
+              "notificationKind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "linkKind": {
+                "const": "processing_status"
+              },
+              "failedSink": {
+                "type": "string",
+                "minLength": 1
+              },
+              "consequentialDeltaDigest": {
+                "type": "null"
+              },
+              "correctsProviderMessageId": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "notificationKind": {
+                "const": "correction"
+              }
+            },
+            "required": [
+              "notificationKind"
+            ]
+          },
+          "then": {
+            "required": [
+              "predecessorReceiptDigest",
+              "predecessorSourceKey",
+              "predecessorProviderMessageId",
+              "correctionDeltaDigest"
+            ],
+            "properties": {
+              "linkKind": {
+                "const": "meeting_record"
+              },
+              "consequentialDeltaDigest": {
+                "$ref": "#/$defs/sha256"
+              },
+              "correctsProviderMessageId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "predecessorReceiptDigest": {
+                "$ref": "#/$defs/sha256"
+              },
+              "predecessorSourceKey": {
+                "type": "string",
+                "minLength": 1
+              },
+              "predecessorProviderMessageId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "correctionDeltaDigest": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "UNKNOWN_COMMIT"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "unknownProbeCount": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3
+              },
+              "lastProbeAt": {
+                "$ref": "#/$defs/dateTime"
+              },
+              "nextAttemptAt": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "unknownProbeCount": {
+                "const": 0
+              },
+              "lastProbeAt": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

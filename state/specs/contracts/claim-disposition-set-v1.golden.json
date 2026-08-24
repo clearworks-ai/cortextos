@@ -1,0 +1,210 @@
+{
+  "schemaVersion": "1.0",
+  "orgId": "clearworksai",
+  "dispositionSetId": "claim-dispositions:meeting-demo:v1",
+  "dispositionSetDigest": "d50f7f77efcc10653022cfa4e3b6bd76b6205c56bac74eb8f5993a8143c79b5b",
+  "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+  "recordVersion": 1,
+  "candidateSetDigest": "4d16b46572bf11b4fd9c79bc0b0b73b68eb7bd3887767004d89c049eaf8cb7c4",
+  "authorityRegistryDigest": "fdb0ced747812742c1d5c03301c68c3b6718c9e615d1fb936fdb34c601f3a3c9",
+  "dispositions": [
+    {
+      "claimId": "claim:context:v1",
+      "canonicalClaimId": "canonical:context",
+      "evidenceSetDigest": "8548b3afea39431aca45b57a351df710b82b17a72d1b33e3af971fd936e173d2",
+      "state": "accepted",
+      "kind": "crm",
+      "actorId": "crm-agent",
+      "policyVersion": "crm-authority-v1",
+      "decisionDigest": "b57979c6682d31edcf3c5d90ae1f1cdef64a62725419c5384e6c87d8985740d9",
+      "decidedAt": "2026-08-24T04:00:00Z",
+      "identityBasisDigest": "a88dd544cc203e2925bf4b3184f1400a9ac770684a6d01345110f50c30fec84d",
+      "candidateContentDigest": "08096e54d73a40bda52db7714fa29a2b2123df380175043f5cc9f06a64bc4b58",
+      "authorizedMaterialization": {
+        "task": false,
+        "crm": true,
+        "aggregate": true
+      },
+      "orgId": "clearworksai",
+      "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+      "recordVersion": 1,
+      "evidenceLineageDigest": "1b9888fbe8b3d0db79e512143846e59190b618e7ef7f7dd673791ab203bf73c2"
+    },
+    {
+      "claimId": "claim:role-josh:v1",
+      "canonicalClaimId": "canonical:role-josh",
+      "evidenceSetDigest": "c5e00227fa58108ba9e48eb25f38d2b7444ac4d60d8a603d65c68a844890edf9",
+      "state": "accepted",
+      "kind": "deterministic_policy",
+      "actorId": "meeting-validator",
+      "policyVersion": "participant-policy-v1",
+      "decisionDigest": "2d4b38dde3607ce8f65f1cf91fe91e25b06869ae6e49dda72401eb930ac85c0b",
+      "decidedAt": "2026-08-24T04:00:00Z",
+      "identityBasisDigest": "c2cea6c37bc82edff9044914b7115c2e9a997373ddd32d4c5ad7c9bb9d1ef1ca",
+      "candidateContentDigest": "656223a3322042dda51164938de9cb9a7834d6e42256d25d4508827978fb0096",
+      "authorizedMaterialization": {
+        "task": false,
+        "crm": false,
+        "aggregate": true
+      },
+      "orgId": "clearworksai",
+      "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+      "recordVersion": 1,
+      "evidenceLineageDigest": "67b5603e33e82b164c75f5bd8f95faaf66f12dd974d3e74489a1ee2b398e4a26"
+    },
+    {
+      "claimId": "claim:relationship-josh:v1",
+      "canonicalClaimId": "canonical:relationship-josh",
+      "evidenceSetDigest": "c5e00227fa58108ba9e48eb25f38d2b7444ac4d60d8a603d65c68a844890edf9",
+      "state": "accepted",
+      "kind": "deterministic_policy",
+      "actorId": "meeting-validator",
+      "policyVersion": "participant-policy-v1",
+      "decisionDigest": "911cb4b526ac8c8b121a3649f9cb763a9005aeec4a0c650df42efed972dad734",
+      "decidedAt": "2026-08-24T04:00:00Z",
+      "identityBasisDigest": "56a4ed2666daf33766afdad630e64611dd83b0ed6d95207d01d8f65b1f3b773a",
+      "candidateContentDigest": "b1cd3a992297877f613bdb06998a573cd46849eb4c380c34fda9d7d75bc2c476",
+      "authorizedMaterialization": {
+        "task": false,
+        "crm": false,
+        "aggregate": true
+      },
+      "orgId": "clearworksai",
+      "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+      "recordVersion": 1,
+      "evidenceLineageDigest": "67b5603e33e82b164c75f5bd8f95faaf66f12dd974d3e74489a1ee2b398e4a26"
+    },
+    {
+      "claimId": "claim:role-alex:v1",
+      "canonicalClaimId": "canonical:role-alex",
+      "evidenceSetDigest": "ab9b7760eba6618ad167df61666270c20af49d187add2d87124666b5eb252121",
+      "state": "accepted",
+      "kind": "user",
+      "actorId": "user:josh",
+      "policyVersion": "manual-review-v1",
+      "decisionDigest": "6381e0a21852157367d17b478ee5c88545bca0471b0b5a64093f6383a420574b",
+      "decidedAt": "2026-08-24T04:00:00Z",
+      "identityBasisDigest": "1f4e69074c641b0067544d49e9eeec726f42c44fda23ffdd8e8797037353cf4f",
+      "candidateContentDigest": "c503c20934acf08ad2930b85c789104dcf1c76e157a2c17e0f2a9c3ea628b66d",
+      "authorizedMaterialization": {
+        "task": false,
+        "crm": false,
+        "aggregate": true
+      },
+      "orgId": "clearworksai",
+      "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+      "recordVersion": 1,
+      "evidenceLineageDigest": "3695bb851d00c0ef728e280e87a7f538918452784efc01964c560f621e8e26ad"
+    },
+    {
+      "claimId": "claim:relationship-alex:v1",
+      "canonicalClaimId": "canonical:relationship-alex",
+      "evidenceSetDigest": "ab9b7760eba6618ad167df61666270c20af49d187add2d87124666b5eb252121",
+      "state": "accepted",
+      "kind": "crm",
+      "actorId": "crm-agent",
+      "policyVersion": "crm-authority-v1",
+      "decisionDigest": "b8d55533dbb6e72d764dc5038dd950d14996b1fa947d105442395fe247c6481e",
+      "decidedAt": "2026-08-24T04:00:00Z",
+      "identityBasisDigest": "02c1a1b5bd72d69d65fef66305048f00e7882befa7faf54c2e041ee9d9e465db",
+      "candidateContentDigest": "e822325d582e3034798b6a401ab11882add6764b1ee7ed73c15a6717a16c430b",
+      "authorizedMaterialization": {
+        "task": false,
+        "crm": false,
+        "aggregate": true
+      },
+      "orgId": "clearworksai",
+      "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+      "recordVersion": 1,
+      "evidenceLineageDigest": "3695bb851d00c0ef728e280e87a7f538918452784efc01964c560f621e8e26ad"
+    },
+    {
+      "claimId": "claim:decision:v1",
+      "canonicalClaimId": "canonical:decision-pilot",
+      "evidenceSetDigest": "555c68c7187f7703bfe99090c5c06f536be92d712d42c8f43fde4021cd585e4a",
+      "state": "accepted",
+      "kind": "deterministic_policy",
+      "actorId": "meeting-validator",
+      "policyVersion": "explicit-assignment-v1",
+      "decisionDigest": "7c61ef280b059d0cbf7ec090ea7529d36daecf5f16eb0a8b19596fd24b88bad6",
+      "decidedAt": "2026-08-24T04:00:00Z",
+      "identityBasisDigest": "ed775946222bb9e44739f088b8b8c960051fe3bc94e80e0dfb487a832e9a63cc",
+      "candidateContentDigest": "4a5844312454547f6adbd6f3ffbc1b798c7da68ff4157b1ee28eb81ad26d5c29",
+      "authorizedMaterialization": {
+        "task": false,
+        "crm": true,
+        "aggregate": true
+      },
+      "orgId": "clearworksai",
+      "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+      "recordVersion": 1,
+      "evidenceLineageDigest": "b37d43e476b3098e480122b080415d7f81b8899757bc23b8fccf23c0d373f8d5"
+    },
+    {
+      "claimId": "claim:question:v1",
+      "canonicalClaimId": "canonical:question-first-workflow",
+      "evidenceSetDigest": "cc12dbfaae2bea276563bb0d4e6a8fb2404f8188448b73c8e670e83da3e66161",
+      "state": "accepted",
+      "kind": "deterministic_policy",
+      "actorId": "meeting-validator",
+      "policyVersion": "explicit-question-v1",
+      "decisionDigest": "b1fcfe59be67a34887555c635b9b1f87f2bd68df2e9eb953fa515780168bc345",
+      "decidedAt": "2026-08-24T04:00:00Z",
+      "identityBasisDigest": "d508b98f5797da41bebbbe75b489d60940a639fecbbccb3f3ba032c58502e4bf",
+      "candidateContentDigest": "18f228911a60367de0583434cf4452cc330d03019c3cbc6c6b97b0ab06339f5c",
+      "authorizedMaterialization": {
+        "task": false,
+        "crm": false,
+        "aggregate": true
+      },
+      "orgId": "clearworksai",
+      "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+      "recordVersion": 1,
+      "evidenceLineageDigest": "66e108a428f3bc499945b6bcddf2ebdda99cc18e6fd49bcd76652757b1a6650f"
+    },
+    {
+      "claimId": "claim:task:v1",
+      "canonicalClaimId": "canonical:task-send-pilot-outline",
+      "evidenceSetDigest": "b190c7ef1f74ab95e66e3f41f980bd54e5d5a34129cd67410326cdf1513b91f8",
+      "state": "accepted",
+      "kind": "deterministic_policy",
+      "actorId": "meeting-validator",
+      "policyVersion": "explicit-assignment-v1",
+      "decisionDigest": "5535488de582c9c0be1b0f2d4a6f08f401bbe30c9ba848a1555b211cc423663b",
+      "decidedAt": "2026-08-24T04:00:00Z",
+      "identityBasisDigest": "010219af24dfec239dcb9081bd5bf224db02eacfb685ac7b78d92c5062b1b128",
+      "candidateContentDigest": "2ae2ba5df322fd88eb2370b5aa53888fc2157814f90aead355fc44300867dd15",
+      "authorizedMaterialization": {
+        "task": true,
+        "crm": false,
+        "aggregate": true
+      },
+      "orgId": "clearworksai",
+      "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+      "recordVersion": 1,
+      "evidenceLineageDigest": "6d4fdc03e4a71ebd13151ee9b821a367fa1c85e69972a3fff7ab45d70124b6eb"
+    },
+    {
+      "claimId": "claim:waiting:v1",
+      "canonicalClaimId": "canonical:waiting-recipient-list",
+      "evidenceSetDigest": "18b7c567aa2aec3796542b5b2619869c7fd3111b0d16f10de611c45f3918366d",
+      "state": "accepted",
+      "kind": "deterministic_policy",
+      "actorId": "meeting-validator",
+      "policyVersion": "explicit-assignment-v1",
+      "decisionDigest": "8891baa3b3bd679cbde627fd3b78c817c897a1a69e633667168184906d08bf18",
+      "decidedAt": "2026-08-24T04:00:00Z",
+      "identityBasisDigest": "3c66b4ec7e9f1ca2116c09e17e37e98de5b0d61f42483a48ef9cf3a901fb1edb",
+      "candidateContentDigest": "f9a07d78cab06aae9dbbbfa1d768c3728bf7e11bd2fe3aa0946f484e38e75fb3",
+      "authorizedMaterialization": {
+        "task": true,
+        "crm": false,
+        "aggregate": true
+      },
+      "orgId": "clearworksai",
+      "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+      "recordVersion": 1,
+      "evidenceLineageDigest": "0e839908385e6e2e04379f58fa7300d37a806bab5341528abccc8688deae6dd2"
+    }
+  ]
+}

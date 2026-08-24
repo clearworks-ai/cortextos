@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "1.0",
+  "orgId": "clearworksai",
+  "coverageSnapshotId": "coverage:fireflies:2026-08-24",
+  "snapshotDigest": "7454318b47cf7f9c19bbdc43ff13d582567bfa1d738d6d2a35ed4ee07251a9dc",
+  "generatedAt": "2026-08-24T04:05:00Z",
+  "evaluationClockDigest": "c31867bdb3ac6ff00d194492c10fd0be76fece3ae4bea28b6957c210deec47b2",
+  "freshness": {
+    "policyVersion": "coverage-freshness-v1",
+    "evaluatedAsOf": "2026-08-24T04:06:00Z",
+    "state": "current",
+    "snapshotAgeSeconds": 60,
+    "sourceLagSeconds": 60,
+    "receiptDigest": "af54ace7b5dcdc21cefb07ccef6905e6e82b19d9c542dbd6934900d7d2974d11"
+  },
+  "channels": [
+    "fireflies"
+  ],
+  "windowStart": "2026-08-24T00:00:00Z",
+  "windowEnd": "2026-08-24T04:05:00Z",
+  "cutoffAt": "2026-08-24T04:05:00Z",
+  "enumerationState": "complete",
+  "cursor": null,
+  "checkpointDigest": "6464646464646464646464646464646464646464646464646464646464646464",
+  "sourceDigest": "eb5a29ecea4470316e0cb731a71391fedec8ae21b3f80ead4a20fd2f99f7eb2b",
+  "recordSetDigest": "7416fcbd4e277d064dac9f917c0d35b8b97ad7d487efd8866f9d7346cf865f9f",
+  "counts": {
+    "discovered": 2,
+    "processed": 1,
+    "quarantined": 1,
+    "unresolved": 0,
+    "excluded": 0
+  },
+  "gaps": [],
+  "sourceIds": [
+    "01DEMOACTIVE0000000000000000",
+    "01DEMOSUPERSEDED000000000000"
+  ],
+  "recordIds": [
+    "meeting_demo_2026_08_24_01"
+  ],
+  "enumerationAuthority": {
+    "keyId": "fireflies-connector-v1",
+    "policyVersion": "coverage-enumeration-v1",
+    "receiptDigest": "5b38cbbabf58af5ca5d3f90ef20516b15fce73d031ea29eb36ba1b58853b7665"
+  }
+}

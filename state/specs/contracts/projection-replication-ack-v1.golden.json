@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "1.0",
+  "orgId": "clearworksai",
+  "ackId": "projection-ack:meeting-demo:r4",
+  "ackDigest": "0f2abd990bdac00730e81cada29eb28f87589045ada3ad0750f07837d58e1b0c",
+  "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+  "recordDigest": "be66407f98eeb28dc3063c31f800096f8bb3ab06681a56b415f57ca83f1833ba",
+  "manifestRevision": 4,
+  "manifestDigest": "91cb479d0f1997bb015f9fe2e7382860fb733159a7d61d3acacf6bef1f450480",
+  "state": "SUCCEEDED",
+  "attempt": 1,
+  "leaseVersion": 1,
+  "readbackDigest": "df84d0fbc9042dee2c17f31ef8283fc5772339cbf1ea96d48f91c01d78d404b2",
+  "updatedAt": "2026-08-24T04:02:30Z",
+  "errorCode": null,
+  "storedProjectionVersion": "briefs-projection-v1",
+  "storedProjectionDigest": "0fe2a840f2275a71ef51bf75aa9c65db7a90a3f06d69a8b0860277749126c2c3"
+}

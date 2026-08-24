@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clearworks.ai/schemas/pre-record-ingress-failure-v1.schema.json",
+  "title": "PreRecordIngressFailureV1",
+  "description": "Stage-specific failure contract before MeetingObservationV1 exists. Unauthenticated auth failures retain no provider body; authenticated parse/persist failures require bounded encrypted quarantine and deletion evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "orgId", "failureId", "failureDigest", "provider", "stage", "authenticationState", "sourceIdentity", "errorCode", "retryable", "failedAt", "encryptedQuarantine", "piiSafeAlertReceipt", "deletionReceipt"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "orgId": { "type": "string", "minLength": 1 },
+    "failureId": { "type": "string", "minLength": 1 },
+    "failureDigest": { "$ref": "#/$defs/sha256" },
+    "provider": { "const": "fireflies" },
+    "stage": { "enum": ["parse", "auth", "persist"] },
+    "authenticationState": { "enum": ["unverified", "verified"] },
+    "sourceIdentity": { "$ref": "#/$defs/sourceIdentity" },
+    "errorCode": { "enum": ["INGRESS_PARSE_FAILED", "INGRESS_AUTH_FAILED", "INGRESS_PERSIST_FAILED"] },
+    "retryable": { "type": "boolean" },
+    "failedAt": { "$ref": "#/$defs/dateTime" },
+    "encryptedQuarantine": { "anyOf": [{ "$ref": "#/$defs/encryptedQuarantine" }, { "type": "null" }] },
+    "piiSafeAlertReceipt": { "$ref": "#/$defs/piiSafeAlertReceipt" },
+    "deletionReceipt": { "anyOf": [{ "$ref": "#/$defs/deletionReceipt" }, { "type": "null" }] }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "stage": { "const": "auth" } }, "required": ["stage"] },
+      "then": { "properties": { "authenticationState": { "const": "unverified" }, "encryptedQuarantine": { "type": "null" }, "deletionReceipt": { "type": "null" } } }
+    },
+    {
+      "if": { "properties": { "stage": { "enum": ["parse", "persist"] } }, "required": ["stage"] },
+      "then": { "properties": { "authenticationState": { "const": "verified" }, "encryptedQuarantine": { "$ref": "#/$defs/encryptedQuarantine" }, "deletionReceipt": { "$ref": "#/$defs/deletionReceipt" } } }
+    }
+  ],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "dateTime": { "type": "string", "format": "date-time" },
+    "sourceIdentity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["requestId", "providerSourceId", "rawBodyDigest", "receivedAt", "sourceIdentityDigest"],
+      "properties": {
+        "requestId": { "type": "string", "minLength": 1 },
+        "providerSourceId": { "type": ["string", "null"] },
+        "rawBodyDigest": { "$ref": "#/$defs/sha256" },
+        "receivedAt": { "$ref": "#/$defs/dateTime" },
+        "sourceIdentityDigest": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "encryptedQuarantine": {
+      "type": "object", "additionalProperties": false,
+      "required": ["state", "reference", "ciphertextDigest", "encryptionKeyId", "encryptedAt", "expiresAt"],
+      "properties": {
+        "state": { "enum": ["ENCRYPTED", "DELETED"] },
+        "reference": { "type": "string", "pattern": "^encrypted-quarantine://[A-Za-z0-9._/-]+$" },
+        "ciphertextDigest": { "$ref": "#/$defs/sha256" },
+        "encryptionKeyId": { "type": "string", "minLength": 1 },
+        "encryptedAt": { "$ref": "#/$defs/dateTime" },
+        "expiresAt": { "$ref": "#/$defs/dateTime" }
+      }
+    },
+    "piiSafeAlertReceipt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["alertId", "errorCode", "summaryCode", "rawBodyIncluded", "providerPayloadIncluded", "createdAt", "receiptDigest"],
+      "properties": {
+        "alertId": { "type": "string", "minLength": 1 },
+        "errorCode": { "enum": ["INGRESS_PARSE_FAILED", "INGRESS_AUTH_FAILED", "INGRESS_PERSIST_FAILED"] },
+        "summaryCode": { "enum": ["PRE_RECORD_PARSE_FAILURE", "PRE_RECORD_AUTH_FAILURE", "PRE_RECORD_PERSIST_FAILURE"] },
+        "rawBodyIncluded": { "const": false },
+        "providerPayloadIncluded": { "const": false },
+        "createdAt": { "$ref": "#/$defs/dateTime" },
+        "receiptDigest": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "deletionReceipt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["state", "scheduledFor", "deletedAt", "quarantineReferenceDigest", "receiptDigest"],
+      "properties": {
+        "state": { "enum": ["SCHEDULED", "DELETED"] },
+        "scheduledFor": { "$ref": "#/$defs/dateTime" },
+        "deletedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
+        "quarantineReferenceDigest": { "$ref": "#/$defs/sha256" },
+        "receiptDigest": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  }
+}

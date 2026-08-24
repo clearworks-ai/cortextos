@@ -1,0 +1,1408 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clearworks.ai/contracts/meeting-record-v1.schema.json",
+  "title": "MeetingRecordV1",
+  "description": "Immutable semantic/source record. recordDigest is SHA-256 of RFC 8785 JCS bytes after removing only the recordDigest member.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "orgId",
+    "canonicalMeetingId",
+    "recordVersion",
+    "previousRecordDigest",
+    "recordDigest",
+    "producer",
+    "identityPolicy",
+    "extractionBinding",
+    "candidateSetDigest",
+    "claimDispositionSetDigest",
+    "claimAuthorityRegistryDigest",
+    "sourceObservations",
+    "meeting",
+    "participants",
+    "semanticViews",
+    "claims",
+    "lifecycle",
+    "evidenceRegistry",
+    "artifacts"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "orgId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "canonicalMeetingId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "recordVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "previousRecordDigest": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "recordDigest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "service",
+        "repo",
+        "gitSha",
+        "generatedAt"
+      ],
+      "properties": {
+        "service": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repo": {
+          "type": "string",
+          "minLength": 1
+        },
+        "gitSha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,64}$"
+        },
+        "generatedAt": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "identityPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "groupingMode",
+        "selectionOrder",
+        "overrideId",
+        "overrideVersion",
+        "overrideDigest"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "groupingMode": {
+          "const": "exact_provider_id_or_versioned_override"
+        },
+        "selectionOrder": {
+          "const": [
+            "override_pin:first",
+            "transcript_available:true_first",
+            "evidence_artifact_count:desc",
+            "segment_count:desc",
+            "normalized_word_count:desc",
+            "duration_seconds:desc",
+            "captured_at:asc",
+            "source_id:asc"
+          ]
+        },
+        "overrideId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "overrideVersion": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "overrideDigest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "extractionBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidenceVersion",
+        "extractorVersion",
+        "promptVersion",
+        "requestDigest",
+        "promptDigest",
+        "transcriptDigest",
+        "contextDigest",
+        "providerResponseDigest",
+        "normalizedOutputDigest"
+      ],
+      "properties": {
+        "evidenceVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "extractorVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "promptVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requestDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "promptDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "transcriptDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "contextDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "providerResponseDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "normalizedOutputDigest": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "candidateSetDigest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "claimDispositionSetDigest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "claimAuthorityRegistryDigest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "sourceObservations": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/sourceObservation"
+      },
+      "contains": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "const": "active"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "minContains": 1,
+      "maxContains": 1
+    },
+    "meeting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "startedAt",
+        "endedAt",
+        "contextClassClaimId",
+        "associationState",
+        "crmContextVersion",
+        "crmContextDigest",
+        "accountIds",
+        "contactIds",
+        "engagementIds"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "startedAt": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "endedAt": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "contextClassClaimId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "associationState": {
+          "enum": [
+            "proposed",
+            "crm_confirmed"
+          ]
+        },
+        "crmContextVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "crmContextDigest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "accountIds": {
+          "$ref": "#/$defs/uniqueStringArray"
+        },
+        "contactIds": {
+          "$ref": "#/$defs/uniqueStringArray"
+        },
+        "engagementIds": {
+          "$ref": "#/$defs/uniqueStringArray"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "associationState": {
+                "const": "crm_confirmed"
+              }
+            },
+            "required": [
+              "associationState"
+            ]
+          },
+          "then": {
+            "properties": {
+              "crmContextVersion": {
+                "type": "string",
+                "minLength": 1
+              },
+              "crmContextDigest": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "associationState": {
+                "const": "proposed"
+              }
+            },
+            "required": [
+              "associationState"
+            ]
+          },
+          "then": {
+            "properties": {
+              "crmContextVersion": {
+                "type": "null"
+              },
+              "crmContextDigest": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "participants": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "participantId",
+          "displayName",
+          "crmContactId",
+          "roleClaimIds",
+          "relationshipClassClaimId"
+        ],
+        "properties": {
+          "participantId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "crmContactId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "roleClaimIds": {
+            "$ref": "#/$defs/uniqueStringArray"
+          },
+          "relationshipClassClaimId": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "semanticViews": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "headlineClaimId",
+        "narrativeClaimId",
+        "consequentialDeltaClaimIds",
+        "topicClaimIds",
+        "decisionClaimIds",
+        "needClaimIds",
+        "questionClaimIds",
+        "objectionClaimIds",
+        "opportunityClaimIds",
+        "relationshipChangeClaimIds",
+        "recurringThemeClaimIds",
+        "accountChangeClaimIds",
+        "dealChangeClaimIds",
+        "projectChangeClaimIds",
+        "subtopicClaimIds",
+        "rationaleClaimIds"
+      ],
+      "properties": {
+        "headlineClaimId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "narrativeClaimId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "consequentialDeltaClaimIds": {
+          "$ref": "#/$defs/uniqueStringArray"
+        },
+        "topicClaimIds": {
+          "$ref": "#/$defs/uniqueStringArray"
+        },
+        "decisionClaimIds": {
+          "$ref": "#/$defs/uniqueStringArray"
+        },
+        "needClaimIds": {
+          "$ref": "#/$defs/uniqueStringArray"
+        },
+        "questionClaimIds": {
+          "$ref": "#/$defs/uniqueStringArray"
+        },
+        "objectionClaimIds": {
+          "$ref": "#/$defs/uniqueStringArray"
+        },
+        "opportunityClaimIds": {
+          "$ref": "#/$defs/uniqueStringArray"
+        },
+        "relationshipChangeClaimIds": {
+          "$ref": "#/$defs/uniqueStringArray"
+        },
+        "rationaleClaimIds": {
+          "$ref": "#/$defs/uniqueStringArray"
+        },
+        "subtopicClaimIds": {
+          "$ref": "#/$defs/uniqueStringArray"
+        },
+        "projectChangeClaimIds": {
+          "$ref": "#/$defs/uniqueStringArray"
+        },
+        "dealChangeClaimIds": {
+          "$ref": "#/$defs/uniqueStringArray"
+        },
+        "accountChangeClaimIds": {
+          "$ref": "#/$defs/uniqueStringArray"
+        },
+        "recurringThemeClaimIds": {
+          "$ref": "#/$defs/uniqueStringArray"
+        }
+      }
+    },
+    "claims": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/claim"
+      }
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "myTasks",
+        "waitingOnThem",
+        "completedClosed",
+        "notTasks"
+      ],
+      "properties": {
+        "myTasks": {
+          "$ref": "#/$defs/uniqueStringArray"
+        },
+        "waitingOnThem": {
+          "$ref": "#/$defs/uniqueStringArray"
+        },
+        "completedClosed": {
+          "$ref": "#/$defs/uniqueStringArray"
+        },
+        "notTasks": {
+          "$ref": "#/$defs/uniqueStringArray"
+        }
+      }
+    },
+    "evidenceRegistry": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "evidenceId",
+          "sourceId",
+          "startMs",
+          "endMs",
+          "quoteDigest",
+          "artifactId"
+        ],
+        "properties": {
+          "evidenceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sourceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "startMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "endMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "quoteDigest": {
+            "$ref": "#/$defs/sha256"
+          },
+          "artifactId": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactId",
+          "sourceId",
+          "sourceLineageDigest",
+          "kind",
+          "owner",
+          "digest",
+          "accessClass",
+          "resolutionState"
+        ],
+        "properties": {
+          "artifactId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sourceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sourceLineageDigest": {
+            "$ref": "#/$defs/sha256"
+          },
+          "kind": {
+            "enum": [
+              "transcript",
+              "audio",
+              "video",
+              "visual_evidence",
+              "source_json",
+              "other"
+            ]
+          },
+          "owner": {
+            "enum": [
+              "cortextos-evidence",
+              "fireflies"
+            ]
+          },
+          "digest": {
+            "$ref": "#/$defs/sha256"
+          },
+          "accessClass": {
+            "enum": [
+              "private",
+              "restricted_media"
+            ]
+          },
+          "resolutionState": {
+            "enum": [
+              "available",
+              "unavailable",
+              "expired",
+              "denied"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "dateTime": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "uniqueStringArray": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "uniqueEvidenceArray": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "sourceObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceId",
+        "provider",
+        "capturedAt",
+        "startedAt",
+        "state",
+        "supersededBy",
+        "transcriptState",
+        "transcriptDigest",
+        "evidenceDigest",
+        "lineageDigest",
+        "dispositionReason",
+        "tombstoneId",
+        "reingestAllowed",
+        "retiredIdentity",
+        "selectionPolicyVersion",
+        "segmentCount",
+        "normalizedWordCount",
+        "durationSeconds",
+        "evidenceArtifactCount",
+        "title"
+      ],
+      "properties": {
+        "sourceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider": {
+          "const": "fireflies"
+        },
+        "capturedAt": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "startedAt": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "state": {
+          "enum": [
+            "active",
+            "superseded",
+            "quarantined"
+          ]
+        },
+        "supersededBy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "transcriptState": {
+          "enum": [
+            "available",
+            "missing",
+            "unavailable"
+          ]
+        },
+        "transcriptDigest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidenceDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "lineageDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "dispositionReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tombstoneId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reingestAllowed": {
+          "type": "boolean"
+        },
+        "retiredIdentity": {
+          "type": "boolean"
+        },
+        "selectionPolicyVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "segmentCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "normalizedWordCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "durationSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "evidenceArtifactCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "active"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "supersededBy": {
+                "type": "null"
+              },
+              "dispositionReason": {
+                "type": "null"
+              },
+              "tombstoneId": {
+                "type": "null"
+              },
+              "reingestAllowed": {
+                "const": true
+              },
+              "retiredIdentity": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "superseded",
+                  "quarantined"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "supersededBy": {
+                "type": "string",
+                "minLength": 1
+              },
+              "dispositionReason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "tombstoneId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reingestAllowed": {
+                "const": false
+              },
+              "retiredIdentity": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "transcriptState": {
+                "const": "available"
+              }
+            },
+            "required": [
+              "transcriptState"
+            ]
+          },
+          "then": {
+            "properties": {
+              "transcriptDigest": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "transcriptDigest": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claimId",
+        "canonicalClaimId",
+        "supersedesClaimId",
+        "identityPolicyVersion",
+        "identityBasisDigest",
+        "candidateContentDigest",
+        "claimKind",
+        "semanticClass",
+        "statement",
+        "ownerId",
+        "direction",
+        "workState",
+        "dependency",
+        "due",
+        "closure",
+        "evidenceRefs",
+        "origin",
+        "disposition",
+        "materialization"
+      ],
+      "properties": {
+        "claimId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "canonicalClaimId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "supersedesClaimId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "identityPolicyVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "identityBasisDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "claimKind": {
+          "enum": [
+            "fact",
+            "inference",
+            "proposal"
+          ]
+        },
+        "semanticClass": {
+          "enum": [
+            "headline",
+            "narrative",
+            "context_class",
+            "participant_role",
+            "relationship_class",
+            "topic",
+            "decision",
+            "need",
+            "question",
+            "objection",
+            "opportunity",
+            "relationship_change",
+            "crm_fact",
+            "work_item",
+            "consequential_delta",
+            "rationale",
+            "subtopic",
+            "project_change",
+            "deal_change",
+            "account_change",
+            "recurring_theme"
+          ]
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ownerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "direction": {
+          "enum": [
+            "josh_owned",
+            "external_owned",
+            "shared",
+            "unassigned",
+            "not_applicable"
+          ]
+        },
+        "workState": {
+          "enum": [
+            "open",
+            "waiting",
+            "contingent",
+            "completed",
+            "closed_abandoned",
+            "not_a_task",
+            "not_applicable"
+          ]
+        },
+        "dependency": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "description",
+            "ownerId",
+            "satisfied"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "none",
+                "date",
+                "event",
+                "person",
+                "condition"
+              ]
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ownerId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "satisfied": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          }
+        },
+        "due": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "at",
+            "groundingEvidenceRefs"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "known",
+                "unknown",
+                "not_applicable"
+              ]
+            },
+            "at": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            },
+            "groundingEvidenceRefs": {
+              "$ref": "#/$defs/uniqueStringArray"
+            }
+          }
+        },
+        "closure": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "reason",
+            "completedAt"
+          ],
+          "properties": {
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "completedAt": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            }
+          }
+        },
+        "evidenceRefs": {
+          "$ref": "#/$defs/uniqueEvidenceArray"
+        },
+        "origin": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "actor",
+            "actorVersion",
+            "observedAt"
+          ],
+          "properties": {
+            "actor": {
+              "enum": [
+                "semantic_provider",
+                "deterministic_parser",
+                "user",
+                "crm"
+              ]
+            },
+            "actorVersion": {
+              "type": "string",
+              "minLength": 1
+            },
+            "observedAt": {
+              "$ref": "#/$defs/dateTime"
+            }
+          }
+        },
+        "disposition": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "authority"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "proposed",
+                "accepted",
+                "rejected",
+                "superseded"
+              ]
+            },
+            "authority": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "actorId",
+                    "policyVersion",
+                    "decisionDigest",
+                    "decidedAt"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "deterministic_policy",
+                        "user",
+                        "crm"
+                      ]
+                    },
+                    "actorId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "policyVersion": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "decisionDigest": {
+                      "$ref": "#/$defs/sha256"
+                    },
+                    "decidedAt": {
+                      "$ref": "#/$defs/dateTime"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "materialization": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "task",
+            "crm",
+            "aggregate"
+          ],
+          "properties": {
+            "task": {
+              "type": "boolean"
+            },
+            "crm": {
+              "type": "boolean"
+            },
+            "aggregate": {
+              "type": "boolean"
+            }
+          }
+        },
+        "candidateContentDigest": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "disposition": {
+                "properties": {
+                  "state": {
+                    "const": "proposed"
+                  }
+                },
+                "required": [
+                  "state"
+                ]
+              }
+            },
+            "required": [
+              "disposition"
+            ]
+          },
+          "then": {
+            "properties": {
+              "disposition": {
+                "properties": {
+                  "authority": {
+                    "type": "null"
+                  }
+                }
+              },
+              "materialization": {
+                "properties": {
+                  "task": {
+                    "const": false
+                  },
+                  "crm": {
+                    "const": false
+                  },
+                  "aggregate": {
+                    "const": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "claimKind": {
+                "enum": [
+                  "inference",
+                  "proposal"
+                ]
+              }
+            },
+            "required": [
+              "claimKind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "materialization": {
+                "properties": {
+                  "task": {
+                    "const": false
+                  },
+                  "crm": {
+                    "const": false
+                  },
+                  "aggregate": {
+                    "const": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "disposition": {
+                "properties": {
+                  "state": {
+                    "enum": [
+                      "accepted",
+                      "rejected",
+                      "superseded"
+                    ]
+                  }
+                },
+                "required": [
+                  "state"
+                ]
+              }
+            },
+            "required": [
+              "disposition"
+            ]
+          },
+          "then": {
+            "properties": {
+              "disposition": {
+                "properties": {
+                  "authority": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "due": {
+                "properties": {
+                  "state": {
+                    "const": "known"
+                  }
+                },
+                "required": [
+                  "state"
+                ]
+              }
+            },
+            "required": [
+              "due"
+            ]
+          },
+          "then": {
+            "properties": {
+              "due": {
+                "properties": {
+                  "at": {
+                    "$ref": "#/$defs/dateTime"
+                  },
+                  "groundingEvidenceRefs": {
+                    "$ref": "#/$defs/uniqueEvidenceArray"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "due": {
+                "properties": {
+                  "state": {
+                    "const": "not_applicable"
+                  }
+                },
+                "required": [
+                  "state"
+                ]
+              }
+            },
+            "required": [
+              "due"
+            ]
+          },
+          "then": {
+            "properties": {
+              "due": {
+                "properties": {
+                  "at": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "dependency": {
+                "properties": {
+                  "kind": {
+                    "const": "none"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            },
+            "required": [
+              "dependency"
+            ]
+          },
+          "then": {
+            "properties": {
+              "dependency": {
+                "properties": {
+                  "description": {
+                    "type": "null"
+                  },
+                  "ownerId": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "dependency": {
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "date",
+                      "event",
+                      "person",
+                      "condition"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            },
+            "required": [
+              "dependency"
+            ]
+          },
+          "then": {
+            "properties": {
+              "dependency": {
+                "properties": {
+                  "description": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "workState": {
+                "enum": [
+                  "completed",
+                  "closed_abandoned"
+                ]
+              }
+            },
+            "required": [
+              "workState"
+            ]
+          },
+          "then": {
+            "properties": {
+              "closure": {
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "completedAt": {
+                    "$ref": "#/$defs/dateTime"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

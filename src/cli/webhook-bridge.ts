@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
-import { createHash, createHmac, timingSafeEqual } from 'crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { execSync, spawnSync } from 'child_process';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'http';
 import { homedir } from 'os';
@@ -23,6 +23,13 @@ import {
   type ZoomRegistrant,
 } from './zoom-officehours-crm.js';
 import { handleProviderShadowIngress, type CalendarShadowOptions, type GmailShadowOptions, type ProviderIngressDependencies, type ProviderRateBuckets } from './provider-shadow-ingress.js';
+import { acceptFirefliesIngress, type FirefliesVerificationConfigV1 } from '../bus/meeting-observation-ingress.js';
+import {
+  INTERNAL_RELAY_METHOD,
+  INTERNAL_RELAY_PATH,
+  acceptInternalRelay,
+  signInternalRelayRequest,
+} from '../bus/meeting-observation-relay.js';
 
 export const DEFAULT_PORT = 20242;
 const DEFAULT_HOST = '127.0.0.1';
@@ -48,6 +55,7 @@ interface BridgeRuntimeContext {
   firefliesWebhookSecret?: string;
   zoomWebhookSecretToken?: string;
   mailchimpApiKey?: string;
+  relayHmacSecret?: string;
 }
 
 export interface BridgeServerOptions {
@@ -70,6 +78,20 @@ export interface BridgeServerOptions {
   gmailShadow?: GmailShadowOptions;
   calendarShadow?: CalendarShadowOptions;
   providerIngressDependencies?: ProviderIngressDependencies;
+  firefliesVerification?: {
+    config: FirefliesVerificationConfigV1;
+    configDigest: string;
+    secretsByKeyId: Record<string, string>;
+  };
+  firefliesRelay?: {
+    keyId: string;
+    secret: string;
+    trustedKeyIds: string[];
+    trustedOrgId: string;
+    replayWindowSeconds: number;
+    maximumClockSkewSeconds: number;
+    relayAfterPersist?: boolean;
+  };
 }
 
 interface RelayEnvelope {
@@ -99,6 +121,24 @@ function normalizeFirefliesEnvelope(envelope: RelayEnvelope): RelayEnvelope {
     normalized.meeting_id = normalized.meetingId;
   }
   return normalized;
+}
+
+function firefliesObservationId(rawBody: string): string | null {
+  try {
+    const parsed = JSON.parse(rawBody) as Record<string, unknown>;
+    const meetingId = parsed.meeting_id ?? parsed.meetingId;
+    if (typeof meetingId === 'string' && meetingId.trim().length > 0) {
+      return `observation:fireflies:${meetingId.trim()}`;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function headerString(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) return value[0];
+  return typeof value === 'string' ? value : undefined;
 }
 
 function jsonResponse(response: ServerResponse, status: number, body: Record<string, unknown>): void {
@@ -231,6 +271,46 @@ export function resolveBridgeRuntimeContext(instanceId: string, orgOverride?: st
     firefliesWebhookSecret,
     zoomWebhookSecretToken,
     mailchimpApiKey,
+    relayHmacSecret: process.env.CORTEXT_RELAY_HMAC_SECRET || envFromFiles.CORTEXT_RELAY_HMAC_SECRET || undefined,
+  };
+}
+
+export function resolveFirefliesObservationSeam(input: {
+  frameworkRoot: string;
+  org?: string;
+  firefliesWebhookSecret?: string;
+  relayHmacSecret?: string;
+}): Pick<BridgeServerOptions, 'firefliesVerification' | 'firefliesRelay'> {
+  if (!input.firefliesWebhookSecret) return {};
+  if (!input.org) {
+    throw new Error('Organization is required when FIREFLIES_WEBHOOK_SECRET is set. Pass --org <id> or set CTX_ORG.');
+  }
+  if (!input.relayHmacSecret) {
+    throw new Error('CORTEXT_RELAY_HMAC_SECRET is required when FIREFLIES_WEBHOOK_SECRET is set.');
+  }
+  const contracts = join(input.frameworkRoot, 'state/specs/contracts');
+  const config = JSON.parse(readFileSync(join(contracts, 'fireflies-verification-config-v1.golden.json'), 'utf8')) as FirefliesVerificationConfigV1;
+  const pin = JSON.parse(readFileSync(join(contracts, 'fireflies-verification-config-pin-v1.json'), 'utf8')) as { verificationConfigDigest: string };
+  const authority = JSON.parse(readFileSync(join(contracts, 'meeting-authority-root-v1.golden.json'), 'utf8')) as { orgId: string; relayInternalAuthKeyIds: string[] };
+  if (config.orgId !== input.org || authority.orgId !== input.org) {
+    throw new Error('Fireflies verification config org does not match the runtime org.');
+  }
+  const keyId = authority.relayInternalAuthKeyIds[0];
+  if (!keyId) throw new Error('relayInternalAuthKeyIds is empty');
+  return {
+    firefliesVerification: {
+      config,
+      configDigest: pin.verificationConfigDigest,
+      secretsByKeyId: { [config.activeKeyId]: input.firefliesWebhookSecret },
+    },
+    firefliesRelay: {
+      keyId,
+      secret: input.relayHmacSecret,
+      trustedKeyIds: authority.relayInternalAuthKeyIds,
+      trustedOrgId: input.org,
+      replayWindowSeconds: 300,
+      maximumClockSkewSeconds: 300,
+    },
   };
 }
 
@@ -707,6 +787,47 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
         return;
       }
 
+      if (request.method === 'POST' && url.pathname === INTERNAL_RELAY_PATH) {
+        const rawBody = await readRequestBody(request, response);
+        if (rawBody === null) return;
+        const relay = options.firefliesRelay;
+        if (!relay) {
+          jsonResponse(response, 503, { error: 'relay_not_enabled', tier: 'relay' });
+          return;
+        }
+        const observationId = headerString(request.headers['x-observation-id'])
+          ?? firefliesObservationId(rawBody);
+        if (!observationId) {
+          jsonResponse(response, 400, { error: 'missing_observation_id', tier: 'relay' });
+          return;
+        }
+        const storeDir = join(options.ctxRoot, 'state', 'meeting-observations');
+        const accepted = acceptInternalRelay({
+          storeDir,
+          observationId,
+          method: INTERNAL_RELAY_METHOD,
+          path: INTERNAL_RELAY_PATH,
+          rawBody,
+          headers: {
+            'X-Service-Key-Id': headerString(request.headers['x-service-key-id']),
+            'X-Org-Id': headerString(request.headers['x-org-id']),
+            'X-Request-Timestamp': headerString(request.headers['x-request-timestamp']),
+            'X-Request-Nonce': headerString(request.headers['x-request-nonce']),
+            'X-Request-Signature': headerString(request.headers['x-request-signature']),
+          },
+          now: () => new Date(now()),
+          secretsByKeyId: { [relay.keyId]: relay.secret },
+          trustedKeyIds: relay.trustedKeyIds,
+          trustedOrgId: relay.trustedOrgId,
+          replayWindowSeconds: relay.replayWindowSeconds,
+          maximumClockSkewSeconds: relay.maximumClockSkewSeconds,
+        });
+        jsonResponse(response, accepted.status, accepted.observation
+          ? { ok: accepted.status < 400, relay: { state: accepted.observation.relay.state }, observationId: accepted.observation.observationId, error: accepted.error }
+          : { error: accepted.error ?? 'relay_rejected', tier: 'relay' });
+        return;
+      }
+
       if (request.method !== 'POST' || pathParts.length !== 2 || pathParts[0] !== 'relay') {
         jsonResponse(response, 404, { error: 'not_found' });
         return;
@@ -799,6 +920,69 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
         if (!hmacSignatureMatches(rawBody, providedSignature, options.firefliesWebhookSecret as string)) {
           jsonResponse(response, 401, { error: 'secret_mismatch', tier: 'auth' });
           return;
+        }
+        if (options.firefliesVerification) {
+          if (typeof options.org !== 'string' || options.org.length < 1) {
+            jsonResponse(response, 503, { error: 'org_required', tier: 'observation' });
+            return;
+          }
+          const persist = acceptFirefliesIngress({
+            rawBody,
+            headerName: 'X-Hub-Signature',
+            signatureHeader: providedSignature,
+            orgId: options.org,
+            now: () => new Date(now()),
+            storeDir: join(options.ctxRoot, 'state', 'meeting-observations'),
+            secretsByKeyId: options.firefliesVerification.secretsByKeyId,
+            verificationConfig: options.firefliesVerification.config,
+            verificationConfigDigest: options.firefliesVerification.configDigest,
+          });
+          if (persist.status >= 400 || persist.observation === undefined) {
+            jsonResponse(response, persist.status >= 400 ? persist.status : 500, {
+              error: persist.error ?? 'observation_persist_failed',
+              tier: 'observation',
+            });
+            return;
+          }
+          const relay = options.firefliesRelay;
+          if (!relay) {
+            jsonResponse(response, 503, { error: 'relay_not_enabled', tier: 'relay' });
+            return;
+          }
+          if (relay.relayAfterPersist !== false) {
+            const signed = signInternalRelayRequest({
+              observation: persist.observation,
+              keyId: relay.keyId,
+              secret: relay.secret,
+              timestamp: new Date(now()).toISOString(),
+              nonce: `relay_nonce_${randomBytes(10).toString('hex')}`,
+            });
+            const relayed = acceptInternalRelay({
+              storeDir: join(options.ctxRoot, 'state', 'meeting-observations'),
+              observationId: persist.observation.observationId,
+              method: INTERNAL_RELAY_METHOD,
+              path: INTERNAL_RELAY_PATH,
+              rawBody,
+              headers: signed.headers,
+              now: () => new Date(now()),
+              secretsByKeyId: { [relay.keyId]: relay.secret },
+              trustedKeyIds: relay.trustedKeyIds,
+              trustedOrgId: relay.trustedOrgId,
+              replayWindowSeconds: relay.replayWindowSeconds,
+              maximumClockSkewSeconds: relay.maximumClockSkewSeconds,
+            });
+            if (
+              relayed.status >= 400
+              || relayed.observation === undefined
+              || relayed.observation.relay.state !== 'RELAYED'
+            ) {
+              jsonResponse(response, relayed.status >= 400 ? relayed.status : 502, {
+                error: relayed.error ?? 'internal_relay_failed',
+                tier: 'relay',
+              });
+              return;
+            }
+          }
         }
       } else {
         const secretHeader = request.headers['x-webhook-bridge-secret'];
@@ -1111,6 +1295,12 @@ const runCommand = new Command('run')
       const instanceId = resolveInstanceId(options.instance);
       const port = parsePort(options.port, '--port');
       const context = resolveBridgeRuntimeContext(instanceId, options.org);
+      const observationSeam = resolveFirefliesObservationSeam({
+        frameworkRoot: context.frameworkRoot,
+        org: context.org,
+        firefliesWebhookSecret: context.firefliesWebhookSecret,
+        relayHmacSecret: context.relayHmacSecret,
+      });
       const server = createBridgeServer({
         instanceId,
         ctxRoot: context.ctxRoot,
@@ -1120,6 +1310,7 @@ const runCommand = new Command('run')
         firefliesWebhookSecret: context.firefliesWebhookSecret,
         zoomWebhookSecretToken: context.zoomWebhookSecretToken,
         mailchimpApiKey: context.mailchimpApiKey,
+        ...observationSeam,
       });
 
       await new Promise<void>((resolve, reject) => {

@@ -213,10 +213,6 @@ export function acceptInternalRelay(input: AcceptInternalRelayInput): AcceptInte
       return { status: 503, observation: stored, error: 'relay_not_enabled' };
     }
 
-    if (stored.relay.state === 'RELAYED' && stored.rawBodyDigest === sha256Hex(input.rawBody)) {
-      return { status: 202, observation: stored };
-    }
-
     const keyId = headerValue(input.headers, 'X-Service-Key-Id');
     const orgId = headerValue(input.headers, 'X-Org-Id');
     const timestamp = headerValue(input.headers, 'X-Request-Timestamp');
@@ -258,6 +254,10 @@ export function acceptInternalRelay(input: AcceptInternalRelayInput): AcceptInte
     const expectedMac = createHmac('sha256', secret).update(payload).digest('hex');
     if (!timingSafeHexEqual(signature, expectedMac)) {
       return { status: 401, observation: stored, error: 'invalid_internal_hmac' };
+    }
+
+    if (stored.relay.state === 'RELAYED' && stored.rawBodyDigest === bodyDigest) {
+      return { status: 202, observation: stored };
     }
 
     const nowMs = input.now().getTime();

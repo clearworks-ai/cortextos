@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
-import { createHash, createHmac, timingSafeEqual } from 'crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { execSync, spawnSync } from 'child_process';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'http';
 import { homedir } from 'os';
@@ -24,6 +24,12 @@ import {
 } from './zoom-officehours-crm.js';
 import { handleProviderShadowIngress, type CalendarShadowOptions, type GmailShadowOptions, type ProviderIngressDependencies, type ProviderRateBuckets } from './provider-shadow-ingress.js';
 import { acceptFirefliesIngress, type FirefliesVerificationConfigV1 } from '../bus/meeting-observation-ingress.js';
+import {
+  INTERNAL_RELAY_METHOD,
+  INTERNAL_RELAY_PATH,
+  acceptInternalRelay,
+  signInternalRelayRequest,
+} from '../bus/meeting-observation-relay.js';
 
 export const DEFAULT_PORT = 20242;
 const DEFAULT_HOST = '127.0.0.1';
@@ -76,6 +82,15 @@ export interface BridgeServerOptions {
     configDigest: string;
     secretsByKeyId: Record<string, string>;
   };
+  firefliesRelay?: {
+    keyId: string;
+    secret: string;
+    trustedKeyIds: string[];
+    trustedOrgId: string;
+    replayWindowSeconds: number;
+    maximumClockSkewSeconds: number;
+    relayAfterPersist?: boolean;
+  };
 }
 
 interface RelayEnvelope {
@@ -105,6 +120,24 @@ function normalizeFirefliesEnvelope(envelope: RelayEnvelope): RelayEnvelope {
     normalized.meeting_id = normalized.meetingId;
   }
   return normalized;
+}
+
+function firefliesObservationId(rawBody: string): string | null {
+  try {
+    const parsed = JSON.parse(rawBody) as Record<string, unknown>;
+    const meetingId = parsed.meeting_id ?? parsed.meetingId;
+    if (typeof meetingId === 'string' && meetingId.trim().length > 0) {
+      return `observation:fireflies:${meetingId.trim()}`;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function headerString(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) return value[0];
+  return typeof value === 'string' ? value : undefined;
 }
 
 function jsonResponse(response: ServerResponse, status: number, body: Record<string, unknown>): void {
@@ -713,6 +746,47 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
         return;
       }
 
+      if (request.method === 'POST' && url.pathname === INTERNAL_RELAY_PATH) {
+        const rawBody = await readRequestBody(request, response);
+        if (rawBody === null) return;
+        const relay = options.firefliesRelay;
+        if (!relay) {
+          jsonResponse(response, 503, { error: 'relay_not_enabled', tier: 'relay' });
+          return;
+        }
+        const observationId = headerString(request.headers['x-observation-id'])
+          ?? firefliesObservationId(rawBody);
+        if (!observationId) {
+          jsonResponse(response, 400, { error: 'missing_observation_id', tier: 'relay' });
+          return;
+        }
+        const storeDir = join(options.ctxRoot, 'state', 'meeting-observations');
+        const accepted = acceptInternalRelay({
+          storeDir,
+          observationId,
+          method: INTERNAL_RELAY_METHOD,
+          path: INTERNAL_RELAY_PATH,
+          rawBody,
+          headers: {
+            'X-Service-Key-Id': headerString(request.headers['x-service-key-id']),
+            'X-Org-Id': headerString(request.headers['x-org-id']),
+            'X-Request-Timestamp': headerString(request.headers['x-request-timestamp']),
+            'X-Request-Nonce': headerString(request.headers['x-request-nonce']),
+            'X-Request-Signature': headerString(request.headers['x-request-signature']),
+          },
+          now: () => new Date(now()),
+          secretsByKeyId: { [relay.keyId]: relay.secret },
+          trustedKeyIds: relay.trustedKeyIds,
+          trustedOrgId: relay.trustedOrgId,
+          replayWindowSeconds: relay.replayWindowSeconds,
+          maximumClockSkewSeconds: relay.maximumClockSkewSeconds,
+        });
+        jsonResponse(response, accepted.status, accepted.observation
+          ? { ok: accepted.status < 400, relay: { state: accepted.observation.relay.state }, observationId: accepted.observation.observationId, error: accepted.error }
+          : { error: accepted.error ?? 'relay_rejected', tier: 'relay' });
+        return;
+      }
+
       if (request.method !== 'POST' || pathParts.length !== 2 || pathParts[0] !== 'relay') {
         jsonResponse(response, 404, { error: 'not_found' });
         return;
@@ -824,6 +898,30 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
               tier: 'observation',
             });
             return;
+          }
+          const relay = options.firefliesRelay;
+          if (relay && relay.relayAfterPersist !== false) {
+            const signed = signInternalRelayRequest({
+              observation: persist.observation,
+              keyId: relay.keyId,
+              secret: relay.secret,
+              timestamp: new Date(now()).toISOString(),
+              nonce: `relay_nonce_${randomBytes(10).toString('hex')}`,
+            });
+            acceptInternalRelay({
+              storeDir: join(options.ctxRoot, 'state', 'meeting-observations'),
+              observationId: persist.observation.observationId,
+              method: INTERNAL_RELAY_METHOD,
+              path: INTERNAL_RELAY_PATH,
+              rawBody,
+              headers: signed.headers,
+              now: () => new Date(now()),
+              secretsByKeyId: { [relay.keyId]: relay.secret },
+              trustedKeyIds: relay.trustedKeyIds,
+              trustedOrgId: relay.trustedOrgId,
+              replayWindowSeconds: relay.replayWindowSeconds,
+              maximumClockSkewSeconds: relay.maximumClockSkewSeconds,
+            });
           }
         }
       } else {

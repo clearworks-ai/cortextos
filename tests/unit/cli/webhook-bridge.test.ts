@@ -500,6 +500,179 @@ describe('webhook-bridge server', () => {
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
     });
 
+    it('signs and accepts an org-bound internal relay after durable persist before 2xx', async () => {
+      const contractsRoot = join(process.cwd(), 'state/specs/contracts');
+      const verificationConfig = JSON.parse(
+        readFileSync(join(contractsRoot, 'fireflies-verification-config-v1.golden.json'), 'utf8'),
+      );
+      const configDigest = JSON.parse(
+        readFileSync(join(contractsRoot, 'fireflies-verification-config-pin-v1.json'), 'utf8'),
+      ).verificationConfigDigest as string;
+      const secrets = JSON.parse(
+        readFileSync(join(contractsRoot, 'fireflies-webhook-v2.test-secrets.json'), 'utf8'),
+      ) as { secretsByKeyId: Record<string, string> };
+      const relaySecrets = JSON.parse(
+        readFileSync(join(contractsRoot, 'relay-auth-v1.test-secrets.json'), 'utf8'),
+      ) as { secretsByKeyId: Record<string, string>; replayWindowSeconds: number; maximumClockSkewSeconds: number };
+      const authorityRoot = JSON.parse(
+        readFileSync(join(contractsRoot, 'meeting-authority-root-v1.golden.json'), 'utf8'),
+      ) as { relayInternalAuthKeyIds: string[] };
+      const valid = JSON.parse(
+        readFileSync(join(contractsRoot, 'fireflies-webhook-v2-test-vectors.json'), 'utf8'),
+      ).vectors.find((vector: { name: string }) => vector.name === 'valid-raw-body') as {
+        rawBodyUtf8: string;
+        headerValue: string;
+      };
+
+      const server = createBridgeServer({
+        instanceId: 'test-instance',
+        ctxRoot: tempRoot,
+        frameworkRoot: tempRoot,
+        org: 'clearworksai',
+        bridgeSecret: 'top-secret',
+        firefliesWebhookSecret: secrets.secretsByKeyId['fireflies-webhook-v2-test-key'],
+        firefliesVerification: {
+          config: verificationConfig,
+          configDigest,
+          secretsByKeyId: secrets.secretsByKeyId,
+        },
+        firefliesRelay: {
+          keyId: 'cortext-relay-key-v1',
+          secret: relaySecrets.secretsByKeyId['cortext-relay-key-v1'],
+          trustedKeyIds: authorityRoot.relayInternalAuthKeyIds,
+          trustedOrgId: 'clearworksai',
+          replayWindowSeconds: relaySecrets.replayWindowSeconds,
+          maximumClockSkewSeconds: relaySecrets.maximumClockSkewSeconds,
+        },
+      });
+      const baseUrl = await listen(server);
+      const response = await sendRequest(baseUrl, '/relay/fireflies', {
+        method: 'POST',
+        headers: { 'x-hub-signature': valid.headerValue },
+        body: valid.rawBodyUtf8,
+      });
+
+      expect(response.status).toBe(200);
+      const storedDir = join(tempRoot, 'state', 'meeting-observations', 'observations');
+      const stored = JSON.parse(readFileSync(join(storedDir, readdirSync(storedDir)[0]), 'utf8')) as {
+        relay: {
+          state: string;
+          internalAuth: { keyId: string; method: string; path: string; macHex: string } | null;
+          replayReceipt: { decision: string } | null;
+        };
+      };
+      expect(stored.relay.state).toBe('RELAYED');
+      expect(stored.relay.internalAuth?.keyId).toBe('cortext-relay-key-v1');
+      expect(stored.relay.internalAuth?.method).toBe('POST');
+      expect(stored.relay.internalAuth?.path).toBe('/internal/v1/meeting-observations');
+      expect(stored.relay.internalAuth?.macHex).toMatch(/^[0-9a-f]{64}$/);
+      expect(stored.relay.replayReceipt?.decision).toBe('accepted_new');
+
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    });
+
+    it('accepts POST /internal/v1/meeting-observations with X-Service-Key-Id and X-Request-* after persist', async () => {
+      const contractsRoot = join(process.cwd(), 'state/specs/contracts');
+      const verificationConfig = JSON.parse(
+        readFileSync(join(contractsRoot, 'fireflies-verification-config-v1.golden.json'), 'utf8'),
+      );
+      const configDigest = JSON.parse(
+        readFileSync(join(contractsRoot, 'fireflies-verification-config-pin-v1.json'), 'utf8'),
+      ).verificationConfigDigest as string;
+      const secrets = JSON.parse(
+        readFileSync(join(contractsRoot, 'fireflies-webhook-v2.test-secrets.json'), 'utf8'),
+      ) as { secretsByKeyId: Record<string, string> };
+      const relaySecrets = JSON.parse(
+        readFileSync(join(contractsRoot, 'relay-auth-v1.test-secrets.json'), 'utf8'),
+      ) as { secretsByKeyId: Record<string, string>; replayWindowSeconds: number; maximumClockSkewSeconds: number };
+      const authorityRoot = JSON.parse(
+        readFileSync(join(contractsRoot, 'meeting-authority-root-v1.golden.json'), 'utf8'),
+      ) as { relayInternalAuthKeyIds: string[] };
+      const valid = JSON.parse(
+        readFileSync(join(contractsRoot, 'fireflies-webhook-v2-test-vectors.json'), 'utf8'),
+      ).vectors.find((vector: { name: string }) => vector.name === 'valid-raw-body') as {
+        rawBodyUtf8: string;
+        headerValue: string;
+      };
+      const relayOptions = {
+        keyId: 'cortext-relay-key-v1',
+        secret: relaySecrets.secretsByKeyId['cortext-relay-key-v1'],
+        trustedKeyIds: authorityRoot.relayInternalAuthKeyIds,
+        trustedOrgId: 'clearworksai',
+        replayWindowSeconds: relaySecrets.replayWindowSeconds,
+        maximumClockSkewSeconds: relaySecrets.maximumClockSkewSeconds,
+      };
+
+      const server = createBridgeServer({
+        instanceId: 'test-instance',
+        ctxRoot: tempRoot,
+        frameworkRoot: tempRoot,
+        org: 'clearworksai',
+        bridgeSecret: 'top-secret',
+        firefliesWebhookSecret: secrets.secretsByKeyId['fireflies-webhook-v2-test-key'],
+        firefliesVerification: {
+          config: verificationConfig,
+          configDigest,
+          secretsByKeyId: secrets.secretsByKeyId,
+        },
+        firefliesRelay: {
+          ...relayOptions,
+          relayAfterPersist: false,
+        },
+      });
+      const baseUrl = await listen(server);
+      const persist = await sendRequest(baseUrl, '/relay/fireflies', {
+        method: 'POST',
+        headers: { 'x-hub-signature': valid.headerValue },
+        body: valid.rawBodyUtf8,
+      });
+      expect(persist.status).toBe(200);
+
+      const { signInternalRelayRequest } = await import('../../../src/bus/meeting-observation-relay');
+      const storedDir = join(tempRoot, 'state', 'meeting-observations', 'observations');
+      const pending = JSON.parse(readFileSync(join(storedDir, readdirSync(storedDir)[0]), 'utf8'));
+      const signed = signInternalRelayRequest({
+        observation: pending,
+        keyId: relayOptions.keyId,
+        secret: relayOptions.secret,
+        timestamp: new Date().toISOString(),
+        nonce: 'relay_nonce_http_0001',
+      });
+      const internal = await sendRequest(baseUrl, '/internal/v1/meeting-observations', {
+        method: 'POST',
+        headers: {
+          'X-Service-Key-Id': signed.headers['X-Service-Key-Id'],
+          'X-Org-Id': signed.headers['X-Org-Id'],
+          'X-Request-Timestamp': signed.headers['X-Request-Timestamp'],
+          'X-Request-Nonce': signed.headers['X-Request-Nonce'],
+          'X-Request-Signature': signed.headers['X-Request-Signature'],
+        },
+        body: valid.rawBodyUtf8,
+      });
+      expect(internal.status).toBe(202);
+      expect(internal.json?.relay?.state ?? JSON.parse(internal.text).relay?.state).toBeDefined();
+      const stored = JSON.parse(readFileSync(join(storedDir, readdirSync(storedDir)[0]), 'utf8')) as {
+        relay: { state: string };
+      };
+      expect(stored.relay.state).toBe('RELAYED');
+
+      const forged = await sendRequest(baseUrl, '/internal/v1/meeting-observations', {
+        method: 'POST',
+        headers: {
+          'X-Service-Key-Id': signed.headers['X-Service-Key-Id'],
+          'X-Org-Id': signed.headers['X-Org-Id'],
+          'X-Request-Timestamp': signed.headers['X-Request-Timestamp'],
+          'X-Request-Nonce': 'relay_nonce_http_forged',
+          'X-Request-Signature': 'ab'.repeat(32),
+        },
+        body: valid.rawBodyUtf8,
+      });
+      expect(forged.status).toBe(401);
+      expect(JSON.parse(readFileSync(join(storedDir, readdirSync(storedDir)[0]), 'utf8')).relay.state).toBe('RELAYED');
+
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    });
+
     it('preserves one observation identity across twenty concurrent Fireflies deliveries', async () => {
       const contractsRoot = join(process.cwd(), 'state/specs/contracts');
       const verificationConfig = JSON.parse(

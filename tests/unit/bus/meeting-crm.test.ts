@@ -8,6 +8,7 @@ import {
   CrmWriteValidationError,
   acceptServiceExactIntent,
   applyIntentWithReadback,
+  persistCrmWriteIntent,
   persistCrmWriteSet,
   persistCrmWriteIntentRequest,
   submitCrmWriteIntentRequest,
@@ -81,6 +82,20 @@ describe('meeting CRM write intents', () => {
       const stored = persistCrmWriteSet(dir, writeSet, artifacts.requests, artifacts.intents);
       expect(stored.writeSetDigest).toBe(writeSet.writeSetDigest);
       expect((stored.expectedWrites as unknown[]).length).toBe(5);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses to overwrite a stored CRM intent with a different digest at the same state version', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'meeting-crm-cas-'));
+    try {
+      const pending = clone(loadJson('crm-write-intent-v1.pending.golden.json'));
+      persistCrmWriteIntent(dir, pending);
+      const mutated = clone(pending);
+      mutated.rejectionCode = 'mutated';
+      mutated.intentDigest = digestWithout(mutated, 'intentDigest');
+      expect(() => persistCrmWriteIntent(dir, mutated)).toThrow(CrmWriteConflictError);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

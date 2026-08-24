@@ -24,6 +24,28 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+function persistWithLeasedSink(
+  dir: string,
+  envelope: Record<string, unknown>,
+  sink: string,
+): Record<string, unknown> {
+  const next = clone(envelope);
+  for (const receipt of next.upstreamReceipts as Array<Record<string, unknown>>) {
+    if (receipt.sink !== sink) continue;
+    receipt.state = 'LEASED';
+    receipt.previousState = 'PENDING';
+    receipt.leaseOwner = 'meeting-engine:demo';
+    receipt.leaseVersion = 1;
+    receipt.leaseExpiresAt = '2026-08-24T04:02:30Z';
+    receipt.nextAttemptAt = null;
+    receipt.unknownProbeCount = 0;
+    receipt.lastProbeAt = null;
+  }
+  next.manifestDigest = deliveryManifestDigest(next);
+  persistDeliveryEnvelope(dir, next);
+  return next;
+}
+
 describe('meeting delivery envelope', () => {
   it('persists the golden envelope with the four required sinks and a matching Briefs ack', () => {
     const dir = mkdtempSync(join(tmpdir(), 'meeting-delivery-'));
@@ -53,7 +75,7 @@ describe('meeting delivery envelope', () => {
     const dir = mkdtempSync(join(tmpdir(), 'meeting-delivery-skip-'));
     try {
       const envelope = clone(loadJson('meeting-delivery-envelope-v1.golden.json'));
-      persistDeliveryEnvelope(dir, envelope);
+      persistWithLeasedSink(dir, envelope, 'followup_draft');
       const skipped = applySinkOutcome(dir, envelope.canonicalMeetingId as string, 'followup_draft', {
         state: 'SKIPPED_POLICY',
         policyVersion: 'draft-applicability-v1',
@@ -79,7 +101,7 @@ describe('meeting delivery envelope', () => {
     const dir = mkdtempSync(join(tmpdir(), 'meeting-delivery-fail-'));
     try {
       const envelope = clone(loadJson('meeting-delivery-envelope-v1.golden.json'));
-      persistDeliveryEnvelope(dir, envelope);
+      persistWithLeasedSink(dir, envelope, 'crm_interaction');
       const failed = applySinkOutcome(dir, envelope.canonicalMeetingId as string, 'crm_interaction', {
         state: 'TERMINAL_FAILED',
         errorCode: 'crm_write_rejected',
@@ -95,7 +117,7 @@ describe('meeting delivery envelope', () => {
 
       const unknownDir = mkdtempSync(join(tmpdir(), 'meeting-delivery-unknown-'));
       try {
-        persistDeliveryEnvelope(unknownDir, clone(envelope));
+        persistWithLeasedSink(unknownDir, clone(envelope), 'lifecycle_projection');
         const unknown = applySinkOutcome(unknownDir, envelope.canonicalMeetingId as string, 'lifecycle_projection', {
           state: 'UNKNOWN_COMMIT',
           unknownProbeCount: 1,
@@ -139,6 +161,20 @@ describe('meeting delivery envelope', () => {
       expect(crm?.state).toBe('LEASED');
       expect(crm?.leaseOwner).toBe('meeting-engine:demo');
       expect(evaluatePaEligibility(leased).kind).toBe('suppressed');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses to rewrite a succeeded required sink', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'meeting-delivery-rewrite-'));
+    try {
+      const envelope = clone(loadJson('meeting-delivery-envelope-v1.golden.json'));
+      persistDeliveryEnvelope(dir, envelope);
+      expect(() => applySinkOutcome(dir, envelope.canonicalMeetingId as string, 'crm_interaction', {
+        state: 'TERMINAL_FAILED',
+        errorCode: 'crm_write_rejected',
+      })).toThrow(DeliveryValidationError);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

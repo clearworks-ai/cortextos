@@ -197,11 +197,30 @@ export function persistCrmWriteIntent(
 ): Record<string, unknown> {
   assertCrmWriteIntent(intent);
   ensureDir(storeDir);
-  return withFileLockSync(storeDir, () => {
-    const path = intentPath(storeDir, intent.intentId as string);
-    persistJson(path, intent);
-    return intent;
-  });
+  return withFileLockSync(storeDir, () => persistIntentLocked(storeDir, intent));
+}
+
+function persistIntentLocked(storeDir: string, intent: Record<string, unknown>): Record<string, unknown> {
+  assertCrmWriteIntent(intent);
+  const path = intentPath(storeDir, intent.intentId as string);
+  if (existsSync(path)) {
+    const existing = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+    assertCrmWriteIntent(existing);
+    if (existing.intentDigest === intent.intentDigest) return existing;
+    const existingVersion = existing.stateVersion as number;
+    const nextVersion = intent.stateVersion as number;
+    if (nextVersion === existingVersion) {
+      throw new CrmWriteConflictError('same-version CRM intent digest conflict');
+    }
+    if (nextVersion !== existingVersion + 1) {
+      throw new CrmWriteConflictError('CRM intent version gap');
+    }
+    if (intent.previousIntentDigest !== existing.intentDigest) {
+      throw new CrmWriteConflictError('previousIntentDigest does not match the stored intent');
+    }
+  }
+  persistJson(path, intent);
+  return intent;
 }
 
 export function acceptServiceExactIntent(
@@ -259,7 +278,7 @@ export function applyIntentWithReadback(
       updatedAt: typeof snapshot.generatedAt === 'string' ? snapshot.generatedAt : pending.updatedAt,
     };
     applied.intentDigest = crmIntentDigest(applied);
-    persistJson(path, applied);
+    persistIntentLocked(storeDir, applied);
     return applied;
   });
 }
@@ -277,10 +296,7 @@ export function persistCrmWriteSet(
   ensureDir(storeDir);
   return withFileLockSync(storeDir, () => {
     for (const request of requests) persistRequestLocked(storeDir, request);
-    for (const intent of intents) {
-      assertCrmWriteIntent(intent);
-      persistJson(intentPath(storeDir, intent.intentId as string), intent);
-    }
+    for (const intent of intents) persistIntentLocked(storeDir, intent);
     persistJson(writeSetPath(storeDir, writeSet.writeSetId as string), writeSet);
     return writeSet;
   });

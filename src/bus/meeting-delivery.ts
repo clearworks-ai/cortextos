@@ -22,6 +22,16 @@ export type SinkState =
   | 'TERMINAL_FAILED'
   | 'UNKNOWN_COMMIT';
 
+const LEGAL_PREVIOUS: Record<SinkState, Array<SinkState | null>> = {
+  PENDING: [null],
+  LEASED: ['PENDING', 'RETRYABLE'],
+  SUCCEEDED: ['LEASED', 'UNKNOWN_COMMIT'],
+  SKIPPED_POLICY: ['PENDING', 'LEASED'],
+  RETRYABLE: ['LEASED'],
+  TERMINAL_FAILED: ['LEASED', 'RETRYABLE', 'UNKNOWN_COMMIT'],
+  UNKNOWN_COMMIT: ['LEASED', 'UNKNOWN_COMMIT'],
+};
+
 export class DeliveryValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -227,6 +237,9 @@ export function applySinkOutcome(
     const receipts = receiptsOf(envelope);
     const receipt = receipts.find((item) => item.sink === sink);
     if (!receipt) throw new DeliveryValidationError(`missing sink ${sink}`);
+    if (!LEGAL_PREVIOUS[outcome.state].includes(receipt.state as SinkState | null)) {
+      throw new DeliveryValidationError(`illegal receipt transition ${String(receipt.state)} -> ${outcome.state}`);
+    }
     receipt.previousState = receipt.state;
     receipt.state = outcome.state;
     if (outcome.policyVersion !== undefined) receipt.policyVersion = outcome.policyVersion;
@@ -256,7 +269,8 @@ export function persistReplicationAck(
   ack: Record<string, unknown>,
 ): Record<string, unknown> {
   if (ack.schemaVersion !== '1.0') throw new DeliveryValidationError('unsupported replication ack schemaVersion');
-  if (typeof ack.ackId !== 'string' || ack.ackId.length < 1) {
+  const ackId = ack.ackId;
+  if (typeof ackId !== 'string' || ackId.length < 1) {
     throw new DeliveryValidationError('ackId is required');
   }
   assertSha256(ack.ackDigest, 'ackDigest');
@@ -274,7 +288,7 @@ export function persistReplicationAck(
         throw new DeliveryValidationError('ack/record binding mismatch');
       }
     }
-    persistJson(ackPath(storeDir, ack.ackId), ack);
+    persistJson(ackPath(storeDir, ackId), ack);
     return ack;
   });
 }

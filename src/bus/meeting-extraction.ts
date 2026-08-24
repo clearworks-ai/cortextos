@@ -74,6 +74,20 @@ function bind(request: ExtractionRequest, response: ExtractionResponse): BoundEx
   };
 }
 
+export function createScriptExtractor(
+  scriptPath: string,
+  runner: (scriptPath: string, request: ExtractionRequest) => ExtractionResponse,
+): Extractor {
+  if (scriptPath.length < 1) {
+    throw new ExtractionError('extractor script path is required');
+  }
+  return {
+    extract(request) {
+      return runner(scriptPath, request);
+    },
+  };
+}
+
 export function extractOnce(
   storeDir: string,
   request: ExtractionRequest,

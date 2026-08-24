@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clearworks.ai/schemas/briefs-projection-readback-v1.schema.json",
+  "title": "BriefsProjectionReadbackV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "orgId", "canonicalMeetingId", "recordDigest", "manifestRevision", "manifestDigest", "storedProjectionVersion", "storedProjectionDigest", "recordReadbackDigest", "envelopeReadbackDigest", "producer", "readbackAt", "readbackDigest"],
+  "$defs": { "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "dateTime": { "type": "string", "format": "date-time" } },
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "orgId": { "type": "string", "minLength": 1 },
+    "canonicalMeetingId": { "type": "string", "minLength": 1 },
+    "recordDigest": { "$ref": "#/$defs/sha256" },
+    "manifestRevision": { "type": "integer", "minimum": 1 },
+    "manifestDigest": { "$ref": "#/$defs/sha256" },
+    "storedProjectionVersion": { "type": "string", "minLength": 1 },
+    "storedProjectionDigest": { "$ref": "#/$defs/sha256" },
+    "recordReadbackDigest": { "$ref": "#/$defs/sha256" },
+    "envelopeReadbackDigest": { "$ref": "#/$defs/sha256" },
+    "producer": { "const": "briefs" },
+    "readbackAt": { "$ref": "#/$defs/dateTime" },
+    "readbackDigest": { "$ref": "#/$defs/sha256" }
+  }
+}

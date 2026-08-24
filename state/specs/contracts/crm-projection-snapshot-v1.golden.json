@@ -1,0 +1,110 @@
+{
+  "schemaVersion": "1.0",
+  "orgId": "clearworksai",
+  "projectionVersion": "crm-v42",
+  "projectionDigest": "8133850877cbbb4e730e3d409241dcc347baa99726510a9942b77fdc1f1c91aa",
+  "generatedAt": "2026-08-24T04:02:00Z",
+  "sourceVersion": "crm-v42",
+  "sourceDigest": "d1335315b6bb94b18fbb708af64402d124d508fdd53914f43bacf44609156de9",
+  "accounts": [
+    {
+      "accountId": "crm:account:acme",
+      "name": "Acme",
+      "relationshipClass": "prospect",
+      "status": "active",
+      "version": "42",
+      "digest": "8e9a32283160d8fb6142cf8ccc1ea4735c9261a41a7df7404e611d420366b038",
+      "updatedAt": "2026-08-24T04:01:45Z"
+    }
+  ],
+  "contacts": [
+    {
+      "contactId": "crm:contact:alex",
+      "accountId": "crm:account:acme",
+      "displayName": "Alex",
+      "role": "Operations lead",
+      "version": "42",
+      "digest": "0f1bc19227c6b099e5ab498d574e8b63b4a3fa80783a10b5005f56dba2b50ca1",
+      "updatedAt": "2026-08-24T04:01:45Z"
+    }
+  ],
+  "engagements": [
+    {
+      "engagementId": "crm:engagement:acme-pilot",
+      "accountId": "crm:account:acme",
+      "name": "Intake-routing pilot",
+      "state": "active",
+      "version": "42",
+      "digest": "0e1d34b34286fce9d45695628cc6ae17e620fcaec6eccda32f8217f457206749",
+      "updatedAt": "2026-08-24T04:01:45Z"
+    }
+  ],
+  "opportunities": [
+    {
+      "opportunityId": "crm:opportunity:acme-pilot",
+      "accountId": "crm:account:acme",
+      "engagementId": "crm:engagement:acme-pilot",
+      "name": "Pilot",
+      "state": "qualified",
+      "oneTimeValue": 2500,
+      "monthlyValue": null,
+      "currency": "USD",
+      "version": "42",
+      "digest": "897ef0709d71a7f5bb2bb398744c918ca4c1a0ab9497c02709402463bfdc732b",
+      "updatedAt": "2026-08-24T04:01:45Z"
+    }
+  ],
+  "interactions": [
+    {
+      "interactionId": "crm:interaction:meeting_demo_2026_08_24_01",
+      "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+      "recordDigest": "be66407f98eeb28dc3063c31f800096f8bb3ab06681a56b415f57ca83f1833ba",
+      "occurredAt": "2026-08-24T03:00:00Z",
+      "title": "Acme intake-routing pilot",
+      "accountIds": [
+        "crm:account:acme"
+      ],
+      "contactIds": [
+        "crm:contact:alex"
+      ],
+      "engagementIds": [
+        "crm:engagement:acme-pilot"
+      ],
+      "version": "42",
+      "digest": "456e91e1ee7776114e7cc40823c4bb22c2837820e7224b13cdcbcba23eb70201",
+      "updatedAt": "2026-08-24T04:01:45Z"
+    }
+  ],
+  "lifecycleItems": [
+    {
+      "lifecycleId": "life:task:pilot",
+      "canonicalClaimId": "canonical:task-send-pilot-outline",
+      "claimId": "claim:task:v1",
+      "recordDigest": "be66407f98eeb28dc3063c31f800096f8bb3ab06681a56b415f57ca83f1833ba",
+      "bucket": "my_task",
+      "direction": "josh_owned",
+      "workState": "open",
+      "ownerId": "crm:contact:josh",
+      "dueAt": "2026-08-25T17:00:00Z",
+      "dependencyState": "none",
+      "version": "42",
+      "digest": "8c1d93411ddeb36f93c4f3043bde3bf1aefd6ca95dc43c80f437a3d8a14bf928",
+      "updatedAt": "2026-08-24T04:01:45Z"
+    },
+    {
+      "lifecycleId": "life:waiting:recipients",
+      "canonicalClaimId": "canonical:waiting-recipient-list",
+      "claimId": "claim:waiting:v1",
+      "recordDigest": "be66407f98eeb28dc3063c31f800096f8bb3ab06681a56b415f57ca83f1833ba",
+      "bucket": "waiting_on_them",
+      "direction": "external_owned",
+      "workState": "waiting",
+      "ownerId": "crm:contact:alex",
+      "dueAt": null,
+      "dependencyState": "unsatisfied",
+      "version": "42",
+      "digest": "88126646dbe561e90201300021da05f652d0486e39fc235bf5935c9138bc3807",
+      "updatedAt": "2026-08-24T04:01:45Z"
+    }
+  ]
+}

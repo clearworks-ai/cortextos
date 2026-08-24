@@ -1,0 +1,465 @@
+{
+  "schemaVersion": "1.0",
+  "orgId": "clearworksai",
+  "writeSetId": "meeting_demo_2026_08_24_01:v1:crm-write-set",
+  "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+  "recordVersion": 1,
+  "recordDigest": "be66407f98eeb28dc3063c31f800096f8bb3ab06681a56b415f57ca83f1833ba",
+  "requests": [
+    {
+      "schemaVersion": "1.0",
+      "orgId": "clearworksai",
+      "clientRequestId": "briefs:req:account:write-set",
+      "requestDigest": "ce049d14b926fb85347d4a2ca8627f0b8d9801219d6e4958a12c7cc7d4b4b633",
+      "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+      "recordVersion": 1,
+      "recordDigest": "be66407f98eeb28dc3063c31f800096f8bb3ab06681a56b415f57ca83f1833ba",
+      "canonicalClaimId": "canonical:decision-pilot",
+      "claimId": "claim:decision:v1",
+      "baseCrmVersion": "crm-v41",
+      "baseCrmDigest": "e4f3a46d91b19114a8c6a8874fb27462159939bca35be5ed87b56b28ac9a7970",
+      "requestKind": "system_exact",
+      "operation": "upsert_account",
+      "target": {
+        "entityType": "account",
+        "entityId": "crm:account:acme"
+      },
+      "proposedValue": {
+        "accountId": "crm:account:acme",
+        "name": "Acme",
+        "relationshipClass": "prospect",
+        "status": "active"
+      },
+      "proposedValueDigest": "22cef4ed39f057e70c29902d663ed361441ff3bbae09090e180586216078c363",
+      "evidenceRefs": [
+        "ev:decision"
+      ],
+      "idempotencyKey": "meeting_demo_2026_08_24_01:v1:crm:account:write-set",
+      "submittedAt": "2026-08-24T04:00:30Z",
+      "submittedBy": {
+        "subjectId": "service:meeting-engine",
+        "sessionId": "service-session:demo",
+        "auditReceiptId": "audit:crm-request:demo",
+        "policyVersion": "crm-request-attribution-v1"
+      }
+    },
+    {
+      "schemaVersion": "1.0",
+      "orgId": "clearworksai",
+      "clientRequestId": "briefs:req:contact:write-set",
+      "requestDigest": "432bfcf197287f9201ec75f2530afce9b7870cdf090bf833e8d08c823f18f6ea",
+      "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+      "recordVersion": 1,
+      "recordDigest": "be66407f98eeb28dc3063c31f800096f8bb3ab06681a56b415f57ca83f1833ba",
+      "canonicalClaimId": "canonical:decision-pilot",
+      "claimId": "claim:decision:v1",
+      "baseCrmVersion": "crm-v41",
+      "baseCrmDigest": "e4f3a46d91b19114a8c6a8874fb27462159939bca35be5ed87b56b28ac9a7970",
+      "requestKind": "system_exact",
+      "operation": "upsert_contact",
+      "target": {
+        "entityType": "contact",
+        "entityId": "crm:contact:alex"
+      },
+      "proposedValue": {
+        "contactId": "crm:contact:alex",
+        "accountId": "crm:account:acme",
+        "displayName": "Alex",
+        "role": "Operations lead"
+      },
+      "proposedValueDigest": "cf4eb5ba9ff0d3dfb16ed6cc5e7646e5ab3f08cf950a1420db7bfb48bce2490d",
+      "evidenceRefs": [
+        "ev:decision"
+      ],
+      "idempotencyKey": "meeting_demo_2026_08_24_01:v1:crm:contact:write-set",
+      "submittedAt": "2026-08-24T04:00:30Z",
+      "submittedBy": {
+        "subjectId": "service:meeting-engine",
+        "sessionId": "service-session:demo",
+        "auditReceiptId": "audit:crm-request:demo",
+        "policyVersion": "crm-request-attribution-v1"
+      }
+    },
+    {
+      "schemaVersion": "1.0",
+      "orgId": "clearworksai",
+      "clientRequestId": "briefs:req:engagement:write-set",
+      "requestDigest": "97e043ac795b7a3367ccb46003b3f7306340fb5a83c699e7a1d681b2540ae5a1",
+      "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+      "recordVersion": 1,
+      "recordDigest": "be66407f98eeb28dc3063c31f800096f8bb3ab06681a56b415f57ca83f1833ba",
+      "canonicalClaimId": "canonical:decision-pilot",
+      "claimId": "claim:decision:v1",
+      "baseCrmVersion": "crm-v41",
+      "baseCrmDigest": "e4f3a46d91b19114a8c6a8874fb27462159939bca35be5ed87b56b28ac9a7970",
+      "requestKind": "system_exact",
+      "operation": "upsert_engagement",
+      "target": {
+        "entityType": "engagement",
+        "entityId": "crm:engagement:acme-pilot"
+      },
+      "proposedValue": {
+        "engagementId": "crm:engagement:acme-pilot",
+        "accountId": "crm:account:acme",
+        "name": "Intake-routing pilot",
+        "state": "active"
+      },
+      "proposedValueDigest": "9f03dc9f13e537b4c72a06c78955925a7423aa61e95b77541bd6a09cb55ce577",
+      "evidenceRefs": [
+        "ev:decision"
+      ],
+      "idempotencyKey": "meeting_demo_2026_08_24_01:v1:crm:engagement:write-set",
+      "submittedAt": "2026-08-24T04:00:30Z",
+      "submittedBy": {
+        "subjectId": "service:meeting-engine",
+        "sessionId": "service-session:demo",
+        "auditReceiptId": "audit:crm-request:demo",
+        "policyVersion": "crm-request-attribution-v1"
+      }
+    },
+    {
+      "schemaVersion": "1.0",
+      "orgId": "clearworksai",
+      "clientRequestId": "briefs:req:interaction:write-set",
+      "requestDigest": "730c7b6485b37d487f46a131087d6bd2903874c87a0c4c1494b58e9cad5a105e",
+      "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+      "recordVersion": 1,
+      "recordDigest": "be66407f98eeb28dc3063c31f800096f8bb3ab06681a56b415f57ca83f1833ba",
+      "canonicalClaimId": "canonical:decision-pilot",
+      "claimId": "claim:decision:v1",
+      "baseCrmVersion": "crm-v41",
+      "baseCrmDigest": "e4f3a46d91b19114a8c6a8874fb27462159939bca35be5ed87b56b28ac9a7970",
+      "requestKind": "system_exact",
+      "operation": "upsert_interaction",
+      "target": {
+        "entityType": "interaction",
+        "entityId": "crm:interaction:meeting_demo_2026_08_24_01"
+      },
+      "proposedValue": {
+        "interactionId": "crm:interaction:meeting_demo_2026_08_24_01",
+        "occurredAt": "2026-08-24T03:00:00Z",
+        "title": "Acme intake-routing pilot",
+        "accountIds": [
+          "crm:account:acme"
+        ],
+        "contactIds": [
+          "crm:contact:alex"
+        ],
+        "engagementIds": [
+          "crm:engagement:acme-pilot"
+        ]
+      },
+      "proposedValueDigest": "daa3338baeed791adaf5c097927dfba4dec4c7809e6f7c1f57e1501df776af3b",
+      "evidenceRefs": [
+        "ev:decision"
+      ],
+      "idempotencyKey": "meeting_demo_2026_08_24_01:v1:crm:interaction:write-set",
+      "submittedAt": "2026-08-24T04:00:30Z",
+      "submittedBy": {
+        "subjectId": "service:meeting-engine",
+        "sessionId": "service-session:demo",
+        "auditReceiptId": "audit:crm-request:demo",
+        "policyVersion": "crm-request-attribution-v1"
+      }
+    },
+    {
+      "schemaVersion": "1.0",
+      "orgId": "clearworksai",
+      "clientRequestId": "briefs:req:lifecycle:write-set",
+      "requestDigest": "ee4a769d5eebe9ed5c37530028a3a45f35b025f814a163f980d4659a2ee0b927",
+      "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+      "recordVersion": 1,
+      "recordDigest": "be66407f98eeb28dc3063c31f800096f8bb3ab06681a56b415f57ca83f1833ba",
+      "canonicalClaimId": "canonical:decision-pilot",
+      "claimId": "claim:decision:v1",
+      "baseCrmVersion": "crm-v41",
+      "baseCrmDigest": "e4f3a46d91b19114a8c6a8874fb27462159939bca35be5ed87b56b28ac9a7970",
+      "requestKind": "system_exact",
+      "operation": "upsert_lifecycle",
+      "target": {
+        "entityType": "lifecycle",
+        "entityId": "life:task:pilot"
+      },
+      "proposedValue": {
+        "lifecycleId": "life:task:pilot",
+        "canonicalClaimId": "canonical:task-send-pilot-outline",
+        "claimId": "claim:task:v1",
+        "recordDigest": "be66407f98eeb28dc3063c31f800096f8bb3ab06681a56b415f57ca83f1833ba",
+        "bucket": "my_task",
+        "direction": "josh_owned",
+        "workState": "open",
+        "ownerId": "crm:contact:josh",
+        "dueAt": "2026-08-25T17:00:00Z",
+        "dependencyState": "none"
+      },
+      "proposedValueDigest": "7403d0ab77029e076063dc218b8f102ced2d3e95bb5437bb59978332f779055b",
+      "evidenceRefs": [
+        "ev:decision"
+      ],
+      "idempotencyKey": "meeting_demo_2026_08_24_01:v1:crm:lifecycle:write-set",
+      "submittedAt": "2026-08-24T04:00:30Z",
+      "submittedBy": {
+        "subjectId": "service:meeting-engine",
+        "sessionId": "service-session:demo",
+        "auditReceiptId": "audit:crm-request:demo",
+        "policyVersion": "crm-request-attribution-v1"
+      }
+    }
+  ],
+  "intents": [
+    {
+      "schemaVersion": "1.0",
+      "orgId": "clearworksai",
+      "intentId": "crm:intent:account:write-set",
+      "intentDigest": "bb028efe9b7e63ece4aa705329268c8fc330dbec1f12ec3760b5bae68d31fde0",
+      "clientRequestId": "briefs:req:account:write-set",
+      "requestDigest": "ce049d14b926fb85347d4a2ca8627f0b8d9801219d6e4958a12c7cc7d4b4b633",
+      "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+      "recordVersion": 1,
+      "recordDigest": "be66407f98eeb28dc3063c31f800096f8bb3ab06681a56b415f57ca83f1833ba",
+      "canonicalClaimId": "canonical:decision-pilot",
+      "claimId": "claim:decision:v1",
+      "baseCrmVersion": "crm-v41",
+      "baseCrmDigest": "e4f3a46d91b19114a8c6a8874fb27462159939bca35be5ed87b56b28ac9a7970",
+      "requestKind": "system_exact",
+      "operation": "upsert_account",
+      "target": {
+        "entityType": "account",
+        "entityId": "crm:account:acme"
+      },
+      "proposedValue": {
+        "accountId": "crm:account:acme",
+        "name": "Acme",
+        "relationshipClass": "prospect",
+        "status": "active"
+      },
+      "proposedValueDigest": "22cef4ed39f057e70c29902d663ed361441ff3bbae09090e180586216078c363",
+      "evidenceRefs": [
+        "ev:decision"
+      ],
+      "idempotencyKey": "meeting_demo_2026_08_24_01:v1:crm:account:write-set",
+      "submittedAt": "2026-08-24T04:00:30Z",
+      "acceptedAt": "2026-08-24T04:00:31Z",
+      "submittedBy": {
+        "subjectId": "service:meeting-engine",
+        "sessionId": "service-session:demo",
+        "auditReceiptId": "audit:crm-request:demo",
+        "policyVersion": "crm-request-attribution-v1"
+      },
+      "authoritativeReadbackVersion": "crm-v42",
+      "authoritativeReadbackDigest": "d1335315b6bb94b18fbb708af64402d124d508fdd53914f43bacf44609156de9",
+      "reconciliationReceipt": null,
+      "state": "applied",
+      "stateVersion": 2,
+      "previousIntentDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rejectionCode": null,
+      "updatedAt": "2026-08-24T04:01:45Z"
+    },
+    {
+      "schemaVersion": "1.0",
+      "orgId": "clearworksai",
+      "intentId": "crm:intent:contact:write-set",
+      "intentDigest": "7cd0ff15b36f7e5b51ced19f01cea81da4e9c7a1c45758420c5dd6809b61f2b5",
+      "clientRequestId": "briefs:req:contact:write-set",
+      "requestDigest": "432bfcf197287f9201ec75f2530afce9b7870cdf090bf833e8d08c823f18f6ea",
+      "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+      "recordVersion": 1,
+      "recordDigest": "be66407f98eeb28dc3063c31f800096f8bb3ab06681a56b415f57ca83f1833ba",
+      "canonicalClaimId": "canonical:decision-pilot",
+      "claimId": "claim:decision:v1",
+      "baseCrmVersion": "crm-v41",
+      "baseCrmDigest": "e4f3a46d91b19114a8c6a8874fb27462159939bca35be5ed87b56b28ac9a7970",
+      "requestKind": "system_exact",
+      "operation": "upsert_contact",
+      "target": {
+        "entityType": "contact",
+        "entityId": "crm:contact:alex"
+      },
+      "proposedValue": {
+        "contactId": "crm:contact:alex",
+        "accountId": "crm:account:acme",
+        "displayName": "Alex",
+        "role": "Operations lead"
+      },
+      "proposedValueDigest": "cf4eb5ba9ff0d3dfb16ed6cc5e7646e5ab3f08cf950a1420db7bfb48bce2490d",
+      "evidenceRefs": [
+        "ev:decision"
+      ],
+      "idempotencyKey": "meeting_demo_2026_08_24_01:v1:crm:contact:write-set",
+      "submittedAt": "2026-08-24T04:00:30Z",
+      "acceptedAt": "2026-08-24T04:00:31Z",
+      "submittedBy": {
+        "subjectId": "service:meeting-engine",
+        "sessionId": "service-session:demo",
+        "auditReceiptId": "audit:crm-request:demo",
+        "policyVersion": "crm-request-attribution-v1"
+      },
+      "authoritativeReadbackVersion": "crm-v42",
+      "authoritativeReadbackDigest": "d1335315b6bb94b18fbb708af64402d124d508fdd53914f43bacf44609156de9",
+      "reconciliationReceipt": null,
+      "state": "applied",
+      "stateVersion": 2,
+      "previousIntentDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rejectionCode": null,
+      "updatedAt": "2026-08-24T04:01:45Z"
+    },
+    {
+      "schemaVersion": "1.0",
+      "orgId": "clearworksai",
+      "intentId": "crm:intent:engagement:write-set",
+      "intentDigest": "1d3e077c76bff1fac4790e383586682223563fad2e1937ae2eb05c1e14e3a3ed",
+      "clientRequestId": "briefs:req:engagement:write-set",
+      "requestDigest": "97e043ac795b7a3367ccb46003b3f7306340fb5a83c699e7a1d681b2540ae5a1",
+      "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+      "recordVersion": 1,
+      "recordDigest": "be66407f98eeb28dc3063c31f800096f8bb3ab06681a56b415f57ca83f1833ba",
+      "canonicalClaimId": "canonical:decision-pilot",
+      "claimId": "claim:decision:v1",
+      "baseCrmVersion": "crm-v41",
+      "baseCrmDigest": "e4f3a46d91b19114a8c6a8874fb27462159939bca35be5ed87b56b28ac9a7970",
+      "requestKind": "system_exact",
+      "operation": "upsert_engagement",
+      "target": {
+        "entityType": "engagement",
+        "entityId": "crm:engagement:acme-pilot"
+      },
+      "proposedValue": {
+        "engagementId": "crm:engagement:acme-pilot",
+        "accountId": "crm:account:acme",
+        "name": "Intake-routing pilot",
+        "state": "active"
+      },
+      "proposedValueDigest": "9f03dc9f13e537b4c72a06c78955925a7423aa61e95b77541bd6a09cb55ce577",
+      "evidenceRefs": [
+        "ev:decision"
+      ],
+      "idempotencyKey": "meeting_demo_2026_08_24_01:v1:crm:engagement:write-set",
+      "submittedAt": "2026-08-24T04:00:30Z",
+      "acceptedAt": "2026-08-24T04:00:31Z",
+      "submittedBy": {
+        "subjectId": "service:meeting-engine",
+        "sessionId": "service-session:demo",
+        "auditReceiptId": "audit:crm-request:demo",
+        "policyVersion": "crm-request-attribution-v1"
+      },
+      "authoritativeReadbackVersion": "crm-v42",
+      "authoritativeReadbackDigest": "d1335315b6bb94b18fbb708af64402d124d508fdd53914f43bacf44609156de9",
+      "reconciliationReceipt": null,
+      "state": "applied",
+      "stateVersion": 2,
+      "previousIntentDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rejectionCode": null,
+      "updatedAt": "2026-08-24T04:01:45Z"
+    },
+    {
+      "schemaVersion": "1.0",
+      "orgId": "clearworksai",
+      "intentId": "crm:intent:interaction:write-set",
+      "intentDigest": "778fbfe1a0ed789a63f556eef968f2c8d733b567116a52e0fac04d511c131f4b",
+      "clientRequestId": "briefs:req:interaction:write-set",
+      "requestDigest": "730c7b6485b37d487f46a131087d6bd2903874c87a0c4c1494b58e9cad5a105e",
+      "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+      "recordVersion": 1,
+      "recordDigest": "be66407f98eeb28dc3063c31f800096f8bb3ab06681a56b415f57ca83f1833ba",
+      "canonicalClaimId": "canonical:decision-pilot",
+      "claimId": "claim:decision:v1",
+      "baseCrmVersion": "crm-v41",
+      "baseCrmDigest": "e4f3a46d91b19114a8c6a8874fb27462159939bca35be5ed87b56b28ac9a7970",
+      "requestKind": "system_exact",
+      "operation": "upsert_interaction",
+      "target": {
+        "entityType": "interaction",
+        "entityId": "crm:interaction:meeting_demo_2026_08_24_01"
+      },
+      "proposedValue": {
+        "interactionId": "crm:interaction:meeting_demo_2026_08_24_01",
+        "occurredAt": "2026-08-24T03:00:00Z",
+        "title": "Acme intake-routing pilot",
+        "accountIds": [
+          "crm:account:acme"
+        ],
+        "contactIds": [
+          "crm:contact:alex"
+        ],
+        "engagementIds": [
+          "crm:engagement:acme-pilot"
+        ]
+      },
+      "proposedValueDigest": "daa3338baeed791adaf5c097927dfba4dec4c7809e6f7c1f57e1501df776af3b",
+      "evidenceRefs": [
+        "ev:decision"
+      ],
+      "idempotencyKey": "meeting_demo_2026_08_24_01:v1:crm:interaction:write-set",
+      "submittedAt": "2026-08-24T04:00:30Z",
+      "acceptedAt": "2026-08-24T04:00:31Z",
+      "submittedBy": {
+        "subjectId": "service:meeting-engine",
+        "sessionId": "service-session:demo",
+        "auditReceiptId": "audit:crm-request:demo",
+        "policyVersion": "crm-request-attribution-v1"
+      },
+      "authoritativeReadbackVersion": "crm-v42",
+      "authoritativeReadbackDigest": "d1335315b6bb94b18fbb708af64402d124d508fdd53914f43bacf44609156de9",
+      "reconciliationReceipt": null,
+      "state": "applied",
+      "stateVersion": 2,
+      "previousIntentDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rejectionCode": null,
+      "updatedAt": "2026-08-24T04:01:45Z"
+    },
+    {
+      "schemaVersion": "1.0",
+      "orgId": "clearworksai",
+      "intentId": "crm:intent:lifecycle:write-set",
+      "intentDigest": "d0e9679c24ccd14adb3fc1aa767e3e7a91ae523df97e1cbe12cd7f513aee3b1e",
+      "clientRequestId": "briefs:req:lifecycle:write-set",
+      "requestDigest": "ee4a769d5eebe9ed5c37530028a3a45f35b025f814a163f980d4659a2ee0b927",
+      "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+      "recordVersion": 1,
+      "recordDigest": "be66407f98eeb28dc3063c31f800096f8bb3ab06681a56b415f57ca83f1833ba",
+      "canonicalClaimId": "canonical:decision-pilot",
+      "claimId": "claim:decision:v1",
+      "baseCrmVersion": "crm-v41",
+      "baseCrmDigest": "e4f3a46d91b19114a8c6a8874fb27462159939bca35be5ed87b56b28ac9a7970",
+      "requestKind": "system_exact",
+      "operation": "upsert_lifecycle",
+      "target": {
+        "entityType": "lifecycle",
+        "entityId": "life:task:pilot"
+      },
+      "proposedValue": {
+        "lifecycleId": "life:task:pilot",
+        "canonicalClaimId": "canonical:task-send-pilot-outline",
+        "claimId": "claim:task:v1",
+        "recordDigest": "be66407f98eeb28dc3063c31f800096f8bb3ab06681a56b415f57ca83f1833ba",
+        "bucket": "my_task",
+        "direction": "josh_owned",
+        "workState": "open",
+        "ownerId": "crm:contact:josh",
+        "dueAt": "2026-08-25T17:00:00Z",
+        "dependencyState": "none"
+      },
+      "proposedValueDigest": "7403d0ab77029e076063dc218b8f102ced2d3e95bb5437bb59978332f779055b",
+      "evidenceRefs": [
+        "ev:decision"
+      ],
+      "idempotencyKey": "meeting_demo_2026_08_24_01:v1:crm:lifecycle:write-set",
+      "submittedAt": "2026-08-24T04:00:30Z",
+      "acceptedAt": "2026-08-24T04:00:31Z",
+      "submittedBy": {
+        "subjectId": "service:meeting-engine",
+        "sessionId": "service-session:demo",
+        "auditReceiptId": "audit:crm-request:demo",
+        "policyVersion": "crm-request-attribution-v1"
+      },
+      "authoritativeReadbackVersion": "crm-v42",
+      "authoritativeReadbackDigest": "d1335315b6bb94b18fbb708af64402d124d508fdd53914f43bacf44609156de9",
+      "reconciliationReceipt": null,
+      "state": "applied",
+      "stateVersion": 2,
+      "previousIntentDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rejectionCode": null,
+      "updatedAt": "2026-08-24T04:01:45Z"
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "schemaVersion": "1.0",
+  "orgId": "clearworksai",
+  "observationId": "observation:fireflies:demo",
+  "observationDigest": "ae0d7e174917d73ab9cca7e1da8dd73c3ca8b9c4bd65432dffeec8a27c7abbd1",
+  "provider": "fireflies",
+  "providerSourceId": "demo",
+  "receivedAt": "2026-08-24T04:00:00Z",
+  "rawBodyDigest": "6173174efe3cc2ae9f1600d508f06823caa8691cf7de38470b07a869647f96cb",
+  "signatureVerification": {
+    "scheme": "hmac-sha256-raw-body",
+    "headerName": "X-Hub-Signature",
+    "headerValueDigest": "fc4928595ac4d7bc9006e4f79060fa5676dd044fadfa9edf0d88923cc71def4f",
+    "keyConfigVersion": "fireflies-webhook-v2-key-v1",
+    "providerDocsSource": "https://docs.fireflies.ai/graphql-api/webhooks-v2",
+    "verifiedAt": "2026-08-24T04:00:00Z",
+    "verificationReceiptDigest": "2858451f8560eb7a7249fc4ee496f8ecf808f3cd0af547ccda5132c5a567c6ff",
+    "verified": true,
+    "keyId": "fireflies-webhook-v2-test-key",
+    "verificationConfigDigest": "10c067d772450f32c52e8de7e16b3f409ae2f4fb7e31ac72d3c043a0020bc30b"
+  },
+  "relay": {
+    "state": "RELAYED",
+    "intentDigest": "68c584a24b9d4bed19c818e0caeb1f47b88bc379f46a25ddf59e930a05a78477",
+    "relayReceiptDigest": "9b058e86bb28417cd3d5ed8822843ccd4651ac5cf65cec5a4c4ebed809ed65a0",
+    "idempotencyKey": "fireflies:demo:relay:v1",
+    "previousState": "LEASED",
+    "attempt": 1,
+    "leaseVersion": 1,
+    "firstAttemptAt": "2026-08-24T04:00:01Z",
+    "deadlineAt": "2026-08-24T04:15:01Z",
+    "leaseOwner": "cortext:fireflies-relay",
+    "leaseExpiresAt": "2026-08-24T04:01:01Z",
+    "lastUpdatedAt": "2026-08-24T04:00:10Z",
+    "errorCode": null,
+    "internalAuth": {
+      "scheme": "hmac-sha256-canonical-request-v1",
+      "keyId": "cortext-relay-key-v1",
+      "method": "POST",
+      "path": "/internal/v1/meeting-observations",
+      "timestamp": "2026-08-24T04:00:01Z",
+      "nonce": "relay_nonce_demo_0001",
+      "bodyDigest": "6173174efe3cc2ae9f1600d508f06823caa8691cf7de38470b07a869647f96cb",
+      "canonicalRequestDigest": "e9b7844b1a69e3b669fa4d2bdab1483e62763cc8dc6ae57c08d748742ce7e6a1",
+      "macHex": "9b058e86bb28417cd3d5ed8822843ccd4651ac5cf65cec5a4c4ebed809ed65a0"
+    },
+    "replayReceipt": {
+      "storeId": "meeting-relay-nonce-store-v1",
+      "nonceKey": "1c4fa7958fc2e69462cdfe87e8b6c0175a4a259c8adf61a2eefec608f03c31c7",
+      "decision": "accepted_new",
+      "acceptedAt": "2026-08-24T04:00:01Z",
+      "expiresAt": "2026-08-24T04:05:01Z",
+      "receiptMacHex": "1ce93430ad541df8b419d3300918a06cc475543798ffb7111d8d24825d830931"
+    },
+    "durableReceipt": {
+      "storeId": "meeting-observation-store-v1",
+      "storageKey": "clearworksai:observation:fireflies:demo",
+      "observationId": "observation:fireflies:demo",
+      "rawBodyDigest": "6173174efe3cc2ae9f1600d508f06823caa8691cf7de38470b07a869647f96cb",
+      "persistedAt": "2026-08-24T04:00:01Z",
+      "durability": "fsync_committed",
+      "receiptDigest": "53d73bded2c793997c8d8feda5a4630c600b90de0e3dd35559559c5607d4ba5c"
+    }
+  }
+}

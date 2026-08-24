@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "1.0",
+  "orgId": "clearworksai",
+  "failureId": "pre-record-failure:fireflies:req-demo:persist",
+  "failureDigest": "a0c103bc3dc7ddb379338d69cc3a1de0d942e6b95b0c708465dba62252e954da",
+  "provider": "fireflies",
+  "stage": "persist",
+  "sourceIdentity": {
+    "requestId": "request:fireflies:webhook:demo",
+    "providerSourceId": "demo",
+    "rawBodyDigest": "6173174efe3cc2ae9f1600d508f06823caa8691cf7de38470b07a869647f96cb",
+    "receivedAt": "2026-08-24T04:00:00Z",
+    "sourceIdentityDigest": "fc3301f3afd6fc5a847000007711917072cb477a0a5de5aa539769ff43d880b7"
+  },
+  "errorCode": "INGRESS_PERSIST_FAILED",
+  "retryable": true,
+  "failedAt": "2026-08-24T04:00:01Z",
+  "encryptedQuarantine": {
+    "state": "DELETED",
+    "reference": "encrypted-quarantine://fireflies/2026-08-24/request-demo.bin",
+    "ciphertextDigest": "abababababababababababababababababababababababababababababababab",
+    "encryptionKeyId": "ingress-quarantine-key-v1",
+    "encryptedAt": "2026-08-24T04:00:01Z",
+    "expiresAt": "2026-08-25T04:00:00Z"
+  },
+  "piiSafeAlertReceipt": {
+    "alertId": "alert:pre-record:req-demo",
+    "errorCode": "INGRESS_PERSIST_FAILED",
+    "summaryCode": "PRE_RECORD_PERSIST_FAILURE",
+    "rawBodyIncluded": false,
+    "providerPayloadIncluded": false,
+    "createdAt": "2026-08-24T04:00:02Z",
+    "receiptDigest": "7691cfca4b693e5568f54afa7337aef708dd23f29fef01083421cf114443866e"
+  },
+  "deletionReceipt": {
+    "state": "DELETED",
+    "scheduledFor": "2026-08-25T04:00:00Z",
+    "deletedAt": "2026-08-25T04:00:00Z",
+    "quarantineReferenceDigest": "4b958f227b5d7cf6b3835cb9eeb7e51d1b09716da7be2a43f4e7b4c64eda95c5",
+    "receiptDigest": "25d8914587aa1b8052ca3c0e18252955cf4a1de4b237181524f5edb467540110"
+  },
+  "authenticationState": "verified"
+}

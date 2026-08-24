@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clearworks.ai/contracts/coverage-clock-authority-v1.schema.json",
+  "title": "CoverageClockAuthorityV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "orgId", "policyId", "policyDigest", "policyVersion", "keyId", "validFrom", "validUntil", "maximumIssuedAtSkewSeconds", "replayWindowSeconds"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" }, "orgId": { "type": "string", "minLength": 1 },
+    "policyId": { "type": "string", "minLength": 1 }, "policyDigest": { "$ref": "#/$defs/sha256" },
+    "policyVersion": { "const": "coverage-clock-authority-v1" }, "keyId": { "type": "string", "minLength": 1 },
+    "validFrom": { "$ref": "#/$defs/dateTime" }, "validUntil": { "$ref": "#/$defs/dateTime" },
+    "maximumIssuedAtSkewSeconds": { "type": "integer", "minimum": 1, "maximum": 300 },
+    "replayWindowSeconds": { "type": "integer", "minimum": 1, "maximum": 900 }
+  },
+  "$defs": { "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "dateTime": { "type": "string", "format": "date-time" } }
+}

@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clearworks.ai/contracts/claim-disposition-set-v1.schema.json",
+  "title": "ClaimDispositionSetV1",
+  "description": "Separately produced claim decisions joined to provider candidates. dispositionSetDigest is SHA-256 of RFC 8785 JCS bytes after removing only dispositionSetDigest; each decisionDigest is SHA-256 over the full decision after removing only decisionDigest and therefore directly binds orgId, canonicalMeetingId, recordVersion, recomputed identity basis, and recomputed evidence lineage.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "orgId",
+    "dispositionSetId",
+    "dispositionSetDigest",
+    "canonicalMeetingId",
+    "recordVersion",
+    "candidateSetDigest",
+    "authorityRegistryDigest",
+    "dispositions"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "orgId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dispositionSetId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dispositionSetDigest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "canonicalMeetingId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "recordVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "candidateSetDigest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "authorityRegistryDigest": {
+      "$ref": "#/$defs/sha256"
+    },
+    "dispositions": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orgId",
+          "canonicalMeetingId",
+          "recordVersion",
+          "claimId",
+          "canonicalClaimId",
+          "identityBasisDigest",
+          "evidenceLineageDigest",
+          "candidateContentDigest",
+          "authorizedMaterialization",
+          "evidenceSetDigest",
+          "state",
+          "kind",
+          "actorId",
+          "policyVersion",
+          "decisionDigest",
+          "decidedAt"
+        ],
+        "properties": {
+          "orgId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "canonicalMeetingId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "recordVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "claimId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "canonicalClaimId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidenceSetDigest": {
+            "$ref": "#/$defs/sha256"
+          },
+          "state": {
+            "enum": [
+              "accepted",
+              "rejected",
+              "superseded"
+            ]
+          },
+          "kind": {
+            "enum": [
+              "deterministic_policy",
+              "user",
+              "crm"
+            ]
+          },
+          "actorId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "policyVersion": {
+            "type": "string",
+            "minLength": 1
+          },
+          "decisionDigest": {
+            "$ref": "#/$defs/sha256"
+          },
+          "decidedAt": {
+            "$ref": "#/$defs/dateTime"
+          },
+          "identityBasisDigest": {
+            "$ref": "#/$defs/sha256"
+          },
+          "evidenceLineageDigest": {
+            "$ref": "#/$defs/sha256"
+          },
+          "candidateContentDigest": {
+            "$ref": "#/$defs/sha256"
+          },
+          "authorizedMaterialization": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "task",
+              "crm",
+              "aggregate"
+            ],
+            "properties": {
+              "task": {
+                "type": "boolean"
+              },
+              "crm": {
+                "type": "boolean"
+              },
+              "aggregate": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "dateTime": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

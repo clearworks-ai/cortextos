@@ -1,0 +1,849 @@
+{
+  "schema_version": "meeting-intelligence-compatibility-manifest-v12",
+  "manifest_state": "frozen_g5_packaging_provenance_replacement_candidate",
+  "promotion_authority": false,
+  "generated_at": "2026-08-24T13:46:04.000Z",
+  "predecessor_local_candidate": {
+    "schema_version": "meeting-intelligence-compatibility-manifest-v11",
+    "manifest_sha256": "49a86d2d8c472e677c92cd968a047d2a0286657cd3d27d74c2557bcd036b9c2e",
+    "scope": "g1_g4_pass_g5_packaging_provenance_failed_candidate"
+  },
+  "predecessor_failed_evidence": {
+    "manifest_sha256": "49a86d2d8c472e677c92cd968a047d2a0286657cd3d27d74c2557bcd036b9c2e",
+    "terminal_receipt_id": "1787578600067-larry-codex-cmwzk",
+    "terminal_receipt_path": "/Users/joshweiss/code/cortextos/state/task-observer-v1/reviews/task_1787578173767_21158264/meeting-intelligence-g2-g5-replacement-review-2026-08-24.md",
+    "terminal_receipt_sha256": "c100aba813030924e193656f757d8ad70e75e7492435f0454436844bc2c7153e",
+    "verdict": "not_converged",
+    "severity": {
+      "critical": 1,
+      "high": 0,
+      "medium": 0,
+      "low": 0
+    },
+    "preserved_as": "immutable_failed_review_evidence_not_promotion_authority"
+  },
+  "repository_bases": {
+    "cortextos": "15defb1307df39f2df77522e70737c46dac52079",
+    "briefs": "5b521f2e4f0ec8655643b16641f41202705d7d6b"
+  },
+  "contract_distribution": {
+    "owner": "cortextos",
+    "source_path": "state/specs/contracts",
+    "briefs_vendor_path": "contracts/meeting-intelligence/v1",
+    "mode": "generated_exact_copy_hash_checked_in_ci",
+    "consumer_first": true,
+    "briefs_review_bundle_id": "sha256:55a4896cc95858e6413c8823a2ea1846b2ca5f1ae131147a93770a878228ced2",
+    "briefs_review_bundle_manifest": "state/specs/evidence/briefs-review-bundle/55a4896cc95858e6413c8823a2ea1846b2ca5f1ae131147a93770a878228ced2/bundle-manifest.json",
+    "briefs_source_state": "untracked_planning_and_product_evidence_not_present_at_pinned_base_commit",
+    "goalify_vendor_promotion_gate": "required_not_run"
+  },
+  "runtime_trust": {
+    "required_environment_variable": "MEETING_AUTHORITY_ROOT_DIGEST",
+    "fireflies_verification_required_environment_variable": "FIREFLIES_VERIFICATION_CONFIG_DIGEST",
+    "fireflies_verification_config_digest": "10c067d772450f32c52e8de7e16b3f409ae2f4fb7e31ac72d3c043a0020bc30b",
+    "coverage_clock_required_environment_variable": "COVERAGE_CLOCK_AUTHORITY_DIGEST",
+    "coverage_clock_authority_digest": "c2c32ef422d602145572b96972e4e03352d43fb307581c73258bc1bf58a1ba3d",
+    "authority_root_digest": "98cf10a485937fde4abfa104f2ebc69631faa90ff7cdd4f71beb55f8abd72100",
+    "org_id": "clearworksai",
+    "relay_internal_auth_key_ids": [
+      "cortext-relay-key-v1"
+    ],
+    "coverage_enumerator_key_ids": [
+      "fireflies-connector-v1"
+    ],
+    "source": "single_externally_pinned_authority_root_not_packet_or_provider"
+  },
+  "trusted_inputs": {
+    "authority_root_digest": "98cf10a485937fde4abfa104f2ebc69631faa90ff7cdd4f71beb55f8abd72100",
+    "claim_authority_registry_digest": "fdb0ced747812742c1d5c03301c68c3b6718c9e615d1fb936fdb34c601f3a3c9",
+    "claim_disposition_set_digest": "d50f7f77efcc10653022cfa4e3b6bd76b6205c56bac74eb8f5993a8143c79b5b",
+    "identity_override_digest": "a501f7519a98156014ef205cc25f0dbbda48da51aac22f1e7bef669a1b097279",
+    "authorized_claim_decision_digests": [
+      "b57979c6682d31edcf3c5d90ae1f1cdef64a62725419c5384e6c87d8985740d9",
+      "2d4b38dde3607ce8f65f1cf91fe91e25b06869ae6e49dda72401eb930ac85c0b",
+      "911cb4b526ac8c8b121a3649f9cb763a9005aeec4a0c650df42efed972dad734",
+      "6381e0a21852157367d17b478ee5c88545bca0471b0b5a64093f6383a420574b",
+      "b8d55533dbb6e72d764dc5038dd950d14996b1fa947d105442395fe247c6481e",
+      "7c61ef280b059d0cbf7ec090ea7529d36daecf5f16eb0a8b19596fd24b88bad6",
+      "b1fcfe59be67a34887555c635b9b1f87f2bd68df2e9eb953fa515780168bc345",
+      "5535488de582c9c0be1b0f2d4a6f08f401bbe30c9ba848a1555b211cc423663b",
+      "8891baa3b3bd679cbde627fd3b78c817c897a1a69e633667168184906d08bf18"
+    ],
+    "authorized_identity_decision_digests": [
+      "cbe29b854079e7e354b3aa21d2bd5183811324496efda5303cce6ed3d3787e19"
+    ]
+  },
+  "governed_artifacts": {
+    "contracts": [
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/briefs-projection-readback-v1.golden.json",
+        "sha256": "242399ee09b08a73befe4f88ac2602bf4a3f1c9434201c096a27fb5310b7cb29",
+        "bytes": 800,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/briefs-projection-readback-v1.schema.json",
+        "sha256": "ef2e00cf9ad64b8ca94513b35bb8429450c77b60a23f766d904632c561375446",
+        "bytes": 1369,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/briefs-meeting-intelligence-output-v1.golden.json",
+        "sha256": "759b2c22af4fae2ae2562336afb85377e49f4f37b7d89d97f698add6fc62e0c8",
+        "bytes": 7083,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/briefs-meeting-intelligence-output-v1.schema.json",
+        "sha256": "113e4c6898ff14f76bb05a64dd96f52810dd4cb460c9d40ebd9ce05eb970f943",
+        "bytes": 6969,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/coverage-clock-authority-v1.golden.json",
+        "sha256": "edb1e0b2772c1110890f1b99c5367724fdbfaeda25646b89e385b1ec974f573f",
+        "bytes": 423,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/coverage-clock-authority-v1.schema.json",
+        "sha256": "a6574de6f81dbe0c1ded7a26804e9481ee0c8f2979f67285663657bff44f429a",
+        "bytes": 1133,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/coverage-clock-authority-pin-v1.json",
+        "sha256": "8e923ea347031a0079333ee288b382c945ebf9b18427be6f456c430e4668a1f5",
+        "bytes": 182,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/coverage-clock-authority-v1.test-secrets.json",
+        "sha256": "8f3aa0a9929673b7fa16389832afd83dff03ab96b09af40ad8ff5bfa54ec143e",
+        "bytes": 169,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/coverage-evaluation-clock-v1.golden.json",
+        "sha256": "aa7fb925881fb2e4ee1cf0dd8f60e9cdd292aaaacc5611f13acde2a81b2f6def",
+        "bytes": 657,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/coverage-evaluation-clock-v1.schema.json",
+        "sha256": "7b60f08437c23e80a1e28ca73a91ccc764e5897cad42890adf8018702eb2750e",
+        "bytes": 1401,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/semantic-evaluation-dataset-v1.golden.json",
+        "sha256": "e9952318c3d639e5e557b6e50904538379e5715916d7c003e6c055c2ae08289e",
+        "bytes": 41084,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/semantic-evaluation-dataset-v1.schema.json",
+        "sha256": "1ff74358289782e3a9f7d037187b9726e1e93a283b0cb577ce3201b2f07ee0e8",
+        "bytes": 1551,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/semantic-evaluation-v1.golden.json",
+        "sha256": "de949bddac0cf3a85625863fa841c09abdbdea19bd6847a956f785267d03b118",
+        "bytes": 10659,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/semantic-evaluation-v1.schema.json",
+        "sha256": "ecb28653e98bb6936c26f4dedf1fed5b00501132d48551b4a6f3a6bf32bf21ab",
+        "bytes": 5083,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/claim-authority-registry-v1.golden.json",
+        "sha256": "b6b83977cb442d5f2e362c8c42e4f204fb6063ae1f4f3e01df0aaa8f3818baad",
+        "bytes": 3460,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/claim-authority-registry-v1.schema.json",
+        "sha256": "dd621f633f97eb853330ef66bca6fbc33ef8f819d4e906c182eebde1c58c6a81",
+        "bytes": 3613,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/claim-disposition-set-v1.golden.json",
+        "sha256": "03a3dd67d2b7229dbdc706d13621cbe25179f199eb17fa7d9c03b27257f4b01f",
+        "bytes": 9554,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/claim-disposition-set-v1.schema.json",
+        "sha256": "955ddb667d09d5233eed44d1f8c23f14b4b6892ec9d6c512858f4d1ddcbcf947",
+        "bytes": 4277,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/coverage-snapshot-v1.golden.json",
+        "sha256": "3db66ced0ac6210e5b0f247c6ca45d1b17279f64b7f9f510f3e7431b0feb92c9",
+        "bytes": 1583,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/coverage-snapshot-v1.schema.json",
+        "sha256": "3c590270e4eb734483eea32324bf8338d79051ac96655e4f61f0a677cea35acd",
+        "bytes": 5886,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/crm-projection-snapshot-v1.base.golden.json",
+        "sha256": "a4bb5133595c1aa9ae7c92f02e76387ba3318fa83b5d8ecd38e6024fd6aaa6b9",
+        "bytes": 1813,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/crm-projection-snapshot-v1.golden.json",
+        "sha256": "0049525f3b964b45aae4a96701176e0b09a9e1198fbc7b592da358d600048c39",
+        "bytes": 3654,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/crm-projection-snapshot-v1.schema.json",
+        "sha256": "6c4f7b5f642e4f8dbb427fa2b60640d42b695f55962116d1bab5164ee0d737cc",
+        "bytes": 6267,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/crm-write-intent-request-v1.golden.json",
+        "sha256": "6491adf89c85926f208c708b4785452d61bf28b363f73df62ca2f65d133ce8da",
+        "bytes": 1521,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/crm-write-intent-request-v1.schema.json",
+        "sha256": "85cfd6e23323f346d72734a4ff7743bf2e9e37d8283cbddcca8e372e37bc98e0",
+        "bytes": 15090,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/crm-write-intent-v1.golden.json",
+        "sha256": "8c1e5a5d36fb679f33c131c5b64664aed23d90c80905e286fc44c039d99c5a9d",
+        "bytes": 2061,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/crm-write-intent-v1.pending.golden.json",
+        "sha256": "22d8d50f438c08fd0b0282bba29f8ab842ea36ec5778003605c5f2d5c9baa344",
+        "bytes": 1941,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/crm-write-intent-v1.schema.json",
+        "sha256": "5443188e3d2f0fd86582c7b1269098089c439b377e8ff001329f118811eb61a5",
+        "bytes": 20143,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/crm-write-set-artifacts-v1.golden.json",
+        "sha256": "944c49c23abf99eb5013067db4f0ac28cdb92b589add60e71ee7bc6a26f8bf94",
+        "bytes": 19205,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/crm-write-set-artifacts-v1.schema.json",
+        "sha256": "3b37f93348dafd336a7d35821bdc1a15261226e0da512cbb65c0b4d05d4636ea",
+        "bytes": 1155,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/crm-write-set-v1.golden.json",
+        "sha256": "60bc2a2d633b7f95e31ffda5881e88a7ce62206954db54645d6266263b97d42e",
+        "bytes": 4584,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/crm-write-set-v1.schema.json",
+        "sha256": "40e1f9a50c3023893e6d09fdddf8a880296a437b088f45f39392d97bba9d84a3",
+        "bytes": 2879,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/fireflies-verification-config-pin-v1.json",
+        "sha256": "f0c1a691c01e1ea6b5f5d8bf49f9e5b30103081774fd8d4838f41163e3db8be2",
+        "bytes": 190,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/fireflies-verification-config-v1.golden.json",
+        "sha256": "47844072a17cb95cbfe4e3893f5a08003c645c2ee6ab5b1123c206543092182a",
+        "bytes": 938,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/fireflies-verification-config-v1.schema.json",
+        "sha256": "d6ed9fa6e01fbc17e30f62e5990ed374701949fc186e01a1368dd55ea6f04c29",
+        "bytes": 2456,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/fireflies-webhook-v2-test-vectors.json",
+        "sha256": "c5920e9c1ba5e686953b393aac029a44f5d3d688695640ebaf2b24eeceb08b7d",
+        "bytes": 3657,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/fireflies-webhook-v2.test-secrets.json",
+        "sha256": "d37e1b9b606e32653a9bb0a86faf3a8c178dbd4fb2b9805a281cf1e205cbce57",
+        "bytes": 170,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/pre-record-ingress-failure-v1.golden.json",
+        "sha256": "eccfcc1a8e2eb07dcded332577a9487c72b6cd19745ae997df114afe929734fe",
+        "bytes": 1784,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/pre-record-ingress-failure-v1.schema.json",
+        "sha256": "296e64dc96b20fd75fa039cf438a1c03f573bb21d940496ef0b0af7d14eec2bf",
+        "bytes": 4793,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/relay-auth-v1.test-secrets.json",
+        "sha256": "aa2760a628e68ce7ca105c32535f319473155a78cee3bbaaaf609165c67e91f8",
+        "bytes": 214,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/identity-override-v1.golden.json",
+        "sha256": "eb7b3cc29b7032e700f30b1e2886a5f87c8d1cb8994e7930272a8f3a0b77562e",
+        "bytes": 801,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/identity-override-v1.schema.json",
+        "sha256": "5d7240c44d1794f4f60c198800a9ab29becb30abf44da81c62638b2ce7bd449e",
+        "bytes": 1966,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/json-schema-subset-validator.mjs",
+        "sha256": "61a75bd71299d8003459f1e16a69a63875ef33478e3bff595f2207318bcc3e46",
+        "bytes": 4905,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/meeting-authority-root-pin-v1.json",
+        "sha256": "af6e173fde6d40607291ee7fc8a0ba73067d7eba2ef95e36a8a489c59aca8294",
+        "bytes": 380,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/meeting-authority-root-v1.golden.json",
+        "sha256": "454a5dddb567fd6c4b5f44bdc4f16bdf6601a09f68643a423a49eeb486440171",
+        "bytes": 1635,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/meeting-authority-root-v1.schema.json",
+        "sha256": "27209e1cea646b78737f7e023a1ff9cf8bfe4e4cda5d13c0c861f1994db82ec1",
+        "bytes": 2562,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/meeting-contract-negative-cases.json",
+        "sha256": "5f2d89822a34686b28cf6f39f87bdea18522f6a2903bfed23126761bb38668e1",
+        "bytes": 9783,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/meeting-delivery-envelope-v1.golden.json",
+        "sha256": "de69be6e8a5ad0e052e9e84b64fface81f64d668d5115210718f2d1464068225",
+        "bytes": 12691,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/meeting-delivery-envelope-v1.schema.json",
+        "sha256": "72a63893eb2b188e9e669d1f61a506c59a218612bbdb5d6f048b6b1fb0201dab",
+        "bytes": 34528,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/meeting-observation-v1.golden.json",
+        "sha256": "1dc590f246990a5ed13cdb73c7808a59cb3a748ac4420c21ecaab29233873e75",
+        "bytes": 3003,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/meeting-observation-v1.schema.json",
+        "sha256": "f5c5e62166c2e4e0fbced33fd8fb1bdcad99bfda3a37feda91571776630bc738",
+        "bytes": 8893,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/meeting-processing-failure-v1.golden.json",
+        "sha256": "33ceeadc34f7e92baecb4cc770ce05f3417a9f8680c857d02a835123cb7f8dc0",
+        "bytes": 1108,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/meeting-processing-failure-v1.schema.json",
+        "sha256": "0ed8a8f07e57070b4d4afc6bc5f3c11c020257ba123f3e6dacb1532fd35ac464",
+        "bytes": 2274,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/meeting-record-v1.golden.json",
+        "sha256": "ae7083c0dcb626f0f104ba1ab6f7c4d44569a222f29bd4e6c9ca9075a45ef5c1",
+        "bytes": 32194,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/meeting-record-v1.schema.json",
+        "sha256": "b394529865aa8beda536fc4352f7eb139afca16c3252db11af9656c2d4305241",
+        "bytes": 32686,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/projection-replication-ack-v1.golden.json",
+        "sha256": "15b5876ecb74e12e0c39e8d52f0121229d0bc3f39f879423c25616fbfc7a79eb",
+        "bytes": 795,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/projection-replication-ack-v1.schema.json",
+        "sha256": "ee9208132158eb2df3b2b3f94914c9ad8331ad0bd03ce7d981a05d90b455b030",
+        "bytes": 3075,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/rehash-meeting-compatibility-manifest.mjs",
+        "sha256": "1294221696b0ab36b6600b740dcdc02c85a2dbbc5da981a6f85e307152998274",
+        "bytes": 1175,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/rebuild-g1-authority-fixtures.mjs",
+        "sha256": "e885b6a730788862f6877ebb18786b648ea96c7594462a1da69c90de19d01646",
+        "bytes": 32406,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/contracts/validate-meeting-contracts.mjs",
+        "sha256": "9035cf78405f0606ee47ebe95fd16458b54af7f0e9f0e5cb3d8fb2a3863b4351",
+        "bytes": 252525,
+        "mode": "0600"
+      }
+    ],
+    "specs": [
+      {
+        "repo": "cortextos",
+        "path": "state/specs/meeting-intelligence-crm-standard-2026-08-24.md",
+        "sha256": "b2ee72f71ecc32ad9ca2ed4a28ecfefc008af91c91f50340dc952c2ead953ded",
+        "bytes": 81196,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/meeting-intelligence-engine-standard-2026-08-24.md",
+        "sha256": "c6321decb15138a2bbb370045343575833020324ad42591adca7f459958aaec9",
+        "bytes": 13977,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/meeting-intelligence-standard-claims.json",
+        "sha256": "6cf09c67cf0577ed5179b7f130eb4e11f195fff5f27409744e01617cbf17cbc7",
+        "bytes": 7230,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/meeting-intelligence-standard-ledger.md",
+        "sha256": "fbee3e5153f1fc67af68c134a67855efd34ac4c119a0a1f2256aa425f5111367",
+        "bytes": 6219,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/evidence/meeting-intelligence-standard-evidence-manifest.json",
+        "sha256": "c7bbaeb8896f8588f026cfeccbb008e0bb8fcb4c4c395bebd4c0607df9c8f145",
+        "bytes": 6533,
+        "mode": "0600"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/evidence/briefs-review-bundle/55a4896cc95858e6413c8823a2ea1846b2ca5f1ae131147a93770a878228ced2/bundle-manifest.json",
+        "sha256": "0cb252c0374e3dbf29d306d5eb54362ee7ec66b58f1ac5613d886363760d70a4",
+        "bytes": 7024,
+        "mode": "0600",
+        "artifact_role": "briefs_review_bundle_manifest"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/evidence/briefs-review-bundle/55a4896cc95858e6413c8823a2ea1846b2ca5f1ae131147a93770a878228ced2/validate-bundle.mjs",
+        "sha256": "e96c5bb021fff6b44a503a96fb25136053997e6eec2c068dba2dbe6f8b98f539",
+        "bytes": 4782,
+        "mode": "0600",
+        "artifact_role": "briefs_review_bundle_validator"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/evidence/briefs-review-bundle/55a4896cc95858e6413c8823a2ea1846b2ca5f1ae131147a93770a878228ced2/files/docs/specs/meeting-intelligence-crm-surface-standard-2026-08-24.md",
+        "sha256": "4160cb59071b67333821d60162ea3e8ec50e724044ee41f532637bc2352696ee",
+        "bytes": 12020,
+        "mode": "0600",
+        "artifact_role": "briefs_review_bundle_copy",
+        "source_repository": "briefs",
+        "source_path": "docs/specs/meeting-intelligence-crm-surface-standard-2026-08-24.md",
+        "target_repository": "briefs",
+        "target_path": "docs/specs/meeting-intelligence-crm-surface-standard-2026-08-24.md",
+        "goalify_vendor_state": "required_not_run"
+      }
+    ],
+    "product": [
+      {
+        "repo": "cortextos",
+        "path": "state/specs/evidence/briefs-review-bundle/55a4896cc95858e6413c8823a2ea1846b2ca5f1ae131147a93770a878228ced2/files/docs/superpowers/specs/mockups/crm-interaction-intelligence.html",
+        "sha256": "00c34dccdbb64346862fd71ed8c23403b26232e6100a889e4bcd57ec53ee3991",
+        "bytes": 4259,
+        "mode": "0600",
+        "artifact_role": "briefs_review_bundle_copy",
+        "source_repository": "briefs",
+        "source_path": "docs/superpowers/specs/mockups/crm-interaction-intelligence.html",
+        "target_repository": "briefs",
+        "target_path": "docs/superpowers/specs/mockups/crm-interaction-intelligence.html",
+        "goalify_vendor_state": "required_not_run"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/evidence/briefs-review-bundle/55a4896cc95858e6413c8823a2ea1846b2ca5f1ae131147a93770a878228ced2/files/docs/superpowers/specs/mockups/crm-interaction-intelligence.html.approved.json",
+        "sha256": "cad4a1e3a288ffd542c69c724cf8ea221160a9e96119e9853f9afa005937335b",
+        "bytes": 341,
+        "mode": "0600",
+        "artifact_role": "briefs_review_bundle_copy",
+        "source_repository": "briefs",
+        "source_path": "docs/superpowers/specs/mockups/crm-interaction-intelligence.html.approved.json",
+        "target_repository": "briefs",
+        "target_path": "docs/superpowers/specs/mockups/crm-interaction-intelligence.html.approved.json",
+        "goalify_vendor_state": "required_not_run"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/evidence/briefs-review-bundle/55a4896cc95858e6413c8823a2ea1846b2ca5f1ae131147a93770a878228ced2/files/docs/superpowers/prototypes/meeting-intelligence-layout/ANSWER.md",
+        "sha256": "aba03f4a8d786f6197d476180912514a7f0f9f191925915007bffe5973298c48",
+        "bytes": 1270,
+        "mode": "0600",
+        "artifact_role": "briefs_review_bundle_copy",
+        "source_repository": "briefs",
+        "source_path": "docs/superpowers/prototypes/meeting-intelligence-layout/ANSWER.md",
+        "target_repository": "briefs",
+        "target_path": "docs/superpowers/prototypes/meeting-intelligence-layout/ANSWER.md",
+        "goalify_vendor_state": "required_not_run"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/evidence/briefs-review-bundle/55a4896cc95858e6413c8823a2ea1846b2ca5f1ae131147a93770a878228ced2/files/docs/superpowers/prototypes/meeting-intelligence-layout/approval-manifest.json",
+        "sha256": "e756b6416b1f0aef3b02af447020a37e4c8739ab4592ddcf19dada209a1a5022",
+        "bytes": 1977,
+        "mode": "0600",
+        "artifact_role": "briefs_review_bundle_copy",
+        "source_repository": "briefs",
+        "source_path": "docs/superpowers/prototypes/meeting-intelligence-layout/approval-manifest.json",
+        "target_repository": "briefs",
+        "target_path": "docs/superpowers/prototypes/meeting-intelligence-layout/approval-manifest.json",
+        "goalify_vendor_state": "required_not_run"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/evidence/briefs-review-bundle/55a4896cc95858e6413c8823a2ea1846b2ca5f1ae131147a93770a878228ced2/files/docs/superpowers/prototypes/meeting-intelligence-layout/index.html",
+        "sha256": "c4ff59287bdbfbad73c3c6b677f4d5ac60dc359db4e9371884ec6f8f2f879232",
+        "bytes": 3076,
+        "mode": "0600",
+        "artifact_role": "briefs_review_bundle_copy",
+        "source_repository": "briefs",
+        "source_path": "docs/superpowers/prototypes/meeting-intelligence-layout/index.html",
+        "target_repository": "briefs",
+        "target_path": "docs/superpowers/prototypes/meeting-intelligence-layout/index.html",
+        "goalify_vendor_state": "required_not_run"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/evidence/briefs-review-bundle/55a4896cc95858e6413c8823a2ea1846b2ca5f1ae131147a93770a878228ced2/files/docs/superpowers/prototypes/meeting-intelligence-layout/styles.css",
+        "sha256": "2aa5535bcb579917d0b2204452d7079e08d2412331b761f7481ad2e47f4bb15f",
+        "bytes": 10266,
+        "mode": "0600",
+        "artifact_role": "briefs_review_bundle_copy",
+        "source_repository": "briefs",
+        "source_path": "docs/superpowers/prototypes/meeting-intelligence-layout/styles.css",
+        "target_repository": "briefs",
+        "target_path": "docs/superpowers/prototypes/meeting-intelligence-layout/styles.css",
+        "goalify_vendor_state": "required_not_run"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/evidence/briefs-review-bundle/55a4896cc95858e6413c8823a2ea1846b2ca5f1ae131147a93770a878228ced2/files/docs/superpowers/prototypes/meeting-intelligence-layout/states.html",
+        "sha256": "e22cf60a15c7a9ee6e606e2a28b4ad8bc48dd2713dcc026c2deb197e5f79b2ee",
+        "bytes": 7496,
+        "mode": "0600",
+        "artifact_role": "briefs_review_bundle_copy",
+        "source_repository": "briefs",
+        "source_path": "docs/superpowers/prototypes/meeting-intelligence-layout/states.html",
+        "target_repository": "briefs",
+        "target_path": "docs/superpowers/prototypes/meeting-intelligence-layout/states.html",
+        "goalify_vendor_state": "required_not_run"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/evidence/briefs-review-bundle/55a4896cc95858e6413c8823a2ea1846b2ca5f1ae131147a93770a878228ced2/files/docs/superpowers/prototypes/meeting-intelligence-layout/variants/b.html",
+        "sha256": "c53664c72f343f43426fbf50623d396dc9bf3e55379fcb31dd4d7c71fcdd6d9f",
+        "bytes": 13874,
+        "mode": "0600",
+        "artifact_role": "briefs_review_bundle_copy",
+        "source_repository": "briefs",
+        "source_path": "docs/superpowers/prototypes/meeting-intelligence-layout/variants/b.html",
+        "target_repository": "briefs",
+        "target_path": "docs/superpowers/prototypes/meeting-intelligence-layout/variants/b.html",
+        "goalify_vendor_state": "required_not_run"
+      },
+      {
+        "repo": "cortextos",
+        "path": "state/specs/evidence/briefs-review-bundle/55a4896cc95858e6413c8823a2ea1846b2ca5f1ae131147a93770a878228ced2/files/docs/superpowers/prototypes/meeting-intelligence-layout/variants/c.html",
+        "sha256": "621e495dc3f850a243400f6cc81fd161426a380075ae8a050bf50e4fe420f612",
+        "bytes": 15558,
+        "mode": "0600",
+        "artifact_role": "briefs_review_bundle_copy",
+        "source_repository": "briefs",
+        "source_path": "docs/superpowers/prototypes/meeting-intelligence-layout/variants/c.html",
+        "target_repository": "briefs",
+        "target_path": "docs/superpowers/prototypes/meeting-intelligence-layout/variants/c.html",
+        "goalify_vendor_state": "required_not_run"
+      }
+    ]
+  },
+  "compatibility": {
+    "reader_support": [
+      "meeting-intelligence-v1"
+    ],
+    "producer_emit": "meeting-intelligence-v1",
+    "n_minus_1_required": true,
+    "n_minus_1_result": "required_in_goalify_before_promotion",
+    "consumer_target_commit": null,
+    "producer_target_commit": null,
+    "prior_compatible_pair": null,
+    "promotion_order": [
+      "briefs_consumer",
+      "cortextos_producer",
+      "pair_receipt"
+    ]
+  },
+  "validation": {
+    "planning_subset_validator": "pass",
+    "negative_cases": {
+      "count": 53,
+      "result": "pass"
+    },
+    "coupled_adversarial_cases": {
+      "count": 145,
+      "result": "pass"
+    },
+    "exact_crm_operations": [
+      "upsert_account",
+      "upsert_contact",
+      "upsert_engagement",
+      "upsert_interaction",
+      "upsert_lifecycle"
+    ],
+    "trust_root_gate": "independent_pass_49a86d2d",
+    "crm_readiness_gate": "independent_pass_49a86d2d",
+    "transition_retry_gate": "independent_pass_49a86d2d",
+    "ingress_failure_gate": "independent_pass_49a86d2d",
+    "product_contract_gate": "semantic_contract_pass_packaging_provenance_pending_rereview",
+    "draft_2020_12_standards_validator": "required_in_goalify_slice_1_before_promotion",
+    "content_addressed_briefs_review_bundle_equality": "pass_10_of_10",
+    "cross_repo_vendored_bundle_equality": "goalify_vendor_promotion_required_not_run",
+    "briefs_vendor_promotion_gate": {
+      "state": "blocked_required_in_goalify_before_consumer_implementation_or_promotion",
+      "bundle_id": "sha256:55a4896cc95858e6413c8823a2ea1846b2ca5f1ae131147a93770a878228ced2",
+      "bundle_manifest_sha256": "0cb252c0374e3dbf29d306d5eb54362ee7ec66b58f1ac5613d886363760d70a4",
+      "artifact_count": 10,
+      "requirements": "exact_target_path_sha256_bytes_mode_then_briefs_commit_tree_and_cross_repo_equality_receipt"
+    },
+    "g5_packaging_provenance_local_correction": {
+      "result": "pass_pending_independent_g5_only_rereview",
+      "governed_artifact_count": 77,
+      "governed_artifact_rehash": "77_of_77_exact_from_cortextos_review_root",
+      "briefs_review_bundle_artifact_count": 10,
+      "briefs_review_bundle_source_equality": "10_of_10_exact",
+      "briefs_review_bundle_validator": "pass",
+      "briefs_pinned_base_contains_review_artifacts": false,
+      "cross_repo_vendored_bundle_equality": "not_run_by_design",
+      "goalify_vendor_promotion": "blocked_required_before_consumer_implementation_or_promotion",
+      "independent_review": "not_run"
+    },
+    "round_3": "not_converged_frozen_failed_evidence_a85d2e",
+    "targeted_rereview_round_2": "not_converged_frozen_failed_evidence_e1ead579_g1_pass_g2_g5_c1_h15",
+    "targeted_rereview_round_3": "not_converged_frozen_failed_evidence_49a86d2d_g1_g4_pass_g5_packaging_provenance_c1_receipt_c100aba8",
+    "g1_local_correction": {
+      "result": "pass",
+      "decision_count": 9,
+      "cross_meeting_transplant_attack": "A-014_pass",
+      "evidence_lineage_rewrite_attack": "A-015_pass",
+      "independent_review": "pass_49a86d2d"
+    },
+    "g2_local_correction": {
+      "result": "pass",
+      "exact_operation_positive_count": 5,
+      "per_operation_mismatch_negative_count": 20,
+      "complete_write_set_positive_count": 3,
+      "complete_write_set_negative_count": 12,
+      "request_to_durable_to_delivery_to_readback": "pass_all_five",
+      "expected_request_durable_delivery_set_equality": "nonempty_bidirectional_no_missing_partial_extra_duplicate_or_orphan",
+      "operation_and_state_domains": "shared_and_validator_asserted_across_request_durable_delivery_and_write_set",
+      "independent_review": "pass_49a86d2d"
+    },
+    "g3_local_correction": {
+      "result": "pass",
+      "focused_positive_count": 17,
+      "focused_negative_count": 29,
+      "lifecycle_identity": "bidirectional",
+      "lease_fence": "advanced_on_every_acquisition",
+      "unknown_probe_policy": "unknown_only_bounded_15m_monotonic",
+      "unknown_exit_reconciliation": "applied_rejected_terminal_failed_bound",
+      "terminal_carry_forward": "byte_identical_schema_and_transition_valid",
+      "source_identity": "immutable_with_explicit_tombstone_supersession",
+      "retry_backoff": "bounded_monotonic",
+      "attempt_window": "immutable_across_sink_identity_lineage",
+      "retry_cycle": "each_retryable_consumes_attempt_and_each_lease_acquisition_advances_exact_fence",
+      "leased_state": "live_expiry_no_schedule_no_probe_valid_owner_and_fence",
+      "pa_terminal_carry_forward": "cannot_disappear_byte_identical_or_predecessor_bound_correction",
+      "independent_review": "pass_49a86d2d"
+    },
+    "g4_local_correction": {
+      "result": "pass",
+      "focused_positive_count": 9,
+      "focused_negative_count": 39,
+      "relay_auth": "org_bound_keyed_hmac_canonical_request_and_replay_receipt",
+      "relay_test_secrets": "test_only_not_runtime_configuration",
+      "fireflies_auth": "exact_header_lowercase_sha256_hex_configured_secret_raw_body",
+      "pre_record_failure": "separate_encrypted_quarantine_24h_pii_safe_deletion_receipt",
+      "processing_failure": "observation_required_and_ingress_persist_forbidden",
+      "relay_state_shapes": "pending_durable_without_success_receipts_relayed_requires_complete_auth_replay_and_receipt",
+      "provider_verification_config": "externally_pinned_config_and_key_validity_window",
+      "relay_chronology": "received_verified_persisted_attempt_auth_replay_updated_deadline_and_live_lease_ordered",
+      "pre_record_stage_shapes": "auth_no_quarantine_parse_persist_encrypted_quarantine_and_ordered_deletion",
+      "independent_review": "pass_49a86d2d"
+    },
+    "g5_local_correction": {
+      "result": "pass",
+      "focused_positive_count": 4,
+      "focused_negative_count": 30,
+      "pa_correction": "distinct_predecessor_current_records_immediate_version_and_deterministic_claim_lifecycle_consequential_crm_delta_bound",
+      "coverage_freshness": "externally_pinned_hmac_clock_authority_org_asof_issuedat_nonce_policy_validity_skew_replay_bound",
+      "briefs_bc_output": "exact_coverage_record_set_derived_aggregate_tie_drill_and_required_typed_record_evidence_delivery_sections",
+      "semantic_evaluator": "governed_truth_prediction_evidence_dataset_split_strata_confusion_precision_recall_f1_support_status_wilson_z1_bound",
+      "briefs_duplicate_promotion_occurrences": 1,
+      "independent_review": "semantic_contract_pass_packaging_provenance_fail_49a86d2d"
+    },
+    "prior_targeted_freezes": [
+      "59d76ad6653d30fd824f0dd3aa9c1e1c9d333d43dcdabc92d130c0a99d1650c_superseded_by_explicit_durable_intent_join",
+      "799a174a6863a9f39e3580c9e22ccd2944a767e14eee160d47f1c8d824117fd7_superseded_by_deployment_key_org_binding",
+      "aa381cf999d52b9f042dff066a0fb74096a47585013169d46f91bba6a29945b4_superseded_by_root_bound_runtime_key_sets",
+      "d51a62186ebdf8ff698af40f950d25a944742f967f011e5417989d29e3cdf5be_superseded_by_retry_state_totality",
+      "a85d2eebdccf174dc366781b845eb3a16ee9d4ed77594552fcca0a920f18baa3_failed_independent_review_c1_h12_m2_l1_receipt_145ed1d1",
+      "e1ead579f31e8fb2b56226cc71731d557b422f65f0b79a6427939db87fcde5d8_failed_independent_review_g1_pass_g2_g5_c1_h15_receipt_ccf3191b",
+      "49a86d2d8c472e677c92cd968a047d2a0286657cd3d27d74c2557bcd036b9c2e_failed_independent_review_g1_g4_pass_g5_packaging_provenance_c1_receipt_c100aba8"
+    ],
+    "targeted_convergence": "pending"
+  },
+  "goalify_handoff": {
+    "mode": "standard",
+    "task_id": "task_1787534800125_79509698",
+    "parent_task_id": "task_1787446957155_21072782",
+    "blocked_until": "all_five_targeted_reviews_converged_and_terminal_specify_acceptance",
+    "sequence": [
+      "authority_schema_and_shared_fixtures",
+      "ingress_durability_and_security",
+      "single_extraction_and_identity",
+      "crm_lifecycle_draft_briefs_adapters",
+      "terminal_readiness_and_pa_paths",
+      "briefs_c_to_b_surface",
+      "local_and_shared_fixture_tests",
+      "delivery_suppressed_new_real_meeting_proof",
+      "unseen_meeting_product_value_gate",
+      "separately_authorized_full_corpus_recovery",
+      "separately_authorized_legacy_retirement",
+      "separately_authorized_production_activation"
+    ],
+    "single_writer_per_slice": true
+  },
+  "gates": {
+    "goalify": "blocked_pending_targeted_convergence",
+    "implementation": "not_authorized",
+    "reader_deployment": "not_authorized",
+    "producer_deployment": "not_authorized",
+    "production_activation": "not_authorized",
+    "historical_recovery": "not_authorized"
+  }
+}

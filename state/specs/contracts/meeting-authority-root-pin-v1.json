@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "meeting-authority-root-pin-v1",
+  "orgId": "clearworksai",
+  "authorityRootVersion": 1,
+  "authorityRootDigest": "98cf10a485937fde4abfa104f2ebc69631faa90ff7cdd4f71beb55f8abd72100",
+  "source": "deployment-config-not-provider-payload",
+  "runtimeTrustInput": "MEETING_AUTHORITY_ROOT_DIGEST",
+  "trustScope": "org-root-registry-decisions-relay-and-coverage"
+}

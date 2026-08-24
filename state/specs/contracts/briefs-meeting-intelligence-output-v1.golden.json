@@ -1,0 +1,232 @@
+{
+  "schemaVersion": "1.0",
+  "orgId": "clearworksai",
+  "outputId": "briefs-meeting-intelligence:demo:v1",
+  "outputDigest": "4008a2567db90a5cfd4456439515bfd473ddcbdb8846e552f69d6de43e56ab31",
+  "generatedAt": "2026-08-24T04:06:00Z",
+  "coverage": {
+    "coverageSnapshotId": "coverage:fireflies:2026-08-24",
+    "snapshotDigest": "7454318b47cf7f9c19bbdc43ff13d582567bfa1d738d6d2a35ed4ee07251a9dc",
+    "evaluationClockDigest": "c31867bdb3ac6ff00d194492c10fd0be76fece3ae4bea28b6957c210deec47b2",
+    "freshnessState": "current",
+    "asOf": "2026-08-24T04:06:00Z"
+  },
+  "cSurface": {
+    "aggregateId": "aggregate:meetings-current",
+    "title": "Current meeting intelligence",
+    "numerator": 1,
+    "denominator": 1,
+    "rate": 1,
+    "drillThroughMeetingIds": [
+      "meeting_demo_2026_08_24_01"
+    ],
+    "drillThroughDigest": "7416fcbd4e277d064dac9f917c0d35b8b97ad7d487efd8866f9d7346cf865f9f",
+    "tieBreakPolicy": "movement_score_desc_then_canonical_meeting_id_asc",
+    "ranking": [
+      {
+        "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+        "movementScore": 2,
+        "occurredAt": "2026-08-24T03:00:00Z"
+      }
+    ],
+    "meetingCards": [
+      {
+        "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+        "recordDigest": "be66407f98eeb28dc3063c31f800096f8bb3ab06681a56b415f57ca83f1833ba",
+        "bPath": "/business/crm/meetings/meeting_demo_2026_08_24_01",
+        "linkDigest": "b22fd5314baf43065eb76712189d6cc003ba47a992c04cffe0cee61100bcfeab"
+      }
+    ]
+  },
+  "bSurface": {
+    "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+    "recordVersion": 1,
+    "recordDigest": "be66407f98eeb28dc3063c31f800096f8bb3ab06681a56b415f57ca83f1833ba",
+    "title": "Acme workflow review",
+    "claimLabels": [
+      {
+        "canonicalClaimId": "canonical:context",
+        "claimId": "claim:context:v1",
+        "label": "fact",
+        "disposition": "accepted",
+        "semanticClass": "context_class",
+        "evidenceRefs": [
+          "ev:context"
+        ]
+      },
+      {
+        "canonicalClaimId": "canonical:headline",
+        "claimId": "claim:headline:v1",
+        "label": "inference",
+        "disposition": "proposed",
+        "semanticClass": "headline",
+        "evidenceRefs": [
+          "ev:decision"
+        ]
+      },
+      {
+        "canonicalClaimId": "canonical:need-routing",
+        "claimId": "claim:need:v1",
+        "label": "proposal",
+        "disposition": "proposed",
+        "semanticClass": "need",
+        "evidenceRefs": [
+          "ev:need"
+        ]
+      }
+    ],
+    "sourceEvidence": [
+      {
+        "evidenceId": "ev:context",
+        "sourceId": "01DEMOACTIVE0000000000000000",
+        "artifactId": "artifact:transcript",
+        "quoteDigest": "4545454545454545454545454545454545454545454545454545454545454545",
+        "sourceLineageDigest": "1818181818181818181818181818181818181818181818181818181818181818"
+      },
+      {
+        "evidenceId": "ev:decision",
+        "sourceId": "01DEMOACTIVE0000000000000000",
+        "artifactId": "artifact:transcript",
+        "quoteDigest": "5050505050505050505050505050505050505050505050505050505050505050",
+        "sourceLineageDigest": "1818181818181818181818181818181818181818181818181818181818181818"
+      },
+      {
+        "evidenceId": "ev:need",
+        "sourceId": "01DEMOACTIVE0000000000000000",
+        "artifactId": "artifact:transcript",
+        "quoteDigest": "4848484848484848484848484848484848484848484848484848484848484848",
+        "sourceLineageDigest": "1818181818181818181818181818181818181818181818181818181818181818"
+      }
+    ],
+    "freshnessState": "current",
+    "asOf": "2026-08-24T04:06:00Z",
+    "cPath": "/business/crm/meetings",
+    "sections": {
+      "structuredSummary": {
+        "headlineClaimId": "claim:headline:v1",
+        "narrativeClaimId": "claim:narrative:v1"
+      },
+      "participants": [
+        {
+          "participantId": "person:josh-weiss",
+          "roleClaimIds": [
+            "claim:role-josh:v1"
+          ],
+          "relationshipClassClaimId": "claim:relationship-josh:v1"
+        },
+        {
+          "participantId": "crm:contact:alex",
+          "roleClaimIds": [
+            "claim:role-alex:v1"
+          ],
+          "relationshipClassClaimId": "claim:relationship-alex:v1"
+        }
+      ],
+      "topics": {
+        "topicClaimIds": [
+          "claim:topic:v1"
+        ],
+        "subtopicClaimIds": []
+      },
+      "decisions": {
+        "decisionClaimIds": [
+          "claim:decision:v1"
+        ],
+        "rationaleClaimIds": []
+      },
+      "discovery": {
+        "needClaimIds": [
+          "claim:need:v1"
+        ],
+        "questionClaimIds": [
+          "claim:question:v1"
+        ],
+        "objectionClaimIds": [],
+        "opportunityClaimIds": [
+          "claim:opportunity:v1"
+        ]
+      },
+      "changes": {
+        "projectChangeClaimIds": [],
+        "dealChangeClaimIds": [],
+        "accountChangeClaimIds": [],
+        "relationshipChangeClaimIds": [
+          "claim:relationship-change:v1"
+        ]
+      },
+      "commitmentsDates": {
+        "canonicalClaimIds": [
+          "canonical:task-send-pilot-outline",
+          "canonical:waiting-recipient-list"
+        ]
+      },
+      "lifecycle": {
+        "myTasks": [
+          "canonical:task-send-pilot-outline"
+        ],
+        "waitingOnThem": [
+          "canonical:waiting-recipient-list"
+        ],
+        "completedClosed": [],
+        "notTasks": []
+      },
+      "followUpDraft": {
+        "state": "drafted",
+        "draftId": "gmail:draft:demo-01",
+        "bodyDigest": "6060606060606060606060606060606060606060606060606060606060606060"
+      },
+      "artifactsEvidence": {
+        "artifactIds": [
+          "artifact:transcript",
+          "artifact:video"
+        ],
+        "evidenceIds": [
+          "ev:context",
+          "ev:role-josh",
+          "ev:role-alex",
+          "ev:need",
+          "ev:question",
+          "ev:decision",
+          "ev:task",
+          "ev:waiting",
+          "ev:opportunity"
+        ]
+      },
+      "recurringThemes": {
+        "claimIds": []
+      },
+      "sinkReceiptsFreshness": {
+        "sinks": [
+          {
+            "sink": "briefs_projection",
+            "state": "SUCCEEDED"
+          },
+          {
+            "sink": "crm_interaction",
+            "state": "SUCCEEDED"
+          },
+          {
+            "sink": "lifecycle_projection",
+            "state": "SUCCEEDED"
+          },
+          {
+            "sink": "followup_draft",
+            "state": "SUCCEEDED"
+          }
+        ],
+        "paState": null,
+        "freshnessState": "current",
+        "asOf": "2026-08-24T04:06:00Z"
+      }
+    }
+  },
+  "cToBLinks": [
+    {
+      "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+      "recordDigest": "be66407f98eeb28dc3063c31f800096f8bb3ab06681a56b415f57ca83f1833ba",
+      "fromPath": "/business/crm/meetings",
+      "toPath": "/business/crm/meetings/meeting_demo_2026_08_24_01",
+      "linkDigest": "b22fd5314baf43065eb76712189d6cc003ba47a992c04cffe0cee61100bcfeab"
+    }
+  ]
+}

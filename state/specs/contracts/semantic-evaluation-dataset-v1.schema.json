@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://clearworks.ai/contracts/semantic-evaluation-dataset-v1.schema.json", "title": "SemanticEvaluationDatasetV1",
+  "type": "object", "additionalProperties": false,
+  "required": ["schemaVersion", "orgId", "datasetId", "datasetDigest", "policyVersion", "meetingSplitDigest", "examples"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" }, "orgId": { "type": "string", "minLength": 1 }, "datasetId": { "type": "string", "minLength": 1 }, "datasetDigest": { "$ref": "#/$defs/sha256" },
+    "policyVersion": { "const": "semantic-truth-prediction-v1" }, "meetingSplitDigest": { "$ref": "#/$defs/sha256" },
+    "examples": { "type": "array", "minItems": 112, "uniqueItems": true, "items": { "$ref": "#/$defs/example" } }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "example": { "type": "object", "additionalProperties": false, "required": ["exampleId", "dimension", "stratumId", "meetingId", "truth", "prediction", "evidenceId", "evidenceDigest"],
+      "properties": { "exampleId": { "type": "string", "minLength": 1 }, "dimension": { "enum": ["direction", "work_state", "evidence_grounding", "due", "dependency", "context_class", "identity"] }, "stratumId": { "type": "string", "minLength": 1 }, "meetingId": { "type": "string", "minLength": 1 }, "truth": { "type": "boolean" }, "prediction": { "type": "boolean" }, "evidenceId": { "type": "string", "minLength": 1 }, "evidenceDigest": { "$ref": "#/$defs/sha256" } }
+    }
+  }
+}

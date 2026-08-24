@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clearworks.ai/contracts/crm-projection-snapshot-v1.schema.json",
+  "title": "CrmProjectionSnapshotV1",
+  "description": "CRM-owned current-state read projection for Briefs. projectionDigest is SHA-256 of RFC 8785 JCS bytes after removing only projectionDigest.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "orgId", "projectionVersion", "projectionDigest", "generatedAt", "sourceVersion", "sourceDigest", "accounts", "contacts", "engagements", "opportunities", "interactions", "lifecycleItems"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "orgId": { "type": "string", "minLength": 1 },
+    "projectionVersion": { "type": "string", "minLength": 1 },
+    "projectionDigest": { "$ref": "#/$defs/sha256" },
+    "generatedAt": { "$ref": "#/$defs/dateTime" },
+    "sourceVersion": { "type": "string", "minLength": 1 },
+    "sourceDigest": { "$ref": "#/$defs/sha256" },
+    "accounts": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/account" } },
+    "contacts": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/contact" } },
+    "engagements": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/engagement" } },
+    "opportunities": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/opportunity" } },
+    "interactions": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/interaction" } },
+    "lifecycleItems": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/lifecycleItem" } }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "dateTime": { "type": "string", "format": "date-time" },
+    "ids": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "account": {
+      "type": "object", "additionalProperties": false,
+      "required": ["accountId", "name", "relationshipClass", "status", "version", "digest", "updatedAt"],
+      "properties": { "accountId": { "type": "string", "minLength": 1 }, "name": { "type": "string", "minLength": 1 }, "relationshipClass": { "enum": ["client", "prospect", "partner", "internal", "nonprofit", "unknown"] }, "status": { "type": "string", "minLength": 1 }, "version": { "type": "string", "minLength": 1 }, "digest": { "$ref": "#/$defs/sha256" }, "updatedAt": { "$ref": "#/$defs/dateTime" } }
+    },
+    "contact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["contactId", "accountId", "displayName", "role", "version", "digest", "updatedAt"],
+      "properties": { "contactId": { "type": "string", "minLength": 1 }, "accountId": { "type": ["string", "null"] }, "displayName": { "type": "string", "minLength": 1 }, "role": { "type": ["string", "null"] }, "version": { "type": "string", "minLength": 1 }, "digest": { "$ref": "#/$defs/sha256" }, "updatedAt": { "$ref": "#/$defs/dateTime" } }
+    },
+    "engagement": {
+      "type": "object", "additionalProperties": false,
+      "required": ["engagementId", "accountId", "name", "state", "version", "digest", "updatedAt"],
+      "properties": { "engagementId": { "type": "string", "minLength": 1 }, "accountId": { "type": "string", "minLength": 1 }, "name": { "type": "string", "minLength": 1 }, "state": { "type": "string", "minLength": 1 }, "version": { "type": "string", "minLength": 1 }, "digest": { "$ref": "#/$defs/sha256" }, "updatedAt": { "$ref": "#/$defs/dateTime" } }
+    },
+    "opportunity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["opportunityId", "accountId", "engagementId", "name", "state", "oneTimeValue", "monthlyValue", "currency", "version", "digest", "updatedAt"],
+      "properties": { "opportunityId": { "type": "string", "minLength": 1 }, "accountId": { "type": "string", "minLength": 1 }, "engagementId": { "type": ["string", "null"] }, "name": { "type": "string", "minLength": 1 }, "state": { "type": "string", "minLength": 1 }, "oneTimeValue": { "type": ["number", "null"], "minimum": 0 }, "monthlyValue": { "type": ["number", "null"], "minimum": 0 }, "currency": { "type": ["string", "null"] }, "version": { "type": "string", "minLength": 1 }, "digest": { "$ref": "#/$defs/sha256" }, "updatedAt": { "$ref": "#/$defs/dateTime" } }
+    },
+    "interaction": {
+      "type": "object", "additionalProperties": false,
+      "required": ["interactionId", "canonicalMeetingId", "recordDigest", "occurredAt", "title", "accountIds", "contactIds", "engagementIds", "version", "digest", "updatedAt"],
+      "properties": { "interactionId": { "type": "string", "minLength": 1 }, "canonicalMeetingId": { "type": "string", "minLength": 1 }, "recordDigest": { "$ref": "#/$defs/sha256" }, "occurredAt": { "$ref": "#/$defs/dateTime" }, "title": { "type": "string", "minLength": 1 }, "accountIds": { "$ref": "#/$defs/ids" }, "contactIds": { "$ref": "#/$defs/ids" }, "engagementIds": { "$ref": "#/$defs/ids" }, "version": { "type": "string", "minLength": 1 }, "digest": { "$ref": "#/$defs/sha256" }, "updatedAt": { "$ref": "#/$defs/dateTime" } }
+    },
+    "lifecycleItem": {
+      "type": "object", "additionalProperties": false,
+      "required": ["lifecycleId", "canonicalClaimId", "claimId", "recordDigest", "bucket", "direction", "workState", "ownerId", "dueAt", "dependencyState", "version", "digest", "updatedAt"],
+      "properties": { "lifecycleId": { "type": "string", "minLength": 1 }, "canonicalClaimId": { "type": "string", "minLength": 1 }, "claimId": { "type": "string", "minLength": 1 }, "recordDigest": { "$ref": "#/$defs/sha256" }, "bucket": { "enum": ["my_task", "waiting_on_them", "completed_closed", "not_a_task"] }, "direction": { "enum": ["josh_owned", "external_owned", "shared", "unassigned", "not_applicable"] }, "workState": { "enum": ["open", "waiting", "contingent", "completed", "closed_abandoned", "not_a_task"] }, "ownerId": { "type": ["string", "null"] }, "dueAt": { "type": ["string", "null"], "format": "date-time" }, "dependencyState": { "enum": ["none", "unsatisfied", "satisfied", "unknown"] }, "version": { "type": "string", "minLength": 1 }, "digest": { "$ref": "#/$defs/sha256" }, "updatedAt": { "$ref": "#/$defs/dateTime" } }
+    }
+  }
+}

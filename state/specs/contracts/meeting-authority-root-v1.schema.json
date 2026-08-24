@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clearworks.ai/schemas/meeting-authority-root-v1.schema.json",
+  "title": "MeetingAuthorityRootV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "orgId", "rootId", "rootVersion", "rootDigest", "claimRegistryDigest", "authorizedClaimDecisionDigests", "authorizedIdentityDecisionDigests", "relayInternalAuthKeyIds", "coverageEnumeratorKeyIds", "identityPolicies", "issuedBy"],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "dateTime": { "type": "string", "format": "date-time" }
+  },
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "orgId": { "type": "string", "minLength": 1 },
+    "rootId": { "type": "string", "minLength": 1 },
+    "rootVersion": { "type": "integer", "minimum": 1 },
+    "rootDigest": { "$ref": "#/$defs/sha256" },
+    "claimRegistryDigest": { "$ref": "#/$defs/sha256" },
+    "authorizedClaimDecisionDigests": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/sha256" }
+    },
+    "authorizedIdentityDecisionDigests": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/sha256" }
+    },
+    "relayInternalAuthKeyIds": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "coverageEnumeratorKeyIds": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "identityPolicies": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "actorId", "policyVersion"],
+        "properties": {
+          "kind": { "enum": ["user", "admin"] },
+          "actorId": { "type": "string", "minLength": 1 },
+          "policyVersion": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "issuedBy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "actorId", "policyVersion", "auditReceiptDigest", "issuedAt"],
+      "properties": {
+        "kind": { "enum": ["user", "admin"] },
+        "actorId": { "type": "string", "minLength": 1 },
+        "policyVersion": { "type": "string", "minLength": 1 },
+        "auditReceiptDigest": { "$ref": "#/$defs/sha256" },
+        "issuedAt": { "$ref": "#/$defs/dateTime" }
+      }
+    }
+  }
+}

@@ -1,0 +1,372 @@
+{
+  "schemaVersion": "1.0",
+  "orgId": "clearworksai",
+  "evaluationId": "meeting-semantic-evaluation:demo:v1",
+  "evaluationDigest": "fa62b8d60a221089e66830628de8342a1dd1070ef50fe7face52284cb2002727",
+  "policyVersion": "meeting-semantic-evaluation-v1",
+  "requiredDimensions": [
+    "direction",
+    "work_state",
+    "evidence_grounding",
+    "due",
+    "dependency",
+    "context_class",
+    "identity"
+  ],
+  "meetingSplit": {
+    "policyVersion": "meeting-level-holdout-v1",
+    "trainingMeetingIds": [
+      "meeting_train_01"
+    ],
+    "evaluationMeetingIds": [
+      "meeting_eval_01",
+      "meeting_eval_02",
+      "meeting_eval_03",
+      "meeting_eval_04",
+      "meeting_eval_05",
+      "meeting_eval_06",
+      "meeting_eval_07",
+      "meeting_eval_08",
+      "meeting_eval_09",
+      "meeting_eval_10",
+      "meeting_eval_11",
+      "meeting_eval_12",
+      "meeting_eval_13",
+      "meeting_eval_14",
+      "meeting_eval_15",
+      "meeting_eval_16"
+    ],
+    "splitDigest": "f92e516b162c0b9010c6fa6fb2418bb3a93f4fb7168303116edbbccd4867f3a6"
+  },
+  "thresholdPolicy": {
+    "minimumPositive": 8,
+    "minimumNegative": 8,
+    "minimumPrecision": 0.95,
+    "minimumRecall": 0.9,
+    "minimumAccuracy": 0.9,
+    "minimumConfidenceLowerBound": 0.9
+  },
+  "strata": [
+    {
+      "dimension": "direction",
+      "stratumId": "stratum:direction:required",
+      "positiveMeetingIds": [
+        "meeting_eval_01",
+        "meeting_eval_02",
+        "meeting_eval_03",
+        "meeting_eval_04",
+        "meeting_eval_05",
+        "meeting_eval_06",
+        "meeting_eval_07",
+        "meeting_eval_08"
+      ],
+      "negativeMeetingIds": [
+        "meeting_eval_09",
+        "meeting_eval_10",
+        "meeting_eval_11",
+        "meeting_eval_12",
+        "meeting_eval_13",
+        "meeting_eval_14",
+        "meeting_eval_15",
+        "meeting_eval_16"
+      ],
+      "truePositive": 8,
+      "falsePositive": 0,
+      "falseNegative": 0,
+      "trueNegative": 8,
+      "precision": 1,
+      "recall": 1,
+      "accuracy": 1,
+      "f1": 1,
+      "support": 16,
+      "confidenceLowerBound": 0.9411764705882353,
+      "status": "pass"
+    },
+    {
+      "dimension": "work_state",
+      "stratumId": "stratum:work_state:required",
+      "positiveMeetingIds": [
+        "meeting_eval_01",
+        "meeting_eval_02",
+        "meeting_eval_03",
+        "meeting_eval_04",
+        "meeting_eval_05",
+        "meeting_eval_06",
+        "meeting_eval_07",
+        "meeting_eval_08"
+      ],
+      "negativeMeetingIds": [
+        "meeting_eval_09",
+        "meeting_eval_10",
+        "meeting_eval_11",
+        "meeting_eval_12",
+        "meeting_eval_13",
+        "meeting_eval_14",
+        "meeting_eval_15",
+        "meeting_eval_16"
+      ],
+      "truePositive": 8,
+      "falsePositive": 0,
+      "falseNegative": 0,
+      "trueNegative": 8,
+      "precision": 1,
+      "recall": 1,
+      "accuracy": 1,
+      "f1": 1,
+      "support": 16,
+      "confidenceLowerBound": 0.9411764705882353,
+      "status": "pass"
+    },
+    {
+      "dimension": "evidence_grounding",
+      "stratumId": "stratum:evidence_grounding:required",
+      "positiveMeetingIds": [
+        "meeting_eval_01",
+        "meeting_eval_02",
+        "meeting_eval_03",
+        "meeting_eval_04",
+        "meeting_eval_05",
+        "meeting_eval_06",
+        "meeting_eval_07",
+        "meeting_eval_08"
+      ],
+      "negativeMeetingIds": [
+        "meeting_eval_09",
+        "meeting_eval_10",
+        "meeting_eval_11",
+        "meeting_eval_12",
+        "meeting_eval_13",
+        "meeting_eval_14",
+        "meeting_eval_15",
+        "meeting_eval_16"
+      ],
+      "truePositive": 8,
+      "falsePositive": 0,
+      "falseNegative": 0,
+      "trueNegative": 8,
+      "precision": 1,
+      "recall": 1,
+      "accuracy": 1,
+      "f1": 1,
+      "support": 16,
+      "confidenceLowerBound": 0.9411764705882353,
+      "status": "pass"
+    },
+    {
+      "dimension": "due",
+      "stratumId": "stratum:due:required",
+      "positiveMeetingIds": [
+        "meeting_eval_01",
+        "meeting_eval_02",
+        "meeting_eval_03",
+        "meeting_eval_04",
+        "meeting_eval_05",
+        "meeting_eval_06",
+        "meeting_eval_07",
+        "meeting_eval_08"
+      ],
+      "negativeMeetingIds": [
+        "meeting_eval_09",
+        "meeting_eval_10",
+        "meeting_eval_11",
+        "meeting_eval_12",
+        "meeting_eval_13",
+        "meeting_eval_14",
+        "meeting_eval_15",
+        "meeting_eval_16"
+      ],
+      "truePositive": 8,
+      "falsePositive": 0,
+      "falseNegative": 0,
+      "trueNegative": 8,
+      "precision": 1,
+      "recall": 1,
+      "accuracy": 1,
+      "f1": 1,
+      "support": 16,
+      "confidenceLowerBound": 0.9411764705882353,
+      "status": "pass"
+    },
+    {
+      "dimension": "dependency",
+      "stratumId": "stratum:dependency:required",
+      "positiveMeetingIds": [
+        "meeting_eval_01",
+        "meeting_eval_02",
+        "meeting_eval_03",
+        "meeting_eval_04",
+        "meeting_eval_05",
+        "meeting_eval_06",
+        "meeting_eval_07",
+        "meeting_eval_08"
+      ],
+      "negativeMeetingIds": [
+        "meeting_eval_09",
+        "meeting_eval_10",
+        "meeting_eval_11",
+        "meeting_eval_12",
+        "meeting_eval_13",
+        "meeting_eval_14",
+        "meeting_eval_15",
+        "meeting_eval_16"
+      ],
+      "truePositive": 8,
+      "falsePositive": 0,
+      "falseNegative": 0,
+      "trueNegative": 8,
+      "precision": 1,
+      "recall": 1,
+      "accuracy": 1,
+      "f1": 1,
+      "support": 16,
+      "confidenceLowerBound": 0.9411764705882353,
+      "status": "pass"
+    },
+    {
+      "dimension": "context_class",
+      "stratumId": "stratum:context_class:required",
+      "positiveMeetingIds": [
+        "meeting_eval_01",
+        "meeting_eval_02",
+        "meeting_eval_03",
+        "meeting_eval_04",
+        "meeting_eval_05",
+        "meeting_eval_06",
+        "meeting_eval_07",
+        "meeting_eval_08"
+      ],
+      "negativeMeetingIds": [
+        "meeting_eval_09",
+        "meeting_eval_10",
+        "meeting_eval_11",
+        "meeting_eval_12",
+        "meeting_eval_13",
+        "meeting_eval_14",
+        "meeting_eval_15",
+        "meeting_eval_16"
+      ],
+      "truePositive": 8,
+      "falsePositive": 0,
+      "falseNegative": 0,
+      "trueNegative": 8,
+      "precision": 1,
+      "recall": 1,
+      "accuracy": 1,
+      "f1": 1,
+      "support": 16,
+      "confidenceLowerBound": 0.9411764705882353,
+      "status": "pass"
+    },
+    {
+      "dimension": "identity",
+      "stratumId": "stratum:identity:required",
+      "positiveMeetingIds": [
+        "meeting_eval_01",
+        "meeting_eval_02",
+        "meeting_eval_03",
+        "meeting_eval_04",
+        "meeting_eval_05",
+        "meeting_eval_06",
+        "meeting_eval_07",
+        "meeting_eval_08"
+      ],
+      "negativeMeetingIds": [
+        "meeting_eval_09",
+        "meeting_eval_10",
+        "meeting_eval_11",
+        "meeting_eval_12",
+        "meeting_eval_13",
+        "meeting_eval_14",
+        "meeting_eval_15",
+        "meeting_eval_16"
+      ],
+      "truePositive": 8,
+      "falsePositive": 0,
+      "falseNegative": 0,
+      "trueNegative": 8,
+      "precision": 1,
+      "recall": 1,
+      "accuracy": 1,
+      "f1": 1,
+      "support": 16,
+      "confidenceLowerBound": 0.9411764705882353,
+      "status": "pass"
+    }
+  ],
+  "counterexamples": [
+    {
+      "counterexampleId": "counterexample:direction:hard-negative",
+      "stratumId": "stratum:direction:required",
+      "meetingId": "meeting_eval_09",
+      "kind": "hard_negative",
+      "expectedLabel": "negative",
+      "predictedLabel": "negative",
+      "evidenceId": "evidence:direction:09",
+      "drillThroughPath": "/business/crm/meetings/meeting_eval_09?evidence=evidence:direction:09"
+    },
+    {
+      "counterexampleId": "counterexample:work_state:hard-negative",
+      "stratumId": "stratum:work_state:required",
+      "meetingId": "meeting_eval_09",
+      "kind": "hard_negative",
+      "expectedLabel": "negative",
+      "predictedLabel": "negative",
+      "evidenceId": "evidence:work_state:09",
+      "drillThroughPath": "/business/crm/meetings/meeting_eval_09?evidence=evidence:work_state:09"
+    },
+    {
+      "counterexampleId": "counterexample:evidence_grounding:hard-negative",
+      "stratumId": "stratum:evidence_grounding:required",
+      "meetingId": "meeting_eval_09",
+      "kind": "hard_negative",
+      "expectedLabel": "negative",
+      "predictedLabel": "negative",
+      "evidenceId": "evidence:evidence_grounding:09",
+      "drillThroughPath": "/business/crm/meetings/meeting_eval_09?evidence=evidence:evidence_grounding:09"
+    },
+    {
+      "counterexampleId": "counterexample:due:hard-negative",
+      "stratumId": "stratum:due:required",
+      "meetingId": "meeting_eval_09",
+      "kind": "hard_negative",
+      "expectedLabel": "negative",
+      "predictedLabel": "negative",
+      "evidenceId": "evidence:due:09",
+      "drillThroughPath": "/business/crm/meetings/meeting_eval_09?evidence=evidence:due:09"
+    },
+    {
+      "counterexampleId": "counterexample:dependency:hard-negative",
+      "stratumId": "stratum:dependency:required",
+      "meetingId": "meeting_eval_09",
+      "kind": "hard_negative",
+      "expectedLabel": "negative",
+      "predictedLabel": "negative",
+      "evidenceId": "evidence:dependency:09",
+      "drillThroughPath": "/business/crm/meetings/meeting_eval_09?evidence=evidence:dependency:09"
+    },
+    {
+      "counterexampleId": "counterexample:context_class:hard-negative",
+      "stratumId": "stratum:context_class:required",
+      "meetingId": "meeting_eval_09",
+      "kind": "hard_negative",
+      "expectedLabel": "negative",
+      "predictedLabel": "negative",
+      "evidenceId": "evidence:context_class:09",
+      "drillThroughPath": "/business/crm/meetings/meeting_eval_09?evidence=evidence:context_class:09"
+    },
+    {
+      "counterexampleId": "counterexample:identity:hard-negative",
+      "stratumId": "stratum:identity:required",
+      "meetingId": "meeting_eval_09",
+      "kind": "hard_negative",
+      "expectedLabel": "negative",
+      "predictedLabel": "negative",
+      "evidenceId": "evidence:identity:09",
+      "drillThroughPath": "/business/crm/meetings/meeting_eval_09?evidence=evidence:identity:09"
+    }
+  ],
+  "rankingTieBreakPolicy": "score_desc_then_canonical_meeting_id_asc",
+  "overallStatus": "pass",
+  "datasetDigest": "53f19b5a18f9b801c7716be05410b493dc7f02d6cad3e04b7af907b8a3f376e4",
+  "metricReceiptDigest": "e9d946cf68f6c9a4e17131f5fbd004ef8af26e9b3870380749c4477e42393c87"
+}

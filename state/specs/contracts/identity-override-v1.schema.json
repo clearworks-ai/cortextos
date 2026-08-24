@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clearworks.ai/contracts/identity-override-v1.schema.json",
+  "title": "IdentityOverrideV1",
+  "description": "Separately authorized grouping decision for distinct provider source IDs. overrideDigest is SHA-256 of RFC 8785 JCS bytes after removing only overrideDigest.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "orgId", "overrideId", "overrideVersion", "overrideDigest", "supersedesOverrideDigest", "sourceIds", "canonicalSourceId", "reason", "selectionPolicyVersion", "authority", "createdAt"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "orgId": { "type": "string", "minLength": 1 },
+    "overrideId": { "type": "string", "minLength": 1 },
+    "overrideVersion": { "type": "integer", "minimum": 1 },
+    "overrideDigest": { "$ref": "#/$defs/sha256" },
+    "supersedesOverrideDigest": { "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+    "sourceIds": { "type": "array", "minItems": 2, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "canonicalSourceId": { "type": "string", "minLength": 1 },
+    "reason": { "type": "string", "minLength": 1 },
+    "selectionPolicyVersion": { "type": "string", "minLength": 1 },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "actorId", "policyVersion", "decisionDigest", "decidedAt"],
+      "properties": {
+        "kind": { "enum": ["user", "admin"] },
+        "actorId": { "type": "string", "minLength": 1 },
+        "policyVersion": { "type": "string", "minLength": 1 },
+        "decisionDigest": { "$ref": "#/$defs/sha256" },
+        "decidedAt": { "$ref": "#/$defs/dateTime" }
+      }
+    },
+    "createdAt": { "$ref": "#/$defs/dateTime" }
+  },
+  "$defs": { "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "dateTime": { "type": "string", "format": "date-time" } }
+}

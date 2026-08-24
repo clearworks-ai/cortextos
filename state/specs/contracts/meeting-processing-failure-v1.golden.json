@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "1.0",
+  "orgId": "clearworksai",
+  "failureId": "failure:observation:demo:identity",
+  "failureDigest": "30c846139fce9aa3eabc1809ac5790bc63d20a12e2ffaacdb9c2a5a512f653db",
+  "observationId": "observation:fireflies:demo",
+  "observationDigest": "ae0d7e174917d73ab9cca7e1da8dd73c3ca8b9c4bd65432dffeec8a27c7abbd1",
+  "providerSourceId": "demo",
+  "stage": "identity",
+  "errorCode": "AMBIGUOUS_IDENTITY",
+  "failedAt": "2026-08-24T04:05:00Z",
+  "processingStatusPath": "/business/crm/processing/observation-fireflies-demo",
+  "paExceptionReceipt": {
+    "notificationKind": "terminal_exception",
+    "sourceKey": "meeting-processing:observation:demo",
+    "outboundDigest": "9292929292929292929292929292929292929292929292929292929292929292",
+    "providerMessageId": "1902",
+    "policyVersion": "pa-processing-exception-v1",
+    "processingStatusPath": "/business/crm/processing/observation-fireflies-demo",
+    "state": "SUCCEEDED",
+    "attempt": 1,
+    "readbackDigest": "e44f1b46cebc6acb62dfc7f232d33fa5c48eab481341cc45610fb8b9c19310aa",
+    "updatedAt": "2026-08-24T04:05:10Z"
+  }
+}

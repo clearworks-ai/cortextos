@@ -1,0 +1,1130 @@
+{
+  "schemaVersion": "1.0",
+  "orgId": "clearworksai",
+  "datasetId": "semantic-evaluation-dataset:required-v1",
+  "datasetDigest": "53f19b5a18f9b801c7716be05410b493dc7f02d6cad3e04b7af907b8a3f376e4",
+  "policyVersion": "semantic-truth-prediction-v1",
+  "meetingSplitDigest": "f92e516b162c0b9010c6fa6fb2418bb3a93f4fb7168303116edbbccd4867f3a6",
+  "examples": [
+    {
+      "exampleId": "example:direction:01",
+      "dimension": "direction",
+      "stratumId": "stratum:direction:required",
+      "meetingId": "meeting_eval_01",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:direction:01",
+      "evidenceDigest": "877a24fb44d6bb9c2016829ec8a52a2cbbe7598830a6160060fa5d73219f2bc7"
+    },
+    {
+      "exampleId": "example:direction:02",
+      "dimension": "direction",
+      "stratumId": "stratum:direction:required",
+      "meetingId": "meeting_eval_02",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:direction:02",
+      "evidenceDigest": "73416ab2e0937a44c1e59dbc80b7f063522e3db0602920202a495646646b02db"
+    },
+    {
+      "exampleId": "example:direction:03",
+      "dimension": "direction",
+      "stratumId": "stratum:direction:required",
+      "meetingId": "meeting_eval_03",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:direction:03",
+      "evidenceDigest": "2841e8872fecaca94cdeacb0dd43c38a4b212cbe4729924c0a9ee77a9748b0ce"
+    },
+    {
+      "exampleId": "example:direction:04",
+      "dimension": "direction",
+      "stratumId": "stratum:direction:required",
+      "meetingId": "meeting_eval_04",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:direction:04",
+      "evidenceDigest": "fffe535d50991081be37fade6e5bf8b43feda9b9301555baf744d9b1ffe3859f"
+    },
+    {
+      "exampleId": "example:direction:05",
+      "dimension": "direction",
+      "stratumId": "stratum:direction:required",
+      "meetingId": "meeting_eval_05",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:direction:05",
+      "evidenceDigest": "33f41e04bdcfbc4215aa1e348c5c33758f4311affa794bb12e49a2de66caa4ee"
+    },
+    {
+      "exampleId": "example:direction:06",
+      "dimension": "direction",
+      "stratumId": "stratum:direction:required",
+      "meetingId": "meeting_eval_06",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:direction:06",
+      "evidenceDigest": "650c2babb8b84af43974b6ae950c2f3bc7050fafa60e6c1bac1bf45c2c93e1d7"
+    },
+    {
+      "exampleId": "example:direction:07",
+      "dimension": "direction",
+      "stratumId": "stratum:direction:required",
+      "meetingId": "meeting_eval_07",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:direction:07",
+      "evidenceDigest": "d56c35680aec6474a8adac01100a84c9102bd7b5abb6d83d3e089c09b51b9f85"
+    },
+    {
+      "exampleId": "example:direction:08",
+      "dimension": "direction",
+      "stratumId": "stratum:direction:required",
+      "meetingId": "meeting_eval_08",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:direction:08",
+      "evidenceDigest": "e01bfa8ef5f545c54b01e3c888dfc956d60eb35a8c734b769725e2d1b7e94b57"
+    },
+    {
+      "exampleId": "example:direction:09",
+      "dimension": "direction",
+      "stratumId": "stratum:direction:required",
+      "meetingId": "meeting_eval_09",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:direction:09",
+      "evidenceDigest": "a227bfbae1737a008119d2f0689059693f0f3a2115faed185a164e791076159d"
+    },
+    {
+      "exampleId": "example:direction:10",
+      "dimension": "direction",
+      "stratumId": "stratum:direction:required",
+      "meetingId": "meeting_eval_10",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:direction:10",
+      "evidenceDigest": "cbca591ff961f68012c0908aec36c2184fe0a431e622ecedf6679d4b02c39f52"
+    },
+    {
+      "exampleId": "example:direction:11",
+      "dimension": "direction",
+      "stratumId": "stratum:direction:required",
+      "meetingId": "meeting_eval_11",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:direction:11",
+      "evidenceDigest": "8958de9b564d7943c039eb944a5071c999139eed3dd8c249557f33780ef1ef72"
+    },
+    {
+      "exampleId": "example:direction:12",
+      "dimension": "direction",
+      "stratumId": "stratum:direction:required",
+      "meetingId": "meeting_eval_12",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:direction:12",
+      "evidenceDigest": "b8fc45bce7605cbae294941b4331fecaafe80aaa5751d2c5657e93a99d19d902"
+    },
+    {
+      "exampleId": "example:direction:13",
+      "dimension": "direction",
+      "stratumId": "stratum:direction:required",
+      "meetingId": "meeting_eval_13",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:direction:13",
+      "evidenceDigest": "52b049ee47ce22698e2b2f634e638d4e8492e7597aa2d33b6491d900a2a84243"
+    },
+    {
+      "exampleId": "example:direction:14",
+      "dimension": "direction",
+      "stratumId": "stratum:direction:required",
+      "meetingId": "meeting_eval_14",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:direction:14",
+      "evidenceDigest": "3ec60706bdd5f0da2c27e2cdfb8941a428c721aa0617c6abb8b589646ce0e958"
+    },
+    {
+      "exampleId": "example:direction:15",
+      "dimension": "direction",
+      "stratumId": "stratum:direction:required",
+      "meetingId": "meeting_eval_15",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:direction:15",
+      "evidenceDigest": "f413b7b7353d9003ede013e5f6ec4492699cf44f5736a00db8302b2615530983"
+    },
+    {
+      "exampleId": "example:direction:16",
+      "dimension": "direction",
+      "stratumId": "stratum:direction:required",
+      "meetingId": "meeting_eval_16",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:direction:16",
+      "evidenceDigest": "3aaed0a071305557e29aa53f3303c8bc5725a79dd97d64d06232ac628f51a8f1"
+    },
+    {
+      "exampleId": "example:work_state:01",
+      "dimension": "work_state",
+      "stratumId": "stratum:work_state:required",
+      "meetingId": "meeting_eval_01",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:work_state:01",
+      "evidenceDigest": "ab8d614d24739eeffb07c46f8432f53cdef7f2276d8733d5b1078d96cf6cd6fc"
+    },
+    {
+      "exampleId": "example:work_state:02",
+      "dimension": "work_state",
+      "stratumId": "stratum:work_state:required",
+      "meetingId": "meeting_eval_02",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:work_state:02",
+      "evidenceDigest": "a69eb363334a81adf95214444f93d6cbb6bbdd2e8edd81289b710703639e20d6"
+    },
+    {
+      "exampleId": "example:work_state:03",
+      "dimension": "work_state",
+      "stratumId": "stratum:work_state:required",
+      "meetingId": "meeting_eval_03",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:work_state:03",
+      "evidenceDigest": "91cd51cbb45b9077b58e9fb332c7226e14555e4a0155075a76a5050e8240f7b7"
+    },
+    {
+      "exampleId": "example:work_state:04",
+      "dimension": "work_state",
+      "stratumId": "stratum:work_state:required",
+      "meetingId": "meeting_eval_04",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:work_state:04",
+      "evidenceDigest": "3f2340c2fda9a7c10c2267af2865247436c4a7711396eebf17304a2a5d6b9659"
+    },
+    {
+      "exampleId": "example:work_state:05",
+      "dimension": "work_state",
+      "stratumId": "stratum:work_state:required",
+      "meetingId": "meeting_eval_05",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:work_state:05",
+      "evidenceDigest": "9adb8e1a94d921dea3fcd25b25f204a457dd51ae16a81a290756426e896f1807"
+    },
+    {
+      "exampleId": "example:work_state:06",
+      "dimension": "work_state",
+      "stratumId": "stratum:work_state:required",
+      "meetingId": "meeting_eval_06",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:work_state:06",
+      "evidenceDigest": "799abfca9817b1a5fccc398c782a5e79134ff8b61ff5470e74033ecdc708c0dd"
+    },
+    {
+      "exampleId": "example:work_state:07",
+      "dimension": "work_state",
+      "stratumId": "stratum:work_state:required",
+      "meetingId": "meeting_eval_07",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:work_state:07",
+      "evidenceDigest": "c781c9be83bcbfec22527b4c3da733210a4ae6a4822ede6cf6a800d423038432"
+    },
+    {
+      "exampleId": "example:work_state:08",
+      "dimension": "work_state",
+      "stratumId": "stratum:work_state:required",
+      "meetingId": "meeting_eval_08",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:work_state:08",
+      "evidenceDigest": "3b22f6ee65b7a118d70d523d1629a45c32a5975063ba0643bffd9b3647a36785"
+    },
+    {
+      "exampleId": "example:work_state:09",
+      "dimension": "work_state",
+      "stratumId": "stratum:work_state:required",
+      "meetingId": "meeting_eval_09",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:work_state:09",
+      "evidenceDigest": "719cb68440836f3ac48bb93586329069367c72b162c2241eb89c8c1881e415b2"
+    },
+    {
+      "exampleId": "example:work_state:10",
+      "dimension": "work_state",
+      "stratumId": "stratum:work_state:required",
+      "meetingId": "meeting_eval_10",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:work_state:10",
+      "evidenceDigest": "6d1cd731c497536f02e1214c3e7b3391f38a892ecc518bd85613b3761eb0c635"
+    },
+    {
+      "exampleId": "example:work_state:11",
+      "dimension": "work_state",
+      "stratumId": "stratum:work_state:required",
+      "meetingId": "meeting_eval_11",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:work_state:11",
+      "evidenceDigest": "4fc9b5f61f5ed9efabc62c65e12cd4b8c95a922e47faf3a8126d9b49c6cdf2b6"
+    },
+    {
+      "exampleId": "example:work_state:12",
+      "dimension": "work_state",
+      "stratumId": "stratum:work_state:required",
+      "meetingId": "meeting_eval_12",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:work_state:12",
+      "evidenceDigest": "e6c4570ae348ef2fc6489cbaeba2896433443c7d96e56cd08c6946893b351704"
+    },
+    {
+      "exampleId": "example:work_state:13",
+      "dimension": "work_state",
+      "stratumId": "stratum:work_state:required",
+      "meetingId": "meeting_eval_13",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:work_state:13",
+      "evidenceDigest": "9eef5182448c18ae270001914c56565735023d49b85b8a1a48534b796e564db3"
+    },
+    {
+      "exampleId": "example:work_state:14",
+      "dimension": "work_state",
+      "stratumId": "stratum:work_state:required",
+      "meetingId": "meeting_eval_14",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:work_state:14",
+      "evidenceDigest": "acd1b5cff40ca579e85ed7ba4d509eec65eb19f401e0f4800fa2b3ef05268e73"
+    },
+    {
+      "exampleId": "example:work_state:15",
+      "dimension": "work_state",
+      "stratumId": "stratum:work_state:required",
+      "meetingId": "meeting_eval_15",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:work_state:15",
+      "evidenceDigest": "6d81a8d48c890c99364780b7020fa6280ea3a12e2af39b191192a6bd674dc106"
+    },
+    {
+      "exampleId": "example:work_state:16",
+      "dimension": "work_state",
+      "stratumId": "stratum:work_state:required",
+      "meetingId": "meeting_eval_16",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:work_state:16",
+      "evidenceDigest": "dee3a17fd6fbfd803b3805ded78054aa609e2dd4f09a8fb296f1fea8f2f0547d"
+    },
+    {
+      "exampleId": "example:evidence_grounding:01",
+      "dimension": "evidence_grounding",
+      "stratumId": "stratum:evidence_grounding:required",
+      "meetingId": "meeting_eval_01",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:evidence_grounding:01",
+      "evidenceDigest": "aac61007afc9c8520dfbc8acd48bdb432d0f84a3d738785892935d00818f98ca"
+    },
+    {
+      "exampleId": "example:evidence_grounding:02",
+      "dimension": "evidence_grounding",
+      "stratumId": "stratum:evidence_grounding:required",
+      "meetingId": "meeting_eval_02",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:evidence_grounding:02",
+      "evidenceDigest": "e43035349c1250b83b3dcc86834a5ffa797703a439571488a0a6d582ab341632"
+    },
+    {
+      "exampleId": "example:evidence_grounding:03",
+      "dimension": "evidence_grounding",
+      "stratumId": "stratum:evidence_grounding:required",
+      "meetingId": "meeting_eval_03",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:evidence_grounding:03",
+      "evidenceDigest": "88615ce4d512d8f0b6a43929d7172ca4ef9e96d120ac200962c603ad839467b1"
+    },
+    {
+      "exampleId": "example:evidence_grounding:04",
+      "dimension": "evidence_grounding",
+      "stratumId": "stratum:evidence_grounding:required",
+      "meetingId": "meeting_eval_04",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:evidence_grounding:04",
+      "evidenceDigest": "230d616cf7d6a46130c03d2933ff837462606e511083d5ed6ce150915b95a3dc"
+    },
+    {
+      "exampleId": "example:evidence_grounding:05",
+      "dimension": "evidence_grounding",
+      "stratumId": "stratum:evidence_grounding:required",
+      "meetingId": "meeting_eval_05",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:evidence_grounding:05",
+      "evidenceDigest": "c3acc15d42795865866eaab7e0dc5b16cdc9886b37a6fd24e120669ea30e2abc"
+    },
+    {
+      "exampleId": "example:evidence_grounding:06",
+      "dimension": "evidence_grounding",
+      "stratumId": "stratum:evidence_grounding:required",
+      "meetingId": "meeting_eval_06",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:evidence_grounding:06",
+      "evidenceDigest": "3e8b5315a8dfa2fbe520aabb4040b194cbce380e3ee23b9ad214b81cfaa88381"
+    },
+    {
+      "exampleId": "example:evidence_grounding:07",
+      "dimension": "evidence_grounding",
+      "stratumId": "stratum:evidence_grounding:required",
+      "meetingId": "meeting_eval_07",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:evidence_grounding:07",
+      "evidenceDigest": "9171de9773b2d0fbdad11a53861788daa99dbca65a31145b5aeae988e4a63d5f"
+    },
+    {
+      "exampleId": "example:evidence_grounding:08",
+      "dimension": "evidence_grounding",
+      "stratumId": "stratum:evidence_grounding:required",
+      "meetingId": "meeting_eval_08",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:evidence_grounding:08",
+      "evidenceDigest": "9098dcd8d73972031cd9710195747cd2a5c7a27f25e4e23d985a6a169832ce1c"
+    },
+    {
+      "exampleId": "example:evidence_grounding:09",
+      "dimension": "evidence_grounding",
+      "stratumId": "stratum:evidence_grounding:required",
+      "meetingId": "meeting_eval_09",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:evidence_grounding:09",
+      "evidenceDigest": "fe3f5fe8e952eb04bd258ebbfb913ebda56bc12483628af59f6d35c56cc41c38"
+    },
+    {
+      "exampleId": "example:evidence_grounding:10",
+      "dimension": "evidence_grounding",
+      "stratumId": "stratum:evidence_grounding:required",
+      "meetingId": "meeting_eval_10",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:evidence_grounding:10",
+      "evidenceDigest": "4bd98c73ad648faaebb111057bb8f9b8cca73df0df689676394db702b86f8ecd"
+    },
+    {
+      "exampleId": "example:evidence_grounding:11",
+      "dimension": "evidence_grounding",
+      "stratumId": "stratum:evidence_grounding:required",
+      "meetingId": "meeting_eval_11",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:evidence_grounding:11",
+      "evidenceDigest": "e9b8f8155a5245c586a1fc1e03afc92e73c301e17ebc526ea9dbaedf1b4ba3ba"
+    },
+    {
+      "exampleId": "example:evidence_grounding:12",
+      "dimension": "evidence_grounding",
+      "stratumId": "stratum:evidence_grounding:required",
+      "meetingId": "meeting_eval_12",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:evidence_grounding:12",
+      "evidenceDigest": "9a35f2a45109593e2ca92895fd07dbfce465729650ac4da5c7bedf5f972f45dc"
+    },
+    {
+      "exampleId": "example:evidence_grounding:13",
+      "dimension": "evidence_grounding",
+      "stratumId": "stratum:evidence_grounding:required",
+      "meetingId": "meeting_eval_13",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:evidence_grounding:13",
+      "evidenceDigest": "39a9ce42ef0b441e3f5515ffaabce56a0af58ccc8fa4ada3639e010c96fc52a1"
+    },
+    {
+      "exampleId": "example:evidence_grounding:14",
+      "dimension": "evidence_grounding",
+      "stratumId": "stratum:evidence_grounding:required",
+      "meetingId": "meeting_eval_14",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:evidence_grounding:14",
+      "evidenceDigest": "fd987fcdb471d6a8cc70f520c86f9caefce002443429c703e5f23fb3325f5d9c"
+    },
+    {
+      "exampleId": "example:evidence_grounding:15",
+      "dimension": "evidence_grounding",
+      "stratumId": "stratum:evidence_grounding:required",
+      "meetingId": "meeting_eval_15",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:evidence_grounding:15",
+      "evidenceDigest": "70f88675573c4d5e5069c5db7447363e90082377aa07955eca7b6acd85310322"
+    },
+    {
+      "exampleId": "example:evidence_grounding:16",
+      "dimension": "evidence_grounding",
+      "stratumId": "stratum:evidence_grounding:required",
+      "meetingId": "meeting_eval_16",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:evidence_grounding:16",
+      "evidenceDigest": "4776f5c3912d40f76334662abd27cd8e00594342b875a90fe9da827f3c3686e0"
+    },
+    {
+      "exampleId": "example:due:01",
+      "dimension": "due",
+      "stratumId": "stratum:due:required",
+      "meetingId": "meeting_eval_01",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:due:01",
+      "evidenceDigest": "6a81d3ed7fd548e35eae9b4e20cc5067b8bfab173650adcf40816982c3466c82"
+    },
+    {
+      "exampleId": "example:due:02",
+      "dimension": "due",
+      "stratumId": "stratum:due:required",
+      "meetingId": "meeting_eval_02",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:due:02",
+      "evidenceDigest": "6459dc0ce95a3872f2bc68a89867c3f4d936c989c9fb541a61717895c835cf4e"
+    },
+    {
+      "exampleId": "example:due:03",
+      "dimension": "due",
+      "stratumId": "stratum:due:required",
+      "meetingId": "meeting_eval_03",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:due:03",
+      "evidenceDigest": "774151d0c8ff47f206aca7ea8aa8a44b77b812c494c698f057ff129b0729ad91"
+    },
+    {
+      "exampleId": "example:due:04",
+      "dimension": "due",
+      "stratumId": "stratum:due:required",
+      "meetingId": "meeting_eval_04",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:due:04",
+      "evidenceDigest": "56c8cf21b45812a24e2416f114c68ff79c845bbedd62e27a9731373052ce0eab"
+    },
+    {
+      "exampleId": "example:due:05",
+      "dimension": "due",
+      "stratumId": "stratum:due:required",
+      "meetingId": "meeting_eval_05",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:due:05",
+      "evidenceDigest": "4790a3e0d67cd86d47bda4aff3d6d683c6147d981f2b7455eae0f3dce37bbed4"
+    },
+    {
+      "exampleId": "example:due:06",
+      "dimension": "due",
+      "stratumId": "stratum:due:required",
+      "meetingId": "meeting_eval_06",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:due:06",
+      "evidenceDigest": "bab62df2620cc685a4bd6e516746ce69bb6b25d5453400c07411402f131085cc"
+    },
+    {
+      "exampleId": "example:due:07",
+      "dimension": "due",
+      "stratumId": "stratum:due:required",
+      "meetingId": "meeting_eval_07",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:due:07",
+      "evidenceDigest": "3c429415949e549e043240c3e4d016610e4f45a58b1bd481b8caddcf524bb074"
+    },
+    {
+      "exampleId": "example:due:08",
+      "dimension": "due",
+      "stratumId": "stratum:due:required",
+      "meetingId": "meeting_eval_08",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:due:08",
+      "evidenceDigest": "f5cd433a850b58308b327b2524b93ab6f21bc3aa7b3614af0c406327e0698fcb"
+    },
+    {
+      "exampleId": "example:due:09",
+      "dimension": "due",
+      "stratumId": "stratum:due:required",
+      "meetingId": "meeting_eval_09",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:due:09",
+      "evidenceDigest": "847cb6c0c2e4b15d2d5d1bf89312ce0f94094f47f7ed35e7b8e7eff6c17e695a"
+    },
+    {
+      "exampleId": "example:due:10",
+      "dimension": "due",
+      "stratumId": "stratum:due:required",
+      "meetingId": "meeting_eval_10",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:due:10",
+      "evidenceDigest": "9e7744efaf32737b993dead5197f2c384decc41b7ea64fa4d5883790a7a00579"
+    },
+    {
+      "exampleId": "example:due:11",
+      "dimension": "due",
+      "stratumId": "stratum:due:required",
+      "meetingId": "meeting_eval_11",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:due:11",
+      "evidenceDigest": "e26089b3a6abb39c18995e671219d8bdd1994a279f90875193c7d3938203526f"
+    },
+    {
+      "exampleId": "example:due:12",
+      "dimension": "due",
+      "stratumId": "stratum:due:required",
+      "meetingId": "meeting_eval_12",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:due:12",
+      "evidenceDigest": "37147fcaf6c534df1eef96b8f4b4f2bb5e842d7cdb8841fdfb3cc23dada1cf86"
+    },
+    {
+      "exampleId": "example:due:13",
+      "dimension": "due",
+      "stratumId": "stratum:due:required",
+      "meetingId": "meeting_eval_13",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:due:13",
+      "evidenceDigest": "37d4a631a023cdddae3e66c4690989b4ae2de9183fecf6e87220a76a229ed246"
+    },
+    {
+      "exampleId": "example:due:14",
+      "dimension": "due",
+      "stratumId": "stratum:due:required",
+      "meetingId": "meeting_eval_14",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:due:14",
+      "evidenceDigest": "05235c4ba57a98f2e76ee14f1036f6c51eb621ef668738cff000fe4bc30189b4"
+    },
+    {
+      "exampleId": "example:due:15",
+      "dimension": "due",
+      "stratumId": "stratum:due:required",
+      "meetingId": "meeting_eval_15",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:due:15",
+      "evidenceDigest": "0eaf1e0a4013dafc13902372de47d8f37a1ad72d3079d09bfa3eb0a864505a94"
+    },
+    {
+      "exampleId": "example:due:16",
+      "dimension": "due",
+      "stratumId": "stratum:due:required",
+      "meetingId": "meeting_eval_16",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:due:16",
+      "evidenceDigest": "7e1f5e855449d148ebefa16af0df6b5a587a918fbc1c03278f3170965af04767"
+    },
+    {
+      "exampleId": "example:dependency:01",
+      "dimension": "dependency",
+      "stratumId": "stratum:dependency:required",
+      "meetingId": "meeting_eval_01",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:dependency:01",
+      "evidenceDigest": "85673283243ba68d74b23f6ac20c486f0ea758990d92fecf134b6cd7af7585c6"
+    },
+    {
+      "exampleId": "example:dependency:02",
+      "dimension": "dependency",
+      "stratumId": "stratum:dependency:required",
+      "meetingId": "meeting_eval_02",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:dependency:02",
+      "evidenceDigest": "adf7d42b0bd99fa4f916c3cfc210dba1989a6033b4fcf5c40ff539f9b69e95d0"
+    },
+    {
+      "exampleId": "example:dependency:03",
+      "dimension": "dependency",
+      "stratumId": "stratum:dependency:required",
+      "meetingId": "meeting_eval_03",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:dependency:03",
+      "evidenceDigest": "67a3810daddf9a5627e327a5d1985e724dc070e46717c6da43c24d348780f423"
+    },
+    {
+      "exampleId": "example:dependency:04",
+      "dimension": "dependency",
+      "stratumId": "stratum:dependency:required",
+      "meetingId": "meeting_eval_04",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:dependency:04",
+      "evidenceDigest": "043001522f3e7be16e3d67907cbd03bf077a7554fbe569e06d54f4a08f0ac1ea"
+    },
+    {
+      "exampleId": "example:dependency:05",
+      "dimension": "dependency",
+      "stratumId": "stratum:dependency:required",
+      "meetingId": "meeting_eval_05",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:dependency:05",
+      "evidenceDigest": "d7588e93a316c7f9e22b07c270a9df4084de07f12759f37cf8134e436f3d1eac"
+    },
+    {
+      "exampleId": "example:dependency:06",
+      "dimension": "dependency",
+      "stratumId": "stratum:dependency:required",
+      "meetingId": "meeting_eval_06",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:dependency:06",
+      "evidenceDigest": "265dc3e9832c33a6b963915c80834a3c8e4c4ee149853ac71af029ad7ddca024"
+    },
+    {
+      "exampleId": "example:dependency:07",
+      "dimension": "dependency",
+      "stratumId": "stratum:dependency:required",
+      "meetingId": "meeting_eval_07",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:dependency:07",
+      "evidenceDigest": "f333dbfcf0e2e9bbda288550598871876427fff44a0982bf020893a99256c589"
+    },
+    {
+      "exampleId": "example:dependency:08",
+      "dimension": "dependency",
+      "stratumId": "stratum:dependency:required",
+      "meetingId": "meeting_eval_08",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:dependency:08",
+      "evidenceDigest": "c35c003da6c45354a86bf760102da756f3c01f2a8c034c10724b187464efb08a"
+    },
+    {
+      "exampleId": "example:dependency:09",
+      "dimension": "dependency",
+      "stratumId": "stratum:dependency:required",
+      "meetingId": "meeting_eval_09",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:dependency:09",
+      "evidenceDigest": "2acda9ad0fc96aeeb053094beb425f9575d5c4134753793ba6b859cb3b6430c3"
+    },
+    {
+      "exampleId": "example:dependency:10",
+      "dimension": "dependency",
+      "stratumId": "stratum:dependency:required",
+      "meetingId": "meeting_eval_10",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:dependency:10",
+      "evidenceDigest": "7dd6501784ad09cc026849f943a99942c327da380c9531dbfeb20c2bf567bb77"
+    },
+    {
+      "exampleId": "example:dependency:11",
+      "dimension": "dependency",
+      "stratumId": "stratum:dependency:required",
+      "meetingId": "meeting_eval_11",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:dependency:11",
+      "evidenceDigest": "15793e86605dd77136a185bf80696ae4777b7490475948502d9c3405e043354e"
+    },
+    {
+      "exampleId": "example:dependency:12",
+      "dimension": "dependency",
+      "stratumId": "stratum:dependency:required",
+      "meetingId": "meeting_eval_12",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:dependency:12",
+      "evidenceDigest": "32a2ec7fdcc4929fe3c7710800e8556c2826424079682e5d75c0646ae824f0b9"
+    },
+    {
+      "exampleId": "example:dependency:13",
+      "dimension": "dependency",
+      "stratumId": "stratum:dependency:required",
+      "meetingId": "meeting_eval_13",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:dependency:13",
+      "evidenceDigest": "e1165b14bc2264e6d991e1de6f7081e08743f0ffeb098bd3e9115a92360f24aa"
+    },
+    {
+      "exampleId": "example:dependency:14",
+      "dimension": "dependency",
+      "stratumId": "stratum:dependency:required",
+      "meetingId": "meeting_eval_14",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:dependency:14",
+      "evidenceDigest": "0f88d4fc4e9c9fb061f9670c2a1fd44734ddf5bd869584a4917cb8d07597255d"
+    },
+    {
+      "exampleId": "example:dependency:15",
+      "dimension": "dependency",
+      "stratumId": "stratum:dependency:required",
+      "meetingId": "meeting_eval_15",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:dependency:15",
+      "evidenceDigest": "fce2e263802f9032ca7674abfeabaf5a39ab4eb9abba4be0c50b79ed9ea4f846"
+    },
+    {
+      "exampleId": "example:dependency:16",
+      "dimension": "dependency",
+      "stratumId": "stratum:dependency:required",
+      "meetingId": "meeting_eval_16",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:dependency:16",
+      "evidenceDigest": "e2be501e691736a2c303c7c087cc8429ed785643a79ed401bb49a0e52ac239fe"
+    },
+    {
+      "exampleId": "example:context_class:01",
+      "dimension": "context_class",
+      "stratumId": "stratum:context_class:required",
+      "meetingId": "meeting_eval_01",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:context_class:01",
+      "evidenceDigest": "98ebeb4d1a34f4b3e104750f03dcf48d7df1c1b7deecbf0460d43395b08cd434"
+    },
+    {
+      "exampleId": "example:context_class:02",
+      "dimension": "context_class",
+      "stratumId": "stratum:context_class:required",
+      "meetingId": "meeting_eval_02",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:context_class:02",
+      "evidenceDigest": "7cff8c8cf9d34ebfa3c5b1f4c73c649d0e5b560f0101f06dae5c1f02f0a5800a"
+    },
+    {
+      "exampleId": "example:context_class:03",
+      "dimension": "context_class",
+      "stratumId": "stratum:context_class:required",
+      "meetingId": "meeting_eval_03",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:context_class:03",
+      "evidenceDigest": "08bf47004477af59f35e447490d4dbb3da247d2c99859223b665308dee105d2a"
+    },
+    {
+      "exampleId": "example:context_class:04",
+      "dimension": "context_class",
+      "stratumId": "stratum:context_class:required",
+      "meetingId": "meeting_eval_04",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:context_class:04",
+      "evidenceDigest": "7fbedf97ef0c21e2c381176ee25e10640dcb4cfffcf565603411afef1cc4310e"
+    },
+    {
+      "exampleId": "example:context_class:05",
+      "dimension": "context_class",
+      "stratumId": "stratum:context_class:required",
+      "meetingId": "meeting_eval_05",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:context_class:05",
+      "evidenceDigest": "8dd5299f2c3f635a61482a7d9e4f1b3d9c5eadac4c62209de7ac259603a39ff7"
+    },
+    {
+      "exampleId": "example:context_class:06",
+      "dimension": "context_class",
+      "stratumId": "stratum:context_class:required",
+      "meetingId": "meeting_eval_06",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:context_class:06",
+      "evidenceDigest": "db15ae0a6f748789a2635fff09585a51cfab579bf72b928c47f73b68b0be0ac8"
+    },
+    {
+      "exampleId": "example:context_class:07",
+      "dimension": "context_class",
+      "stratumId": "stratum:context_class:required",
+      "meetingId": "meeting_eval_07",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:context_class:07",
+      "evidenceDigest": "a4349af6fc6986d9295a2e69e36d001d36e31e2e4a34e4c61f36102888256d91"
+    },
+    {
+      "exampleId": "example:context_class:08",
+      "dimension": "context_class",
+      "stratumId": "stratum:context_class:required",
+      "meetingId": "meeting_eval_08",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:context_class:08",
+      "evidenceDigest": "72d7da59ed0dab45c6ffb60f6b0e062b3d3cf7f4ec510ffb71d2e5915ff33f7d"
+    },
+    {
+      "exampleId": "example:context_class:09",
+      "dimension": "context_class",
+      "stratumId": "stratum:context_class:required",
+      "meetingId": "meeting_eval_09",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:context_class:09",
+      "evidenceDigest": "085051f5b2321fd61c7e43e56b91d7a93b853d18156775c2774b2e3a84dfc271"
+    },
+    {
+      "exampleId": "example:context_class:10",
+      "dimension": "context_class",
+      "stratumId": "stratum:context_class:required",
+      "meetingId": "meeting_eval_10",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:context_class:10",
+      "evidenceDigest": "7a16c3260e2c70789f0d1619eee568dac03c5867060fc501855920ce557f382c"
+    },
+    {
+      "exampleId": "example:context_class:11",
+      "dimension": "context_class",
+      "stratumId": "stratum:context_class:required",
+      "meetingId": "meeting_eval_11",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:context_class:11",
+      "evidenceDigest": "fadde03e50e9bc738b227b9238ed0117a62405e578138689f7d063c0fbf03c33"
+    },
+    {
+      "exampleId": "example:context_class:12",
+      "dimension": "context_class",
+      "stratumId": "stratum:context_class:required",
+      "meetingId": "meeting_eval_12",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:context_class:12",
+      "evidenceDigest": "b85c369ed57b7fa8acc3f81f389b5819ed42d448b8c9e4e594816301770d9e7c"
+    },
+    {
+      "exampleId": "example:context_class:13",
+      "dimension": "context_class",
+      "stratumId": "stratum:context_class:required",
+      "meetingId": "meeting_eval_13",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:context_class:13",
+      "evidenceDigest": "37695de573e88adb0dd8197a841607b41384d09154f7fe348b9e2a63dcd56cf9"
+    },
+    {
+      "exampleId": "example:context_class:14",
+      "dimension": "context_class",
+      "stratumId": "stratum:context_class:required",
+      "meetingId": "meeting_eval_14",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:context_class:14",
+      "evidenceDigest": "6359023355843e6f4b394db728fdcd5ea328db1e55e527878d9b97225d5eb111"
+    },
+    {
+      "exampleId": "example:context_class:15",
+      "dimension": "context_class",
+      "stratumId": "stratum:context_class:required",
+      "meetingId": "meeting_eval_15",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:context_class:15",
+      "evidenceDigest": "9e77f4b2914d145bdc24a1d0f0eeac708d74a2288b679294dbd6459c57f5d181"
+    },
+    {
+      "exampleId": "example:context_class:16",
+      "dimension": "context_class",
+      "stratumId": "stratum:context_class:required",
+      "meetingId": "meeting_eval_16",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:context_class:16",
+      "evidenceDigest": "e4731548d5391b3e3780d3d46cb3da16fd873d0844c455ceb07a52ebbeee8d5e"
+    },
+    {
+      "exampleId": "example:identity:01",
+      "dimension": "identity",
+      "stratumId": "stratum:identity:required",
+      "meetingId": "meeting_eval_01",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:identity:01",
+      "evidenceDigest": "656f7f0f2b7c1932e918006ac2a0b60092062b936056ef3f9e2443d545fa7191"
+    },
+    {
+      "exampleId": "example:identity:02",
+      "dimension": "identity",
+      "stratumId": "stratum:identity:required",
+      "meetingId": "meeting_eval_02",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:identity:02",
+      "evidenceDigest": "1bf88d729338bd1a9adc03568728642f689a4b52b2ccca430a031c33a2a0e4d0"
+    },
+    {
+      "exampleId": "example:identity:03",
+      "dimension": "identity",
+      "stratumId": "stratum:identity:required",
+      "meetingId": "meeting_eval_03",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:identity:03",
+      "evidenceDigest": "73333643fde422ee923f1b989b326bea55853034cb242867e8333a15617ccc74"
+    },
+    {
+      "exampleId": "example:identity:04",
+      "dimension": "identity",
+      "stratumId": "stratum:identity:required",
+      "meetingId": "meeting_eval_04",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:identity:04",
+      "evidenceDigest": "2a1e63047327e10ce0f168a977d3b6617fac248ec6f4959fdb5390cbdd332f3d"
+    },
+    {
+      "exampleId": "example:identity:05",
+      "dimension": "identity",
+      "stratumId": "stratum:identity:required",
+      "meetingId": "meeting_eval_05",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:identity:05",
+      "evidenceDigest": "92c84063955525f87be50ee8e9ea9fabf97bd156d19469e21f3448557b7fc0be"
+    },
+    {
+      "exampleId": "example:identity:06",
+      "dimension": "identity",
+      "stratumId": "stratum:identity:required",
+      "meetingId": "meeting_eval_06",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:identity:06",
+      "evidenceDigest": "7f20460f7a31ea7f1cc9b65385478c3528d5174f7171e5b12ecab761e07ceb0c"
+    },
+    {
+      "exampleId": "example:identity:07",
+      "dimension": "identity",
+      "stratumId": "stratum:identity:required",
+      "meetingId": "meeting_eval_07",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:identity:07",
+      "evidenceDigest": "6824da85925e0cdbb9c339d143a0697911573f0a795ce3b7d093f334359f2d4c"
+    },
+    {
+      "exampleId": "example:identity:08",
+      "dimension": "identity",
+      "stratumId": "stratum:identity:required",
+      "meetingId": "meeting_eval_08",
+      "truth": true,
+      "prediction": true,
+      "evidenceId": "evidence:identity:08",
+      "evidenceDigest": "d20b3c0a88b7df745df47ac556bac63aa7ac74c4b87588d2c9226f1709858a03"
+    },
+    {
+      "exampleId": "example:identity:09",
+      "dimension": "identity",
+      "stratumId": "stratum:identity:required",
+      "meetingId": "meeting_eval_09",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:identity:09",
+      "evidenceDigest": "6a140aa7a6d19f4983a3e92bb8fe77b43d1ea76d4c67bdad35c03625db7a49d9"
+    },
+    {
+      "exampleId": "example:identity:10",
+      "dimension": "identity",
+      "stratumId": "stratum:identity:required",
+      "meetingId": "meeting_eval_10",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:identity:10",
+      "evidenceDigest": "c602269f8eec3f492e3e4b1f19a9ffcd5e2ebda8167e66db8e6185e88ec98e42"
+    },
+    {
+      "exampleId": "example:identity:11",
+      "dimension": "identity",
+      "stratumId": "stratum:identity:required",
+      "meetingId": "meeting_eval_11",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:identity:11",
+      "evidenceDigest": "b2c244a49c88c7365f183be2e9c05f9c3cc06274ce444f36a75b7a9620f069f7"
+    },
+    {
+      "exampleId": "example:identity:12",
+      "dimension": "identity",
+      "stratumId": "stratum:identity:required",
+      "meetingId": "meeting_eval_12",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:identity:12",
+      "evidenceDigest": "b89564b8ad3ea9478251de25c0c358edbec51baaf7e97a11f462bc44747eeb6d"
+    },
+    {
+      "exampleId": "example:identity:13",
+      "dimension": "identity",
+      "stratumId": "stratum:identity:required",
+      "meetingId": "meeting_eval_13",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:identity:13",
+      "evidenceDigest": "aa092bd891ce8fd04f73e57afbad4e2e757fdb3b2dc05adce39fa02c0d9b39cf"
+    },
+    {
+      "exampleId": "example:identity:14",
+      "dimension": "identity",
+      "stratumId": "stratum:identity:required",
+      "meetingId": "meeting_eval_14",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:identity:14",
+      "evidenceDigest": "02bb72ed0e0939deff7dbd5493f6d3513d3dfdf507fde4be1ba74f95ddde2b2e"
+    },
+    {
+      "exampleId": "example:identity:15",
+      "dimension": "identity",
+      "stratumId": "stratum:identity:required",
+      "meetingId": "meeting_eval_15",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:identity:15",
+      "evidenceDigest": "7b4c2f2b12e61a2f3246cd3e9639624f06e5b2e88c939bd38aa81033785fbf0d"
+    },
+    {
+      "exampleId": "example:identity:16",
+      "dimension": "identity",
+      "stratumId": "stratum:identity:required",
+      "meetingId": "meeting_eval_16",
+      "truth": false,
+      "prediction": false,
+      "evidenceId": "evidence:identity:16",
+      "evidenceDigest": "b6e669f50231da59eb3111a95f16a8b99e124787fed4b772a369b1f2b5587d7e"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1.0",
+  "orgId": "clearworksai",
+  "policyId": "coverage-clock:clearworksai",
+  "policyDigest": "c2c32ef422d602145572b96972e4e03352d43fb307581c73258bc1bf58a1ba3d",
+  "policyVersion": "coverage-clock-authority-v1",
+  "keyId": "coverage-clock-test-key-v1",
+  "validFrom": "2026-01-01T00:00:00Z",
+  "validUntil": "2027-01-01T00:00:00Z",
+  "maximumIssuedAtSkewSeconds": 60,
+  "replayWindowSeconds": 300
+}

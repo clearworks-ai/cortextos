@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "1.0",
+  "orgId": "clearworksai",
+  "intentId": "crm:intent:pilot",
+  "intentDigest": "25d063cbd0a7ec8a8900bfff85842543d4e46aae9e1b25aed1d10c5acd75fbbd",
+  "clientRequestId": "briefs:req:pilot",
+  "requestDigest": "2db24d40f04ec4c3967c35af0f4677c9b8b087203a433d227d5acdc6303dba9f",
+  "canonicalMeetingId": "meeting_demo_2026_08_24_01",
+  "recordVersion": 1,
+  "recordDigest": "be66407f98eeb28dc3063c31f800096f8bb3ab06681a56b415f57ca83f1833ba",
+  "canonicalClaimId": "canonical:decision-pilot",
+  "claimId": "claim:decision:v1",
+  "baseCrmVersion": "crm-v41",
+  "baseCrmDigest": "e4f3a46d91b19114a8c6a8874fb27462159939bca35be5ed87b56b28ac9a7970",
+  "requestKind": "system_exact",
+  "operation": "upsert_interaction",
+  "target": {
+    "entityType": "interaction",
+    "entityId": "crm:interaction:meeting_demo_2026_08_24_01"
+  },
+  "proposedValue": {
+    "interactionId": "crm:interaction:meeting_demo_2026_08_24_01",
+    "occurredAt": "2026-08-24T03:00:00Z",
+    "title": "Acme intake-routing pilot",
+    "accountIds": [
+      "crm:account:acme"
+    ],
+    "contactIds": [
+      "crm:contact:alex"
+    ],
+    "engagementIds": [
+      "crm:engagement:acme-pilot"
+    ]
+  },
+  "proposedValueDigest": "daa3338baeed791adaf5c097927dfba4dec4c7809e6f7c1f57e1501df776af3b",
+  "evidenceRefs": [
+    "ev:decision"
+  ],
+  "idempotencyKey": "meeting_demo_2026_08_24_01:v1:crm:pilot",
+  "submittedAt": "2026-08-24T04:00:30Z",
+  "acceptedAt": "2026-08-24T04:00:31Z",
+  "submittedBy": {
+    "subjectId": "service:meeting-engine",
+    "sessionId": "service-session:demo",
+    "auditReceiptId": "audit:crm-request:demo",
+    "policyVersion": "crm-request-attribution-v1"
+  },
+  "authoritativeReadbackVersion": null,
+  "authoritativeReadbackDigest": null,
+  "reconciliationReceipt": null,
+  "state": "accepted_pending",
+  "stateVersion": 1,
+  "previousIntentDigest": null,
+  "rejectionCode": null,
+  "updatedAt": "2026-08-24T04:00:31Z"
+}

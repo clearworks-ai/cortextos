@@ -220,6 +220,73 @@ describe('queryKnowledgeBase — graceful missing-config', () => {
   });
 });
 
+describe('queryKnowledgeBase — native hold fail-closed', () => {
+  function throwHold(result = 'STORE_QUARANTINED', holdMode = 'exclusive'): never {
+    const err = Object.assign(new Error('Command failed: python mmrag.py'), {
+      status: 3,
+      stdout: JSON.stringify({
+        result,
+        store_health: result === 'STORE_QUARANTINED' ? 'QUARANTINED' : 'UNKNOWN',
+        hold_mode: holdMode,
+        operation: 'query',
+      }),
+      stderr: '',
+    });
+    throw err;
+  }
+
+  it('exclusive hold returns STORE_QUARANTINED and does not treat total:0 as success', () => {
+    mockConfiguredKb();
+    execFileSyncMock.mockImplementation(() => throwHold());
+
+    const result = queryKnowledgeBase(dummyPaths, 'what is recovery?', { ...baseOptions, scope: 'shared' });
+
+    expect(result.result).toBe('STORE_QUARANTINED');
+    expect(result.store_health).toBe('QUARANTINED');
+    expect(result.hold_mode).toBe('exclusive');
+    expect(result.total).toBe(0);
+    expect(result.results).toEqual([]);
+    expect(warnLog.some((m) => m.includes('STORE_QUARANTINED'))).toBe(true);
+    expect(warnLog.some((m) => m.includes('ANOMALY'))).toBe(false);
+    const statusCalls = execFileSyncMock.mock.calls.filter((call) => {
+      const argv = call[1] as string[];
+      return Array.isArray(argv) && argv.includes('status');
+    });
+    expect(statusCalls).toHaveLength(0);
+  });
+
+  it('invalid hold returns INVALID_CONFIG instead of empty success', () => {
+    mockConfiguredKb();
+    execFileSyncMock.mockImplementation(() => throwHold('INVALID_CONFIG', ''));
+
+    const result = queryKnowledgeBase(dummyPaths, 'what is recovery?', { ...baseOptions, scope: 'shared' });
+    expect(result.result).toBe('INVALID_CONFIG');
+    expect(result.total).toBe(0);
+  });
+});
+
+describe('ingestKnowledgeBase — native hold fail-closed', () => {
+  it('throws STORE_QUARANTINED and does not claim ingest complete', () => {
+    mockConfiguredKb();
+    execFileSyncMock.mockImplementation(() => {
+      const err = Object.assign(new Error('Command failed'), {
+        status: 3,
+        stdout: JSON.stringify({
+          result: 'STORE_QUARANTINED',
+          store_health: 'QUARANTINED',
+          hold_mode: 'writers',
+          operation: 'ingest',
+        }),
+        stderr: '',
+      });
+      throw err;
+    });
+
+    expect(() => ingestKnowledgeBase(['/some/file.md'], baseOptions)).toThrow(/STORE_QUARANTINED/);
+    expect(logLog.some((m) => m.includes('Ingest complete'))).toBe(false);
+  });
+});
+
 describe('kb warn messages — UX invariants', () => {
   it('both warn messages name the org and suggest "run setup"', () => {
     // Drive ingest path

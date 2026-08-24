@@ -497,8 +497,199 @@ def describe_media(client, config, file_path, media_type="video"):
 # ---------------------------------------------------------------------------
 # ChromaDB
 # ---------------------------------------------------------------------------
+NATIVE_HOLD_FILENAME = "NATIVE_HOLD"
+NATIVE_HOLD_EXIT_CODE = 3
+NATIVE_HOLD_MODES = {"exclusive", "writers"}
+CHROMA_COMMANDS = {
+    "ingest", "query", "status", "list", "collections", "delete", "reset",
+    "reconcile", "deliver", "verify-retrieval", "reindex-indexes",
+}
+WRITE_OPERATIONS = {"ingest", "reconcile", "delete", "reset", "reindex-indexes"}
+READ_OPERATIONS = {
+    "query", "status", "list", "collections", "deliver", "verify-retrieval",
+}
+
+_CURRENT_OPERATION = ""
+
+
+class NativeHoldError(Exception):
+    """Fail-closed refusal to construct or mutate a live PersistentClient."""
+
+    def __init__(
+        self,
+        result="STORE_QUARANTINED",
+        *,
+        hold_mode="",
+        operation="",
+        chroma_dir="",
+        live_dir="",
+        detail="",
+    ):
+        self.result = result
+        self.store_health = "QUARANTINED" if result == "STORE_QUARANTINED" else "UNKNOWN"
+        self.hold_mode = hold_mode
+        self.operation = operation
+        self.chroma_dir = str(chroma_dir)
+        self.live_dir = str(live_dir)
+        self.detail = detail
+        super().__init__(self.to_json())
+
+    def to_dict(self):
+        payload = {
+            "result": self.result,
+            "store_health": self.store_health,
+            "hold_mode": self.hold_mode,
+            "operation": self.operation,
+            "chroma_dir": self.chroma_dir,
+            "live_dir": self.live_dir,
+        }
+        if self.detail:
+            payload["detail"] = self.detail
+        return payload
+
+    def to_json(self):
+        return json.dumps(self.to_dict(), separators=(",", ":"))
+
+
+def set_mmrag_operation(name):
+    global _CURRENT_OPERATION
+    _CURRENT_OPERATION = (name or "").strip().lower()
+
+
+def _mmrag_operation():
+    env_op = os.environ.get("MMRAG_OPERATION", "").strip().lower()
+    return env_op or _CURRENT_OPERATION
+
+
+def _resolve_fs_path(path):
+    return Path(path).expanduser().resolve()
+
+
+def _native_hold_path():
+    return Path(MMRAG_DIR) / NATIVE_HOLD_FILENAME
+
+
+def _load_native_hold():
+    hold_path = _native_hold_path()
+    if not hold_path.is_file():
+        return None
+    raw = hold_path.read_text(encoding="utf-8").strip()
+    if not raw:
+        raise NativeHoldError(
+            "INVALID_CONFIG",
+            hold_mode="",
+            operation=_mmrag_operation(),
+            chroma_dir=CHROMADB_DIR,
+            live_dir=CHROMADB_DIR,
+            detail="NATIVE_HOLD is empty",
+        )
+    try:
+        if raw[0] == "{":
+            mode = str(json.loads(raw).get("mode", "")).strip().lower()
+        else:
+            mode = raw.split()[0].strip().lower()
+    except (json.JSONDecodeError, IndexError, TypeError) as exc:
+        raise NativeHoldError(
+            "INVALID_CONFIG",
+            hold_mode="",
+            operation=_mmrag_operation(),
+            chroma_dir=CHROMADB_DIR,
+            live_dir=CHROMADB_DIR,
+            detail=f"NATIVE_HOLD is not parseable: {exc}",
+        ) from exc
+    if mode not in NATIVE_HOLD_MODES:
+        raise NativeHoldError(
+            "INVALID_CONFIG",
+            hold_mode=mode,
+            operation=_mmrag_operation(),
+            chroma_dir=CHROMADB_DIR,
+            live_dir=CHROMADB_DIR,
+            detail="NATIVE_HOLD mode must be exclusive or writers",
+        )
+    return {"mode": mode, "path": str(hold_path)}
+
+
+def _side_capability_dir():
+    raw = os.environ.get("MMRAG_SIDE_CHROMADB_DIR", "").strip()
+    if not raw:
+        return None
+    return _resolve_fs_path(raw)
+
+
+def _assert_chroma_allowed(chroma_dir=None):
+    """Refuse live PersistentClient construction when NATIVE_HOLD is active."""
+    target = _resolve_fs_path(chroma_dir or CHROMADB_DIR)
+    live = _resolve_fs_path(CHROMADB_DIR)
+    operation = _mmrag_operation()
+    hold = _load_native_hold()
+    if hold is None:
+        return
+    side = _side_capability_dir()
+    if side is not None and target == side and target != live:
+        return
+    mode = hold["mode"]
+    if target != live:
+        raise NativeHoldError(
+            hold_mode=mode,
+            operation=operation,
+            chroma_dir=target,
+            live_dir=live,
+            detail="hold is active; chroma_dir is neither live nor the approved side path",
+        )
+    if mode == "exclusive":
+        raise NativeHoldError(
+            hold_mode=mode,
+            operation=operation,
+            chroma_dir=target,
+            live_dir=live,
+            detail="exclusive hold refuses every live PersistentClient",
+        )
+    # writers: reads of live are allowed; writes and unknown ops fail closed.
+    if operation in READ_OPERATIONS:
+        return
+    raise NativeHoldError(
+        hold_mode=mode,
+        operation=operation,
+        chroma_dir=target,
+        live_dir=live,
+        detail="writers hold refuses live ingest/reconcile/delete/reset and unknown ops",
+    )
+
+
+def _emit_native_hold_error(exc, *, json_out=False):
+    payload = exc.to_json()
+    print(payload)
+    if not json_out:
+        print(
+            f"NATIVE_HOLD refused result={exc.result} mode={exc.hold_mode or '-'} "
+            f"operation={exc.operation or '-'}",
+            file=sys.stderr,
+        )
+
+
 def get_chroma_collection(collection_name="default", *, chroma_dir=None, chroma_client=None):
     client = chroma_client or get_chroma_client(chroma_dir=chroma_dir)
+    # Caller-supplied clients (side rebuild temp) keep get_or_create. The live
+    # factory path is the only one that must refuse creating a missing name.
+    if chroma_client is not None and chroma_dir is None:
+        return client.get_or_create_collection(
+            name=collection_name,
+            metadata={"hnsw:space": "cosine"},
+        )
+    hold = _load_native_hold()
+    target = _resolve_fs_path(chroma_dir or CHROMADB_DIR)
+    live = _resolve_fs_path(CHROMADB_DIR)
+    if hold and hold["mode"] == "writers" and target == live:
+        existing = _get_existing_collection(client, collection_name)
+        if existing is None:
+            raise NativeHoldError(
+                hold_mode="writers",
+                operation=_mmrag_operation(),
+                chroma_dir=target,
+                live_dir=live,
+                detail="writers hold refuses get_or_create of a missing live collection",
+            )
+        return existing
     return client.get_or_create_collection(
         name=collection_name,
         metadata={"hnsw:space": "cosine"},
@@ -506,6 +697,7 @@ def get_chroma_collection(collection_name="default", *, chroma_dir=None, chroma_
 
 
 def get_chroma_client(chroma_dir=None):
+    _assert_chroma_allowed(chroma_dir)
     import chromadb
     return chromadb.PersistentClient(path=str(chroma_dir or CHROMADB_DIR))
 
@@ -3731,6 +3923,8 @@ def cmd_status(args):
     try:
         collection = get_chroma_collection(collection_name)
         count = collection.count()
+    except NativeHoldError:
+        raise
     except Exception:
         count = 0
 
@@ -3778,6 +3972,8 @@ def cmd_list(args):
 
     try:
         collection = get_chroma_collection(collection_name)
+    except NativeHoldError:
+        raise
     except Exception:
         print("No data found.")
         return
@@ -4034,7 +4230,14 @@ def main():
         "usage": cmd_usage,
     }
 
-    commands[args.command](args)
+    set_mmrag_operation(args.command)
+    try:
+        if args.command in CHROMA_COMMANDS:
+            _assert_chroma_allowed()
+        commands[args.command](args)
+    except NativeHoldError as exc:
+        _emit_native_hold_error(exc, json_out=bool(getattr(args, "json", False)))
+        sys.exit(NATIVE_HOLD_EXIT_CODE)
 
 
 if __name__ == "__main__":

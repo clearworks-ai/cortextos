@@ -134,9 +134,22 @@ export async function GET(request: NextRequest) {
     return Response.json({ results: [], total: 0, query: q, collection: `shared-${org}` });
   }
 
+  function throwIfHoldPayload(text: string): void {
+    const jsonStart = text.indexOf('{');
+    if (jsonStart === -1) return;
+    try {
+      const parsed = JSON.parse(text.slice(jsonStart).split('\n')[0]) as { result?: string; hold_mode?: string };
+      if (parsed?.result === 'STORE_QUARANTINED' || parsed?.result === 'INVALID_CONFIG') {
+        throw Object.assign(new Error(parsed.result), { holdResult: parsed.result, holdMode: parsed.hold_mode });
+      }
+    } catch (err) {
+      if (err && typeof err === 'object' && 'holdResult' in err) throw err;
+    }
+  }
+
   /**
    * Run a single mmrag.py query against one collection.
-   * Returns empty array (never throws) — callers handle missing/empty collections gracefully.
+   * Empty collections return []. Native-hold refusals throw so GET can 503.
    */
   function runQuery(col: string): Array<{
     content?: string; result?: string; similarity?: number;
@@ -158,17 +171,24 @@ export async function GET(request: NextRequest) {
         env: env as NodeJS.ProcessEnv,
       });
     } catch (e: unknown) {
-      // On non-zero exit, try to recover stdout (partial output)
       stdout = (e as { stdout?: string }).stdout || '';
+      throwIfHoldPayload(stdout);
       if (!stdout) return [];
     }
+    throwIfHoldPayload(stdout);
     const trimmed = stdout.trim();
     const jsonStart = trimmed.indexOf('{');
     if (jsonStart === -1) return [];
     try {
       const parsed = JSON.parse(trimmed.slice(jsonStart));
+      if (parsed?.result === 'STORE_QUARANTINED' || parsed?.result === 'INVALID_CONFIG') {
+        throw Object.assign(new Error(parsed.result), { holdResult: parsed.result, holdMode: parsed.hold_mode });
+      }
       return parsed.results || [];
-    } catch { return []; }
+    } catch (err) {
+      if (err && typeof err === 'object' && 'holdResult' in err) throw err;
+      return [];
+    }
   }
 
   /**
@@ -185,8 +205,10 @@ export async function GET(request: NextRequest) {
       });
     } catch (e: unknown) {
       stdout = (e as { stdout?: string }).stdout || '';
+      throwIfHoldPayload(stdout);
       if (!stdout) return [];
     }
+    throwIfHoldPayload(stdout);
     const names: string[] = [];
     for (const line of stdout.trim().split('\n')) {
       if (!line || line.startsWith('Collection') || line.startsWith('---')) continue;
@@ -279,6 +301,16 @@ export async function GET(request: NextRequest) {
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
+    if (message === 'STORE_QUARANTINED' || message === 'INVALID_CONFIG') {
+      return Response.json({
+        result: message,
+        store_health: message === 'STORE_QUARANTINED' ? 'QUARANTINED' : 'UNKNOWN',
+        results: [],
+        total: 0,
+        query: q,
+        collection: `shared-${org}`,
+      }, { status: 503 });
+    }
     // If knowledge base not set up, return empty rather than 500
     if (message.includes('not set up') || message.includes('No collections')) {
       return Response.json({ results: [], total: 0, query: q, collection: `shared-${org}` });

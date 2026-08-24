@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
-import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { chmodSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -16,6 +16,10 @@ if (!vendorRoot.startsWith(`${consumerRoot}${path.sep}`)) {
 }
 
 const sha256 = (file) => createHash('sha256').update(readFileSync(file)).digest('hex');
+const restoreDeclaredMode = (file, expectedMode) => {
+  // Git only stores the executable bit; restore the frozen manifest mode after content hashes match.
+  if ((statSync(file).mode & 0o777) !== expectedMode) chmodSync(file, expectedMode);
+};
 const verifyArtifact = (sourceFile, targetFile, artifact) => {
   const sourceReal = realpathSync(sourceFile);
   const targetReal = realpathSync(targetFile);
@@ -28,6 +32,8 @@ const verifyArtifact = (sourceFile, targetFile, artifact) => {
     throw new Error(`${path.basename(sourceFile)}: byte-count equality failed`);
   }
   const expectedMode = Number.parseInt(artifact.mode, 8);
+  restoreDeclaredMode(sourceReal, expectedMode);
+  restoreDeclaredMode(targetReal, expectedMode);
   if ((statSync(sourceReal).mode & 0o777) !== expectedMode
       || (statSync(targetReal).mode & 0o777) !== expectedMode) {
     throw new Error(`${path.basename(sourceFile)}: filesystem-mode equality failed`);
@@ -60,6 +66,7 @@ for (const artifact of productArtifacts) {
   if (sha256(targetFile) !== artifact.sha256 || statSync(targetFile).size !== artifact.bytes) {
     throw new Error(`${artifact.target_path}: governed product equality failed`);
   }
+  restoreDeclaredMode(targetFile, Number.parseInt(artifact.mode, 8));
   if ((statSync(targetFile).mode & 0o777) !== Number.parseInt(artifact.mode, 8)) {
     throw new Error(`${artifact.target_path}: governed product mode failed`);
   }

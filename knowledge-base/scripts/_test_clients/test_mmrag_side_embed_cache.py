@@ -193,6 +193,9 @@ def test_side_owned_cache_write_leaves_live_bytes_untouched(tmp_path, monkeypatc
     assert prepared.is_file()
     assert live_cache.read_bytes() == b"live-cache-bytes"
     assert live_cache.stat().st_mtime_ns == live_stat.st_mtime_ns
-    assert sqlite3.connect(str(prepared)).execute(
-        "SELECT content_key FROM embedding_cache"
-    ).fetchone() == ("k",)
+    verify = sqlite3.connect(str(prepared))
+    try:
+        row = verify.execute("SELECT content_key FROM embedding_cache").fetchone()
+    finally:
+        verify.close()
+    assert row == ("k",)

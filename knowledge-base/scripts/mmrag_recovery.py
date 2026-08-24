@@ -159,6 +159,27 @@ def _sha256_file(path):
     return digest.hexdigest()
 
 
+def assert_recovery_archive_sufficient(archive_path):
+    """Refuse fleet-hot-state-style archives that omit embedding-cache or chromadb."""
+    archive = Path(archive_path).expanduser().resolve()
+    assert_not_live_epoch(archive)
+    if not archive.is_file():
+        raise BackupRefused(f"backup archive missing: {archive}")
+    with tarfile.open(archive, "r:*") as tar:
+        names = set(tar.getnames())
+    missing = []
+    if not any(name == "chromadb" or name.startswith("chromadb/") for name in names):
+        missing.append("chromadb/")
+    for member in ("config.json", "embedding-cache.sqlite"):
+        if member not in names:
+            missing.append(member)
+    if missing:
+        raise BackupRefused(
+            "recovery archive insufficient (fleet-hot-state-style omissions): "
+            f"missing {missing}"
+        )
+
+
 def snapshot_kb_surfaces(kb_root, dest_dir, *, drain_timeout_s=30):
     """Immutable snapshot of chromadb/, config.json, and embedding-cache.sqlite.
 
@@ -196,6 +217,7 @@ def snapshot_kb_surfaces(kb_root, dest_dir, *, drain_timeout_s=30):
     finally:
         os.close(dir_fd)
     os.chmod(archive, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+    assert_recovery_archive_sufficient(archive)
 
     receipt = {
         "result": "BACKUP_OK",

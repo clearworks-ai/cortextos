@@ -6,11 +6,13 @@ Never SIGKILL. Live ~/.cortextos KB roots are blocked until human L0.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
 import stat
 import tarfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -186,3 +188,62 @@ def test_materialize_refuses_live_destination():
             LIVE_KB / "not-used.tar.gz",
             LIVE_KB / "work",
         )
+
+
+def test_drain_passes_after_flock_holder_releases(tmp_path):
+    kb = _seed_kb(tmp_path)
+    sqlite = kb / "chromadb" / "chroma.sqlite3"
+    opened = threading.Event()
+    release = threading.Event()
+
+    def hold():
+        fd = os.open(sqlite, os.O_RDWR)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            opened.set()
+            release.wait(timeout=5)
+        finally:
+            os.close(fd)
+
+    holder = threading.Thread(target=hold)
+    holder.start()
+    assert opened.wait(timeout=2)
+    threading.Timer(0.2, release.set).start()
+    receipt = mmrag_recovery.drain_chroma_openers(sqlite, timeout_s=2, poll_s=0.05)
+    holder.join(timeout=3)
+    assert receipt["result"] == "DRAIN_PASS"
+    assert receipt["openers"] == []
+
+
+def test_backup_refuses_missing_embedding_cache_surface(tmp_path):
+    kb = _seed_kb(tmp_path)
+    (kb / "embedding-cache.sqlite").unlink()
+    dest = tmp_path / "backup"
+    with pytest.raises(mmrag_recovery.BackupRefused):
+        mmrag_recovery.snapshot_kb_surfaces(kb, dest, drain_timeout_s=1)
+    assert not dest.exists()
+
+
+def test_archive_without_embedding_cache_is_insufficient(tmp_path):
+    kb = _seed_kb(tmp_path)
+    dest = tmp_path / "backup"
+    receipt = mmrag_recovery.snapshot_kb_surfaces(kb, dest, drain_timeout_s=1)
+    mmrag_recovery.assert_recovery_archive_sufficient(receipt["archive_path"])
+
+    thin = tmp_path / "fleet-style.tar.gz"
+    with tarfile.open(thin, "w:gz") as tar:
+        tar.add(kb / "chromadb", arcname="chromadb")
+        tar.add(kb / "config.json", arcname="config.json")
+    with pytest.raises(mmrag_recovery.BackupRefused) as exc_info:
+        mmrag_recovery.assert_recovery_archive_sufficient(thin)
+    assert "embedding-cache" in str(exc_info.value).lower()
+
+
+def test_materialize_refuses_writable_archive(tmp_path):
+    kb = _seed_kb(tmp_path)
+    dest = tmp_path / "backup"
+    receipt = mmrag_recovery.snapshot_kb_surfaces(kb, dest, drain_timeout_s=1)
+    archive = Path(receipt["archive_path"])
+    os.chmod(archive, 0o644)
+    with pytest.raises(mmrag_recovery.BackupRefused):
+        mmrag_recovery.materialize_backup_work_tree(archive, tmp_path / "work-tree")

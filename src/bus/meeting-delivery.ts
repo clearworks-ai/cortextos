@@ -55,6 +55,7 @@ export interface SinkOutcome {
   providerId?: string | null;
   unknownProbeCount?: number;
   lastProbeAt?: string | null;
+  reconciliationReceipt?: Record<string, unknown> | null;
 }
 
 export interface PaEligibility {
@@ -240,6 +241,16 @@ export function applySinkOutcome(
     if (!LEGAL_PREVIOUS[outcome.state].includes(receipt.state as SinkState | null)) {
       throw new DeliveryValidationError(`illegal receipt transition ${String(receipt.state)} -> ${outcome.state}`);
     }
+    if (outcome.state === 'SUCCEEDED' && (!outcome.readbackDigest || !outcome.providerId)) {
+      throw new DeliveryValidationError('succeeded receipt lacks readback');
+    }
+    if (
+      outcome.state === 'SUCCEEDED'
+      && receipt.state === 'UNKNOWN_COMMIT'
+      && !outcome.reconciliationReceipt
+    ) {
+      throw new DeliveryValidationError('unknown commit lacks reconciliation receipt');
+    }
     receipt.previousState = receipt.state;
     receipt.state = outcome.state;
     if (outcome.policyVersion !== undefined) receipt.policyVersion = outcome.policyVersion;
@@ -249,6 +260,7 @@ export function applySinkOutcome(
     if (outcome.providerId !== undefined) receipt.providerId = outcome.providerId;
     if (outcome.unknownProbeCount !== undefined) receipt.unknownProbeCount = outcome.unknownProbeCount;
     if (outcome.lastProbeAt !== undefined) receipt.lastProbeAt = outcome.lastProbeAt;
+    if (outcome.reconciliationReceipt !== undefined) receipt.reconciliationReceipt = outcome.reconciliationReceipt;
     if (['SUCCEEDED', 'SKIPPED_POLICY', 'TERMINAL_FAILED', 'UNKNOWN_COMMIT'].includes(outcome.state)) {
       receipt.nextAttemptAt = null;
     }

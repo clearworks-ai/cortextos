@@ -125,6 +125,8 @@ describe('meeting delivery envelope', () => {
         });
         expect(evaluatePaEligibility(unknown).kind).toBe('suppressed');
         expect(unknown.paDeliveryReceipt).toBeNull();
+        const unknownReceipt = (unknown.upstreamReceipts as Array<{ sink: string; lastProbeAt: string | null }>).find((item) => item.sink === 'lifecycle_projection');
+        expect(unknownReceipt?.lastProbeAt).toBe('2026-08-24T04:01:40Z');
       } finally {
         rmSync(unknownDir, { recursive: true, force: true });
       }
@@ -161,6 +163,33 @@ describe('meeting delivery envelope', () => {
       expect(crm?.state).toBe('LEASED');
       expect(crm?.leaseOwner).toBe('meeting-engine:demo');
       expect(evaluatePaEligibility(leased).kind).toBe('suppressed');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses SUCCEEDED without readback and UNKNOWN_COMMIT promotion without reconciliation', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'meeting-delivery-readback-'));
+    try {
+      const envelope = clone(loadJson('meeting-delivery-envelope-v1.golden.json'));
+      persistWithLeasedSink(dir, envelope, 'crm_interaction');
+      expect(() => applySinkOutcome(dir, envelope.canonicalMeetingId as string, 'crm_interaction', {
+        state: 'SUCCEEDED',
+      })).toThrow(DeliveryValidationError);
+
+      const unknownDir = mkdtempSync(join(tmpdir(), 'meeting-delivery-reconcile-'));
+      persistWithLeasedSink(unknownDir, clone(envelope), 'lifecycle_projection');
+      applySinkOutcome(unknownDir, envelope.canonicalMeetingId as string, 'lifecycle_projection', {
+        state: 'UNKNOWN_COMMIT',
+        unknownProbeCount: 1,
+        lastProbeAt: '2026-08-24T04:01:40Z',
+      });
+      expect(() => applySinkOutcome(unknownDir, envelope.canonicalMeetingId as string, 'lifecycle_projection', {
+        state: 'SUCCEEDED',
+        readbackDigest: 'aa'.repeat(32),
+        providerId: 'life:demo',
+      })).toThrow(DeliveryValidationError);
+      rmSync(unknownDir, { recursive: true, force: true });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -55,6 +55,7 @@ interface BridgeRuntimeContext {
   firefliesWebhookSecret?: string;
   zoomWebhookSecretToken?: string;
   mailchimpApiKey?: string;
+  relayHmacSecret?: string;
 }
 
 export interface BridgeServerOptions {
@@ -270,6 +271,46 @@ export function resolveBridgeRuntimeContext(instanceId: string, orgOverride?: st
     firefliesWebhookSecret,
     zoomWebhookSecretToken,
     mailchimpApiKey,
+    relayHmacSecret: process.env.CORTEXT_RELAY_HMAC_SECRET || envFromFiles.CORTEXT_RELAY_HMAC_SECRET || undefined,
+  };
+}
+
+export function resolveFirefliesObservationSeam(input: {
+  frameworkRoot: string;
+  org?: string;
+  firefliesWebhookSecret?: string;
+  relayHmacSecret?: string;
+}): Pick<BridgeServerOptions, 'firefliesVerification' | 'firefliesRelay'> {
+  if (!input.firefliesWebhookSecret) return {};
+  if (!input.org) {
+    throw new Error('Organization is required when FIREFLIES_WEBHOOK_SECRET is set. Pass --org <id> or set CTX_ORG.');
+  }
+  if (!input.relayHmacSecret) {
+    throw new Error('CORTEXT_RELAY_HMAC_SECRET is required when FIREFLIES_WEBHOOK_SECRET is set.');
+  }
+  const contracts = join(input.frameworkRoot, 'state/specs/contracts');
+  const config = JSON.parse(readFileSync(join(contracts, 'fireflies-verification-config-v1.golden.json'), 'utf8')) as FirefliesVerificationConfigV1;
+  const pin = JSON.parse(readFileSync(join(contracts, 'fireflies-verification-config-pin-v1.json'), 'utf8')) as { verificationConfigDigest: string };
+  const authority = JSON.parse(readFileSync(join(contracts, 'meeting-authority-root-v1.golden.json'), 'utf8')) as { orgId: string; relayInternalAuthKeyIds: string[] };
+  if (config.orgId !== input.org || authority.orgId !== input.org) {
+    throw new Error('Fireflies verification config org does not match the runtime org.');
+  }
+  const keyId = authority.relayInternalAuthKeyIds[0];
+  if (!keyId) throw new Error('relayInternalAuthKeyIds is empty');
+  return {
+    firefliesVerification: {
+      config,
+      configDigest: pin.verificationConfigDigest,
+      secretsByKeyId: { [config.activeKeyId]: input.firefliesWebhookSecret },
+    },
+    firefliesRelay: {
+      keyId,
+      secret: input.relayHmacSecret,
+      trustedKeyIds: authority.relayInternalAuthKeyIds,
+      trustedOrgId: input.org,
+      replayWindowSeconds: 300,
+      maximumClockSkewSeconds: 300,
+    },
   };
 }
 
@@ -881,11 +922,15 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
           return;
         }
         if (options.firefliesVerification) {
+          if (typeof options.org !== 'string' || options.org.length < 1) {
+            jsonResponse(response, 503, { error: 'org_required', tier: 'observation' });
+            return;
+          }
           const persist = acceptFirefliesIngress({
             rawBody,
             headerName: 'X-Hub-Signature',
             signatureHeader: providedSignature,
-            orgId: options.org || 'clearworksai',
+            orgId: options.org,
             now: () => new Date(now()),
             storeDir: join(options.ctxRoot, 'state', 'meeting-observations'),
             secretsByKeyId: options.firefliesVerification.secretsByKeyId,
@@ -900,7 +945,11 @@ export function createBridgeServer(options: BridgeServerOptions): Server {
             return;
           }
           const relay = options.firefliesRelay;
-          if (relay && relay.relayAfterPersist !== false) {
+          if (!relay) {
+            jsonResponse(response, 503, { error: 'relay_not_enabled', tier: 'relay' });
+            return;
+          }
+          if (relay.relayAfterPersist !== false) {
             const signed = signInternalRelayRequest({
               observation: persist.observation,
               keyId: relay.keyId,
@@ -1246,6 +1295,12 @@ const runCommand = new Command('run')
       const instanceId = resolveInstanceId(options.instance);
       const port = parsePort(options.port, '--port');
       const context = resolveBridgeRuntimeContext(instanceId, options.org);
+      const observationSeam = resolveFirefliesObservationSeam({
+        frameworkRoot: context.frameworkRoot,
+        org: context.org,
+        firefliesWebhookSecret: context.firefliesWebhookSecret,
+        relayHmacSecret: context.relayHmacSecret,
+      });
       const server = createBridgeServer({
         instanceId,
         ctxRoot: context.ctxRoot,
@@ -1255,6 +1310,7 @@ const runCommand = new Command('run')
         firefliesWebhookSecret: context.firefliesWebhookSecret,
         zoomWebhookSecretToken: context.zoomWebhookSecretToken,
         mailchimpApiKey: context.mailchimpApiKey,
+        ...observationSeam,
       });
 
       await new Promise<void>((resolve, reject) => {

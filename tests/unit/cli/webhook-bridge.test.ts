@@ -452,7 +452,7 @@ describe('webhook-bridge server', () => {
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
     });
 
-    it('persists RELAY_PENDING observation before 2xx for a valid Fireflies vector', async () => {
+    it('persists RELAY_PENDING observation then 503s when relay is not enabled', async () => {
       const contractsRoot = join(process.cwd(), 'state/specs/contracts');
       const verificationConfig = JSON.parse(
         readFileSync(join(contractsRoot, 'fireflies-verification-config-v1.golden.json'), 'utf8'),
@@ -490,8 +490,8 @@ describe('webhook-bridge server', () => {
         body: valid.rawBodyUtf8,
       });
 
-      expect(response.status).toBe(200);
-      const storedDir = join(tempRoot, 'state', 'meeting-observations', 'observations');
+      expect(response.status).toBe(503);
+      const storedDir = join(tempRoot, 'state', 'meeting-observations', 'observations', 'clearworksai');
       const storedFiles = readdirSync(storedDir);
       expect(storedFiles).toHaveLength(1);
       const stored = JSON.parse(readFileSync(join(storedDir, storedFiles[0]), 'utf8')) as { relay: { state: string } };
@@ -553,7 +553,7 @@ describe('webhook-bridge server', () => {
       });
 
       expect(response.status).toBe(200);
-      const storedDir = join(tempRoot, 'state', 'meeting-observations', 'observations');
+      const storedDir = join(tempRoot, 'state', 'meeting-observations', 'observations', 'clearworksai');
       const stored = JSON.parse(readFileSync(join(storedDir, readdirSync(storedDir)[0]), 'utf8')) as {
         relay: {
           state: string;
@@ -621,7 +621,7 @@ describe('webhook-bridge server', () => {
       });
 
       expect(response.status).toBeGreaterThanOrEqual(400);
-      const storedDir = join(tempRoot, 'state', 'meeting-observations', 'observations');
+      const storedDir = join(tempRoot, 'state', 'meeting-observations', 'observations', 'clearworksai');
       const stored = JSON.parse(readFileSync(join(storedDir, readdirSync(storedDir)[0]), 'utf8')) as {
         relay: { state: string };
       };
@@ -688,7 +688,7 @@ describe('webhook-bridge server', () => {
       expect(persist.status).toBe(200);
 
       const { signInternalRelayRequest } = await import('../../../src/bus/meeting-observation-relay');
-      const storedDir = join(tempRoot, 'state', 'meeting-observations', 'observations');
+      const storedDir = join(tempRoot, 'state', 'meeting-observations', 'observations', 'clearworksai');
       const pending = JSON.parse(readFileSync(join(storedDir, readdirSync(storedDir)[0]), 'utf8'));
       const signed = signInternalRelayRequest({
         observation: pending,
@@ -770,8 +770,8 @@ describe('webhook-bridge server', () => {
         body: valid.rawBodyUtf8,
       })));
 
-      expect(copies.every((copy) => copy.status === 200)).toBe(true);
-      const storedDir = join(tempRoot, 'state', 'meeting-observations', 'observations');
+      expect(copies.every((copy) => copy.status === 503)).toBe(true);
+      const storedDir = join(tempRoot, 'state', 'meeting-observations', 'observations', 'clearworksai');
       expect(readdirSync(storedDir)).toHaveLength(1);
       const stored = JSON.parse(readFileSync(join(storedDir, readdirSync(storedDir)[0]), 'utf8')) as {
         observationId: string;

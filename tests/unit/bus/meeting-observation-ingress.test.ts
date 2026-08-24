@@ -79,9 +79,10 @@ describe('Fireflies ingress observation seam', () => {
     expect(result.observation?.relay.firstAttemptAt).toBeNull();
     expect(validateObservation(result.observation)).toBe(true);
 
-    const storedFiles = readdirSync(join(storeDir, 'observations'));
+    const storedDir = join(storeDir, 'observations', 'clearworksai');
+    const storedFiles = readdirSync(storedDir);
     expect(storedFiles).toHaveLength(1);
-    const stored = JSON.parse(readFileSync(join(storeDir, 'observations', storedFiles[0]), 'utf8'));
+    const stored = JSON.parse(readFileSync(join(storedDir, storedFiles[0]), 'utf8'));
     expect(stored.relay.state).toBe('RELAY_PENDING');
     expect(stored.rawBodyDigest).toBe(EXPECTED_RAW_BODY_DIGEST);
     expect(validateObservation(stored)).toBe(true);
@@ -89,7 +90,7 @@ describe('Fireflies ingress observation seam', () => {
     const replay = accept();
     expect(replay.status).toBe(202);
     expect(replay.observation?.observationId).toBe(result.observation?.observationId);
-    expect(readdirSync(join(storeDir, 'observations'))).toHaveLength(1);
+    expect(readdirSync(join(storeDir, 'observations', 'clearworksai'))).toHaveLength(1);
   });
 
   it('rejects each official invalid Fireflies vector with no accepted observation', () => {
@@ -164,5 +165,26 @@ describe('Fireflies ingress observation seam', () => {
     const ciphertext = readFileSync(join(storeDir, 'quarantine', quarantineFiles[0]));
     expect(ciphertext.toString('utf8')).not.toContain('meeting.transcribed');
     expect(validateFailure(result.failure)).toBe(true);
+  });
+
+  it('rejects a verification config bound to a different org', () => {
+    const result = accept({
+      verificationConfig: { ...verificationConfig, orgId: 'other-org' },
+    });
+    expect(result.status).toBe(401);
+    expect(result.observation).toBeUndefined();
+  });
+
+  it('conflicts instead of overwriting a different body for the same observation id', () => {
+    const first = accept();
+    expect(first.status).toBe(202);
+    const otherBody = validVector.rawBodyUtf8.replace('1787544000000', '1787544000001');
+    const otherHmac = `sha256=${createHmac('sha256', secrets.secretsByKeyId['fireflies-webhook-v2-test-key']).update(otherBody, 'utf8').digest('hex')}`;
+    const second = accept({
+      rawBody: otherBody,
+      signatureHeader: otherHmac,
+    });
+    expect(second.status).toBe(409);
+    expect(second.observation?.rawBodyDigest).toBe(first.observation?.rawBodyDigest);
   });
 });

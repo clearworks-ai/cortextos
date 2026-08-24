@@ -177,6 +177,7 @@ function providerSignatureValid(input: FirefliesIngressInput): boolean {
   }
   if (input.verificationConfig.scheme !== 'hmac-sha256-raw-body') return false;
   if (input.verificationConfig.headerName !== SIGNATURE_HEADER) return false;
+  if (input.verificationConfig.orgId !== input.orgId) return false;
   if (input.verificationConfigDigest !== input.verificationConfig.configDigest) return false;
   if (!SHA256_HEX.test(input.verificationConfigDigest)) return false;
 
@@ -227,8 +228,9 @@ function fsyncRenameWrite(filePath: string, data: string): void {
   }
 }
 
-export function observationStoragePath(storeDir: string, observationId: string): string {
-  return join(storeDir, 'observations', `${observationId.replaceAll(':', '_')}.json`);
+export function observationStoragePath(storeDir: string, observationId: string, orgId: string): string {
+  const orgPart = orgId.replaceAll(/[^a-zA-Z0-9._-]/g, '_');
+  return join(storeDir, 'observations', orgPart, `${observationId.replaceAll(':', '_')}.json`);
 }
 
 export function persistCanonicalJsonFile(filePath: string, value: unknown): void {
@@ -456,20 +458,31 @@ export function acceptFirefliesIngress(input: FirefliesIngressInput): FirefliesI
   }
 
   let observation = buildPendingObservation(input, providerSourceId);
-  const filePath = observationStoragePath(input.storeDir, observation.observationId);
+  const filePath = observationStoragePath(input.storeDir, observation.observationId, input.orgId);
   const lockDir = join(input.storeDir, '.observation-lock');
   mkdirSync(lockDir, { recursive: true });
+  let conflict = false;
 
   withFileLockSync(lockDir, () => {
     if (existsSync(filePath)) {
       const existing = JSON.parse(readFileSync(filePath, 'utf8')) as MeetingObservationV1;
+      if (existing.orgId !== input.orgId) {
+        conflict = true;
+        return;
+      }
       if (existing.rawBodyDigest === observation.rawBodyDigest) {
         observation = existing;
         return;
       }
+      conflict = true;
+      observation = existing;
+      return;
     }
     fsyncRenameWrite(filePath, `${canonicalJson(observation)}\n`);
   });
 
+  if (conflict) {
+    return { status: 409, error: 'observation_conflict', observation };
+  }
   return { status: 202, observation };
 }

@@ -191,8 +191,8 @@ function noncePath(storeDir: string, nonceKey: string): string {
   return join(storeDir, 'nonces', `${nonceKey}.json`);
 }
 
-function readObservation(storeDir: string, observationId: string): RelayedMeetingObservation | null {
-  const filePath = observationStoragePath(storeDir, observationId);
+function readObservation(storeDir: string, observationId: string, orgId: string): RelayedMeetingObservation | null {
+  const filePath = observationStoragePath(storeDir, observationId, orgId);
   if (!existsSync(filePath)) return null;
   return JSON.parse(readFileSync(filePath, 'utf8')) as RelayedMeetingObservation;
 }
@@ -204,7 +204,7 @@ export function acceptInternalRelay(input: AcceptInternalRelayInput): AcceptInte
   mkdirSync(join(input.storeDir, 'observations'), { recursive: true });
 
   return withFileLockSync(lockDir, () => {
-    const stored = readObservation(input.storeDir, input.observationId);
+    const stored = readObservation(input.storeDir, input.observationId, input.trustedOrgId);
     if (!stored) {
       return { status: 404, error: 'observation_not_found' };
     }
@@ -357,7 +357,7 @@ export function acceptInternalRelay(input: AcceptInternalRelayInput): AcceptInte
       acceptedAt: timestamp,
       expiresAt,
     });
-    persistCanonicalJsonFile(observationStoragePath(input.storeDir, stored.observationId), relayed);
+    persistCanonicalJsonFile(observationStoragePath(input.storeDir, stored.observationId, stored.orgId), relayed);
     return { status: 202, observation: relayed };
   });
 }

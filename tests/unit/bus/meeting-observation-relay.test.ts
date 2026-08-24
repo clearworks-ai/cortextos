@@ -110,17 +110,18 @@ function expectedIntentDigest(observation: {
   }));
 }
 
-function observationPath(observationId: string): string {
-  return join(storeDir, 'observations', `${observationId.replaceAll(':', '_')}.json`);
+function observationPath(observationId: string, orgId = 'clearworksai'): string {
+  return join(storeDir, 'observations', orgId, `${observationId.replaceAll(':', '_')}.json`);
 }
 
 function storedObservation(observationId?: string) {
   if (observationId) {
     return JSON.parse(readFileSync(observationPath(observationId), 'utf8'));
   }
-  const files = readdirSync(join(storeDir, 'observations'));
+  const orgDir = join(storeDir, 'observations', 'clearworksai');
+  const files = readdirSync(orgDir);
   expect(files).toHaveLength(1);
-  return JSON.parse(readFileSync(join(storeDir, 'observations', files[0]), 'utf8'));
+  return JSON.parse(readFileSync(join(orgDir, files[0]), 'utf8'));
 }
 
 function relayInput(
@@ -262,7 +263,7 @@ describe('internal org-bound meeting observation relay', () => {
     expect(nonceReplay.status).toBe(401);
     expect(storedObservation(otherPending.observation!.observationId).relay.state).toBe('RELAY_PENDING');
     expect(storedObservation(pending.observation!.observationId).relay.state).toBe('RELAYED');
-    expect(readdirSync(join(storeDir, 'observations'))).toHaveLength(2);
+    expect(readdirSync(join(storeDir, 'observations', 'clearworksai'))).toHaveLength(2);
   });
 
   it('refuses to enable relay without an org-bound key, nonce store, or five-minute window', () => {
@@ -354,7 +355,7 @@ describe('internal org-bound meeting observation relay', () => {
       expect(new Set(results.map((result) => result.body.observationId)).size).toBe(1);
       expect(results.every((result) => result.body.state === 'RELAYED')).toBe(true);
       expect(storedObservation().observationId).toBe(pending.observation?.observationId);
-      expect(readdirSync(join(storeDir, 'observations'))).toHaveLength(1);
+      expect(readdirSync(join(storeDir, 'observations', 'clearworksai'))).toHaveLength(1);
       expect(storedObservation().relay.state).toBe('RELAYED');
     } finally {
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));

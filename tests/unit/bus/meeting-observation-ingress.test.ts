@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,10 +28,12 @@ const verificationConfigDigest = readJson<{ verificationConfigDigest: string }>(
   'fireflies-verification-config-pin-v1.json',
 ).verificationConfigDigest;
 const observationSchema = readJson<Record<string, unknown>>('meeting-observation-v1.schema.json');
+const failureSchema = readJson<Record<string, unknown>>('pre-record-ingress-failure-v1.schema.json');
 
 const ajv = new Ajv2020({ allErrors: true, strict: false });
 addFormats(ajv);
 const validateObservation = ajv.compile(observationSchema);
+const validateFailure = ajv.compile(failureSchema);
 
 const validVector = vectors.vectors.find((vector) => vector.name === 'valid-raw-body');
 if (!validVector) throw new Error('missing valid-raw-body vector');
@@ -108,5 +110,59 @@ describe('Fireflies ingress observation seam', () => {
       rmSync(storeDir, { recursive: true, force: true });
       storeDir = '';
     }
+  });
+
+  it('emits a PII-safe auth failure receipt with no quarantine and no observation', () => {
+    const invalid = vectors.vectors.find((vector) => vector.name === 'wrong-prefix');
+    if (!invalid) throw new Error('missing wrong-prefix vector');
+    storeDir = mkdtempSync(join(tmpdir(), 'meeting-obs-auth-fail-'));
+    const result = accept({
+      rawBody: invalid.rawBodyUtf8,
+      headerName: invalid.headerName,
+      signatureHeader: invalid.headerValue,
+    });
+    expect(result.status).toBe(401);
+    expect(result.observation).toBeUndefined();
+    expect(existsSync(join(storeDir, 'observations'))).toBe(false);
+    expect(result.failure?.stage).toBe('auth');
+    expect(result.failure?.authenticationState).toBe('unverified');
+    expect(result.failure?.errorCode).toBe('INGRESS_AUTH_FAILED');
+    expect(result.failure?.encryptedQuarantine).toBeNull();
+    expect(result.failure?.deletionReceipt).toBeNull();
+    expect(result.failure?.piiSafeAlertReceipt.rawBodyIncluded).toBe(false);
+    expect(result.failure?.piiSafeAlertReceipt.providerPayloadIncluded).toBe(false);
+    expect(JSON.stringify(result.failure)).not.toContain(invalid.rawBodyUtf8);
+    expect(existsSync(join(storeDir, 'quarantine'))).toBe(false);
+    expect(validateFailure(result.failure)).toBe(true);
+  });
+
+  it('quarantines authenticated unpersistable bytes for 24 hours and never stores an observation', () => {
+    const unpersistableBody = '{"event":"meeting.transcribed","timestamp":1787544000000}';
+    const signature = `sha256=${createHmac('sha256', secrets.secretsByKeyId['fireflies-webhook-v2-test-key']).update(unpersistableBody, 'utf8').digest('hex')}`;
+    storeDir = mkdtempSync(join(tmpdir(), 'meeting-obs-persist-fail-'));
+    const result = accept({
+      rawBody: unpersistableBody,
+      signatureHeader: signature,
+      quarantineKey: 'ingress-quarantine-test-secret-v1',
+      requestId: 'request:fireflies:webhook:unpersistable',
+    });
+    expect(result.status).toBe(400);
+    expect(result.observation).toBeUndefined();
+    expect(existsSync(join(storeDir, 'observations'))).toBe(false);
+    expect(result.failure?.stage).toBe('persist');
+    expect(result.failure?.authenticationState).toBe('verified');
+    expect(result.failure?.encryptedQuarantine?.state).toBe('ENCRYPTED');
+    expect(result.failure?.encryptedQuarantine?.encryptionKeyId).toBe('ingress-quarantine-key-v1');
+    const encryptedAt = Date.parse(result.failure!.encryptedQuarantine!.encryptedAt);
+    const expiresAt = Date.parse(result.failure!.encryptedQuarantine!.expiresAt);
+    expect(expiresAt - encryptedAt).toBeLessThanOrEqual(24 * 60 * 60 * 1000);
+    expect(expiresAt - Date.parse(result.failure!.sourceIdentity.receivedAt)).toBe(24 * 60 * 60 * 1000);
+    expect(result.failure?.deletionReceipt?.state).toBe('SCHEDULED');
+    expect(JSON.stringify(result.failure)).not.toContain(unpersistableBody);
+    const quarantineFiles = readdirSync(join(storeDir, 'quarantine'));
+    expect(quarantineFiles).toHaveLength(1);
+    const ciphertext = readFileSync(join(storeDir, 'quarantine', quarantineFiles[0]));
+    expect(ciphertext.toString('utf8')).not.toContain('meeting.transcribed');
+    expect(validateFailure(result.failure)).toBe(true);
   });
 });

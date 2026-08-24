@@ -500,6 +500,57 @@ describe('webhook-bridge server', () => {
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
     });
 
+    it('preserves one observation identity across twenty concurrent Fireflies deliveries', async () => {
+      const contractsRoot = join(process.cwd(), 'state/specs/contracts');
+      const verificationConfig = JSON.parse(
+        readFileSync(join(contractsRoot, 'fireflies-verification-config-v1.golden.json'), 'utf8'),
+      );
+      const configDigest = JSON.parse(
+        readFileSync(join(contractsRoot, 'fireflies-verification-config-pin-v1.json'), 'utf8'),
+      ).verificationConfigDigest as string;
+      const secrets = JSON.parse(
+        readFileSync(join(contractsRoot, 'fireflies-webhook-v2.test-secrets.json'), 'utf8'),
+      ) as { secretsByKeyId: Record<string, string> };
+      const valid = JSON.parse(
+        readFileSync(join(contractsRoot, 'fireflies-webhook-v2-test-vectors.json'), 'utf8'),
+      ).vectors.find((vector: { name: string }) => vector.name === 'valid-raw-body') as {
+        rawBodyUtf8: string;
+        headerValue: string;
+      };
+
+      const server = createBridgeServer({
+        instanceId: 'test-instance',
+        ctxRoot: tempRoot,
+        frameworkRoot: tempRoot,
+        org: 'clearworksai',
+        bridgeSecret: 'top-secret',
+        firefliesWebhookSecret: secrets.secretsByKeyId['fireflies-webhook-v2-test-key'],
+        firefliesVerification: {
+          config: verificationConfig,
+          configDigest,
+          secretsByKeyId: secrets.secretsByKeyId,
+        },
+      });
+      const baseUrl = await listen(server);
+      const copies = await Promise.all(Array.from({ length: 20 }, () => sendRequest(baseUrl, '/relay/fireflies', {
+        method: 'POST',
+        headers: { 'x-hub-signature': valid.headerValue },
+        body: valid.rawBodyUtf8,
+      })));
+
+      expect(copies.every((copy) => copy.status === 200)).toBe(true);
+      const storedDir = join(tempRoot, 'state', 'meeting-observations', 'observations');
+      expect(readdirSync(storedDir)).toHaveLength(1);
+      const stored = JSON.parse(readFileSync(join(storedDir, readdirSync(storedDir)[0]), 'utf8')) as {
+        observationId: string;
+        relay: { state: string };
+      };
+      expect(stored.relay.state).toBe('RELAY_PENDING');
+      expect(stored.observationId).toBe('observation:fireflies:demo');
+
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    });
+
     it('returns 401 when the Fireflies signature header is missing and the Fireflies secret is configured', async () => {
       const server = buildServer(undefined, 'ff-secret');
       const baseUrl = await listen(server);

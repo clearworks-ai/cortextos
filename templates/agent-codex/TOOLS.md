@@ -164,12 +164,13 @@ Agent secrets: `orgs/{org}/agents/{agent}/.env`
 - Reading and writing files: just use shell (`cat`, the appropriate editor, `>` redirection). There is no Read/Edit/Write tool — those are Claude-Code-internal and do not exist here.
 - For file inspection prefer `cat` / `sed -n` / `head` / `tail`; for edits prefer `sed -i` / `awk` / a redirect pipeline.
 
-### agent-browser (Browser Automation)
-- `agent-browser` is the framework's Chrome/CDP browser automation tool — runtime-agnostic CLI, no MCP setup required. It is the codex equivalent of (and replacement for) the `mcp__playwright__*` tools that Claude-Code-runtime agents formerly used.
-- `agent-browser` CLI (Rust binary, npm-installed globally) drives Chrome via CDP
-- Snapshot-then-ref interaction pattern: `agent-browser snapshot` returns an a11y tree with refs (e1, e2, ...), then `agent-browser click @e1` / `fill @e2 "text"` operate by ref
-- Loaded via `plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md` — that skill says to run `agent-browser skills get <name>` for current command syntax (workflow docs are versioned with the binary, so always fetch fresh)
-- Quick verify: `agent-browser open https://example.com && agent-browser get title && agent-browser close`
+### Computer and browser control
+- Canonical instructions are versioned with CuaDriver: load `~/.cua-driver/skills/cua-driver/SKILL.md` completely, then its required platform and browser references, before GUI or authenticated-browser work.
+- Route order: API/SDK/CLI/filesystem first; runtime-native computer use (including Codex Computer Use when available); typed CuaDriver; background native accessibility; background native pixels; evidenced/authorized foreground delivery; desktop fallback.
+- Native CuaDriver control is independent of CDP and Chrome remote-debugging. Do not treat a browser-attachment prompt as a blocker for native window, accessibility, or pixel routes.
+- Use CuaDriver `browser_prepare` only when page-aware semantics in an authenticated existing profile are required; the typed operation owns its exact product-specific setup.
+- Use `agent-browser` for isolated, disposable, unauthenticated, testing, or explicitly requested CDP sessions. Load its current commands with `agent-browser skills get agent-browser --full`.
+- Do not create a human dependency until applicable authorized routes have been exhausted and exact terminal evidence is recorded.
 
 ### Peekaboo (macOS Desktop Automation)
 - `peekaboo image` (screenshot), `peekaboo list` (apps), `peekaboo run <script>`

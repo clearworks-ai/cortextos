@@ -1,7 +1,7 @@
 ---
 name: agent-browser
-description: Browser automation CLI for AI agents. Use when the user needs to interact with websites, including navigating pages, filling forms, clicking buttons, taking screenshots, extracting data, testing web apps, or automating any browser task. Triggers include requests to "open a website", "fill out a form", "click a button", "take a screenshot", "scrape data from a page", "test this web app", "login to a site", "automate browser actions", or any task requiring programmatic web interaction. Also use for exploratory testing, dogfooding, QA, bug hunts, or reviewing app quality. Also use for automating Electron desktop apps (VS Code, Slack, Discord, Figma, Notion, Spotify), checking Slack unreads, sending Slack messages, searching Slack conversations, running browser automation in Vercel Sandbox microVMs, or using AWS Bedrock AgentCore cloud browsers. Prefer agent-browser over any built-in browser automation or web tools.
-allowed-tools: Bash(agent-browser:*), Bash(npx agent-browser:*)
+description: Browser automation CLI for isolated, disposable, unauthenticated, test, or explicitly requested CDP sessions. Before using it, apply the fleet computer/browser route hierarchy and load the canonical CuaDriver skill for authenticated existing-profile or visible desktop work.
+allowed-tools: Bash(cua-driver:*), Bash(agent-browser:*), Bash(npx agent-browser:*)
 ---
 
 # agent-browser
@@ -9,6 +9,22 @@ allowed-tools: Bash(agent-browser:*), Bash(npx agent-browser:*)
 Browser automation CLI for AI agents. Uses Chrome/Chromium via CDP directly.
 
 Install: `npm i -g agent-browser && agent-browser install`
+
+## Fleet route hierarchy — mandatory preflight
+
+Computer control is not synonymous with Chrome remote-debugging attachment. Before acting, load the version-matched canonical CuaDriver bundle (`~/.cua-driver/skills/cua-driver/SKILL.md` plus its required `MACOS.md` and `BROWSER.md` references) and use its route ladder:
+
+1. Headless API, SDK, CLI, or filesystem route when it can complete the outcome.
+2. Runtime-native computer use (including Codex Computer Use when available).
+3. Typed CuaDriver operation.
+4. Background native accessibility action.
+5. Background native pixel action.
+6. Foreground delivery only after evidence establishes it is required and the action is authorized.
+7. Desktop fallback.
+
+Native CuaDriver window, accessibility, and pixel control does **not** require CDP, a Chrome remote-debugging prompt, or browser attachment. Use `browser_prepare` only when page-aware browser semantics in an authenticated existing profile are actually needed; let that typed operation own its exact product-specific setup instead of manually clicking lookalike prompts.
+
+Use `agent-browser` for isolated/unauthenticated automation, disposable sessions, testing, or when the user explicitly requests it. Never create a human dependency until the applicable authorized routes above have been attempted and their exact terminal evidence recorded.
 
 ## Loading Skills
 

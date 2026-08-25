@@ -72,4 +72,33 @@ describe('agent template skill-tree parity', () => {
     expect(agentsMd).toContain('## Current Tasks');
     expect(agentsMd).toContain('## Files Modified This Session');
   });
+
+  it.each([
+    ['claude agent', join(TEMPLATE_ROOT, 'agent', '.claude', 'skills', 'agent-browser', 'SKILL.md')],
+    ['claude analyst', join(TEMPLATE_ROOT, 'analyst', '.claude', 'skills', 'agent-browser', 'SKILL.md')],
+    ['claude orchestrator', join(TEMPLATE_ROOT, 'orchestrator', '.claude', 'skills', 'agent-browser', 'SKILL.md')],
+    ['codex agent', join(TEMPLATE_ROOT, 'agent-codex', 'plugins', 'cortextos-agent-skills', 'skills', 'agent-browser', 'SKILL.md')],
+    ['opencode agent', join(TEMPLATE_ROOT, 'agent-opencode', 'plugins', 'cortextos-agent-skills', 'skills', 'agent-browser', 'SKILL.md')],
+  ])('%s browser skill enforces the fleet control hierarchy', (_runtime, skillPath) => {
+    const skill = readFileSync(skillPath, 'utf-8');
+
+    expect(skill).toContain('Fleet route hierarchy — mandatory preflight');
+    expect(skill).toContain('Computer control is not synonymous with Chrome remote-debugging attachment');
+    expect(skill).toContain('Runtime-native computer use (including Codex Computer Use when available)');
+    expect(skill).toContain('Native CuaDriver window, accessibility, and pixel control does **not** require CDP');
+    expect(skill).toContain('Never create a human dependency until the applicable authorized routes above have been attempted');
+  });
+
+  it.each(['agent', 'analyst', 'agent-codex', 'agent-opencode'])(
+    '%s TOOLS.md points to the versioned CuaDriver policy',
+    (templateDir) => {
+      const tools = readFileSync(join(TEMPLATE_ROOT, templateDir, 'TOOLS.md'), 'utf-8');
+
+      expect(tools).toContain('### Computer and browser control');
+      expect(tools).toContain('~/.cua-driver/skills/cua-driver/SKILL.md');
+      expect(tools).toContain('Codex Computer Use when available');
+      expect(tools).toContain('Native CuaDriver control is independent of CDP');
+      expect(tools).toContain('Do not create a human dependency until applicable authorized routes have been exhausted');
+    },
+  );
 });

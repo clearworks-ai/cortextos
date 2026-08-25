@@ -165,7 +165,8 @@ Agent secrets: `orgs/{org}/agents/{agent}/.env`
 - For file inspection prefer `cat` / `sed -n` / `head` / `tail`; for edits prefer `sed -i` / `awk` / a redirect pipeline.
 
 ### Computer and browser control
-- Canonical instructions are versioned with CuaDriver: load `~/.cua-driver/skills/cua-driver/SKILL.md` completely, then its required platform and browser references, before GUI or authenticated-browser work.
+- Load the fleet router at `$CTX_ROOT/community/skills/computer-browser-control/SKILL.md` before GUI, desktop, or browser work. It covers direct APIs/connectors, runtime-native Chrome/Browser plugins, Codex Computer Use, CuaDriver, and agent-browser.
+- CuaDriver instructions are versioned with the binary: load `~/.cua-driver/skills/cua-driver/SKILL.md` completely, then its required platform and browser references, before using CuaDriver.
 - Route order: API/SDK/CLI/filesystem first; runtime-native computer use (including Codex Computer Use when available); typed CuaDriver; background native accessibility; background native pixels; evidenced/authorized foreground delivery; desktop fallback.
 - Native CuaDriver control is independent of CDP and Chrome remote-debugging. Do not treat a browser-attachment prompt as a blocker for native window, accessibility, or pixel routes.
 - Use CuaDriver `browser_prepare` only when page-aware semantics in an authenticated existing profile are required; the typed operation owns its exact product-specific setup.

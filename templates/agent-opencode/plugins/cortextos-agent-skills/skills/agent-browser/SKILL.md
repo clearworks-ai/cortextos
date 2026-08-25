@@ -12,7 +12,7 @@ Install: `npm i -g agent-browser && agent-browser install`
 
 ## Fleet route hierarchy — mandatory preflight
 
-Computer control is not synonymous with Chrome remote-debugging attachment. Before acting, load the version-matched canonical CuaDriver bundle (`~/.cua-driver/skills/cua-driver/SKILL.md` plus its required `MACOS.md` and `BROWSER.md` references) and use its route ladder:
+Computer control is not synonymous with Chrome remote-debugging attachment. Before acting, load `$CTX_ROOT/community/skills/computer-browser-control/SKILL.md`, then the version-matched CuaDriver bundle (`~/.cua-driver/skills/cua-driver/SKILL.md` plus its required `MACOS.md` and `BROWSER.md` references), and apply the fleet capability map:
 
 1. Headless API, SDK, CLI, or filesystem route when it can complete the outcome.
 2. Runtime-native computer use (including Codex Computer Use when available).

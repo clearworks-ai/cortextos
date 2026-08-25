@@ -18,6 +18,7 @@ import { join } from 'path';
 
 const CLAUDE_SKILLS = join(__dirname, '..', '..', '..', 'templates', 'agent', '.claude', 'skills');
 const TEMPLATE_ROOT = join(__dirname, '..', '..', '..', 'templates');
+const COMMUNITY_SKILLS = join(__dirname, '..', '..', '..', 'community', 'skills');
 const CODEX_SKILLS = join(
   __dirname,
   '..',
@@ -38,6 +39,17 @@ function listSkillDirs(root: string): string[] {
 }
 
 describe('agent template skill-tree parity', () => {
+  it('ships one canonical fleet computer/browser control router', () => {
+    const router = readFileSync(join(COMMUNITY_SKILLS, 'computer-browser-control', 'SKILL.md'), 'utf-8');
+
+    expect(router).toContain('Runtime-native browser route');
+    expect(router).toContain('Codex Computer Use');
+    expect(router).toContain('CuaDriver native control');
+    expect(router).toContain('agent-browser');
+    expect(router).toContain('A failure in one route is evidence about that route only');
+    expect(router).toContain('attempt every applicable authorized route');
+  });
+
   it('codex template ships every skill that the claude template ships', () => {
     const claudeSkills = listSkillDirs(CLAUDE_SKILLS);
     const codexSkills = listSkillDirs(CODEX_SKILLS);
@@ -83,6 +95,7 @@ describe('agent template skill-tree parity', () => {
     const skill = readFileSync(skillPath, 'utf-8');
 
     expect(skill).toContain('Fleet route hierarchy — mandatory preflight');
+    expect(skill).toContain('$CTX_ROOT/community/skills/computer-browser-control/SKILL.md');
     expect(skill).toContain('Computer control is not synonymous with Chrome remote-debugging attachment');
     expect(skill).toContain('Runtime-native computer use (including Codex Computer Use when available)');
     expect(skill).toContain('Native CuaDriver window, accessibility, and pixel control does **not** require CDP');
@@ -95,6 +108,7 @@ describe('agent template skill-tree parity', () => {
       const tools = readFileSync(join(TEMPLATE_ROOT, templateDir, 'TOOLS.md'), 'utf-8');
 
       expect(tools).toContain('### Computer and browser control');
+      expect(tools).toContain('$CTX_ROOT/community/skills/computer-browser-control/SKILL.md');
       expect(tools).toContain('~/.cua-driver/skills/cua-driver/SKILL.md');
       expect(tools).toContain('Codex Computer Use when available');
       expect(tools).toContain('Native CuaDriver control is independent of CDP');

@@ -616,10 +616,15 @@ def _side_capability_dir():
     return _resolve_fs_path(raw)
 
 
+def _live_chroma_dir():
+    """Hosted live persist is always MMRAG_DIR/chromadb, even if a side dir is selected."""
+    return _resolve_fs_path(Path(MMRAG_DIR) / "chromadb")
+
+
 def _assert_chroma_allowed(chroma_dir=None):
     """Refuse live PersistentClient construction when NATIVE_HOLD is active."""
     target = _resolve_fs_path(chroma_dir or CHROMADB_DIR)
-    live = _resolve_fs_path(CHROMADB_DIR)
+    live = _live_chroma_dir()
     operation = _mmrag_operation()
     hold = _load_native_hold()
     if hold is None:
@@ -678,7 +683,7 @@ def get_chroma_collection(collection_name="default", *, chroma_dir=None, chroma_
         )
     hold = _load_native_hold()
     target = _resolve_fs_path(chroma_dir or CHROMADB_DIR)
-    live = _resolve_fs_path(CHROMADB_DIR)
+    live = _live_chroma_dir()
     if hold and hold["mode"] == "writers" and target == live:
         existing = _get_existing_collection(client, collection_name)
         if existing is None:

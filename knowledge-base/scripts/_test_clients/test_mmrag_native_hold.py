@@ -182,6 +182,25 @@ def test_exclusive_hold_allows_approved_side_path_only(tmp_path, monkeypatch):
         mmrag.get_chroma_client(chroma_dir=chroma_dir)
 
 
+def test_exclusive_hold_allows_side_when_chromadb_env_points_at_side(tmp_path, monkeypatch):
+    live = _bind_tmp(monkeypatch, tmp_path)
+    _write_hold(tmp_path, "exclusive")
+    side = tmp_path / "recovery-side" / "chromadb"
+    side.mkdir(parents=True)
+    monkeypatch.setattr(mmrag, "CHROMADB_DIR", side)
+    monkeypatch.setenv("MMRAG_SIDE_CHROMADB_DIR", str(side))
+    fake = _RecordingChroma()
+    monkeypatch.setitem(sys.modules, "chromadb", fake)
+    mmrag.set_mmrag_operation("ingest")
+
+    client = mmrag.get_chroma_client()
+    assert str(client.path) == str(side)
+    assert fake.paths == [str(side)]
+
+    with pytest.raises(mmrag.NativeHoldError):
+        mmrag.get_chroma_client(chroma_dir=live)
+
+
 def test_invalid_hold_file_is_invalid_config_and_does_not_construct(tmp_path, monkeypatch):
     _bind_tmp(monkeypatch, tmp_path)
     (tmp_path / mmrag.NATIVE_HOLD_FILENAME).write_text('{"mode":"nope"}\n', encoding="utf-8")

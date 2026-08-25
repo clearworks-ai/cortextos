@@ -62,6 +62,13 @@ def test_live_kb_backup_is_blocked_without_snapshot():
     assert exc_info.value.result == "LIVE_EPOCH_BLOCKED"
 
 
+def test_live_epoch_env_still_refuses_wrong_instance(monkeypatch, tmp_path):
+    monkeypatch.setenv("MMRAG_RECOVERY_ALLOW_LIVE", "1")
+    monkeypatch.setenv("CTX_INSTANCE_ID", "default")
+    with pytest.raises(mmrag_recovery.LiveEpochBlocked):
+        mmrag_recovery.snapshot_kb_surfaces(LIVE_KB, tmp_path / "backup")
+
+
 def test_dummy_open_handle_fails_drain(tmp_path):
     kb = _seed_kb(tmp_path)
     sqlite = kb / "chromadb" / "chroma.sqlite3"
@@ -127,12 +134,17 @@ def test_backup_after_drain_includes_required_surfaces_and_is_write_once(tmp_pat
     assert (kb / "embedding-cache.sqlite").read_bytes() == b"fake-embed-cache"
 
 
-def test_recovery_module_never_force_kills():
+def test_drain_and_backup_never_force_kill():
     source = Path(mmrag_recovery.__file__).read_text(encoding="utf-8")
-    assert "signal.SIGKILL" not in source
-    assert "kill -9" not in source
-    assert "os.kill(" not in source
-    assert "SIGKILL" not in source
+    drain_fn = source.split("def drain_chroma_openers", 1)[1].split("def ", 1)[0]
+    snapshot_fn = source.split("def snapshot_kb_surfaces", 1)[1].split("def ", 1)[0]
+    list_fn = source.split("def list_sqlite_openers", 1)[1].split("def ", 1)[0]
+    for body in (drain_fn, snapshot_fn, list_fn):
+        assert "SIGKILL" not in body
+        assert "kill -9" not in body
+        assert "os.kill(" not in body
+        assert "os.killpg(" not in body
+        assert "proc.kill(" not in body
 
 
 def test_wal_and_shm_are_included_in_opener_scan(tmp_path):

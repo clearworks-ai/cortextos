@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "root": "/Users/joshweiss/code/cortextos",
+  "policy": {
+    "preflight": "resolve every target and require current SHA == pinned base before the first write",
+    "rebase": "derive the semantic delta independently on each distinct base; review one complete bundle per target group",
+    "apply": "atomic temp+rename with backup; stop on any unexpected SHA",
+    "partial_failure": "rollback every already-written target from its pinned backup, verify all old SHAs, emit failed transaction receipt",
+    "postcondition": "all intended targets equal reviewed expected_post_sha; excluded/disabled/snapshot/archive paths are unchanged",
+    "expected_post_sha": "required in the later authoring manifest; null here means intended target only and is never install evidence"
+  },
+  "skills": [
+    {
+      "skill":"task-observer",
+      "canonical_path":"/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "base_skill_sha256":"76418b3fd600d80450d5305051185aff018e3ee3a280a4b6e4c685130a7a048e",
+      "staged_archive_sha256":"8b5cebb6b4a43a1ebfd1bb856103fe1b79df1a6650f0c51645b21c0c2908626d",
+      "disposition":"already_live_baseline_no_pending_mutation",
+      "enabled_activation_count":13,
+      "target_paths":["/Users/joshweiss/code/cortextos/community/skills/task-observer"]
+    },
+    {
+      "skill":"agent-management",
+      "base_skill_sha256":"fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+      "staged_archive_sha256":"06e41adf2dc8e643a0a8321ea8f6165d31986bc8ed2e41f72816e6647af6982b",
+      "disposition":"target_specific_rebase_required",
+      "target_paths":[
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/plugins/cortextos-agent-skills/skills/agent-management",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm-codex/plugins/cortextos-agent-skills/skills/agent-management",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2-codex/plugins/cortextos-agent-skills/skills/agent-management",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox-codex/plugins/cortextos-agent-skills/skills/agent-management",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/plugins/cortextos-agent-skills/skills/agent-management",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven-codex/plugins/cortextos-agent-skills/skills/agent-management",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa-codex/plugins/cortextos-agent-skills/skills/agent-management",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage-codex/plugins/cortextos-agent-skills/skills/agent-management",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout-codex/plugins/cortextos-agent-skills/skills/agent-management",
+        "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir-codex/plugins/cortextos-agent-skills/skills/agent-management"
+      ]
+    },
+    {
+      "skill":"agent-browser",
+      "base_skill_sha256":"24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+      "staged_archive_sha256":"5e44fb8dbdfdf8a20085585216b02f946d8b6c1229e07116341c09ad64a3364a",
+      "disposition":"target_specific_rebase_required",
+      "target_paths":[
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/plugins/cortextos-agent-skills/skills/agent-browser",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm-codex/plugins/cortextos-agent-skills/skills/agent-browser",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2-codex/plugins/cortextos-agent-skills/skills/agent-browser",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox-codex/plugins/cortextos-agent-skills/skills/agent-browser",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/plugins/cortextos-agent-skills/skills/agent-browser",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven-codex/plugins/cortextos-agent-skills/skills/agent-browser",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa-codex/plugins/cortextos-agent-skills/skills/agent-browser",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage-codex/plugins/cortextos-agent-skills/skills/agent-browser",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout-codex/plugins/cortextos-agent-skills/skills/agent-browser",
+        "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir-codex/plugins/cortextos-agent-skills/skills/agent-browser"
+      ]
+    },
+    {
+      "skill":"activity-channel",
+      "base_skill_sha256":"befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0",
+      "staged_archive_sha256":"a3694054ec96cf2bf4effb5342a5aba181dd8c10b269ee7dbd756b18fab400b2",
+      "disposition":"target_specific_rebase_required",
+      "target_paths":[
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/plugins/cortextos-agent-skills/skills/activity-channel",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm-codex/plugins/cortextos-agent-skills/skills/activity-channel",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2-codex/plugins/cortextos-agent-skills/skills/activity-channel",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox-codex/plugins/cortextos-agent-skills/skills/activity-channel",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/plugins/cortextos-agent-skills/skills/activity-channel",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven-codex/plugins/cortextos-agent-skills/skills/activity-channel",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa-codex/plugins/cortextos-agent-skills/skills/activity-channel",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage-codex/plugins/cortextos-agent-skills/skills/activity-channel",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout-codex/plugins/cortextos-agent-skills/skills/activity-channel",
+        "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir-codex/plugins/cortextos-agent-skills/skills/activity-channel"
+      ]
+    },
+    {"skill":"audit-pipeline","base_skill_sha256":"2750fd73ec149a6185065ea748a3ec29f9d97200c0acbd1845c3c3245206447a","staged_archive_sha256":"5eac8862d2aa999882a401754a8d6cae91b14bfc52593b382c398b936ec6ab7f","disposition":"target_specific_rebase_required","target_paths":["/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/plugins/cortextos-agent-skills/skills/audit-pipeline"]},
+    {"skill":"audit-assemble-master","base_skill_sha256":"106cb877c50abe02b3954651878e8733856f1d31bd9b89f0a809c6f2045a7d89","staged_archive_sha256":"986606a7db66f13b5ab534f15e2b4233cb38673a62a0e7bb421c713fda5455f5","disposition":"correct_then_rebase_required","target_paths":["/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/plugins/cortextos-agent-skills/skills/audit-assemble-master"]},
+    {"skill":"source-collection","base_skill_sha256":"9ff32c42fdd3d0bd9af91e0d766ce1178458979df215c6da5f2bd8a1eb5f2663","staged_archive_sha256":"7c9e4839208830806f03689033f9b0e2ab875267f7318d16869ad7603d6c9730","disposition":"target_specific_rebase_required","target_paths":["/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox-codex/.claude/skills/source-collection"]},
+    {
+      "skill":"morning-review",
+      "staged_archive_sha256":"90b81dbec25ae93fa103ca00d3a51e49b173b9757efa35b2731915b3216d79b0",
+      "disposition":"enabled_targets_only; disabled copies are evidence, never targets",
+      "target_groups":[
+        {"class":"enabled_target","base_skill_sha256":"13891dfac155e384de06a3b2b9e6327774f0e26064d25a93bdcad81a3668df31","paths":["/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa-codex/plugins/cortextos-agent-skills/skills/morning-review","/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2-codex/plugins/cortextos-agent-skills/skills/morning-review"]},
+        {"class":"disabled_evidence","base_skill_sha256":"36eac3e25719e5b74686a5d3edd26fb3d384142d5738a251bc8d4e1cc7213da5","paths":["/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/.claude/skills/morning-review","/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/.claude/skills/morning-review"]},
+        {"class":"enabled_blocked_target","base_skill_sha256":"93bac1074bcba0361868e2d095fbefd2afaabd0db7eacde9bd77a345f72e99bb","prerequisite":"Muse legacy zero-activation before later installation","paths":["/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/morning-review"]}
+      ]
+    }
+  ],
+  "archive_catalog": [
+    {"skill":"task-observer","path":"/Users/joshweiss/.cortextos/cortextos1/state/task-observer-v1/skill-updates/2026-08-23/task-observer.skill","mode":"0600","bytes":3168617,"sha256":"8b5cebb6b4a43a1ebfd1bb856103fe1b79df1a6650f0c51645b21c0c2908626d"},
+    {"skill":"agent-management","path":"/Users/joshweiss/.cortextos/cortextos1/state/task-observer-v1/skill-updates/2026-08-23/agent-management.skill","mode":"0600","bytes":6437,"sha256":"06e41adf2dc8e643a0a8321ea8f6165d31986bc8ed2e41f72816e6647af6982b"},
+    {"skill":"agent-browser","path":"/Users/joshweiss/.cortextos/cortextos1/state/task-observer-v1/skill-updates/2026-08-23/agent-browser.skill","mode":"0600","bytes":2429,"sha256":"5e44fb8dbdfdf8a20085585216b02f946d8b6c1229e07116341c09ad64a3364a"},
+    {"skill":"activity-channel","path":"/Users/joshweiss/.cortextos/cortextos1/state/task-observer-v1/skill-updates/2026-08-23/activity-channel.skill","mode":"0600","bytes":1597,"sha256":"a3694054ec96cf2bf4effb5342a5aba181dd8c10b269ee7dbd756b18fab400b2"},
+    {"skill":"audit-pipeline","path":"/Users/joshweiss/.cortextos/cortextos1/state/task-observer-v1/skill-updates/2026-08-23/audit-pipeline.skill","mode":"0600","bytes":5838,"sha256":"5eac8862d2aa999882a401754a8d6cae91b14bfc52593b382c398b936ec6ab7f"},
+    {"skill":"audit-assemble-master","path":"/Users/joshweiss/.cortextos/cortextos1/state/task-observer-v1/skill-updates/2026-08-23/audit-assemble-master.skill","mode":"0600","bytes":7741,"sha256":"986606a7db66f13b5ab534f15e2b4233cb38673a62a0e7bb421c713fda5455f5"},
+    {"skill":"source-collection","path":"/Users/joshweiss/.cortextos/cortextos1/state/task-observer-v1/skill-updates/2026-08-23/source-collection.skill","mode":"0600","bytes":5767,"sha256":"7c9e4839208830806f03689033f9b0e2ab875267f7318d16869ad7603d6c9730"},
+    {"skill":"morning-review","path":"/Users/joshweiss/.cortextos/cortextos1/state/task-observer-v1/skill-updates/2026-08-23/morning-review.skill","mode":"0600","bytes":3908,"sha256":"90b81dbec25ae93fa103ca00d3a51e49b173b9757efa35b2731915b3216d79b0"},
+    {"skill":"clearpath-content-pipeline","path":"/Users/joshweiss/.cortextos/cortextos1/state/task-observer-v1/skill-updates/2026-08-23/clearpath-content-pipeline.skill","mode":"0600","bytes":2851,"sha256":"063beaf57e361a1f2ea462b5d15b39158b28295effe6c2af113b8b5087368ca7","disposition":"SUPERSEDED/DO-NOT-APPLY"}
+  ],
+  "task_observer_activation_symlinks": [
+    "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/.agents/skills/task-observer",
+    "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/codexer/.agents/skills/task-observer",
+    "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm-codex/.agents/skills/task-observer",
+    "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2-codex/.agents/skills/task-observer",
+    "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox-codex/.agents/skills/task-observer",
+    "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/.agents/skills/task-observer",
+    "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven-codex/.agents/skills/task-observer",
+    "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven/.claude/skills/task-observer",
+    "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/task-observer",
+    "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa-codex/.agents/skills/task-observer",
+    "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage-codex/.agents/skills/task-observer",
+    "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout-codex/.agents/skills/task-observer",
+    "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir-codex/.agents/skills/task-observer"
+  ],
+  "global_exclusions":["disabled agents","_archive","Academy","deliverable snapshots","worktrees","review archives","community/template copies unless explicitly canonical"]
+}

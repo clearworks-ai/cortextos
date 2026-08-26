@@ -1,0 +1,157 @@
+{
+  "schema_version": "task-observer-f1-deny-fixture-evidence-contract-v1",
+  "status": "READ_ONLY_CONTRACT_NOT_IMPLEMENTATION_NOT_SPEC",
+  "created_at": "2026-08-24T17:18:15Z",
+  "task_id": "task_1787559952654_76501014",
+  "authorities": {
+    "source_surface_contract": {
+      "path": "/Users/joshweiss/code/cortextos/state/task-observer-v1/programs/2026-08-24-task-observer-foundations/F1-SOURCE-SURFACE-CONTRACT.md",
+      "sha256": "af84eea09d60023ec776201725f0b6db597f6a06b590794a05b37ea5cc9e3e4c"
+    },
+    "surface_inventory": {
+      "path": "/Users/joshweiss/code/cortextos/state/task-observer-v1/programs/2026-08-24-task-observer-foundations/F1-SURFACE-INVENTORY.json",
+      "sha256": "7a24304abecc2661a17fdea943d27c349c720ae6d7cf163d105b1512d149e5ab",
+      "canonical_payload_sha256": "a3c41a64e834b4572f68595c4d613c24d3fd3d265f52229c3b2111291f3417e0",
+      "surface_rows": 117,
+      "symlink_rows": 16,
+      "recursive_tree_rows": 147
+    },
+    "legacy_forensic_bundle": {
+      "path": "/Users/joshweiss/.cortextos/cortextos1/state/task-observer-v1/skill-updates/2026-08-23/clearpath-content-pipeline.skill",
+      "sha256": "063beaf57e361a1f2ea462b5d15b39158b28295effe6c2af113b8b5087368ca7",
+      "mode": "0600",
+      "bytes": 2851,
+      "read_only": true
+    }
+  },
+  "decision_enum": [
+    "PASS",
+    "DENY_LEGACY_VALUE",
+    "DENY_LEGACY_LINEAGE",
+    "DENY_RUNTIME_ACTIVATION",
+    "DENY_DEPENDENCY",
+    "INVALID_INPUT"
+  ],
+  "deny_corpus_contract": {
+    "artifact_name": "legacy-deny-value-corpus.json",
+    "required_record_fields": [
+      "id",
+      "kind",
+      "normalization",
+      "exact_value_or_salted_hash",
+      "salt_authority",
+      "source_path",
+      "source_sha256",
+      "expected_decision"
+    ],
+    "required_kinds": [
+      "product_name",
+      "domain_or_host",
+      "endpoint_or_route",
+      "organization_or_account_identifier",
+      "credential_key",
+      "filesystem_path",
+      "archive_hash",
+      "dependency_or_lineage_identity"
+    ],
+    "normalization_order": [
+      "decode UTF-8 strictly",
+      "Unicode NFKC",
+      "ASCII case fold where the record declares case-insensitive matching",
+      "URL percent-decode once",
+      "normalize URL host with IDNA and lowercase",
+      "collapse dot path segments without following links",
+      "compare exact normalized value and salted exact hash"
+    ],
+    "fail_closed": "missing record field, source byte, source hash, salt authority, or unknown kind => INVALID_INPUT"
+  },
+  "fixture_manifest_contract": {
+    "artifact_name": "clean-room-fixture-manifest.json",
+    "required_record_fields": [
+      "fixture_id",
+      "absolute_path",
+      "type",
+      "mode",
+      "bytes",
+      "sha256_or_target",
+      "corpus_sha256",
+      "expected_decision",
+      "expected_match_ids"
+    ],
+    "required_negative_fixtures": [
+      {
+        "fixture_id": "NEG_RENAMED_BUNDLE_LEGACY_ENDPOINT",
+        "expected_decision": "DENY_LEGACY_VALUE"
+      },
+      {
+        "fixture_id": "NEG_COPIED_ARCHIVE_LINEAGE",
+        "expected_decision": "DENY_LEGACY_LINEAGE"
+      },
+      {
+        "fixture_id": "NEG_LEGACY_SYMLINK",
+        "expected_decision": "DENY_LEGACY_LINEAGE"
+      },
+      {
+        "fixture_id": "NEG_LEGACY_HARDLINK",
+        "expected_decision": "DENY_LEGACY_LINEAGE"
+      },
+      {
+        "fixture_id": "NEG_LEGACY_DEPENDENCY",
+        "expected_decision": "DENY_DEPENDENCY"
+      },
+      {
+        "fixture_id": "NEG_ROUTE_BOOTSTRAP_ACTIVATION",
+        "expected_decision": "DENY_RUNTIME_ACTIVATION"
+      },
+      {
+        "fixture_id": "NEG_EXACT_VALUE_OBFUSCATION",
+        "expected_decision": "DENY_LEGACY_VALUE"
+      }
+    ],
+    "required_positive_fixtures": [
+      {
+        "fixture_id": "POS_PRODUCT_NEUTRAL_BUNDLE",
+        "expected_decision": "PASS"
+      },
+      {
+        "fixture_id": "POS_GENERIC_PROTOCOL_TOKENS_ONLY",
+        "expected_decision": "PASS"
+      }
+    ],
+    "required_invalid_input_fixtures": [
+      "missing corpus",
+      "drifted corpus SHA",
+      "missing fixture path",
+      "drifted fixture SHA",
+      "missing surface row",
+      "duplicate surface row",
+      "dangling symlink",
+      "missing recursive tree byte",
+      "runtime inventory containing .DS_Store or _archive",
+      "discovery command without rg --files -uu"
+    ]
+  },
+  "validator_receipt_contract": {
+    "required_fields": [
+      "schema_version",
+      "validator_path",
+      "validator_sha256",
+      "corpus_path",
+      "corpus_sha256",
+      "fixture_manifest_path",
+      "fixture_manifest_sha256",
+      "surface_inventory_path",
+      "surface_inventory_sha256",
+      "started_at",
+      "completed_at",
+      "argv",
+      "exit_code",
+      "decision",
+      "fixture_results",
+      "input_drift_results"
+    ],
+    "pass_rule": "PASS only when every required positive fixture passes, every required negative fixture returns its exact deny decision, every invalid-input fixture returns INVALID_INPUT, and every pinned input SHA matches",
+    "mutation_rule": "validator and fixture execution must not modify any live, staged, template, archive, snapshot, or forensic skill byte"
+  },
+  "spec_authoring_gate": "CLOSED until corpus, fixtures, validator contract implementation, and independently replayed receipt exist with exact pinned hashes"
+}

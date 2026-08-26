@@ -1,0 +1,10 @@
+{
+  "schema_version": 2,
+  "supersedes": {"path":"correction-ledger.json","disposition":"SUPERSEDED_EVIDENCE_ONLY"},
+  "task_id": "task_1787545824115_45589776",
+  "status": "planning_only",
+  "corrections": [
+    {"id":"legacy-clearpath-academy-20260823","subject":"clearpath-content-pipeline.skill","sha256":"063beaf57e361a1f2ea462b5d15b39158b28295effe6c2af113b8b5087368ca7","disposition":"SUPERSEDED/DO-NOT-APPLY","preserve_as":"forensic_review_evidence","install_eligible":false,"improve_or_reactivate":false,"successor_ownership":{"client-artifact-acceptance":"sole generic scope/evidence/privacy/rights/package/link/openability/recipient and terminal decision authority","creative-deliverable-acceptance":"creative render/voice/platform adapter only; no generic terminal decision"}},
+    {"id":"authority-precedence","rule":"SPEC-v2.md, four V2 sub-specs, eligibility-matrix.json v2, candidate-manifest-v2.json, target-manifest-v2.json, confidentiality-contract-v2.json, validation-contract-v2.json, and this ledger govern. manifest.json, correction-ledger.json, original review, and prior packets remain immutable superseded evidence only."}
+  ]
+}

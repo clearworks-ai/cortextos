@@ -1,0 +1,23 @@
+{
+  "$id": "cortextos.task-observation.v1",
+  "type": "object",
+  "required": ["schema", "id", "seq", "created_at", "org", "agent", "visibility", "signal", "skill", "issue", "improvement", "principle", "status"],
+  "properties": {
+    "schema": {"const": "cortextos.task-observation.v1"},
+    "id": {"type": "string", "format": "uuid"},
+    "seq": {"type": "integer", "minimum": 1},
+    "created_at": {"type": "string"},
+    "org": {"type": "string"},
+    "agent": {"type": "string"},
+    "visibility": {"enum": ["internal", "open_source"]},
+    "signal": {"enum": ["correction", "friction", "success", "gap", "checkpoint"]},
+    "skill": {"type": "string"},
+    "issue": {"type": "string"},
+    "improvement": {"type": "string"},
+    "principle": {"type": "string"},
+    "context": {"type": ["string", "null"]},
+    "source_event": {"type": ["string", "null"]},
+    "status": {"const": "OPEN"}
+  },
+  "additionalProperties": false
+}

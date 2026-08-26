@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "task_id": "task_1787545824115_45589776",
+  "status": "planning_only",
+  "corrections": [
+    {
+      "id": "legacy-clearpath-academy-20260823",
+      "source_event": "1787545813008-frank2-codex-k6xfy",
+      "observation_uuid": "6477f9b2-dec6-4db5-8d4d-d08ab8a11b71",
+      "subject": "clearpath-content-pipeline.skill",
+      "sha256": "063beaf57e361a1f2ea462b5d15b39158b28295effe6c2af113b8b5087368ca7",
+      "disposition": "SUPERSEDED/DO-NOT-APPLY",
+      "preserve_as": "forensic_review_evidence",
+      "install_eligible": false,
+      "improve_or_reactivate": false,
+      "successor_scope": "generalized Humanizer, grounding, render, mobile, asset, link, and package acceptance rules may be specified only in creative-deliverable-acceptance"
+    }
+  ]
+}

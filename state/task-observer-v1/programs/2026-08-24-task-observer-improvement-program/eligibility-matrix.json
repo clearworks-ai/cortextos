@@ -1,0 +1,27 @@
+{
+  "schema_version": 2,
+  "count_contract": {"existing":8,"new":10,"legacy_evidence":1},
+  "existing_skill_bundles": [
+    {"skill":"task-observer","owner":"infrastructure","gate":"G3","disposition":"already_live_baseline_no_pending_mutation","live_apply":false},
+    {"skill":"agent-management","owner":"infrastructure","gate":"G3","disposition":"eligible_after_spec_pass_for_target_rebase","live_apply":false},
+    {"skill":"agent-browser","owner":"infrastructure","gate":"G3","disposition":"eligible_after_spec_pass_for_target_rebase","live_apply":false},
+    {"skill":"activity-channel","owner":"infrastructure","gate":"G3","disposition":"eligible_after_spec_pass_for_target_rebase","live_apply":false},
+    {"skill":"audit-pipeline","owner":"audit-research","gate":"G3","disposition":"eligible_after_spec_pass_for_target_rebase","live_apply":false},
+    {"skill":"audit-assemble-master","owner":"audit-research","gate":"G3","disposition":"correct_then_rebase","live_apply":false},
+    {"skill":"source-collection","owner":"audit-research","gate":"G3","disposition":"eligible_after_spec_pass_for_target_rebase","live_apply":false},
+    {"skill":"morning-review","owner":"state-and-briefing","gate":"G3","disposition":"enabled_target_specific_rebases_after_muse_prerequisite","live_apply":false}
+  ],
+  "new_skill_candidates": [
+    {"skill":"authority-cutoff-ledger","owner":"infrastructure","gate":"G3","disposition":"specification_required"},
+    {"skill":"herdr-ccgram-session-lifecycle","owner":"infrastructure","gate":"G3","disposition":"specification_required_after_gateway"},
+    {"skill":"fleet-restart-conductor","owner":"infrastructure","gate":"G3","disposition":"specification_required"},
+    {"skill":"audit-evidence-ledger","owner":"audit-research","gate":"G3","disposition":"specification_required"},
+    {"skill":"research-claim-ledger","owner":"audit-research","gate":"G3","disposition":"specification_required"},
+    {"skill":"creative-deliverable-acceptance","owner":"creative-client-delivery","gate":"G3","disposition":"clean_room_specification_after_muse_zero_activation"},
+    {"skill":"client-artifact-acceptance","owner":"creative-client-delivery","gate":"G3","disposition":"clean_room_specification_after_muse_zero_activation"},
+    {"skill":"crm-state-evidence","owner":"state-and-briefing","gate":"G3","disposition":"specification_required"},
+    {"skill":"finance-truth-ledger","owner":"state-and-briefing","gate":"G3","disposition":"specification_required"},
+    {"skill":"briefing-truth-reconciler","owner":"state-and-briefing","gate":"G3","disposition":"specification_required"}
+  ],
+  "legacy_evidence": [{"skill":"clearpath-content-pipeline","disposition":"SUPERSEDED/DO-NOT-APPLY","install_eligible":false,"source_eligible":false}]
+}

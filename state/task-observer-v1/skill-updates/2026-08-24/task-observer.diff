@@ -1,0 +1,35 @@
+--- live/references/cortextos-fleet.md
++++ staged/references/cortextos-fleet.md
+@@
+- Skill bundle: `$CTX_ROOT/community/skills/task-observer/`
+- Fleet state: `$CTX_ROOT/state/task-observer-v1/`
++Bundle discovery and state persistence are separate inputs. A runtime
++`$CTX_ROOT` may contain only mutable state and must not be assumed to contain
++the installed skill source.
++
++- Skill bundle: `$TASK_OBSERVER_BUNDLE` (the verified directory containing
++  this `SKILL.md` and `scripts/cortextos_observe.py`)
++- State root: `${CTX_TASK_OBSERVER_STATE_ROOT:-$CTX_ROOT}`
++- Fleet state: `<state-root>/state/task-observer-v1/`
+@@
+-python3 "$CTX_ROOT/community/skills/task-observer/scripts/cortextos_observe.py" init \
+-  --root "$CTX_ROOT" --org "$CTX_ORG" --agent "$CTX_AGENT_NAME"
++: "${TASK_OBSERVER_BUNDLE:?set TASK_OBSERVER_BUNDLE to the verified installed task-observer bundle}"
++TASK_OBSERVER_STATE_ROOT="${CTX_TASK_OBSERVER_STATE_ROOT:-$CTX_ROOT}"
++test -f "$TASK_OBSERVER_BUNDLE/scripts/cortextos_observe.py"
++python3 "$TASK_OBSERVER_BUNDLE/scripts/cortextos_observe.py" init \
++  --root "$TASK_OBSERVER_STATE_ROOT" --org "$CTX_ORG" --agent "$CTX_AGENT_NAME"
+ ```
++
++Fail closed when either path is missing or unverified. Do not silently search
++arbitrary parent directories: the executable bundle controls code provenance,
++while the state root controls confidentiality and durability.
+@@
+-Before claiming activation, verify: the symlink resolves to this bundle; `init`
+-returns `ok`; the partition exists with mode 0700/0600; two concurrent appends
+-produce distinct sequence numbers; and a fresh process can read both records.
++Before claiming activation, verify: the bundle script exists beneath the exact
++declared bundle root; the state root resolves to the intended persistence
++namespace; any activation symlink resolves to this bundle; `init` returns `ok`;
++the partition exists with mode 0700/0600; two concurrent appends produce
++distinct sequence numbers; and a fresh process can read both records.

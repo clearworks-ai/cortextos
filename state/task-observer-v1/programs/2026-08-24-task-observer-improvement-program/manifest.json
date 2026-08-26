@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "task_id": "task_1787545824115_45589776",
+  "program_status": "planning_authority_only",
+  "live_skill_mutation": false,
+  "files": [
+    {
+      "path": "SPEC.md",
+      "sha256": "b4c2b0beb616875840c74d6574f73c5eedf6797e59c7c6af22b864f3d9eaea2c",
+      "bytes": 7329,
+      "mode": "0600"
+    },
+    {
+      "path": "GOAL-CONDITION.md",
+      "sha256": "27d629a8da0b6f2ad98dd5d10eb39fcc4eaa680612a1258c53d67f8aa10fd309",
+      "bytes": 1665,
+      "mode": "0600"
+    },
+    {
+      "path": "correction-ledger.json",
+      "sha256": "82d7259d019b9e51c486383ebf362f759e258becfd9d23b8d412243093347727",
+      "bytes": 789,
+      "mode": "0600"
+    },
+    {
+      "path": "eligibility-matrix.json",
+      "sha256": "6cd5881da398b47b934eb74db1ab99ab8585ff30d175c4524be57e4610143f51",
+      "bytes": 1234,
+      "mode": "0600"
+    }
+  ],
+  "governing_review": {
+    "sha256": "453a2355e4f532474857f9c6119afe00a9b1d1a6f1ae9512caceee1c78f7b988"
+  },
+  "governing_domain_manifest": {
+    "sha256": "10fdef0b7a72711edce4357f62d7e6e402c0f7af9bb1546e97f0cab69e3931be"
+  },
+  "legacy_exclusion": {
+    "skill": "clearpath-content-pipeline",
+    "archive_sha256": "063beaf57e361a1f2ea462b5d15b39158b28295effe6c2af113b8b5087368ca7",
+    "disposition": "SUPERSEDED/DO-NOT-APPLY",
+    "preserved": true,
+    "install_eligible": false
+  }
+}

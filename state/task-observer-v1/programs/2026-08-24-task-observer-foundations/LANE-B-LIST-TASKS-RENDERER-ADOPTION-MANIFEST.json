@@ -1,0 +1,92 @@
+{
+  "schema_version": "cortext-baseline-repair-adoption-v1",
+  "lane": "B-list-tasks-renderer",
+  "status": "awaiting_ophir_acceptance",
+  "source_edit_authorized": false,
+  "task_id": "task_1787582596982_22477050",
+  "governing_diagnosis": {
+    "path": "/Users/joshweiss/code/cortextos/state/task-observer-v1/reviews/task_1787580203472_46528481/cortext-baseline-test-root-cause-proposal-2026-08-24.md",
+    "sha256": "c8a2bed53710c71d390f0abf2544100f7afb098a1cde04e5c5943f2b90b30869",
+    "bytes": 4088,
+    "mode": "0600"
+  },
+  "repository": {
+    "root": "/Users/joshweiss/code/cortextos-worktrees/list-tasks-renderer-adoption-20260824",
+    "base": "15defb1307df39f2df77522e70737c46dac52079",
+    "head": "15defb1307df39f2df77522e70737c46dac52079",
+    "branch": "repair/list-tasks-renderer-adoption-20260824",
+    "branch_worktree_count": 1,
+    "index_clean": true,
+    "worktree_clean": true,
+    "index_lock_count": 0
+  },
+  "writer_lease": {
+    "count": 1,
+    "name": "list_tasks_renderer_adopter",
+    "kind": "codex-yolo",
+    "session": "01a0343a-7e28-7161-990d-04aaf15a2a26",
+    "workspace": "wN",
+    "tab": "wN:t1",
+    "pane": "wN:p1",
+    "visible_title": "Adopt List Tasks Renderer (Codex)",
+    "lease_scope": "adoption_read_only_until_ophir_acceptance",
+    "descendants_allowed": false,
+    "descendants_observed": 0,
+    "other_branch_holders": 0,
+    "source_edit_lease": false
+  },
+  "allowlist": [
+    {
+      "operation": "MODIFY",
+      "path": "src/cli/bus.ts",
+      "pre_edit_sha256": "66928d377fde4789d6940bc8ccef6f83dbfc2956b0a3d26da9554a94b6b7c70c",
+      "bytes": 221009,
+      "filesystem_mode": "0600",
+      "git_mode": "100644",
+      "git_blob": "dcab20ae7c1d7d1241d8514c6bff5e5e4460d384"
+    },
+    {
+      "operation": "MODIFY",
+      "path": "tests/unit/cli/bus-list-tasks-class.test.ts",
+      "pre_edit_sha256": "046d32f878a4c891df5388229d3e67ad2c4240bd53afdc29a61f7898f1f7cfd3",
+      "bytes": 6380,
+      "filesystem_mode": "0600",
+      "git_mode": "100644",
+      "git_blob": "caf70fb6fc58d929449f0ec8ec3bf59f9f4f1f4c"
+    }
+  ],
+  "proposed_change": [
+    "Make formatTaskTable accept decorated task rows carrying class and render a Class/[class] column consistently with --by-project.",
+    "Preserve dynamic full-ID width, at least two spaces between columns, title-only truncation, JSON output, grouping, filters, and priority behavior.",
+    "Strengthen only the existing class test file for default text and preservation assertions."
+  ],
+  "validation_commands": [
+    "npx vitest run tests/unit/cli/bus-list-tasks-class.test.ts",
+    "npx vitest run tests/unit/cli/task-table.test.ts tests/unit/cli/bus-list-tasks-class.test.ts",
+    "npx vitest run tests/unit/cli/bus-list-tasks-class.test.ts tests/unit/cli/task-table.test.ts tests/unit/cli/bus-list-health.test.ts",
+    "npm run typecheck",
+    "npm run build",
+    "npm test (only after Lane A dependency topology repair is accepted and available)"
+  ],
+  "test_acceptance": [
+    "Default text emits [build].",
+    "Default text retains intended project/agent visibility.",
+    "Full task IDs and two-plus-space column separation remain exact.",
+    "JSON class, --class, --by-project, priority filter, and no-priority behavior remain green.",
+    "Typecheck and build pass.",
+    "Full npm test is dependency-gated on Lane A and is not independently runnable while the baseline topology remains RED."
+  ],
+  "rollback": {
+    "targets": ["src/cli/bus.ts", "tests/unit/cli/bus-list-tasks-class.test.ts"],
+    "restore_base": "15defb1307df39f2df77522e70737c46dac52079",
+    "post_restore_requirements": ["pre-edit hashes exact", "clean index", "clean worktree"]
+  },
+  "exclusions": [
+    "package.json, package-lock.json, dashboard/package-lock.json, and all Lane A files",
+    "every file outside the exact two-path MODIFY allowlist",
+    "all S0 candidate paths",
+    "receipts, staging, commit, push, merge, deploy, promotion, downstream action",
+    "full npm test before Lane A topology repair",
+    "descendants or additional writers"
+  ]
+}

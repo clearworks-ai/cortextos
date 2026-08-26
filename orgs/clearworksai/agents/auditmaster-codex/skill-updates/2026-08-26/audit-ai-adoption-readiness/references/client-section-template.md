@@ -57,11 +57,11 @@ The JSON ledger is the citation source of truth. It is not client-facing.
   ],
   "evidence_gaps": [
     {
+      "area": "privacy_retention_training_connectors",
       "question": "Are model-training controls disabled for company workspaces?",
       "owner": "AI tool administrator"
     }
-  ],
-  "optional_support": null
+  ]
 }
 ```
 
@@ -78,7 +78,7 @@ Allowed assessment-area keys:
 - `use_case_intake_ownership`
 - `prioritized_fixes`
 
-Each area uses `status: evidenced | not_established`. A `not_established` area needs an evidence-gap question rather than a negative finding.
+Each area uses `status: evidenced | not_established`. Every `not_established` area needs at least one evidence-gap question carrying the same `area` key rather than a negative finding.
 
 ## Client-facing section
 
@@ -132,5 +132,3 @@ Each area uses `status: evidenced | not_established`. A `not_established` area n
 - Each finding distinguishes current state from gap.
 - Each recommendation is bounded, timed, owned, and linked to an evidenced finding.
 - `Not established from available evidence` is used when configuration or policy was not checked.
-- Optional ongoing support appears only if evidence supports an ownership or cadence gap, and it is no more than one short paragraph.
-

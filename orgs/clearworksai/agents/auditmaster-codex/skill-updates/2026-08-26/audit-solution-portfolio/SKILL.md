@@ -10,9 +10,7 @@ Before writing a single solution, verify these client deliverables exist under `
 `01` pain-point atlas · `03` systems inventory · `04` integration gaps · `04a` AI operating environment and adoption · `05` workflow maps · `13` architecture diagram (current + future).
 If ANY is missing → **STOP and build it first.** Never jump from pain points straight to solutions.
 ```bash
-C=<client>; for p in "01*atlas*" "03*systems*" "04*integration*" "04a*ai*adoption*" "05*workflow*" "13*architecture*"; do \
-  find "deliverables/$C" -maxdepth 1 -type f -name "$p" -print -quit | grep -q . \
-    || echo "GATE BLOCKS — missing: $p"; done
+python3 "$CTX_AGENT_DIR/plugins/cortextos-agent-skills/skills/audit-solution-portfolio/scripts/analysis_gate.py" "deliverables/<client>"
 ```
 Master chain + order: `plugins/cortextos-agent-skills/skills/audit-pipeline/SKILL.md` (orchestrator table). Analysis layer = phases 2–6; this is 7.
 

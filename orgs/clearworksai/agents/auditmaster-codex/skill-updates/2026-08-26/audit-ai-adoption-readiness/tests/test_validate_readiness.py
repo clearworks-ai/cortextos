@@ -24,15 +24,20 @@ class ReadinessValidatorTests(unittest.TestCase):
         payload["findings"][0]["evidence"][0]["evidence_client"] = "another-client"
         self.assertTrue(any("crosses the client boundary" in error for error in MODULE.validate(payload)))
 
+    def test_cross_client_source_namespace_fails_even_when_label_matches(self):
+        payload = copy.deepcopy(self.payload)
+        payload["findings"][0]["evidence"][0]["source_path"] = "auditos://project/another-client/interviews/INT-999"
+        self.assertTrue(any("outside the selected client namespace" in error for error in MODULE.validate(payload)))
+
     def test_invalid_state_fails(self):
         payload = copy.deepcopy(self.payload)
         payload["findings"][0]["state"] = "realized"
         self.assertTrue(any("findings[0].state" in error for error in MODULE.validate(payload)))
 
-    def test_not_established_requires_question(self):
+    def test_every_not_established_area_requires_its_own_question(self):
         payload = copy.deepcopy(self.payload)
-        payload["evidence_gaps"] = []
-        self.assertTrue(any("not_established areas require" in error for error in MODULE.validate(payload)))
+        payload["evidence_gaps"] = payload["evidence_gaps"][:1]
+        self.assertTrue(any("missing evidence-gap coverage" in error for error in MODULE.validate(payload)))
 
     def test_duplicate_area_fails(self):
         payload = copy.deepcopy(self.payload)
@@ -50,4 +55,3 @@ class ReadinessValidatorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

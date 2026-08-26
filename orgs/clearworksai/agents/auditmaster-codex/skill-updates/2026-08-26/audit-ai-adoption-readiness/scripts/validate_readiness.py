@@ -32,6 +32,18 @@ def require_text(value, label, errors):
         errors.append(f"{label} must be non-empty text")
 
 
+def source_matches_client(source_path, client_slug):
+    normalized = source_path.replace("\\", "/")
+    markers = (
+        f"auditos://project/{client_slug}/",
+        f"/deliverables/{client_slug}/",
+        f"deliverables/{client_slug}/",
+        f"/projects/{client_slug}/",
+        f"/clients/{client_slug}/",
+    )
+    return any(marker in normalized for marker in markers)
+
+
 def validate_evidence(items, client_slug, label, errors):
     if not isinstance(items, list) or not items:
         errors.append(f"{label}.evidence must contain at least one citation")
@@ -50,6 +62,8 @@ def validate_evidence(items, client_slug, label, errors):
         source_path = item.get("source_path", "")
         if isinstance(source_path, str) and (".." in source_path or "secret" in source_path.lower()):
             errors.append(f"{where}.source_path contains a prohibited path segment")
+        elif isinstance(source_path, str) and not source_matches_client(source_path, client_slug):
+            errors.append(f"{where}.source_path is outside the selected client namespace")
 
 
 def validate(payload):
@@ -157,16 +171,19 @@ def validate(payload):
         if not isinstance(gap, dict):
             errors.append(f"{label} must be an object")
             continue
+        if gap.get("area") not in AREAS:
+            errors.append(f"{label}.area must be an allowed assessment area")
         require_text(gap.get("question"), f"{label}.question", errors)
         require_text(gap.get("owner"), f"{label}.owner", errors)
 
-    not_established = sum(1 for area in areas if isinstance(area, dict) and area.get("status") == "not_established")
-    if not_established and not evidence_gaps:
-        errors.append("not_established areas require at least one evidence gap question")
-
-    optional_support = payload.get("optional_support")
-    if optional_support is not None and (not isinstance(optional_support, str) or not optional_support.strip()):
-        errors.append("optional_support must be null or non-empty text")
+    not_established_areas = {
+        area.get("area") for area in areas
+        if isinstance(area, dict) and area.get("status") == "not_established" and area.get("area") in AREAS
+    }
+    gap_areas = {gap.get("area") for gap in evidence_gaps if isinstance(gap, dict)}
+    uncovered = sorted(not_established_areas - gap_areas)
+    if uncovered:
+        errors.append(f"not_established areas missing evidence-gap coverage: {', '.join(uncovered)}")
     return errors
 
 
@@ -193,4 +210,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-

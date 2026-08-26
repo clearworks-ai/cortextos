@@ -2,4 +2,3 @@ interface:
   display_name: "Audit AI Adoption Readiness"
   short_description: "Assess one client's AI environment and adoption readiness"
   default_prompt: "Assess this client's evidenced AI operating environment and produce the bounded 04a audit section."
-

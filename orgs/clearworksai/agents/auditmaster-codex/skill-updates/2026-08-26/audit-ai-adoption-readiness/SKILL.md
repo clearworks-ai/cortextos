@@ -29,8 +29,6 @@ Assess only what the evidence supports:
 9. How a new use case is requested, reviewed, prioritized, assigned, tested, and revisited.
 10. Prioritized fixes: implement now vs later, dependencies, owner, and evidence needed.
 
-Optional ongoing support may appear as one short recommendation only when the client's evidence shows an ownership or operating-cadence gap. Do not turn the section into a recurring-services pitch.
-
 ## Evidence rules
 
 - One client/project at a time. Never use another client's evidence, examples, numbers, or language.
@@ -59,7 +57,7 @@ An implemented tool is not evidence of adoption. A recommendation is not an impl
 ## Workflow
 
 1. **Scope the client and evidence boundary.** Record the client slug, project ID, source roots, interviewed roles, and unverified owners. Stop on mixed-client inputs.
-2. **Build the internal evidence ledger.** Use the schema in [references/client-section-template.md](references/client-section-template.md). Run:
+2. **Build the internal evidence ledger.** Use the schema in [references/client-section-template.md](references/client-section-template.md). Evidence paths must remain inside a canonical namespace for the selected client. Run:
    ```bash
    python3 scripts/validate_readiness.py validate <ledger.json>
    ```

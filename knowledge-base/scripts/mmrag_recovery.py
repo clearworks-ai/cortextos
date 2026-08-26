@@ -54,6 +54,9 @@ ISOLATED_LARGE_JSON_BATCH_TIMEOUT_S = 3 * 3600
 # Josh 2026-08-26: small recoverable chunks; do not restart from scratch.
 ISOLATED_CHUNK_MAX_FILES = 8
 ISOLATED_CHUNK_TIMEOUT_S = 15 * 60
+# Low-risk default units: tighter cap than the generic chunk.
+ISOLATED_LOW_RISK_CHUNK_MAX_FILES = 2
+ISOLATED_LOW_RISK_CHUNK_TIMEOUT_S = 10 * 60
 STALE_SIDE_WORK_DIRNAME = "recovery-side"
 SIDE_WORK_DIRNAME = "recovery-side"
 RECOVERY_SIDE_V2_DIRNAME = "recovery-side-2"
@@ -921,6 +924,16 @@ def clone_confirmed_generation(src_work_dir, dest_work_dir):
     }
 
 
+def _refuse_live_or_v3_persist(path):
+    resolved = Path(path).expanduser().resolve()
+    live = (pinned_live_kb() / "chromadb").resolve()
+    if resolved == live:
+        raise RebuildRefused("refuse writing live persist")
+    if RECOVERY_SIDE_V3_DIRNAME in resolved.parts:
+        raise RebuildRefused("refuse writing recovery-side-3")
+    return resolved
+
+
 def snapshot_side_persist(persist_dir, snapshot_dir):
     """Copy a side persist for chunk retry. Never writes recovery-side-3 or live."""
     src = Path(persist_dir).expanduser().resolve()
@@ -929,24 +942,61 @@ def snapshot_side_persist(persist_dir, snapshot_dir):
     assert_not_live_epoch(dest)
     if dest == src:
         raise RebuildRefused("refuse snapshot onto the source persist")
-    if RECOVERY_SIDE_V3_DIRNAME in dest.parts:
-        raise RebuildRefused("refuse writing recovery-side-3")
+    _refuse_live_or_v3_persist(dest)
     sqlite = src / "chroma.sqlite3"
     if not sqlite.is_file():
         raise RebuildRefused(f"persist missing: {sqlite}")
-    if dest.exists() and any(dest.iterdir()):
-        raise RebuildRefused(f"snapshot dest is not empty: {dest}")
+    if dest.exists():
+        raise RebuildRefused(f"snapshot dest already exists: {dest}")
+    tmp = dest.with_name(dest.name + ".tmp")
+    if tmp.exists():
+        shutil.rmtree(tmp)
     before = (sqlite.stat().st_size, sqlite.stat().st_mtime_ns)
-    shutil.copytree(src, dest)
+    shutil.copytree(src, tmp)
     after = (sqlite.stat().st_size, sqlite.stat().st_mtime_ns)
     if after != before:
+        shutil.rmtree(tmp, ignore_errors=True)
         raise RebuildRefused("source persist mutated during snapshot")
+    os.rename(tmp, dest)
     return {
         "result": "SNAPSHOT_OK",
         "src_persist": str(src),
         "snapshot_dir": str(dest),
         "src_sqlite_bytes": before[0],
         "source_unchanged": True,
+        "atomic": True,
+    }
+
+
+def restore_side_persist_from_snapshot(persist_dir, snapshot_dir):
+    """Replace a side persist with its pre-chunk snapshot. Never writes v3 or live."""
+    src = Path(snapshot_dir).expanduser().resolve()
+    dest = Path(persist_dir).expanduser().resolve()
+    assert_not_live_epoch(src)
+    assert_not_live_epoch(dest)
+    if dest == src:
+        raise RebuildRefused("refuse restore onto the snapshot itself")
+    _refuse_live_or_v3_persist(dest)
+    sqlite = src / "chroma.sqlite3"
+    if not sqlite.is_file():
+        raise RebuildRefused(f"snapshot persist missing: {sqlite}")
+    tmp = dest.with_name(dest.name + ".restore-tmp")
+    failed = dest.with_name(dest.name + ".failed-tmp")
+    if tmp.exists():
+        shutil.rmtree(tmp)
+    if failed.exists():
+        shutil.rmtree(failed)
+    shutil.copytree(src, tmp)
+    if dest.exists():
+        os.rename(dest, failed)
+    os.rename(tmp, dest)
+    if failed.exists():
+        shutil.rmtree(failed)
+    return {
+        "result": "RESTORE_OK",
+        "src_snapshot": str(src),
+        "persist_dir": str(dest),
+        "src_sqlite_bytes": sqlite.stat().st_size,
     }
 
 
@@ -1007,14 +1057,16 @@ def remaining_file_manifest(inventory, present_source_files, completed_paths=Non
     }
 
 
-def next_atomic_chunk(remaining_paths):
+def next_atomic_chunk(remaining_paths, *, batch_size=None, batch_timeout_s=None):
     paths = [str(path) for path in (remaining_paths or [])]
     if not paths:
         return {"kind": "empty", "files": [], "timeout_s": 0}
+    size = ISOLATED_CHUNK_MAX_FILES if batch_size is None else int(batch_size)
+    timeout_s = ISOLATED_CHUNK_TIMEOUT_S if batch_timeout_s is None else int(batch_timeout_s)
     batches = plan_supervised_batches(
         paths,
-        batch_size=ISOLATED_CHUNK_MAX_FILES,
-        batch_timeout_s=ISOLATED_CHUNK_TIMEOUT_S,
+        batch_size=size,
+        batch_timeout_s=timeout_s,
     )
     kind, files, timeout = batches[0]
     if timeout >= 6 * 3600:
@@ -1033,6 +1085,8 @@ def run_one_recovery_chunk(
     log_path,
     chunk_receipt_path,
     collection="shared-clearworksai",
+    batch_size=None,
+    batch_timeout_s=None,
 ):
     """Ingest one small chunk. Confirmed IDs never replay. Failed chunk may retry alone."""
     confirmed = {str(path) for path in (confirmed_paths or [])}
@@ -1040,7 +1094,11 @@ def run_one_recovery_chunk(
     overlap = [path for path in remaining if path in confirmed]
     if overlap:
         raise RebuildRefused(f"refuse replay of {len(overlap)} confirmed IDs")
-    chunk = next_atomic_chunk(remaining)
+    chunk = next_atomic_chunk(
+        remaining,
+        batch_size=batch_size,
+        batch_timeout_s=batch_timeout_s,
+    )
     if chunk["kind"] == "empty":
         return {"result": "NO_REMAINING", "retry_chunk": False, "replay_confirmed": False}
     persist = str(Path(env.get("MMRAG_SIDE_CHROMADB_DIR", "")).expanduser().resolve()) if env.get("MMRAG_SIDE_CHROMADB_DIR") else ""

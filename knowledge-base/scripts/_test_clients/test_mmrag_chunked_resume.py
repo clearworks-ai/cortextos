@@ -138,6 +138,25 @@ def test_snapshot_copies_persist_without_mutating_source(tmp_path):
         mmrag_recovery.snapshot_side_persist(src, v3_dest)
 
 
+def test_restore_replaces_dirty_persist_without_touching_v3(tmp_path):
+    v4 = tmp_path / "recovery-side-4"
+    persist = v4 / "chromadb"
+    persist.mkdir(parents=True)
+    (persist / "chroma.sqlite3").write_bytes(b"dirty")
+    snap = v4 / "chromadb.pre-chunk-2"
+    snap.mkdir()
+    (snap / "chroma.sqlite3").write_bytes(b"clean")
+    v3 = tmp_path / "recovery-side-3" / "chromadb"
+    v3.mkdir(parents=True)
+    (v3 / "chroma.sqlite3").write_bytes(b"v3")
+    receipt = mmrag_recovery.restore_side_persist_from_snapshot(persist, snap)
+    assert receipt["result"] == "RESTORE_OK"
+    assert (persist / "chroma.sqlite3").read_bytes() == b"clean"
+    assert (v3 / "chroma.sqlite3").read_bytes() == b"v3"
+    with pytest.raises(mmrag_recovery.RebuildRefused):
+        mmrag_recovery.restore_side_persist_from_snapshot(v3, snap)
+
+
 def test_next_chunk_is_small_and_isolates_oversized_json(tmp_path):
     files = []
     for index in range(10):
@@ -161,6 +180,32 @@ def test_next_chunk_is_small_and_isolates_oversized_json(tmp_path):
     assert third["kind"] == "large_json"
     assert third["files"] == [str(large)]
     assert third["timeout_s"] == mmrag_recovery.ISOLATED_LARGE_JSON_BATCH_TIMEOUT_S
+
+
+def test_low_risk_chunk_caps_at_two_files_and_keeps_video_singleton(tmp_path):
+    files = []
+    for index in range(4):
+        path = tmp_path / f"note-{index}.md"
+        path.write_text("x\n", encoding="utf-8")
+        files.append(str(path))
+    video = tmp_path / "oversized.mp4"
+    video.write_bytes(b"fake-video")
+    low = mmrag_recovery.next_atomic_chunk(
+        files,
+        batch_size=mmrag_recovery.ISOLATED_LOW_RISK_CHUNK_MAX_FILES,
+        batch_timeout_s=mmrag_recovery.ISOLATED_LOW_RISK_CHUNK_TIMEOUT_S,
+    )
+    assert low["kind"] == "default"
+    assert low["files"] == files[:2]
+    assert low["timeout_s"] == 10 * 60
+    singleton = mmrag_recovery.next_atomic_chunk(
+        [str(video)] + files,
+        batch_size=mmrag_recovery.ISOLATED_LOW_RISK_CHUNK_MAX_FILES,
+        batch_timeout_s=mmrag_recovery.ISOLATED_LOW_RISK_CHUNK_TIMEOUT_S,
+    )
+    assert singleton["kind"] == "video"
+    assert singleton["files"] == [str(video)]
+    assert singleton["timeout_s"] == mmrag_recovery.ISOLATED_VIDEO_BATCH_TIMEOUT_S
 
 
 def test_failed_chunk_may_retry_only_that_chunk_not_confirmed(tmp_path, monkeypatch):

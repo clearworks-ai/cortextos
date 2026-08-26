@@ -43,6 +43,9 @@ def test_timeout_constants_sit_inside_bus_and_hook_deadlines():
     assert mmrag_recovery.ISOLATED_CHUNK_MAX_FILES == 8
     assert mmrag_recovery.ISOLATED_CHUNK_TIMEOUT_S == 15 * 60
     assert mmrag_recovery.ISOLATED_CHUNK_TIMEOUT_S < 6 * 3600
+    assert mmrag_recovery.ISOLATED_LOW_RISK_CHUNK_MAX_FILES == 2
+    assert mmrag_recovery.ISOLATED_LOW_RISK_CHUNK_TIMEOUT_S == 10 * 60
+    assert mmrag_recovery.ISOLATED_LOW_RISK_CHUNK_TIMEOUT_S < 6 * 3600
     assert mmrag_recovery.RECOVERY_SIDE_V3_DIRNAME in mmrag_recovery.STALE_RECOVERY_SIDE_DIRNAMES
     assert mmrag_recovery.RECOVERY_SIDE_V4_DIRNAME not in mmrag_recovery.STALE_RECOVERY_SIDE_DIRNAMES
 

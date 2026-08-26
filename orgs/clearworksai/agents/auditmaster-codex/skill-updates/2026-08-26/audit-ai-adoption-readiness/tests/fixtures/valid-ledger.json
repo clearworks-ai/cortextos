@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "client_slug": "sample-client",
+  "project_id": "sample-project",
+  "generated_on": "2026-08-26",
+  "assessment_areas": [
+    {"area":"tools_in_use","status":"evidenced","notes":"Two tools were named.","evidence":[{"evidence_client":"sample-client","source_path":"auditos://project/sample-client/interviews/INT-001","citation":"INT-001 / Operations Lead / [12:14]","confidence":"reported"}]},
+    {"area":"admin_ownership","status":"evidenced","notes":"No owner was named in the interview.","evidence":[{"evidence_client":"sample-client","source_path":"auditos://project/sample-client/interviews/INT-002","citation":"INT-002 / Executive Director / [31:09]","confidence":"reported"}]},
+    {"area":"sso_provisioning_offboarding","status":"not_established","notes":"Tenant configuration was not reviewed.","evidence":[]},
+    {"area":"privacy_retention_training_connectors","status":"not_established","notes":"Tenant configuration was not reviewed.","evidence":[]},
+    {"area":"company_data_use","status":"evidenced","notes":"Project notes were reported as inputs.","evidence":[{"evidence_client":"sample-client","source_path":"auditos://project/sample-client/interviews/INT-001","citation":"INT-001 / Operations Lead / [14:22]","confidence":"reported"}]},
+    {"area":"approved_use_human_review","status":"evidenced","notes":"Managers review external output.","evidence":[{"evidence_client":"sample-client","source_path":"auditos://project/sample-client/interviews/INT-003","citation":"INT-003 / Department Manager / [08:01]","confidence":"reported"}]},
+    {"area":"role_training","status":"not_established","notes":"No training record was available.","evidence":[]},
+    {"area":"adoption_sticking_points","status":"evidenced","notes":"Use varies by team.","evidence":[{"evidence_client":"sample-client","source_path":"auditos://project/sample-client/interviews/INT-003","citation":"INT-003 / Department Manager / [10:44]","confidence":"reported"}]},
+    {"area":"use_case_intake_ownership","status":"not_established","notes":"No intake owner was identified.","evidence":[]},
+    {"area":"prioritized_fixes","status":"evidenced","notes":"The owner assignment can begin now.","evidence":[{"evidence_client":"sample-client","source_path":"auditos://project/sample-client/interviews/INT-002","citation":"INT-002 / Executive Director / [33:18]","confidence":"reported"}]}
+  ],
+  "findings": [
+    {"id":"AIR-001","area":"admin_ownership","state":"gap","title":"Administrative ownership is not assigned","detail":"Interview evidence did not identify a named owner for access changes or offboarding.","evidence":[{"evidence_client":"sample-client","source_path":"auditos://project/sample-client/interviews/INT-002","citation":"INT-002 / Executive Director / [31:09]","confidence":"reported"}]}
+  ],
+  "recommendations": [
+    {"id":"AIR-R001","timing":"now","title":"Assign an AI tool administrator","action":"Name the person responsible for access changes, settings review, and offboarding.","owner":"Executive sponsor","dependencies":[],"addresses":["AIR-001"]}
+  ],
+  "evidence_gaps": [
+    {"question":"Are privacy, retention, model-training, and connector controls set for company use?","owner":"AI tool administrator"},
+    {"question":"How are new users provisioned and former users removed?","owner":"IT owner"}
+  ],
+  "optional_support": null
+}
+

@@ -37,7 +37,33 @@ SUPPORTED_NATIVE_TUPLES = {("3.13.12", "1.5.9")}
 HOOK_QUERY_TIMEOUT_MS = 12000
 BUS_QUERY_TIMEOUT_MS = 30000
 ISOLATED_QUERY_TIMEOUT_S = 10.0
-ISOLATED_INGEST_TIMEOUT_S = 6 * 3600
+# Isolated ingest is supervised in batches. A 6h corpus wall caused WORKER_TIMEOUT
+# while Gemini recaptioned meeting-frame JPEGs; do not wrap the full corpus.
+ISOLATED_INGEST_BATCH_TIMEOUT_S = 45 * 60
+ISOLATED_INGEST_BATCH_MAX_FILES = 80
+ISOLATED_INGEST_TIMEOUT_S = ISOLATED_INGEST_BATCH_TIMEOUT_S
+# Single long videos blew the 45-minute mixed batch; keep each video in its
+# own batch under a still-sub-6h wall.
+ISOLATED_VIDEO_BATCH_TIMEOUT_S = 3 * 3600
+VIDEO_BATCH_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+# v3 timed out on a 7.16 MB JSON inside an 80-file / 2700s default batch.
+# Isolate oversized JSON as a singleton under the same sub-6h wall as video.
+LARGE_JSON_EXTS = {".json"}
+LARGE_JSON_MIN_BYTES = 5_000_000
+ISOLATED_LARGE_JSON_BATCH_TIMEOUT_S = 3 * 3600
+# Josh 2026-08-26: small recoverable chunks; do not restart from scratch.
+ISOLATED_CHUNK_MAX_FILES = 8
+ISOLATED_CHUNK_TIMEOUT_S = 15 * 60
+STALE_SIDE_WORK_DIRNAME = "recovery-side"
+SIDE_WORK_DIRNAME = "recovery-side"
+RECOVERY_SIDE_V2_DIRNAME = "recovery-side-2"
+RECOVERY_SIDE_V3_DIRNAME = "recovery-side-3"
+RECOVERY_SIDE_V4_DIRNAME = "recovery-side-4"
+STALE_RECOVERY_SIDE_DIRNAMES = (
+    STALE_SIDE_WORK_DIRNAME,
+    RECOVERY_SIDE_V2_DIRNAME,
+    RECOVERY_SIDE_V3_DIRNAME,
+)
 ISOLATED_WORKER_ENV = "MMRAG_ISOLATED_CHROMA_WORKER"
 WORKER_TERM_GRACE_S = 2.0
 
@@ -399,12 +425,22 @@ def assert_side_rebuild_target(live_chromadb, target):
         raise RebuildRefused("recovery refuses live rebuild temp persist names")
 
 
-def prepare_side_rebuild_scaffold(kb_root, *, copy_live_cache=False):
+def prepare_side_rebuild_scaffold(
+    kb_root,
+    *,
+    copy_live_cache=False,
+    work_dirname=None,
+    refuse_work_dirnames=None,
+):
     """Create an empty sibling persist plus FR-015 side cache. Does not ingest."""
     kb = Path(kb_root).expanduser().resolve()
     assert_not_live_epoch(kb)
+    name = work_dirname or SIDE_WORK_DIRNAME
+    refused = set(refuse_work_dirnames or ())
+    if name in refused:
+        raise RebuildRefused(f"refuse reuse of timed-out side work dir {name}")
     live_chromadb = (kb / "chromadb").resolve()
-    work_dir = (kb / SIDE_WORK_DIRNAME).resolve()
+    work_dir = (kb / name).resolve()
     persist_dir = (work_dir / "chromadb").resolve()
     if persist_dir.exists() and any(persist_dir.iterdir()):
         raise RebuildRefused(f"side persist already populated: {persist_dir}")
@@ -700,6 +736,7 @@ def run_isolated_chroma_worker(
     cwd=None,
     require_supported=True,
     log_path=None,
+    log_mode="w",
 ):
     """Run native work in a child. Timeout/signal are typed. No retry."""
     if require_supported:
@@ -717,13 +754,15 @@ def run_isolated_chroma_worker(
     if env:
         worker_env.update({key: str(value) for key, value in env.items()})
     worker_env[ISOLATED_WORKER_ENV] = "1"
+    worker_env["PYTHONUNBUFFERED"] = "1"
     worker_env["CTX_INSTANCE_ID"] = worker_env.get("CTX_INSTANCE_ID", PINNED_INSTANCE_ID)
     cmd = [str(python_executable), "-X", "faulthandler", *[str(part) for part in argv]]
     log_handle = None
     if log_path is not None:
         log = Path(log_path)
         log.parent.mkdir(parents=True, exist_ok=True)
-        log_handle = open(log, "w", encoding="utf-8")
+        mode = "a" if log_mode == "a" else "w"
+        log_handle = open(log, mode, encoding="utf-8", buffering=1)
         stdout_handle = log_handle
         stderr_handle = log_handle
     else:
@@ -789,82 +828,362 @@ def run_isolated_chroma_worker(
         if log_handle is not None:
             log_handle.close()
 
-    """Run native work in a child. Timeout/signal are typed. No retry."""
-    if require_supported:
-        preflight = preflight_native_runtime(python_executable)
-        if preflight["result"] != "RUNTIME_OK":
-            return preflight
-    else:
-        preflight = {
-            "result": "RUNTIME_OK",
-            "python_executable": str(python_executable),
-            "live_health_proven": False,
-            "detail": "preflight skipped for fixture isolation tests",
-        }
-    worker_env = os.environ.copy()
-    if env:
-        worker_env.update({key: str(value) for key, value in env.items()})
-    worker_env[ISOLATED_WORKER_ENV] = "1"
-    worker_env["CTX_INSTANCE_ID"] = worker_env.get("CTX_INSTANCE_ID", PINNED_INSTANCE_ID)
-    cmd = [str(python_executable), "-X", "faulthandler", *[str(part) for part in argv]]
-    stdout_handle = subprocess.PIPE
-    stderr_handle = subprocess.PIPE
-    if log_path is not None:
-        log = Path(log_path)
-        log.parent.mkdir(parents=True, exist_ok=True)
-        stdout_handle = open(log, "w", encoding="utf-8")
-        stderr_handle = stdout_handle
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=stdout_handle,
-            stderr=stderr_handle,
-            text=True,
-            env=worker_env,
-            cwd=cwd,
-            start_new_session=True,
-        )
-    except OSError as exc:
-        return {
-            "result": "UNSUPPORTED_RUNTIME",
-            "detail": f"failed to spawn isolated worker: {exc}",
-            "live_health_proven": False,
-            "preflight": preflight,
-        }
-    try:
-        stdout, stderr = proc.communicate(timeout=float(timeout_s))
-    except subprocess.TimeoutExpired:
-        _reap_worker(proc)
-        stdout, stderr = proc.communicate()
-        return {
-            "result": "WORKER_TIMEOUT",
-            "timeout_s": timeout_s,
-            "hook_query_timeout_ms": HOOK_QUERY_TIMEOUT_MS,
-            "bus_query_timeout_ms": BUS_QUERY_TIMEOUT_MS,
-            "retry": False,
-            "stdout": stdout or "",
-            "stderr": stderr or "",
-            "preflight": preflight,
-            "live_health_proven": False,
-        }
-    if proc.returncode < 0:
-        return {
-            "result": "WORKER_SIGNALED",
-            "signal": -proc.returncode,
-            "retry": False,
-            "stdout": stdout or "",
-            "stderr": stderr or "",
-            "preflight": preflight,
-            "live_health_proven": False,
-        }
+
+def classify_supervised_file(path, *, batch_timeout_s):
+    """Return (kind, timeout_s) for one ingest path. Path must exist."""
+    resolved = Path(path)
+    suffix = resolved.suffix.lower()
+    if suffix in VIDEO_BATCH_EXTS:
+        return "video", ISOLATED_VIDEO_BATCH_TIMEOUT_S
+    if suffix in LARGE_JSON_EXTS and resolved.stat().st_size >= LARGE_JSON_MIN_BYTES:
+        return "large_json", ISOLATED_LARGE_JSON_BATCH_TIMEOUT_S
+    return "default", batch_timeout_s
+
+
+def plan_supervised_batches(paths, *, batch_size, batch_timeout_s):
+    """Split explicit files into isolated batches. No worker spawn."""
+    batches = []
+    current = []
+    for path in paths:
+        kind, timeout = classify_supervised_file(path, batch_timeout_s=batch_timeout_s)
+        if kind != "default":
+            if current:
+                batches.append(("default", current, batch_timeout_s))
+                current = []
+            batches.append((kind, [path], timeout))
+        else:
+            current.append(path)
+            if len(current) >= batch_size:
+                batches.append(("default", current, batch_timeout_s))
+                current = []
+    if current:
+        batches.append(("default", current, batch_timeout_s))
+    return batches
+
+
+def clone_confirmed_generation(src_work_dir, dest_work_dir):
+    """Filesystem clone of a confirmed side generation. Never writes the source."""
+    src = Path(src_work_dir).expanduser().resolve()
+    dest = Path(dest_work_dir).expanduser().resolve()
+    assert_not_live_epoch(src)
+    assert_not_live_epoch(dest)
+    if dest == src:
+        raise RebuildRefused("refuse snapshot onto the source generation")
+    if src.name == RECOVERY_SIDE_V3_DIRNAME and dest.name == RECOVERY_SIDE_V3_DIRNAME:
+        raise RebuildRefused("refuse mutation of recovery-side-3")
+    if dest.name == RECOVERY_SIDE_V3_DIRNAME:
+        raise RebuildRefused("refuse writing recovery-side-3")
+    src_persist = src / "chromadb"
+    src_sqlite = src_persist / "chroma.sqlite3"
+    if not src_sqlite.is_file():
+        raise RebuildRefused(f"source persist missing: {src_sqlite}")
+    if dest.exists() and any(dest.iterdir()):
+        raise RebuildRefused(f"destination generation is not empty: {dest}")
+    before = (src_sqlite.stat().st_size, src_sqlite.stat().st_mtime_ns, src_sqlite.read_bytes()[:64])
+    dest.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src_persist, dest / "chromadb")
+    src_cache = src / "embedding-cache.sqlite"
+    dest_cache = dest / "embedding-cache.sqlite"
+    if src_cache.is_file():
+        shutil.copy2(src_cache, dest_cache)
+    progress_src = src / "supervised-ingest-progress.json"
+    completed = []
+    collection = "shared-clearworksai"
+    if progress_src.is_file():
+        loaded = json.loads(progress_src.read_text(encoding="utf-8"))
+        completed = list(loaded.get("completed") or [])
+        collection = loaded.get("collection") or collection
+    dest_persist = str((dest / "chromadb").resolve())
+    _write_supervised_progress(dest / "supervised-ingest-progress.json", {
+        "persist": dest_persist,
+        "completed": completed,
+        "collection": collection,
+        "cloned_from": str(src),
+    })
+    after = (src_sqlite.stat().st_size, src_sqlite.stat().st_mtime_ns, src_sqlite.read_bytes()[:64])
+    if after != before:
+        raise RebuildRefused("source generation mutated during clone")
     return {
-        "result": "WORKER_OK" if proc.returncode == 0 else "WORKER_EXIT",
-        "returncode": proc.returncode,
+        "result": "CLONE_OK",
+        "src_work_dir": str(src),
+        "dest_work_dir": str(dest),
+        "persist_dir": dest_persist,
+        "embed_cache_path": str(dest_cache) if dest_cache.is_file() else None,
+        "completed_count": len(completed),
+        "src_sqlite_bytes": before[0],
+        "src_sqlite_mtime_ns": before[1],
+        "source_unchanged": True,
+        "env": {
+            "MMRAG_CHROMADB_DIR": dest_persist,
+            "MMRAG_SIDE_CHROMADB_DIR": dest_persist,
+            "MMRAG_EMBED_CACHE_PATH": str(dest_cache) if dest_cache.is_file() else "",
+        },
+    }
+
+
+def snapshot_side_persist(persist_dir, snapshot_dir):
+    """Copy a side persist for chunk retry. Never writes recovery-side-3 or live."""
+    src = Path(persist_dir).expanduser().resolve()
+    dest = Path(snapshot_dir).expanduser().resolve()
+    assert_not_live_epoch(src)
+    assert_not_live_epoch(dest)
+    if dest == src:
+        raise RebuildRefused("refuse snapshot onto the source persist")
+    if RECOVERY_SIDE_V3_DIRNAME in dest.parts:
+        raise RebuildRefused("refuse writing recovery-side-3")
+    sqlite = src / "chroma.sqlite3"
+    if not sqlite.is_file():
+        raise RebuildRefused(f"persist missing: {sqlite}")
+    if dest.exists() and any(dest.iterdir()):
+        raise RebuildRefused(f"snapshot dest is not empty: {dest}")
+    before = (sqlite.stat().st_size, sqlite.stat().st_mtime_ns)
+    shutil.copytree(src, dest)
+    after = (sqlite.stat().st_size, sqlite.stat().st_mtime_ns)
+    if after != before:
+        raise RebuildRefused("source persist mutated during snapshot")
+    return {
+        "result": "SNAPSHOT_OK",
+        "src_persist": str(src),
+        "snapshot_dir": str(dest),
+        "src_sqlite_bytes": before[0],
+        "source_unchanged": True,
+    }
+
+
+def verify_confirmed_source_ids(completed_paths, present_source_files):
+    completed = [str(path) for path in (completed_paths or []) if path]
+    present = {str(path) for path in (present_source_files or []) if path}
+    missing = sorted(set(completed) - present)
+    extra = sorted(present - set(completed))
+    if missing:
+        raise ConservationFailed(
+            f"CONFIRMED_IDS_FAIL missing={len(missing)} extra={len(extra)}"
+        )
+    return {
+        "result": "CONFIRMED_IDS_OK",
+        "confirmed_count": len(completed),
+        "store_unique_sources": len(present),
+        "missing_confirmed": [],
+        "extra_in_store": extra,
+    }
+
+
+def verify_store_ids_survived(before_source_files, after_source_files):
+    """Cloned chroma source IDs must remain after a later chunk. New IDs are allowed."""
+    before = {str(path) for path in (before_source_files or []) if path}
+    after = {str(path) for path in (after_source_files or []) if path}
+    missing = sorted(before - after)
+    added = sorted(after - before)
+    if missing:
+        raise ConservationFailed(
+            f"STORE_IDS_FAIL missing={len(missing)} added={len(added)}"
+        )
+    return {
+        "result": "STORE_IDS_SURVIVED",
+        "before_count": len(before),
+        "after_count": len(after),
+        "added_count": len(added),
+        "added": added,
+        "missing": [],
+    }
+
+
+def remaining_file_manifest(inventory, present_source_files, completed_paths=None):
+    """Unfinished IDs only: inventory minus store IDs minus confirmed progress attempts."""
+    present = {str(path) for path in (present_source_files or []) if path}
+    attempted = {str(path) for path in (completed_paths or []) if path}
+    files = [row["path"] for row in (inventory or {}).get("files") or [] if row.get("path")]
+    remaining = [
+        path for path in files if path not in present and path not in attempted
+    ]
+    return {
+        "result": "REMAINING_MANIFEST_OK",
+        "inventory_count": len(files),
+        "present_count": len(present),
+        "attempted_count": len(attempted),
+        "remaining_count": len(remaining),
+        "remaining": remaining,
+        "zero_chunk_attempts": sorted(attempted - present),
+    }
+
+
+def next_atomic_chunk(remaining_paths):
+    paths = [str(path) for path in (remaining_paths or [])]
+    if not paths:
+        return {"kind": "empty", "files": [], "timeout_s": 0}
+    batches = plan_supervised_batches(
+        paths,
+        batch_size=ISOLATED_CHUNK_MAX_FILES,
+        batch_timeout_s=ISOLATED_CHUNK_TIMEOUT_S,
+    )
+    kind, files, timeout = batches[0]
+    if timeout >= 6 * 3600:
+        raise RebuildRefused("chunk timeout refuses a 6h-or-longer wall")
+    return {"kind": kind, "files": files, "timeout_s": timeout}
+
+
+def run_one_recovery_chunk(
+    remaining_paths,
+    *,
+    confirmed_paths,
+    python_executable,
+    mmrag_py,
+    env,
+    progress_path,
+    log_path,
+    chunk_receipt_path,
+    collection="shared-clearworksai",
+):
+    """Ingest one small chunk. Confirmed IDs never replay. Failed chunk may retry alone."""
+    confirmed = {str(path) for path in (confirmed_paths or [])}
+    remaining = [str(path) for path in (remaining_paths or [])]
+    overlap = [path for path in remaining if path in confirmed]
+    if overlap:
+        raise RebuildRefused(f"refuse replay of {len(overlap)} confirmed IDs")
+    chunk = next_atomic_chunk(remaining)
+    if chunk["kind"] == "empty":
+        return {"result": "NO_REMAINING", "retry_chunk": False, "replay_confirmed": False}
+    persist = str(Path(env.get("MMRAG_SIDE_CHROMADB_DIR", "")).expanduser().resolve()) if env.get("MMRAG_SIDE_CHROMADB_DIR") else ""
+    progress_file = Path(progress_path)
+    progress_completed = set()
+    loaded_progress = None
+    if progress_file.is_file():
+        loaded_progress = json.loads(progress_file.read_text(encoding="utf-8"))
+        if loaded_progress.get("persist") and persist and loaded_progress.get("persist") != persist:
+            raise RebuildRefused("progress persist mismatch; refuse mixing generations")
+        progress_completed = set(loaded_progress.get("completed") or [])
+    replay_progress = [path for path in chunk["files"] if path in progress_completed]
+    if replay_progress:
+        raise RebuildRefused(
+            f"refuse replay of {len(replay_progress)} confirmed progress IDs"
+        )
+    receipt = run_isolated_chroma_worker(
+        [str(mmrag_py), "ingest", *chunk["files"], "-c", collection, "--json"],
+        python_executable=python_executable,
+        timeout_s=chunk["timeout_s"],
+        env=env,
+        require_supported=True,
+        log_path=log_path,
+        log_mode="a",
+    )
+    out = dict(receipt)
+    out["retry"] = False
+    out["replay_confirmed"] = False
+    out["batch_kind"] = chunk["kind"]
+    out["chunk_files"] = chunk["files"]
+    out["persist"] = persist
+    if receipt.get("result") != "WORKER_OK":
+        out["retry_chunk"] = True
+        _write_supervised_progress(chunk_receipt_path, out)
+        return out
+    out["retry_chunk"] = False
+    completed = list(loaded_progress.get("completed") or confirmed_paths or []) if loaded_progress else list(confirmed_paths or [])
+    if set(chunk["files"]) & set(completed):
+        raise RebuildRefused("chunk files already in confirmed progress")
+    completed.extend(chunk["files"])
+    _write_supervised_progress(progress_file, {
+        "persist": persist,
+        "completed": completed,
+        "collection": collection,
+    })
+    out["completed_count"] = len(completed)
+    _write_supervised_progress(chunk_receipt_path, out)
+    return out
+
+
+def _write_supervised_progress(progress_path, payload):
+    dest = Path(progress_path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, dest)
+
+
+def supervised_side_ingest(
+    files,
+    *,
+    python_executable,
+    mmrag_py,
+    env,
+    progress_path,
+    log_path,
+    collection="shared-clearworksai",
+    batch_size=ISOLATED_INGEST_BATCH_MAX_FILES,
+    batch_timeout_s=ISOLATED_INGEST_BATCH_TIMEOUT_S,
+):
+    """Ingest explicit files in isolated batches. Never wrap the full corpus in one wall.
+
+    A timed-out batch must not be retried against the same side persist.
+    """
+    if batch_timeout_s >= 6 * 3600:
+        raise RebuildRefused("supervised ingest refuses a 6h-or-longer corpus wall")
+    if batch_size > ISOLATED_INGEST_BATCH_MAX_FILES:
+        raise RebuildRefused(
+            f"batch_size {batch_size} exceeds {ISOLATED_INGEST_BATCH_MAX_FILES}"
+        )
+    persist = str(Path(env.get("MMRAG_SIDE_CHROMADB_DIR", "")).expanduser().resolve()) if env.get("MMRAG_SIDE_CHROMADB_DIR") else ""
+    if not persist:
+        raise RebuildRefused("supervised ingest requires MMRAG_SIDE_CHROMADB_DIR")
+    paths = []
+    for raw in files:
+        path = Path(raw).expanduser().resolve()
+        if path.is_dir():
+            raise RebuildRefused(
+                f"supervised ingest refuses directory roots (would recreate the 6h corpus wall): {path}"
+            )
+        if not path.is_file():
+            raise RebuildRefused(f"ingest path missing: {path}")
+        paths.append(str(path))
+    progress_file = Path(progress_path)
+    completed = []
+    if progress_file.is_file():
+        loaded = json.loads(progress_file.read_text(encoding="utf-8"))
+        if loaded.get("persist") != persist:
+            raise RebuildRefused("progress persist mismatch; refuse resume on different side bytes")
+        completed = list(loaded.get("completed") or [])
+    completed_set = set(completed)
+    pending = [path for path in paths if path not in completed_set]
+    batches = plan_supervised_batches(
+        pending,
+        batch_size=batch_size,
+        batch_timeout_s=batch_timeout_s,
+    )
+    for batch_index, (kind, batch, timeout) in enumerate(batches):
+        if timeout >= 6 * 3600:
+            raise RebuildRefused("supervised ingest refuses a 6h-or-longer corpus wall")
+        receipt = run_isolated_chroma_worker(
+            [str(mmrag_py), "ingest", *batch, "-c", collection, "--json"],
+            python_executable=python_executable,
+            timeout_s=timeout,
+            env=env,
+            require_supported=True,
+            log_path=log_path,
+            log_mode="a",
+        )
+        if receipt.get("result") != "WORKER_OK":
+            receipt = dict(receipt)
+            receipt["retry"] = False
+            receipt["batch_index"] = batch_index
+            receipt["batch_kind"] = kind
+            receipt["completed_count"] = len(completed)
+            receipt["persist"] = persist
+            return receipt
+        completed.extend(batch)
+        _write_supervised_progress(progress_file, {
+            "persist": persist,
+            "completed": completed,
+            "collection": collection,
+        })
+    return {
+        "result": "SUPERVISED_INGEST_OK",
         "retry": False,
-        "stdout": stdout or "",
-        "stderr": stderr or "",
-        "preflight": preflight,
-        "live_health_proven": False,
+        "completed_count": len(completed),
+        "batch_count": len(batches),
+        "batch_timeout_s": batch_timeout_s,
+        "video_batch_timeout_s": ISOLATED_VIDEO_BATCH_TIMEOUT_S,
+        "large_json_batch_timeout_s": ISOLATED_LARGE_JSON_BATCH_TIMEOUT_S,
+        "large_json_min_bytes": LARGE_JSON_MIN_BYTES,
+        "persist": persist,
     }
 
 

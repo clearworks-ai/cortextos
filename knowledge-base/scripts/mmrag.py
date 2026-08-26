@@ -1415,6 +1415,33 @@ def _is_ignored(path: Path) -> bool:
     return False
 
 
+def _is_meeting_frame_image(file_path):
+    """True for derived meeting-frame JPEGs that blew the 6h caption wall."""
+    path = Path(file_path)
+    if path.suffix.lower() not in IMAGE_EXTS:
+        return False
+    parts = {part.lower() for part in path.parts}
+    if "derived" in parts and "frames" in parts:
+        return True
+    name = path.name.lower()
+    if name.startswith(("periodic-", "target-")) and name.endswith(".jpg"):
+        return True
+    if name.startswith("frame-") and name.endswith(".jpg"):
+        return True
+    return False
+
+
+def _meeting_frame_skip_description(file_path):
+    """Deterministic caption substitute so conservation still records the source path."""
+    path = Path(file_path)
+    return (
+        "meeting-frame\n"
+        f"source={_normalize_source_path(path)}\n"
+        f"sha256={_file_content_hash(path)}\n"
+        f"filename={path.name}"
+    )
+
+
 def _normalize_source_path(file_path: Path) -> str:
     """Canonical absolute source path for stored metadata."""
     return str(Path(file_path).resolve())
@@ -2499,15 +2526,23 @@ def ingest_image(client, config, collection, file_path):
         print(f"  SKIP (exists): {file_path}")
         return 0
 
-    print(f"  Generating description for {file_path.name}...")
-    description, media_bytes, mime = describe_media(client, config, file_path, "image")
-
-    # Option B: embed text description + raw image together
-    try:
-        embedding = embed_multimodal(client, config, description, media_bytes, mime)
-    except Exception:
-        # Fallback to text-only embedding if multimodal fails (e.g., file too large)
+    skip_caption = (
+        os.environ.get("MMRAG_SKIP_MEETING_FRAME_CAPTION", "").strip() == "1"
+        and _is_meeting_frame_image(file_path)
+    )
+    if skip_caption:
+        media_bytes = file_path.read_bytes()
+        mime = mimetypes.guess_type(str(file_path))[0] or "image/jpeg"
+        description = _meeting_frame_skip_description(file_path)
+        print(f"  SKIP caption (meeting-frame): {file_path.name}")
         embedding = embed_content(client, config, description)
+    else:
+        print(f"  Generating description for {file_path.name}...")
+        description, media_bytes, mime = describe_media(client, config, file_path, "image")
+        try:
+            embedding = embed_multimodal(client, config, description, media_bytes, mime)
+        except Exception:
+            embedding = embed_content(client, config, description)
 
     collection.upsert(
         ids=[doc_id],
@@ -2518,6 +2553,7 @@ def ingest_image(client, config, collection, file_path):
             "type": "image",
             "mime_type": mime,
             "ingested_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "caption_skipped": bool(skip_caption),
         }],
     )
     return 1

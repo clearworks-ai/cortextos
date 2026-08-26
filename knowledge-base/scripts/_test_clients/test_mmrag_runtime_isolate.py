@@ -31,6 +31,20 @@ def test_timeout_constants_sit_inside_bus_and_hook_deadlines():
     assert mmrag_recovery.BUS_QUERY_TIMEOUT_MS == 30000
     assert mmrag_recovery.ISOLATED_QUERY_TIMEOUT_S * 1000 < mmrag_recovery.HOOK_QUERY_TIMEOUT_MS
     assert mmrag_recovery.ISOLATED_QUERY_TIMEOUT_S * 1000 < mmrag_recovery.BUS_QUERY_TIMEOUT_MS
+    assert mmrag_recovery.ISOLATED_INGEST_BATCH_TIMEOUT_S == 45 * 60
+    assert mmrag_recovery.ISOLATED_INGEST_BATCH_TIMEOUT_S < 6 * 3600
+    assert mmrag_recovery.ISOLATED_INGEST_TIMEOUT_S == mmrag_recovery.ISOLATED_INGEST_BATCH_TIMEOUT_S
+    assert mmrag_recovery.ISOLATED_INGEST_BATCH_MAX_FILES == 80
+    assert mmrag_recovery.ISOLATED_VIDEO_BATCH_TIMEOUT_S == 3 * 3600
+    assert mmrag_recovery.ISOLATED_VIDEO_BATCH_TIMEOUT_S < 6 * 3600
+    assert mmrag_recovery.LARGE_JSON_MIN_BYTES == 5_000_000
+    assert mmrag_recovery.ISOLATED_LARGE_JSON_BATCH_TIMEOUT_S == 3 * 3600
+    assert mmrag_recovery.ISOLATED_LARGE_JSON_BATCH_TIMEOUT_S < 6 * 3600
+    assert mmrag_recovery.ISOLATED_CHUNK_MAX_FILES == 8
+    assert mmrag_recovery.ISOLATED_CHUNK_TIMEOUT_S == 15 * 60
+    assert mmrag_recovery.ISOLATED_CHUNK_TIMEOUT_S < 6 * 3600
+    assert mmrag_recovery.RECOVERY_SIDE_V3_DIRNAME in mmrag_recovery.STALE_RECOVERY_SIDE_DIRNAMES
+    assert mmrag_recovery.RECOVERY_SIDE_V4_DIRNAME not in mmrag_recovery.STALE_RECOVERY_SIDE_DIRNAMES
 
 
 def test_unsupported_tuple_fails_closed_and_is_not_live_health_proof(monkeypatch):

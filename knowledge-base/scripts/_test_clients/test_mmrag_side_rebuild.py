@@ -109,6 +109,51 @@ def test_side_scaffold_refuses_populated_side_persist(tmp_path):
         mmrag_recovery.prepare_side_rebuild_scaffold(kb)
 
 
+def test_side_scaffold_named_v2_is_not_stale_recovery_side(tmp_path):
+    kb, live = _seed_kb(tmp_path)
+    stale = kb / "recovery-side" / "chromadb"
+    stale.mkdir(parents=True)
+    (stale / "chroma.sqlite3").write_bytes(b"timed-out-side")
+    receipt = mmrag_recovery.prepare_side_rebuild_scaffold(
+        kb,
+        work_dirname="recovery-side-2",
+        refuse_work_dirnames=("recovery-side",),
+    )
+    persist = Path(receipt["persist_dir"])
+    assert persist.parent.name == "recovery-side-2"
+    assert persist != stale.resolve()
+    assert (stale / "chroma.sqlite3").read_bytes() == b"timed-out-side"
+    assert not any(persist.rglob("*"))
+
+
+def test_side_scaffold_refuses_named_stale_work_dir(tmp_path):
+    kb, _live = _seed_kb(tmp_path)
+    with pytest.raises(mmrag_recovery.RebuildRefused):
+        mmrag_recovery.prepare_side_rebuild_scaffold(
+            kb,
+            work_dirname="recovery-side",
+            refuse_work_dirnames=("recovery-side",),
+        )
+
+
+def test_side_scaffold_refuses_v3_and_allows_v4_on_fixture(tmp_path):
+    kb, _live = _seed_kb(tmp_path)
+    with pytest.raises(mmrag_recovery.RebuildRefused):
+        mmrag_recovery.prepare_side_rebuild_scaffold(
+            kb,
+            work_dirname=mmrag_recovery.RECOVERY_SIDE_V3_DIRNAME,
+            refuse_work_dirnames=mmrag_recovery.STALE_RECOVERY_SIDE_DIRNAMES,
+        )
+    receipt = mmrag_recovery.prepare_side_rebuild_scaffold(
+        kb,
+        work_dirname=mmrag_recovery.RECOVERY_SIDE_V4_DIRNAME,
+        refuse_work_dirnames=mmrag_recovery.STALE_RECOVERY_SIDE_DIRNAMES,
+    )
+    persist = Path(receipt["persist_dir"])
+    assert persist.parent.name == "recovery-side-4"
+    assert not any(persist.rglob("*"))
+
+
 def test_recovery_driver_never_calls_rebuild_or_chroma_client():
     source = Path(mmrag_recovery.__file__).read_text(encoding="utf-8")
     _, body = source.split("def prepare_side_rebuild_scaffold", 1)

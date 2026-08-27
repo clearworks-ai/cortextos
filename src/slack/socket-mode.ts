@@ -21,14 +21,12 @@
  *      "refresh_requested" | ...) before closing — the client should open a
  *      NEW connection proactively rather than wait for the close to avoid a
  *      gap in delivery.
- *   5. Ping/pong is handled at the WebSocket protocol level by the runtime;
- *      no JSON-level heartbeat handling is needed. A silence watchdog still
- *      guards against a connection that's technically open but stopped
- *      delivering traffic (network black-hole).
+ *   5. Ping/pong and dead-transport detection are handled at the WebSocket
+ *      protocol level by the runtime. Inactivity alone is not a failure;
+ *      actual close/error signals drive recovery.
  */
 
 const CONNECTIONS_OPEN_URL = 'https://slack.com/api/apps.connections.open';
-const SILENCE_TIMEOUT_MS = 45_000; // reconnect if nothing received in this window
 const RECONNECT_BASE_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 30_000;
 
@@ -105,7 +103,7 @@ export class SlackSocketModeClient {
   private ws: WebSocket | null = null;
   private running = false;
   private reconnectAttempt = 0;
-  private silenceTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private log: (msg: string) => void;
 
   /**
@@ -140,21 +138,25 @@ export class SlackSocketModeClient {
   stop(): void {
     this.running = false;
     this.epoch++; // retire whatever socket is currently open
-    this.clearSilenceTimer();
+    this.clearReconnectTimer();
     this.ws?.close();
     this.ws = null;
   }
 
   private async connect(): Promise<void> {
     if (!this.running) return;
+    this.clearReconnectTimer();
     const myEpoch = ++this.epoch; // retires any previously-open socket immediately
+    const supersededSocket = this.ws;
+    this.ws = null;
+    supersededSocket?.close();
 
     let url: string;
     try {
       url = await openConnectionUrl(this.appToken);
     } catch (err) {
       this.log(`connections.open failed: ${(err as Error).message}`);
-      this.scheduleReconnect();
+      if (myEpoch === this.epoch && this.running) this.scheduleReconnect();
       return;
     }
 
@@ -176,35 +178,39 @@ export class SlackSocketModeClient {
       socket = new WebSocket(url);
     } catch (err) {
       this.log(`WebSocket construction failed: ${(err as Error).message} — is this runtime on Node >=22?`);
-      this.scheduleReconnect();
+      if (myEpoch === this.epoch && this.running) this.scheduleReconnect();
+      return;
+    }
+
+    if (myEpoch !== this.epoch || !this.running) {
+      socket.close();
       return;
     }
 
     socket.addEventListener('open', () => {
-      if (myEpoch !== this.epoch) return;
+      if (myEpoch !== this.epoch || this.ws !== socket) return;
       this.reconnectAttempt = 0;
-      this.armSilenceTimer();
       this.log('connected');
     });
 
     socket.addEventListener('message', (ev: MessageEvent) => {
-      if (myEpoch !== this.epoch) return; // stale socket — see epoch docblock
-      this.armSilenceTimer();
+      if (myEpoch !== this.epoch || this.ws !== socket) return;
       this.handleFrame(socket, String(ev.data));
     });
 
     socket.addEventListener('close', () => {
-      if (myEpoch !== this.epoch) return; // already superseded — do not reconnect on its behalf
-      this.clearSilenceTimer();
+      if (myEpoch !== this.epoch || this.ws !== socket) return;
+      this.epoch++;
       this.ws = null;
       if (this.running) this.scheduleReconnect();
     });
 
     socket.addEventListener('error', () => {
-      // 'close' fires after 'error' for a failed connection — reconnect is
-      // scheduled there (guarded by the same epoch check). This handler
-      // exists only so an unhandled 'error' event doesn't crash the process
-      // (native WebSocket emits Event, not an exception).
+      if (myEpoch !== this.epoch || this.ws !== socket) return;
+      this.epoch++;
+      this.ws = null;
+      socket.close();
+      if (this.running) this.scheduleReconnect();
     });
 
     this.ws = socket;
@@ -281,28 +287,23 @@ export class SlackSocketModeClient {
     }
   }
 
-  private armSilenceTimer(): void {
-    this.clearSilenceTimer();
-    this.silenceTimer = setTimeout(() => {
-      this.log(`no traffic for ${SILENCE_TIMEOUT_MS}ms — forcing reconnect`);
-      this.ws?.close();
-    }, SILENCE_TIMEOUT_MS);
-  }
-
-  private clearSilenceTimer(): void {
-    if (this.silenceTimer) {
-      clearTimeout(this.silenceTimer);
-      this.silenceTimer = null;
-    }
-  }
-
   private scheduleReconnect(): void {
-    if (!this.running) return;
+    if (!this.running || this.reconnectTimer) return;
     const delay = Math.min(
       RECONNECT_BASE_DELAY_MS * 2 ** this.reconnectAttempt,
       RECONNECT_MAX_DELAY_MS,
     );
     this.reconnectAttempt++;
-    setTimeout(() => void this.connect(), delay);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.connect();
+    }, delay);
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
   }
 }

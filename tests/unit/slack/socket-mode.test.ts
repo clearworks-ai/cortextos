@@ -9,14 +9,18 @@ import { SlackSocketModeClient, openConnectionUrl } from '../../../src/slack/soc
  */
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
+  static lifecycle: string[] = [];
+  readonly id: number;
   url: string;
   sent: string[] = [];
   closed = false;
   private listeners: Record<string, Array<(ev: unknown) => void>> = {};
 
   constructor(url: string) {
+    this.id = FakeWebSocket.instances.length;
     this.url = url;
     FakeWebSocket.instances.push(this);
+    FakeWebSocket.lifecycle.push(`construct:${this.id}`);
   }
 
   addEventListener(type: string, handler: (ev: unknown) => void): void {
@@ -30,6 +34,7 @@ class FakeWebSocket {
 
   close(): void {
     this.closed = true;
+    FakeWebSocket.lifecycle.push(`close:${this.id}`);
     this.emit('close', {});
   }
 
@@ -44,6 +49,7 @@ class FakeWebSocket {
 
 function resetFakes(): void {
   FakeWebSocket.instances = [];
+  FakeWebSocket.lifecycle = [];
 }
 
 /** Flush the pending microtask chain (a real macrotask tick flushes all queued microtasks first). */
@@ -205,6 +211,220 @@ describe('SlackSocketModeClient', () => {
       await flushAsync();
 
       expect(FakeWebSocket.instances).toHaveLength(2);
+    });
+
+    it('RED: closes the superseded socket when a disconnect opens its replacement', async () => {
+      const client = new SlackSocketModeClient('xapp-1', { log: () => {} });
+      await client.start();
+
+      const oldSocket = FakeWebSocket.instances[0];
+      oldSocket.emitMessage({ type: 'disconnect', reason: 'too_many_websockets' });
+      await flushAsync();
+
+      expect(FakeWebSocket.instances).toHaveLength(2);
+      expect(oldSocket.closed).toBe(true);
+    });
+
+    it('strict zero-overlap: closes the superseded socket before constructing its replacement', async () => {
+      const client = new SlackSocketModeClient('xapp-1', { log: () => {} });
+      await client.start();
+      FakeWebSocket.lifecycle = [];
+
+      FakeWebSocket.instances[0].emitMessage({ type: 'disconnect', reason: 'too_many_websockets' });
+      await flushAsync();
+
+      expect(FakeWebSocket.lifecycle).toEqual(['close:0', 'construct:1']);
+    });
+
+    it('coalesces repeated error and close signals into one reconnect attempt', async () => {
+      vi.useFakeTimers();
+      const client = new SlackSocketModeClient('xapp-1', { log: () => {} });
+
+      try {
+        await client.start();
+        const oldSocket = FakeWebSocket.instances[0];
+
+        oldSocket.emit('error', {});
+        oldSocket.emit('error', {});
+        oldSocket.emit('close', {});
+        oldSocket.emit('close', {});
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        expect(global.fetch).toHaveBeenCalledTimes(2);
+        expect(FakeWebSocket.instances).toHaveLength(2);
+      } finally {
+        client.stop();
+        vi.useRealTimers();
+      }
+    });
+
+    it('retires an errored socket and reconnects once even without a close event', async () => {
+      vi.useFakeTimers();
+      const client = new SlackSocketModeClient('xapp-1', { log: () => {} });
+
+      try {
+        await client.start();
+        const erroredSocket = FakeWebSocket.instances[0];
+
+        erroredSocket.emit('error', {});
+        erroredSocket.emit('error', {});
+        await vi.advanceTimersByTimeAsync(1_000);
+
+        expect(erroredSocket.closed).toBe(true);
+        expect(global.fetch).toHaveBeenCalledTimes(2);
+        expect(FakeWebSocket.instances).toHaveLength(2);
+      } finally {
+        client.stop();
+        vi.useRealTimers();
+      }
+    });
+
+    /**
+     * Live acceptance evidence: after exact 89592606 apply and the one
+     * authorized restart, daemon PID 90384 completed at least two cycles of
+     * "no traffic for 45000ms — forcing reconnect" followed by "connected".
+     * The restart budget is consumed; this regression is transport-local.
+     */
+    it('post-restart regression: idle alone stays connected while transport close still recovers', async () => {
+      vi.useFakeTimers();
+      const client = new SlackSocketModeClient('xapp-1', { log: () => {} });
+
+      try {
+        await client.start();
+        const socket = FakeWebSocket.instances[0];
+        socket.emit('open', {});
+
+        await vi.advanceTimersByTimeAsync(45_000);
+        expect({
+          closed: socket.closed,
+          connectionOpenCalls: (global.fetch as ReturnType<typeof vi.fn>).mock.calls.length,
+          socketCount: FakeWebSocket.instances.length,
+        }).toEqual({ closed: false, connectionOpenCalls: 1, socketCount: 1 });
+
+        socket.close();
+        await vi.advanceTimersByTimeAsync(1_000);
+
+        expect(global.fetch).toHaveBeenCalledTimes(2);
+        expect(FakeWebSocket.instances).toHaveLength(2);
+      } finally {
+        client.stop();
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not let a stale connections.open failure replace a newer current socket', async () => {
+      vi.useFakeTimers();
+      let rejectStaleOpen!: (reason: Error) => void;
+      const staleOpen = new Promise<never>((_resolve, reject) => {
+        rejectStaleOpen = reject;
+      });
+      const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+      fetchMock
+        .mockReset()
+        .mockReturnValueOnce(staleOpen)
+        .mockResolvedValue({
+          json: async () => ({ ok: true, url: 'wss://example.com/current' }),
+        });
+      const client = new SlackSocketModeClient('xapp-1', { log: () => {} });
+
+      try {
+        const staleStart = client.start();
+        client.stop();
+        await client.start();
+        const currentSocket = FakeWebSocket.instances[0];
+
+        rejectStaleOpen(new Error('stale HTTP failure'));
+        await staleStart;
+        await vi.advanceTimersByTimeAsync(1_000);
+
+        expect(currentSocket.closed).toBe(false);
+        expect(global.fetch).toHaveBeenCalledTimes(2);
+        expect(FakeWebSocket.instances).toHaveLength(1);
+      } finally {
+        client.stop();
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps repeated disconnect, error, and close signals single-flight with one delivery', async () => {
+      let resolveReplacement!: (response: { json: () => Promise<{ ok: boolean; url: string }> }) => void;
+      const replacementOpen = new Promise<{ json: () => Promise<{ ok: boolean; url: string }> }>((resolve) => {
+        resolveReplacement = resolve;
+      });
+      const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+      fetchMock
+        .mockReset()
+        .mockResolvedValueOnce({
+          json: async () => ({ ok: true, url: 'wss://example.com/initial' }),
+        })
+        .mockReturnValueOnce(replacementOpen);
+      const client = new SlackSocketModeClient('xapp-1', { log: () => {} });
+      const received: unknown[] = [];
+      client.onMessage((event) => received.push(event));
+      await client.start();
+
+      const oldSocket = FakeWebSocket.instances[0];
+      oldSocket.emitMessage({ type: 'disconnect', reason: 'too_many_websockets' });
+      oldSocket.emit('error', {});
+      oldSocket.emit('close', {});
+      oldSocket.emitMessage({ type: 'disconnect', reason: 'too_many_websockets' });
+      resolveReplacement({
+        json: async () => ({ ok: true, url: 'wss://example.com/replacement' }),
+      });
+      await flushAsync();
+
+      const currentSocket = FakeWebSocket.instances[1];
+      const envelope = {
+        envelope_id: 'one-delivery',
+        type: 'events_api',
+        payload: {
+          team_id: 'T1',
+          event: { type: 'message', channel: 'C1', user: 'U1', text: 'once', ts: '1.1' },
+        },
+      };
+      oldSocket.emitMessage(envelope);
+      currentSocket.emitMessage(envelope);
+
+      expect({
+        connectionOpenCalls: fetchMock.mock.calls.length,
+        socketCount: FakeWebSocket.instances.length,
+        oldClosed: oldSocket.closed,
+        deliveries: received.length,
+        oldAcks: oldSocket.sent.length,
+        currentAcks: currentSocket.sent.length,
+      }).toEqual({
+        connectionOpenCalls: 2,
+        socketCount: 2,
+        oldClosed: true,
+        deliveries: 1,
+        oldAcks: 0,
+        currentAcks: 1,
+      });
+      client.stop();
+    });
+
+    it('caps reconnect backoff at 30 seconds and cancels the pending timer on stop', async () => {
+      vi.useFakeTimers();
+      const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+      fetchMock.mockRejectedValue(new Error('connections.open unavailable'));
+      const client = new SlackSocketModeClient('xapp-1', { log: () => {} });
+
+      try {
+        await client.start();
+        await vi.advanceTimersByTimeAsync(31_000);
+        expect(fetchMock).toHaveBeenCalledTimes(6);
+
+        await vi.advanceTimersByTimeAsync(29_999);
+        expect(fetchMock).toHaveBeenCalledTimes(6);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(fetchMock).toHaveBeenCalledTimes(7);
+
+        client.stop();
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        client.stop();
+        vi.useRealTimers();
+      }
     });
 
     it('a frame arriving on the OLD socket after a new connection is active is dropped, not processed', async () => {

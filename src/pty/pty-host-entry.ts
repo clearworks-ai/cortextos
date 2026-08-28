@@ -53,7 +53,11 @@ let disposing = false;
  * (5000ms in pty-host-client.ts) so the host self-exits cleanly before the
  * daemon escalates to SIGKILL of the host.
  */
-const DISPOSE_SELF_EXIT_MS = 4000;
+const DISPOSE_SELF_EXIT_MS = (() => {
+  const raw = process.env.CTX_PTY_DISPOSE_SELF_EXIT_MS;
+  const n = raw ? parseInt(raw, 10) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : 4000;
+})();
 
 function armDisposeFallback(): void {
   const t = setTimeout(() => {
@@ -64,6 +68,22 @@ function armDisposeFallback(): void {
     process.exit(0);
   }, DISPOSE_SELF_EXIT_MS);
   t.unref();
+}
+
+function beginDispose(signal?: string): void {
+  if (disposing) return;
+  disposing = true;
+  if (pty && !exited) {
+    try { pty.kill(signal); } catch { /* ignore */ }
+    // Do not exit the host until the PTY child confirms exit. If it ignores
+    // the graceful signal, the fallback SIGKILLs it before the host exits.
+    // This ordering is load-bearing after daemon death: exiting immediately
+    // can orphan a Codex app-server that still owns its persisted thread.
+    armDisposeFallback();
+  } else if (!exited) {
+    exited = true;
+    setTimeout(() => process.exit(0), 20).unref();
+  }
 }
 
 /**
@@ -147,18 +167,7 @@ function handleMessage(raw: unknown): void {
       // normal onExit path (pty-exit + process.exit) — with a self-exit
       // fallback so this host can never linger, and never exits leaving the
       // grandchild alive un-SIGKILLed.
-      if (disposing) break;
-      disposing = true;
-      if (pty && !exited) {
-        try { pty.kill(msg.signal); } catch { /* ignore */ }
-        armDisposeFallback();
-      } else if (!exited) {
-        // Never spawned (or already torn down) — nothing to signal, just exit.
-        exited = true;
-        setTimeout(() => process.exit(0), 20).unref();
-      }
-      // If exited is already true, pty-exit was sent and process.exit(0) is
-      // already scheduled — nothing to do.
+      beginDispose(msg.signal);
       break;
     }
 
@@ -170,22 +179,17 @@ function handleMessage(raw: unknown): void {
 
 process.on('message', handleMessage);
 
-// If the parent dies, exit cleanly so the fd is reclaimed
+// If the parent dies, use the same graceful-then-escalate ordering as an
+// explicit dispose. Exiting this host immediately after pty.kill() can orphan
+// a signal-ignoring child, including a Codex app-server that still owns a
+// persisted conversation thread during daemon recovery.
 process.on('disconnect', () => {
-  if (pty && !exited) {
-    try { pty.kill(); } catch { /* ignore */ }
-    try { pty.destroy?.(); } catch { /* ignore */ }
-  }
-  process.exit(0);
+  beginDispose();
 });
 
 // RW-4 fix: SIGTERM must take the pty child down WITH the host. Without this
 // handler a daemon-side (or external) SIGTERM killed only the host and the
 // node-pty grandchild reparented to launchd — the confirmed multi-day orphans.
 process.on('SIGTERM', () => {
-  if (pty && !exited) {
-    try { pty.kill(); } catch { /* ignore */ }
-    try { pty.destroy?.(); } catch { /* fd already closed */ }
-  }
-  process.exit(0);
+  beginDispose('SIGTERM');
 });

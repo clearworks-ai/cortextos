@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "proposal_type": "internal_skill_and_bootstrap_improvement",
+  "status": "staged_for_review",
+  "installed": false,
+  "runtime_mutated": false,
+  "source_task": "task_1787795145060_35195417",
+  "governing_evidence_sha256": "47cb397c313ca2b8c05f433fe25e7ec049c2b3d876f428891c5c69a4e0eec356",
+  "files": [
+    "SKILL.md",
+    "proposal.md",
+    "manifest.json"
+  ]
+}

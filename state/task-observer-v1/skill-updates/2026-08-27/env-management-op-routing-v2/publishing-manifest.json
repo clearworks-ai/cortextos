@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "proposal_version": "env-management-op-routing-v2",
+  "status": "staged_for_review",
+  "canonical_source_after_approval": "/Users/joshweiss/code/cortextos/templates/agent-codex/plugins/cortextos-agent-skills/skills/env-management",
+  "canonical_source_baseline_skill_sha256": "abe0ffd653c19f6ebe4518d55fcc458b114de34dd746c8f504ff3113b0752f62",
+  "target_count": 11,
+  "explicit_exclusions": ["maven", "muse", "auditos", "auditos2", "opencode", "codexer", "retired and shadow aliases"],
+  "targets": [
+    {"agent":"auditmaster-codex","org":"clearworksai","baseline_skill_sha256":"abe0ffd653c19f6ebe4518d55fcc458b114de34dd746c8f504ff3113b0752f62"},
+    {"agent":"builddifferentprod-codex","org":"clearworksai","baseline_skill_sha256":"fffff654fe9ff850055730dfdb81ef7ff9d7d14424c03981f37e7921b138b6c1"},
+    {"agent":"crm-codex","org":"clearworksai","baseline_skill_sha256":"abe0ffd653c19f6ebe4518d55fcc458b114de34dd746c8f504ff3113b0752f62"},
+    {"agent":"frank2-codex","org":"clearworksai","baseline_skill_sha256":"abe0ffd653c19f6ebe4518d55fcc458b114de34dd746c8f504ff3113b0752f62"},
+    {"agent":"knox-codex","org":"clearworksai","baseline_skill_sha256":"abe0ffd653c19f6ebe4518d55fcc458b114de34dd746c8f504ff3113b0752f62"},
+    {"agent":"larry-codex","org":"clearworksai","baseline_skill_sha256":"abe0ffd653c19f6ebe4518d55fcc458b114de34dd746c8f504ff3113b0752f62"},
+    {"agent":"maven-codex","org":"clearworksai","baseline_skill_sha256":"abe0ffd653c19f6ebe4518d55fcc458b114de34dd746c8f504ff3113b0752f62"},
+    {"agent":"pa-codex","org":"clearworksai","baseline_skill_sha256":"abe0ffd653c19f6ebe4518d55fcc458b114de34dd746c8f504ff3113b0752f62"},
+    {"agent":"sage-codex","org":"clearworksai","baseline_skill_sha256":"abe0ffd653c19f6ebe4518d55fcc458b114de34dd746c8f504ff3113b0752f62"},
+    {"agent":"scout-codex","org":"clearworksai","baseline_skill_sha256":"abe0ffd653c19f6ebe4518d55fcc458b114de34dd746c8f504ff3113b0752f62"},
+    {"agent":"ophir-codex","org":"personal","baseline_skill_sha256":"abe0ffd653c19f6ebe4518d55fcc458b114de34dd746c8f504ff3113b0752f62"}
+  ],
+  "apply_authorized": false,
+  "installed": false,
+  "runtime_or_config_mutated": false
+}

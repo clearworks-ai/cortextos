@@ -123,6 +123,43 @@ def test_short_transcript_exits_2_unless_allow_short(
     assert (env_dir / "source.json").is_file()
 
 
+def test_iso_from_fireflies_date_variants() -> None:
+    from datetime import datetime, timezone
+
+    from fetch_fireflies import _iso_from_fireflies_date
+
+    ms = 1788548400000
+    expected = datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat(timespec="seconds")
+    assert _iso_from_fireflies_date(ms) == expected
+    assert _iso_from_fireflies_date(str(ms)) == expected
+    assert _iso_from_fireflies_date("2026-09-04T17:00:00.000Z") == "2026-09-04T17:00:00.000Z"
+    assert _iso_from_fireflies_date(None) is None
+
+
+def test_envelope_converts_epoch_ms_date() -> None:
+    from datetime import datetime, timezone
+
+    from fetch_fireflies import envelope_from_transcript
+
+    ms = 1788548400000
+    tr = _transcript(date=ms)
+    env = envelope_from_transcript(tr)
+    expected = datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat(timespec="seconds")
+    assert env["occurred_at"] == expected
+
+
+def test_spoke_matching_is_case_insensitive() -> None:
+    from fetch_fireflies import envelope_from_transcript
+
+    tr = _transcript(
+        meeting_attendees=[{"displayName": "Joseph Chang", "email": "joseph@example.com"}],
+        sentences=[{"index": 0, "speaker_name": "joseph chang", "text": "hi", "start_time": 0.0}],
+    )
+    env = envelope_from_transcript(tr)
+    part = next(p for p in env["participants"] if p["email"] == "joseph@example.com")
+    assert part["spoke"] is True
+
+
 def test_writes_canonical_envelope_and_skips_existing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

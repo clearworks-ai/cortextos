@@ -54,6 +54,18 @@ def _load_api_key(repo_root: Path) -> str:
     return (parse_env_file(path).get("FIREFLIES_API_KEY") or "").strip()
 
 
+def _iso_from_fireflies_date(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip().isdigit():
+        return value
+    try:
+        ms = int(value)
+    except (TypeError, ValueError):
+        return value if isinstance(value, str) else None
+    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat(timespec="seconds")
+
+
 def _is_notetaker(name: str, email: str) -> bool:
     if name.strip().lower() in NOTETAKER_NAMES:
         return True
@@ -80,6 +92,7 @@ def envelope_from_transcript(tr: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(sentences, list):
         sentences = []
     speakers_spoken = {str(s.get("speaker_name") or "").strip() for s in sentences if isinstance(s, dict)}
+    speakers_spoken_cf = {sp.casefold() for sp in speakers_spoken}
     participants: list[dict[str, Any]] = []
     seen_keys: set[str] = set()
     for att in attendees:
@@ -98,7 +111,7 @@ def envelope_from_transcript(tr: dict[str, Any]) -> dict[str, Any]:
                 "email": email or None,
                 "handle": None,
                 "side": _side(name, email, note),
-                "spoke": name in speakers_spoken,
+                "spoke": name.strip().casefold() in speakers_spoken_cf,
                 "notetaker": note,
             }
         )
@@ -147,7 +160,7 @@ def envelope_from_transcript(tr: dict[str, Any]) -> dict[str, Any]:
         "schema": "brain.source/1",
         "source": {"kind": "fireflies", "id": str(tr.get("id") or "")},
         "title": tr.get("title"),
-        "occurred_at": tr.get("date"),
+        "occurred_at": _iso_from_fireflies_date(tr.get("date")),
         "duration_s": tr.get("duration"),
         "participants": participants,
         "text_units": text_units,

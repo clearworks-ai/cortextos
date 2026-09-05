@@ -91,6 +91,61 @@ keep-me-byte-for-byte
     assert "Scoped tactical reports" in new or "Tacticals sync" in new
 
 
+def test_render_page_open_items_bare_heading_gets_header() -> None:
+    from writeback_render import render_page
+
+    old = """# Client: Alloi — Tactical Reports
+
+## History (dated, newest first)
+
+- old entry
+
+## Open Items
+"""
+    meeting = _payload()["meetings"][0]
+    meeting["open_items"] = [
+        {
+            "item": "Ship dry-run",
+            "owner": "Josh",
+            "deadline": "2026-09-08",
+            "source": "commitment:abc",
+            "status": "open",
+        },
+        {
+            "item": "Review deck",
+            "owner": "Josh",
+            "deadline": "2026-09-09",
+            "source": "commitment:def",
+            "status": "open",
+        },
+    ]
+    new = render_page(old, meeting)
+    lines = new.splitlines()
+    idx = lines.index("## Open Items")
+    assert lines[idx + 1] == ""
+    assert lines[idx + 2] == "| Item | Owner | Deadline | Source | Status |"
+    assert lines[idx + 3] == "|---|---|---|---|---|"
+    assert lines[idx + 4] == "| Ship dry-run | Josh | 2026-09-08 | commitment:abc | open |"
+    assert lines[idx + 5] == "| Review deck | Josh | 2026-09-09 | commitment:def | open |"
+
+
+def test_render_page_open_items_existing_header_not_duplicated() -> None:
+    from writeback_render import render_page
+
+    old = """# Client: Alloi — Tactical Reports
+
+## History (dated, newest first)
+
+- old entry
+
+## Open Items
+| Item | Owner | Deadline | Source | Status |
+|---|---|---|---|---|
+"""
+    new = render_page(old, _payload()["meetings"][0])
+    assert new.count("| Item | Owner | Deadline | Source | Status |") == 1
+
+
 def test_dry_run_prints_all_diffs_and_reason_writes_nothing(tmp_path: Path) -> None:
     org = tmp_path / "org"
     home = org / "raw/areas/clearworks/org-brain/projects/alloi-03.md"

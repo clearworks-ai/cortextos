@@ -119,6 +119,49 @@ def test_owner_identity_regex_exits_12() -> None:
     assert exc.value.code == 12
 
 
+def test_occurred_at_epoch_ms_string_converted(tmp_path) -> None:
+    from adapt_meeting import main
+    from fetch_fireflies import _iso_from_fireflies_date
+
+    src = tmp_path / "env"
+    src.mkdir()
+    _payloads(src)
+    source = json.loads((src / "source.json").read_text(encoding="utf-8"))
+    ms = 1788548400000
+    source["occurred_at"] = str(ms)
+    (src / "source.json").write_text(json.dumps(source), encoding="utf-8")
+    assert main(["--source", str(src)]) == 0
+    wb = json.loads((src / "writeback-payload.json").read_text(encoding="utf-8"))
+    expected = _iso_from_fireflies_date(str(ms))
+    assert wb["meetings"][0]["date"] == expected
+    assert wb["meetings"][0]["date"].startswith("2026-09-0")
+
+
+def test_event_meeting_type_from_validated(tmp_path) -> None:
+    from adapt_meeting import main
+
+    src = tmp_path / "env"
+    src.mkdir()
+    _payloads(src)
+    validated = json.loads((src / "validated.json").read_text(encoding="utf-8"))
+    validated["meeting_type"] = "sales"
+    (src / "validated.json").write_text(json.dumps(validated), encoding="utf-8")
+    assert main(["--source", str(src)]) == 0
+    event = json.loads((src / "event.json").read_text(encoding="utf-8"))
+    assert event["meeting_type"] == "sales"
+
+
+def test_deal_state_copied_to_writeback(tmp_path) -> None:
+    from adapt_meeting import main
+
+    src = tmp_path / "env"
+    src.mkdir()
+    _payloads(src)
+    assert main(["--source", str(src)]) == 0
+    wb = json.loads((src / "writeback-payload.json").read_text(encoding="utf-8"))
+    assert wb["meetings"][0]["deal_state"] == "won"
+
+
 def test_deadline_floor_null(tmp_path) -> None:
     from adapt_meeting import main
 

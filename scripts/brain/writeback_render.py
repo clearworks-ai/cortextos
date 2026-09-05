@@ -9,6 +9,8 @@ from typing import Any
 
 ORG_BRAIN = Path("raw/areas/clearworks/org-brain")
 
+OPEN_ITEMS_HEADER = "| Item | Owner | Deadline | Source | Status |\n|---|---|---|---|---|\n"
+
 
 def _slug(text: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
@@ -121,9 +123,14 @@ def render_page(old_text: str, meeting: dict[str, Any]) -> str:
         elif heading == "Open Items":
             found_open = True
             extra = ""
-            if rows:
-                extra = "\n".join(rows) + "\n"
             body2 = body if body.endswith("\n") else body + "\n"
+            if rows:
+                has_header = any(
+                    ln.strip().startswith("| Item |") for ln in body.splitlines()
+                )
+                if not has_header:
+                    body2 = body.rstrip("\n") + "\n\n" + OPEN_ITEMS_HEADER
+                extra = "\n".join(rows) + "\n"
             out_sections.append(body2 + extra)
         else:
             out_sections.append(body if body.endswith("\n") or body == "" else body + "\n")
@@ -131,7 +138,7 @@ def render_page(old_text: str, meeting: dict[str, Any]) -> str:
     if not found_hist:
         suffix += "## History (dated, newest first)\n\n" + "\n".join(hist) + "\n"
     if not found_open and rows:
-        suffix += "\n## Open Items\n\n| Item | Owner | Deadline | Source | Status |\n|---|---|---|---|---|\n"
+        suffix += "\n## Open Items\n\n" + OPEN_ITEMS_HEADER
         suffix += "\n".join(rows) + "\n"
     pre = preamble if preamble.endswith("\n") or preamble == "" else preamble + "\n"
     return pre + "".join(out_sections) + suffix

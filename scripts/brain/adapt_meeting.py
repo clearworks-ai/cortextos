@@ -13,6 +13,22 @@ from typing import Any
 
 from atomic import atomic_write
 
+try:
+    from fetch_fireflies import _iso_from_fireflies_date
+except Exception:  # pragma: no cover - defensive fallback if fetch_fireflies import fails
+
+    def _iso_from_fireflies_date(value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip().isdigit():
+            return value
+        try:
+            ms = int(value)
+        except (TypeError, ValueError):
+            return value if isinstance(value, str) else None
+        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat(timespec="seconds")
+
+
 OWNER_RE = re.compile(r"^[a-z0-9_-]+$")
 JOSH_NAMES = {"josh", "josh weiss", "josh@clearworks.ai"}
 
@@ -94,6 +110,8 @@ def adapt(source: dict[str, Any], validated: dict[str, Any], resolution: dict[st
     source_id = str(src.get("id") or "")
     title = str(source.get("title") or "")
     date = str(source.get("occurred_at") or "")
+    if date.isdigit() and len(date) in (10, 13):
+        date = _iso_from_fireflies_date(date) or date
     parts = source.get("participants") or []
     counts: dict[str, int] = {}
     commitments_out = []
@@ -165,6 +183,7 @@ def adapt(source: dict[str, Any], validated: dict[str, Any], resolution: dict[st
         "decisions": [d.get("text") for d in (validated.get("decisions") or []) if isinstance(d, dict)],
         "next_steps": recap_steps,
         "meeting_type": validated.get("meeting_type") or "delivery",
+        "deal_state": validated.get("deal_state") or resolution.get("deal_state") or None,
         "commitment_ids": [c["commitmentId"] for c in commitments_out],
         "resolution": {
             "home_path": resolution.get("home_path"),
@@ -185,7 +204,7 @@ def adapt(source: dict[str, Any], validated: dict[str, Any], resolution: dict[st
     event = {
         "meeting_id": source_id,
         "client": str((validated.get("classification") or {}).get("org_name") or ""),
-        "meeting_type": "delivery",
+        "meeting_type": validated.get("meeting_type") or "delivery",
         "attendees": event_emails,
         "commitmentIds": [c["commitmentId"] for c in commitments_out],
         "writeback_ok": False,

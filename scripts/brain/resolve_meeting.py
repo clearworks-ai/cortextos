@@ -215,7 +215,12 @@ def _external_participants(source: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-def resolve(source: dict[str, Any], closed: dict[str, Any], repo_root: Path) -> dict[str, Any]:
+def resolve(
+    source: dict[str, Any],
+    closed: dict[str, Any],
+    repo_root: Path,
+    classification: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     if not (source.get("participants") or []) and not (source.get("text_units") or []):
         raise SystemExit(5)
     title = str(source.get("title") or "")
@@ -245,6 +250,9 @@ def resolve(source: dict[str, Any], closed: dict[str, Any], repo_root: Path) -> 
 
     externals = _external_participants(source)
     client_cands: set[str] = set()
+    org_cands: set[str] = set()
+    unknown_labels: dict[str, tuple[str, str]] = {}
+    unknown_counts: dict[str, int] = {}
     for p in externals:
         email = str(p.get("email") or "")
         if "@" not in email:
@@ -253,12 +261,49 @@ def resolve(source: dict[str, Any], closed: dict[str, Any], repo_root: Path) -> 
         if domain in FREE_MAIL:
             continue
         lab = registrable_label(domain)
-        if lab in domain_to_slug:
-            client_cands.add(domain_to_slug[lab])
-        if domain in domain_to_slug:
-            client_cands.add(domain_to_slug[domain])
+        tld = domain.rsplit(".", 1)[-1]
+        mapped = domain_to_slug.get(lab) or domain_to_slug.get(domain) or ""
+        if mapped in clients:
+            client_cands.add(mapped)
+        if mapped in closed["orgs"]:
+            org_cands.add(mapped)
         if lab in clients:
             client_cands.add(lab)
+        if lab in closed["orgs"]:
+            org_cands.add(lab)
+        if lab not in clients and lab not in closed["orgs"] and mapped not in clients and mapped not in closed["orgs"]:
+            unknown_labels[lab] = (tld, domain)
+            unknown_counts[lab] = unknown_counts.get(lab, 0) + 1
+
+    def _also(picked: str) -> list[str]:
+        return sorted(c for c in (client_cands | org_cands) if c != picked)
+
+    def _pick(cands: set[str]) -> str:
+        counts: dict[str, int] = {}
+        for p in externals:
+            email = str(p.get("email") or "")
+            if "@" not in email:
+                continue
+            domain = email.split("@", 1)[1].lower()
+            if domain in FREE_MAIL:
+                continue
+            lab = registrable_label(domain)
+            slug = domain_to_slug.get(lab) or domain_to_slug.get(domain) or (lab if lab in cands else "")
+            if slug in cands:
+                counts[slug] = counts.get(slug, 0) + 1
+        return min(
+            cands,
+            key=lambda s: (
+                -counts.get(s, 0),
+                -sum(
+                    1
+                    for n in nodes.values()
+                    if n.get("client") == s
+                    and (n.get("delivery_state") in OPEN_STATES or n.get("delivery_state") == "active")
+                ),
+                s,
+            ),
+        )
 
     # (1) node id in title
     for nid, node in nodes.items():
@@ -281,50 +326,35 @@ def resolve(source: dict[str, Any], closed: dict[str, Any], repo_root: Path) -> 
             return _hit(node, nid, rule=2, clients=clients, client_cands=client_cands, corroborated=True)
     # (3) candidate client from non-free-mail domain
     if client_cands:
-        counts: dict[str, int] = {}
-        for p in externals:
-            email = str(p.get("email") or "")
-            if "@" not in email:
-                continue
-            domain = email.split("@", 1)[1].lower()
-            if domain in FREE_MAIL:
-                continue
-            lab = registrable_label(domain)
-            slug = domain_to_slug.get(lab) or domain_to_slug.get(domain) or (lab if lab in clients else "")
-            if slug in client_cands:
-                counts[slug] = counts.get(slug, 0) + 1
-        picked = min(
-            client_cands,
-            key=lambda s: (
-                -counts.get(s, 0),
-                -sum(
-                    1
-                    for n in nodes.values()
-                    if n.get("client") == s
-                    and (n.get("delivery_state") in OPEN_STATES or n.get("delivery_state") == "active")
-                ),
-                s,
-            ),
-        )
+        picked = _pick(client_cands)
         hit = _client_hit(picked, nodes, clients, rule=3)
-        hit["also_present"] = sorted(c for c in client_cands if c != picked)
+        hit["also_present"] = _also(picked)
         return hit
     # (4) contacts.json company
+    rule4: set[str] = set()
     for p in externals:
         email = str(p.get("email") or "").lower()
         for row in contact_rows:
             emails = [str(e).lower() for e in (row.get("emails") or [])]
-            if email in emails:
-                company = row.get("company")
-                if not company:
-                    continue
-                c = str(company)
-                if "." in c and " " not in c:
-                    slug = registrable_label(c)
-                else:
-                    slug = str(aliases.get(c) or slugify(c)) if isinstance(aliases, dict) else slugify(c)
-                if slug in clients:
-                    return _client_hit(slug, nodes, clients, rule=4)
+            if email not in emails:
+                continue
+            company = row.get("company")
+            if not company:
+                continue
+            c = str(company)
+            if "." in c and " " not in c:
+                slug = registrable_label(c)
+            else:
+                slug = str(aliases.get(c) or slugify(c)) if isinstance(aliases, dict) else slugify(c)
+            if slug in clients:
+                rule4.add(slug)
+            if slug in closed["orgs"]:
+                org_cands.add(slug)
+    if rule4:
+        picked = _pick(rule4)
+        hit = _client_hit(picked, nodes, clients, rule=4)
+        hit["also_present"] = _also(picked)
+        return hit
     # (5) free-mail → person org page
     for p in externals:
         email = str(p.get("email") or "")
@@ -340,17 +370,104 @@ def resolve(source: dict[str, Any], closed: dict[str, Any], repo_root: Path) -> 
                 return {
                     "counterparty_slug": cid,
                     "kind": "person",
-                    "relationship": "person",
+                    "relationship": "personal",
                     "home_path": f"orgs/{cid}.md",
                     "node": "none",
-                    "created": None if exists else {"kind": "person", "slug": cid, "relationship": "person"},
+                    "created": None if exists else {"kind": "person", "slug": cid, "relationship": "personal"},
                     "confidence": 1.0,
                     "rule": 5,
                     "corroborated": False,
                     "also_present": [],
                 }
-    # (6) classification domain/org_name → create org
-    cls = {}  # filled by caller via extraction; we read from source-adjacent later
+    cls = classification if isinstance(classification, dict) else {}
+    rel_ok = {"prospect", "vendor", "partner", "personal"}
+    # (6) org candidate from domain/company, else create from non-free-mail label
+    if org_cands:
+        picked = _pick(org_cands)
+        rel = str(cls.get("relationship") or "")
+        return {
+            "counterparty_slug": picked,
+            "kind": "org",
+            "relationship": rel if rel in rel_ok else "org",
+            "home_path": f"orgs/{picked}.md",
+            "node": "none",
+            "created": None,
+            "confidence": float(cls.get("confidence") or 0),
+            "rule": 6,
+            "corroborated": False,
+            "also_present": _also(picked),
+        }
+    if unknown_labels:
+        picked = min(unknown_labels, key=lambda s: (-unknown_counts.get(s, 0), s))
+        tld, domain = unknown_labels[picked]
+        slug = picked
+        if slug in closed["orgs"]:
+            existing = {d.lower() for d in _domains_from_text(closed["orgs"][slug].read_text(encoding="utf-8"))}
+            if domain not in existing:
+                slug = f"{picked}-{tld}"
+        rel = str(cls.get("relationship") or "")
+        if rel not in rel_ok:
+            rel = "prospect"
+        exists = slug in closed["orgs"]
+        return {
+            "counterparty_slug": slug,
+            "kind": "org",
+            "relationship": rel,
+            "home_path": f"orgs/{slug}.md",
+            "node": "none",
+            "created": None if exists else {"kind": "org", "slug": slug, "relationship": rel},
+            "confidence": float(cls.get("confidence") or 0),
+            "rule": 6,
+            "corroborated": False,
+            "also_present": _also(slug),
+        }
+    # (7) only free-mail or email-less external participants
+    hard_domain = False
+    for p in externals:
+        email = str(p.get("email") or "")
+        if "@" in email and email.split("@", 1)[1].lower() not in FREE_MAIL:
+            hard_domain = True
+            break
+    if externals and not hard_domain:
+        first = externals[0]
+        name = str(first.get("name") or "").strip()
+        tokens = [t for t in re.split(r"\s+", name) if t]
+        if len(tokens) >= 2:
+            slug = slugify(name)
+        else:
+            occurred = str(source.get("occurred_at") or "")
+            yyyymm = occurred[:7].replace("-", "") if len(occurred) >= 7 else "000000"
+            slug = f"{slugify(name or str(first.get('email') or 'person'))}-{yyyymm}"
+        exists = slug in closed["orgs"]
+        return {
+            "counterparty_slug": slug,
+            "kind": "person",
+            "relationship": "personal",
+            "home_path": f"orgs/{slug}.md",
+            "node": "none",
+            "created": None if exists else {"kind": "person", "slug": slug, "relationship": "personal"},
+            "confidence": float(cls.get("confidence") or 0),
+            "rule": 7,
+            "corroborated": False,
+            "also_present": [],
+        }
+    # (8) no external participants
+    if not externals:
+        exists = "clearworks-internal" in closed["orgs"]
+        return {
+            "counterparty_slug": "clearworks-internal",
+            "kind": "org",
+            "relationship": "internal",
+            "home_path": "orgs/clearworks-internal.md",
+            "node": "none",
+            "created": None
+            if exists
+            else {"kind": "org", "slug": "clearworks-internal", "relationship": "internal"},
+            "confidence": 1.0,
+            "rule": 8,
+            "corroborated": False,
+            "also_present": [],
+        }
     return {}
 
 
@@ -458,29 +575,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         closed = load_closed_sets(Path(args.vault))
         validated = quote_gate(extraction, source)
-        resolution = resolve(source, closed, Path(args.repo_root))
+        resolution = resolve(source, closed, Path(args.repo_root), extraction.get("classification") if isinstance(extraction.get("classification"), dict) else None)
         if not resolution:
-            # (6) classification org
-            cls = extraction.get("classification") or {}
-            domain = str(cls.get("domain") or "").strip()
-            org_name = str(cls.get("org_name") or "").strip()
-            if domain or org_name:
-                slug = slugify(org_name or registrable_label(domain))
-                resolution = {
-                    "counterparty_slug": slug,
-                    "kind": "org",
-                    "relationship": cls.get("relationship") or "org",
-                    "home_path": f"orgs/{slug}.md",
-                    "node": "none",
-                    "created": {"kind": "org", "slug": slug, "relationship": cls.get("relationship") or "org"},
-                    "confidence": float(cls.get("confidence") or 0),
-                    "rule": 6,
-                    "corroborated": False,
-                    "also_present": [],
-                }
-            else:
-                print("unresolved-technical", file=sys.stderr)
-                return 5
+            print("unresolved-technical", file=sys.stderr)
+            return 5
         _apply_promotion(validated, resolution, closed)
         resolution["dropped"] = validated.get("dropped") or {}
         resolution["deal_state"] = extraction.get("deal_state")

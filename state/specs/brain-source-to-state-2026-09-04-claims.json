@@ -1,0 +1,32 @@
+{
+  "repo_root": "/Users/joshweiss/code/cortextos",
+  "canary": null,
+  "claims": [
+    { "id": "G-01", "claim": "meeting-crm-sync.py --event-file still calls load_full_meeting (ff-extractor --mode full) unconditionally", "type": "code_contains", "path": "orgs/clearworksai/agents/crm/crm/meeting-crm-sync.py", "pattern": "def load_full_meeting|--event-file", "expect": true },
+    { "id": "G-02", "claim": "meeting-fanout.py has a Deps.load_full seam and prod_load_full shells ff-extractor --mode full", "type": "code_contains", "path": "orgs/clearworksai/agents/crm/crm/meeting-fanout.py", "pattern": "load_full", "expect": true },
+    { "id": "G-03", "claim": "meeting-fanout.py TRIAGE_OWNER defaults to pa (disabled agent)", "type": "code_contains", "path": "orgs/clearworksai/agents/crm/crm/meeting-fanout.py", "pattern": "TRIAGE_OWNER.*\"pa\"|TRIAGE_OWNER.*'pa'", "expect": true },
+    { "id": "G-04", "claim": "meeting-fanout.py dedups tasks on commitment:<commitmentId> via bus event-dedup", "type": "code_contains", "path": "orgs/clearworksai/agents/crm/crm/meeting-fanout.py", "pattern": "event-dedup|commitment:", "expect": true },
+    { "id": "G-05", "claim": "meeting_writeback.py rebuilds the client file from a fixed heading whitelist (drops other ## sections)", "type": "code_contains", "path": "orgs/clearworksai/agents/pa/scripts/meeting_writeback.py", "pattern": "rebuilt = \\[", "expect": true },
+    { "id": "G-06", "claim": "meeting_writeback.py accepts --payload JSON and dedupes History on meeting_rel", "type": "code_contains", "path": "orgs/clearworksai/agents/pa/scripts/meeting_writeback.py", "pattern": "--payload", "expect": true },
+    { "id": "G-07", "claim": "meeting_recap_draft.py hardcodes --to josh@clearworks.ai and shells gws gmail +draft", "type": "code_contains", "path": "orgs/clearworksai/agents/pa/scripts/meeting_recap_draft.py", "pattern": "\\+draft", "expect": true },
+    { "id": "G-08", "claim": "ff-extractor.py has no fetch-only mode; every mode requires OPENROUTER_API_KEY", "type": "code_contains", "path": "orgs/clearworksai/agents/pa/scripts/ff-extractor.py", "pattern": "require_env\\(\"OPENROUTER_API_KEY\"\\)", "expect": true },
+    { "id": "G-09", "claim": "ff-extractor.py has no fetch-only argparse mode", "type": "code_contains", "path": "orgs/clearworksai/agents/pa/scripts/ff-extractor.py", "pattern": "fetch-only|fetch_only", "expect": false },
+    { "id": "G-10", "claim": "delivery-status.ts exports buildStatusReportPlan and parseClientFile", "type": "code_contains", "path": "src/bus/delivery-status.ts", "pattern": "export function buildStatusReportPlan|export function parseClientFile", "expect": true },
+    { "id": "G-11", "claim": "delivery-status unit tests exist", "type": "file_exists", "path": "tests/unit/bus/delivery-status.test.ts" },
+    { "id": "G-12", "claim": "bus create-task writes the task file directly (no daemon IPC required)", "type": "code_contains", "path": "src/bus/task.ts", "pattern": "atomicWriteSync|writeFileSync", "expect": true },
+    { "id": "G-13", "claim": "bus event-dedup --source --fire-once exists in bus.ts", "type": "code_contains", "path": "src/cli/bus.ts", "pattern": "event-dedup", "expect": true },
+    { "id": "G-14", "claim": "org-brain clients/_template.md exists", "type": "file_exists", "path": "orgs/clearworksai/knowledge/clients/_template.md" },
+    { "id": "G-15", "claim": "org-brain clients/alloi.md exists", "type": "file_exists", "path": "orgs/clearworksai/knowledge/clients/alloi.md" },
+    { "id": "G-16", "claim": "org-brain projects/ does not exist yet", "type": "file_exists", "path": "orgs/clearworksai/knowledge/projects", "expect": false },
+    { "id": "G-17", "claim": "org-brain orgs/ does not exist yet", "type": "file_exists", "path": "orgs/clearworksai/knowledge/orgs", "expect": false },
+    { "id": "G-18", "claim": "CRM contacts.json contains alloi.us contacts (resolver can reach alloi via attendee email)", "type": "code_contains", "path": "orgs/clearworksai/agents/crm-codex/crm/contacts.json", "pattern": "@alloi\\.us", "expect": true },
+    { "id": "G-19", "claim": "gws-dwd shim supports gmail +draft with --to --subject --body", "type": "code_contains", "path": "/Users/joshweiss/.local/bin/gws-dwd", "pattern": "\\+draft", "expect": true },
+    { "id": "G-20", "claim": "spawn-worker CLI is daemon IPC (returns on enqueue, no exit code)", "type": "code_contains", "path": "src/cli/workers.ts", "pattern": "IPCClient|spawn-worker", "expect": true },
+    { "id": "G-21", "claim": "meeting-consumer-dispatch fires crm-sync/fanout only from daemon onDone for meeting-writeback-* workers", "type": "code_contains", "path": "src/daemon/agent-manager.ts", "pattern": "dispatchMeetingConsumers", "expect": true },
+    { "id": "G-22", "claim": "meeting_writeback unit tests exist (casualty/control classification pending)", "type": "file_exists", "path": "orgs/clearworksai/agents/pa/scripts/test_meeting_writeback.py" },
+    { "id": "G-23", "claim": "delivery-status-plan CLI is absent from bus.ts (removed 013de1e8)", "type": "code_contains", "path": "src/cli/bus.ts", "pattern": "delivery-status-plan", "expect": false },
+    { "id": "G-24", "claim": "package.json has no zod/ajv runtime dep (schema validation must be hand-rolled)", "type": "code_contains", "path": "package.json", "pattern": "\"zod\"|\"ajv\"", "expect": false },
+    { "id": "G-25", "claim": "knowledge-base venv python has no anthropic SDK (extractor must use urllib)", "type": "file_exists", "path": "knowledge-base/venv/lib/python3.12/site-packages/anthropic", "expect": false },
+    { "id": "G-26", "claim": "meeting-crm-sync add-interaction.py dedups on source_ref + contact_id", "type": "code_contains", "path": "orgs/clearworksai/agents/crm/crm/add-interaction.py", "pattern": "source_ref", "expect": true }
+  ]
+}

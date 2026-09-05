@@ -14,7 +14,7 @@ from typing import Any
 
 from atomic import atomic_write
 from envparse import parse_env_file
-from paths import DEFAULT_REPO_ROOT, DEFAULT_VAULT, envelope_dir, secrets_path
+from paths import DEFAULT_REPO_ROOT, DEFAULT_VAULT, envelope_dir, safe_meeting_id, secrets_path
 
 FETCHER_VERSION = "fetch_fireflies/1"
 GRAPHQL_URL = "https://api.fireflies.ai/graphql"
@@ -193,11 +193,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--refetch", action="store_true")
     args = p.parse_args(argv)
 
-    meeting_id = args.meeting_id.strip()
-    if meeting_id.startswith("fireflies:"):
-        meeting_id = meeting_id.split(":", 1)[1]
+    meeting_id = safe_meeting_id(args.meeting_id)
     if not meeting_id:
-        print("need --meeting-id", file=sys.stderr)
+        print("invalid meeting id", file=sys.stderr)
         return 64
 
     vault = Path(args.vault)

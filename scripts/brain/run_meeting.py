@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -14,25 +13,13 @@ from pathlib import Path
 from adapt_meeting import main as adapt_main
 from extract_meeting import main as extract_main
 from fetch_fireflies import main as fetch_main
-from paths import DEFAULT_REPO_ROOT, DEFAULT_VAULT, envelope_dir
+from paths import DEFAULT_REPO_ROOT, DEFAULT_VAULT, envelope_dir, safe_meeting_id
 from resolve_meeting import main as resolve_main
 
 HERE = Path(__file__).resolve().parent
 CODE_ROOT = HERE.parent.parent
 WRITEBACK = CODE_ROOT / "orgs/clearworksai/agents/pa/scripts/meeting_writeback.py"
 RECAP = CODE_ROOT / "orgs/clearworksai/agents/pa/scripts/meeting_recap_draft.py"
-
-
-SAFE_MEETING_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
-
-
-def _strip_id(meeting_id: str) -> str:
-    mid = meeting_id.strip()
-    if mid.startswith("fireflies:"):
-        mid = mid.split(":", 1)[1]
-    if not SAFE_MEETING_ID.match(mid):
-        return ""
-    return mid
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -51,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
         print("need --dry-run or --apply", file=sys.stderr)
         return 64
 
-    meeting_id = _strip_id(args.meeting_id)
+    meeting_id = safe_meeting_id(args.meeting_id)
     if not meeting_id:
         print("need --meeting-id", file=sys.stderr)
         return 64

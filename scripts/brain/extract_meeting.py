@@ -65,6 +65,87 @@ STAMP_KEYS = {"inputSha", "promptSha", "model", "cost_usd", "extracted_at"}
 # compat with extraction.json files written before these existed
 OPTIONAL_STAMP_KEYS = {"model_receipt", "usage"}
 
+# Loaded once at import; also backs _build_prompt/prompt_sha's own reads of
+# the same file. Used to drive the recursive nested-schema walker below so
+# nested fields (classification.confidence, commitments[].owner_participant,
+# etc.) get real type/required/enum checks instead of being skipped.
+EXTRACTION_SCHEMA: dict[str, Any] = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+
+_JSON_TYPES: dict[str, type | tuple[type, ...]] = {
+    "string": str,
+    "number": (int, float),
+    "integer": int,
+    "boolean": bool,
+    "array": list,
+    "object": dict,
+    "null": type(None),
+}
+
+
+def _matches_json_type(value: Any, type_name: str) -> bool:
+    if type_name == "null":
+        return value is None
+    if type_name in ("number", "integer") and isinstance(value, bool):
+        # bool is a subclass of int in Python; JSON schema treats them as distinct.
+        return False
+    expected = _JSON_TYPES.get(type_name)
+    if expected is None:
+        return True
+    return isinstance(value, expected)
+
+
+def _validate_against_schema(value: Any, schema: dict[str, Any], path: str) -> None:
+    """Recursive walker driven by extraction.schema.json.
+
+    Enforces, for the subtree rooted at `schema`: required keys present,
+    primitive type match, enum/const membership, and (for arrays of objects)
+    the same checks one level down. Raises ValueError with a dotted `path`.
+    """
+    if "oneOf" in schema:
+        errors: list[str] = []
+        for sub in schema["oneOf"]:
+            try:
+                _validate_against_schema(value, sub, path)
+                return
+            except ValueError as exc:
+                errors.append(str(exc))
+        raise ValueError(f"{path}: matches none of oneOf ({'; '.join(errors)})")
+
+    if "const" in schema and value != schema["const"]:
+        raise ValueError(f"{path}: expected const {schema['const']!r}, got {value!r}")
+
+    if "enum" in schema and value not in schema["enum"]:
+        raise ValueError(f"{path}: expected one of {schema['enum']!r}, got {value!r}")
+
+    type_spec = schema.get("type")
+    if type_spec is None:
+        return
+    type_names = type_spec if isinstance(type_spec, list) else [type_spec]
+    matched = next((t for t in type_names if _matches_json_type(value, t)), None)
+    if matched is None:
+        expected_desc = "/".join(type_names)
+        raise ValueError(f"{path}: expected {expected_desc}, got {type(value).__name__}")
+
+    if matched == "object" and "properties" in schema and isinstance(value, dict):
+        properties = schema["properties"]
+        required = schema.get("required") or []
+        missing = [k for k in required if k not in value]
+        if missing:
+            raise ValueError(f"{path}: missing keys {sorted(missing)}")
+        if schema.get("additionalProperties") is False:
+            extra = set(value) - set(properties)
+            if extra:
+                raise ValueError(f"{path}: unknown keys {sorted(extra)}")
+        for key, subschema in properties.items():
+            if key in value:
+                child_path = f"{path}.{key}" if path else key
+                _validate_against_schema(value[key], subschema, child_path)
+
+    elif matched == "array" and "items" in schema and isinstance(value, list):
+        item_schema = schema["items"]
+        for i, item in enumerate(value):
+            _validate_against_schema(item, item_schema, f"{path}[{i}]")
+
 
 def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -102,14 +183,24 @@ def validate_extraction(obj: dict[str, Any], *, stamped: bool = True) -> None:
     _forbid_unknown_string(cls.get("relationship"), "classification.relationship")
     if cls.get("relationship") not in RELATIONSHIPS:
         raise ValueError("classification.relationship")
+    _validate_against_schema(
+        cls, EXTRACTION_SCHEMA["properties"]["classification"], "classification"
+    )
     summ = obj.get("summary")
     if not isinstance(summ, dict) or set(summ) - {"overview", "bullets"}:
         raise ValueError("summary")
-    for i, dec in enumerate(obj.get("decisions") or []):
+    _validate_against_schema(summ, EXTRACTION_SCHEMA["properties"]["summary"], "summary")
+    decisions = obj.get("decisions") or []
+    _validate_against_schema(decisions, EXTRACTION_SCHEMA["properties"]["decisions"], "decisions")
+    for i, dec in enumerate(decisions):
         if not isinstance(dec, dict) or set(dec) - {"text", "quote"}:
             raise ValueError(f"decisions[{i}]")
         _forbid_unknown_string(dec.get("text"), f"decisions[{i}].text")
-    for i, c in enumerate(obj.get("commitments") or []):
+    commitments = obj.get("commitments") or []
+    _validate_against_schema(
+        commitments, EXTRACTION_SCHEMA["properties"]["commitments"], "commitments"
+    )
+    for i, c in enumerate(commitments):
         if not isinstance(c, dict):
             raise ValueError(f"commitments[{i}]")
         extra_c = set(c) - {"text", "owner_participant", "owner_name", "deadline_iso", "quote"}
@@ -122,6 +213,9 @@ def validate_extraction(obj: dict[str, Any], *, stamped: bool = True) -> None:
         _forbid_unknown_string(pds.get("state"), "proposed_delivery_state.state")
         if pds.get("state") not in LADDER:
             raise ValueError("proposed_delivery_state.state")
+    _validate_against_schema(
+        pds, EXTRACTION_SCHEMA["properties"]["proposed_delivery_state"], "proposed_delivery_state"
+    )
     _forbid_unknown_string(obj.get("deal_state"), "deal_state")
     if obj.get("deal_state") not in DEAL_STATES:
         raise ValueError("deal_state")

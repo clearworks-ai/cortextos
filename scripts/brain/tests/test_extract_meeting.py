@@ -296,3 +296,72 @@ def test_reextract_refused_when_receipt_exists(tmp_path: Path) -> None:
     rc2 = main(["--source", str(src)])
     assert rc2 == 3
     _ = sha
+
+
+def _stamped_good() -> dict:
+    good = _model_obj()
+    good.update(
+        {
+            "inputSha": "a",
+            "promptSha": "b",
+            "model": "sonnet",
+            "cost_usd": 0,
+            "extracted_at": "t",
+            "model_receipt": "claude-sonnet-5",
+            "usage": {},
+        }
+    )
+    return good
+
+
+def test_nested_string_typed_as_expected_number_rejected() -> None:
+    from extract_meeting import validate_extraction
+
+    good = _stamped_good()
+    validate_extraction(good)
+
+    bad = json.loads(json.dumps(good))
+    bad["classification"]["confidence"] = "high"
+    with pytest.raises(ValueError, match=r"classification\.confidence.*expected number.*got str"):
+        validate_extraction(bad)
+
+
+def test_missing_required_nested_key_rejected() -> None:
+    from extract_meeting import validate_extraction
+
+    good = _stamped_good()
+    bad = json.loads(json.dumps(good))
+    del bad["classification"]["evidence"]
+    with pytest.raises(ValueError, match="classification"):
+        validate_extraction(bad)
+
+
+def test_commitment_missing_required_key_rejected() -> None:
+    from extract_meeting import validate_extraction
+
+    good = _stamped_good()
+    good["commitments"] = [
+        {
+            "text": "Ship it",
+            "owner_participant": 0,
+            "owner_name": "Josh",
+            "deadline_iso": None,
+            "quote": "hello",
+        }
+    ]
+    validate_extraction(good)
+
+    bad = json.loads(json.dumps(good))
+    del bad["commitments"][0]["deadline_iso"]
+    with pytest.raises(ValueError, match=r"commitments\[0\]"):
+        validate_extraction(bad)
+
+
+def test_decision_wrong_type_rejected() -> None:
+    from extract_meeting import validate_extraction
+
+    good = _stamped_good()
+    bad = json.loads(json.dumps(good))
+    bad["decisions"] = [{"text": 123, "quote": "hello"}]
+    with pytest.raises(ValueError, match=r"decisions\[0\]\.text.*expected string.*got int"):
+        validate_extraction(bad)

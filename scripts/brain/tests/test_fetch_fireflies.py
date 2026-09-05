@@ -191,3 +191,21 @@ def test_writes_canonical_envelope_and_skips_existing(
     rc2 = main(["--meeting-id", mid, "--vault", str(vault)])
     assert rc2 == 0
     assert capsys.readouterr().out.strip() == sha
+
+
+def test_path_traversal_meeting_id_rejected_exit_64(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from fetch_fireflies import main
+
+    monkeypatch.setenv("FIREFLIES_API_KEY", "k")
+
+    def boom(*_a: object, **_k: object) -> None:
+        raise AssertionError("must not make network call")
+
+    monkeypatch.setattr("urllib.request.urlopen", boom)
+    vault = tmp_path / "vault"
+    rc = main(["--meeting-id", "../../target", "--vault", str(vault)])
+    assert rc == 64
+    assert "invalid meeting id" in capsys.readouterr().err
+    assert not vault.exists() or not any(vault.rglob("source.json"))

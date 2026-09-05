@@ -11,15 +11,19 @@ from pathlib import Path
 from typing import Any
 
 from atomic import atomic_write
-from extract_meeting import validate_extraction
+from extract_meeting import RELATIONSHIPS, validate_extraction
 from paths import DEFAULT_REPO_ROOT, DEFAULT_VAULT, org_brain_root
 
 FREE_MAIL = {
     "gmail.com",
-    "yahoo.com",
-    "hotmail.com",
+    "googlemail.com",
     "outlook.com",
+    "hotmail.com",
+    "live.com",
+    "msn.com",
+    "yahoo.com",
     "icloud.com",
+    "me.com",
     "aol.com",
     "proton.me",
     "protonmail.com",
@@ -100,6 +104,24 @@ def _domains_from_text(text: str) -> list[str]:
             rest = line.split(":", 1)[1]
             found.extend(x.strip().lower() for x in rest.split(",") if x.strip())
     return found
+
+
+def _relationship_from_text(text: str) -> str | None:
+    for line in text.splitlines():
+        if re.match(r"^relationship:", line, re.I):
+            val = line.split(":", 1)[1].strip().lower()
+            return val or None
+    return None
+
+
+def _company_slug(company: str, aliases: Any) -> str:
+    """G-32/G-55: alias table first (keys are display names), only then slugify(company)."""
+    c = str(company)
+    if "." in c and " " not in c:
+        return registrable_label(c)
+    if isinstance(aliases, dict):
+        return str(aliases.get(c) or slugify(c))
+    return slugify(c)
 
 
 def load_closed_sets(vault: Path) -> dict[str, Any]:
@@ -245,7 +267,7 @@ def resolve(
             continue
         if not row.get("company"):
             continue
-        slug = slugify(str(row.get("company") or ""))
+        slug = _company_slug(str(row.get("company") or ""), aliases)
         for em in row.get("emails") or []:
             if "@" in str(em):
                 domain_to_slug[registrable_label(str(em).split("@", 1)[1])] = slug or domain_to_slug.get(
@@ -345,11 +367,7 @@ def resolve(
             company = row.get("company")
             if not company:
                 continue
-            c = str(company)
-            if "." in c and " " not in c:
-                slug = registrable_label(c)
-            else:
-                slug = str(aliases.get(c) or slugify(c)) if isinstance(aliases, dict) else slugify(c)
+            slug = _company_slug(str(company), aliases)
             if slug in clients:
                 rule4.add(slug)
             if slug in closed["orgs"]:
@@ -388,11 +406,24 @@ def resolve(
     # (6) org candidate from domain/company, else create from non-free-mail label
     if org_cands:
         picked = _pick(org_cands)
-        rel = str(cls.get("relationship") or "")
+        org_path = closed["orgs"].get(picked)
+        page_rel = _relationship_from_text(org_path.read_text(encoding="utf-8")) if org_path else None
+        cls_rel = str(cls.get("relationship") or "")
+        if page_rel in RELATIONSHIPS:
+            rel = page_rel
+        elif cls_rel in RELATIONSHIPS:
+            rel = cls_rel
+        else:
+            print(
+                f"ambiguous-relationship: no relationship: frontmatter on orgs/{picked}.md "
+                "and no valid classification.relationship",
+                file=sys.stderr,
+            )
+            raise SystemExit(5)
         return {
             "counterparty_slug": picked,
             "kind": "org",
-            "relationship": rel if rel in rel_ok else "org",
+            "relationship": rel,
             "home_path": f"orgs/{picked}.md",
             "node": "none",
             "created": None,
@@ -494,7 +525,7 @@ def _hit(
         "confidence": 1.0,
         "rule": rule,
         "corroborated": corroborated,
-        "also_present": sorted(client_cands),
+        "also_present": sorted(c for c in client_cands if c != node["client"]),
     }
 
 

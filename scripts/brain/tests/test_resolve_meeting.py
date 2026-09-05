@@ -6,6 +6,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 BRAIN = Path(__file__).resolve().parents[1]
 if str(BRAIN) not in sys.path:
     sys.path.insert(0, str(BRAIN))
@@ -604,3 +606,312 @@ def test_null_company_contact_does_not_steal_client_domain(tmp_path) -> None:
     assert res["home_path"] == "clients/alloi.md"
     assert res["rule"] == 3
     assert res["counterparty_slug"] == "alloi"
+
+
+def test_f2_live_com_is_free_mail_not_org(tmp_path) -> None:
+    """D-13: live.com must never yield created org slug 'live' — follow rule 5/7 person path."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Intro call",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Lee Adams",
+                "email": "lee@live.com",
+                "side": "theirs",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        org_name="Unknown",
+        domain="live.com",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 7
+    assert res["kind"] == "person"
+    assert res["created"] == {
+        "kind": "person",
+        "slug": "lee-adams",
+        "relationship": "personal",
+    }
+    assert res["created"]["slug"] != "live"
+
+
+def test_f5_also_present_excludes_home_client_rule_1(tmp_path) -> None:
+    """also_present for rules 1/2 must exclude the resolved home client itself."""
+    from resolve_meeting import main
+
+    vault = tmp_path / "vault"
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients").mkdir(parents=True)
+    (brain / "projects").mkdir()
+    (brain / "orgs").mkdir()
+    (brain / "clients" / "alloi.md").write_text(
+        "# Client: Alloi\n\n## Contacts\n\ndomains: alloi.us\n",
+        encoding="utf-8",
+    )
+    (brain / "clients" / "alpha.md").write_text(
+        "# Client: Alpha\n\n## Contacts\n\ndomains: alpha.com\n",
+        encoding="utf-8",
+    )
+    (brain / "projects" / "alloi-03.md").write_text(
+        _node_page("alloi", "alloi-03", "tacticals"),
+        encoding="utf-8",
+    )
+    (brain / "projects" / "alloi-01.md").write_text(
+        _node_page("alloi", "alloi-01", ""),
+        encoding="utf-8",
+    )
+    repo = tmp_path / "repo"
+    (repo / "orgs/clearworksai/agents/crm-codex/crm").mkdir(parents=True)
+    (repo / "orgs/clearworksai/agents/crm-codex/crm/org-aliases.json").write_text("{}", encoding="utf-8")
+    (repo / "orgs/clearworksai/agents/crm-codex/crm/contacts.json").write_text(
+        '{"contacts":[]}', encoding="utf-8"
+    )
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Node alloi-03 sync",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Marcos",
+                "email": "marcos@alloi.us",
+                "side": "theirs",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Ann",
+                "email": "ann@alpha.com",
+                "side": "theirs",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        org_name="Alloi",
+        domain="alloi.us",
+        relationship="client",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 1
+    assert res["node"] == "alloi-03"
+    assert res["also_present"] == ["alpha"]
+
+
+def test_f6_existing_org_uses_page_relationship_over_classification(tmp_path) -> None:
+    """rule 6 existing-org relationship reads orgs/<slug>.md frontmatter first (§4a enum)."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "orgs" / "vendor.md").write_text(
+        "# Vendor\n\nrelationship: vendor\ndomains: vendor.com\n",
+        encoding="utf-8",
+    )
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Vendor check-in",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Vic",
+                "email": "vic@vendor.com",
+                "side": "theirs",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        org_name="Vendor",
+        domain="vendor.com",
+        relationship="prospect",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 6
+    assert res["counterparty_slug"] == "vendor"
+    assert res["relationship"] == "vendor"
+    assert res["created"] is None
+
+
+def test_f6_existing_org_falls_back_to_classification_when_page_has_no_relationship(tmp_path) -> None:
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "orgs" / "vendor2.md").write_text(
+        "# Vendor2\n\ndomains: vendor2.com\n",
+        encoding="utf-8",
+    )
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Vendor check-in",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Pat",
+                "email": "pat@vendor2.com",
+                "side": "theirs",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        org_name="Vendor2",
+        domain="vendor2.com",
+        relationship="partner",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 6
+    assert res["relationship"] == "partner"
+
+
+def test_f6_ambiguous_relationship_exits_5(tmp_path) -> None:
+    """No page relationship: and no valid classification.relationship => FR-003 ambiguity exit."""
+    from resolve_meeting import load_closed_sets, resolve
+
+    vault = tmp_path / "vault"
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients").mkdir(parents=True)
+    (brain / "projects").mkdir()
+    (brain / "orgs").mkdir()
+    (brain / "orgs" / "vendor3.md").write_text(
+        "# Vendor3\n\ndomains: vendor3.com\n",
+        encoding="utf-8",
+    )
+    closed = load_closed_sets(vault)
+    source = {
+        "title": "Intro",
+        "occurred_at": "2026-09-04T17:00:00Z",
+        "participants": [
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+            },
+            {
+                "name": "Vic",
+                "email": "vic@vendor3.com",
+                "side": "theirs",
+                "spoke": True,
+                "notetaker": False,
+            },
+        ],
+        "text_units": [{"i": 0, "speaker": "Vic", "text": "hi"}],
+    }
+    with pytest.raises(SystemExit) as exc:
+        resolve(source, closed, tmp_path / "repo", classification=None)
+    assert exc.value.code == 5
+
+
+def test_f7_contact_company_alias_first_not_slugify(tmp_path) -> None:
+    """G-32/G-55: contacts.json company->slug prebuild must check the alias table before slugify."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients" / "alloi.md").write_text(
+        "# Client: Alloi\n\n## Contacts\n\ndomains: alloi.us\n",
+        encoding="utf-8",
+    )
+    (brain / "clients" / "alloi-inc.md").write_text(
+        "# Client: Alloi Inc (decoy)\n\n## Contacts\n\n",
+        encoding="utf-8",
+    )
+    (repo / "orgs/clearworksai/agents/crm-codex/crm/org-aliases.json").write_text(
+        json.dumps({"Alloi Inc": "alloi"}), encoding="utf-8"
+    )
+    (repo / "orgs/clearworksai/agents/crm-codex/crm/contacts.json").write_text(
+        json.dumps(
+            {
+                "contacts": [
+                    {"id": "c1", "company": "Alloi Inc", "emails": ["known@alloi-other.test"]},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Weekly sync",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Marcos",
+                "email": "marcos@alloi-other.test",
+                "side": "theirs",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        org_name="Alloi",
+        domain="alloi-other.test",
+        relationship="client",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 3
+    assert res["counterparty_slug"] == "alloi"
+    assert res["home_path"] == "clients/alloi.md"

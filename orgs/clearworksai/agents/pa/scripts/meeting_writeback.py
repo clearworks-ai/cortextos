@@ -32,6 +32,7 @@ import fcntl
 import json
 import os
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -554,6 +555,8 @@ def process_writeback(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="File meeting intelligence into knowledge/meetings + knowledge/clients")
     parser.add_argument("--payload", default="/tmp/ff-writeback.json")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--apply", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -565,6 +568,22 @@ def main(argv: list[str] | None = None) -> int:
     ctx_tmp = (os.environ.get("CTX_TMP") or "/tmp").strip() or "/tmp"
 
     payload = json.loads(Path(args.payload).read_text(encoding="utf-8"))
+
+    brain_dir = Path(__file__).resolve().parents[5] / "scripts" / "brain"
+    if str(brain_dir) not in sys.path:
+        sys.path.insert(0, str(brain_dir))
+    from writeback_render import payload_has_resolution, print_dry_run
+
+    if args.apply:
+        print("R1: --apply refused until goal-brain-source-to-state-r2-apply", file=sys.stderr)
+        return 64
+    if args.dry_run:
+        print_dry_run(org_root, payload)
+        return 0
+    if payload_has_resolution(payload):
+        print("R1: resolution payload requires --dry-run (or R2 --apply)", file=sys.stderr)
+        return 64
+
     result = process_writeback(
         payload,
         org_root=org_root,

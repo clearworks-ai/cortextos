@@ -1,0 +1,157 @@
+"""FR-005 / D-15: dry-run diffs every file --apply would touch; 8 CONTROL tests stay green."""
+from __future__ import annotations
+
+import importlib.util
+import io
+import json
+import os
+import sys
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
+
+import pytest
+
+BRAIN = Path(__file__).resolve().parents[1]
+if str(BRAIN) not in sys.path:
+    sys.path.insert(0, str(BRAIN))
+
+WB_PATH = (
+    Path(__file__).resolve().parents[3]
+    / "orgs/clearworksai/agents/pa/scripts/meeting_writeback.py"
+)
+SPEC = importlib.util.spec_from_file_location("meeting_writeback_script", WB_PATH)
+assert SPEC and SPEC.loader
+WB = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = WB
+SPEC.loader.exec_module(WB)
+
+
+def _payload(**res_extra: object) -> dict:
+    resolution = {
+        "home_path": "projects/alloi-03.md",
+        "node": "alloi-03",
+        "rule": 2,
+        "created": None,
+        "relationship": "client",
+        "confidence": "high",
+    }
+    resolution.update(res_extra)
+    return {
+        "meetings": [
+            {
+                "id": "01M1MW2GAZ1DQ0C6PG3KJ557JA",
+                "title": "Tacticals sync",
+                "date": "2026-09-04T17:00:00Z",
+                "organizer": "Josh Weiss",
+                "attendees": ["josh@clearworks.us"],
+                "client_context": "alloi",
+                "summary": {"overview": "Scoped tactical reports."},
+                "decisions": ["Keep weekly cadence"],
+                "next_steps": [],
+                "meeting_type": "delivery",
+                "resolution": resolution,
+                "promotion": None,
+                "open_items": [
+                    {
+                        "item": "Ship dry-run",
+                        "owner": "Josh",
+                        "deadline": "2026-09-08",
+                        "source": "commitment:abc",
+                        "status": "open",
+                    }
+                ],
+            }
+        ]
+    }
+
+
+def test_render_page_preserves_unknown_section() -> None:
+    from writeback_render import render_page
+
+    old = """# Client: Alloi — Tactical Reports
+
+## Node
+id: alloi-03
+
+## Custom
+keep-me-byte-for-byte
+
+## History (dated, newest first)
+
+- old entry
+
+## Open Items
+| Item | Owner | Deadline | Source | Status |
+|---|---|---|---|---|
+"""
+    new = render_page(old, _payload()["meetings"][0])
+    assert "keep-me-byte-for-byte" in new
+    assert "## Custom" in new
+    assert new.index("## Custom") < new.index("## History")
+    assert "Scoped tactical reports" in new or "Tacticals sync" in new
+
+
+def test_dry_run_prints_all_diffs_and_reason_writes_nothing(tmp_path: Path) -> None:
+    org = tmp_path / "org"
+    home = org / "raw/areas/clearworks/org-brain/projects/alloi-03.md"
+    home.parent.mkdir(parents=True)
+    home.write_text(
+        "# Client: Alloi — Tactical Reports\n\n## History (dated, newest first)\n\n- old\n",
+        encoding="utf-8",
+    )
+    payload_path = tmp_path / "payload.json"
+    payload_path.write_text(json.dumps(_payload()), encoding="utf-8")
+    ledger = tmp_path / "ledger.txt"
+    ledger.write_text("", encoding="utf-8")
+
+    env = {
+        "ORG_ROOT": str(org),
+        "LEDGER_FILE": str(ledger),
+        "CTX_TMP": str(tmp_path),
+    }
+    out = io.StringIO()
+    err = io.StringIO()
+    with pytest.MonkeyPatch.context() as mp:
+        for k, v in env.items():
+            mp.setenv(k, v)
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = WB.main(["--payload", str(payload_path), "--dry-run"])
+    assert rc == 0
+    text = out.getvalue()
+    assert "---" in text and "+++" in text
+    assert "alloi-03.md" in text
+    assert "meetings/" in text
+    assert "home=" in text and "node=alloi-03" in text and "rule=2" in text
+    assert "created=" in text and "promotion=" in text
+    assert home.read_text(encoding="utf-8").startswith("# Client: Alloi")
+    assert list((org / "raw/areas/clearworks/org-brain/meetings").glob("*.md")) == []
+    assert ledger.read_text(encoding="utf-8") == ""
+
+
+def test_resolution_without_flags_refuses(tmp_path: Path) -> None:
+    payload_path = tmp_path / "p.json"
+    payload_path.write_text(json.dumps(_payload()), encoding="utf-8")
+    (tmp_path / "ledger").write_text("", encoding="utf-8")
+    org = tmp_path / "org"
+    org.mkdir()
+    out = io.StringIO()
+    err = io.StringIO()
+    env = {"ORG_ROOT": str(org), "LEDGER_FILE": str(tmp_path / "ledger"), "CTX_TMP": str(tmp_path)}
+    with pytest.MonkeyPatch.context() as mp:
+        for k, v in env.items():
+            mp.setenv(k, v)
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = WB.main(["--payload", str(payload_path)])
+    assert rc == 64
+
+
+def test_created_page_diff_when_resolution_created(tmp_path: Path) -> None:
+    from writeback_render import render_created_page, render_meeting_note
+
+    tmpl = "# Client: Alloi — <title>\n\n## Node\nid: <client>-<nn>\n"
+    meeting = _payload(created={"kind": "project", "slug": "alloi-04"})["meetings"][0]
+    page = render_created_page(tmpl, meeting)
+    note = render_meeting_note(meeting)
+    assert "alloi-04" in page or "Tactical" in page
+    assert "meeting_id" in note
+    assert "01M1MW2G" in note

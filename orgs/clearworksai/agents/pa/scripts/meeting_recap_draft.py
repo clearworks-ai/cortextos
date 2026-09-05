@@ -228,6 +228,7 @@ def process_meetings(
     voice_guidance: str,
     vip_list: set[str],
     runner: Runner = default_runner,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     ledger_ids = load_ledger(ledger_path)
     summary: dict[str, Any] = {
@@ -263,6 +264,11 @@ def process_meetings(
             }
         )
 
+        if dry_run:
+            print(f"subject: {subject}")
+            print(body)
+            continue
+
         if tier == "L2":
             append_ledger(ledger_path, meeting_id)
             summary["auto_filed"] += 1
@@ -292,6 +298,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--ledger", required=True)
     parser.add_argument("--voice", default=str(DEFAULT_VOICE_PATH))
     parser.add_argument("--vip-list", default=str(DEFAULT_VIP_PATH))
+    parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -308,6 +315,7 @@ def main(argv: list[str] | None = None) -> int:
         ledger_path=Path(args.ledger),
         voice_guidance=load_voice_guidance(Path(args.voice)),
         vip_list=load_vip_list(Path(args.vip_list)),
+        dry_run=args.dry_run,
     )
     print(json.dumps(summary))
     return 0

@@ -1,0 +1,34 @@
+{
+  "source_commits": [
+    "52c2f53baf203088d942ef272cc6feca5f9d184c",
+    "60742aaf61a0fc4d34f60a47d5ceb5027a78f599"
+  ],
+  "canonical_router_sha256": "60ae2968821c4600c5b2d34a4225e09fc6a6918728f1b460ee1a9ae69da8f1cf",
+  "canonical_agent_browser_sha256": "ec699a4f41b68fe9c09bc29a88428309d43a15b87f48f98a9fda09e7733f167c",
+  "cua_driver_version": "0.21.0",
+  "restart_strategy": "rolling soft restart; Knox last; stop and diagnose on first failed readback",
+  "restart_performed": true,
+  "summary": {
+    "daemon_enabled": 14,
+    "new_process_healthy": 14,
+    "router_discovery_pass": 14,
+    "native_vs_cdp_pass": 14,
+    "failures": 0
+  },
+  "agents": [
+    {"org":"clearworksai","agent":"maven","runtime":"claude-code","old_pid":5101,"new_pid":23290,"process":"healthy","router":"pass","native_vs_cdp":"pass","verification":"fresh-process bootstrap plus canonical local link/hash","caveat":"Claude weekly quota prevented prose readback"},
+    {"org":"clearworksai","agent":"muse","runtime":"claude-code","old_pid":5808,"new_pid":24081,"process":"healthy","router":"pass","native_vs_cdp":"pass","verification":"fresh-process bootstrap plus canonical local link/hash","caveat":"Claude weekly quota prevented prose readback"},
+    {"org":"clearworksai","agent":"codexer","runtime":"codex-app-server","old_pid":3437,"new_pid":24672,"process":"healthy","router":"pass","native_vs_cdp":"pass","verification":"runtime readback"},
+    {"org":"clearworksai","agent":"frank2-codex","runtime":"codex-app-server","old_pid":62092,"new_pid":43734,"process":"healthy","router":"pass","native_vs_cdp":"pass","verification":"current-process runtime readback after a subsequent session restart"},
+    {"org":"clearworksai","agent":"auditmaster-codex","runtime":"codex-app-server","old_pid":2621,"new_pid":26283,"process":"healthy","router":"pass","native_vs_cdp":"pass","verification":"runtime readback"},
+    {"org":"clearworksai","agent":"pa-codex","runtime":"codex-app-server","old_pid":46408,"new_pid":26708,"process":"healthy","router":"pass","native_vs_cdp":"pass","verification":"runtime readback"},
+    {"org":"clearworksai","agent":"crm-codex","runtime":"codex-app-server","old_pid":3755,"new_pid":27465,"process":"healthy","router":"pass","native_vs_cdp":"pass","verification":"runtime readback"},
+    {"org":"clearworksai","agent":"maven-codex","runtime":"codex-app-server","old_pid":5156,"new_pid":28126,"process":"healthy","router":"pass","native_vs_cdp":"pass","verification":"runtime readback"},
+    {"org":"clearworksai","agent":"sage-codex","runtime":"codex-app-server","old_pid":6633,"new_pid":28613,"process":"healthy","router":"pass","native_vs_cdp":"pass","verification":"runtime readback"},
+    {"org":"clearworksai","agent":"scout-codex","runtime":"codex-app-server","old_pid":7133,"new_pid":29503,"process":"healthy","router":"pass","native_vs_cdp":"pass","verification":"runtime readback"},
+    {"org":"personal","agent":"ophir-codex","runtime":"codex-app-server","old_pid":73182,"new_pid":30470,"process":"healthy","router":"pass","native_vs_cdp":"pass","verification":"runtime readback"},
+    {"org":"clearworksai","agent":"builddifferentprod-codex","runtime":"codex-app-server","old_pid":8127,"new_pid":31079,"process":"healthy","router":"pass","native_vs_cdp":"pass","verification":"exact-path runtime readback after initial Slack-scoped response"},
+    {"org":"clearworksai","agent":"larry-codex","runtime":"codex-app-server","old_pid":45570,"new_pid":55714,"process":"healthy","router":"pass","native_vs_cdp":"pass","verification":"live self-readback"},
+    {"org":"clearworksai","agent":"knox-codex","runtime":"codex-app-server","old_pid":4440,"new_pid":57035,"process":"healthy","router":"pass","native_vs_cdp":"pass","verification":"runtime readback; restarted last"}
+  ]
+}

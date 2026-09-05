@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "canonical_root": "/Users/joshweiss/code/cortextos/state/task-observer-v1/programs/2026-08-24-task-observer-improvement-program",
+  "manifest": {"path":"manifest-v2.json","mode":"0600","bytes":4454,"sha256":"39b3af212f53956c02cd67333ac893d90e42b0836922cb03be9fa86d8a997de2"},
+  "state": "CORRECTION_REVIEW_NOT_PASS",
+  "self_binding": "The packet hash is returned externally; this file does not claim its own digest.",
+  "execution_authority": false
+}

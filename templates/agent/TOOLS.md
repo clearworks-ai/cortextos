@@ -140,12 +140,14 @@ Agent secrets: `orgs/{org}/agents/{agent}/.env`
 
 ## Tools Available in This Session
 
-### agent-browser (Browser Automation — replaces Playwright)
-- `agent-browser` CLI (Rust binary, npm-installed globally) drives Chrome via CDP
-- Snapshot-then-ref interaction pattern: `agent-browser snapshot` returns an a11y tree with refs (e1, e2, ...), then `agent-browser click @e1` / `fill @e2 "text"` operate by ref
-- Loaded via `.claude/skills/agent-browser/SKILL.md` — that skill says to run `agent-browser skills get <name>` for current command syntax (workflow docs are versioned with the binary, so always fetch fresh)
-- Quick verify: `agent-browser open https://example.com && agent-browser get title && agent-browser close`
-- Dashboard E2E tests still use Playwright DIRECTLY (different surface) — agent-browser only replaces the agent-facing browser MCP layer that was previously `mcp__plugin_playwright_*`
+### Computer and browser control
+- Load the fleet router at `$CTX_ROOT/community/skills/computer-browser-control/SKILL.md` before GUI, desktop, or browser work. It covers direct APIs/connectors, runtime-native Chrome/Browser plugins, Codex Computer Use, CuaDriver, and agent-browser.
+- CuaDriver instructions are versioned with the binary: load `~/.cua-driver/skills/cua-driver/SKILL.md` completely, then its required platform and browser references, before using CuaDriver.
+- Route order: API/SDK/CLI/filesystem first; runtime-native computer use (including Codex Computer Use when available); typed CuaDriver; background native accessibility; background native pixels; evidenced/authorized foreground delivery; desktop fallback.
+- Native CuaDriver control is independent of CDP and Chrome remote-debugging. Do not treat a browser-attachment prompt as a blocker for native window, accessibility, or pixel routes.
+- Use CuaDriver `browser_prepare` only when page-aware semantics in an authenticated existing profile are required; the typed operation owns its exact product-specific setup.
+- Use `agent-browser` for isolated, disposable, unauthenticated, testing, or explicitly requested CDP sessions. Load its current commands with `agent-browser skills get agent-browser --full`.
+- Do not create a human dependency until applicable authorized routes have been exhausted and exact terminal evidence is recorded.
 
 ### Peekaboo (macOS Desktop Automation)
 - `peekaboo image` (screenshot), `peekaboo list` (apps), `peekaboo run <script>`

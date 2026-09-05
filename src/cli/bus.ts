@@ -2557,6 +2557,16 @@ busCommand
       },
     );
 
+    if (result.result === 'STORE_QUARANTINED' || result.result === 'INVALID_CONFIG') {
+      console.error(`[kb] ${result.result}: live native query refused hold_mode=${result.hold_mode || '-'}`);
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(`[kb] ${result.result}`);
+      }
+      process.exit(3);
+    }
+
     if (opts.json) {
       console.log(JSON.stringify(result, null, 2));
       return;

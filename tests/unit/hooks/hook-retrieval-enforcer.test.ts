@@ -13,6 +13,7 @@ import {
   buildAdditionalContext,
   buildOutputEnvelope,
   cachePathFor,
+  kbQuery,
   readCache,
   sha256Hex,
 } from '../../../src/hooks/hook-retrieval-enforcer.js';
@@ -381,5 +382,25 @@ describe('hook-retrieval-enforcer', () => {
     // Repo path is its own argv element after -C, never quoted into a shell string.
     expect(logArgs[0]).toBe('-C');
     expect(logArgs[1]).toBe(join(tempHome, 'fleet-repo'));
+  });
+
+  it('kbQuery returns a STORE_QUARANTINED marker instead of empty success', () => {
+    mockExecFileSync.mockImplementation(() => {
+      const err = Object.assign(new Error('Command failed'), {
+        status: 3,
+        stdout: JSON.stringify({
+          result: 'STORE_QUARANTINED',
+          store_health: 'QUARANTINED',
+          hold_mode: 'exclusive',
+          operation: 'query',
+        }),
+        stderr: '[kb] STORE_QUARANTINED',
+      });
+      throw err;
+    });
+
+    expect(kbQuery('what is the recovery factory hold behavior', 'clearworksai')).toBe(
+      '[kb] STORE_QUARANTINED',
+    );
   });
 });

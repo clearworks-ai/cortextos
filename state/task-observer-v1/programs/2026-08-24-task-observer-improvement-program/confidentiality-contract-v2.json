@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "classes": [
+    {"name":"open_source","rank":0},
+    {"name":"internal","rank":1},
+    {"name":"client_confidential","rank":2},
+    {"name":"personal_confidential","rank":3}
+  ],
+  "join_rule": "before rank evaluation, all content-bearing inputs must share origin_org and client_scope; cross-scope copy/join is rejected. Then output rank is max(input ranks); absent/unknown label fails closed into quarantine",
+  "allowed_automatic_transitions": [
+    "open_source->open_source",
+    "internal->internal",
+    "client_confidential->client_confidential",
+    "personal_confidential->personal_confidential",
+    "lower_rank->higher_rank"
+  ],
+  "declassification": {
+    "authority": "Josh explicit decision or a separately approved named policy",
+    "receipt_required": true,
+    "receipt_fields": ["receipt_id","authority_source","authority_event_id","input_artifact_ids","input_hashes","input_classes","transformation","redactions","output_hash","output_class","reviewer","reviewed_at","decision"],
+    "decision_enum": ["approved","rejected","quarantined"]
+  },
+  "transition_validator": {
+    "input_array_member": ["artifact_id","origin_org","client_scope","source_partition","input_hash","input_class"],
+    "request": ["inputs","requested_output_class","requested_output_partition","receipt_id"],
+    "decision_order": ["validate_known_classes","validate_same_origin_org","validate_identical_client_scope_for_content","reject_cross_partition_copy","apply_max_rank_join","reject_implicit_downgrade","verify_receipt_hash_binding","verify_authority_policy_version_and_revocation","scan_output","emit_decision"],
+    "result_enum": ["accepted_same_or_higher","accepted_declassification","quarantined","rejected"],
+    "receipt_authority": "the named reviewer verifies bytes and policy; only Josh or a separately approved named policy may authorize a downgrade",
+    "authority_binding_fields": ["authority_policy_id","authority_policy_version","authority_policy_sha256","authority_revocation_checked_at","authority_revoked"],
+    "retention": "source bytes remain only in the originating partition; receipts retain hashes/classes/decision and no raw client text"
+  },
+  "quarantine": {
+    "on": ["missing_label","unknown_class","missing_receipt","hash_mismatch","mixed_client_scope","forbidden_identifier"],
+    "retention": "retain in the originating org/agent partition until an authorized receipt resolves or explicitly rejects it",
+    "cross_partition_copy": false
+  },
+  "delivery_readiness": {"separate_from_confidentiality":true,"states":["not_evaluated","blocked","ready_for_private_delivery","approved_for_public_delivery"],"public_delivery_requires":["evidence_receipt","voice_receipt","rights_receipt","privacy_receipt","delivery_approval_receipt"]},
+  "public_output_scan_classes": ["open_source","approved_for_public_delivery"],
+  "public_output_forbidden": ["client_or_person_name","account_or_deal_value","raw_excerpt","source_record_id","private_url_or_path","linkable_identifier_combination"]
+}

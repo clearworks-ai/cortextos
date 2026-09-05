@@ -1,0 +1,9 @@
+{
+  "SELF_VALIDATION.md": "f0898576c58dbae0c85c7319bf99b7b41d517e76b5633c5b74b2d5fa7d804f00",
+  "SKILL.md": "d6890c768e7c8fdba9808448f84b52851367bfef0c1e99b7e355d84b81994c3b",
+  "manifest.json": "f0c21f8228f65cca2694078caf1b1c97e10015b6a00a9f8cd9d725ae4ceaac84",
+  "publishing-manifest.json": "f3f728fbce16648cf757a6b67d7ac68311f1ca8d715c69e7691be0483cc44258",
+  "references/credential-access-contract.md": "4db5cbbd078d9acb9bf7b5ec63b43731e90c58e136f7be28e204dd69eacfb3ab",
+  "references/publishing-contract.md": "226ab41ea3da1e6b393df95831cb0c308a30bbefdac734f8ce64e8aef39dabcf",
+  "tests/self-validate.sh": "7ba9843572443420667772bfd197632193880ce8b8eb9f8041927c9395445568"
+}

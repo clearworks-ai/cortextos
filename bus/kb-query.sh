@@ -122,9 +122,18 @@ if [[ -n "$COLLECTION" ]]; then
   # Single collection query (redirect Python warnings to /dev/null)
   run_query "$COLLECTION" 2>/dev/null
 else
-  # "all" scope: query shared + agent-private if agent set
-  run_query "shared-${ORG}" 2>/dev/null || true
+  # "all" scope: query shared + agent-private if agent set.
+  # Exit 3 is the native-hold refusal; do not swallow it as empty success.
+  shared_rc=0
+  run_query "shared-${ORG}" 2>/dev/null || shared_rc=$?
+  if [[ "$shared_rc" -eq 3 ]]; then
+    exit 3
+  fi
   if [[ -n "$AGENT" ]]; then
-    run_query "agent-${AGENT}" 2>/dev/null || true
+    agent_rc=0
+    run_query "agent-${AGENT}" 2>/dev/null || agent_rc=$?
+    if [[ "$agent_rc" -eq 3 ]]; then
+      exit 3
+    fi
   fi
 fi

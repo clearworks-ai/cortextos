@@ -62,7 +62,8 @@ export interface PtyHostReaperOptions {
   /** Minimum ledger-entry age before it can be reaped. Default 10 minutes. */
   graceMs?: number;
   /** Host pids currently owned by a live registry entry (agents + workers).
-   * When provided, tier 3 (registry-unowned) reaping is enabled. */
+   * This is diagnostic only: registry ownership is a single-current-host view
+   * and is not sufficient proof that a PTY client-tracked host is orphaned. */
   getOwnedHostPids?: () => ReadonlySet<number>;
   /** Injectable process table (tests). Default: `ps -axo pid=,ppid=,command=`. */
   psList?: () => PsEntry[];
@@ -116,8 +117,8 @@ export class PtyHostReaper {
 
   private initialTimer: NodeJS.Timeout | null = null;
   private timer: NodeJS.Timeout | null = null;
-  /** Tier-3 two-sweep persistence: host pids flagged registry-unowned last sweep. */
-  private pendingRegistryOrphans = new Set<number>();
+  /** Registry-unowned hosts already reported while they remain live/tracked. */
+  private reportedRegistryUnowned = new Set<number>();
 
   constructor(ctxRoot: string, opts: PtyHostReaperOptions = {}) {
     this.ledgerPath = ledgerPathFor(ctxRoot);
@@ -172,7 +173,7 @@ export class PtyHostReaper {
   private sweepLedger(): void {
     const entries = readPtyHostLedger(this.ledgerPath);
     if (entries.length === 0) {
-      this.pendingRegistryOrphans.clear();
+      this.reportedRegistryUnowned.clear();
       return;
     }
     const ps = this.psList();
@@ -182,7 +183,7 @@ export class PtyHostReaper {
     const live = this.getLiveHosts();
     const owned = this.getOwnedHostPids ? this.getOwnedHostPids() : null;
     const now = Date.now();
-    const nextPending = new Set<number>();
+    const nextReported = new Set<number>();
 
     for (const entry of entries) {
       const hostPs = byPid.get(entry.hostPid);
@@ -218,14 +219,18 @@ export class PtyHostReaper {
         reap = true;
         tier = hostAlive ? 'untracked-host' : 'surviving-pty-child';
       } else if (owned !== null && !owned.has(entry.hostPid)) {
-        // Tier 3: tracked by the client but no live registry entry owns it
-        // (RW-3 delete-without-kill / RW-5 wedged spawn). Require the
-        // condition to persist across two sweeps before killing.
-        if (this.pendingRegistryOrphans.has(entry.hostPid)) {
-          reap = true;
-          tier = 'registry-unowned';
-        } else {
-          nextPending.add(entry.hostPid);
+        // Registry ownership only exposes the single current host pointer for
+        // each AgentProcess. During replacement/lifecycle overlap, an older
+        // host can remain live and client-tracked while legitimately absent
+        // from that set. Absence is therefore not proof of orphanhood and
+        // must never be a destructive condition. Tier 2 remains the safe
+        // cleanup gate once the PTY client itself stops tracking the host.
+        nextReported.add(entry.hostPid);
+        if (!this.reportedRegistryUnowned.has(entry.hostPid)) {
+          this.log(
+            `preserving registry-unowned live pty-host ${entry.hostPid} ` +
+            `(agent=${entry.agent || '?'}, file=${entry.file})`,
+          );
         }
       }
 
@@ -240,7 +245,7 @@ export class PtyHostReaper {
       removePtyHost(this.ledgerPath, entry.hostPid);
     }
 
-    this.pendingRegistryOrphans = nextPending;
+    this.reportedRegistryUnowned = nextReported;
   }
 
   /**

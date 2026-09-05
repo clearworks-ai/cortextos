@@ -1,0 +1,27 @@
+{
+  "schema_version": "task-observer-weekly-review-v1",
+  "date": "2026-08-24",
+  "mode": "scheduled_autonomous",
+  "status": "staged_only_not_installed",
+  "source_bundle": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+  "staged_bundle": "/Users/joshweiss/code/cortextos/state/task-observer-v1/skill-updates/2026-08-24/task-observer",
+  "changed_files": ["references/cortextos-fleet.md"],
+  "actioned_observations": [
+    "clearworksai/codexer#1",
+    "clearworksai/larry-codex#13",
+    "clearworksai/auditmaster-codex#1"
+  ],
+  "action_summary": "Separate verified bundle discovery from mutable state-root persistence and fail closed when either namespace is unverified.",
+  "partition_counts": {
+    "personal/ophir-codex": 8,
+    "clearworksai/codexer": 6,
+    "clearworksai/maven-codex": 1,
+    "clearworksai/larry-codex": 21,
+    "clearworksai/auditmaster-codex": 2,
+    "clearworksai/knox-codex": 1
+  },
+  "total_observations_reviewed": 39,
+  "confidentiality": "Partitions were evaluated independently; client contexts were not merged into a shared review corpus.",
+  "live_skill_modified": false,
+  "installation_authorized": false
+}

@@ -34,6 +34,7 @@ from crm_connect_common import (
     contacts_index,
     load_jsonl as read_jsonl_rows,
 )
+from deal_identity import ensure_record_ids, set_values
 
 
 LOGGER = logging.getLogger(__name__)
@@ -95,7 +96,8 @@ def build_engagement(
     primary_contact = str(intent["primary_contact"]).strip()
     stage = str(intent["stage"]).strip()
     company = canonical_company_name(intent["company"], aliases)
-    value_total = coerce_positive_value(intent.get("value"))
+    value_total = coerce_positive_value(intent.get("value_total", intent.get("value")))
+    value_monthly = coerce_positive_value(intent.get("value_monthly"))
 
     engagement: dict[str, Any] = {
         "billing": None,
@@ -112,9 +114,11 @@ def build_engagement(
         "stage": stage,
         "stage_changed_at": timestamp,
         "status": status_for_stage(stage),
+        "record_id": f"clearpath:engagement:{clearpath_id}",
         "value_monthly": None,
-        "value_total": value_total,
+        "value_total": None,
     }
+    set_values(engagement, value_total=value_total, value_monthly=value_monthly)
     return engagement
 
 
@@ -144,6 +148,7 @@ def reconcile_intake(
     engagements = pipeline_payload.get("engagements", [])
     if not isinstance(engagements, list):
         raise ValueError("pipeline.json missing engagements list")
+    ensure_record_ids(engagements)
 
     known_intents = existing_intent_keys(engagements, aliases, contact_index)
     next_id = next_clearpath_id(engagements)
@@ -228,8 +233,9 @@ def reconcile_intake(
             )
             continue
 
-        parsed_value = coerce_positive_value(intent.get("value"))
-        if stage_name in QUALIFIED_OR_BEYOND and parsed_value is None:
+        parsed_value_total = coerce_positive_value(intent.get("value_total", intent.get("value")))
+        parsed_value_monthly = coerce_positive_value(intent.get("value_monthly"))
+        if stage_name in QUALIFIED_OR_BEYOND and parsed_value_total is None and parsed_value_monthly is None:
             rejected_intents.append(
                 rejected_record(
                     intent,
@@ -247,7 +253,8 @@ def reconcile_intake(
                 **intent,
                 "intake_id": str(intake_id).strip(),
                 "stage": stage_name,
-                "value": parsed_value,
+                "value_total": parsed_value_total,
+                "value_monthly": parsed_value_monthly,
             },
             clearpath_id=next_id,
             aliases=aliases,

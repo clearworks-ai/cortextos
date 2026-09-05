@@ -18,6 +18,7 @@ import { join } from 'path';
 
 const CLAUDE_SKILLS = join(__dirname, '..', '..', '..', 'templates', 'agent', '.claude', 'skills');
 const TEMPLATE_ROOT = join(__dirname, '..', '..', '..', 'templates');
+const COMMUNITY_SKILLS = join(__dirname, '..', '..', '..', 'community', 'skills');
 const CODEX_SKILLS = join(
   __dirname,
   '..',
@@ -38,6 +39,17 @@ function listSkillDirs(root: string): string[] {
 }
 
 describe('agent template skill-tree parity', () => {
+  it('ships one canonical fleet computer/browser control router', () => {
+    const router = readFileSync(join(COMMUNITY_SKILLS, 'computer-browser-control', 'SKILL.md'), 'utf-8');
+
+    expect(router).toContain('Runtime-native browser route');
+    expect(router).toContain('Codex Computer Use');
+    expect(router).toContain('CuaDriver native control');
+    expect(router).toContain('agent-browser');
+    expect(router).toContain('A failure in one route is evidence about that route only');
+    expect(router).toContain('attempt every applicable authorized route');
+  });
+
   it('codex template ships every skill that the claude template ships', () => {
     const claudeSkills = listSkillDirs(CLAUDE_SKILLS);
     const codexSkills = listSkillDirs(CODEX_SKILLS);
@@ -72,4 +84,35 @@ describe('agent template skill-tree parity', () => {
     expect(agentsMd).toContain('## Current Tasks');
     expect(agentsMd).toContain('## Files Modified This Session');
   });
+
+  it.each([
+    ['claude agent', join(TEMPLATE_ROOT, 'agent', '.claude', 'skills', 'agent-browser', 'SKILL.md')],
+    ['claude analyst', join(TEMPLATE_ROOT, 'analyst', '.claude', 'skills', 'agent-browser', 'SKILL.md')],
+    ['claude orchestrator', join(TEMPLATE_ROOT, 'orchestrator', '.claude', 'skills', 'agent-browser', 'SKILL.md')],
+    ['codex agent', join(TEMPLATE_ROOT, 'agent-codex', 'plugins', 'cortextos-agent-skills', 'skills', 'agent-browser', 'SKILL.md')],
+    ['opencode agent', join(TEMPLATE_ROOT, 'agent-opencode', 'plugins', 'cortextos-agent-skills', 'skills', 'agent-browser', 'SKILL.md')],
+  ])('%s browser skill enforces the fleet control hierarchy', (_runtime, skillPath) => {
+    const skill = readFileSync(skillPath, 'utf-8');
+
+    expect(skill).toContain('Fleet route hierarchy — mandatory preflight');
+    expect(skill).toContain('$CTX_ROOT/community/skills/computer-browser-control/SKILL.md');
+    expect(skill).toContain('Computer control is not synonymous with Chrome remote-debugging attachment');
+    expect(skill).toContain('Runtime-native computer use (including Codex Computer Use when available)');
+    expect(skill).toContain('Native CuaDriver window, accessibility, and pixel control does **not** require CDP');
+    expect(skill).toContain('Never create a human dependency until the applicable authorized routes above have been attempted');
+  });
+
+  it.each(['agent', 'analyst', 'agent-codex', 'agent-opencode'])(
+    '%s TOOLS.md points to the versioned CuaDriver policy',
+    (templateDir) => {
+      const tools = readFileSync(join(TEMPLATE_ROOT, templateDir, 'TOOLS.md'), 'utf-8');
+
+      expect(tools).toContain('### Computer and browser control');
+      expect(tools).toContain('$CTX_ROOT/community/skills/computer-browser-control/SKILL.md');
+      expect(tools).toContain('~/.cua-driver/skills/cua-driver/SKILL.md');
+      expect(tools).toContain('Codex Computer Use when available');
+      expect(tools).toContain('Native CuaDriver control is independent of CDP');
+      expect(tools).toContain('Do not create a human dependency until applicable authorized routes have been exhausted');
+    },
+  );
 });

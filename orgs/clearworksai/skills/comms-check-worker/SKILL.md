@@ -23,7 +23,7 @@ cortextos bus update-task "$TASK_ID" in_progress 2>/dev/null
 ## Step 2 — Fetch and deterministically filter
 
 ```bash
-gws gmail +triage --query 'is:unread newer_than:5h -category:promotions -category:social -from:notify.railway.app -from:notifications@github.com -from:noreply -from:no-reply -from:donotreply -from:do-not-reply -from:mailer-daemon -subject:"Accepted:" -subject:"Declined:" -subject:"Tentative:" -subject:"out of office" -subject:"auto-reply"' --format json > /tmp/josh-inbox-raw.json
+/Users/joshweiss/.local/bin/gws gmail +triage --query 'is:unread newer_than:5h -category:promotions -category:social -from:notify.railway.app -from:notifications@github.com -from:noreply -from:no-reply -from:donotreply -from:do-not-reply -from:mailer-daemon -subject:"Accepted:" -subject:"Declined:" -subject:"Tentative:" -subject:"out of office" -subject:"auto-reply"' --format json > /tmp/josh-inbox-raw.json
 cat /tmp/josh-inbox-raw.json | cortextos bus comms-filter --namespace gmail > /tmp/josh-inbox-firstseen.json
 cat /tmp/josh-inbox-firstseen.json
 ```

@@ -109,6 +109,40 @@ export interface KBQueryResponse {
   total: number;
   query: string;
   collection: string;
+  result?: string;
+  store_health?: string;
+  hold_mode?: string;
+}
+
+const HOLD_RESULTS = new Set(['STORE_QUARANTINED', 'INVALID_CONFIG']);
+
+interface NativeHoldPayload {
+  result: string;
+  store_health?: string;
+  hold_mode?: string;
+  operation?: string;
+}
+
+function parseHoldPayload(text: string | null | undefined): NativeHoldPayload | null {
+  if (!text) return null;
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    const jsonStart = trimmed.indexOf('{');
+    if (jsonStart === -1) continue;
+    try {
+      const parsed = JSON.parse(trimmed.slice(jsonStart)) as NativeHoldPayload;
+      if (parsed && HOLD_RESULTS.has(parsed.result)) return parsed;
+    } catch {
+      // Keep scanning; mmrag may print a human line after the JSON payload.
+    }
+  }
+  return null;
+}
+
+function holdFromExecError(err: unknown): NativeHoldPayload | null {
+  if (!err || typeof err !== 'object') return null;
+  const execErr = err as { stdout?: string; stderr?: string; message?: string };
+  return parseHoldPayload(`${execErr.stdout || ''}\n${execErr.stderr || ''}\n${execErr.message || ''}`);
 }
 
 interface MmragQueryJson {
@@ -175,12 +209,24 @@ export function queryKnowledgeBase(
 
   const runMmrag = (args: string[]): string | null => {
     try {
-      return execFileSync(pythonPath, [mmragPath, ...args], {
+      const output = execFileSync(pythonPath, [mmragPath, ...args], {
         encoding: 'utf-8',
         timeout: 30000,
         env,
       });
-    } catch {
+      const hold = parseHoldPayload(output);
+      if (hold) {
+        throw Object.assign(new Error(hold.result), { holdPayload: hold });
+      }
+      return output;
+    } catch (err) {
+      if (err && typeof err === 'object' && 'holdPayload' in err) {
+        throw err;
+      }
+      const hold = holdFromExecError(err);
+      if (hold) {
+        throw Object.assign(new Error(hold.result), { holdPayload: hold });
+      }
       return null;
     }
   };
@@ -260,8 +306,26 @@ export function queryKnowledgeBase(
         collection: collections.length === 1 ? lastCollection : `shared-${org}`,
       };
     }
-  } catch {
-    // Failed — return empty
+  } catch (err) {
+    const hold = (
+      err && typeof err === 'object' && 'holdPayload' in err
+        ? (err as { holdPayload: NativeHoldPayload }).holdPayload
+        : holdFromExecError(err)
+    );
+    if (hold) {
+      console.warn(
+        `[kb] ${hold.result}: live native query refused hold_mode=${hold.hold_mode || '-'}`,
+      );
+      return {
+        results: [],
+        total: 0,
+        query: question,
+        collection: `shared-${org}`,
+        result: hold.result,
+        store_health: hold.store_health || 'QUARANTINED',
+        hold_mode: hold.hold_mode,
+      };
+    }
   }
 
   const hasHealthyStore = collections.some((col) => {
@@ -355,12 +419,22 @@ export function ingestKnowledgeBase(
       : KB_INGEST_TIMEOUT_DEFAULT_MS,
   );
 
-  execFileSync(pythonPath, args, {
-    encoding: 'utf-8',
-    timeout: ingestTimeoutMs,
-    env,
-    stdio: 'inherit',
-  });
+  try {
+    execFileSync(pythonPath, args, {
+      encoding: 'utf-8',
+      timeout: ingestTimeoutMs,
+      env,
+      stdio: 'inherit',
+    });
+  } catch (err) {
+    const hold = holdFromExecError(err);
+    if (hold) {
+      throw new Error(
+        `${hold.result}: live native ingest refused (hold_mode=${hold.hold_mode || '-'})`,
+      );
+    }
+    throw err;
+  }
 
   console.log(`\nIngest complete → collection: ${collection}`);
 }

@@ -62,6 +62,24 @@ async function waitForChildExit(child: ChildProcess, ms: number): Promise<boolea
   });
 }
 
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForPidExit(pid: number, ms: number): Promise<boolean> {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (!isPidAlive(pid)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return !isPidAlive(pid);
+}
+
 describe('RW-5: hostSpawn never wedges', () => {
   it('rejects when the host child exits before pty-ready', async () => {
     stubTarget = DEAD_STUB;
@@ -103,4 +121,54 @@ describe('RW-5: hostSpawn never wedges', () => {
     expect(exitCode).toBe(1);
     expect(errors.some((m) => m.type === 'pty-error' && /no pty-spawn received/.test(m.message ?? ''))).toBe(true);
   });
+
+  it.skipIf(process.platform === 'win32' || !existsSync(DIST_HOST_ENTRY))(
+    'parent disconnect reaps a PTY child that ignores graceful signals before the host exits',
+    async () => {
+      const real = await vi.importActual<typeof import('child_process')>('child_process');
+      const child = (real.fork as typeof fork)(DIST_HOST_ENTRY, [], {
+        silent: true,
+        execArgv: [],
+        env: { ...process.env, CTX_PTY_DISPOSE_SELF_EXIT_MS: '300' },
+      });
+
+      let ptyPid = 0;
+      child.on('message', (message) => {
+        if (message && typeof message === 'object' && (message as { type?: string }).type === 'pty-ready') {
+          ptyPid = Number((message as { pid?: number }).pid ?? 0);
+        }
+      });
+      child.send({
+        type: 'pty-spawn',
+        file: '/bin/sh',
+        args: ['-c', "trap '' HUP TERM; while :; do sleep 1; done"],
+        options: {
+          name: 'xterm-256color',
+          cols: 80,
+          rows: 24,
+          cwd: '/tmp',
+          env: { ...process.env },
+        },
+      });
+
+      const readyDeadline = Date.now() + 5000;
+      while (!ptyPid && Date.now() < readyDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(ptyPid).toBeGreaterThan(0);
+
+      try {
+        child.disconnect();
+        expect(await waitForChildExit(child, 5000)).toBe(true);
+        expect(await waitForPidExit(ptyPid, 2000)).toBe(true);
+      } finally {
+        if (isPidAlive(ptyPid)) {
+          try { process.kill(-ptyPid, 'SIGKILL'); } catch { /* already gone */ }
+          try { process.kill(ptyPid, 'SIGKILL'); } catch { /* already gone */ }
+        }
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      }
+    },
+    10_000,
+  );
 });

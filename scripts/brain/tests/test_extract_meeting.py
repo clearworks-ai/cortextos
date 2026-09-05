@@ -86,7 +86,7 @@ def test_missing_extraction_calls_claude(tmp_path: Path, monkeypatch: pytest.Mon
     rc = main(["--source", str(src)])
     assert rc == 0
     assert len(calls) == 1
-    assert calls[0][0][:3] == ["claude", "-p", "--bare"]
+    assert calls[0][0][:4] == ["claude", "-p", "--setting-sources", ""]
     assert "--disallowedTools" in calls[0][0]
     out = json.loads((src / "extraction.json").read_text(encoding="utf-8"))
     assert out["schema"] == "brain.extraction/1"

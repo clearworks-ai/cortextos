@@ -219,10 +219,12 @@ def main(argv: list[str] | None = None) -> int:
         return 3
 
     prompt = _build_prompt(source)
+    # --bare never reads keychain OAuth (needs ANTHROPIC_API_KEY, which spec G-29 says does not exist); --setting-sources "" skips user/project/local settings (hooks, plugins, CLAUDE.md) while keeping keychain auth.
     cmd = [
         "claude",
         "-p",
-        "--bare",
+        "--setting-sources",
+        "",
         "--disallowedTools",
         "*",
         "--model",

@@ -1314,6 +1314,7 @@ def promote_side_store(
     independent_review_pass=False,
     human_l0=False,
     hold_active=False,
+    side_dirname=SIDE_WORK_DIRNAME,
 ):
     """Journaled S/L/R rename. Refuses without conservation, gold, and review."""
     if not (conservation_pass and gold_pass and independent_review_pass and human_l0 and hold_active):
@@ -1323,7 +1324,7 @@ def promote_side_store(
     kb = Path(kb_root).expanduser().resolve()
     assert_not_live_epoch(kb)
     live = kb / "chromadb"
-    side = kb / SIDE_WORK_DIRNAME / "chromadb"
+    side = kb / side_dirname / "chromadb"
     rollback = kb / "chromadb.rollback"
     config_path = kb / "config.json"
     if not live.is_dir() or not side.is_dir():
@@ -1347,6 +1348,7 @@ def promote_side_store(
     )
     receipt = {
         "result": "PROMOTE_OK",
+        "side_dirname": side_dirname,
         "live": str(live),
         "rollback": str(rollback),
         "prior_default_collection": prior_cfg.get("default_collection"),

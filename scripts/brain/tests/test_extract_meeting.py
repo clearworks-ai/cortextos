@@ -60,8 +60,24 @@ def _write_source(dir_path: Path) -> bytes:
     return raw
 
 
-def _claude_json(result_obj: dict, subtype: str = "success") -> str:
-    return json.dumps({"type": "result", "subtype": subtype, "result": json.dumps(result_obj)})
+def _claude_json(
+    result_obj: dict,
+    subtype: str = "success",
+    total_cost_usd: float = 0.0851578,
+    include_model_usage: bool = True,
+) -> str:
+    wrapper: dict = {
+        "type": "result",
+        "subtype": subtype,
+        "result": json.dumps(result_obj),
+        "total_cost_usd": total_cost_usd,
+        "usage": {"input_tokens": 2, "output_tokens": 4},
+    }
+    if include_model_usage:
+        wrapper["modelUsage"] = {
+            "claude-sonnet-5": {"inputTokens": 2, "outputTokens": 4, "costUSD": total_cost_usd}
+        }
+    return json.dumps(wrapper)
 
 
 def test_missing_extraction_calls_claude(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -92,6 +108,30 @@ def test_missing_extraction_calls_claude(tmp_path: Path, monkeypatch: pytest.Mon
     assert out["schema"] == "brain.extraction/1"
     sha = hashlib.sha256((src / "source.json").read_bytes()).hexdigest()
     assert out["inputSha"] == sha
+    assert out["cost_usd"] == 0.0851578
+    assert out["model_receipt"] == "claude-sonnet-5"
+    assert out["usage"] == {"input_tokens": 2, "output_tokens": 4}
+
+
+def test_missing_model_usage_receipt_unverified(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from extract_meeting import main
+
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(src)
+
+    class Proc:
+        def __init__(self) -> None:
+            self.returncode = 0
+            self.stdout = _claude_json(_model_obj(), include_model_usage=False)
+            self.stderr = ""
+
+    monkeypatch.setattr("subprocess.run", lambda *_a, **_k: Proc())
+    rc = main(["--source", str(src)])
+    assert rc == 0
+    out = json.loads((src / "extraction.json").read_text(encoding="utf-8"))
+    assert out["model_receipt"] == "unverified"
+    assert out["cost_usd"] == 0.0851578
 
 
 def test_matching_input_sha_skips_claude(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -132,6 +172,8 @@ def test_unknown_key_and_unknown_enum_exit_3(tmp_path: Path, monkeypatch: pytest
             "model": "sonnet",
             "cost_usd": 0,
             "extracted_at": "t",
+            "model_receipt": "claude-sonnet-5",
+            "usage": {},
         }
     )
     validate_extraction(good)

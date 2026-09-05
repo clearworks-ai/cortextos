@@ -61,6 +61,9 @@ REQUIRED_ROOT = {
 }
 # envelope fields added after the model returns
 STAMP_KEYS = {"inputSha", "promptSha", "model", "cost_usd", "extracted_at"}
+# envelope fields added after the model returns, but optional for backward
+# compat with extraction.json files written before these existed
+OPTIONAL_STAMP_KEYS = {"model_receipt", "usage"}
 
 
 def _sha256_bytes(data: bytes) -> str:
@@ -80,7 +83,7 @@ def _forbid_unknown_string(value: Any, where: str) -> None:
 def validate_extraction(obj: dict[str, Any], *, stamped: bool = True) -> None:
     if not isinstance(obj, dict):
         raise ValueError("extraction is not an object")
-    allowed = REQUIRED_ROOT | STAMP_KEYS
+    allowed = REQUIRED_ROOT | STAMP_KEYS | OPTIONAL_STAMP_KEYS
     extra = set(obj) - allowed
     if extra:
         raise ValueError(f"unknown keys: {sorted(extra)}")
@@ -134,7 +137,8 @@ def _strip_fence(text: str) -> str:
     return t.strip()
 
 
-def _parse_claude_stdout(stdout: str) -> dict[str, Any]:
+def _parse_claude_stdout(stdout: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Returns (model_result, wrapper) — wrapper carries claude's own cost/usage receipt."""
     wrapper = json.loads(stdout)
     if not isinstance(wrapper, dict):
         raise ValueError("claude stdout not an object")
@@ -144,13 +148,13 @@ def _parse_claude_stdout(stdout: str) -> dict[str, Any]:
         raise ValueError(f"subtype={wrapper.get('subtype')}")
     result = wrapper.get("result")
     if isinstance(result, dict):
-        return result
+        return result, wrapper
     if not isinstance(result, str):
         raise ValueError("result is not JSON")
     parsed = json.loads(_strip_fence(result))
     if not isinstance(parsed, dict):
         raise ValueError("result JSON is not an object")
-    return parsed
+    return parsed, wrapper
 
 
 def _claude_failure_reason(proc: subprocess.CompletedProcess[str]) -> str:
@@ -251,18 +255,21 @@ def main(argv: list[str] | None = None) -> int:
         print(_claude_failure_reason(proc), file=sys.stderr)
         return 3
     try:
-        model_obj = _parse_claude_stdout(proc.stdout)
+        model_obj, wrapper = _parse_claude_stdout(proc.stdout)
         validate_extraction(model_obj, stamped=False)
     except (ValueError, json.JSONDecodeError) as exc:
         print(str(exc), file=sys.stderr)
         return 3
 
+    model_usage = wrapper.get("modelUsage") or {}
     stamped = dict(model_obj)
     stamped["schema"] = "brain.extraction/1"
     stamped["inputSha"] = input_sha
     stamped["promptSha"] = p_sha
     stamped["model"] = "sonnet"
-    stamped["cost_usd"] = float(model_obj.get("cost_usd") or 0)
+    stamped["cost_usd"] = float(wrapper.get("total_cost_usd") or 0)
+    stamped["model_receipt"] = ",".join(sorted(model_usage.keys())) or "unverified"
+    stamped["usage"] = wrapper.get("usage") or {}
     stamped["extracted_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         validate_extraction(stamped, stamped=True)
@@ -270,6 +277,7 @@ def main(argv: list[str] | None = None) -> int:
         print(str(exc), file=sys.stderr)
         return 3
     atomic_write(extraction_path, json.dumps(stamped, sort_keys=True, indent=2).encode() + b"\n")
+    print(f"extract cost_usd={stamped['cost_usd']} model_receipt={stamped['model_receipt']}")
     return 0
 
 

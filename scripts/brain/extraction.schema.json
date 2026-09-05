@@ -25,6 +25,8 @@
     "model": { "type": "string" },
     "cost_usd": { "type": "number" },
     "extracted_at": { "type": "string" },
+    "model_receipt": { "type": "string" },
+    "usage": { "type": "object" },
     "classification": {
       "type": "object",
       "additionalProperties": false,

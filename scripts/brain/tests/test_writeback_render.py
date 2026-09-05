@@ -145,11 +145,57 @@ def test_resolution_without_flags_refuses(tmp_path: Path) -> None:
     assert rc == 64
 
 
+def test_created_org_template_fills_name_and_provenance() -> None:
+    from writeback_render import render_created_page
+
+    tmpl = """# <Name>
+
+kind:
+relationship:
+created_from:
+confidence:
+domains:
+emails:
+"""
+    meeting = _payload(
+        home_path="orgs/newco-fixture.md",
+        node="none",
+        created={"kind": "org", "slug": "newco-fixture", "relationship": "prospect"},
+    )["meetings"][0]
+    meeting["resolution"]["confidence"] = 0.8
+    page = render_created_page(tmpl, meeting)
+    assert page.startswith("# Newco Fixture")
+    assert "kind: org" in page
+    assert "relationship: prospect" in page
+    assert "created_from: fireflies:01M1MW2GAZ1DQ0C6PG3KJ557JA" in page
+    assert "confidence: 0.8" in page
+
+
+def test_promotion_updates_delivery_state_line() -> None:
+    from writeback_render import render_page
+
+    meeting = _payload()["meetings"][0]
+    meeting["promotion"] = {"state": "delivered", "quote": "hello tacticals"}
+    old = """# Client: Alloi — Tactical Reports
+
+## Node
+id: alloi-03
+delivery_state: active
+
+## History (dated, newest first)
+
+- old
+"""
+    new = render_page(old, meeting)
+    assert "delivery_state: delivered" in new
+    assert "delivery_state: active" not in new
+
+
 def test_created_page_diff_when_resolution_created(tmp_path: Path) -> None:
     from writeback_render import render_created_page, render_meeting_note
 
     tmpl = "# Client: Alloi — <title>\n\n## Node\nid: <client>-<nn>\n"
-    meeting = _payload(created={"kind": "project", "slug": "alloi-04"})["meetings"][0]
+    meeting = _payload(created={"kind": "org", "slug": "alloi-04"})["meetings"][0]
     page = render_created_page(tmpl, meeting)
     note = render_meeting_note(meeting)
     assert "alloi-04" in page or "Tactical" in page

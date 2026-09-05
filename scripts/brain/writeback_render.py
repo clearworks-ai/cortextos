@@ -90,6 +90,15 @@ def render_page(old_text: str, meeting: dict[str, Any]) -> str:
     marker = f"[source: fireflies:{mid}]" if mid else ""
     if marker and marker in old_text:
         return old_text if old_text.endswith("\n") or old_text == "" else old_text + "\n"
+    promo = meeting.get("promotion")
+    if isinstance(promo, dict) and promo.get("state"):
+        state = str(promo.get("state"))
+        old_text = re.sub(
+            r"(?m)^delivery_state:\s*.*$",
+            f"delivery_state: {state}",
+            old_text,
+            count=1,
+        )
     preamble, sections = _split_sections(old_text)
     hist = _history_block(meeting)
     rows = _open_item_rows(meeting)
@@ -163,17 +172,28 @@ def render_created_page(template_text: str, meeting: dict[str, Any]) -> str:
     res = meeting.get("resolution") or {}
     created = res.get("created") if isinstance(res, dict) else None
     slug = ""
-    kind = "project"
+    kind = "org"
+    relationship = ""
     if isinstance(created, dict):
         slug = str(created.get("slug") or "")
-        kind = str(created.get("kind") or "project")
+        kind = str(created.get("kind") or "org")
+        relationship = str(created.get("relationship") or "")
     elif isinstance(created, str) and ":" in created:
         kind, slug = created.split(":", 1)
     title = str(meeting.get("title") or slug or "Untitled")
+    name = slug.replace("-", " ").title() or title
+    mid = str(meeting.get("id") or "")
+    conf = res.get("confidence") if isinstance(res, dict) else None
     text = template_text
+    text = text.replace("<Name>", name)
     text = text.replace("<title>", title)
     text = text.replace("<client>-<nn>", slug or "<client>-<nn>")
     text = text.replace("engagement|project", kind)
+    text = re.sub(r"^kind:\s*$", f"kind: {kind}", text, flags=re.M)
+    text = re.sub(r"^relationship:\s*$", f"relationship: {relationship}", text, flags=re.M)
+    text = re.sub(r"^created_from:\s*$", f"created_from: fireflies:{mid}", text, flags=re.M)
+    if conf is not None:
+        text = re.sub(r"^confidence:\s*$", f"confidence: {conf}", text, flags=re.M)
     if slug and slug not in text:
         text = text + f"\nid: {slug}\n"
     return text
@@ -242,7 +262,7 @@ def planned_files(org_root: Path, meeting: dict[str, Any]) -> list[tuple[Path, s
     created = res.get("created")
     if created:
         kind = created.get("kind") if isinstance(created, dict) else str(created).split(":")[0]
-        tmpl_name = "orgs/_template.md" if kind in ("org", "person") else "projects/_template.md"
+        tmpl_name = "orgs/_template.md"
         tmpl_path = brain / tmpl_name
         tmpl = tmpl_path.read_text(encoding="utf-8") if tmpl_path.exists() else "# <Name>\n"
         seed = render_created_page(tmpl, meeting)

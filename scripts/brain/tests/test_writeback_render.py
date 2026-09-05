@@ -155,3 +155,26 @@ def test_created_page_diff_when_resolution_created(tmp_path: Path) -> None:
     assert "alloi-04" in page or "Tactical" in page
     assert "meeting_id" in note
     assert "01M1MW2G" in note
+
+
+def test_created_person_plans_orgs_home_once(tmp_path: Path) -> None:
+    from writeback_render import planned_files
+
+    org = tmp_path / "org"
+    brain = org / "raw/areas/clearworks/org-brain"
+    (brain / "orgs").mkdir(parents=True)
+    (brain / "orgs" / "_template.md").write_text(
+        "# <Name>\n\n## History (dated, newest first)\n\n",
+        encoding="utf-8",
+    )
+    meeting = _payload(
+        home_path="orgs/jane.md",
+        node="none",
+        created={"kind": "person", "slug": "jane", "relationship": "person"},
+    )["meetings"][0]
+    files = planned_files(org, meeting)
+    rels = [str(path.relative_to(brain)) for path, _, _ in files]
+    assert rels.count("orgs/jane.md") == 1
+    assert not any(rel.startswith("projects/") for rel in rels)
+    assert any(rel.startswith("meetings/") for rel in rels)
+    assert len(files) == 2

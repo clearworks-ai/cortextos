@@ -153,6 +153,11 @@ def _load_json(path: Path, default: Any) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def quote_grounded(quote: str, blob: str) -> bool:
+    n = normalize_quote(quote)
+    return bool(n) and n in blob
+
+
 def quote_gate(extraction: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
     blob = normalize_quote(
         " ".join(str(u.get("text") or "") for u in (source.get("text_units") or []) if isinstance(u, dict))
@@ -160,19 +165,27 @@ def quote_gate(extraction: dict[str, Any], source: dict[str, Any]) -> dict[str, 
     dropped = {"decisions": 0, "commitments": 0, "promotion": False, "promotion_reason": None}
     decisions = []
     for item in extraction.get("decisions") or []:
-        if isinstance(item, dict) and normalize_quote(str(item.get("quote") or "")) in blob:
+        if isinstance(item, dict) and quote_grounded(str(item.get("quote") or ""), blob):
             decisions.append(item)
         else:
             dropped["decisions"] += 1
     commitments = []
     for item in extraction.get("commitments") or []:
-        if isinstance(item, dict) and normalize_quote(str(item.get("quote") or "")) in blob:
+        if isinstance(item, dict) and quote_grounded(str(item.get("quote") or ""), blob):
             commitments.append(item)
         else:
             dropped["commitments"] += 1
+    pds = extraction.get("proposed_delivery_state")
+    if pds is not None:
+        q = str(pds.get("quote") or "") if isinstance(pds, dict) else ""
+        if not quote_grounded(q, blob):
+            dropped["promotion"] = True
+            dropped["promotion_reason"] = "ungrounded"
+            pds = None
     validated = dict(extraction)
     validated["decisions"] = decisions
     validated["commitments"] = commitments
+    validated["proposed_delivery_state"] = pds
     validated["dropped"] = dropped
     return validated
 
@@ -267,12 +280,35 @@ def resolve(source: dict[str, Any], closed: dict[str, Any], repo_root: Path) -> 
         if client in client_cands or no_ext:
             return _hit(node, nid, rule=2, clients=clients, client_cands=client_cands, corroborated=True)
     # (3) candidate client from non-free-mail domain
-    if len(client_cands) == 1:
-        slug = next(iter(client_cands))
-        return _client_hit(slug, nodes, clients, rule=3)
-    if len(client_cands) > 1:
-        print("unresolved-ambiguous", file=sys.stderr)
-        raise SystemExit(5)
+    if client_cands:
+        counts: dict[str, int] = {}
+        for p in externals:
+            email = str(p.get("email") or "")
+            if "@" not in email:
+                continue
+            domain = email.split("@", 1)[1].lower()
+            if domain in FREE_MAIL:
+                continue
+            lab = registrable_label(domain)
+            slug = domain_to_slug.get(lab) or domain_to_slug.get(domain) or (lab if lab in clients else "")
+            if slug in client_cands:
+                counts[slug] = counts.get(slug, 0) + 1
+        picked = min(
+            client_cands,
+            key=lambda s: (
+                -counts.get(s, 0),
+                -sum(
+                    1
+                    for n in nodes.values()
+                    if n.get("client") == s
+                    and (n.get("delivery_state") in OPEN_STATES or n.get("delivery_state") == "active")
+                ),
+                s,
+            ),
+        )
+        hit = _client_hit(picked, nodes, clients, rule=3)
+        hit["also_present"] = sorted(c for c in client_cands if c != picked)
+        return hit
     # (4) contacts.json company
     for p in externals:
         email = str(p.get("email") or "").lower()

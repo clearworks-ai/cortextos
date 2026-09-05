@@ -234,22 +234,22 @@ def planned_files(org_root: Path, meeting: dict[str, Any]) -> list[tuple[Path, s
     home_rel = str(res.get("home_path") or "")
     home = brain / home_rel if home_rel else brain / "clients" / "unknown.md"
     old_home = home.read_text(encoding="utf-8") if home.exists() else ""
-    new_home = render_page(old_home, meeting)
-    files: list[tuple[Path, str, str]] = [(home, old_home, new_home)]
-
-    note_rel = _meeting_rel(meeting)
-    note_path = brain / note_rel
-    files.append((note_path, "", render_meeting_note(meeting)))
-
     created = res.get("created")
     if created:
-        slug = created.get("slug") if isinstance(created, dict) else str(created).split(":")[-1]
-        kind = created.get("kind") if isinstance(created, dict) else "project"
-        tmpl_name = "projects/_template.md" if kind != "org" else "orgs/_template.md"
+        kind = created.get("kind") if isinstance(created, dict) else str(created).split(":")[0]
+        tmpl_name = "orgs/_template.md" if kind in ("org", "person") else "projects/_template.md"
         tmpl_path = brain / tmpl_name
         tmpl = tmpl_path.read_text(encoding="utf-8") if tmpl_path.exists() else "# <Name>\n"
-        dest = brain / ("orgs" if kind == "org" else "projects") / f"{slug}.md"
-        files.append((dest, "", render_created_page(tmpl, meeting)))
+        seed = render_created_page(tmpl, meeting)
+        base = old_home if old_home else seed
+        new_home = render_page(base, meeting)
+        files: list[tuple[Path, str, str]] = [(home, old_home, new_home)]
+        files.append((brain / _meeting_rel(meeting), "", render_meeting_note(meeting)))
+        return files
+
+    new_home = render_page(old_home, meeting)
+    files = [(home, old_home, new_home)]
+    files.append((brain / _meeting_rel(meeting), "", render_meeting_note(meeting)))
     return files
 
 

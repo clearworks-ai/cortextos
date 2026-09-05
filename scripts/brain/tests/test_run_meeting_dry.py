@@ -150,6 +150,7 @@ def test_dry_run_prints_nouns_and_diffs(tmp_path: Path, monkeypatch: pytest.Monk
     assert "---" in out and "+++" in out
     assert "meetings/" in out
     assert "quotes" in out.lower()
+    assert "Ship dry-run · owner: Josh · due 2026-12-01" in out
     assert "subject:" in out.lower() or "Recap:" in out
     assert not log.exists() or log.read_text(encoding="utf-8").strip() == ""
     # no progress.json

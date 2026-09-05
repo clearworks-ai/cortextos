@@ -78,14 +78,30 @@ def main(argv: list[str] | None = None) -> int:
     dropped = {}
     if validated_path.is_file():
         dropped = json.loads(validated_path.read_text(encoding="utf-8")).get("dropped") or {}
-    kept_d = "ok"
     print(
         f"quotes kept decisions={dropped.get('decisions', 0) == 0} "
         f"dropped={json.dumps(dropped, sort_keys=True)}"
     )
     print("tasks:")
-    print("(none)")
-    _ = kept_d
+    fan_path = source_dir / "fanout-meeting.json"
+    printed = False
+    if fan_path.is_file():
+        fan = json.loads(fan_path.read_text(encoding="utf-8"))
+        for meet in fan.get("meetings") or []:
+            if not isinstance(meet, dict):
+                continue
+            for step in meet.get("next_steps") or []:
+                if not isinstance(step, dict):
+                    continue
+                title = str(step.get("text") or "").strip()
+                if not title:
+                    continue
+                owner = str(step.get("owner_label") or step.get("owner_identity") or "")
+                due = step.get("deadline") or "none"
+                print(f"{title} · {owner} · due {due}")
+                printed = True
+    if not printed:
+        print("(none)")
 
     with tempfile.TemporaryDirectory() as tmp:
         ledger = Path(tmp) / "ledger.txt"

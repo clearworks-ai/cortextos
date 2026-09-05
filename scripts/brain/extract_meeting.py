@@ -207,11 +207,11 @@ def main(argv: list[str] | None = None) -> int:
     if extraction_path.exists():
         existing = json.loads(extraction_path.read_text(encoding="utf-8"))
         existing_sha = str(existing.get("inputSha") or "")
-        if existing_sha == input_sha:
+        if existing_sha == input_sha and not args.re_extract:
             if str(existing.get("promptSha") or "") != p_sha:
                 print("warn: stale-prompt", file=sys.stderr)
             return 0
-        if not args.re_extract:
+        if existing_sha != input_sha and not args.re_extract:
             print("stale-extraction", file=sys.stderr)
             return 3
         if _receipt_path(Path(args.vault), source).exists():

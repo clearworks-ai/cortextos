@@ -161,6 +161,44 @@ def test_matching_input_sha_skips_claude(tmp_path: Path, monkeypatch: pytest.Mon
     assert rc == 0
 
 
+def test_re_extract_forces_on_same_input_sha(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from extract_meeting import main
+
+    src = tmp_path / "env"
+    src.mkdir()
+    raw = _write_source(src)
+    sha = hashlib.sha256(raw).hexdigest()
+    extraction = _model_obj()
+    extraction.update(
+        {
+            "inputSha": sha,
+            "promptSha": "old",
+            "model": "sonnet",
+            "cost_usd": 0,
+            "extracted_at": "2026-01-01T00:00:00Z",
+        }
+    )
+    (src / "extraction.json").write_text(json.dumps(extraction), encoding="utf-8")
+    calls: list[object] = []
+
+    class Proc:
+        def __init__(self) -> None:
+            self.returncode = 0
+            self.stdout = _claude_json(_model_obj())
+            self.stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        calls.append((list(cmd), kwargs.get("cwd"), kwargs.get("input")))
+        return Proc()
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    rc = main(["--source", str(src), "--re-extract", "--vault", str(tmp_path / "vault")])
+    assert rc == 0
+    assert len(calls) == 1
+    out = json.loads((src / "extraction.json").read_text(encoding="utf-8"))
+    assert out["extracted_at"] != "2026-01-01T00:00:00Z"
+
+
 def test_unknown_key_and_unknown_enum_exit_3(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from extract_meeting import validate_extraction
 

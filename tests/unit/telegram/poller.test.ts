@@ -241,6 +241,94 @@ describe('TelegramPoller — offset-after-handler', () => {
     await expect(running).resolves.toBeUndefined();
     expect(poller.lastExitReason).toBe('stopped-externally');
   });
+
+  it('stop() aborts the in-flight getUpdates request instead of leaving it to age out', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    let rejectPoll: ((err: Error) => void) | undefined;
+    const api = {
+      getUpdates: vi.fn((_offset: number, _timeout?: number, signal?: AbortSignal) => {
+        capturedSignal = signal;
+        return new Promise((_resolve, reject) => {
+          rejectPoll = reject;
+        });
+      }),
+    } as unknown as TelegramAPI;
+    const poller = new TelegramPoller(api, stateDir);
+
+    const running = poller.start();
+    await vi.waitFor(() => expect(api.getUpdates).toHaveBeenCalled());
+
+    expect(capturedSignal).toBeInstanceOf(AbortSignal);
+    expect(capturedSignal!.aborted).toBe(false);
+
+    poller.stop();
+
+    // stop() must abort synchronously — no need to wait for anything.
+    expect(capturedSignal!.aborted).toBe(true);
+
+    // Simulate the real fetch layer reacting to the abort (api.ts throws a
+    // distinct "aborted" error, never a fake timeout or Conflict — see api.ts
+    // post()'s `if (signal?.aborted)` branch).
+    rejectPoll?.(new Error('Telegram API request aborted: getUpdates'));
+
+    await expect(running).resolves.toBeUndefined();
+    // Must resolve as an intentional stop, NOT get misclassified as a
+    // restartable conflict-self-die exit.
+    expect(poller.lastExitReason).toBe('stopped-externally');
+  });
+
+  it('logs no "Poll error" for an intentional abort-during-stop', async () => {
+    let rejectPoll: ((err: Error) => void) | undefined;
+    const api = {
+      getUpdates: vi.fn(() => new Promise((_resolve, reject) => {
+        rejectPoll = reject;
+      })),
+    } as unknown as TelegramAPI;
+    const poller = new TelegramPoller(api, stateDir);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const running = poller.start();
+      await vi.waitFor(() => expect(api.getUpdates).toHaveBeenCalled());
+
+      poller.stop();
+      rejectPoll?.(new Error('Telegram API request aborted: getUpdates'));
+      await running;
+
+      const pollErrorLogs = errorSpy.mock.calls.filter((call) =>
+        String(call[0]).includes('[telegram-poller] Poll error'));
+      expect(pollErrorLogs).toEqual([]);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('stop() with nothing in flight is a no-op (no throw, no dangling controller)', () => {
+    const { api } = makeStubApi([]);
+    const poller = new TelegramPoller(api, stateDir);
+    expect(() => poller.stop()).not.toThrow();
+    expect(poller.lastExitReason).toBe('stopped-externally');
+  });
+
+  it('threads the abort signal through a normal resolving poll without breaking it', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const api = {
+      getUpdates: vi.fn((offset: number, _timeout?: number, signal?: AbortSignal) => {
+        capturedSignal = signal;
+        return Promise.resolve({ result: [makeMessageUpdate(offset, 'hi')] });
+      }),
+    } as unknown as TelegramAPI;
+    const poller = new TelegramPoller(api, stateDir);
+
+    const received: string[] = [];
+    poller.onMessage((msg) => received.push(msg.text ?? ''));
+
+    await poller.pollOnce();
+
+    expect(received).toEqual(['hi']);
+    expect(capturedSignal).toBeInstanceOf(AbortSignal);
+    expect(capturedSignal!.aborted).toBe(false);
+  });
 });
 
 describe('TelegramPoller — start() re-entry (LINK A for the map-entry-race poller resurrection)', () => {

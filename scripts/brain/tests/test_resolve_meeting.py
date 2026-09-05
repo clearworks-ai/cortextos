@@ -534,3 +534,73 @@ def test_sha_mismatch_exits_4(tmp_path) -> None:
     (src / "source.sha256").write_text("deadbeef\n", encoding="utf-8")
     rc = main(["--source", str(src), "--vault", str(tmp_path), "--repo-root", str(tmp_path)])
     assert rc == 4
+
+
+def test_non_string_quote_is_dropped() -> None:
+    from resolve_meeting import quote_gate
+
+    extraction = {
+        "decisions": [{"text": "Keep cadence", "quote": 123}],
+        "commitments": [],
+        "proposed_delivery_state": {"state": "delivered", "quote": 123},
+    }
+    source = {"text_units": [{"text": "hello 123 tacticals"}]}
+    validated = quote_gate(extraction, source)
+    assert validated["decisions"] == []
+    assert validated["proposed_delivery_state"] is None
+    assert validated["dropped"]["decisions"] == 1
+    assert validated["dropped"]["promotion"] is True
+
+
+def test_null_company_contact_does_not_steal_client_domain(tmp_path) -> None:
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients" / "alloi.md").write_text(
+        "# Client: Alloi\n\n## Contacts\n\ndomains: alloi.us\n",
+        encoding="utf-8",
+    )
+    (repo / "orgs/clearworksai/agents/crm-codex/crm/contacts.json").write_text(
+        json.dumps(
+            {
+                "contacts": [
+                    {"id": "ivette", "company": None, "emails": ["ivette@alloi.us"]},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Weekly sync",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Marcos",
+                "email": "marcos@alloi.us",
+                "side": "theirs",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        org_name="Alloi",
+        domain="alloi.us",
+        relationship="client",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "clients/alloi.md"
+    assert res["rule"] == 3
+    assert res["counterparty_slug"] == "alloi"

@@ -157,6 +157,29 @@ def test_created_page_diff_when_resolution_created(tmp_path: Path) -> None:
     assert "01M1MW2G" in note
 
 
+def test_meeting_note_includes_counterparty() -> None:
+    from writeback_render import render_meeting_note
+
+    meeting = _payload()["meetings"][0]
+    meeting["resolution"]["counterparty"] = "alloi"
+    note = render_meeting_note(meeting)
+    assert "counterparty: alloi" in note
+
+
+def test_history_skips_when_source_already_present() -> None:
+    from writeback_render import render_page
+
+    meeting = _payload()["meetings"][0]
+    old = """# Client: Alloi — Tactical Reports
+
+## History (dated, newest first)
+
+- 2026-09-04 — Tacticals sync (meeting: meetings/x.md) [source: fireflies:01M1MW2GAZ1DQ0C6PG3KJ557JA]
+"""
+    new = render_page(old, meeting)
+    assert new.count("[source: fireflies:01M1MW2GAZ1DQ0C6PG3KJ557JA]") == 1
+
+
 def test_created_person_plans_orgs_home_once(tmp_path: Path) -> None:
     from writeback_render import planned_files
 

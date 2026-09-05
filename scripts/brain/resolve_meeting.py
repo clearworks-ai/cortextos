@@ -153,7 +153,9 @@ def _load_json(path: Path, default: Any) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def quote_grounded(quote: str, blob: str) -> bool:
+def quote_grounded(quote: object, blob: str) -> bool:
+    if not isinstance(quote, str):
+        return False
     n = normalize_quote(quote)
     return bool(n) and n in blob
 
@@ -165,19 +167,19 @@ def quote_gate(extraction: dict[str, Any], source: dict[str, Any]) -> dict[str, 
     dropped = {"decisions": 0, "commitments": 0, "promotion": False, "promotion_reason": None}
     decisions = []
     for item in extraction.get("decisions") or []:
-        if isinstance(item, dict) and quote_grounded(str(item.get("quote") or ""), blob):
+        if isinstance(item, dict) and quote_grounded(item.get("quote"), blob):
             decisions.append(item)
         else:
             dropped["decisions"] += 1
     commitments = []
     for item in extraction.get("commitments") or []:
-        if isinstance(item, dict) and quote_grounded(str(item.get("quote") or ""), blob):
+        if isinstance(item, dict) and quote_grounded(item.get("quote"), blob):
             commitments.append(item)
         else:
             dropped["commitments"] += 1
     pds = extraction.get("proposed_delivery_state")
     if pds is not None:
-        q = str(pds.get("quote") or "") if isinstance(pds, dict) else ""
+        q = pds.get("quote") if isinstance(pds, dict) else None
         if not quote_grounded(q, blob):
             dropped["promotion"] = True
             dropped["promotion_reason"] = "ungrounded"
@@ -241,7 +243,9 @@ def resolve(
     for row in contact_rows:
         if not isinstance(row, dict):
             continue
-        slug = slugify(str(row.get("company") or row.get("id") or ""))
+        if not row.get("company"):
+            continue
+        slug = slugify(str(row.get("company") or ""))
         for em in row.get("emails") or []:
             if "@" in str(em):
                 domain_to_slug[registrable_label(str(em).split("@", 1)[1])] = slug or domain_to_slug.get(

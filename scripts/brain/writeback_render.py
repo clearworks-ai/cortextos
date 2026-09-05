@@ -86,6 +86,10 @@ def _split_sections(text: str) -> tuple[str, list[tuple[str, str]]]:
 
 
 def render_page(old_text: str, meeting: dict[str, Any]) -> str:
+    mid = str(meeting.get("id") or "")
+    marker = f"[source: fireflies:{mid}]" if mid else ""
+    if marker and marker in old_text:
+        return old_text if old_text.endswith("\n") or old_text == "" else old_text + "\n"
     preamble, sections = _split_sections(old_text)
     hist = _history_block(meeting)
     rows = _open_item_rows(meeting)
@@ -132,6 +136,7 @@ def render_meeting_note(meeting: dict[str, Any]) -> str:
     date = _date_only(str(meeting.get("date") or ""))
     node = res.get("node") or "none"
     client = str(meeting.get("client_context") or "")
+    cp = str(res.get("counterparty") or res.get("counterparty_slug") or "")
     lines = [
         "---",
         f"meeting_id: {mid}",
@@ -139,7 +144,7 @@ def render_meeting_note(meeting: dict[str, Any]) -> str:
         f"client: {client}",
         f"date: {date}",
         f"node: {node}",
-        "counterparty:",
+        f"counterparty: {cp}",
         f"rule: {res.get('rule') or 'none'}",
         f"deal_state: {meeting.get('deal_state') or ''}",
         f"meeting_type: {meeting.get('meeting_type') or ''}",
@@ -244,12 +249,14 @@ def planned_files(org_root: Path, meeting: dict[str, Any]) -> list[tuple[Path, s
         base = old_home if old_home else seed
         new_home = render_page(base, meeting)
         files: list[tuple[Path, str, str]] = [(home, old_home, new_home)]
-        files.append((brain / _meeting_rel(meeting), "", render_meeting_note(meeting)))
-        return files
-
-    new_home = render_page(old_home, meeting)
-    files = [(home, old_home, new_home)]
-    files.append((brain / _meeting_rel(meeting), "", render_meeting_note(meeting)))
+    else:
+        new_home = render_page(old_home, meeting)
+        files = [(home, old_home, new_home)]
+    note_rel = _meeting_rel(meeting)
+    note_path = brain / note_rel
+    old_note = note_path.read_text(encoding="utf-8") if note_path.exists() else ""
+    new_note = old_note if old_note else render_meeting_note(meeting)
+    files.append((note_path, old_note, new_note))
     return files
 
 

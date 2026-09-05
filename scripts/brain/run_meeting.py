@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -22,10 +23,15 @@ WRITEBACK = CODE_ROOT / "orgs/clearworksai/agents/pa/scripts/meeting_writeback.p
 RECAP = CODE_ROOT / "orgs/clearworksai/agents/pa/scripts/meeting_recap_draft.py"
 
 
+SAFE_MEETING_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
+
+
 def _strip_id(meeting_id: str) -> str:
     mid = meeting_id.strip()
     if mid.startswith("fireflies:"):
         mid = mid.split(":", 1)[1]
+    if not SAFE_MEETING_ID.match(mid):
+        return ""
     return mid
 
 
@@ -76,10 +82,15 @@ def main(argv: list[str] | None = None) -> int:
 
     validated_path = source_dir / "validated.json"
     dropped = {}
+    kept_d = 0
+    kept_c = 0
     if validated_path.is_file():
-        dropped = json.loads(validated_path.read_text(encoding="utf-8")).get("dropped") or {}
+        validated = json.loads(validated_path.read_text(encoding="utf-8"))
+        dropped = validated.get("dropped") or {}
+        kept_d = len(validated.get("decisions") or [])
+        kept_c = len(validated.get("commitments") or [])
     print(
-        f"quotes kept decisions={dropped.get('decisions', 0) == 0} "
+        f"quotes kept decisions={kept_d} commitments={kept_c} "
         f"dropped={json.dumps(dropped, sort_keys=True)}"
     )
     print("tasks:")

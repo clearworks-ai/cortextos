@@ -20,6 +20,7 @@ def test_apply_exits_64() -> None:
 
     assert main(["--meeting-id", "x", "--apply"]) == 64
     assert main(["--meeting-id", "x"]) == 64
+    assert main(["--meeting-id", "fireflies:../etc/passwd", "--dry-run"]) == 64
 
 
 def _seed(tmp_path: Path) -> tuple[Path, Path, str]:
@@ -149,7 +150,7 @@ def test_dry_run_prints_nouns_and_diffs(tmp_path: Path, monkeypatch: pytest.Monk
     assert "created=" in out and "promotion=" in out
     assert "---" in out and "+++" in out
     assert "meetings/" in out
-    assert "quotes" in out.lower()
+    assert "quotes kept decisions=1 commitments=1" in out
     assert "Ship dry-run · owner: Josh · due 2026-12-01" in out
     assert "subject:" in out.lower() or "Recap:" in out
     assert not log.exists() or log.read_text(encoding="utf-8").strip() == ""

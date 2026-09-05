@@ -173,6 +173,7 @@ def adapt(source: dict[str, Any], validated: dict[str, Any], resolution: dict[st
             "created": resolution.get("created"),
             "relationship": resolution.get("relationship"),
             "confidence": resolution.get("confidence"),
+            "counterparty": resolution.get("counterparty_slug"),
         },
         "promotion": validated.get("proposed_delivery_state"),
         "open_items": open_items,

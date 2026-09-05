@@ -106,6 +106,7 @@ def test_stable_ids_and_email_attendees(tmp_path) -> None:
     step = fan["meetings"][0]["next_steps"][0]
     assert step["owner_identity"] == "pa-codex"
     assert step["direction"] == "internal"
+    assert wb["meetings"][0]["resolution"]["counterparty"] == "alloi"
 
 
 def test_owner_identity_regex_exits_12() -> None:

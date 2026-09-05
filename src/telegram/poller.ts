@@ -63,6 +63,12 @@ export class TelegramPoller {
   private pollInterval: number;
   private consecutiveErrors = 0;
   private readonly backoffCapMs = 30_000;
+  // The AbortController for the getUpdates call currently in flight (null
+  // between calls). stop() aborts it so a stopped poller's connection closes
+  // immediately instead of racing the next poller's getUpdates on the same
+  // bot token (that race is what produces a Telegram 409 Conflict — see
+  // lastExitReason's 'conflict-self-die' doc below).
+  private abortController: AbortController | null = null;
   /**
    * Why the poll loop last exited. Read by AgentManager's poller-supervisor
    * (#459 supervision-gap fix) to decide whether to restart:
@@ -169,6 +175,10 @@ export class TelegramPoller {
   stop(): void {
     this.running = false;
     this.lastExitReason = 'stopped-externally';
+    // Set running=false FIRST so the abort's rejection hits start()'s
+    // !this.running early-return above, rather than falling through to the
+    // Conflict/backoff branches.
+    this.abortController?.abort();
   }
 
   /**
@@ -182,7 +192,18 @@ export class TelegramPoller {
    * update so a crash mid-batch does not drop confirmed state.
    */
   async pollOnce(): Promise<void> {
-    const result = await this.api.getUpdates(this.offset, 1);
+    const controller = new AbortController();
+    this.abortController = controller;
+    let result;
+    try {
+      result = await this.api.getUpdates(this.offset, 1, controller.signal);
+    } finally {
+      // Only clear if this call's controller is still the current one — a
+      // slower prior call's finally must not clobber a newer in-flight
+      // controller (can't happen with the current single-await poll loop,
+      // but this keeps the invariant explicit if that ever changes).
+      if (this.abortController === controller) this.abortController = null;
+    }
     if (!result?.result?.length) return;
 
     for (const update of result.result as TelegramUpdate[]) {

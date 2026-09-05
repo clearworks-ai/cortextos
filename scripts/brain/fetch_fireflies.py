@@ -14,7 +14,14 @@ from typing import Any
 
 from atomic import atomic_write
 from envparse import parse_env_file
-from paths import DEFAULT_REPO_ROOT, DEFAULT_VAULT, envelope_dir, safe_meeting_id, secrets_path
+from paths import (
+    DEFAULT_REPO_ROOT,
+    DEFAULT_VAULT,
+    envelope_dir,
+    load_enabled_agents,
+    safe_meeting_id,
+    secrets_path,
+)
 
 FETCHER_VERSION = "fetch_fireflies/1"
 GRAPHQL_URL = "https://api.fireflies.ai/graphql"
@@ -73,11 +80,14 @@ def _is_notetaker(name: str, email: str) -> bool:
     return domain in NOTETAKER_DOMAINS
 
 
-def _side(name: str, email: str, notetaker: bool) -> str:
+def _side(name: str, email: str, notetaker: bool, enabled_agents_cf: set[str] | None = None) -> str:
     if notetaker:
         return "unknown"
     domain = email.split("@")[-1].lower() if "@" in email else ""
     if domain in OURS_DOMAINS or name.strip().lower() in OURS_NAMES or email.lower() in OURS_NAMES:
+        return "ours"
+    # D-17: name equal (casefold) to an enabled fleet agent -> ours.
+    if enabled_agents_cf and name.strip().casefold() in enabled_agents_cf:
         return "ours"
     if email and domain and domain not in OURS_DOMAINS:
         return "theirs"
@@ -91,8 +101,27 @@ def envelope_from_transcript(tr: dict[str, Any]) -> dict[str, Any]:
     sentences = tr.get("sentences") or []
     if not isinstance(sentences, list):
         sentences = []
-    speakers_spoken = {str(s.get("speaker_name") or "").strip() for s in sentences if isinstance(s, dict)}
-    speakers_spoken_cf = {sp.casefold() for sp in speakers_spoken}
+    # F-4: iterate speakers in first-appearance order over `sentences` (stable),
+    # never via set iteration — set order depends on hash-seed randomization and
+    # differs across processes, which shifted envelope sha + commitment ordinals
+    # on --refetch. `speakers_spoken_order` preserves first-seen order for the
+    # speaker-only-participant loop below; `speakers_spoken_cf` remains a set,
+    # used only for membership tests (order-independent).
+    speakers_spoken_order: list[str] = []
+    seen_spoken_cf: set[str] = set()
+    for s in sentences:
+        if not isinstance(s, dict):
+            continue
+        name = str(s.get("speaker_name") or "").strip()
+        if not name:
+            continue
+        key = name.casefold()
+        if key in seen_spoken_cf:
+            continue
+        seen_spoken_cf.add(key)
+        speakers_spoken_order.append(name)
+    speakers_spoken_cf = seen_spoken_cf
+    enabled_agents_cf = {a.casefold() for a in load_enabled_agents()}
     participants: list[dict[str, Any]] = []
     seen_keys: set[str] = set()
     for att in attendees:
@@ -110,12 +139,12 @@ def envelope_from_transcript(tr: dict[str, Any]) -> dict[str, Any]:
                 "name": name or None,
                 "email": email or None,
                 "handle": None,
-                "side": _side(name, email, note),
+                "side": _side(name, email, note, enabled_agents_cf),
                 "spoke": name.strip().casefold() in speakers_spoken_cf,
                 "notetaker": note,
             }
         )
-    for speaker in speakers_spoken:
+    for speaker in speakers_spoken_order:
         if not speaker:
             continue
         if speaker.lower() in seen_keys:
@@ -129,7 +158,7 @@ def envelope_from_transcript(tr: dict[str, Any]) -> dict[str, Any]:
                 "name": speaker,
                 "email": None,
                 "handle": None,
-                "side": _side(speaker, "", note),
+                "side": _side(speaker, "", note, enabled_agents_cf),
                 "spoke": True,
                 "notetaker": note,
             }

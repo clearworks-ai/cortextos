@@ -137,7 +137,11 @@ def test_occurred_at_epoch_ms_string_converted(tmp_path) -> None:
     assert wb["meetings"][0]["date"].startswith("2026-09-0")
 
 
-def test_event_meeting_type_from_validated(tmp_path) -> None:
+def test_event_meeting_type_always_delivery_writeback_keeps_validated(tmp_path) -> None:
+    """D-08: meeting_type is recorded in resolution.json + the meeting note only —
+    never written to event.json, which feeds meeting-crm-sync and must never let
+    a sales-type meeting touch pipeline.json (FR-004 G-31). The WRITEBACK payload
+    is allowed to carry the real validated meeting_type."""
     from adapt_meeting import main
 
     src = tmp_path / "env"
@@ -148,7 +152,9 @@ def test_event_meeting_type_from_validated(tmp_path) -> None:
     (src / "validated.json").write_text(json.dumps(validated), encoding="utf-8")
     assert main(["--source", str(src)]) == 0
     event = json.loads((src / "event.json").read_text(encoding="utf-8"))
-    assert event["meeting_type"] == "sales"
+    assert event["meeting_type"] == "delivery"
+    wb = json.loads((src / "writeback-payload.json").read_text(encoding="utf-8"))
+    assert wb["meetings"][0]["meeting_type"] == "sales"
 
 
 def test_deal_state_copied_to_writeback(tmp_path) -> None:
@@ -160,6 +166,61 @@ def test_deal_state_copied_to_writeback(tmp_path) -> None:
     assert main(["--source", str(src)]) == 0
     wb = json.loads((src / "writeback-payload.json").read_text(encoding="utf-8"))
     assert wb["meetings"][0]["deal_state"] == "won"
+
+
+def test_missing_validated_exits_12(tmp_path) -> None:
+    """FR-012 exit-code table: FR-004 (adapt_meeting.py) failures exit 12."""
+    from adapt_meeting import main
+
+    src = tmp_path / "env"
+    src.mkdir()
+    _payloads(src)
+    (src / "validated.json").unlink()
+    assert main(["--source", str(src)]) == 12
+
+
+def test_enabled_agent_owner_gets_own_identity(tmp_path, monkeypatch) -> None:
+    """D-17/FR-004: an OURS commitment owned by an enabled fleet agent gets
+    owner_identity == that exact enabled name (not pa-codex), label 'owner: <name>'."""
+    from adapt_meeting import main
+
+    roster = tmp_path / "enabled-agents.json"
+    roster.write_text(json.dumps({"larry": {"enabled": True}}), encoding="utf-8")
+    monkeypatch.setenv("BRAIN_ENABLED_AGENTS_JSON", str(roster))
+
+    src = tmp_path / "env"
+    src.mkdir()
+    _payloads(src, owner_name="Larry", side="ours")
+    source = json.loads((src / "source.json").read_text(encoding="utf-8"))
+    source["participants"][0] = {
+        "name": "Larry",
+        "email": None,
+        "side": "ours",
+        "spoke": True,
+        "notetaker": False,
+        "handle": None,
+    }
+    (src / "source.json").write_text(json.dumps(source), encoding="utf-8")
+
+    assert main(["--source", str(src)]) == 0
+    fan = json.loads((src / "fanout-meeting.json").read_text(encoding="utf-8"))
+    step = fan["meetings"][0]["next_steps"][0]
+    assert step["owner_identity"] == "larry"
+    assert step["owner_label"] == "owner: Larry"
+
+
+def test_roster_missing_josh_still_pa_codex(tmp_path, monkeypatch) -> None:
+    from adapt_meeting import main
+
+    monkeypatch.setenv("BRAIN_ENABLED_AGENTS_JSON", str(tmp_path / "nope.json"))
+    src = tmp_path / "env"
+    src.mkdir()
+    _payloads(src)
+    assert main(["--source", str(src)]) == 0
+    fan = json.loads((src / "fanout-meeting.json").read_text(encoding="utf-8"))
+    step = fan["meetings"][0]["next_steps"][0]
+    assert step["owner_identity"] == "pa-codex"
+    assert step["owner_label"] == "owner: Josh"
 
 
 def test_deadline_floor_null(tmp_path) -> None:

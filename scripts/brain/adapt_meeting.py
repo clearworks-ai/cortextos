@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from atomic import atomic_write
+from paths import load_enabled_agents
 
 try:
     from fetch_fireflies import _iso_from_fireflies_date
@@ -61,12 +62,18 @@ def _side(source: dict[str, Any], idx: int | None, owner_name: str) -> str:
     return "theirs"
 
 
-def _owner_identity(side: str, owner_name: str) -> tuple[str, str]:
+def _owner_identity(side: str, owner_name: str, enabled_agents: set[str] | None = None) -> tuple[str, str]:
     if side != "ours":
         ident = "pa-codex"
         return require_owner_identity(ident), f"owner: {owner_name or 'Unassigned'}"
     if _norm(owner_name) in JOSH_NAMES:
         return require_owner_identity("pa-codex"), "owner: Josh"
+    # D-17: OURS owner equal (casefold) to an enabled fleet agent -> owner_identity
+    # is that exact enabled name, not pa-codex.
+    owner_cf = _norm(owner_name)
+    for agent in enabled_agents or ():
+        if _norm(agent) == owner_cf:
+            return require_owner_identity(agent), f"owner: {owner_name}"
     return require_owner_identity("pa-codex"), f"owner: {owner_name or 'Josh'}"
 
 
@@ -113,6 +120,7 @@ def adapt(source: dict[str, Any], validated: dict[str, Any], resolution: dict[st
     if date.isdigit() and len(date) in (10, 13):
         date = _iso_from_fireflies_date(date) or date
     parts = source.get("participants") or []
+    enabled_agents = load_enabled_agents()
     counts: dict[str, int] = {}
     commitments_out = []
     ours_steps = []
@@ -129,7 +137,7 @@ def adapt(source: dict[str, Any], validated: dict[str, Any], resolution: dict[st
         idx = c.get("owner_participant")
         owner_name = str(c.get("owner_name") or "")
         side = _side(source, idx if isinstance(idx, int) else None, owner_name)
-        ident, label = _owner_identity(side, owner_name)
+        ident, label = _owner_identity(side, owner_name, enabled_agents)
         deadline = _deadline(c.get("deadline_iso") if isinstance(c.get("deadline_iso"), str) else None, now)
         commitments_out.append({"commitmentId": cid, "text": text, "side": side, "owner_identity": ident})
         recap_steps.append(
@@ -204,7 +212,10 @@ def adapt(source: dict[str, Any], validated: dict[str, Any], resolution: dict[st
     event = {
         "meeting_id": source_id,
         "client": str((validated.get("classification") or {}).get("org_name") or ""),
-        "meeting_type": validated.get("meeting_type") or "delivery",
+        # D-08: meeting_type is recorded in resolution.json + the meeting note only —
+        # never in event.json. FR-004 fixes it to "delivery" so meeting-crm-sync
+        # (which reads event.json) never mutates pipeline.json for this meeting.
+        "meeting_type": "delivery",
         "attendees": event_emails,
         "commitmentIds": [c["commitmentId"] for c in commitments_out],
         "writeback_ok": False,
@@ -233,7 +244,8 @@ def main(argv: list[str] | None = None) -> int:
         resolution = json.loads((source_dir / "resolution.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         print(str(exc), file=sys.stderr)
-        return 12 if False else 1
+        # FR-012 exit-code table: FR-004 (this script) failures exit 12.
+        return 12
     now = datetime.now(timezone.utc)
     try:
         files = adapt(source, validated, resolution, now)

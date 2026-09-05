@@ -193,6 +193,110 @@ def test_writes_canonical_envelope_and_skips_existing(
     assert capsys.readouterr().out.strip() == sha
 
 
+def test_load_enabled_agents_returns_enabled_names_only(tmp_path: Path) -> None:
+    from paths import load_enabled_agents
+
+    roster = tmp_path / "enabled-agents.json"
+    roster.write_text(
+        json.dumps({"larry": {"enabled": True, "status": "configured"}, "frank2": {"enabled": False}}),
+        encoding="utf-8",
+    )
+    assert load_enabled_agents(roster) == {"larry"}
+
+
+def test_load_enabled_agents_missing_file_returns_empty_set(tmp_path: Path) -> None:
+    from paths import load_enabled_agents
+
+    assert load_enabled_agents(tmp_path / "nope.json") == set()
+
+
+def test_load_enabled_agents_unparseable_returns_empty_set(tmp_path: Path) -> None:
+    from paths import load_enabled_agents
+
+    bad = tmp_path / "bad.json"
+    bad.write_text("not json", encoding="utf-8")
+    assert load_enabled_agents(bad) == set()
+
+
+def test_load_enabled_agents_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from paths import load_enabled_agents
+
+    roster = tmp_path / "enabled-agents.json"
+    roster.write_text(json.dumps({"scout": {"enabled": True}}), encoding="utf-8")
+    monkeypatch.setenv("BRAIN_ENABLED_AGENTS_JSON", str(roster))
+    assert load_enabled_agents() == {"scout"}
+
+
+def test_enabled_fleet_agent_speaker_is_side_ours(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D-08/D-17: an enabled fleet-agent name (not a Josh alias, not clearworks.ai
+    domain) still resolves side=ours; a disabled one with an external domain does not."""
+    from fetch_fireflies import envelope_from_transcript
+
+    roster = tmp_path / "enabled-agents.json"
+    roster.write_text(
+        json.dumps({"larry": {"enabled": True}, "frank2": {"enabled": False}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("BRAIN_ENABLED_AGENTS_JSON", str(roster))
+    tr = _transcript(
+        meeting_attendees=[
+            {"displayName": "Larry", "email": "larry@example.com"},
+            {"displayName": "Frank2", "email": "frank2@example.com"},
+        ],
+    )
+    env = envelope_from_transcript(tr)
+    larry = next(p for p in env["participants"] if p["email"] == "larry@example.com")
+    frank2 = next(p for p in env["participants"] if p["email"] == "frank2@example.com")
+    assert larry["side"] == "ours"
+    assert frank2["side"] == "theirs"
+
+
+def test_missing_roster_speaker_side_defaults_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Roster file missing -> empty enabled set, never raises; behavior unchanged."""
+    from fetch_fireflies import envelope_from_transcript
+
+    monkeypatch.setenv("BRAIN_ENABLED_AGENTS_JSON", str(tmp_path / "does-not-exist.json"))
+    tr = _transcript(
+        meeting_attendees=[{"displayName": "Larry", "email": "larry@example.com"}],
+    )
+    env = envelope_from_transcript(tr)
+    larry = next(p for p in env["participants"] if p["email"] == "larry@example.com")
+    assert larry["side"] == "theirs"
+
+
+def test_speaker_only_participants_appended_in_first_appearance_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F-4: nondeterministic set iteration order must not leak into participant
+    order — speaker-only participants are appended in first-appearance order over
+    `sentences`, independent of hash-seed/set ordering."""
+    from fetch_fireflies import envelope_from_transcript
+
+    sentences = [
+        {"index": 0, "speaker_name": "Zed", "text": "a", "start_time": 0.0},
+        {"index": 1, "speaker_name": "Amy", "text": "b", "start_time": 1.0},
+        {"index": 2, "speaker_name": "Mona", "text": "c", "start_time": 2.0},
+        {"index": 3, "speaker_name": "Zed", "text": "d", "start_time": 3.0},
+        {"index": 4, "speaker_name": "Amy", "text": "e", "start_time": 4.0},
+    ]
+    tr = _transcript(meeting_attendees=[], sentences=sentences)
+    env = envelope_from_transcript(tr)
+    names = [p["name"] for p in env["participants"]]
+    assert names == ["Zed", "Amy", "Mona"]
+
+    # Shuffled input order must still yield the same first-appearance order and
+    # byte-identical canonical output (envelope sha stability across processes).
+    shuffled = [sentences[2], sentences[0], sentences[4], sentences[3], sentences[1]]
+    tr2 = _transcript(meeting_attendees=[], sentences=shuffled)
+    env2 = envelope_from_transcript(tr2)
+    names2 = [p["name"] for p in env2["participants"]]
+    assert names2 == ["Mona", "Zed", "Amy"]
+
+
 def test_path_traversal_meeting_id_rejected_exit_64(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

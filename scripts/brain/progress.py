@@ -238,7 +238,13 @@ def vault_commit(vault: Path, pathspec: list[str], message: str) -> tuple[str | 
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    # FR-012 line ~328 ("receipt.json SHALL differ only in last_run_at" on a
+    # --force re-run) requires two back-to-back --apply subprocess
+    # invocations to produce distinguishable timestamps. Second-precision
+    # collided when both ran inside the same wall-clock second (observed in
+    # Task 10's restart/--force integration test) — milliseconds is enough
+    # resolution for two real subprocess round-trips to always differ.
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
 def compose_receipt(

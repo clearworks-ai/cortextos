@@ -34,7 +34,41 @@ FR012_NOUNS = ("home=", "--- a/", "quotes kept", "tasks:", "subject:")
 # would-* line, via re.MULTILINE so `^`/`$` bind to line boundaries rather
 # than the whole capture.
 PHASE3_HEADER_RE = re.compile(r"^phase3-preview: v1$", re.MULTILINE)
-PHASE3_NOUN_RE = re.compile(r"^would-(?:touch|write|file): ", re.MULTILINE)
+# Finding 1 (P1, review 2026-09-06): the single combined regex above let a
+# capture truncated right after "would-touch:" (never reaching the status
+# writer's would-write: or the filed-log's would-file:) pass as fully
+# reviewed — ANY one anchored noun was enough. Each of the three phase-3
+# writers now needs its OWN evidence line: at least one would-touch: (the
+# rollup writer — client region and/or STATE.md), at least one
+# would-write: (the status writer — "would-write: skip: ..." counts, since
+# _run_dry always normalizes an empty status writer into that form), and
+# EXACTLY one would-file: (the filed-log writer, always emitted once).
+PHASE3_TOUCH_RE = re.compile(r"^would-touch: ", re.MULTILINE)
+PHASE3_WRITE_RE = re.compile(r"^would-write: ", re.MULTILINE)
+PHASE3_FILE_RE = re.compile(r"^would-file: ", re.MULTILINE)
+
+
+def _phase3_missing(text: str) -> list[str]:
+    """Returns the list of phase-3 writer(s) missing evidence in `text`, or
+    an empty list when the capture fully evidences all three. Also enforces
+    that the capture ends with the would-file: block (trailing whitespace
+    only) — content appended after it is the same truncation/tampering
+    signal as content missing before it."""
+    missing: list[str] = []
+    if not PHASE3_HEADER_RE.search(text):
+        missing.append("phase3-preview: v1 header")
+    if not PHASE3_TOUCH_RE.search(text):
+        missing.append("would-touch:")
+    if not PHASE3_WRITE_RE.search(text):
+        missing.append("would-write:")
+    file_lines = PHASE3_FILE_RE.findall(text)
+    if len(file_lines) != 1:
+        missing.append("would-file: (exactly one)")
+    stripped = text.rstrip()
+    last_line = stripped.rsplit("\n", 1)[-1] if stripped else ""
+    if not last_line.startswith("would-file: "):
+        missing.append("would-file: (must end capture)")
+    return missing
 
 
 def marker_path(vault: Path, kind: str, meeting_id: str) -> Path:
@@ -63,7 +97,10 @@ def main(argv: list[str] | None = None) -> int:
     if missing:
         print(f"dry-run capture missing nouns: {missing}", file=sys.stderr)
         return 1
-    phase3_ok = bool(PHASE3_HEADER_RE.search(text)) and bool(PHASE3_NOUN_RE.search(text))
+    phase3_missing = _phase3_missing(text)
+    phase3_ok = not phase3_missing
+    if phase3_missing:
+        print(f"phase-3 preview incomplete: missing {phase3_missing}", file=sys.stderr)
     marker = marker_path(Path(args.vault), "fireflies", meeting_id)
     envelope = marker.parent
     # Finding 4c: progress.validate_sign_marker() now requires capture_path

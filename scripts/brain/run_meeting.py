@@ -7,6 +7,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -24,6 +25,15 @@ from paths import DEFAULT_REPO_ROOT, DEFAULT_VAULT, envelope_dir, org_brain_root
 from resolve_meeting import main as resolve_main
 from sign_dry_run import marker_path as sign_marker_path
 from writeback_render import meeting_note_rel
+
+# Finding 1 (P1, review 2026-09-06): sign_dry_run.py's phase3_ok gate now
+# requires evidence for EACH phase-3 writer (would-touch/would-write/
+# would-file), not just any single one — a legitimately empty status
+# writer (STATUS_PLAN prints a bare "skip: <reason>" line, never anchored
+# as "would-write: ...") must still be normalized into an anchored
+# would-write: line so the reviewer's capture actually evidences it.
+STATUS_WOULD_WRITE_RE = re.compile(r"^would-write: ", re.MULTILINE)
+STATUS_SKIP_REASON_RE = re.compile(r"^skip: (.*)$", re.MULTILINE)
 
 HERE = Path(__file__).resolve().parent
 CODE_ROOT = HERE.parent.parent
@@ -273,6 +283,12 @@ def _run_dry(meeting_id: str, vault: Path, repo: Path, source_dir: Path) -> int:
         print(f"FAILED at rollup: {exc}", file=sys.stderr)
         return 6
 
+    # Finding 1: track whether either rollup writer (client region, STATE.md)
+    # actually printed a would-touch: line, so a legitimately no-op rollup
+    # (both diffs empty) still leaves an anchored line behind for the
+    # phase-3 sign-check to find, instead of silently emitting nothing.
+    touched_any = False
+
     if client_slug and any(n.get("client") == client_slug for n in nodes.values()):
         # CH2-new-1: `client_slug` is untrusted text copied verbatim from a
         # node's `client:` field (same as brain_rollup.main()'s per-client
@@ -294,6 +310,7 @@ def _run_dry(meeting_id: str, vault: Path, repo: Path, source_dir: Path) -> int:
         )
         if new_client != old_client:
             print(f"would-touch: clients/{client_slug}.md (engagements-rollup)")
+            touched_any = True
 
     state_path = org_brain_root(vault) / "STATE.md"
     old_state = state_path.read_text(encoding="utf-8") if state_path.is_file() else ""
@@ -313,6 +330,12 @@ def _run_dry(meeting_id: str, vault: Path, repo: Path, source_dir: Path) -> int:
         return 6
     if new_state != old_state:
         print("would-touch: STATE.md (state)")
+        touched_any = True
+    if not touched_any:
+        # Finding 1: neither writer had anything to touch — still leave an
+        # anchored would-touch: line so the sign-check can tell "reviewed,
+        # nothing to do" apart from "capture truncated before this writer".
+        print("would-touch: (none)")
 
     eng_id = ""
     node_id = resolution.get("node")
@@ -347,6 +370,17 @@ def _run_dry(meeting_id: str, vault: Path, repo: Path, source_dir: Path) -> int:
             tail = (st.stderr or st.stdout or "").strip().splitlines()
             print(f"FAILED at status: rc={st.returncode} {tail[-1] if tail else ''}", file=sys.stderr)
             return 14
+        # Finding 1: STATUS_PLAN's own success-path skip forms ("skip:
+        # no-reporting-block", a plan-level skip reason, "skip: no-target")
+        # print a bare "skip: <reason>" line, never anchored as
+        # "would-write: ..." — only its one write-something branch is.
+        # Normalize every other outcome into an anchored would-write: line
+        # so the phase-3 sign-check always finds this writer's evidence,
+        # not just the write-something case.
+        if not STATUS_WOULD_WRITE_RE.search(st.stdout):
+            reason_match = STATUS_SKIP_REASON_RE.search(st.stdout)
+            reason = reason_match.group(1).strip() if reason_match else "(no-op)"
+            print(f"would-write: skip: {reason}")
     else:
         print("would-write: skip: no-engagement")
 

@@ -133,6 +133,53 @@ def test_open_rows_splits_on_unescaped_pipes_only(tmp_path: Path) -> None:
     assert row["status"] == "open"
 
 
+def test_open_rows_splits_when_cell_ends_in_even_backslash_run_before_pipe(tmp_path: Path) -> None:
+    """Coordinator fold: the old `(?<!\\\\)\\|` lookbehind only inspects the
+    ONE character immediately before a `|` — it cannot tell an escaped
+    backslash (`\\\\`, two chars) from an escaped pipe (`\\|`), so a cell
+    that legitimately ends in a literal backslash right before the real
+    column delimiter (an EVEN run of backslashes, e.g. `foo\\\\|`) was
+    wrongly treated as an escaped delimiter. The row then split into fewer
+    than 5 cells and was silently dropped. A left-to-right scanner that
+    consumes each `\\` + next-char pair as one unit must still find the
+    real delimiter right after the pair and produce exactly 5 cells, with
+    the trailing backslash preserved (unescaped to one literal `\\`)."""
+    from brain_rollup import _open_rows
+
+    body = "| Reconcile Q3\\\\ | Ivette Ramos | 2026-09-20 | commitment:z | open |\n"
+    rows = _open_rows(body)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["item"] == "Reconcile Q3\\"
+    assert row["owner"] == "Ivette Ramos"
+    assert row["deadline"] == "2026-09-20"
+    assert row["source"] == "commitment:z"
+    assert row["status"] == "open"
+
+    # regression guard: `\|` inside a cell must still stay literal (not a
+    # delimiter) after the scanner rewrite.
+    escaped_pipe_body = "| a \\| b | owner | — | src | open |\n"
+    escaped_rows = _open_rows(escaped_pipe_body)
+    assert len(escaped_rows) == 1
+    assert escaped_rows[0]["item"] == "a | b"
+
+
+def test_render_state_sections_keeps_open_item_row_ending_in_backslash(tmp_path: Path) -> None:
+    """Integration: the trailing-backslash item must reach STATE.md's
+    rendered Waiting-on output, not just parse correctly in isolation."""
+    from brain_rollup import load_nodes, render_state_sections
+
+    vault = _seed_state_fixture(tmp_path)
+    alloi01 = vault / "raw/areas/clearworks/org-brain/projects/alloi-01.md"
+    text = alloi01.read_text(encoding="utf-8")
+    text += "| Reconcile Q3\\\\ | Ivette Ramos | 2026-09-20 | commitment:z | open |\n"
+    alloi01.write_text(text, encoding="utf-8")
+
+    nodes = load_nodes(vault)
+    body = render_state_sections(nodes, "2026-09-10")
+    assert "Reconcile Q3\\" in body
+
+
 def test_render_state_sections_keeps_open_item_row_with_escaped_pipe(tmp_path: Path) -> None:
     """G2R2-P2-1 integration: under the old blind-split-on-every-pipe
     parser, an escaped pipe in a cell added extra `|` boundaries and made
@@ -193,6 +240,78 @@ def test_render_state_sections_active_waiting_decisions_next(tmp_path: Path) -> 
     next_section = body.split("## Next priorities", 1)[1]
     assert "Send follow-up email — Josh Weiss" in next_section
     assert "Confirm scope — Josh Weiss (due 2026-09-10)" in next_section
+
+
+def test_render_state_sections_includes_open_project_under_closed_engagement(tmp_path: Path) -> None:
+    """Finding 2 (FR-007 line ~234, D-09 line 52): the old traversal only
+    walked children of OPEN engagements, so an active/paused/scoping
+    project whose parent engagement is closed (or any other non-open
+    state) never surfaced in Active work / Waiting on / Decisions / Next
+    priorities. render_state_sections must derive its working set from
+    every open node directly."""
+    from brain_rollup import load_nodes, render_state_sections
+
+    vault = _seed_state_fixture(tmp_path)
+    alloi01 = vault / "raw/areas/clearworks/org-brain/projects/alloi-01.md"
+    text = alloi01.read_text(encoding="utf-8")
+    text = text.replace("delivery_state: active", "delivery_state: closed", 1)
+    alloi01.write_text(text, encoding="utf-8")
+
+    nodes = load_nodes(vault)
+    assert nodes["alloi-01"]["delivery_state"] == "closed"
+    assert nodes["alloi-03"]["delivery_state"] == "active"
+
+    body = render_state_sections(nodes, "2026-09-10")
+    active_section = body.split("## Active work", 1)[1].split("## Waiting on", 1)[0]
+    assert "Tactical Reports" in active_section
+    assert "## Waiting on" in body and "Run tactical reports — Ivette Ramos" in body
+    assert "## Decisions made" in body and "Reports land Monday EOD." in body
+
+
+def test_render_state_sections_includes_open_project_with_missing_parent(tmp_path: Path) -> None:
+    """Finding 2: an open project whose `parent:` id has no corresponding
+    node at all (never orphaned by state, just never written) must still
+    surface — grouped under an `(unparented)` bucket rather than vanishing."""
+    from brain_rollup import load_nodes, render_state_sections
+
+    vault = _seed_state_fixture(tmp_path)
+    alloi03 = vault / "raw/areas/clearworks/org-brain/projects/alloi-03.md"
+    text = alloi03.read_text(encoding="utf-8")
+    text = text.replace("parent: alloi-01", "parent: ghost-01", 1)
+    alloi03.write_text(text, encoding="utf-8")
+    # remove the engagement entirely so alloi-01 doesn't exist as a node
+    (vault / "raw/areas/clearworks/org-brain/projects/alloi-01.md").unlink()
+
+    nodes = load_nodes(vault)
+    assert "alloi-01" not in nodes
+    assert nodes["alloi-03"]["parent"] == "ghost-01"
+
+    body = render_state_sections(nodes, "2026-09-10")
+    active_section = body.split("## Active work", 1)[1].split("## Waiting on", 1)[0]
+    assert "(unparented)" in active_section
+    assert "Tactical Reports" in active_section
+    assert active_section.index("(unparented)") < active_section.index("Tactical Reports")
+
+
+def test_main_state_zero_diff_on_rerun_with_closed_parent_orphan(tmp_path: Path) -> None:
+    """Finding 2 must not break FR-007's idempotency guarantee: two runs of
+    main() over the same canonical inputs (including an open project under
+    a closed engagement) must produce byte-identical STATE.md."""
+    from brain_rollup import main
+
+    vault = _seed_state_fixture(tmp_path)
+    alloi01 = vault / "raw/areas/clearworks/org-brain/projects/alloi-01.md"
+    text = alloi01.read_text(encoding="utf-8")
+    text = text.replace("delivery_state: active", "delivery_state: closed", 1)
+    alloi01.write_text(text, encoding="utf-8")
+
+    rc = main(["--vault", str(vault), "--today", "2026-09-10"])
+    assert rc == 0
+    state = (vault / "raw/areas/clearworks/org-brain/STATE.md").read_text(encoding="utf-8")
+    rc2 = main(["--vault", str(vault), "--today", "2026-09-10"])
+    assert rc2 == 0
+    state2 = (vault / "raw/areas/clearworks/org-brain/STATE.md").read_text(encoding="utf-8")
+    assert state2 == state
 
 
 def test_main_writes_state_generated_region_idempotently(tmp_path: Path) -> None:

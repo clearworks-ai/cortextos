@@ -132,11 +132,53 @@ def _decisions_since(body: str, cutoff_date: str) -> list[str]:
 # G2R2-P2-1: column delimiter is an UNESCAPED `|` only — `\|` inside a cell
 # (e.g. an item or owner name that legitimately contains a pipe) must stay
 # literal, not be mistaken for a column boundary.
-_UNESCAPED_PIPE_RE = re.compile(r"(?<!\\)\|")
+#
+# Coordinator fold (2026-09-06): a single-char lookbehind (`(?<!\\)\|`)
+# cannot tell an escaped backslash (`\\`, two chars) from an escaped pipe
+# (`\|`, one backslash then the delimiter) — it only ever looks at the ONE
+# character immediately before `|`. A cell ending in a literal backslash
+# right before the real delimiter (an EVEN run of backslashes, e.g.
+# `foo\\|`) was wrongly read as "delimiter escaped", the row split into
+# fewer than 5 cells, and the whole row was silently dropped. A
+# left-to-right scanner that consumes each `\` + next-char pair as one
+# escaped unit sidesteps counting backslash-run parity entirely: a `|`
+# reached by the scanner's outer loop (i.e. not already consumed as half of
+# a pair) is always a real, unescaped delimiter.
+def _split_row_cells(text: str) -> list[str]:
+    cells: list[str] = []
+    current: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "\\" and i + 1 < n:
+            current.append(ch)
+            current.append(text[i + 1])
+            i += 2
+            continue
+        if ch == "|":
+            cells.append("".join(current))
+            current = []
+            i += 1
+            continue
+        current.append(ch)
+        i += 1
+    cells.append("".join(current))
+    return cells
 
 
 def _unescape_pipe_cell(text: str) -> str:
-    return text.strip().replace("\\|", "|")
+    text = text.strip()
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "\\" and i + 1 < n and text[i + 1] in ("\\", "|"):
+            out.append(text[i + 1])
+            i += 2
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
 
 
 def _open_rows(body: str) -> list[dict[str, str]]:
@@ -145,7 +187,7 @@ def _open_rows(body: str) -> list[dict[str, str]]:
         stripped = line.strip()
         if len(stripped) < 2 or not stripped.startswith("|") or not stripped.endswith("|"):
             continue
-        cells = _UNESCAPED_PIPE_RE.split(stripped[1:-1])
+        cells = _split_row_cells(stripped[1:-1])
         if len(cells) != 5:
             continue
         item, owner, deadline, source, status = (_unescape_pipe_cell(c) for c in cells)
@@ -184,7 +226,6 @@ def _today_iso() -> str:
 def render_state_sections(nodes: dict[str, dict[str, Any]], today: str) -> str:
     enabled = load_enabled_agents()
     open_nodes = {nid: n for nid, n in nodes.items() if (n.get("delivery_state") or "") in OPEN_STATES}
-    engagements = sorted((n for n in open_nodes.values() if n["kind"] == "engagement"), key=lambda n: n["id"])
     cutoff = _minus_days(today, 30)
 
     active: list[str] = []
@@ -212,12 +253,43 @@ def render_state_sections(nodes: dict[str, dict[str, Any]], today: str) -> str:
             else:
                 waiting.append(f"- {item} — {owner}" + (f" (due {deadline})" if deadline else ""))
 
-    for eng in engagements:
-        _emit_node(eng, "")
-        for child in sorted(
-            (n for n in open_nodes.values() if n["kind"] == "project" and n.get("parent") == eng["id"]),
-            key=lambda n: n["id"],
-        ):
+    # Finding 2 (D-09 line 52, FR-007 line ~234 "Active work = open nodes"):
+    # the old traversal started only from OPEN engagements and walked their
+    # open children — an active/paused/scoping project whose parent
+    # engagement is closed (or missing entirely) never appeared anywhere,
+    # even though the project itself is an open node. Derive the working
+    # set from open_nodes directly instead: every open project groups under
+    # its parent when that parent node exists at all (open or not); a
+    # project whose parent id resolves to no node lands in a deterministic
+    # "(unparented)" bucket. Ordering stays deterministic via sorted ids.
+    open_engagement_ids = {n["id"] for n in open_nodes.values() if n["kind"] == "engagement"}
+    open_projects = sorted((n for n in open_nodes.values() if n["kind"] == "project"), key=lambda n: n["id"])
+
+    by_parent: dict[str, list[dict[str, Any]]] = {}
+    unparented: list[dict[str, Any]] = []
+    for proj in open_projects:
+        parent_id = proj.get("parent") or ""
+        if parent_id and parent_id in nodes:
+            by_parent.setdefault(parent_id, []).append(proj)
+        else:
+            unparented.append(proj)
+
+    for group_id in sorted(open_engagement_ids | set(by_parent)):
+        if group_id in open_engagement_ids:
+            _emit_node(nodes[group_id], "")
+        else:
+            # Parent exists but is not itself open — headline it for
+            # grouping context only; no decisions/waiting/next extraction
+            # of its own (FR-007: only open nodes contribute content).
+            parent_node = nodes[group_id]
+            title = parent_node.get("title") or parent_node["id"]
+            active.append(f"- **{title}** ({parent_node['id']})")
+        for child in sorted(by_parent.get(group_id, []), key=lambda n: n["id"]):
+            _emit_node(child, "  ")
+
+    if unparented:
+        active.append("- **(unparented)**")
+        for child in unparented:
             _emit_node(child, "  ")
 
     active_out = ["## Active work", ""] + (active or ["(none)"])

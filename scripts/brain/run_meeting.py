@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -10,13 +12,15 @@ import sys
 import tempfile
 from pathlib import Path
 
+import brain_rollup
+import file_digest
 import preview
 import progress
 from adapt_meeting import main as adapt_main
 from atomic import atomic_write
 from extract_meeting import main as extract_main
 from fetch_fireflies import main as fetch_main
-from paths import DEFAULT_REPO_ROOT, DEFAULT_VAULT, envelope_dir, safe_meeting_id
+from paths import DEFAULT_REPO_ROOT, DEFAULT_VAULT, envelope_dir, org_brain_root, safe_meeting_id
 from resolve_meeting import main as resolve_main
 from sign_dry_run import marker_path as sign_marker_path
 from writeback_render import meeting_note_rel
@@ -31,6 +35,32 @@ RECAP = CODE_ROOT / "orgs/clearworksai/agents/pa/scripts/meeting_recap_draft.py"
 # via progress.crm_env in _apply_writes.
 CRM_SYNC = CODE_ROOT / "orgs/clearworksai/agents/crm/crm/meeting-crm-sync.py"
 FANOUT_SCRIPT = CODE_ROOT / "orgs/clearworksai/agents/crm/crm/meeting-fanout.py"
+BRAIN_ROLLUP = HERE / "brain_rollup.py"
+STATUS_PLAN = HERE / "status_plan.ts"
+
+
+def _status_env(base_env: dict[str, str]) -> dict[str, str]:
+    """G0a F-5: `npx` resolves `tsx` from the invoking process's cwd
+    upward and can fall back to a global/registry copy — a network
+    dependency and an unpinned version inside a production write path that
+    must also complete with the daemon down (Global Constraints). Strip the
+    proxy/registry knobs that would let a lookup escape offline and turn
+    off npm's own update-notifier chatter; the actual binary resolution is
+    `_status_plan_argv` below, not this env."""
+    drop = {"npm_config_registry", "NPM_CONFIG_REGISTRY", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"}
+    env = {k: v for k, v in base_env.items() if k not in drop}
+    env["NPM_CONFIG_UPDATE_NOTIFIER"] = "false"
+    return env
+
+
+def _status_plan_argv() -> list[str]:
+    """Prefer the repo's own pinned node_modules/.bin/tsx (deterministic,
+    offline, exact package.json version); fall back to `npx --no-install
+    tsx` (still refuses to fetch) only when the local install is missing."""
+    local_tsx = CODE_ROOT / "node_modules/.bin/tsx"
+    if local_tsx.exists():
+        return [str(local_tsx)]
+    return ["npx", "--no-install", "tsx"]
 
 # G2-P1-1: FR-012 line ~332's acceptance minimums (>=1 decision, >=1 OURS
 # task, >=5 CRM contacts, 1 draft) are the ACCEPTANCE MEETING's own gate
@@ -208,6 +238,75 @@ def _run_dry(meeting_id: str, vault: Path, repo: Path, source_dir: Path) -> int:
         if ledger.read_text(encoding="utf-8").strip():
             print("ledger mutated in dry-run", file=sys.stderr)
             return 3
+
+    # G0a F-9 ruling: phase 3 adds three new production-vault write targets
+    # that predate FR-012 line 324's dry-run noun list. Preview each via the
+    # SAME pure functions / subprocess --write-less path apply uses (no
+    # duplicated logic to drift out of sync), so a signed capture (Task 5)
+    # actually covers what --apply will write.
+    source = json.loads((source_dir / "source.json").read_text(encoding="utf-8"))
+    key = f"fireflies:{meeting_id}"
+    client_slug = str(resolution.get("counterparty_slug") or "")
+    today = str(source.get("occurred_at") or "")[:10] or brain_rollup._today_iso()
+
+    try:
+        nodes = brain_rollup.load_nodes(vault)
+    except brain_rollup.NodeBlockError as exc:
+        print(f"would-touch: FAILED reading ## Node blocks ({exc})")
+        nodes = {}
+
+    if client_slug and any(n.get("client") == client_slug for n in nodes.values()):
+        client_path = org_brain_root(vault) / "clients" / f"{client_slug}.md"
+        old_client = (
+            client_path.read_text(encoding="utf-8") if client_path.is_file()
+            else f"# Client: {client_slug.title()}\n\n## Current state\n\n"
+        )
+        new_client = brain_rollup.apply_generated_region(
+            old_client, "engagements-rollup", brain_rollup.render_engagements_rollup(client_slug, nodes),
+            create_after="## Current state\n",
+        )
+        if new_client != old_client:
+            print(f"would-touch: clients/{client_slug}.md (engagements-rollup)")
+
+    state_path = org_brain_root(vault) / "STATE.md"
+    old_state = state_path.read_text(encoding="utf-8") if state_path.is_file() else ""
+    gen_sha = brain_rollup.compute_generated_from(sorted(n["path"] for n in nodes.values())) if nodes else ""
+    new_state = brain_rollup.apply_generated_region(
+        old_state, "state", f"generated-from: {gen_sha}\n\n{brain_rollup.render_state_sections(nodes, today)}",
+    )
+    if new_state != old_state:
+        print("would-touch: STATE.md (state)")
+
+    eng_id = ""
+    node_id = resolution.get("node")
+    if node_id and node_id != "none":
+        node = nodes.get(node_id)
+        if node and node.get("kind") == "engagement":
+            eng_id = node_id
+        elif node and node.get("kind") == "project" and node.get("parent"):
+            parent = nodes.get(node["parent"])
+            if parent and parent.get("kind") == "engagement":
+                eng_id = node["parent"]
+    if eng_id:
+        st = subprocess.run(
+            [*_status_plan_argv(), str(STATUS_PLAN), "--client", client_slug, "--node", eng_id,
+             "--today", today, "--vault", str(vault)],
+            capture_output=True, text=True, timeout=CHILD_TIMEOUT_S,
+            cwd=str(CODE_ROOT), env=_status_env(os.environ),
+        )
+        sys.stdout.write(st.stdout)
+        if st.returncode != 0:
+            sys.stderr.write(st.stderr)
+    else:
+        print("would-write: skip: no-engagement")
+
+    log_path = org_brain_root(vault) / "_filed.log"
+    existing_log = log_path.read_text(encoding="utf-8") if log_path.is_file() else ""
+    if any(key in row for row in existing_log.splitlines()):
+        print("would-file: (already filed)")
+    else:
+        print(f"would-file: {file_digest.digest_line(today, str(source.get('title') or ''), resolution, key)}")
+
     return 0
 
 
@@ -568,6 +667,103 @@ def _apply_writes(
             "created": bool(rec_out.get("drafts_created")), "skipped_ledger": skipped_ledger,
         })
 
+    # Phase 3 (spec §12, FR-012 line 327): D-09 phase-3 re-sign check (Task
+    # 5) -> FR-007 -> FR-011 -> FR-013, after FR-008 (draft), before the
+    # receipt/acceptance-minimums/commit block.
+    phase3_marker = sign_marker_path(vault, "fireflies", meeting_id)
+    phase3_sign_failure = progress.validate_phase3_capture(phase3_marker)
+    if phase3_sign_failure:
+        print(f"FAILED at sign-check: {phase3_sign_failure}", file=sys.stderr)
+        return 15
+
+    client_slug = str(resolution.get("counterparty_slug") or "")
+    home_rel = str(resolution.get("home_path") or "")
+    # G0a F-7: one "today" for the whole phase-3 block, sourced from the
+    # meeting's own occurred_at (not wall-clock), so FR-007's rerun-zero-diff
+    # and FR-012's --force porcelain check both hold across a day boundary
+    # or the 30-day Decisions-made cutoff.
+    today = str(source.get("occurred_at") or "")[:10] or brain_rollup._today_iso()
+    try:
+        nodes = brain_rollup.load_nodes(vault)
+    except brain_rollup.NodeBlockError as exc:
+        print(f"FAILED at rollup: {exc}", file=sys.stderr)
+        return 6
+
+    if not progress.step_done(doc, "rollup"):
+        # G0b C1-2: always invoke brain_rollup — STATE.md's generated
+        # region sources every projects/*.md node in the vault and must
+        # regenerate whether or not THIS meeting resolved to a client;
+        # --client is passed only when we have one, for the per-client
+        # rollup region.
+        argv = [sys.executable, str(BRAIN_ROLLUP), "--vault", str(vault), "--today", today]
+        if client_slug:
+            argv += ["--client", client_slug]
+        try:
+            roll = subprocess.run(argv, capture_output=True, text=True, timeout=CHILD_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            print("FAILED at rollup: timeout", file=sys.stderr)
+            return 6
+        sys.stdout.write(roll.stdout)
+        if roll.returncode != 0:
+            sys.stderr.write(roll.stderr)
+            print(f"FAILED at rollup: rc={roll.returncode}", file=sys.stderr)
+            return 6
+        outcome = {"done": True}
+        if not client_slug:
+            outcome["skipped"] = "no-client"
+        doc = progress.merge_progress(prog_path, "rollup", outcome)
+
+    eng_id, eng_skip = ("", "no-engagement")
+    node_id = resolution.get("node")
+    if node_id and node_id != "none":
+        node = nodes.get(node_id)
+        if node and node.get("kind") == "engagement":
+            eng_id, eng_skip = node_id, ""
+        elif node and node.get("kind") == "project" and node.get("parent"):
+            # G0a F-6: only trust the parent id when it actually exists in
+            # this vault AND is itself kind: engagement — resolution.json's
+            # node.parent is copied verbatim from the child's own ## Node
+            # block (FR-006) and was never cross-checked against the real
+            # node set. Every pre-existing R2 fixture seeds only the child
+            # (alloi-03), never alloi-01, so this must resolve to a clean
+            # skip, not a subprocess call.
+            parent = nodes.get(node["parent"])
+            if parent and parent.get("kind") == "engagement":
+                eng_id, eng_skip = node["parent"], ""
+
+    if not progress.step_done(doc, "status_update"):
+        if eng_skip:
+            doc = progress.merge_progress(prog_path, "status_update", {
+                "done": True, "relPath": None, "action": f"skip: {eng_skip}",
+            })
+        else:
+            try:
+                st = subprocess.run(
+                    [*_status_plan_argv(), str(STATUS_PLAN), "--client", client_slug, "--node", eng_id,
+                     "--today", today, "--write", "--vault", str(vault)],
+                    capture_output=True, text=True, timeout=CHILD_TIMEOUT_S,
+                    cwd=str(CODE_ROOT), env=_status_env(os.environ),
+                )
+            except subprocess.TimeoutExpired:
+                print("FAILED at status: timeout", file=sys.stderr)
+                return 14
+            sys.stdout.write(st.stdout)
+            if st.returncode != 0:
+                sys.stderr.write(st.stderr)
+                print(f"FAILED at status: rc={st.returncode}", file=sys.stderr)
+                return 14
+            st_out = progress.parse_subprocess_json(st.stdout)
+            doc = progress.merge_progress(prog_path, "status_update", {
+                "done": True, "relPath": st_out.get("relPath"), "action": st_out.get("action"),
+            })
+
+    if not progress.step_done(doc, "filed"):
+        appended = file_digest.append_filed_line(
+            org_brain_root(vault) / "_filed.log", key,
+            file_digest.digest_line(today, str(source.get("title") or ""), resolution, key),
+        )
+        doc = progress.merge_progress(prog_path, "filed", {"done": True, "appended": appended})
+
     # C2-4 (fold, rev3): FR-012 line ~332's acceptance minimums (>=1
     # decision, >=1 OURS task, >=5 CRM contacts, 1 draft) must be enforced by
     # the production --apply path itself, not only by a test helper calling
@@ -605,7 +801,12 @@ def _apply_writes(
     if not progress.step_done(doc, "commit"):
         adapted_meeting = (wb_payload_doc.get("meetings") or [{}])[0]
         home_rel = str(resolution.get("home_path") or "")
-        pathspec = progress.fr014_pathspec(meeting_id, home_rel, meeting_note_rel(adapted_meeting))
+        pathspec = progress.fr014_pathspec(
+            meeting_id, home_rel, meeting_note_rel(adapted_meeting),
+            client_slug=client_slug or None, engagement_id=(eng_id or None),
+            status_rel=(doc.get("status_update") or {}).get("relPath"),
+            filed=progress.step_done(doc, "filed"), state_touched=True,
+        )
         message = f"brain: {_home_slug(resolution)} {str(source.get('occurred_at') or '')[:10]} from {key}"
         sha, committed_now = progress.vault_commit(vault, pathspec, message)
         final_sha = sha if committed_now else (prior_receipt or {}).get("vault_sha")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +16,13 @@ if str(BRAIN) not in sys.path:
 
 from atomic import atomic_write
 from sign_dry_run import marker_path
+
+# Captured at collection time, before the autouse _no_live_daemon fixture
+# below narrows os.environ["PATH"] to /usr/bin:/bin for every test — needed
+# by test_apply_runs_phase3_rollup_status_filed_before_commit to locate a
+# real `node` interpreter (node_modules/.bin/tsx's shebang) once that
+# narrowing is in effect.
+_ORIGINAL_PATH = os.environ.get("PATH", "")
 
 
 @pytest.fixture(autouse=True)
@@ -323,6 +331,18 @@ def _install_fakes(tmp_path: Path) -> Path:
         "#!/bin/sh\necho 'claude must never be invoked by an R2 test' >&2\nexit 99\n"
     )
     claude.chmod(0o755)
+    # G0a F-5 defense in depth: `_status_plan_argv` prefers the repo's own
+    # pinned node_modules/.bin/tsx by absolute path and never touches PATH
+    # when that file exists, falling back to `npx --no-install tsx` (which
+    # DOES resolve via PATH) only when the local install is missing. Trap
+    # both names so a regression to the ambient/unpinned resolution is loud.
+    npx_trap_log = tmp_path / "npx-tsx-trap.log"
+    for name in ("npx", "tsx"):
+        shim = bindir / name
+        shim.write_text(
+            f'#!/bin/sh\necho "TRAPPED $0 $@" >> "{npx_trap_log}"\nexit 98\n'
+        )
+        shim.chmod(0o755)
     return bindir
 
 
@@ -334,6 +354,24 @@ def _write_capture(tmp_path: Path) -> Path:
         "quotes kept decisions=1 commitments=1 dropped={}\n"
         "tasks:\nSend the tactical report draft · owner: Josh · due 2026-09-08\n"
         "subject: Recap: Weekly tacticals review — 2026-09-04\n",
+        encoding="utf-8",
+    )
+    return capture
+
+
+def _write_phase3_capture(tmp_path: Path) -> Path:
+    capture = tmp_path / "dry-run-phase3.txt"
+    capture.write_text(
+        "home=projects/alloi-03.md node=alloi-03 rule=2 created=none promotion=none\n"
+        "--- a/projects/alloi-03.md\n+++ b/projects/alloi-03.md\n"
+        "quotes kept decisions=1 commitments=1 open_questions=0 dropped={}\n"
+        "tasks:\nSend the tactical report draft · owner: Josh · due 2026-09-08\n"
+        "subject: Recap: Weekly tacticals review — 2026-09-04\n"
+        "would-touch: clients/alloi.md (engagements-rollup)\n"
+        "would-touch: STATE.md (state)\n"
+        "would-write: raw/areas/clearworks/clients/alloi/status-update-2026-09-04.md\n"
+        "would-file: 2026-09-04 filed \"Weekly tacticals review\" under alloi-03 "
+        "→ alloi-03 (rule 2, conf 1.0) fireflies:" + MID + "\n",
         encoding="utf-8",
     )
     return capture
@@ -628,6 +666,7 @@ def test_apply_restart_and_force_are_zero_new_writes(tmp_path):
         capture_output=True, text=True, env=env,
     )
     assert sign.returncode == 0, sign.stderr
+    _stamp_phase3_capture(vault, mid)
 
     def run_apply(*extra: str) -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -711,6 +750,7 @@ def test_apply_ledger_already_skipped_recovers_subject_and_still_passes_minimums
         capture_output=True, text=True, env=env,
     )
     assert sign.returncode == 0, sign.stderr
+    _stamp_phase3_capture(vault, mid)
 
     ledger = vault / "raw/media/transcripts/_recap-ledger.txt"
     ledger.parent.mkdir(parents=True, exist_ok=True)
@@ -751,6 +791,7 @@ def test_apply_recap_recovers_real_subject_from_ledger_tab_row(tmp_path):
         capture_output=True, text=True, env=env,
     )
     assert sign.returncode == 0, sign.stderr
+    _stamp_phase3_capture(vault, mid)
 
     real_subject = "Recap: Weekly tacticals review — 2026-09-04"
     ledger = vault / "raw/media/transcripts/_recap-ledger.txt"
@@ -801,6 +842,7 @@ def test_apply_exits_9_when_decisions_shortfall_blocks_commit_before_vault_write
         capture_output=True, text=True, env=env,
     )
     assert sign.returncode == 0, sign.stderr
+    _stamp_phase3_capture(vault, mid)
 
     pre_head = _git(vault, "rev-parse", "HEAD").stdout.strip()
 
@@ -850,6 +892,7 @@ def test_apply_non_acceptance_meeting_never_blocked_by_minimums_shortfall(tmp_pa
         capture_output=True, text=True, env=env,
     )
     assert sign.returncode == 0, sign.stderr
+    _stamp_phase3_capture(vault, mid)
 
     result = subprocess.run(
         [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
@@ -879,6 +922,25 @@ def test_acceptance_meeting_ids_default_and_env_override(monkeypatch):
     assert run_meeting._acceptance_meeting_ids() == {"abc", "def", "ghi"}
 
 
+def _stamp_phase3_capture(vault: Path, mid: str) -> None:
+    """Deviation (Task 4/Task 5 boundary): `progress.validate_phase3_capture`
+    (this task) requires a `phase3_capture_sha256` field on the SAME
+    d09-signed.json marker `validate_sign_marker` already checks — but
+    `sign_dry_run.py` (Task 5's exclusive file, D-09 phase-3 re-sign CLI) is
+    the thing that writes it, and Task 5 has not landed yet. Rather than
+    touch sign_dry_run.py out of scope, hand-stamp the same field directly
+    onto the real marker sign_dry_run.py just wrote, hashed from the exact
+    bytes of the capture file it already bound via `capture_path` — this
+    exercises Task 4's own gate (which only re-verifies the hash against the
+    capture file's CURRENT bytes, never its noun content) faithfully end to
+    end for every test that runs the full --apply path past FR-008."""
+    marker = marker_path(vault, "fireflies", mid)
+    doc = json.loads(marker.read_text(encoding="utf-8"))
+    capture_file = Path(doc["capture_path"])
+    doc["phase3_capture_sha256"] = hashlib.sha256(capture_file.read_bytes()).hexdigest()
+    atomic_write(marker, json.dumps(doc, sort_keys=True).encode("utf-8"))
+
+
 def _sign_for_restart_test(vault: Path, mid: str, tmp_path: Path, env: dict) -> None:
     sign = subprocess.run(
         [sys.executable, str(BRAIN / "sign_dry_run.py"), "--meeting-id", mid, "--vault", str(vault),
@@ -887,6 +949,7 @@ def _sign_for_restart_test(vault: Path, mid: str, tmp_path: Path, env: dict) -> 
         capture_output=True, text=True, env=env,
     )
     assert sign.returncode == 0, sign.stderr
+    _stamp_phase3_capture(vault, mid)
 
 
 def test_apply_rejects_marker_missing_source_binding_fields(tmp_path):
@@ -1080,3 +1143,110 @@ def test_apply_restart_redoes_writeback_when_bogus_checkpoint_has_no_marker(tmp_
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     assert receipt["vault_sha"]
     assert receipt["minimums"]["ok"] is True
+
+
+def test_apply_runs_phase3_rollup_status_filed_before_commit(tmp_path):
+    """FR-012 line 327: FR-007 -> FR-011 -> FR-013 -> commit, after FR-008.
+    Extends the existing _seed_apply_vault fixture's engagement/child pages
+    with a ## Reporting block so FR-011 finds a real engagement to feed the
+    unchanged engine, and asserts all three phase-3 progress keys land plus
+    STATE.md/clients/alloi.md/_filed.log are all inside the committed diff."""
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    # add the parent engagement page + a ## Reporting block on alloi-03.md,
+    # matching the real Alloi seed (D-03) so FR-011 resolves node's parent
+    # AND F-6's gate (parent must exist and be kind: engagement) is satisfied.
+    proj = vault / "raw/areas/clearworks/org-brain/projects"
+    (proj / "alloi-01.md").write_text(
+        "# Client: Alloi — Managed Services\n\n## Node\nid: alloi-01\nkind: engagement\n"
+        "client: alloi\nparent:\ntitle: Managed Services\ndomains: alloi.us\ndelivery_state: active\n\n"
+        "## Reporting\ncadence: weekly\nchannel: email\ncontact: marcos@alloi.us\nlast_update:\n\n"
+        "## History (dated, newest first)\n\n## Open Items\n",
+        encoding="utf-8",
+    )
+    alloi03 = proj / "alloi-03.md"
+    text = alloi03.read_text(encoding="utf-8")
+    if "## Reporting" not in text:
+        text = text.replace("## History", "## Reporting\ncadence:\nchannel:\ncontact:\nlast_update:\n\n## History", 1)
+        alloi03.write_text(text, encoding="utf-8")
+    _git(vault, "add", "-A")
+    _git(vault, "commit", "-q", "-m", "seed phase3")
+
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    # Deviation: unlike every no-engagement R2 fixture, this test genuinely
+    # reaches FR-011 and shells the repo's real node_modules/.bin/tsx, whose
+    # shebang is `#!/usr/bin/env node` — the autouse _no_live_daemon fixture
+    # narrows PATH to /usr/bin:/bin (to keep the real cortextos/gws off it),
+    # which also hides `node`. Append node's real directory AFTER bindir so
+    # the PATH-trapped fake gws/cortextos/claude in bindir still win over
+    # any same-named real binary that happens to live alongside node.
+    node_bin = shutil.which("node", path=_ORIGINAL_PATH)
+    if node_bin:
+        env["PATH"] = f"{env['PATH']}:{os.path.dirname(node_bin)}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+
+    sign = subprocess.run(
+        [sys.executable, str(BRAIN / "sign_dry_run.py"), "--meeting-id", mid, "--vault", str(vault),
+         "--signed-by", "Josh", "--signed-at", "2026-09-05T00:00:00Z",
+         "--dry-run-capture", str(_write_phase3_capture(tmp_path))],
+        capture_output=True, text=True, env=env,
+    )
+    assert sign.returncode == 0, sign.stderr
+    _stamp_phase3_capture(vault, mid)
+
+    r = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply"],
+        capture_output=True, text=True, env=env,
+    )
+    assert r.returncode == 0, r.stderr + r.stdout
+
+    prog = json.loads((vault / "raw/media/transcripts/_state" / f"fireflies-{mid}" / "progress.json").read_text(encoding="utf-8"))
+    assert prog["rollup"]["done"] is True
+    assert prog["status_update"]["done"] is True
+    assert prog["status_update"]["action"] in ("draft", "brief") or str(prog["status_update"]["action"]).startswith("skip:")
+    assert prog["filed"]["done"] is True
+
+    committed = _git(vault, "show", "--stat", "HEAD").stdout
+    assert "STATE.md" in committed
+    assert "clients/alloi.md" in committed
+    assert "_filed.log" in committed
+
+    filed_log = (vault / "raw/areas/clearworks/org-brain/_filed.log").read_text(encoding="utf-8")
+    assert f"fireflies:{mid}" in filed_log
+
+
+def test_existing_r2_fixtures_skip_status_update_no_engagement_no_subprocess(tmp_path):
+    """G0a F-6: none of the pre-existing R2 fixtures seed projects/alloi-01.md
+    (only alloi-03.md, whose ## Node names parent: alloi-01 without that
+    page existing). Before the F-6 gate, eng_id was trusted anyway and every
+    R2 apply test would have shelled a real tsx subprocess. After the gate,
+    eng_id must stay empty and status_update must skip in pure Python — the
+    PATH-trapped npx/tsx shims (added to _install_fakes below) must never
+    fire, proving no node/tsx dependency was added to this test's cost."""
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+
+    sign = subprocess.run(
+        [sys.executable, str(BRAIN / "sign_dry_run.py"), "--meeting-id", mid, "--vault", str(vault),
+         "--signed-by", "Josh", "--signed-at", "2026-09-05T00:00:00Z",
+         "--dry-run-capture", str(_write_phase3_capture(tmp_path))],
+        capture_output=True, text=True, env=env,
+    )
+    assert sign.returncode == 0, sign.stderr
+    _stamp_phase3_capture(vault, mid)
+
+    r = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply"],
+        capture_output=True, text=True, env=env,
+    )
+    assert r.returncode == 0, r.stderr + r.stdout
+    prog = json.loads((vault / "raw/media/transcripts/_state" / f"fireflies-{mid}" / "progress.json").read_text(encoding="utf-8"))
+    assert prog["status_update"]["action"] == "skip: no-engagement"
+    npx_trap_log = tmp_path / "npx-tsx-trap.log"
+    assert not npx_trap_log.exists() or npx_trap_log.read_text(encoding="utf-8").strip() == ""

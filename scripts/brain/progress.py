@@ -318,14 +318,24 @@ def parse_subprocess_json(stdout: str) -> dict[str, Any]:
     return {}
 
 
-def fr014_pathspec(meeting_id: str, home_rel: str, note_rel: str) -> list[str]:
+def fr014_pathspec(
+    meeting_id: str,
+    home_rel: str,
+    note_rel: str,
+    *,
+    client_slug: str | None = None,
+    engagement_id: str | None = None,
+    status_rel: str | None = None,
+    filed: bool = False,
+    state_touched: bool = False,
+) -> list[str]:
     """FR-014's git-add pathspec (spec line 363) for one meeting: the
     envelope dir, both ledgers, the meeting note, and (when a home page is
-    resolved) the home page. Phase-3 artifacts (STATE.md, _filed.log, a
-    status relPath, clients/*.md, projects/*.md last_update) are out of
-    scope for R2 (FR-007/011/013 land in phase 3) so are never added here.
-    A single source of truth for this list — both `_apply_writes`'s commit
-    step and Task 10's G4 porcelain assertion call this (G0a F-6)."""
+    resolved) the home page. R3 adds the phase-3 artifacts (STATE.md,
+    clients/<slug>.md, projects/<engagement>.md, _filed.log, the status
+    artifact relPath) behind keyword args so every R2 call site is
+    unaffected. A single source of truth for this list — both
+    `_apply_writes`'s commit step and the G4 porcelain assertion call this."""
     entries = {
         f"raw/media/transcripts/fireflies/{meeting_id}",
         "raw/media/transcripts/_recap-ledger.txt",
@@ -334,7 +344,54 @@ def fr014_pathspec(meeting_id: str, home_rel: str, note_rel: str) -> list[str]:
     }
     if home_rel:
         entries.add(f"raw/areas/clearworks/org-brain/{home_rel}")
+    if client_slug:
+        entries.add(f"raw/areas/clearworks/org-brain/clients/{client_slug}.md")
+    if engagement_id:
+        entries.add(f"raw/areas/clearworks/org-brain/projects/{engagement_id}.md")
+    if state_touched:
+        entries.add("raw/areas/clearworks/org-brain/STATE.md")
+    if filed:
+        entries.add("raw/areas/clearworks/org-brain/_filed.log")
+    if status_rel:
+        entries.add(status_rel)
     return sorted(entries)
+
+
+def validate_phase3_capture(path: Path) -> str | None:
+    """G0a F-9 ruling: phase 3 adds five new production-vault write targets
+    that predate FR-012 line 324's dry-run noun list. A marker's ordinary
+    `capture_sha256` (validate_sign_marker, above) only proves a human
+    reviewed the five R2-era nouns — it says nothing about the phase-3
+    previews this task adds to _run_dry. Require a DISTINCT
+    `phase3_capture_sha256` field, set by Task 5's sign_dry_run.py only when
+    the reviewed capture also contains the phase-3 preview nouns
+    (would-touch:/would-write:/would-file:), and re-verify it against the
+    capture file's CURRENT bytes here (not just presence) so an edited or
+    swapped-out capture cannot silently satisfy this gate. Returns None
+    when valid, else the reason (`--apply` exits 15 before any phase-3
+    write). Assumes validate_sign_marker(path) has already been called and
+    returned None — this function does not repeat signed_by/signed_at/
+    capture_path/capture_sha256 validation."""
+    if not path.exists():
+        return "d09-signed.json missing"
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "d09-signed.json is not valid JSON"
+    if not isinstance(doc, dict):
+        return "d09-signed.json is not a JSON object"
+    value = doc.get("phase3_capture_sha256")
+    if not isinstance(value, str) or not value.strip():
+        return "phase-3 capture unsigned"
+    capture_path = doc.get("capture_path")
+    if not isinstance(capture_path, str) or not capture_path.strip():
+        return "phase-3 capture unsigned"
+    capture_file = Path(capture_path)
+    if not capture_file.is_file():
+        return "phase-3 capture unsigned"
+    if hashlib.sha256(capture_file.read_bytes()).hexdigest() != value:
+        return "phase-3 capture unsigned"
+    return None
 
 
 def acceptance_minimums(receipt: dict[str, Any], *, decisions_kept: int) -> list[str]:

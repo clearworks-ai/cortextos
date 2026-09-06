@@ -19,6 +19,7 @@ DEFAULT_VOICE_PATH = ORG_DIR / "knowledge" / "voice.md"
 DEFAULT_VIP_PATH = ORG_DIR / "knowledge" / "vip-clients.txt"
 CLEARWORKS_DOMAINS = {"clearworks.ai"}
 SUPPRESSED_NAMES = ("marcos santa ana",)
+DEFAULT_TO = "josh@clearworks.ai"
 RunResult = subprocess.CompletedProcess[str]
 Runner = Callable[[Sequence[str]], RunResult]
 
@@ -208,7 +209,7 @@ def run_gmail_draft(subject: str, body: str, runner: Runner) -> RunResult:
             "gmail",
             "+draft",
             "--to",
-            "josh@clearworks.ai",
+            DEFAULT_TO,
             "--subject",
             subject,
             "--body",
@@ -265,6 +266,9 @@ def process_meetings(
         )
 
         if dry_run:
+            recipients = {"to": [DEFAULT_TO], "cc": []}
+            print(f"to: {', '.join(recipients['to'])}")
+            print(f"cc: {', '.join(recipients['cc']) or '(none)'}")
             print(f"subject: {subject}")
             print(body)
             continue

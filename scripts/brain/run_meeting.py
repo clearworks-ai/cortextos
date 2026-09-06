@@ -80,25 +80,36 @@ def main(argv: list[str] | None = None) -> int:
         f"quotes kept decisions={kept_d} commitments={kept_c} "
         f"dropped={json.dumps(dropped, sort_keys=True)}"
     )
+    from preview import bus_task_preview, crm_interaction_preview
+
+    event_path = source_dir / "event.json"
+    resolution_path = source_dir / "resolution.json"
+    event = json.loads(event_path.read_text(encoding="utf-8")) if event_path.is_file() else {}
+    resolution = json.loads(resolution_path.read_text(encoding="utf-8")) if resolution_path.is_file() else {}
+    validated_doc = validated if validated_path.is_file() else {}
+
+    print("crm interaction rows:")
+    crm_rows = crm_interaction_preview(event, validated_doc, resolution)
+    if crm_rows:
+        for row in crm_rows:
+            print(json.dumps(row, sort_keys=True))
+    else:
+        print("(none)")
+
     print("tasks:")
     fan_path = source_dir / "fanout-meeting.json"
-    printed = False
-    if fan_path.is_file():
-        fan = json.loads(fan_path.read_text(encoding="utf-8"))
-        for meet in fan.get("meetings") or []:
-            if not isinstance(meet, dict):
-                continue
-            for step in meet.get("next_steps") or []:
-                if not isinstance(step, dict):
-                    continue
-                title = str(step.get("text") or "").strip()
-                if not title:
-                    continue
-                owner = str(step.get("owner_label") or step.get("owner_identity") or "")
-                due = step.get("deadline") or "none"
-                print(f"{title} · {owner} · due {due}")
-                printed = True
-    if not printed:
+    fan = json.loads(fan_path.read_text(encoding="utf-8")) if fan_path.is_file() else {}
+    task_rows = bus_task_preview(fan, set(), meeting_id=meeting_id)
+    if task_rows:
+        for row in task_rows:
+            # FR-012 line ~324 names this noun by shape: "the task list
+            # (title · owner · due)" — the R1-signed capture has this exact
+            # line (G0a F-12); keep it, then add the full payload beneath it.
+            print(f"{row['title']} · {row['owner_label']} · due {row['due'] or 'none'}")
+        print("task payloads:")
+        for row in task_rows:
+            print(json.dumps(row, sort_keys=True))
+    else:
         print("(none)")
 
     with tempfile.TemporaryDirectory() as tmp:

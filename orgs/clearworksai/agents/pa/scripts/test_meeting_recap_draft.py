@@ -193,6 +193,8 @@ class ProcessMeetingsTests(unittest.TestCase):
                     )
             self.assertEqual(rc, 0)
             out = stdout.getvalue()
+            self.assertIn("to: josh@clearworks.ai", out)
+            self.assertIn("cc: (none)", out)
             self.assertIn("Recap: MSIA recap — 2026-07-27", out)
             self.assertIn("Reviewed the audit findings.", out)
             self.assertIn("Josh: Send findings deck", out)

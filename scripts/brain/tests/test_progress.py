@@ -109,6 +109,25 @@ def test_check_vault_gitignore_flags_missing_then_clears_once_landed(tmp_path):
     assert check_vault_gitignore(vault) == []
 
 
+def test_check_vault_gitignore_accepts_literal_gitignore_lines(tmp_path):
+    # Regression: `git check-ignore -q '*.md.lock'` exits 1 even when
+    # .gitignore contains that exact line, because the literal glob text
+    # is not itself a matchable pathname (only a concrete path like
+    # raw/areas/x.md.lock resolves against the pattern). The old
+    # implementation probed the pattern strings themselves and failed
+    # closed on a correctly configured vault. Probing concrete sample
+    # paths must report nothing missing here.
+    from progress import check_vault_gitignore
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    subprocess.run(["git", "init", "-q", str(vault)], check=True)
+    (vault / ".gitignore").write_text(
+        "raw/media/transcripts/_state/\n*.md.lock\n", encoding="utf-8"
+    )
+    assert check_vault_gitignore(vault) == []
+
+
 def test_check_vault_gitignore_skips_when_vault_is_not_a_git_repo(tmp_path):
     # A bare (non-git) vault fixture is common in this suite's other tests
     # (e.g. Task 8's guard-path tests, which never reach the commit step) —

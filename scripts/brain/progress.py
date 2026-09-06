@@ -77,8 +77,12 @@ def check_vault_gitignore(vault: Path) -> list[str]:
     suite use a non-git vault and never reach the commit step, and this
     precondition must not block them."""
     missing: list[str] = []
-    for pattern in ("raw/media/transcripts/_state/", "*.md.lock"):
-        res = subprocess.run(["git", "-C", str(vault), "check-ignore", "-q", pattern], timeout=60)
+    probes = {
+        "raw/media/transcripts/_state/": "raw/media/transcripts/_state/probe/progress.json",
+        "*.md.lock": "raw/areas/probe.md.lock",
+    }
+    for pattern, probe_path in probes.items():
+        res = subprocess.run(["git", "-C", str(vault), "check-ignore", "-q", probe_path], timeout=60)
         if res.returncode == 1:
             missing.append(pattern)
     return missing

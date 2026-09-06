@@ -42,6 +42,30 @@ def crm_interaction_preview(
     return rows
 
 
+def _fanout_task_description(*, owner_label: str, meeting_id: str, text: str, due: str | None, commitment_id: str) -> str:
+    """Byte-for-byte mirror of meeting-fanout.py's `fanout()` inline
+    desc-building block (CRM_DIR/meeting-fanout.py, the loop over
+    `parse_commitments(...)`, ~lines 339-352). Not extracted to a shared,
+    importable function there — meeting-fanout.py is read-only for this fix
+    (D-09 review scope) and the block is embedded inside a loop that also
+    performs dedup/create_task side effects, so it cannot be called
+    directly without executing those. Replicated here instead; parity is
+    pinned by test_preview.py's importlib-based comparison against the real
+    meeting-fanout.py module, which fails if this ever drifts from the
+    original block."""
+    task_marker = f"commitment:{meeting_id}/{commitment_id}"
+    if owner_label:
+        return (
+            f"{owner_label} · From meeting fireflies:{meeting_id} · "
+            f"{text} · due {due or 'none'} · [{task_marker}]"
+        )
+    return (
+        f"From meeting {meeting_id}"
+        + (f" · due {due}" if due else "")
+        + f" · [{task_marker}]"
+    )
+
+
 def bus_task_preview(
     fanout: dict[str, Any], created_ids: set[str], *, meeting_id: str
 ) -> list[dict[str, Any]]:
@@ -56,15 +80,25 @@ def bus_task_preview(
             cid = str(step.get("commitmentId") or "")
             if cid and cid in created_ids:
                 continue
-            text = str(step.get("text") or "").strip()
+            # Finding 2 (D-09 review): meeting-fanout.py's own Commitment.text
+            # is `_s(step.get("text")) or _s(step.get("action"))` — falls
+            # back to `action` when `text` is missing/empty. Preview must use
+            # the exact same text fanout would title/describe the task with.
+            text = str(step.get("text") or "").strip() or str(step.get("action") or "").strip()
             if not text:
                 continue
-            owner_identity = str(step.get("owner_identity") or "")
-            owner_label = str(step.get("owner_label") or f"owner: {owner_identity or 'Unassigned'}")
-            due = step.get("deadline") or None
+            owner_identity = str(step.get("owner_identity") or "").strip()
+            # Finding 2: never synthesize an owner_label — fanout's Commitment
+            # .owner_label is `_s(step.get("owner_label"))` (empty string when
+            # absent), and the desc-building block branches on that emptiness
+            # to a DIFFERENT format (no "owner: Unassigned" text at all). A
+            # synthesized fallback here would make the signed dry-run preview
+            # describe a task fanout would never actually create.
+            owner_label = str(step.get("owner_label") or "").strip()
+            due = str(step.get("deadline") or "").strip() or None
             title = text if len(text) <= 120 else text[:117] + "..."
-            description = (
-                f"{owner_label} · From meeting fireflies:{meeting_id} · {text} · due {due or 'none'}"
+            description = _fanout_task_description(
+                owner_label=owner_label, meeting_id=meeting_id, text=text, due=due, commitment_id=cid,
             )
             rows.append(
                 {

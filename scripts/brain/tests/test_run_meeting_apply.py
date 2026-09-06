@@ -117,6 +117,22 @@ def test_apply_signed_marker_reaches_fetch(tmp_path, monkeypatch):
     assert rc == 2
 
 
+def test_apply_has_no_refetch_flag(tmp_path):
+    # D-09 review finding 1, part (d): the simplest way to guarantee --apply
+    # never re-fetches after sign-off is to never expose a --refetch flag on
+    # this CLI at all (fetch_fireflies.py has its own --refetch, but
+    # run_meeting.py never passes it through) — argparse must refuse this
+    # combination outright.
+    from run_meeting import main
+
+    with pytest.raises(SystemExit) as exc:
+        main([
+            "--meeting-id", "MID", "--apply", "--refetch",
+            "--repo-root", str(tmp_path / "repo"), "--vault", str(tmp_path / "vault"),
+        ])
+    assert exc.value.code == 2
+
+
 def test_apply_exits_11_when_crm_scripts_predate_r2(tmp_path, monkeypatch):
     # R2-F-1: a mechanical, fail-fast precondition — if CODE_ROOT's CRM/
     # fanout scripts ever regress to a pre-R2 copy (no --full-file), --apply
@@ -873,6 +889,69 @@ def _sign_for_restart_test(vault: Path, mid: str, tmp_path: Path, env: dict) -> 
     assert sign.returncode == 0, sign.stderr
 
 
+def test_apply_rejects_marker_missing_source_binding_fields(tmp_path):
+    # D-09 review finding 1: a legacy marker (signed before this fix, or —
+    # as here — hand-seeded the way _seed_signed_marker does, with no
+    # source_sha256/extraction_input_sha) must be refused once --apply
+    # reaches the post-fetch envelope-bound check, distinctly from a
+    # genuine post-signing change.
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    _seed_signed_marker(vault, mid)  # legacy-shaped marker: no binding fields
+    env = os.environ.copy()  # already PATH-narrowed by the autouse _no_live_daemon fixture
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 15, result.stderr + result.stdout
+    assert "FAILED at sign-check:" in result.stderr
+    assert "missing" in result.stderr
+    assert "source changed since sign-off" not in result.stderr
+
+    receipt_path = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}" / "receipt.json"
+    assert not receipt_path.exists()
+
+
+def test_apply_rejects_when_source_changed_after_signoff(tmp_path):
+    # D-09 review finding 1: the marker alone previously proved only that a
+    # human reviewed SOME capture — not that the envelope --apply is about
+    # to act on is still the one reviewed. Sign against the real fixture,
+    # then mutate source.json (and recompute its sha256, so the drift is a
+    # genuine change to the SOURCE the sign-off bound to, not merely a
+    # corrupted sha file) before running --apply.
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    _sign_for_restart_test(vault, mid, tmp_path, env)
+
+    env_dir = vault / "raw/media/transcripts/fireflies" / mid
+    source_path = env_dir / "source.json"
+    source_doc = json.loads(source_path.read_text(encoding="utf-8"))
+    source_doc["title"] = "Weekly tacticals review (edited after sign-off)"
+    raw = json.dumps(source_doc, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    source_path.write_bytes(raw)
+    (env_dir / "source.sha256").write_text(hashlib.sha256(raw).hexdigest() + "\n", encoding="utf-8")
+
+    pre_head = _git(vault, "rev-parse", "HEAD").stdout.strip()
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 15, result.stderr + result.stdout
+    assert "FAILED at sign-check: source changed since sign-off" in result.stderr
+
+    receipt_path = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}" / "receipt.json"
+    assert not receipt_path.exists()
+    post_head = _git(vault, "rev-parse", "HEAD").stdout.strip()
+    assert post_head == pre_head  # never committed
+
+
 def test_apply_restart_resumes_after_writeback_when_marker_present_leaves_page_untouched(tmp_path):
     """Directive binding rule (d), beyond the plan's literal Step 1 text:
     FR-012's restart contract (spec ~318-335) is "continues from the first
@@ -909,7 +988,12 @@ def test_apply_restart_resumes_after_writeback_when_marker_present_leaves_page_u
         home_page.read_text(encoding="utf-8").replace(
             "## History (dated, newest first)\n\n- old\n",
             f"## History (dated, newest first)\n\n"
-            f"- 2026-09-04 recap [source: fireflies:{mid}]\n- old\n",
+            # Coordinator follow-up finding: writeback_marker_present now
+            # requires the writeback-shaped bullet (date + em-dash + ...
+            # ending in the marker), matching writeback_render._history_
+            # block's real output — not just any line containing the marker
+            # substring.
+            f"- 2026-09-04 — recap [source: fireflies:{mid}]\n- old\n",
         ),
         encoding="utf-8",
     )

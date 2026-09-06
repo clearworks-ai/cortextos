@@ -379,6 +379,133 @@ def test_validate_sign_marker_accepts_signer_from_env_override(tmp_path, monkeyp
     assert validate_sign_marker(marker) is None
 
 
+# ── D-09 review finding 1: envelope-bound sign-off ────────────────────────────
+
+
+def _valid_marker_doc_with_binding(capture: Path, *, source_sha256: str, extraction_input_sha: str) -> dict:
+    doc = _valid_marker_doc(capture)
+    doc["source_sha256"] = source_sha256
+    doc["extraction_input_sha"] = extraction_input_sha
+    return doc
+
+
+def test_validate_sign_marker_envelope_check_skipped_when_no_envelope_given(tmp_path):
+    # Backward compatible default: existing callers that never pass
+    # `envelope=` (e.g. the original pre-fetch check in run_meeting.py) get
+    # exactly the old behavior — a marker missing the new fields entirely
+    # still passes when envelope is not given.
+    from atomic import atomic_write
+    from progress import validate_sign_marker
+
+    capture = tmp_path / "dry-run.txt"
+    capture.write_text("real capture bytes", encoding="utf-8")
+    marker = tmp_path / "d09-signed.json"
+    atomic_write(marker, json.dumps(_valid_marker_doc(capture)).encode("utf-8"))
+    assert validate_sign_marker(marker) is None
+
+
+def test_validate_sign_marker_rejects_marker_missing_binding_fields_when_envelope_given(tmp_path):
+    # A legacy marker (signed before this fix, or _seed_signed_marker-style
+    # test fixture) has none of source_sha256/extraction_input_sha — this
+    # must fail distinctly from "source changed since sign-off" once an
+    # envelope is passed.
+    from atomic import atomic_write
+    from progress import validate_sign_marker
+
+    capture = tmp_path / "dry-run.txt"
+    capture.write_text("real capture bytes", encoding="utf-8")
+    marker = tmp_path / "d09-signed.json"
+    atomic_write(marker, json.dumps(_valid_marker_doc(capture)).encode("utf-8"))
+
+    envelope = tmp_path / "envelope"
+    envelope.mkdir()
+    (envelope / "source.sha256").write_text("abc123\n", encoding="utf-8")
+    (envelope / "extraction.json").write_text(json.dumps({"inputSha": "abc123"}), encoding="utf-8")
+
+    reason = validate_sign_marker(marker, envelope=envelope)
+    assert reason is not None
+    assert "missing" in reason
+    assert reason != "source changed since sign-off"
+
+
+def test_validate_sign_marker_accepts_matching_source_and_extraction_sha(tmp_path):
+    # The positive case: source_sha256/extraction_input_sha recorded at sign
+    # time still equal the envelope's CURRENT values.
+    from atomic import atomic_write
+    from progress import validate_sign_marker
+
+    capture = tmp_path / "dry-run.txt"
+    capture.write_text("real capture bytes", encoding="utf-8")
+    marker = tmp_path / "d09-signed.json"
+    doc = _valid_marker_doc_with_binding(capture, source_sha256="abc123", extraction_input_sha="abc123")
+    atomic_write(marker, json.dumps(doc).encode("utf-8"))
+
+    envelope = tmp_path / "envelope"
+    envelope.mkdir()
+    (envelope / "source.sha256").write_text("abc123\n", encoding="utf-8")
+    (envelope / "extraction.json").write_text(json.dumps({"inputSha": "abc123"}), encoding="utf-8")
+
+    assert validate_sign_marker(marker, envelope=envelope) is None
+
+
+def test_validate_sign_marker_rejects_when_envelope_source_sha_changed_since_signoff(tmp_path):
+    # The envelope's source.sha256 no longer matches what was signed (the
+    # source changed after sign-off, e.g. a manual --refetch or hand-edit).
+    from atomic import atomic_write
+    from progress import validate_sign_marker
+
+    capture = tmp_path / "dry-run.txt"
+    capture.write_text("real capture bytes", encoding="utf-8")
+    marker = tmp_path / "d09-signed.json"
+    doc = _valid_marker_doc_with_binding(capture, source_sha256="signed-sha", extraction_input_sha="signed-sha")
+    atomic_write(marker, json.dumps(doc).encode("utf-8"))
+
+    envelope = tmp_path / "envelope"
+    envelope.mkdir()
+    (envelope / "source.sha256").write_text("changed-sha\n", encoding="utf-8")
+    (envelope / "extraction.json").write_text(json.dumps({"inputSha": "signed-sha"}), encoding="utf-8")
+
+    assert validate_sign_marker(marker, envelope=envelope) == "source changed since sign-off"
+
+
+def test_validate_sign_marker_rejects_when_envelope_extraction_sha_changed_since_signoff(tmp_path):
+    # The source itself didn't change, but extraction.json's inputSha did
+    # (e.g. a manual re-extraction) — still must be caught.
+    from atomic import atomic_write
+    from progress import validate_sign_marker
+
+    capture = tmp_path / "dry-run.txt"
+    capture.write_text("real capture bytes", encoding="utf-8")
+    marker = tmp_path / "d09-signed.json"
+    doc = _valid_marker_doc_with_binding(capture, source_sha256="signed-sha", extraction_input_sha="signed-sha")
+    atomic_write(marker, json.dumps(doc).encode("utf-8"))
+
+    envelope = tmp_path / "envelope"
+    envelope.mkdir()
+    (envelope / "source.sha256").write_text("signed-sha\n", encoding="utf-8")
+    (envelope / "extraction.json").write_text(json.dumps({"inputSha": "different-sha"}), encoding="utf-8")
+
+    assert validate_sign_marker(marker, envelope=envelope) == "source changed since sign-off"
+
+
+def test_validate_sign_marker_rejects_when_envelope_files_absent(tmp_path):
+    # No source.sha256/extraction.json at all in the envelope (fail closed,
+    # never treat "can't verify" as "verified").
+    from atomic import atomic_write
+    from progress import validate_sign_marker
+
+    capture = tmp_path / "dry-run.txt"
+    capture.write_text("real capture bytes", encoding="utf-8")
+    marker = tmp_path / "d09-signed.json"
+    doc = _valid_marker_doc_with_binding(capture, source_sha256="signed-sha", extraction_input_sha="signed-sha")
+    atomic_write(marker, json.dumps(doc).encode("utf-8"))
+
+    envelope = tmp_path / "envelope"
+    envelope.mkdir()
+
+    assert validate_sign_marker(marker, envelope=envelope) == "source changed since sign-off"
+
+
 def test_validate_sign_marker_rejects_capture_outside_envelope(tmp_path):
     # Finding 4a: capture_path must resolve inside the marker's own envelope
     # directory (its parent dir) — a marker pointing anywhere else on disk,
@@ -497,15 +624,64 @@ def test_reconstruct_task_map_from_bus_prefers_title_match_on_ambiguity(tmp_path
 
 
 def test_writeback_marker_present_true_when_marker_in_page(tmp_path):
+    # Shaped like writeback_render._history_block's real output ("- <date>
+    # — <text> ... [source: <kind>:<id>]" as the line's terminal
+    # characters) — see the dedicated real-shape test below for the exact
+    # literal render.
     from progress import writeback_marker_present
 
     page = tmp_path / "raw/areas/clearworks/org-brain/projects/alloi-03.md"
     page.parent.mkdir(parents=True)
     page.write_text(
-        "## History (dated, newest first)\n\n- 2026-09-04 recap [source: fireflies:MID]\n",
+        "## History (dated, newest first)\n\n- 2026-09-04 — recap [source: fireflies:MID]\n",
         encoding="utf-8",
     )
     assert writeback_marker_present(tmp_path, "projects/alloi-03.md", "fireflies:MID") is True
+
+
+def test_writeback_marker_present_true_for_real_history_block_shaped_line(tmp_path):
+    # Coordinator follow-up finding (2026-09-05): pin acceptance against the
+    # REAL writeback_render._history_block output, not just a hand-typed
+    # stand-in.
+    from progress import writeback_marker_present
+    from writeback_render import _history_block
+
+    meeting = {
+        "id": "MID",
+        "date": "2026-09-04T00:00:00Z",
+        "title": "Weekly tacticals review",
+        "source": {"kind": "fireflies", "id": "MID"},
+        "summary": {"overview": "Scoped tactical reports."},
+        "decisions": ["Keep cadence"],
+    }
+    lines = _history_block(meeting)
+    page = tmp_path / "raw/areas/clearworks/org-brain/projects/alloi-03.md"
+    page.parent.mkdir(parents=True)
+    page.write_text(
+        "## History (dated, newest first)\n\n" + "\n".join(lines) + "\n- old\n",
+        encoding="utf-8",
+    )
+    assert writeback_marker_present(tmp_path, "projects/alloi-03.md", "fireflies:MID") is True
+
+
+def test_writeback_marker_present_false_when_history_line_is_prose_not_a_dated_bullet(tmp_path):
+    # Coordinator follow-up finding: the pre-fix check accepted ANY line
+    # inside the History section containing the marker substring — prose
+    # like a migration note that merely repeats the `[source: ...]` text
+    # must NOT count as proof meeting_writeback.py actually ran. Only a line
+    # shaped like a real writeback bullet (`- <YYYY-MM-DD> — ...` ending
+    # with the marker) counts.
+    from progress import writeback_marker_present
+
+    page = tmp_path / "raw/areas/clearworks/org-brain/projects/alloi-03.md"
+    page.parent.mkdir(parents=True)
+    page.write_text(
+        "## History (dated, newest first)\n\n"
+        "Migration note: preserve [source: fireflies:MID] during the vault restructure.\n"
+        "- old\n",
+        encoding="utf-8",
+    )
+    assert writeback_marker_present(tmp_path, "projects/alloi-03.md", "fireflies:MID") is False
 
 
 def test_writeback_marker_present_false_when_page_lacks_marker(tmp_path):

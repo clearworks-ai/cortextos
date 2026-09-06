@@ -279,6 +279,22 @@ def _run_apply(meeting_id, vault, repo, source_dir, *, force) -> int:
     if fetch_rc != 0:
         print(f"FAILED at fetch: rc={fetch_rc}", file=sys.stderr)
         return 2
+
+    # D-09 review finding 1: the pre-fetch sign_failure check above only
+    # proves a human reviewed SOME capture — it says nothing about whether
+    # the source that capture described is still what's on disk now. fetch
+    # on an already-fetched envelope is a no-op (fetch_fireflies.py never
+    # refetches unless --refetch is passed, and this orchestrator never
+    # passes --refetch — there is no --refetch flag on this CLI at all), so
+    # this second check, run immediately after fetch and before
+    # extract/resolve/adapt regenerate anything, catches the envelope
+    # having changed since sign-off (a manual --refetch, a hand-edited
+    # source.json, or a re-extraction) before any production write happens.
+    post_fetch_sign_failure = progress.validate_sign_marker(marker, envelope=source_dir)
+    if post_fetch_sign_failure:
+        print(f"FAILED at sign-check: {post_fetch_sign_failure}", file=sys.stderr)
+        return 15
+
     extract_rc = extract_main(["--source", str(source_dir), "--vault", str(vault)])
     if extract_rc != 0:
         print(f"FAILED at extract: rc={extract_rc}", file=sys.stderr)

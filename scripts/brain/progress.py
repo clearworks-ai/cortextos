@@ -94,7 +94,33 @@ def _signer_allowlist() -> set[str]:
     return {"Josh"}
 
 
-def validate_sign_marker(path: Path) -> str | None:
+def _read_current_source_sha256(envelope: Path) -> str | None:
+    """The CURRENT content of `<envelope>/source.sha256` (fetch_fireflies.py's
+    output), stripped. None when the file is absent."""
+    path = Path(envelope) / "source.sha256"
+    if not path.is_file():
+        return None
+    value = path.read_text(encoding="utf-8").strip()
+    return value or None
+
+
+def _read_current_extraction_input_sha(envelope: Path) -> str | None:
+    """The CURRENT `<envelope>/extraction.json`'s `inputSha` field. None when
+    the file is absent, unparseable, or the field is missing/empty."""
+    path = Path(envelope) / "extraction.json"
+    if not path.is_file():
+        return None
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(doc, dict):
+        return None
+    value = doc.get("inputSha")
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def validate_sign_marker(path: Path, envelope: Path | None = None) -> str | None:
     """CH-1/S-2: `marker.exists()` alone let `{}` (or a marker missing
     `signed_at`, exactly what the pre-fix test fixture wrote) satisfy D-09's
     human sign-off gate for the org's only production-write path. Returns
@@ -109,6 +135,22 @@ def validate_sign_marker(path: Path) -> str | None:
     sign_dry_run.py copies any externally-supplied capture into
     `<envelope>/dry-run.txt` so this is always satisfiable for a genuine
     sign-off.
+
+    D-09 review finding 1: the checks above only prove a human reviewed
+    SOME capture — they say nothing about whether the source `--apply` is
+    about to fetch/resolve/adapt is still the one that capture described.
+    When `envelope` (the data envelope run_meeting.py calls `source_dir`,
+    i.e. `raw/media/transcripts/<kind>/<meeting_id>/`, NOT this marker's own
+    `_state/` directory) is given, the marker's `source_sha256` and
+    `extraction_input_sha` fields (sign_dry_run.py records both at sign
+    time, from that same envelope) must equal the envelope's CURRENT
+    `source.sha256` and `extraction.json.inputSha`. Missing either field on
+    the marker (an older/legacy marker signed before this fix) is a
+    distinct failure from a genuine post-signing change, so it gets its own
+    reason string; run_meeting.py calls this a second time, right after its
+    fetch step (a no-op when the envelope already exists) and before
+    extract/resolve/adapt would otherwise regenerate everything from
+    whatever is on disk by then.
 
     Threat model: this gate proves the signing STEP ran (a human invoked
     sign_dry_run.py against a real, unmodified dry-run capture) after
@@ -155,6 +197,19 @@ def validate_sign_marker(path: Path) -> str | None:
     actual = hashlib.sha256(capture_file.read_bytes()).hexdigest()
     if actual != capture_sha256:
         return "capture_sha256 mismatch"
+
+    if envelope is not None:
+        marker_source_sha = doc.get("source_sha256")
+        marker_extraction_sha = doc.get("extraction_input_sha")
+        if (
+            not isinstance(marker_source_sha, str) or not marker_source_sha.strip()
+            or not isinstance(marker_extraction_sha, str) or not marker_extraction_sha.strip()
+        ):
+            return "source_sha256/extraction_input_sha missing from sign marker (re-sign after dry-run)"
+        current_source_sha = _read_current_source_sha256(envelope)
+        current_extraction_sha = _read_current_extraction_input_sha(envelope)
+        if current_source_sha != marker_source_sha or current_extraction_sha != marker_extraction_sha:
+            return "source changed since sign-off"
     return None
 
 
@@ -172,7 +227,18 @@ def writeback_marker_present(vault: Path, home_rel: str, key: str) -> bool:
     writeback.py actually ran and appended the History entry. Parse
     sections exactly the way writeback_render does (_split_sections) and
     only trust the marker when it appears on a line inside that specific
-    section."""
+    section.
+
+    Coordinator follow-up finding (2026-09-05): checking "the marker string
+    appears ANYWHERE on any line inside the History section" is still a
+    false positive — ordinary prose inside that section (e.g. a migration
+    note that happens to mention `[source: fireflies:m1]` in passing) is
+    not a writeback bullet. Require the marker to land on a line shaped
+    exactly like the ones writeback_render._history_block emits: `- ` +
+    an ISO date + ` — ` + free text, ending with the `[source: <kind>:<id>]`
+    marker as the last characters of the line. This is a hand-written regex
+    (writeback_render.py exposes no reusable prefix constant to import) but
+    it mirrors _history_block's literal f-string shape byte for byte."""
     if not home_rel:
         return False
     page = Path(vault) / "raw/areas/clearworks/org-brain" / home_rel
@@ -182,11 +248,11 @@ def writeback_marker_present(vault: Path, home_rel: str, key: str) -> bool:
         text = page.read_text(encoding="utf-8")
     except OSError:
         return False
-    marker = f"[source: {key}]"
+    bullet = re.compile(r"^- \d{4}-\d{2}-\d{2} — .*\[source: " + re.escape(key) + r"\]$")
     _, sections = _split_sections(text)
     for heading, body in sections:
         if heading == "History (dated, newest first)":
-            return any(marker in line for line in body.splitlines())
+            return any(bullet.match(line) for line in body.splitlines())
     return False
 
 

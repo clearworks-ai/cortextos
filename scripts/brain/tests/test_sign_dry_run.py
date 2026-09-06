@@ -163,6 +163,62 @@ def test_sign_dry_run_and_validate_sign_marker_reject_outside_envelope_capture(t
     assert validate_sign_marker(marker) == "capture outside envelope"
 
 
+def test_sign_dry_run_records_source_and_extraction_binding_fields(tmp_path):
+    # D-09 review finding 1: sign_dry_run.py must record the DATA envelope's
+    # (raw/media/transcripts/fireflies/<meeting_id>/, not this marker's own
+    # _state/ directory) source.sha256 and extraction.json.inputSha at sign
+    # time, so progress.validate_sign_marker(..., envelope=...) can prove
+    # nothing changed by the time --apply runs.
+    from paths import envelope_dir
+    from sign_dry_run import main, marker_path
+
+    vault = tmp_path / "vault"
+    meeting_id = "01M1MW2GAZ1DQ0C6PG3KJ557JA"
+    data_dir = envelope_dir(vault, "fireflies", meeting_id)
+    data_dir.mkdir(parents=True)
+    (data_dir / "source.sha256").write_text("deadbeef\n", encoding="utf-8")
+    (data_dir / "extraction.json").write_text(
+        json.dumps({"inputSha": "deadbeef", "decisions": []}), encoding="utf-8",
+    )
+
+    capture = tmp_path / "dry-run.txt"
+    capture.write_text(_capture_text(), encoding="utf-8")
+    rc = main([
+        "--meeting-id", meeting_id, "--vault", str(vault),
+        "--signed-by", "Josh", "--signed-at", "2026-09-05T00:00:00Z",
+        "--dry-run-capture", str(capture),
+    ])
+    assert rc == 0
+    marker = marker_path(vault, "fireflies", meeting_id)
+    doc = json.loads(marker.read_text(encoding="utf-8"))
+    assert doc["source_sha256"] == "deadbeef"
+    assert doc["extraction_input_sha"] == "deadbeef"
+
+
+def test_sign_dry_run_records_null_binding_fields_when_envelope_data_absent(tmp_path):
+    # No source.sha256/extraction.json exist yet at sign time (e.g. this
+    # test's other fixtures, which never seed the data envelope) — must not
+    # crash, and must record null (never a fabricated value) so
+    # validate_sign_marker's envelope-bound check correctly refuses it later
+    # as "missing from sign marker" rather than a false match.
+    from sign_dry_run import main, marker_path
+
+    vault = tmp_path / "vault"
+    meeting_id = "01M1MW2GAZ1DQ0C6PG3KJ557JA"
+    capture = tmp_path / "dry-run.txt"
+    capture.write_text(_capture_text(), encoding="utf-8")
+    rc = main([
+        "--meeting-id", meeting_id, "--vault", str(vault),
+        "--signed-by", "Josh", "--signed-at", "2026-09-05T00:00:00Z",
+        "--dry-run-capture", str(capture),
+    ])
+    assert rc == 0
+    marker = marker_path(vault, "fireflies", meeting_id)
+    doc = json.loads(marker.read_text(encoding="utf-8"))
+    assert doc["source_sha256"] is None
+    assert doc["extraction_input_sha"] is None
+
+
 def test_sign_dry_run_rejects_unknown_signer(tmp_path):
     # Finding 4b: sign_dry_run.py's own output must also fail
     # validate_sign_marker's allowlist check for a non-allowlisted signer —

@@ -1,0 +1,320 @@
+# scripts/brain/brain_rollup.py
+"""FR-007: deterministic derived views (phase 3). No LLM, idempotent, touches
+only clients that have nodes for the per-client rollup region; the STATE.md
+region regenerates unconditionally (G0b C1-2). Pure render functions tested
+directly; main() does the atomic I/O — same split as writeback_render.py/D-15."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import re
+import sys
+from pathlib import Path
+from typing import Any
+
+from atomic import atomic_write
+from paths import DEFAULT_VAULT, load_enabled_agents, org_brain_root
+
+GENERATED_START = "<!-- generated: {name} -->"
+GENERATED_END = "<!-- /generated -->"
+REQUIRED_NODE_KEYS = {"id", "kind", "client"}
+NODE_KIND_VALUES = {"engagement", "project"}
+OPEN_STATES = {"scoping", "active", "paused"}
+JOSH_ROSTER = {"josh", "josh weiss"}
+
+
+class NodeBlockError(ValueError):
+    pass
+
+
+def _kv_block(text: str, heading: str) -> dict[str, str]:
+    marker = f"## {heading}"
+    if marker not in text:
+        return {}
+    rest = text.split(marker, 1)[1]
+    nxt = rest.find("\n## ")
+    block = rest if nxt < 0 else rest[:nxt]
+    out: dict[str, str] = {}
+    for line in block.splitlines():
+        if ":" not in line:
+            continue
+        k, v = line.split(":", 1)
+        key = k.strip().lower()
+        if key:
+            out[key] = v.strip()
+    return out
+
+
+def parse_node_block(path: Path) -> dict[str, str]:
+    text = path.read_text(encoding="utf-8")
+    out = _kv_block(text, "Node")
+    if not out:
+        raise NodeBlockError(f"{path}: no ## Node block")
+    missing = REQUIRED_NODE_KEYS - set(out)
+    if missing:
+        raise NodeBlockError(f"{path}: missing Node keys {sorted(missing)}")
+    if out["kind"] not in NODE_KIND_VALUES:
+        raise NodeBlockError(f"{path}: illegal kind {out['kind']!r}")
+    return {k: out.get(k, "") for k in ("id", "kind", "client", "parent", "title")}
+
+
+def load_nodes(vault: Path) -> dict[str, dict[str, Any]]:
+    proj_dir = org_brain_root(vault) / "projects"
+    nodes: dict[str, dict[str, Any]] = {}
+    if not proj_dir.is_dir():
+        return nodes
+    for path in sorted(proj_dir.glob("*.md")):
+        if path.stem.startswith("_"):
+            continue
+        node = parse_node_block(path)
+        text = path.read_text(encoding="utf-8")
+        reporting = _kv_block(text, "Reporting")
+        node["delivery_state"] = _kv_block(text, "Node").get("delivery_state", "")
+        node["last_update"] = reporting.get("last_update", "")
+        node["path"] = path
+        nodes[node["id"] or path.stem] = node
+    return nodes
+
+
+def render_engagements_rollup(client_slug: str, nodes: dict[str, dict[str, Any]]) -> str:
+    engagements = sorted(
+        (n for n in nodes.values() if n.get("client") == client_slug and n.get("kind") == "engagement"),
+        key=lambda n: n["id"],
+    )
+    if not engagements:
+        return "(no engagements)"
+    lines = ["| Engagement | Project | Delivery state | Last update |", "|---|---|---|---|"]
+    for eng in engagements:
+        state = eng.get("delivery_state") or "—"
+        last_update = eng.get("last_update") or "—"
+        children = sorted(
+            (n for n in nodes.values() if n.get("kind") == "project" and n.get("parent") == eng["id"]),
+            key=lambda n: n["id"],
+        )
+        if not children:
+            lines.append(f"| {eng.get('title') or eng['id']} | — | {state} | {last_update} |")
+            continue
+        for child in children:
+            c_state = child.get("delivery_state") or "—"
+            c_update = child.get("last_update") or "—"
+            lines.append(f"| {eng.get('title') or eng['id']} | {child.get('title') or child['id']} | {c_state} | {c_update} |")
+    return "\n".join(lines)
+
+
+def _split_sections(text: str) -> tuple[str, list[tuple[str, str]]]:
+    lines = text.splitlines(keepends=True)
+    preamble: list[str] = []
+    sections: list[tuple[str, list[str]]] = []
+    current: tuple[str, list[str]] | None = None
+    for line in lines:
+        if line.startswith("## "):
+            if current is not None:
+                sections.append((current[0], current[1]))
+            current = (line[3:].strip(), [line])
+        elif current is None:
+            preamble.append(line)
+        else:
+            current[1].append(line)
+    if current is not None:
+        sections.append((current[0], current[1]))
+    return "".join(preamble), [(h, "".join(b)) for h, b in sections]
+
+
+def _latest_history(body: str) -> tuple[str, str] | None:
+    for line in body.splitlines():
+        m = re.match(r"^- (\d{4}-\d{2}-\d{2}) — (.*)$", line)
+        if m:
+            return m.group(1), m.group(2)
+    return None
+
+
+def _decisions_since(body: str, cutoff_date: str) -> list[str]:
+    out: list[str] = []
+    current_date = ""
+    for line in body.splitlines():
+        m = re.match(r"^- (\d{4}-\d{2}-\d{2}) — (.*)$", line)
+        if m:
+            current_date = m.group(1)
+            continue
+        dm = re.match(r"^\s*- Decisions:\s*(.*)$", line)
+        if dm and current_date >= cutoff_date and dm.group(1).strip().lower() not in ("", "none"):
+            out.append(f"{current_date} — {dm.group(1).strip()}")
+    return out
+
+
+OPEN_ROW_RE = re.compile(
+    r"^\|\s*(?P<item>[^|]*?)\s*\|\s*(?P<owner>[^|]*?)\s*\|\s*(?P<deadline>[^|]*?)\s*\|\s*(?P<source>[^|]*?)\s*\|\s*(?P<status>[^|]*?)\s*\|\s*$"
+)
+
+
+def _open_rows(body: str) -> list[dict[str, str]]:
+    rows = []
+    for line in body.splitlines():
+        m = OPEN_ROW_RE.match(line.strip())
+        if not m:
+            continue
+        d = m.groupdict()
+        if d["item"].lower() == "item":
+            continue
+        rows.append(d)
+    return rows
+
+
+def _is_josh_or_fleet(owner: str, enabled_agents: set[str]) -> bool:
+    o = owner.strip().lower()
+    return o in JOSH_ROSTER or o in {a.lower() for a in enabled_agents}
+
+
+def _section_text(path: Path, heading: str) -> str:
+    _, sections = _split_sections(path.read_text(encoding="utf-8"))
+    for h, body in sections:
+        if h.startswith(heading):
+            return body
+    return ""
+
+
+def _minus_days(iso_date: str, days: int) -> str:
+    from datetime import datetime, timedelta
+
+    dt = datetime.strptime(iso_date, "%Y-%m-%d") - timedelta(days=days)
+    return dt.strftime("%Y-%m-%d")
+
+
+def _today_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def render_state_sections(nodes: dict[str, dict[str, Any]], today: str) -> str:
+    enabled = load_enabled_agents()
+    open_nodes = {nid: n for nid, n in nodes.items() if (n.get("delivery_state") or "") in OPEN_STATES}
+    engagements = sorted((n for n in open_nodes.values() if n["kind"] == "engagement"), key=lambda n: n["id"])
+    cutoff = _minus_days(today, 30)
+
+    active: list[str] = []
+    waiting: list[str] = []
+    decisions: list[str] = []
+    next_josh: list[tuple[str, str]] = []
+
+    def _emit_node(node: dict[str, Any], indent: str) -> None:
+        body = _section_text(node["path"], "History")
+        latest = _latest_history(body)
+        line = f"{indent}- **{node.get('title') or node['id']}** ({node['id']})"
+        if latest:
+            line += f" — {latest[0]}: {latest[1]}"
+        active.append(line)
+        decisions.extend(f"- {d}" for d in _decisions_since(body, cutoff))
+        for row in _open_rows(_section_text(node["path"], "Open Items")):
+            if row["status"].strip().lower() != "open":
+                continue
+            owner = row["owner"].strip()
+            item = row["item"].strip()
+            deadline = row["deadline"].strip()
+            deadline = "" if deadline in ("—", "-") else deadline
+            if _is_josh_or_fleet(owner, enabled):
+                next_josh.append((deadline, f"{item} — {owner}"))
+            else:
+                waiting.append(f"- {item} — {owner}" + (f" (due {deadline})" if deadline else ""))
+
+    for eng in engagements:
+        _emit_node(eng, "")
+        for child in sorted(
+            (n for n in open_nodes.values() if n["kind"] == "project" and n.get("parent") == eng["id"]),
+            key=lambda n: n["id"],
+        ):
+            _emit_node(child, "  ")
+
+    active_out = ["## Active work", ""] + (active or ["(none)"])
+    waiting_out = ["## Waiting on", ""] + (waiting or ["(none)"])
+    decisions_out = ["## Decisions made", ""] + (decisions or ["(none)"])
+
+    next_josh.sort(key=lambda t: (t[0] == "", t[0]))
+    next_out = ["## Next priorities", ""]
+    if not next_josh:
+        next_out.append("(none)")
+    else:
+        for i, (deadline, text) in enumerate(next_josh, start=1):
+            tag = " OVERDUE" if deadline and deadline < today else ""
+            due = f" (due {deadline})" if deadline else ""
+            next_out.append(f"{i}.{tag} {text}{due}")
+
+    return "\n\n".join("\n".join(section) for section in (active_out, waiting_out, decisions_out, next_out))
+
+
+def compute_generated_from(inputs: list[Path]) -> str:
+    h = hashlib.sha256()
+    for p in sorted(inputs):
+        h.update(p.read_bytes())
+    return h.hexdigest()
+
+
+def apply_generated_region(
+    old_text: str, name: str, body: str, *, create_after: str | None = None
+) -> str:
+    start = GENERATED_START.format(name=name)
+    if start in old_text and GENERATED_END in old_text:
+        pre, rest = old_text.split(start, 1)
+        _, post = rest.split(GENERATED_END, 1)
+        return f"{pre}{start}\n{body}\n{GENERATED_END}{post}"
+    block = f"{start}\n{body}\n{GENERATED_END}\n"
+    if create_after and create_after in old_text:
+        pre, post = old_text.split(create_after, 1)
+        sep = "" if pre.endswith("\n\n") or pre == "" else ("\n" if pre.endswith("\n") else "\n\n")
+        return f"{pre}{create_after}{sep}{block}{post}"
+    sep = "" if old_text.endswith("\n\n") or old_text == "" else ("\n" if old_text.endswith("\n") else "\n\n")
+    return old_text + sep + block
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument("--client")
+    p.add_argument("--all", action="store_true")
+    p.add_argument("--vault", default=str(DEFAULT_VAULT))
+    p.add_argument("--today", default=None)
+    args = p.parse_args(argv)
+    vault = Path(args.vault)
+
+    try:
+        nodes = load_nodes(vault)
+    except NodeBlockError as exc:
+        print(f"FAILED at rollup: {exc}", file=sys.stderr)
+        return 6
+
+    # G0b C1-2: the per-client rollup region is genuinely gated on a client
+    # (nothing to rewrite without one) — but STATE.md below is NOT: it is
+    # never skipped just because --client/--all was omitted or matched no
+    # client, since it sources every projects/*.md node in the vault.
+    clients_with_nodes = sorted({n["client"] for n in nodes.values() if n.get("client")})
+    targets = clients_with_nodes if args.all else ([args.client] if args.client else [])
+
+    brain = org_brain_root(vault)
+    for slug in targets:
+        if slug not in clients_with_nodes:
+            continue
+        client_path = brain / "clients" / f"{slug}.md"
+        old = (
+            client_path.read_text(encoding="utf-8")
+            if client_path.is_file()
+            else f"# Client: {slug.title()}\n\n## Current state\n\n"
+        )
+        body = render_engagements_rollup(slug, nodes)
+        new = apply_generated_region(old, "engagements-rollup", body, create_after="## Current state\n")
+        if new != old:
+            atomic_write(client_path, new.encode("utf-8"))
+
+    today = args.today or _today_iso()
+    state_path = brain / "STATE.md"
+    old_state = state_path.read_text(encoding="utf-8") if state_path.is_file() else ""
+    body = render_state_sections(nodes, today)
+    gen_sha = compute_generated_from(sorted(n["path"] for n in nodes.values())) if nodes else ""
+    full_body = f"generated-from: {gen_sha}\n\n{body}"
+    new_state = apply_generated_region(old_state, "state", full_body)
+    if new_state != old_state:
+        atomic_write(state_path, new_state.encode("utf-8"))
+    print(f"rollup: {len(targets)} client(s), state generated-from={gen_sha[:12]}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

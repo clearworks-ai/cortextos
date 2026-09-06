@@ -63,7 +63,7 @@ REQUIRED_ROOT = {
 STAMP_KEYS = {"inputSha", "promptSha", "model", "cost_usd", "extracted_at"}
 # envelope fields added after the model returns, but optional for backward
 # compat with extraction.json files written before these existed
-OPTIONAL_STAMP_KEYS = {"model_receipt", "usage"}
+OPTIONAL_STAMP_KEYS = {"model_receipt", "usage", "variant"}
 
 # Loaded once at import; also backs _build_prompt/prompt_sha's own reads of
 # the same file. Used to drive the recursive nested-schema walker below so

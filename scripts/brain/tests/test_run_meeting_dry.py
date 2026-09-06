@@ -296,6 +296,66 @@ def _seed_alloi_engagement(vault: Path) -> None:
     )
 
 
+def _seed_alloi_engagement_with_history(vault: Path) -> None:
+    """D-09 preview-body coverage: `_seed_alloi_engagement` alone leaves
+    alloi-03's History as the base fixture's undated "- old" bullet, which
+    `composeSyntheticMarkdown`/`buildStatusReportPlan` treats as no delivery
+    activity (action: 'skip') — never reaching a real would-write: <relPath>
+    line. Overwrite alloi-03.md with a dated History entry (same shape as
+    status_plan.test.ts's CHILD_MD) so the STATUS_PLAN subprocess actually
+    resolves action: 'draft' and _run_dry's would-write-body: block has
+    real content to show."""
+    _seed_alloi_engagement(vault)
+    proj = vault / "raw/areas/clearworks/org-brain/projects"
+    (proj / "alloi-03.md").write_text(
+        "# Client: Alloi — Tactical Reports\n\n## Node\nid: alloi-03\nkind: project\n"
+        "client: alloi\nparent: alloi-01\ntitle: Tactical Reports\n"
+        "aliases: tacticals, tactical report, arch tactical\ndomains: alloi.us\n"
+        "delivery_state: active\n\n## History (dated, newest first)\n\n"
+        "- 2026-09-04 — Alloi Tacticals Troubleshooting (meeting: meetings/x.md) "
+        "[source: fireflies:01M1MW2G]\n"
+        "  - Outcomes: Installed skill v4.\n"
+        "  - Decisions: Reports land Monday EOD.\n\n## Open Items\n",
+        encoding="utf-8",
+    )
+
+
+def test_dry_run_status_write_preview_includes_body(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """D-09: the phase-3 status preview named the status artifact's
+    relPath but never its body, so the human signing the capture never saw
+    what --apply would actually write there. `_run_dry` must now print,
+    immediately after the anchored `would-write: <relPath>` line, the
+    status body indented two spaces under a `would-write-body:` marker and
+    a closing `would-write-end` line — with `would-file:` still the very
+    last line of the capture."""
+    vault, repo, mid = _seed(tmp_path)
+    _seed_alloi_engagement_with_history(vault)
+
+    rc = _run_dry_with_fake_fetch_extract(monkeypatch, mid, repo, vault)
+    assert rc == 0
+    out = capsys.readouterr().out
+
+    assert "\nwould-write: raw/" in out  # real write, not a skip: form
+    assert out.count("would-write-body:") == 1
+    assert out.count("would-write-end") == 1
+
+    body_start = out.index("would-write-body:")
+    body_end = out.index("would-write-end")
+    file_start = out.index("would-file:")
+    assert body_start < body_end < file_start  # would-file stays last
+
+    body_block = out[body_start:body_end].splitlines()[1:]
+    body_lines = [line for line in body_block if line.strip()]
+    assert body_lines, "expected a non-empty indented status body"
+    assert all(line.startswith("  ") for line in body_lines)
+    assert any("Slack draft" in line for line in body_lines)
+
+    stripped = out.rstrip()
+    assert stripped.rsplit("\n", 1)[-1].startswith("would-file: ")
+
+
 def test_dry_run_status_subprocess_failure_exits_14_no_would_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:

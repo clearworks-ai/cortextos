@@ -240,7 +240,12 @@ export function main(argv: string[]): number {
   }
   if (!write) {
     process.stdout.write(`would-write: ${target.relPath}\n`);
-    process.stdout.write(JSON.stringify({ relPath: target.relPath, action: plan.action }) + '\n');
+    // D-09: preview must carry the full body a human reviews before
+    // --write ever runs, not just the relPath — --write's own JSON below
+    // carries the same field so a caller can assert parity.
+    process.stdout.write(
+      JSON.stringify({ relPath: target.relPath, action: plan.action, fileContent: target.fileContent }) + '\n',
+    );
     return 0;
   }
   const destPath = join(vault, target.relPath);
@@ -260,7 +265,9 @@ export function main(argv: string[]): number {
     }
   }
   process.stdout.write(`wrote: ${target.relPath}\n`);
-  process.stdout.write(JSON.stringify({ relPath: target.relPath, action: plan.action }) + '\n');
+  process.stdout.write(
+    JSON.stringify({ relPath: target.relPath, action: plan.action, fileContent: target.fileContent }) + '\n',
+  );
   return 0;
 }
 

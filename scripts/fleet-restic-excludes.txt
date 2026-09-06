@@ -1,0 +1,34 @@
+# Rebuildable dependencies and build output
+**/node_modules
+**/node_modules/**
+**/dist
+**/dist/**
+**/build
+**/build/**
+**/.next
+**/.next/**
+**/coverage
+**/coverage/**
+
+# Git object databases and disposable worktrees (working source remains covered)
+**/.git
+**/.git/**
+**/.agent-worktrees
+**/.agent-worktrees/**
+
+# Rebuildable package/browser caches and operating-system noise
+**/.npm/_cacache
+**/.npm/_cacache/**
+**/.cache/ms-playwright
+**/.cache/ms-playwright/**
+**/Library/Caches/ms-playwright
+**/Library/Caches/ms-playwright/**
+**/.DS_Store
+
+# Live process endpoints, never durable recovery state
+**/daemon.pid
+**/daemon.sock
+**/*.sock
+
+# Intentionally NOT excluded: logs, messages, manifests, configuration,
+# Claude project transcripts, Codex sessions, skills, and cross-session state.

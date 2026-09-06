@@ -301,6 +301,79 @@ class RealWriteTests(unittest.TestCase):
         self.assertEqual(len(self._rows()), 1)
 
 
+class EmailLessAttendeeTests(unittest.TestCase):
+    """F-1 FINAL review: FR-004 fills bare NAME strings (no email) into
+    fanout-meeting.json's attendees for email-less speakers; FR-009 requires
+    they are NEVER upserted / logged. Live apply upserted two email-less
+    contacts (ivette-ramos, joseph-chang) and wrote 8 rows instead of 6
+    before this fix."""
+
+    def setUp(self):
+        self.mod = _load_worker()
+        self.calls: list[list[str]] = []
+
+        def fake_run(argv, env=None):
+            self.calls.append(argv)
+            if "upsert-contact.py" in argv[1]:
+                idx = argv.index("--id") + 1
+                return subprocess.CompletedProcess(argv, 0, argv[idx], "")
+            return subprocess.CompletedProcess(argv, 0, "{}", "")
+
+        self.mod._run = fake_run
+
+    def tearDown(self):
+        for k in ("CRM_CONTACTS_PATH", "CRM_PIPELINE_PATH", "FF_EVENT_PAYLOAD_PATH"):
+            os.environ.pop(k, None)
+
+    def _contact_calls(self):
+        return [c for c in self.calls if "upsert-contact.py" in c[1]]
+
+    def _interaction_calls(self):
+        return [c for c in self.calls if "add-interaction.py" in c[1]]
+
+    def test_crm_attendees_drops_name_only_entries(self):
+        # Unit-level: the shared derivation function itself.
+        full_meeting = {"attendees": ["marcos@alloi.us", "Ivette Ramos", "joe@alloi.us"]}
+        self.assertEqual(
+            self.mod.crm_attendees({}, full_meeting),
+            ["marcos@alloi.us", "joe@alloi.us"],
+        )
+
+    def test_external_attendees_drops_name_only_entries(self):
+        full_meeting = {"attendees": ["marcos@alloi.us", "Ivette Ramos", "joe@alloi.us"]}
+        self.assertEqual(
+            self.mod.external_attendees({}, full_meeting),
+            [{"name": "", "email": "marcos@alloi.us"}, {"name": "", "email": "joe@alloi.us"}],
+        )
+
+    def test_full_file_name_only_attendees_never_upserted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            full = tmp / "fanout-meeting.json"
+            full.write_text(json.dumps({
+                "meetings": [{
+                    "id": "M9",
+                    "meeting_type": "delivery",
+                    "attendees": ["marcos@alloi.us", "Ivette Ramos", "joe@alloi.us"],
+                }]
+            }))
+            # event.json carries no attendees at all -> falls back to full_meeting.
+            ev = _write_event(tmp, meeting_id="M9", meeting_type="delivery", attendees=[])
+            os.environ["FF_EVENT_PAYLOAD_PATH"] = str(ev)
+
+            result = self.mod.process(meeting_id="M9", event_file=None, full_file=str(full))
+
+            contact_calls = self._contact_calls()
+            self.assertEqual(len(contact_calls), 2)  # 2 emails only
+            emails = {c[c.index("--email") + 1] for c in contact_calls}
+            self.assertEqual(emails, {"marcos@alloi.us", "joe@alloi.us"})
+            self.assertTrue(all("Ivette" not in " ".join(c) for c in contact_calls))
+
+            interaction_calls = self._interaction_calls()
+            self.assertEqual(len(interaction_calls), 2)  # 2 interaction rows, not 3
+            self.assertEqual(result["external_attendees"], 2)
+
+
 class FullFileTests(unittest.TestCase):
     def setUp(self):
         self.mod = _load_worker()

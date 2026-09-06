@@ -150,6 +150,87 @@ def test_bus_task_preview_falls_back_to_action_when_text_missing() -> None:
     )
 
 
+def test_crm_interaction_preview_drops_name_only_attendees_via_fanout_fallback() -> None:
+    # F-1 FINAL review: event.json carries no attendees (edge case / legacy
+    # payload), so the preview falls back to fanout-meeting.json's attendees
+    # — which FR-004 fills with bare NAME strings (no email) for email-less
+    # speakers. Those must never turn into a preview row.
+    from preview import crm_interaction_preview
+
+    event = {"meeting_id": "MID", "attendees": []}
+    validated = {"summary": {"overview": "ov"}, "deal_state": None}
+    resolution = {"deal_state": None}
+    fanout = {
+        "meetings": [
+            {
+                "id": "MID",
+                "attendees": [
+                    "marcos@alloi.us", "sam@alloi.us", "pat@alloi.us",
+                    "kim@alloi.us", "lee@alloi.us", "ray@alloi.us",
+                    "Ivette Ramos", "Joseph Chang", "Molly",
+                ],
+            }
+        ]
+    }
+    rows = crm_interaction_preview(event, validated, resolution, fanout)
+    assert len(rows) == 6
+    assert {r["contact"] for r in rows} == {
+        "marcos@alloi.us", "sam@alloi.us", "pat@alloi.us",
+        "kim@alloi.us", "lee@alloi.us", "ray@alloi.us",
+    }
+
+
+def _load_meeting_crm_sync_module():
+    """importlib load of meeting-crm-sync.py (hyphenated filename, can't
+    `import`), same pattern as `_load_meeting_fanout_module` below — used to
+    prove preview.py's `crm_interaction_preview` produces exactly the rows
+    the REAL apply path (`external_attendees` / `upsert_contacts` /
+    `append_interactions`) would write, via the shared `crm_attendees`
+    derivation (F-1 FINAL review)."""
+    import importlib.util
+
+    code_root = BRAIN.parent.parent
+    path = code_root / "orgs/clearworksai/agents/crm/crm/meeting-crm-sync.py"
+    spec = importlib.util.spec_from_file_location("brain_test_meeting_crm_sync", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_crm_interaction_preview_matches_real_meeting_crm_sync_module() -> None:
+    """6 emailed attendees + 3 name-only (FR-004 fills bare names for
+    email-less speakers) -> preview shows exactly 6 rows AND those 6 contacts
+    are byte-identical to what the REAL meeting-crm-sync.py module's
+    `external_attendees`/`upsert_contacts`/`append_interactions` would
+    upsert and log — proving no --full-file apply/preview drift (F-1)."""
+    module = _load_meeting_crm_sync_module()
+
+    event = {"meeting_id": "MID", "attendees": []}
+    full_meeting = {
+        "id": "MID",
+        "attendees": [
+            "marcos@alloi.us", "sam@alloi.us", "pat@alloi.us",
+            "kim@alloi.us", "lee@alloi.us", "ray@alloi.us",
+            "Ivette Ramos", "Joseph Chang", "Molly",
+        ],
+    }
+    fanout = {"meetings": [full_meeting]}
+
+    real_attendees = module.external_attendees(event, full_meeting)
+    real_contact_ids = {a["email"] for a in real_attendees}
+    assert len(real_attendees) == 6  # the real module also drops the 3 name-only entries
+
+    from preview import crm_interaction_preview
+
+    validated = {"summary": {"overview": "ov"}, "deal_state": None}
+    resolution = {"deal_state": None}
+    preview_rows = crm_interaction_preview(event, validated, resolution, fanout)
+
+    assert len(preview_rows) == 6
+    assert {row["contact"] for row in preview_rows} == real_contact_ids
+
+
 def _load_meeting_fanout_module():
     """importlib load of meeting-fanout.py (hyphenated filename, can't
     `import`): meeting-fanout.py is read-only for this fix (D-09 review

@@ -223,6 +223,45 @@ def test_roster_missing_josh_still_pa_codex(tmp_path, monkeypatch) -> None:
     assert step["owner_label"] == "owner: Josh"
 
 
+def test_ours_steps_carry_commitment_id(tmp_path) -> None:
+    # G0a F-8: the earlier draft of this test invented three fixture-builder
+    # helpers (_source_fixture/_validated_fixture/_resolution_fixture) that
+    # do not exist in this file. The only helper this module defines is
+    # `_payloads(dir_path, *, owner_name="Josh Weiss", side="ours")`, which
+    # WRITES source.json/validated.json/resolution.json into a directory
+    # (see the top of this file) — use it the same way every other test here
+    # does, then drive the real CLI seam (`adapt_meeting.main`).
+    from adapt_meeting import main
+
+    src = tmp_path / "env"
+    src.mkdir()
+    _payloads(src, side="ours")
+    assert main(["--source", str(src)]) == 0
+    fan = json.loads((src / "fanout-meeting.json").read_text(encoding="utf-8"))
+    wb = json.loads((src / "writeback-payload.json").read_text(encoding="utf-8"))
+    ours_steps = fan["meetings"][0]["next_steps"]
+    assert len(ours_steps) == 1
+    assert ours_steps[0]["commitmentId"] == wb["meetings"][0]["commitment_ids"][0]
+
+
+def test_meeting_core_carries_source_kind_and_id(tmp_path) -> None:
+    # G0b C2-2 (D-16 spec line 59 / FR-005 line 192): meeting_writeback.py's
+    # apply_resolution() (Task 2) derives its idempotency key from the
+    # payload's own source{kind,id} — never a hardcoded "fireflies:"
+    # literal — so the adapter must actually emit it on the
+    # writeback-payload.json meeting item. Spec v1.5's payload contract
+    # (line 176) doesn't yet list `source` there; noted in Open Questions
+    # for a v1.6 patch.
+    from adapt_meeting import main
+
+    src = tmp_path / "env"
+    src.mkdir()
+    _payloads(src, side="ours")
+    assert main(["--source", str(src)]) == 0
+    wb = json.loads((src / "writeback-payload.json").read_text(encoding="utf-8"))
+    assert wb["meetings"][0]["source"] == {"kind": "fireflies", "id": "abc12345zzzz"}
+
+
 def test_deadline_floor_null(tmp_path) -> None:
     from adapt_meeting import main
 

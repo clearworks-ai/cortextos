@@ -151,6 +151,7 @@ def adapt(source: dict[str, Any], validated: dict[str, Any], resolution: dict[st
         if side == "ours":
             ours_steps.append(
                 {
+                    "commitmentId": cid,
                     "text": text,
                     "direction": "internal",
                     "owner_identity": ident,
@@ -178,6 +179,7 @@ def adapt(source: dict[str, Any], validated: dict[str, Any], resolution: dict[st
     summary = validated.get("summary") or {}
     meeting_core = {
         "id": source_id,
+        "source": {"kind": kind, "id": source_id},
         "title": title,
         "date": date,
         "organizer": next((p.get("email") or p.get("name") for p in parts if isinstance(p, dict)), ""),

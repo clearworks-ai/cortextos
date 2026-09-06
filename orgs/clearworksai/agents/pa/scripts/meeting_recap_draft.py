@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 from datetime import datetime, timezone
@@ -50,8 +51,24 @@ def load_ledger(path: Path) -> set[str]:
 
 def append_ledger(path: Path, meeting_id: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(f"{meeting_id} {int(datetime.now(timezone.utc).timestamp())}\n")
+    tmp_path = path.with_name(f".{path.name}.tmp")
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    row = f"{meeting_id} {int(datetime.now(timezone.utc).timestamp())}\n"
+    tmp_path.write_text(existing + row, encoding="utf-8")
+    os.replace(tmp_path, path)
+
+
+def ledger_key(meeting: dict[str, Any]) -> str:
+    """D-16/N3-1: mirror writeback's `_source_key` (scripts/brain/writeback_render.py)
+    — derive `<kind>:<id>` from the payload's own `source{kind,id}` so the recap
+    ledger dedupes on the same source-agnostic key as writeback/CRM. Falls back to
+    the legacy `fireflies:<id>` literal only when `source` is absent or malformed
+    (no unconditional `fireflies:` literal for payloads that do carry a source)."""
+    meeting_id = normalize_space(str(meeting.get("id") or ""))
+    source = meeting.get("source")
+    if isinstance(source, dict) and source.get("kind") and source.get("id"):
+        return f"{source['kind']}:{source['id']}"
+    return f"fireflies:{meeting_id}"
 
 
 def load_voice_guidance(path: Path) -> str:
@@ -245,7 +262,8 @@ def process_meetings(
         meeting_id = normalize_space(str(meeting.get("id") or ""))
         if not meeting_id:
             continue
-        if meeting_id in ledger_ids:
+        key = ledger_key(meeting)
+        if key in ledger_ids:
             summary["skipped_ledger"] += 1
             continue
         if is_suppressed_meeting(meeting):
@@ -274,16 +292,16 @@ def process_meetings(
             continue
 
         if tier == "L2":
-            append_ledger(ledger_path, meeting_id)
+            append_ledger(ledger_path, key)
             summary["auto_filed"] += 1
-            ledger_ids.add(meeting_id)
+            ledger_ids.add(key)
             continue
 
         result = run_gmail_draft(subject, body, runner)
         if result.returncode == 0:
-            append_ledger(ledger_path, meeting_id)
+            append_ledger(ledger_path, key)
             summary["drafts_created"] += 1
-            ledger_ids.add(meeting_id)
+            ledger_ids.add(key)
             continue
         summary["draft_failures"].append(
             {

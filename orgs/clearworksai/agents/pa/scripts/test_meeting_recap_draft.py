@@ -201,5 +201,60 @@ class ProcessMeetingsTests(unittest.TestCase):
             self.assertEqual(ledger_path.read_text(encoding="utf-8"), "")
 
 
+import os
+
+
+def test_apply_calls_gws_and_keys_ledger_by_source(tmp_path, monkeypatch):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    calls_file = tmp_path / "gws-calls.txt"
+    gws = bindir / "gws"
+    gws.write_text(f'#!/bin/sh\necho "$@" >> {calls_file}\nexit 0\n')
+    gws.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
+
+    payload = {
+        "meetings": [
+            {
+                "id": "unused-legacy-id",
+                "title": "Tacticals sync",
+                "date": "2026-09-04T17:00:00Z",
+                "summary": {"overview": "Scoped tactical reports."},
+                "next_steps": [],
+                "source": {"kind": "omi", "id": "OMI-999"},
+            }
+        ]
+    }
+    payload_path = tmp_path / "recap-payload.json"
+    payload_path.write_text(json.dumps(payload), encoding="utf-8")
+    ledger = tmp_path / "recap-ledger.txt"
+
+    rc = MODULE.main(["--payload", str(payload_path), "--ledger", str(ledger)])
+    assert rc == 0
+    calls_text = calls_file.read_text(encoding="utf-8")
+    assert calls_text.count("+draft") == 1
+    tokens = calls_text.split()
+    assert "gmail" in tokens
+    assert "+draft" in tokens
+    assert "send" not in tokens
+    assert ledger.read_text(encoding="utf-8").strip().startswith("omi:OMI-999")
+
+
+def test_legacy_no_source_falls_back_to_fireflies_prefixed_id(tmp_path, monkeypatch):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    gws = bindir / "gws"
+    gws.write_text("#!/bin/sh\nexit 0\n")
+    gws.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
+    payload = {"meetings": [{"id": "legacy123", "title": "T", "date": "2026-01-01", "next_steps": []}]}
+    payload_path = tmp_path / "p.json"
+    payload_path.write_text(json.dumps(payload), encoding="utf-8")
+    ledger = tmp_path / "l.txt"
+    rc = MODULE.main(["--payload", str(payload_path), "--ledger", str(ledger)])
+    assert rc == 0
+    assert ledger.read_text(encoding="utf-8").strip().startswith("fireflies:legacy123")
+
+
 if __name__ == "__main__":
     unittest.main()

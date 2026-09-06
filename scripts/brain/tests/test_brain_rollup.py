@@ -114,6 +114,46 @@ def test_render_engagements_rollup_nests_projects_under_engagement(tmp_path: Pat
     assert body.count("|") > 4  # header + at least one data row
 
 
+def test_open_rows_splits_on_unescaped_pipes_only(tmp_path: Path) -> None:
+    """G2R2-P2-1: an escaped pipe (`\\|`) inside a cell must stay literal —
+    it is not a column delimiter — and must come back unescaped (as a
+    plain `|`) in the parsed cell, with the row still parsed into exactly
+    5 cells (not split into extra fields by the escaped pipe)."""
+    from brain_rollup import _open_rows
+
+    body = "| Reconcile Q3 \\| Q4 invoices | Ivette \\| Ramos | 2026-09-20 | commitment:z | open |\n"
+    rows = _open_rows(body)
+    assert len(rows) == 1
+    row = rows[0]
+    assert set(row) == {"item", "owner", "deadline", "source", "status"}
+    assert row["item"] == "Reconcile Q3 | Q4 invoices"
+    assert row["owner"] == "Ivette | Ramos"
+    assert row["deadline"] == "2026-09-20"
+    assert row["source"] == "commitment:z"
+    assert row["status"] == "open"
+
+
+def test_render_state_sections_keeps_open_item_row_with_escaped_pipe(tmp_path: Path) -> None:
+    """G2R2-P2-1 integration: under the old blind-split-on-every-pipe
+    parser, an escaped pipe in a cell added extra `|` boundaries and made
+    the whole row fail to match the fixed 5-column shape — the item was
+    silently dropped out of STATE.md entirely, not just mis-split. With the
+    fix the row must still parse and its (unescaped) item text must reach
+    the rendered STATE.md open-items output."""
+    from brain_rollup import load_nodes, render_state_sections
+
+    vault = _seed_state_fixture(tmp_path)
+    alloi01 = vault / "raw/areas/clearworks/org-brain/projects/alloi-01.md"
+    text = alloi01.read_text(encoding="utf-8")
+    text += "| Reconcile Q3 \\| Q4 invoices | Ivette \\| Ramos | 2026-09-20 | commitment:z | open |\n"
+    alloi01.write_text(text, encoding="utf-8")
+
+    nodes = load_nodes(vault)
+    body = render_state_sections(nodes, "2026-09-10")
+    assert "Reconcile Q3 | Q4 invoices" in body
+    assert "Ivette | Ramos" in body
+
+
 def test_apply_generated_region_creates_under_marker_when_absent() -> None:
     from brain_rollup import apply_generated_region
 
@@ -292,3 +332,25 @@ def test_main_exits_6_on_unterminated_state_generated_region(tmp_path: Path) -> 
     )
     rc = main(["--vault", str(vault), "--today", "2026-09-10"])
     assert rc == 6
+
+
+def test_main_exits_6_on_state_terminated_by_a_different_regions_close(tmp_path: Path) -> None:
+    """CH-3 (still-open): an unterminated `<!-- generated: state -->`
+    followed by a second region's `<!-- generated: other -->` ... `<!--
+    /generated -->` must NOT let that other region's closing marker be
+    borrowed as state's own close. The first marker encountered after
+    state's opening marker is another region's OPEN, not a CLOSE — this
+    must fail exit 6, same as having no closing marker at all, and must
+    leave the file on disk untouched."""
+    from brain_rollup import main
+
+    vault = _seed_state_fixture(tmp_path)
+    state_path = vault / "raw/areas/clearworks/org-brain/STATE.md"
+    original = (
+        "# STATE\n\n<!-- generated: state -->\nOLD STATE BODY, NO CLOSE OF ITS OWN\n\n"
+        "<!-- generated: other -->\nsome other region's body\n<!-- /generated -->\n"
+    )
+    _write(state_path, original)
+    rc = main(["--vault", str(vault), "--today", "2026-09-10"])
+    assert rc == 6
+    assert state_path.read_text(encoding="utf-8") == original

@@ -280,6 +280,162 @@ def test_dry_run_recap_failure_exits_9_with_stderr_tail(
     assert "recap dry-run exploded" in err
 
 
+def _seed_alloi_engagement(vault: Path) -> None:
+    """Gives alloi-03's `parent: alloi-01` a real, kind:engagement target
+    so `_run_dry`'s FR-011 lookup resolves a non-empty eng_id and actually
+    reaches the STATUS_PLAN subprocess call (none of the base `_seed()`
+    fixtures seed this page — see the parallel apply-test comment)."""
+    proj = vault / "raw/areas/clearworks/org-brain/projects"
+    (proj / "alloi-01.md").write_text(
+        "# Client: Alloi — Managed Services\n\n## Node\nid: alloi-01\nkind: engagement\n"
+        "client: alloi\nparent:\ntitle: Managed Services\ndomains: alloi.us\n"
+        "delivery_state: active\n\n## Reporting\ncadence: weekly\nchannel: email\n"
+        "contact: marcos@alloi.us\nlast_update:\n\n## History (dated, newest first)\n\n"
+        "## Open Items\n",
+        encoding="utf-8",
+    )
+
+
+def test_dry_run_status_subprocess_failure_exits_14_no_would_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """G2R2-P1-1: a non-zero STATUS_PLAN preview rc must map to the FR-012
+    exit-code table's fixed 14 (with a stderr tail), exactly like every
+    other phase-3/dry-run subprocess failure already does — not be
+    swallowed while the capture keeps printing further phase3-preview
+    nouns (would-file:) that would make a failed preview look signable."""
+    import run_meeting
+
+    vault, repo, mid = _seed(tmp_path)
+    _seed_alloi_engagement(vault)
+    fake_status = _fake_binary(tmp_path, "fake_status.py", 1, "status preview exploded")
+    monkeypatch.setattr(run_meeting, "_status_plan_argv", lambda: [sys.executable, str(fake_status)])
+
+    rc = _run_dry_with_fake_fetch_extract(monkeypatch, mid, repo, vault)
+    assert rc == 14
+    captured = capsys.readouterr()
+    assert "FAILED at status: rc=1" in captured.err
+    assert "status preview exploded" in captured.err
+    assert "would-file:" not in captured.out
+
+
+def test_dry_run_status_subprocess_timeout_exits_14_no_would_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """G2R2-P1-1: an uncaught TimeoutExpired from the STATUS_PLAN preview
+    subprocess must not crash `_run_dry` — it must map to the same fixed
+    exit 14 as an explicit non-zero rc, with a distinct 'timeout' reason,
+    and must not let the capture continue printing further nouns."""
+    import subprocess
+
+    import run_meeting
+
+    vault, repo, mid = _seed(tmp_path)
+    _seed_alloi_engagement(vault)
+    original_run = subprocess.run
+
+    def fake_run(cmd, *a, **kw):
+        if any(str(run_meeting.STATUS_PLAN) in str(c) for c in cmd):
+            raise subprocess.TimeoutExpired(cmd=cmd, timeout=kw.get("timeout", 0))
+        return original_run(cmd, *a, **kw)
+
+    monkeypatch.setattr(run_meeting.subprocess, "run", fake_run)
+
+    rc = _run_dry_with_fake_fetch_extract(monkeypatch, mid, repo, vault)
+    assert rc == 14
+    captured = capsys.readouterr()
+    assert "FAILED at status: timeout" in captured.err
+    assert "would-file:" not in captured.out
+
+
+def _fake_resolve_writing(source_dir_holder: dict, counterparty_slug: str):
+    """Builds a `resolve_main` replacement that writes a resolution.json
+    (and the validated.json adapt_meeting.main() requires to already
+    exist) with an attacker-controlled `counterparty_slug`, so a test can
+    drive `_run_dry`'s client-slug handling without needing real
+    resolve_meeting.py org/domain matching to produce a traversal value."""
+
+    def fake_resolve(argv=None) -> int:
+        source_dir = Path(argv[argv.index("--source") + 1])
+        source_dir_holder["path"] = source_dir
+        resolution = {
+            "home_path": "clients/mal.md",
+            "node": "none",
+            "created": False,
+            "relationship": "client",
+            "confidence": 0.9,
+            "counterparty_slug": counterparty_slug,
+            "rule": 7,
+        }
+        (source_dir / "resolution.json").write_text(json.dumps(resolution), encoding="utf-8")
+        validated = {
+            "decisions": [{"text": "Keep cadence", "quote": "hello"}],
+            "commitments": [
+                {
+                    "text": "Ship dry-run",
+                    "owner_participant": 0,
+                    "owner_name": "Josh Weiss",
+                    "deadline_iso": "2026-12-01",
+                    "quote": "hello",
+                }
+            ],
+            "open_questions": [],
+            "dropped": {},
+        }
+        (source_dir / "validated.json").write_text(json.dumps(validated), encoding="utf-8")
+        return 0
+
+    return fake_resolve
+
+
+def test_dry_run_rejects_client_slug_path_traversal_before_reading_client_page(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """CH2-new-1: `_run_dry` previously built/read the clients/<slug>.md
+    page directly from a node's untrusted `client:` value, bypassing the
+    SAME brain_rollup.validate_client_slug guard brain_rollup.main()
+    already runs for the identical write. A node with `client:
+    ../../outside` (matching resolve's own resolved counterparty_slug)
+    must fail closed — exit 6, FAILED at rollup, no phase3 write-target
+    noun ever printed — never read/write outside org-brain/clients/."""
+    import run_meeting
+
+    vault, repo, mid = _seed(tmp_path)
+    proj = vault / "raw/areas/clearworks/org-brain/projects"
+    (proj / "malicious.md").write_text(
+        "# Malicious\n\n## Node\nid: mal-01\nkind: project\nclient: ../../outside\n"
+        "parent:\ntitle: Malicious\n",
+        encoding="utf-8",
+    )
+    sentinel = vault / "raw/areas/outside.md"
+    sentinel.write_text("SENTINEL: must never be read by _run_dry", encoding="utf-8")
+    sentinel_mtime = sentinel.stat().st_mtime_ns
+
+    def fake_fetch(argv=None):
+        return 0
+
+    def fake_extract(argv=None):
+        return 0
+
+    monkeypatch.setattr(run_meeting, "fetch_main", fake_fetch)
+    monkeypatch.setattr(run_meeting, "extract_main", fake_extract)
+    monkeypatch.setattr(
+        run_meeting, "resolve_main", _fake_resolve_writing({}, "../../outside")
+    )
+
+    rc = run_meeting.main(
+        ["--meeting-id", f"fireflies:{mid}", "--dry-run", "--repo-root", str(repo), "--vault", str(vault)]
+    )
+    assert rc == 6
+    captured = capsys.readouterr()
+    assert "FAILED at rollup: invalid client slug '../../outside'" in captured.err
+    assert "would-touch:" not in captured.out
+    assert "would-write:" not in captured.out
+    assert "would-file:" not in captured.out
+    assert sentinel.stat().st_mtime_ns == sentinel_mtime
+    assert sentinel.read_text(encoding="utf-8") == "SENTINEL: must never be read by _run_dry"
+
+
 def test_dry_run_state_preview_uses_apply_state_generated_region_end_placement(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:

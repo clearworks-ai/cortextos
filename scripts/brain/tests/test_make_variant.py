@@ -255,6 +255,47 @@ def test_make_variant_copy_failure_leaves_dest_untouched_and_no_tmp_sibling(
     assert leftovers == []
 
 
+def test_make_variant_second_rename_failure_restores_dest_no_tmp_leftover(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """CH2-new-2: if `tmp_dest.rename(dest)` fails AFTER `dest` was already
+    renamed aside, the requested destination must never end up absent —
+    the original content must come back under `dest`'s own name, and no
+    `.tmp-<pid>`/`.old-<pid>` sibling may be left behind."""
+    import pathlib
+
+    import pytest
+
+    import make_variant as mv
+
+    source_vault = _seed_source_vault(tmp_path)
+    dest = tmp_path / "dest_vault"
+    dest.mkdir()
+    (dest / "marker.txt").write_text("original content", encoding="utf-8")
+
+    original_rename = pathlib.Path.rename
+
+    def _flaky_rename(self, target):
+        if ".tmp-" in self.name:
+            raise OSError("simulated second rename failure")
+        return original_rename(self, target)
+
+    monkeypatch.setattr(pathlib.Path, "rename", _flaky_rename)
+
+    with pytest.raises(OSError):
+        mv.make_variant(
+            source_vault=source_vault, dest_vault=dest, kind="fireflies", meeting_id=MID, variant="A"
+        )
+
+    assert dest.is_dir()
+    assert (dest / "marker.txt").read_text(encoding="utf-8") == "original content"
+    leftovers = [
+        p.name for p in tmp_path.iterdir()
+        if p.name.startswith("dest_vault.tmp-") or p.name.startswith("dest_vault.old-")
+    ]
+    assert leftovers == []
+
+
 def test_main_cli_refusal_path_exits_2(tmp_path: Path, monkeypatch, capsys) -> None:
     """S-1: main() calls sys.stderr on the refusal path but is invoked
     programmatically here (never through `if __name__ == "__main__":`), so

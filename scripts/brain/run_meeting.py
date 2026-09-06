@@ -274,7 +274,16 @@ def _run_dry(meeting_id: str, vault: Path, repo: Path, source_dir: Path) -> int:
         return 6
 
     if client_slug and any(n.get("client") == client_slug for n in nodes.values()):
-        client_path = org_brain_root(vault) / "clients" / f"{client_slug}.md"
+        # CH2-new-1: `client_slug` is untrusted text copied verbatim from a
+        # node's `client:` field (same as brain_rollup.main()'s per-client
+        # loop) — run it through the SAME validator before it ever touches
+        # a filesystem path, instead of trusting it to build/read
+        # clients/<slug>.md directly.
+        try:
+            client_path = brain_rollup.validate_client_slug(client_slug, org_brain_root(vault) / "clients")
+        except brain_rollup.NodeBlockError as exc:
+            print(f"FAILED at rollup: {exc}", file=sys.stderr)
+            return 6
         old_client = (
             client_path.read_text(encoding="utf-8") if client_path.is_file()
             else f"# Client: {client_slug.title()}\n\n## Current state\n\n"
@@ -316,15 +325,28 @@ def _run_dry(meeting_id: str, vault: Path, repo: Path, source_dir: Path) -> int:
             if parent and parent.get("kind") == "engagement":
                 eng_id = node["parent"]
     if eng_id:
-        st = subprocess.run(
-            [*_status_plan_argv(), str(STATUS_PLAN), "--client", client_slug, "--node", eng_id,
-             "--today", today, "--vault", str(vault)],
-            capture_output=True, text=True, timeout=CHILD_TIMEOUT_S,
-            cwd=str(CODE_ROOT), env=_status_env(os.environ),
-        )
+        try:
+            st = subprocess.run(
+                [*_status_plan_argv(), str(STATUS_PLAN), "--client", client_slug, "--node", eng_id,
+                 "--today", today, "--vault", str(vault)],
+                capture_output=True, text=True, timeout=CHILD_TIMEOUT_S,
+                cwd=str(CODE_ROOT), env=_status_env(os.environ),
+            )
+        except subprocess.TimeoutExpired:
+            # G2R2-P1-1: an uncaught TimeoutExpired here would crash `_run_dry`
+            # (and thus never reach the FR-012 exit-code table's fixed 14),
+            # and a swallowed non-zero rc would let the capture continue past
+            # a real failure and print further phase3-preview nouns
+            # (would-file: below) that make an incomplete/failed preview
+            # look like a clean, signable one.
+            print("FAILED at status: timeout", file=sys.stderr)
+            return 14
         sys.stdout.write(st.stdout)
         if st.returncode != 0:
             sys.stderr.write(st.stderr)
+            tail = (st.stderr or st.stdout or "").strip().splitlines()
+            print(f"FAILED at status: rc={st.returncode} {tail[-1] if tail else ''}", file=sys.stderr)
+            return 14
     else:
         print("would-write: skip: no-engagement")
 

@@ -18,6 +18,10 @@ from writeback_render import _split_sections
 
 GENERATED_START = "<!-- generated: {name} -->"
 GENERATED_END = "<!-- /generated -->"
+# CH-3: matches ANY generated-region opening marker (not just "state"'s own),
+# so apply_state_generated_region can tell "our close comes next" apart from
+# "another region's open comes first" before trusting a `GENERATED_END` match.
+ANY_GENERATED_START_RE = re.compile(r"<!-- generated: [^\n>]*-->")
 REQUIRED_NODE_KEYS = {"id", "kind", "client"}
 NODE_KIND_VALUES = {"engagement", "project"}
 OPEN_STATES = {"scoping", "active", "paused"}
@@ -125,21 +129,29 @@ def _decisions_since(body: str, cutoff_date: str) -> list[str]:
     return out
 
 
-OPEN_ROW_RE = re.compile(
-    r"^\|\s*(?P<item>[^|]*?)\s*\|\s*(?P<owner>[^|]*?)\s*\|\s*(?P<deadline>[^|]*?)\s*\|\s*(?P<source>[^|]*?)\s*\|\s*(?P<status>[^|]*?)\s*\|\s*$"
-)
+# G2R2-P2-1: column delimiter is an UNESCAPED `|` only — `\|` inside a cell
+# (e.g. an item or owner name that legitimately contains a pipe) must stay
+# literal, not be mistaken for a column boundary.
+_UNESCAPED_PIPE_RE = re.compile(r"(?<!\\)\|")
+
+
+def _unescape_pipe_cell(text: str) -> str:
+    return text.strip().replace("\\|", "|")
 
 
 def _open_rows(body: str) -> list[dict[str, str]]:
     rows = []
     for line in body.splitlines():
-        m = OPEN_ROW_RE.match(line.strip())
-        if not m:
+        stripped = line.strip()
+        if len(stripped) < 2 or not stripped.startswith("|") or not stripped.endswith("|"):
             continue
-        d = m.groupdict()
-        if d["item"].lower() == "item":
+        cells = _UNESCAPED_PIPE_RE.split(stripped[1:-1])
+        if len(cells) != 5:
             continue
-        rows.append(d)
+        item, owner, deadline, source, status = (_unescape_pipe_cell(c) for c in cells)
+        if item.lower() == "item":
+            continue
+        rows.append({"item": item, "owner": owner, "deadline": deadline, "source": source, "status": status})
     return rows
 
 
@@ -278,7 +290,15 @@ def apply_state_generated_region(old_text: str, body: str) -> str:
     start = GENERATED_START.format(name="state")
     if start in old_text:
         pre, rest = old_text.split(start, 1)
-        if GENERATED_END not in rest:
+        end_idx = rest.find(GENERATED_END)
+        # CH-3: the first marker encountered after OUR opening marker must be
+        # our own close. If some other region's `<!-- generated: ... -->`
+        # opens before any `<!-- /generated -->` is seen, that later close
+        # belongs to the OTHER region, not this one — treat it the same as
+        # having no close at all rather than silently borrowing it.
+        next_open = ANY_GENERATED_START_RE.search(rest)
+        next_open_idx = next_open.start() if next_open else -1
+        if end_idx < 0 or (next_open_idx != -1 and next_open_idx < end_idx):
             raise NodeBlockError("unterminated generated region")
         _, post = rest.split(GENERATED_END, 1)
         remainder = pre + post

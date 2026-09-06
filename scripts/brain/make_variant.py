@@ -165,7 +165,17 @@ def make_variant(*, source_vault: Path, dest_vault: Path, kind: str, meeting_id:
         shutil.rmtree(old_aside, ignore_errors=True)
     if dest.exists():
         dest.rename(old_aside)
-    tmp_dest.rename(dest)
+    try:
+        tmp_dest.rename(dest)
+    except Exception:
+        # CH2-new-2: dest was already renamed aside above (if it existed) —
+        # a failure here must never leave the requested destination absent.
+        # Put the original content back before propagating the error, and
+        # clean up the half-made tmp copy so nothing is left behind.
+        if old_aside.exists():
+            old_aside.rename(dest)
+        shutil.rmtree(tmp_dest, ignore_errors=True)
+        raise
     if old_aside.exists():
         shutil.rmtree(old_aside, ignore_errors=True)
     return sha

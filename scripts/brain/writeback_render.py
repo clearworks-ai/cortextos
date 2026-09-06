@@ -41,6 +41,9 @@ def _meeting_rel(meeting: dict[str, Any]) -> str:
     return f"meetings/{date}-{_slug(title)}-{kind}-{sid[:8]}.md"
 
 
+meeting_note_rel = _meeting_rel  # public alias for run_meeting's FR-014 pathspec
+
+
 def _history_block(meeting: dict[str, Any]) -> list[str]:
     date = _date_only(str(meeting.get("date") or ""))
     title = str(meeting.get("title") or "meeting")

@@ -18,7 +18,7 @@ if str(BRAIN) not in sys.path:
 def test_apply_exits_64() -> None:
     from run_meeting import main
 
-    assert main(["--meeting-id", "x", "--apply"]) == 64
+    assert main(["--meeting-id", "x", "--apply"]) == 15  # R2: d09-signed gate (FR-012 sign-check)
     assert main(["--meeting-id", "x"]) == 64
     assert main(["--meeting-id", "fireflies:../etc/passwd", "--dry-run"]) == 64
 

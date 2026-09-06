@@ -18,7 +18,7 @@ if str(BRAIN) not in sys.path:
 def test_apply_exits_64() -> None:
     from run_meeting import main
 
-    assert main(["--meeting-id", "x", "--apply"]) == 64
+    assert main(["--meeting-id", "x", "--apply"]) == 15  # R2: d09-signed gate (FR-012 sign-check)
     assert main(["--meeting-id", "x"]) == 64
     assert main(["--meeting-id", "fireflies:../etc/passwd", "--dry-run"]) == 64
 
@@ -151,7 +151,9 @@ def test_dry_run_prints_nouns_and_diffs(tmp_path: Path, monkeypatch: pytest.Monk
     assert "---" in out and "+++" in out
     assert "meetings/" in out
     assert "quotes kept decisions=1 commitments=1" in out
+    assert "crm interaction rows:" in out
     assert "Ship dry-run · owner: Josh · due 2026-12-01" in out
+    assert "task payloads:" in out
     assert "subject:" in out.lower() or "Recap:" in out
     assert not log.exists() or log.read_text(encoding="utf-8").strip() == ""
     # no progress.json

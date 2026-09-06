@@ -21,18 +21,32 @@ def _date_only(iso: str) -> str:
     return (iso or "")[:10] or "1970-01-01"
 
 
+def _source_key(meeting: dict[str, Any]) -> str:
+    """D-16: writeback is source-agnostic — derive `<kind>:<id>` from the
+    payload's own `source{kind,id}` (adapt_meeting.py emits it, Task 6).
+    Falls back to the legacy `fireflies:<meeting id>` literal only when a
+    payload carries no `source` field at all (pre-Task-6 / R1 dry-run
+    fixtures) so the existing CONTROL suite (test_writeback_render.py,
+    which never sets `source`) stays byte-identical."""
+    src = meeting.get("source")
+    if isinstance(src, dict) and src.get("kind") and src.get("id"):
+        return f"{src['kind']}:{src['id']}"
+    return f"fireflies:{meeting.get('id') or ''}"
+
+
 def _meeting_rel(meeting: dict[str, Any]) -> str:
-    mid = str(meeting.get("id") or "")
     date = _date_only(str(meeting.get("date") or ""))
     title = str(meeting.get("title") or "meeting")
-    kind = "fireflies"
-    return f"meetings/{date}-{_slug(title)}-{kind}-{mid[:8]}.md"
+    kind, _, sid = _source_key(meeting).partition(":")
+    return f"meetings/{date}-{_slug(title)}-{kind}-{sid[:8]}.md"
+
+
+meeting_note_rel = _meeting_rel  # public alias for run_meeting's FR-014 pathspec
 
 
 def _history_block(meeting: dict[str, Any]) -> list[str]:
     date = _date_only(str(meeting.get("date") or ""))
     title = str(meeting.get("title") or "meeting")
-    mid = str(meeting.get("id") or "")
     rel = _meeting_rel(meeting)
     summary = meeting.get("summary") or {}
     overview = ""
@@ -43,7 +57,7 @@ def _history_block(meeting: dict[str, Any]) -> list[str]:
         decisions = []
     dec_txt = " ; ".join(str(d) for d in decisions if str(d).strip()) or "none"
     return [
-        f"- {date} — {title} (meeting: {rel}) [source: fireflies:{mid}]",
+        f"- {date} — {title} (meeting: {rel}) [source: {_source_key(meeting)}]",
         f"  - Outcomes: {overview or 'none'}",
         f"  - Decisions: {dec_txt}",
     ]
@@ -88,8 +102,8 @@ def _split_sections(text: str) -> tuple[str, list[tuple[str, str]]]:
 
 
 def render_page(old_text: str, meeting: dict[str, Any]) -> str:
-    mid = str(meeting.get("id") or "")
-    marker = f"[source: fireflies:{mid}]" if mid else ""
+    key = _source_key(meeting)
+    marker = f"[source: {key}]" if not key.endswith(":") else ""
     if marker and marker in old_text:
         return old_text if old_text.endswith("\n") or old_text == "" else old_text + "\n"
     promo = meeting.get("promotion")
@@ -156,7 +170,7 @@ def render_meeting_note(meeting: dict[str, Any]) -> str:
     lines = [
         "---",
         f"meeting_id: {mid}",
-        f"source: fireflies:{mid}",
+        f"source: {_source_key(meeting)}",
         f"client: {client}",
         f"date: {date}",
         f"node: {node}",
@@ -189,7 +203,6 @@ def render_created_page(template_text: str, meeting: dict[str, Any]) -> str:
         kind, slug = created.split(":", 1)
     title = str(meeting.get("title") or slug or "Untitled")
     name = slug.replace("-", " ").title() or title
-    mid = str(meeting.get("id") or "")
     conf = res.get("confidence") if isinstance(res, dict) else None
     text = template_text
     text = text.replace("<Name>", name)
@@ -198,7 +211,7 @@ def render_created_page(template_text: str, meeting: dict[str, Any]) -> str:
     text = text.replace("engagement|project", kind)
     text = re.sub(r"^kind:\s*$", f"kind: {kind}", text, flags=re.M)
     text = re.sub(r"^relationship:\s*$", f"relationship: {relationship}", text, flags=re.M)
-    text = re.sub(r"^created_from:\s*$", f"created_from: fireflies:{mid}", text, flags=re.M)
+    text = re.sub(r"^created_from:\s*$", f"created_from: {_source_key(meeting)}", text, flags=re.M)
     if conf is not None:
         text = re.sub(r"^confidence:\s*$", f"confidence: {conf}", text, flags=re.M)
     if slug and slug not in text:
@@ -257,14 +270,27 @@ def org_brain_root(org_root: Path) -> Path:
     return org_root
 
 
+def home_path_for(org_root: Path, meeting: dict[str, Any]) -> Path:
+    """G2-P1-2: compute the home-page path WITHOUT reading its contents, so a
+    caller (meeting_writeback.apply_resolution) can acquire a lock on this
+    exact path before doing the read + render that planned_files() below
+    performs — otherwise two meetings resolving to the same home page can
+    each read stale contents and clobber each other's write."""
+    brain = org_brain_root(org_root)
+    res = meeting.get("resolution") or {}
+    if not isinstance(res, dict):
+        res = {}
+    home_rel = str(res.get("home_path") or "")
+    return brain / home_rel if home_rel else brain / "clients" / "unknown.md"
+
+
 def planned_files(org_root: Path, meeting: dict[str, Any]) -> list[tuple[Path, str, str]]:
     """Return (path, old_text, new_text) for every file --apply would touch."""
     brain = org_brain_root(org_root)
     res = meeting.get("resolution") or {}
     if not isinstance(res, dict):
         res = {}
-    home_rel = str(res.get("home_path") or "")
-    home = brain / home_rel if home_rel else brain / "clients" / "unknown.md"
+    home = home_path_for(org_root, meeting)
     old_home = home.read_text(encoding="utf-8") if home.exists() else ""
     created = res.get("created")
     if created:

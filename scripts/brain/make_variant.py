@@ -15,6 +15,7 @@ import os
 import re
 import shutil
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -167,11 +168,24 @@ def make_variant(*, source_vault: Path, dest_vault: Path, kind: str, meeting_id:
         dest.rename(old_aside)
     try:
         tmp_dest.rename(dest)
-    except Exception:
-        # CH2-new-2: dest was already renamed aside above (if it existed) —
-        # a failure here must never leave the requested destination absent.
-        # Put the original content back before propagating the error, and
-        # clean up the half-made tmp copy so nothing is left behind.
+    except Exception as exc:
+        # CH2-new-2 / race-guard: dest was already renamed aside above (if it
+        # existed) — a failure here must never leave the requested
+        # destination absent. But if another process created a NEW `dest` in
+        # the window between that rename-aside and this rename-in, `dest` now
+        # exists again and is foreign content we must never delete or
+        # overwrite. Detect that case first: if `dest` exists, leave it
+        # completely alone, move the preserved original to a stable
+        # `.recovered-<ISO>` sibling (never lost), and raise a clear,
+        # unambiguous error instead of silently swallowing the conflict.
+        if old_aside.exists() and dest.exists():
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            recovered = dest.parent / f"{dest.name}.recovered-{stamp}"
+            old_aside.rename(recovered)
+            shutil.rmtree(tmp_dest, ignore_errors=True)
+            msg = f"variant: destination raced, original preserved at {recovered}"
+            print(msg, file=sys.stderr)
+            raise UnsafeDestinationError(msg) from exc
         if old_aside.exists():
             old_aside.rename(dest)
         shutil.rmtree(tmp_dest, ignore_errors=True)

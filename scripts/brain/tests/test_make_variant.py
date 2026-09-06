@@ -296,6 +296,57 @@ def test_make_variant_second_rename_failure_restores_dest_no_tmp_leftover(
     assert leftovers == []
 
 
+def test_make_variant_dest_raced_after_swap_original_preserved_at_recovered_path(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """If another process creates `dest` after the original was renamed
+    aside, both the primary rename-in and the rollback rename-back fail
+    (dest exists). The original must never be lost: it lands at a stable
+    `<dest>.recovered-<ISO>` sibling, the foreign `dest` is left completely
+    untouched, no `.tmp-` leftover remains, and a clear
+    UnsafeDestinationError is raised."""
+    import pathlib
+
+    import pytest
+
+    import make_variant as mv
+
+    source_vault = _seed_source_vault(tmp_path)
+    dest = tmp_path / "dest_vault"
+    dest.mkdir()
+    (dest / "marker.txt").write_text("original content", encoding="utf-8")
+
+    original_rename = pathlib.Path.rename
+
+    def _racy_rename(self, target):
+        if ".tmp-" in self.name:
+            # simulate another process creating `dest` in the race window
+            target_path = Path(target)
+            target_path.mkdir(parents=True)
+            (target_path / "foreign.txt").write_text("foreign content", encoding="utf-8")
+            raise OSError("simulated race: destination now exists")
+        return original_rename(self, target)
+
+    monkeypatch.setattr(pathlib.Path, "rename", _racy_rename)
+
+    with pytest.raises(mv.UnsafeDestinationError):
+        mv.make_variant(
+            source_vault=source_vault, dest_vault=dest, kind="fireflies", meeting_id=MID, variant="A"
+        )
+
+    # foreign dest content untouched, original marker gone from it
+    assert (dest / "foreign.txt").read_text(encoding="utf-8") == "foreign content"
+    assert not (dest / "marker.txt").exists()
+
+    # original preserved at a stable recovery path
+    recovered = [p for p in tmp_path.iterdir() if p.name.startswith("dest_vault.recovered-")]
+    assert len(recovered) == 1
+    assert (recovered[0] / "marker.txt").read_text(encoding="utf-8") == "original content"
+
+    leftovers = [p.name for p in tmp_path.iterdir() if p.name.startswith("dest_vault.tmp-")]
+    assert leftovers == []
+
+
 def test_main_cli_refusal_path_exits_2(tmp_path: Path, monkeypatch, capsys) -> None:
     """S-1: main() calls sys.stderr on the refusal path but is invoked
     programmatically here (never through `if __name__ == "__main__":`), so

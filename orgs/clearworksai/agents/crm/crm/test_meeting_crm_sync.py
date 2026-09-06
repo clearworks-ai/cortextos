@@ -29,15 +29,22 @@ def _load_worker():
 
 
 def _write_event(tmp: Path, *, meeting_id, meeting_type, attendees, client="Acme", commitment_ids=None):
-    path = tmp / f"ff-meeting-event-{meeting_id}.json"
-    path.write_text(json.dumps({
+    """``attendees=None`` omits the key entirely — the legacy/no-attendees-
+    field payload shape (N-1: falls back to full_meeting). Any other value,
+    including ``[]``, writes that literal ``attendees`` value — a
+    present-but-empty list is now authoritative (N-1), NOT a fallback
+    trigger."""
+    payload = {
         "meeting_id": meeting_id,
         "meeting_type": meeting_type,
-        "attendees": attendees,
         "client": client,
         "commitmentIds": commitment_ids or [],
         "writeback_ok": True,
-    }))
+    }
+    if attendees is not None:
+        payload["attendees"] = attendees
+    path = tmp / f"ff-meeting-event-{meeting_id}.json"
+    path.write_text(json.dumps(payload))
     return path
 
 
@@ -346,6 +353,23 @@ class EmailLessAttendeeTests(unittest.TestCase):
             [{"name": "", "email": "marcos@alloi.us"}, {"name": "", "email": "joe@alloi.us"}],
         )
 
+    def test_crm_attendees_present_empty_list_is_authoritative(self):
+        # N-1: event.json's "attendees" key present but [] means the
+        # adapter already decided there are no external, emailed attendees
+        # (FR-009 "no attendees -> write nothing") -- must NOT fall back to
+        # full_meeting even though full_meeting has real emailed attendees.
+        full_meeting = {"attendees": ["marcos@alloi.us", "joe@alloi.us"]}
+        self.assertEqual(self.mod.crm_attendees({"attendees": []}, full_meeting), [])
+
+    def test_crm_attendees_missing_key_falls_back_to_full_meeting(self):
+        # N-1: only a WHOLLY ABSENT "attendees" key (legacy payload) falls
+        # back to full_meeting.
+        full_meeting = {"attendees": ["marcos@alloi.us", "Ivette Ramos", "joe@alloi.us"]}
+        self.assertEqual(
+            self.mod.crm_attendees({"meeting_id": "M9"}, full_meeting),
+            ["marcos@alloi.us", "joe@alloi.us"],
+        )
+
     def test_full_file_name_only_attendees_never_upserted(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
@@ -358,7 +382,7 @@ class EmailLessAttendeeTests(unittest.TestCase):
                 }]
             }))
             # event.json carries no attendees at all -> falls back to full_meeting.
-            ev = _write_event(tmp, meeting_id="M9", meeting_type="delivery", attendees=[])
+            ev = _write_event(tmp, meeting_id="M9", meeting_type="delivery", attendees=None)
             os.environ["FF_EVENT_PAYLOAD_PATH"] = str(ev)
 
             result = self.mod.process(meeting_id="M9", event_file=None, full_file=str(full))

@@ -5,6 +5,7 @@ inferred automatically; only invoked once a human sign-off is in hand."""
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from datetime import datetime, timezone
@@ -46,11 +47,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"dry-run capture missing nouns: {missing}", file=sys.stderr)
         return 1
     marker = marker_path(Path(args.vault), "fireflies", meeting_id)
+    # CH-1/S-2: D-09's `--apply` gate must validate more than "the marker
+    # file exists" — capture_path + capture_sha256 let progress.py's
+    # validate_sign_marker() prove the signed capture is the exact bytes a
+    # human reviewed, not just a same-named stand-in.
     doc = {
         "meeting_id": meeting_id,
         "signed_by": args.signed_by,
         "signed_at": args.signed_at,
         "capture": str(capture),
+        "capture_path": str(capture),
+        "capture_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
         "written_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
     atomic_write(marker, json.dumps(doc, sort_keys=True).encode("utf-8"))

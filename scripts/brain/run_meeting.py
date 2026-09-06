@@ -32,6 +32,31 @@ RECAP = CODE_ROOT / "orgs/clearworksai/agents/pa/scripts/meeting_recap_draft.py"
 CRM_SYNC = CODE_ROOT / "orgs/clearworksai/agents/crm/crm/meeting-crm-sync.py"
 FANOUT_SCRIPT = CODE_ROOT / "orgs/clearworksai/agents/crm/crm/meeting-fanout.py"
 
+# G2-P1-1: FR-012 line ~332's acceptance minimums (>=1 decision, >=1 OURS
+# task, >=5 CRM contacts, 1 draft) are the ACCEPTANCE MEETING's own gate
+# (G-54, D-11) — not a general per-meeting production block. An ordinary
+# meeting with, say, 2 external attendees would legitimately (and
+# permanently) fail "contacts >= 5" and could never commit. Only the listed
+# meeting id(s) enforce (exit 9 on shortfall, before the commit); every
+# other meeting still computes minimums into the receipt for visibility
+# (`enforced: false`) but always proceeds to commit.
+ACCEPTANCE_MEETING_IDS = {"01M1MW2GAZ1DQ0C6PG3KJ557JA"}
+
+# S-5: bound every subprocess this orchestrator shells out to, so a hung
+# `git`/writeback/CRM/fanout/recap child (or the bus calls they make
+# internally) can never hang --apply indefinitely with no daemon watchdog to
+# recover it (FR-012: "cortextos daemon not running THE SYSTEM SHALL
+# complete --apply").
+GIT_TIMEOUT_S = 60
+CHILD_TIMEOUT_S = 600
+
+
+def _acceptance_meeting_ids() -> set[str]:
+    override = os.environ.get("BRAIN_ACCEPTANCE_MEETING_IDS")
+    if override:
+        return {x.strip() for x in override.split(",") if x.strip()}
+    return set(ACCEPTANCE_MEETING_IDS)
+
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser()
@@ -219,9 +244,12 @@ def _check_crm_scripts_support_full_file() -> int:
 
 def _run_apply(meeting_id, vault, repo, source_dir, *, force) -> int:
     # G0b C2-3: unconditional — no --skip-sign-check bypass exists.
+    # CH-1/S-2: existence alone is not proof of a real sign-off — validate
+    # signed_by/signed_at/capture_sha256 (progress.validate_sign_marker).
     marker = sign_marker_path(vault, "fireflies", meeting_id)
-    if not marker.exists():
-        print("FAILED at sign-check: d09-signed.json missing", file=sys.stderr)
+    sign_failure = progress.validate_sign_marker(marker)
+    if sign_failure:
+        print(f"FAILED at sign-check: {sign_failure}", file=sys.stderr)
         return 15
 
     guard_rc = _worker_guard(meeting_id)
@@ -305,17 +333,37 @@ def _apply_writes(
     pending_path = progress.fanout_pending_path(vault, "fireflies", meeting_id)
     doc = progress.load_progress(prog_path)
 
+    # CH-9: `progress.writeback.done: true` alone is not proof the write
+    # actually happened — verify the home page carries meeting_writeback's
+    # own `[source: <kind>:<id>]` marker before trusting a resume; a bogus
+    # or hand-edited checkpoint gets the step reset and redone.
+    if progress.step_done(doc, "writeback"):
+        wb_state = doc.get("writeback") or {}
+        home_rel_check = str(wb_state.get("home_path") or "")
+        if not progress.writeback_marker_present(vault, home_rel_check, key):
+            print("resume: writeback marker missing, redoing", file=sys.stderr)
+            doc = progress.merge_progress(prog_path, "writeback", {"done": False})
+
     if not progress.step_done(doc, "writeback"):
         env = _writeback_env(vault)
-        wb = subprocess.run(
-            [sys.executable, str(WRITEBACK), "--payload", str(source_dir / "writeback-payload.json"), "--apply"],
-            env=env, capture_output=True, text=True,
-        )
+        try:
+            wb = subprocess.run(
+                [sys.executable, str(WRITEBACK), "--payload", str(source_dir / "writeback-payload.json"), "--apply"],
+                env=env, capture_output=True, text=True, timeout=CHILD_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired:
+            print("FAILED at writeback: timeout", file=sys.stderr)
+            return 7
         sys.stdout.write(wb.stdout)
         if wb.returncode != 0:
             sys.stderr.write(wb.stderr)
-            print(f"FAILED at writeback: rc={wb.returncode}", file=sys.stderr)
-            return wb.returncode or 7
+            # CH-8/S-1: FR-012's exit-code table assigns every FR-005
+            # failure exit 7, regardless of the subprocess's own return code
+            # (meeting_writeback.py can itself return 1 or 64) — `or 7`
+            # never fires for those truthy codes and leaked the raw code.
+            tail = (wb.stderr or wb.stdout or "").strip().splitlines()
+            print(f"FAILED at writeback: rc={wb.returncode} {tail[-1] if tail else ''}", file=sys.stderr)
+            return 7
         doc = progress.merge_progress(prog_path, "writeback", {
             "done": True, "home_path": resolution.get("home_path"), "node": resolution.get("node"),
             "rule": resolution.get("rule"), "history_added": True, "open_items_added": True,
@@ -333,11 +381,16 @@ def _apply_writes(
         print(json.dumps(row, sort_keys=True))
 
     if not progress.step_done(doc, "crm"):
-        crm_res = subprocess.run(
-            [sys.executable, str(CRM_SYNC), "--event-file", str(source_dir / "event.json"),
-             "--full-file", str(source_dir / "fanout-meeting.json")],
-            env=progress.crm_env(os.environ, repo), capture_output=True, text=True,
-        )
+        try:
+            crm_res = subprocess.run(
+                [sys.executable, str(CRM_SYNC), "--event-file", str(source_dir / "event.json"),
+                 "--full-file", str(source_dir / "fanout-meeting.json")],
+                env=progress.crm_env(os.environ, repo), capture_output=True, text=True,
+                timeout=CHILD_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired:
+            print("FAILED at crm: timeout", file=sys.stderr)
+            return 11
         sys.stdout.write(crm_res.stdout)
         if crm_res.returncode != 0:
             sys.stderr.write(crm_res.stderr)
@@ -350,6 +403,7 @@ def _apply_writes(
         })
 
     if not progress.step_done(doc, "tasks"):
+        existing_created = list((doc.get("tasks") or {}).get("created") or [])
         pending_ids = progress.read_fanout_pending(pending_path)
         fanout_cmd = [
             sys.executable, str(FANOUT_SCRIPT), "--meeting-id", meeting_id,
@@ -367,16 +421,24 @@ def _apply_writes(
         # fanout also needs the repo-scoped CRM data env (it upserts
         # nothing itself, but shares the same --repo-root convention) — the
         # two env helpers compose left-to-right.
-        fan_res = subprocess.run(
-            fanout_cmd, capture_output=True, text=True,
-            env=progress.crm_env(progress.fanout_env(os.environ), repo),
-        )
+        try:
+            fan_res = subprocess.run(
+                fanout_cmd, capture_output=True, text=True,
+                env=progress.crm_env(progress.fanout_env(os.environ), repo),
+                timeout=CHILD_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired:
+            print("FAILED at tasks: timeout", file=sys.stderr)
+            return 8
         sys.stdout.write(fan_res.stdout)
         fan_out = progress.parse_subprocess_json(fan_res.stdout)
         if fan_res.returncode == 8:
             failed_ids = [str(x) for x in (fan_out.get("failed") or [])]
             progress.write_fanout_pending(pending_path, failed_ids)
-            created_pairs = fan_out.get("task_map") or []
+            # G2-P1-3: dict-union with what a prior partial run already
+            # recorded — a retry's task_map must never REPLACE earlier
+            # successful commitmentId->taskId mappings.
+            created_pairs = progress.merge_task_map(existing_created, fan_out.get("task_map") or [])
             progress.merge_progress(prog_path, "tasks", {
                 "done": False, "created": created_pairs,
                 "created_ids": [p.get("commitmentId") for p in created_pairs], "pending": failed_ids,
@@ -387,7 +449,25 @@ def _apply_writes(
             sys.stderr.write(fan_res.stderr)
             print(f"FAILED at tasks: rc={fan_res.returncode}", file=sys.stderr)
             return 8
-        created_pairs = fan_out.get("task_map") or []
+        created_pairs = progress.merge_task_map(existing_created, fan_out.get("task_map") or [])
+        if not created_pairs:
+            # CH-5: every commitment dedup-SKIPped (already surfaced by an
+            # earlier run) yet we have no recorded mapping at all — the most
+            # likely explanation is a crash between that earlier fanout
+            # succeeding and merge_progress persisting it, not "there was
+            # nothing to fan". Try to recover the real taskId from the bus
+            # before ever marking this step done with an empty map.
+            skipped_ids = [str(x) for x in (fan_out.get("skipped") or [])]
+            if skipped_ids:
+                recovered = progress.reconstruct_task_map_from_bus(skipped_ids)
+                if recovered:
+                    created_pairs = progress.merge_task_map(existing_created, recovered)
+                else:
+                    print(
+                        "FAILED at tasks: dedup skipped but no created tasks recorded",
+                        file=sys.stderr,
+                    )
+                    return 8
         progress.clear_fanout_pending(pending_path)
         doc = progress.merge_progress(prog_path, "tasks", {
             "done": True, "created": created_pairs,
@@ -396,11 +476,16 @@ def _apply_writes(
 
     if not progress.step_done(doc, "draft"):
         env = _writeback_env(vault)
-        rec = subprocess.run(
-            [sys.executable, str(RECAP), "--payload", str(source_dir / "recap-payload.json"),
-             "--ledger", str(vault / "raw/media/transcripts/_recap-ledger.txt")],
-            env=env, capture_output=True, text=True,
-        )
+        ledger_path = vault / "raw/media/transcripts/_recap-ledger.txt"
+        try:
+            rec = subprocess.run(
+                [sys.executable, str(RECAP), "--payload", str(source_dir / "recap-payload.json"),
+                 "--ledger", str(ledger_path)],
+                env=env, capture_output=True, text=True, timeout=CHILD_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired:
+            print("FAILED at recap: timeout", file=sys.stderr)
+            return 9
         sys.stdout.write(rec.stdout)
         if rec.returncode != 0:
             sys.stderr.write(rec.stderr)
@@ -420,9 +505,30 @@ def _apply_writes(
             print("FAILED at recap: zero drafts created and zero ledger-skips", file=sys.stderr)
             return 9
         planned = (rec_out.get("planned") or [{}])[0]
+        subject = planned.get("subject")
+        skipped_ledger = bool(rec_out.get("skipped_ledger"))
+        if not subject and skipped_ledger:
+            # CH-6: kill the parent after the real Gmail draft + ledger
+            # append but before this merge — the NEXT run ledger-skips (key
+            # already recorded) with no `planned` entry (process_meetings'
+            # already-seen branch never appends to `planned`), so `subject`
+            # would otherwise be recorded as None forever and repeatedly
+            # fail acceptance even though the draft already exists. Recover
+            # it from meeting_recap_draft.append_ledger's own `<key>\t
+            # <subject>` row; fall back to a placeholder (never a null
+            # draft) when the row predates that format or carries none.
+            try:
+                if str(RECAP.parent) not in sys.path:
+                    sys.path.insert(0, str(RECAP.parent))
+                from meeting_recap_draft import load_ledger_subjects as _load_ledger_subjects
+                subject = _load_ledger_subjects(ledger_path).get(key) or None
+            except Exception:
+                subject = None
+            if not subject:
+                subject = "(ledger-skipped)"
         doc = progress.merge_progress(prog_path, "draft", {
-            "done": True, "subject": planned.get("subject"),
-            "created": bool(rec_out.get("drafts_created")), "skipped_ledger": bool(rec_out.get("skipped_ledger")),
+            "done": True, "subject": subject,
+            "created": bool(rec_out.get("drafts_created")), "skipped_ledger": skipped_ledger,
         })
 
     # C2-4 (fold, rev3): FR-012 line ~332's acceptance minimums (>=1
@@ -442,8 +548,12 @@ def _apply_writes(
         doc, meeting_id=meeting_id, source=key, vault_sha=pre_commit_sha, prior=prior_receipt,
     )
     shortfalls = progress.acceptance_minimums(receipt, decisions_kept=decisions_kept)
-    if shortfalls:
-        receipt["minimums"] = {"ok": False, "missing": shortfalls}
+    # G2-P1-1: only the acceptance meeting id(s) actually gate on shortfalls
+    # (exit 9, no commit); every other meeting still gets minimums computed
+    # into the receipt for visibility but is never blocked by them.
+    enforced = meeting_id in _acceptance_meeting_ids()
+    if enforced and shortfalls:
+        receipt["minimums"] = {"ok": False, "missing": shortfalls, "enforced": True}
         atomic_write(receipt_p, (json.dumps(receipt, sort_keys=True, indent=2) + "\n").encode("utf-8"))
         print(f"FAILED at minimums: {'; '.join(shortfalls)}", file=sys.stderr)
         return 9
@@ -462,6 +572,13 @@ def _apply_writes(
         message = f"brain: {_home_slug(resolution)} {str(source.get('occurred_at') or '')[:10]} from {key}"
         sha, committed_now = progress.vault_commit(vault, pathspec, message)
         final_sha = sha if committed_now else (prior_receipt or {}).get("vault_sha")
+        if not final_sha:
+            # CH-7: a crash between `git commit` succeeding and this merge
+            # being written leaves no prior receipt to fall back on, even
+            # though the commit genuinely IS on the vault's history —
+            # resolve the true SHA rather than ever recording `vault_sha:
+            # null` when the pathspec plainly has history.
+            final_sha = progress.resolve_vault_sha_from_history(vault, pathspec)
         doc = progress.merge_progress(prog_path, "commit", {"done": True, "vault_sha": final_sha})
     else:
         committed_now = False
@@ -470,7 +587,8 @@ def _apply_writes(
     receipt = progress.compose_receipt(
         doc, meeting_id=meeting_id, source=key, vault_sha=final_sha, prior=prior_receipt,
     )
-    receipt["minimums"] = {"ok": True, "missing": []}
+    final_shortfalls = progress.acceptance_minimums(receipt, decisions_kept=decisions_kept)
+    receipt["minimums"] = {"ok": not final_shortfalls, "missing": final_shortfalls, "enforced": enforced}
     atomic_write(receipt_p, (json.dumps(receipt, sort_keys=True, indent=2) + "\n").encode("utf-8"))
     print(f"receipt: {final_sha}" + ("" if committed_now else " (unchanged)"))
     return 0

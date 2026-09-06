@@ -38,9 +38,29 @@ def _seed_signed_marker(vault: Path, meeting_id: str) -> None:
     exist for a production write gate. Tests that need to get PAST the
     sign-check to exercise a downstream guard seed a real d09-signed.json
     directly (sign_dry_run.py's own nouns-validation logic is covered
-    separately by test_sign_dry_run.py, above)."""
+    separately by test_sign_dry_run.py, above).
+
+    CH-1/S-2: progress.validate_sign_marker() now requires non-empty
+    signed_by/signed_at plus a capture_sha256 that matches a real
+    capture_path file — a marker with just {"signed_by": "test"} (this
+    helper's pre-fix output) no longer passes the sign-check at all, so this
+    now writes a fully valid marker."""
     marker = marker_path(vault, "fireflies", meeting_id)
-    atomic_write(marker, json.dumps({"meeting_id": meeting_id, "signed_by": "test"}).encode("utf-8"))
+    capture = marker.parent / "dry-run.txt"
+    capture.parent.mkdir(parents=True, exist_ok=True)
+    capture_text = (
+        "home=projects/alloi-03.md node=alloi-03 rule=2\n"
+        "--- a/projects/alloi-03.md\n+++ b/projects/alloi-03.md\n"
+        "quotes kept decisions=1 commitments=1\ntasks:\nsubject: Recap\n"
+    )
+    capture.write_text(capture_text, encoding="utf-8")
+    atomic_write(marker, json.dumps({
+        "meeting_id": meeting_id,
+        "signed_by": "test",
+        "signed_at": "2026-09-05T00:00:00Z",
+        "capture_path": str(capture),
+        "capture_sha256": hashlib.sha256(capture_text.encode("utf-8")).hexdigest(),
+    }).encode("utf-8"))
 
 
 def test_apply_refuses_without_sign_marker(tmp_path, monkeypatch):
@@ -245,9 +265,12 @@ def _seed_apply_vault(tmp_path: Path) -> tuple[Path, Path, str]:
     # added by the build") in the seed commit, exactly matching Task 9 Step
     # 0's one-time production build step — --apply itself never touches
     # .gitignore. *.md.lock covers meeting_writeback.py's client_file_lock
-    # leftover (:53-56), which no code in this plan removes.
+    # leftover (:53-56), which no code in this plan removes. *.lock (broader)
+    # covers the concurrent G2-P1-4 fix's client_file_lock use on the
+    # (non-.md) recap/writeback ledger paths — same transient-lock-file
+    # class, different extension.
     (vault / ".gitignore").write_text(
-        "raw/media/transcripts/_state/\n*.md.lock\n", encoding="utf-8"
+        "raw/media/transcripts/_state/\n*.md.lock\n*.lock\n", encoding="utf-8"
     )
     _git(vault, "add", "-A")
     _git(vault, "commit", "-q", "-m", "seed")
@@ -316,6 +339,165 @@ def _assert_only_pathspec_and_ignored_changed(vault: Path, pathspec: list[str]) 
     assert unexpected == [], f"unexpected changes outside pathspec/.gitignore/.md.lock: {unexpected}"
 
 
+def _fanout_commitment_id(mid: str) -> str:
+    from adapt_meeting import _commitment_id
+
+    return _commitment_id("fireflies", mid, "Send the tactical report draft", 0)
+
+
+def test_apply_recovers_task_map_from_bus_when_fanout_dedup_skips_after_lost_checkpoint(tmp_path):
+    # CH-5: kill the parent after fanout creates a task and returns, but
+    # before progress is merged. On restart, `cortextos bus event-dedup`
+    # returns SKIP for the now-already-surfaced commitment (--strict path)
+    # and fanout's own task_map comes back empty — the orchestrator must not
+    # silently mark tasks done with an empty map (permanently losing the
+    # mapping and failing acceptance forever); it reconstructs the mapping
+    # from `cortextos bus list-tasks --json` first, matching on the
+    # `[commitment:<id>]` description marker meeting-fanout.py itself uses
+    # for its own CH-4 retry-lookup.
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    cid = _fanout_commitment_id(mid)
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    cortextos = bindir / "cortextos"
+    cortextos.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1 $2" = "bus event-dedup" ]; then echo SKIP; exit 0; fi\n'
+        f'if [ "$1 $2" = "bus list-tasks" ]; then echo \'[{{"id": "recovered-task-1", '
+        f'"description": "owner: Josh [commitment:{cid}]"}}]\'; exit 0; fi\n'
+        'if [ "$1" = "list-workers" ]; then exit 1; fi\n'
+        "exit 0\n"
+    )
+    cortextos.chmod(0o755)
+    (bindir / "gws").write_text("#!/bin/sh\nexit 0\n")
+    (bindir / "gws").chmod(0o755)
+    claude = bindir / "claude"
+    claude.write_text("#!/bin/sh\necho 'claude must never be invoked by an R2 test' >&2\nexit 99\n")
+    claude.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    _sign_for_restart_test(vault, mid, tmp_path, env)
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    import progress
+    prog_path = progress.progress_path(vault, "fireflies", mid)
+    doc = progress.load_progress(prog_path)
+    assert {"commitmentId": cid, "taskId": "recovered-task-1"} in doc["tasks"]["created"]
+
+    receipt_path = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}" / "receipt.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert {"commitmentId": cid, "taskId": "recovered-task-1"} in receipt["tasks"]
+
+
+def test_apply_exits_8_when_fanout_dedup_skips_and_bus_has_no_matching_task(tmp_path):
+    # CH-5: the same lost-checkpoint scenario, but this time the bus
+    # genuinely has no task carrying the commitment marker (recovery yields
+    # nothing) — the orchestrator must refuse to mark tasks done with a
+    # fabricated/empty mapping and exit 8 instead.
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    cortextos = bindir / "cortextos"
+    cortextos.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1 $2" = "bus event-dedup" ]; then echo SKIP; exit 0; fi\n'
+        'if [ "$1 $2" = "bus list-tasks" ]; then echo \'[]\'; exit 0; fi\n'
+        'if [ "$1" = "list-workers" ]; then exit 1; fi\n'
+        "exit 0\n"
+    )
+    cortextos.chmod(0o755)
+    (bindir / "gws").write_text("#!/bin/sh\nexit 0\n")
+    (bindir / "gws").chmod(0o755)
+    claude = bindir / "claude"
+    claude.write_text("#!/bin/sh\necho 'claude must never be invoked by an R2 test' >&2\nexit 99\n")
+    claude.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    _sign_for_restart_test(vault, mid, tmp_path, env)
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 8, result.stderr + result.stdout
+    assert "FAILED at tasks: dedup skipped but no created tasks recorded" in result.stderr
+
+    import progress
+    prog_path = progress.progress_path(vault, "fireflies", mid)
+    doc = progress.load_progress(prog_path)
+    assert not progress.step_done(doc, "tasks")
+
+
+def _run_apply_with_fake_writeback(tmp_path: Path, wb_exit: int, wb_stderr: str) -> subprocess.CompletedProcess:
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    _sign_for_restart_test(vault, mid, tmp_path, env)
+
+    fake_wb = tmp_path / "fake_writeback.py"
+    fake_wb.write_text(
+        f"import sys\nprint({wb_stderr!r}, file=sys.stderr)\nsys.exit({wb_exit})\n", encoding="utf-8",
+    )
+    env["BRAIN_TEST_WRITEBACK_OVERRIDE"] = str(fake_wb)
+
+    driver = tmp_path / "run_with_override.py"
+    driver.write_text(
+        "import os, sys\n"
+        "sys.path.insert(0, os.environ['BRAIN_DIR'])\n"
+        "import run_meeting\n"
+        "run_meeting.WRITEBACK = __import__('pathlib').Path(os.environ['BRAIN_TEST_WRITEBACK_OVERRIDE'])\n"
+        "raise SystemExit(run_meeting.main(sys.argv[1:]))\n",
+        encoding="utf-8",
+    )
+    env["BRAIN_DIR"] = str(BRAIN)
+
+    return subprocess.run(
+        [sys.executable, str(driver), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply"],
+        capture_output=True, text=True, env=env,
+    )
+
+
+def test_apply_writeback_rc1_exits_7_with_stderr_tail(tmp_path):
+    # CH-8/S-1: FR-012's exit-code table assigns every FR-005 (writeback)
+    # failure exit 7, regardless of the subprocess's own return code.
+    # meeting_writeback.py itself can return 1 (apply_resolution's
+    # SystemExit(1) for a payload missing source.kind/id) — both truthy, so
+    # the pre-fix `wb.returncode or 7` never fired and leaked the raw code.
+    result = _run_apply_with_fake_writeback(
+        tmp_path, 1, "apply_resolution: missing source.kind/source.id (D-16)",
+    )
+    assert result.returncode == 7, result.stderr + result.stdout
+    assert "FAILED at writeback: rc=1" in result.stderr
+    assert "missing source.kind/source.id" in result.stderr
+
+
+def test_apply_writeback_rc64_exits_7(tmp_path):
+    # CH-8/S-1: rc=64 (legacy no-resolution/bad-args path) is also truthy —
+    # must still map to exit 7, not leak 64.
+    result = _run_apply_with_fake_writeback(tmp_path, 64, "bad args")
+    assert result.returncode == 7, result.stderr + result.stdout
+    assert "FAILED at writeback: rc=64" in result.stderr
+
+
 def test_apply_restart_and_force_are_zero_new_writes(tmp_path):
     from progress import acceptance_minimums, fr014_pathspec
     from writeback_render import meeting_note_rel
@@ -360,7 +542,7 @@ def test_apply_restart_and_force_are_zero_new_writes(tmp_path):
     )
     minimums = acceptance_minimums(receipt1, decisions_kept=len(validated_doc.get("decisions") or []))
     assert minimums == []
-    assert receipt1["minimums"] == {"ok": True, "missing": []}
+    assert receipt1["minimums"] == {"ok": True, "missing": [], "enforced": True}
     assert len(receipt1["contacts"]) >= 5
 
     # R2-F-2/R2-F-1: prove the CRM data this run wrote lives under the tmp
@@ -387,20 +569,22 @@ def test_apply_restart_and_force_are_zero_new_writes(tmp_path):
     receipt3 = json.loads(receipt_path.read_text(encoding="utf-8"))
     assert receipt3["vault_sha"] == receipt1["vault_sha"]
     assert receipt3["last_run_at"] != receipt1["last_run_at"]
-    assert receipt3["minimums"] == {"ok": True, "missing": []}
+    assert receipt3["minimums"] == {"ok": True, "missing": [], "enforced": True}
     _assert_only_pathspec_and_ignored_changed(vault, pathspec)
 
 
-def test_apply_exits_9_when_acceptance_minimums_fail_zero_draft(tmp_path):
-    # G0b C2-4: the production --apply path must call
-    # progress.acceptance_minimums() against the composed receipt and fail
-    # loud (exit 9) BEFORE the vault commit — not just the test-helper
-    # function checked in isolation. Pre-seed the recap ledger so FR-008
-    # skips (0 drafts created, no real draft subject recorded) while every
-    # other step (writeback/crm/tasks) succeeds normally; the receipt
-    # composed just before the commit then has draft=null, which
-    # acceptance_minimums flags, and the run must fail before ever
-    # committing to the vault's git history.
+def test_apply_ledger_already_skipped_recovers_subject_and_still_passes_minimums(tmp_path):
+    # CH-6 (supersedes the old G0b C2-4 scenario here): pre-seeding the recap
+    # ledger with this meeting's key BEFORE the run simulates the exact
+    # crash window CH-6 describes — a prior run's real Gmail draft + ledger
+    # append already happened, then it crashed before progress.json's
+    # "draft" key was merged. FR-008 ledger-skips on this run (0 drafts
+    # created THIS run) with no `planned` entry, so the pre-fix orchestrator
+    # recorded `subject: None` forever and failed acceptance (exit 9) even
+    # though the draft genuinely exists. The fix must recover (or, absent a
+    # recoverable subject — this ledger line predates the `<key>\t<subject>`
+    # format — fall back to a placeholder) and NEVER count this as a
+    # zero-draft acceptance failure.
     vault, repo, mid = _seed_apply_vault(tmp_path)
     bindir = _install_fakes(tmp_path)
     env = os.environ.copy()
@@ -418,43 +602,27 @@ def test_apply_exits_9_when_acceptance_minimums_fail_zero_draft(tmp_path):
 
     ledger = vault / "raw/media/transcripts/_recap-ledger.txt"
     ledger.parent.mkdir(parents=True, exist_ok=True)
-    ledger.write_text(f"fireflies:{mid}\n", encoding="utf-8")
-
-    pre_head = _git(vault, "rev-parse", "HEAD").stdout.strip()
+    ledger.write_text(f"fireflies:{mid}\n", encoding="utf-8")  # legacy row, no recoverable subject
 
     result = subprocess.run(
         [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
          "--repo-root", str(repo), "--vault", str(vault), "--apply"],
         capture_output=True, text=True, env=env,
     )
-    assert result.returncode == 9, result.stderr + result.stdout
-    assert "FAILED at minimums" in result.stderr
+    assert result.returncode == 0, result.stderr + result.stdout
 
     receipt_path = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}" / "receipt.json"
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-    assert receipt["minimums"]["ok"] is False
-    assert "draft is null" in receipt["minimums"]["missing"]
+    assert receipt["draft"] == "(ledger-skipped)"
+    assert receipt["minimums"]["ok"] is True
+    assert receipt["minimums"]["missing"] == []
+    assert receipt["vault_sha"]
 
-    post_head = _git(vault, "rev-parse", "HEAD").stdout.strip()
-    assert post_head == pre_head  # never committed
 
-
-def test_apply_restart_resumes_after_writeback_without_rewriting_home_page(tmp_path):
-    """Directive binding rule (d), beyond the plan's literal Step 1 text:
-    FR-012's restart contract (spec ~318-335) is "continues from the first
-    step whose progress key is not done" — simulate a crash right after the
-    writeback step committed its progress.json outcome (but before crm/
-    tasks/draft/commit ran, and before any receipt.json existed) by
-    pre-seeding progress.json's "writeback" key as done, using the exact
-    home_path/node/rule this fixture's real writeback step always produces
-    (same fixture as _write_capture's "home=projects/alloi-03.md
-    node=alloi-03 rule=2" — deterministic, not probed). The resumed run
-    must skip re-invoking meeting_writeback.py (the only code path that
-    mutates the home page's text) and continue through crm/tasks/draft/
-    commit to a full receipt. Proof the home page was never rewritten: its
-    on-disk bytes (sha256) and mtime are identical before and after the
-    resumed run — nothing but the real writeback subprocess ever touches
-    that file's content."""
+def test_apply_recap_recovers_real_subject_from_ledger_tab_row(tmp_path):
+    # CH-6: when the ledger row DOES carry the `<key>\t<subject>` format
+    # meeting_recap_draft.append_ledger writes, recovery must use the real
+    # subject rather than the generic placeholder.
     import progress
 
     vault, repo, mid = _seed_apply_vault(tmp_path)
@@ -472,7 +640,183 @@ def test_apply_restart_resumes_after_writeback_without_rewriting_home_page(tmp_p
     )
     assert sign.returncode == 0, sign.stderr
 
+    real_subject = "Recap: Weekly tacticals review — 2026-09-04"
+    ledger = vault / "raw/media/transcripts/_recap-ledger.txt"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_text(f"fireflies:{mid}\t{real_subject}\n", encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    prog_path = progress.progress_path(vault, "fireflies", mid)
+    doc = progress.load_progress(prog_path)
+    assert doc["draft"]["subject"] == real_subject
+
+    receipt_path = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}" / "receipt.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert receipt["draft"] == real_subject
+    assert receipt["minimums"]["ok"] is True
+
+
+def test_apply_exits_9_when_decisions_shortfall_blocks_commit_before_vault_write(tmp_path):
+    # G0b C2-4 (retained under CH-6): the production --apply path must still
+    # call progress.acceptance_minimums() against the composed receipt and
+    # fail loud (exit 9) BEFORE the vault commit for a genuine shortfall —
+    # CH-6 only changed how a ledger-skip's draft subject is recorded, not
+    # whether other acceptance minimums are enforced for the acceptance
+    # meeting. Zero out the seeded extraction's decisions so decisions_kept
+    # drops below the >=1 minimum while every other step still succeeds.
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    extraction_path = vault / "raw/media/transcripts/fireflies" / mid / "extraction.json"
+    extraction = json.loads(extraction_path.read_text(encoding="utf-8"))
+    extraction["decisions"] = []
+    extraction_path.write_text(json.dumps(extraction), encoding="utf-8")
+
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+
+    sign = subprocess.run(
+        [sys.executable, str(BRAIN / "sign_dry_run.py"), "--meeting-id", mid, "--vault", str(vault),
+         "--signed-by", "Josh", "--signed-at", "2026-09-05T00:00:00Z",
+         "--dry-run-capture", str(_write_capture(tmp_path))],
+        capture_output=True, text=True, env=env,
+    )
+    assert sign.returncode == 0, sign.stderr
+
+    pre_head = _git(vault, "rev-parse", "HEAD").stdout.strip()
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 9, result.stderr + result.stdout
+    assert "FAILED at minimums" in result.stderr
+
+    receipt_path = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}" / "receipt.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert receipt["minimums"]["ok"] is False
+    assert receipt["minimums"]["enforced"] is True
+    assert "decisions_kept=0 < 1" in receipt["minimums"]["missing"]
+
+    post_head = _git(vault, "rev-parse", "HEAD").stdout.strip()
+    assert post_head == pre_head  # never committed
+
+
+def test_apply_non_acceptance_meeting_never_blocked_by_minimums_shortfall(tmp_path, monkeypatch):
+    # G2-P1-1: FR-012 line ~332's acceptance minimums are the ACCEPTANCE
+    # MEETING's own gate, not a general per-meeting production block. Move
+    # the enforced set (via the env override) to a different id, so this
+    # fixture's own meeting id — MID, with a genuine shortfall seeded below —
+    # is no longer enforced: --apply must still complete and commit, with
+    # `minimums.enforced: false` and the real shortfall visible only as
+    # `ok: false, missing: [...]` for observability, never a block.
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    extraction_path = vault / "raw/media/transcripts/fireflies" / mid / "extraction.json"
+    extraction = json.loads(extraction_path.read_text(encoding="utf-8"))
+    extraction["decisions"] = []
+    extraction_path.write_text(json.dumps(extraction), encoding="utf-8")
+
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    env["BRAIN_ACCEPTANCE_MEETING_IDS"] = "some-other-meeting-id"
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+
+    sign = subprocess.run(
+        [sys.executable, str(BRAIN / "sign_dry_run.py"), "--meeting-id", mid, "--vault", str(vault),
+         "--signed-by", "Josh", "--signed-at", "2026-09-05T00:00:00Z",
+         "--dry-run-capture", str(_write_capture(tmp_path))],
+        capture_output=True, text=True, env=env,
+    )
+    assert sign.returncode == 0, sign.stderr
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "FAILED at minimums" not in result.stderr
+
+    receipt_path = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}" / "receipt.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert receipt["vault_sha"]
+    assert receipt["minimums"]["enforced"] is False
+    assert receipt["minimums"]["ok"] is False
+    assert "decisions_kept=0 < 1" in receipt["minimums"]["missing"]
+
+
+def test_acceptance_meeting_ids_default_and_env_override(monkeypatch):
+    # G2-P1-1: module const overridable via BRAIN_ACCEPTANCE_MEETING_IDS
+    # (comma list) — test both the default and the override.
+    import run_meeting
+
+    monkeypatch.delenv("BRAIN_ACCEPTANCE_MEETING_IDS", raising=False)
+    assert run_meeting._acceptance_meeting_ids() == {"01M1MW2GAZ1DQ0C6PG3KJ557JA"}
+
+    monkeypatch.setenv("BRAIN_ACCEPTANCE_MEETING_IDS", "abc, def ,ghi")
+    assert run_meeting._acceptance_meeting_ids() == {"abc", "def", "ghi"}
+
+
+def _sign_for_restart_test(vault: Path, mid: str, tmp_path: Path, env: dict) -> None:
+    sign = subprocess.run(
+        [sys.executable, str(BRAIN / "sign_dry_run.py"), "--meeting-id", mid, "--vault", str(vault),
+         "--signed-by", "Josh", "--signed-at", "2026-09-05T00:00:00Z",
+         "--dry-run-capture", str(_write_capture(tmp_path))],
+        capture_output=True, text=True, env=env,
+    )
+    assert sign.returncode == 0, sign.stderr
+
+
+def test_apply_restart_resumes_after_writeback_when_marker_present_leaves_page_untouched(tmp_path):
+    """Directive binding rule (d), beyond the plan's literal Step 1 text:
+    FR-012's restart contract (spec ~318-335) is "continues from the first
+    step whose progress key is not done" — simulate a crash right after the
+    writeback step committed its progress.json outcome (but before crm/
+    tasks/draft/commit ran, and before any receipt.json existed) by
+    pre-seeding progress.json's "writeback" key as done, using the exact
+    home_path/node/rule this fixture's real writeback step always produces
+    (same fixture as _write_capture's "home=projects/alloi-03.md
+    node=alloi-03 rule=2" — deterministic, not probed).
+
+    CH-9: `progress.writeback.done: true` alone is not proof the write
+    happened — this is the HONEST-checkpoint half: the home page already
+    carries meeting_writeback.py's own `[source: <kind>:<id>]` citation
+    marker (as a real completed writeback would have left it), so
+    progress.writeback_marker_present() confirms the checkpoint and the
+    resumed run must skip re-invoking meeting_writeback.py (the only code
+    path that mutates the home page's text) and continue through
+    crm/tasks/draft/commit to a full receipt. Proof the home page was never
+    rewritten: its on-disk bytes (sha256) and mtime are identical before and
+    after the resumed run."""
+    import progress
+
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    _sign_for_restart_test(vault, mid, tmp_path, env)
+
     home_page = vault / "raw/areas/clearworks/org-brain/projects/alloi-03.md"
+    home_page.write_text(
+        home_page.read_text(encoding="utf-8").replace(
+            "## History (dated, newest first)\n\n- old\n",
+            f"## History (dated, newest first)\n\n"
+            f"- 2026-09-04 recap [source: fireflies:{mid}]\n- old\n",
+        ),
+        encoding="utf-8",
+    )
     before_bytes = home_page.read_bytes()
     before_sha = hashlib.sha256(before_bytes).hexdigest()
     before_mtime_ns = home_page.stat().st_mtime_ns
@@ -489,6 +833,7 @@ def test_apply_restart_resumes_after_writeback_without_rewriting_home_page(tmp_p
         capture_output=True, text=True, env=env,
     )
     assert result.returncode == 0, result.stderr + result.stdout
+    assert "resume: writeback marker missing, redoing" not in result.stderr
 
     after_bytes = home_page.read_bytes()
     assert hashlib.sha256(after_bytes).hexdigest() == before_sha
@@ -504,4 +849,54 @@ def test_apply_restart_resumes_after_writeback_without_rewriting_home_page(tmp_p
     receipt_path = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}" / "receipt.json"
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     assert receipt["vault_sha"]
-    assert receipt["minimums"] == {"ok": True, "missing": []}
+    assert receipt["minimums"] == {"ok": True, "missing": [], "enforced": True}
+
+
+def test_apply_restart_redoes_writeback_when_bogus_checkpoint_has_no_marker(tmp_path):
+    """CH-9: this is the BOGUS-checkpoint half — `progress.writeback.done:
+    true` with the home page carrying NO `[source: <kind>:<id>]` citation
+    (a hand-edited or corrupted progress.json, or a checkpoint written
+    without the write actually landing) must never be trusted silently.
+    progress.writeback_marker_present() must return False, the orchestrator
+    must log `resume: writeback marker missing, redoing`, reset the step,
+    and actually re-run meeting_writeback.py — so the page DOES change this
+    time and ends up carrying the real citation."""
+    import progress
+
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    _sign_for_restart_test(vault, mid, tmp_path, env)
+
+    home_page = vault / "raw/areas/clearworks/org-brain/projects/alloi-03.md"
+    before_bytes = home_page.read_bytes()  # no [source: ...] marker — bogus checkpoint
+
+    prog_path = progress.progress_path(vault, "fireflies", mid)
+    progress.merge_progress(prog_path, "writeback", {
+        "done": True, "home_path": "projects/alloi-03.md", "node": "alloi-03", "rule": 2,
+        "history_added": True, "open_items_added": True, "promotion_applied": False,
+    })
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "resume: writeback marker missing, redoing" in result.stderr
+
+    after_bytes = home_page.read_bytes()
+    assert after_bytes != before_bytes
+    assert f"[source: fireflies:{mid}]" in after_bytes.decode("utf-8")
+
+    doc = progress.load_progress(prog_path)
+    assert progress.step_done(doc, "writeback")
+    assert progress.step_done(doc, "commit")
+
+    receipt_path = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}" / "receipt.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert receipt["vault_sha"]
+    assert receipt["minimums"]["ok"] is True

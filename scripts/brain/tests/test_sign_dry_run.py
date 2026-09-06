@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import sys
 from pathlib import Path
 
@@ -41,4 +43,34 @@ def test_sign_requires_all_five_fr012_nouns(tmp_path):
         "--dry-run-capture", str(capture),
     ])
     assert rc2 == 0
-    assert marker_path(vault, "fireflies", "01M1MW2GAZ1DQ0C6PG3KJ557JA").exists()
+    marker = marker_path(vault, "fireflies", "01M1MW2GAZ1DQ0C6PG3KJ557JA")
+    assert marker.exists()
+
+    # CH-1/S-2: sign_dry_run.py must write capture_path + capture_sha256 so
+    # progress.validate_sign_marker() can prove the signed capture is the
+    # exact bytes reviewed, not just a same-named stand-in.
+    doc = json.loads(marker.read_text(encoding="utf-8"))
+    assert doc["capture_path"] == str(capture)
+    assert doc["capture_sha256"] == hashlib.sha256(capture.read_bytes()).hexdigest()
+
+
+def test_sign_writes_a_marker_that_progress_validate_sign_marker_accepts(tmp_path):
+    from progress import validate_sign_marker
+    from sign_dry_run import main, marker_path
+
+    vault = tmp_path / "vault"
+    capture = tmp_path / "dry-run.txt"
+    capture.write_text(
+        "home=projects/alloi-03.md node=alloi-03 rule=2\n"
+        "--- a/projects/alloi-03.md\n+++ b/projects/alloi-03.md\n"
+        "quotes kept decisions=1 commitments=1\ntasks:\nsubject: Recap\n",
+        encoding="utf-8",
+    )
+    rc = main([
+        "--meeting-id", "01M1MW2GAZ1DQ0C6PG3KJ557JA", "--vault", str(vault),
+        "--signed-by", "Josh", "--signed-at", "2026-09-05T00:00:00Z",
+        "--dry-run-capture", str(capture),
+    ])
+    assert rc == 0
+    marker = marker_path(vault, "fireflies", "01M1MW2GAZ1DQ0C6PG3KJ557JA")
+    assert validate_sign_marker(marker) is None

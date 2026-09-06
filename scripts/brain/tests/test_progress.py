@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -192,6 +193,45 @@ def test_vault_commit_skips_nonexistent_pathspec_entries(tmp_path):
     assert committed and sha
 
 
+def test_vault_commit_excludes_prestaged_unrelated_file(tmp_path):
+    # CH-2: a bare `git commit -m <msg>` after the restricted `git add`
+    # commits the ENTIRE index, so any file a concurrent process had already
+    # staged (outside the FR-014 pathspec) rode along in the same commit
+    # while every scoped `git status --porcelain -- <pathspec>` assertion
+    # still passed. The commit itself must be scoped to the pathspec too.
+    from progress import vault_commit
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    subprocess.run(["git", "init", "-q", str(vault)], check=True)
+    subprocess.run(["git", "-C", str(vault), "config", "user.email", "b@b"], check=True)
+    subprocess.run(["git", "-C", str(vault), "config", "user.name", "b"], check=True)
+    (vault / "f.txt").write_text("x", encoding="utf-8")
+    sha0, committed0 = vault_commit(vault, ["f.txt"], "seed")
+    assert committed0 and sha0
+
+    (vault / "f.txt").write_text("y", encoding="utf-8")
+    unrelated = vault / "unrelated.txt"
+    unrelated.write_text("z", encoding="utf-8")
+    subprocess.run(["git", "-C", str(vault), "add", "unrelated.txt"], check=True)
+
+    sha, committed = vault_commit(vault, ["f.txt"], "scoped commit")
+    assert committed and sha
+
+    show = subprocess.run(
+        ["git", "-C", str(vault), "show", "--name-only", "--format=", "HEAD"],
+        capture_output=True, text=True, check=True,
+    )
+    named = show.stdout.split()
+    assert "unrelated.txt" not in named
+    assert "f.txt" in named
+
+    status = subprocess.run(
+        ["git", "-C", str(vault), "status", "--porcelain"], capture_output=True, text=True, check=True,
+    )
+    assert "A  unrelated.txt" in status.stdout
+
+
 def test_vault_commit_add_failure_exits_10(tmp_path, monkeypatch):
     from progress import vault_commit
 
@@ -239,3 +279,193 @@ def test_acceptance_minimums_passes_when_all_met():
         "draft": "Recap: X",
     }
     assert acceptance_minimums(receipt, decisions_kept=1) == []
+
+
+# ── CH-1/S-2: validate_sign_marker ───────────────────────────────────────────
+
+
+def _valid_marker_doc(capture: Path) -> dict:
+    text = capture.read_text(encoding="utf-8")
+    return {
+        "signed_by": "Josh",
+        "signed_at": "2026-09-05T00:00:00Z",
+        "capture_path": str(capture),
+        "capture_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+    }
+
+
+def test_validate_sign_marker_missing_file_is_missing_reason(tmp_path):
+    from progress import validate_sign_marker
+
+    assert validate_sign_marker(tmp_path / "d09-signed.json") == "d09-signed.json missing"
+
+
+def test_validate_sign_marker_rejects_empty_object(tmp_path):
+    from atomic import atomic_write
+    from progress import validate_sign_marker
+
+    marker = tmp_path / "d09-signed.json"
+    atomic_write(marker, b"{}")
+    reason = validate_sign_marker(marker)
+    assert reason is not None
+    assert "signed_by" in reason
+
+
+def test_validate_sign_marker_rejects_missing_signed_at(tmp_path):
+    from atomic import atomic_write
+    from progress import validate_sign_marker
+
+    marker = tmp_path / "d09-signed.json"
+    atomic_write(marker, json.dumps({"signed_by": "Josh"}).encode("utf-8"))
+    reason = validate_sign_marker(marker)
+    assert reason is not None
+    assert "signed_at" in reason
+
+
+def test_validate_sign_marker_rejects_capture_sha_mismatch(tmp_path):
+    from atomic import atomic_write
+    from progress import validate_sign_marker
+
+    capture = tmp_path / "dry-run.txt"
+    capture.write_text("real capture bytes", encoding="utf-8")
+    doc = _valid_marker_doc(capture)
+    doc["capture_sha256"] = "0" * 64
+    marker = tmp_path / "d09-signed.json"
+    atomic_write(marker, json.dumps(doc).encode("utf-8"))
+    reason = validate_sign_marker(marker)
+    assert reason == "capture_sha256 mismatch"
+
+
+def test_validate_sign_marker_accepts_full_valid_marker(tmp_path):
+    from atomic import atomic_write
+    from progress import validate_sign_marker
+
+    capture = tmp_path / "dry-run.txt"
+    capture.write_text("real capture bytes", encoding="utf-8")
+    marker = tmp_path / "d09-signed.json"
+    atomic_write(marker, json.dumps(_valid_marker_doc(capture)).encode("utf-8"))
+    assert validate_sign_marker(marker) is None
+
+
+# ── G2-P1-3: merge_task_map ───────────────────────────────────────────────────
+
+
+def test_merge_task_map_unions_existing_and_new_without_dropping_either():
+    from progress import merge_task_map
+
+    existing = [{"commitmentId": "a", "taskId": "1"}]
+    new = [{"commitmentId": "b", "taskId": "2"}]
+    merged = merge_task_map(existing, new)
+    assert merged == [{"commitmentId": "a", "taskId": "1"}, {"commitmentId": "b", "taskId": "2"}]
+
+
+def test_merge_task_map_existing_wins_on_key_collision():
+    from progress import merge_task_map
+
+    existing = [{"commitmentId": "a", "taskId": "durable-1"}]
+    new = [{"commitmentId": "a", "taskId": "would-be-duplicate"}]
+    assert merge_task_map(existing, new) == [{"commitmentId": "a", "taskId": "durable-1"}]
+
+
+# ── CH-5: reconstruct_task_map_from_bus ──────────────────────────────────────
+
+
+def _install_cortextos_shim(tmp_path: Path, script: str) -> Path:
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    cortextos = bindir / "cortextos"
+    cortextos.write_text(script)
+    cortextos.chmod(0o755)
+    return bindir
+
+
+def test_reconstruct_task_map_from_bus_finds_commitment_marker_in_description(tmp_path, monkeypatch):
+    from progress import reconstruct_task_map_from_bus
+
+    bindir = _install_cortextos_shim(
+        tmp_path,
+        "#!/bin/sh\n"
+        'echo \'[{"id": "recovered-1", "description": "owner: Josh [commitment:cid-a]"}]\'\n',
+    )
+    monkeypatch.setenv("PATH", f"{bindir}:/usr/bin:/bin")
+    recovered = reconstruct_task_map_from_bus(["cid-a"])
+    assert recovered == [{"commitmentId": "cid-a", "taskId": "recovered-1"}]
+
+
+def test_reconstruct_task_map_from_bus_returns_empty_when_no_match(tmp_path, monkeypatch):
+    from progress import reconstruct_task_map_from_bus
+
+    bindir = _install_cortextos_shim(tmp_path, "#!/bin/sh\necho '[]'\n")
+    monkeypatch.setenv("PATH", f"{bindir}:/usr/bin:/bin")
+    assert reconstruct_task_map_from_bus(["cid-a"]) == []
+
+
+def test_reconstruct_task_map_from_bus_returns_empty_when_daemon_down(monkeypatch):
+    from progress import reconstruct_task_map_from_bus
+
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")  # no cortextos on PATH
+    assert reconstruct_task_map_from_bus(["cid-a"]) == []
+
+
+# ── CH-9: writeback_marker_present ────────────────────────────────────────────
+
+
+def test_writeback_marker_present_true_when_marker_in_page(tmp_path):
+    from progress import writeback_marker_present
+
+    page = tmp_path / "raw/areas/clearworks/org-brain/projects/alloi-03.md"
+    page.parent.mkdir(parents=True)
+    page.write_text("## History\n\n- 2026-09-04 recap [source: fireflies:MID]\n", encoding="utf-8")
+    assert writeback_marker_present(tmp_path, "projects/alloi-03.md", "fireflies:MID") is True
+
+
+def test_writeback_marker_present_false_when_page_lacks_marker(tmp_path):
+    from progress import writeback_marker_present
+
+    page = tmp_path / "raw/areas/clearworks/org-brain/projects/alloi-03.md"
+    page.parent.mkdir(parents=True)
+    page.write_text("## History\n\n- old\n", encoding="utf-8")
+    assert writeback_marker_present(tmp_path, "projects/alloi-03.md", "fireflies:MID") is False
+
+
+def test_writeback_marker_present_false_when_home_rel_or_page_missing(tmp_path):
+    from progress import writeback_marker_present
+
+    assert writeback_marker_present(tmp_path, "", "fireflies:MID") is False
+    assert writeback_marker_present(tmp_path, "projects/does-not-exist.md", "fireflies:MID") is False
+
+
+# ── CH-7: resolve_vault_sha_from_history ──────────────────────────────────────
+
+
+def test_resolve_vault_sha_from_history_finds_prior_commit(tmp_path):
+    from progress import resolve_vault_sha_from_history
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    subprocess.run(["git", "init", "-q", str(vault)], check=True)
+    subprocess.run(["git", "-C", str(vault), "config", "user.email", "b@b"], check=True)
+    subprocess.run(["git", "-C", str(vault), "config", "user.name", "b"], check=True)
+    (vault / "f.txt").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "-C", str(vault), "add", "f.txt"], check=True)
+    subprocess.run(["git", "-C", str(vault), "commit", "-q", "-m", "seed"], check=True)
+    expected = subprocess.run(
+        ["git", "-C", str(vault), "rev-parse", "HEAD"], capture_output=True, text=True, check=True,
+    ).stdout.strip()
+
+    assert resolve_vault_sha_from_history(vault, ["f.txt"]) == expected
+
+
+def test_resolve_vault_sha_from_history_returns_none_when_pathspec_has_no_history(tmp_path):
+    from progress import resolve_vault_sha_from_history
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    subprocess.run(["git", "init", "-q", str(vault)], check=True)
+    subprocess.run(["git", "-C", str(vault), "config", "user.email", "b@b"], check=True)
+    subprocess.run(["git", "-C", str(vault), "config", "user.name", "b"], check=True)
+    (vault / "f.txt").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "-C", str(vault), "add", "f.txt"], check=True)
+    subprocess.run(["git", "-C", str(vault), "commit", "-q", "-m", "seed"], check=True)
+
+    assert resolve_vault_sha_from_history(vault, ["never-touched.txt"]) is None

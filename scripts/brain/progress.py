@@ -15,6 +15,7 @@ parse_subprocess_json, fr014_pathspec, acceptance_minimums,
 write_fanout_pending/read_fanout_pending/clear_fanout_pending)."""
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -74,10 +75,69 @@ def check_vault_gitignore(vault: Path) -> list[str]:
     precondition must not block them."""
     missing: list[str] = []
     for pattern in ("raw/media/transcripts/_state/", "*.md.lock"):
-        res = subprocess.run(["git", "-C", str(vault), "check-ignore", "-q", pattern])
+        res = subprocess.run(["git", "-C", str(vault), "check-ignore", "-q", pattern], timeout=60)
         if res.returncode == 1:
             missing.append(pattern)
     return missing
+
+
+def validate_sign_marker(path: Path) -> str | None:
+    """CH-1/S-2: `marker.exists()` alone let `{}` (or a marker missing
+    `signed_at`, exactly what the pre-fix test fixture wrote) satisfy D-09's
+    human sign-off gate for the org's only production-write path. Returns
+    None when the marker is valid, else the reason `--apply` should fail
+    with (exit 15). Requires non-empty `signed_by`, an RFC3339 `signed_at`,
+    and a `capture_sha256` that matches the sha256 of the file named by
+    `capture_path` — sign_dry_run.py writes both of the latter fields."""
+    if not path.exists():
+        return "d09-signed.json missing"
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "d09-signed.json is not valid JSON"
+    if not isinstance(doc, dict):
+        return "d09-signed.json is not a JSON object"
+    signed_by = doc.get("signed_by")
+    if not isinstance(signed_by, str) or not signed_by.strip():
+        return "signed_by missing or empty"
+    signed_at = doc.get("signed_at")
+    if not isinstance(signed_at, str) or not signed_at.strip():
+        return "signed_at missing or empty"
+    try:
+        datetime.fromisoformat(signed_at.replace("Z", "+00:00"))
+    except ValueError:
+        return "signed_at is not RFC3339"
+    capture_sha256 = doc.get("capture_sha256")
+    if not isinstance(capture_sha256, str) or not capture_sha256.strip():
+        return "capture_sha256 missing or empty"
+    capture_path = doc.get("capture_path")
+    if not isinstance(capture_path, str) or not capture_path.strip():
+        return "capture_path missing or empty"
+    capture_file = Path(capture_path)
+    if not capture_file.is_file():
+        return f"capture_path not found: {capture_path}"
+    actual = hashlib.sha256(capture_file.read_bytes()).hexdigest()
+    if actual != capture_sha256:
+        return "capture_sha256 mismatch"
+    return None
+
+
+def writeback_marker_present(vault: Path, home_rel: str, key: str) -> bool:
+    """CH-9: `progress.writeback.done` alone is not proof the write actually
+    happened — a bogus or hand-edited checkpoint must not silently skip a
+    page that was never touched. meeting_writeback.py stamps every write it
+    makes with a `[source: <kind>:<id>]` marker (its own `key` variable);
+    require it verbatim in the home page before trusting a resume."""
+    if not home_rel:
+        return False
+    page = Path(vault) / "raw/areas/clearworks/org-brain" / home_rel
+    if not page.is_file():
+        return False
+    try:
+        text = page.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return f"[source: {key}]" in text
 
 
 def crm_env(base_env: dict[str, str], repo: Path) -> dict[str, str]:
@@ -181,6 +241,85 @@ def acceptance_minimums(receipt: dict[str, Any], *, decisions_kept: int) -> list
     return problems
 
 
+def merge_task_map(existing: list[dict[str, Any]], new: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """G2-P1-3: a retry's `task_map` (from meeting-fanout.py's own JSON
+    output) previously REPLACED `progress.tasks.created` wholesale, so a
+    checkpoint-retry that only re-covers the still-pending ids silently
+    dropped every commitmentId->taskId pair an earlier partial run had
+    already recorded successfully. Dict-union keyed on `commitmentId`;
+    existing (already-persisted) pairs win on key collision. Returns a list
+    sorted by commitmentId for deterministic output."""
+    merged: dict[str, dict[str, Any]] = {}
+    for pair in new or []:
+        cid = pair.get("commitmentId")
+        if cid:
+            merged[cid] = pair
+    for pair in existing or []:
+        cid = pair.get("commitmentId")
+        if cid:
+            merged[cid] = pair
+    return [merged[cid] for cid in sorted(merged)]
+
+
+def reconstruct_task_map_from_bus(skipped_ids: list[str]) -> list[dict[str, Any]]:
+    """CH-5: a fanout run that dedup-SKIPs every commitment while
+    `progress.tasks.created` is still empty means an earlier run's task_map
+    was lost to a crash between fanout succeeding (the task DID land on the
+    bus) and `merge_progress` persisting it — marking `tasks.done: true` with
+    an empty map here would permanently lose the mapping and fail acceptance
+    forever. Reconstruct via the same `[commitment:<id>]` description marker
+    meeting-fanout.py's own `prod_find_task_by_commitment` (CH-4) filters
+    on, via `cortextos bus list-tasks --json`. Best-effort: returns [] (never
+    raises) when the daemon is down, the id truly isn't findable, or the
+    output isn't parseable JSON — the caller then refuses to mark the step
+    done rather than fabricate a mapping."""
+    try:
+        proc = subprocess.run(
+            ["cortextos", "bus", "list-tasks", "--json"], capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if proc.returncode != 0 or not (proc.stdout or "").strip():
+        return []
+    try:
+        tasks = json.loads(proc.stdout)
+    except ValueError:
+        return []
+    if not isinstance(tasks, list):
+        return []
+    recovered: list[dict[str, Any]] = []
+    for cid in skipped_ids:
+        needle = f"[commitment:{cid}]"
+        for task in tasks:
+            if not isinstance(task, dict):
+                continue
+            desc = str(task.get("desc") or task.get("description") or "")
+            if needle in desc:
+                task_id = task.get("id") or task.get("taskId")
+                if task_id:
+                    recovered.append({"commitmentId": cid, "taskId": str(task_id)})
+                break
+    return recovered
+
+
+def resolve_vault_sha_from_history(vault: Path, pathspec: list[str]) -> str | None:
+    """CH-7: a crash between `git commit` succeeding and `progress.commit` /
+    `receipt.json` being written leaves `vault_commit`'s next call correctly
+    reporting "nothing to commit" (sha=None) with no `prior_receipt` to fall
+    back on (first run) — the commit genuinely IS on the vault's history.
+    Look up the true SHA directly rather than ever writing `vault_sha: null`
+    when the pathspec plainly has history; returns None only when it truly
+    has none."""
+    result = subprocess.run(
+        ["git", "-C", str(vault), "log", "-1", "--format=%H", "--", *pathspec],
+        capture_output=True, text=True, timeout=60,
+    )
+    if result.returncode != 0:
+        return None
+    sha = result.stdout.strip()
+    return sha or None
+
+
 def write_fanout_pending(path: Path, ids: list[str]) -> None:
     atomic_write(path, json.dumps({"pending": ids}, sort_keys=True).encode("utf-8"))
 
@@ -216,14 +355,26 @@ def vault_commit(vault: Path, pathspec: list[str], message: str) -> tuple[str | 
     existing = [p for p in pathspec if (Path(vault) / p).exists()]
     if existing:
         add_res = subprocess.run(
-            ["git", "-C", str(vault), "add", "--", *existing], capture_output=True, text=True,
+            ["git", "-C", str(vault), "add", "--", *existing], capture_output=True, text=True, timeout=60,
         )
         if add_res.returncode != 0:
             reason = (add_res.stderr or add_res.stdout or "").strip().splitlines()
             print(f"FAILED at commit: {reason[-1] if reason else add_res.returncode}", file=sys.stderr)
             raise SystemExit(10)
+    if not existing:
+        # CH-2: nothing of ours changed — never call `git commit` with an
+        # empty pathspec, which git treats as NO pathspec restriction at all
+        # (it would commit the whole index, including anything a concurrent
+        # process staged that has nothing to do with this pathspec).
+        return None, False
+    # CH-2: scope the commit itself to the pathspec, exactly like `add` —
+    # an unrestricted `git commit -m <msg>` commits the ENTIRE index, so any
+    # file another process had already staged (outside this pathspec) rode
+    # along in the same commit while every scoped `git status --porcelain --
+    # <pathspec>` assertion still passed.
     result = subprocess.run(
-        ["git", "-C", str(vault), "commit", "-m", message], capture_output=True, text=True,
+        ["git", "-C", str(vault), "commit", "-m", message, "--", *existing],
+        capture_output=True, text=True, timeout=60,
     )
     if result.returncode != 0:
         if "nothing to commit" in (result.stdout + result.stderr):
@@ -232,7 +383,7 @@ def vault_commit(vault: Path, pathspec: list[str], message: str) -> tuple[str | 
         print(f"FAILED at commit: {reason[-1] if reason else result.returncode}", file=sys.stderr)
         raise SystemExit(10)
     sha = subprocess.run(
-        ["git", "-C", str(vault), "rev-parse", "HEAD"], capture_output=True, text=True, check=True,
+        ["git", "-C", str(vault), "rev-parse", "HEAD"], capture_output=True, text=True, check=True, timeout=60,
     ).stdout.strip()
     return sha, True
 

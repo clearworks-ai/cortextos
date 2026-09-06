@@ -163,7 +163,11 @@ const REPORTING_LAST_UPDATE_LINE = /^([ \t]*-?[ \t]*last_update[ \t]*:)[ \t]*.*$
 
 export function setLastUpdate(md: string, today: string): string {
   const { preamble, sections } = splitSections(md);
-  const idx = sections.findIndex((s) => s.heading.toLowerCase().startsWith('reporting'));
+  // CH-5: exact heading match only — 'Reporting notes' (or any other
+  // Reporting-prefixed heading) must never be mistaken for the canonical
+  // '## Reporting' section. Headings are already trimmed by splitSections,
+  // and the template's own heading is exactly "Reporting" (case-sensitive).
+  const idx = sections.findIndex((s) => s.heading === 'Reporting');
   if (idx === -1) return md;
   const body = sections[idx].body;
   const newBody = REPORTING_LAST_UPDATE_LINE.test(body)

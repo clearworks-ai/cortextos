@@ -176,6 +176,85 @@ def test_make_variant_default_protected_vaults_names_real_knowledge_sync() -> No
     assert any(str(p) == "/Users/joshweiss/code/knowledge-sync" for p in PROTECTED_VAULTS)
 
 
+def test_make_variant_symlinked_parent_dest_resolved_once_immune_to_toctou_retarget(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """CH-2: the dest safety check and every subsequent filesystem op must
+    operate on the SAME resolved path. Simulate an attacker retargeting a
+    symlinked parent directory after the guard has run but before the copy
+    completes (inside shutil.copytree itself, the earliest point the fixed
+    code still has a live filesystem call left to make): the copy must land
+    at the location that was resolved right after the guard, never at the
+    retargeted location."""
+    import shutil
+
+    import make_variant as mv
+
+    from make_variant import ALLOI_NODE_REL
+
+    source_vault = _seed_source_vault(tmp_path)
+    real_a = tmp_path / "real_a"
+    real_a.mkdir()
+    real_b = tmp_path / "real_b"
+    real_b.mkdir()
+    link_parent = tmp_path / "link_parent"
+    link_parent.symlink_to(real_a)
+    dest = link_parent / "dest_vault"
+
+    orig_copytree = shutil.copytree
+
+    def _retarget_then_copy(src, dst, *a, **kw):
+        # attacker action: retarget the parent symlink mid-flight, after
+        # make_variant() has already captured its resolved dest snapshot
+        link_parent.unlink()
+        link_parent.symlink_to(real_b)
+        return orig_copytree(src, dst, *a, **kw)
+
+    monkeypatch.setattr(mv.shutil, "copytree", _retarget_then_copy)
+
+    sha = mv.make_variant(
+        source_vault=source_vault, dest_vault=dest, kind="fireflies", meeting_id=MID, variant="A"
+    )
+    assert sha
+
+    # landed at the location resolved right after the guard (real_a), not
+    # wherever the symlink points to now (real_b)
+    assert (real_a / "dest_vault" / ALLOI_NODE_REL).exists()
+    assert not (real_b / "dest_vault").exists()
+
+
+def test_make_variant_copy_failure_leaves_dest_untouched_and_no_tmp_sibling(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """CH-2: the existing destination must never be deleted before a
+    complete replacement exists. A copy failure (simulated by making
+    shutil.copytree raise) must leave a pre-existing dest byte-for-byte
+    untouched and must not leak a `<dest>.tmp-<pid>` sibling."""
+    import pytest
+    import shutil
+
+    import make_variant as mv
+
+    source_vault = _seed_source_vault(tmp_path)
+    dest = tmp_path / "dest_vault"
+    dest.mkdir()
+    (dest / "marker.txt").write_text("pre-existing content", encoding="utf-8")
+
+    def _boom(*a, **kw):
+        raise OSError("simulated copy failure")
+
+    monkeypatch.setattr(mv.shutil, "copytree", _boom)
+
+    with pytest.raises(OSError):
+        mv.make_variant(
+            source_vault=source_vault, dest_vault=dest, kind="fireflies", meeting_id=MID, variant="A"
+        )
+
+    assert (dest / "marker.txt").read_text(encoding="utf-8") == "pre-existing content"
+    leftovers = [p.name for p in tmp_path.iterdir() if p.name.startswith("dest_vault.tmp-")]
+    assert leftovers == []
+
+
 def test_main_cli_refusal_path_exits_2(tmp_path: Path, monkeypatch, capsys) -> None:
     """S-1: main() calls sys.stderr on the refusal path but is invoked
     programmatically here (never through `if __name__ == "__main__":`), so

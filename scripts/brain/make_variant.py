@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import sys
@@ -122,23 +123,51 @@ def make_variant(*, source_vault: Path, dest_vault: Path, kind: str, meeting_id:
     if variant not in ("A", "B"):
         raise ValueError(f"unknown variant {variant!r}")
     _assert_safe_destination(source_vault, dest_vault)
-    if dest_vault.exists():
-        shutil.rmtree(dest_vault)
-    shutil.copytree(source_vault, dest_vault)
-    _delete_state_and_derived(dest_vault, kind, meeting_id)
+    # CH-2: resolve dest ONCE, right after the guard, and use this SAME
+    # resolved Path for every subsequent filesystem op. A concrete resolved
+    # path no longer traverses any symlink in its parent chain, so a
+    # symlinked parent retargeted after this point (TOCTOU) cannot steer
+    # any later operation somewhere the guard never approved.
+    dest = dest_vault.resolve(strict=False)
+    tmp_dest = dest.parent / f"{dest.name}.tmp-{os.getpid()}"
+    if tmp_dest.exists():
+        shutil.rmtree(tmp_dest)
 
-    envelope_path = dest_vault / "raw/media/transcripts" / kind / meeting_id / "source.json"
-    envelope = json.loads(envelope_path.read_text(encoding="utf-8"))
-    if variant == "A":
-        apply_variant_a(dest_vault)
-    else:
-        envelope = apply_variant_b(envelope)
+    # Build the full replacement in a temp sibling first — the existing
+    # dest is never touched until a complete, edited copy exists, so a
+    # copy failure (or any exception below) never leaves dest deleted or
+    # partially overwritten.
+    try:
+        shutil.copytree(source_vault, tmp_dest)
+        _delete_state_and_derived(tmp_dest, kind, meeting_id)
 
-    data = _canonical_bytes(envelope)
-    atomic_write(envelope_path, data)
-    sha = hashlib.sha256(data).hexdigest()
-    atomic_write(envelope_path.parent / "source.sha256", (sha + "\n").encode("utf-8"))
-    _restamp_extraction_if_present(dest_vault, kind, meeting_id, sha)
+        envelope_path = tmp_dest / "raw/media/transcripts" / kind / meeting_id / "source.json"
+        envelope = json.loads(envelope_path.read_text(encoding="utf-8"))
+        if variant == "A":
+            apply_variant_a(tmp_dest)
+        else:
+            envelope = apply_variant_b(envelope)
+
+        data = _canonical_bytes(envelope)
+        atomic_write(envelope_path, data)
+        sha = hashlib.sha256(data).hexdigest()
+        atomic_write(envelope_path.parent / "source.sha256", (sha + "\n").encode("utf-8"))
+        _restamp_extraction_if_present(tmp_dest, kind, meeting_id, sha)
+    except Exception:
+        shutil.rmtree(tmp_dest, ignore_errors=True)
+        raise
+
+    # Atomic swap: rename old dest aside, rename the verified tmp copy into
+    # place, then remove the old aside — dest is never in a deleted or
+    # half-written state at any point an observer could see it.
+    old_aside = dest.parent / f"{dest.name}.old-{os.getpid()}"
+    if old_aside.exists():
+        shutil.rmtree(old_aside, ignore_errors=True)
+    if dest.exists():
+        dest.rename(old_aside)
+    tmp_dest.rename(dest)
+    if old_aside.exists():
+        shutil.rmtree(old_aside, ignore_errors=True)
     return sha
 
 

@@ -116,6 +116,30 @@ describe('setLastUpdate', () => {
     expect(out).toContain('- note: last_update: should-not-change');
     expect(out).toContain('## Reporting\ncadence: weekly\nchannel: email\ncontact: marcos@alloi.us\nlast_update: 2026-09-10');
   });
+
+  it('CH-5: an earlier "## Reporting notes" section is not matched by prefix — only the exact ## Reporting heading is updated', () => {
+    const md = `# Client: Alloi — Managed Services
+
+## Reporting notes
+freeform commentary
+last_update: should-not-change
+
+## Reporting
+cadence: weekly
+channel: email
+contact: marcos@alloi.us
+last_update:
+
+## History (dated, newest first)
+
+## Open Items
+`;
+    const out = setLastUpdate(md, '2026-09-10');
+    // the decoy section, which sorts before the real one, is untouched
+    expect(out).toContain('## Reporting notes\nfreeform commentary\nlast_update: should-not-change');
+    // only the real ## Reporting section's last_update advances
+    expect(out).toContain('## Reporting\ncadence: weekly\nchannel: email\ncontact: marcos@alloi.us\nlast_update: 2026-09-10');
+  });
 });
 
 function seedVault(): string {

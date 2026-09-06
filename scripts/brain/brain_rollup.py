@@ -22,6 +22,7 @@ REQUIRED_NODE_KEYS = {"id", "kind", "client"}
 NODE_KIND_VALUES = {"engagement", "project"}
 OPEN_STATES = {"scoping", "active", "paused"}
 JOSH_ROSTER = {"josh", "josh weiss"}
+CLIENT_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
 class NodeBlockError(ValueError):
@@ -231,6 +232,22 @@ def compute_generated_from(inputs: list[Path]) -> str:
     return h.hexdigest()
 
 
+def validate_client_slug(slug: str, clients_root: Path) -> Path:
+    """CH-1: a node's `client:` field is untrusted text copied verbatim
+    from a projects/*.md file — never let it steer a filesystem path.
+    Require a plain lowercase-alnum/hyphen slug AND assert the resolved
+    path stays under org-brain/clients/ (defense in depth even though the
+    regex alone already forbids '/' and '.'). Raises NodeBlockError (caught
+    by main() -> exit 6, no write) on any violation."""
+    if not CLIENT_SLUG_RE.match(slug):
+        raise NodeBlockError(f"invalid client slug '{slug}'")
+    root = clients_root.resolve(strict=False)
+    candidate = (clients_root / f"{slug}.md").resolve(strict=False)
+    if candidate.parent != root:
+        raise NodeBlockError(f"invalid client slug '{slug}'")
+    return candidate
+
+
 def apply_generated_region(
     old_text: str, name: str, body: str, *, create_after: str | None = None
 ) -> str:
@@ -248,12 +265,41 @@ def apply_generated_region(
     return old_text + sep + block
 
 
+def apply_state_generated_region(old_text: str, body: str) -> str:
+    """CH-3 / FR-007: STATE.md's generated:state block always regenerates
+    at the END of the file — never in place. An existing block (matched
+    ONLY when the opening marker is exactly `<!-- generated: state -->`,
+    closed by the first `<!-- /generated -->` after it) is removed from
+    wherever it sits and a fresh block is appended at the end, so any
+    legacy section that used to follow it ends up ahead of it instead. An
+    opening marker with no closing marker is a hard error — the generic
+    `<!-- /generated -->` belonging to some other region must never be
+    treated as this one's close."""
+    start = GENERATED_START.format(name="state")
+    if start in old_text:
+        pre, rest = old_text.split(start, 1)
+        if GENERATED_END not in rest:
+            raise NodeBlockError("unterminated generated region")
+        _, post = rest.split(GENERATED_END, 1)
+        remainder = pre + post
+    else:
+        remainder = old_text
+    remainder = remainder.strip("\n")
+    block = f"{start}\n{body}\n{GENERATED_END}\n"
+    sep = "" if remainder == "" else "\n\n"
+    return remainder + sep + block
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--client")
     p.add_argument("--all", action="store_true")
     p.add_argument("--vault", default=str(DEFAULT_VAULT))
-    p.add_argument("--today", default=None)
+    # CH-4: no wall-clock default. An implicit now() means two rerruns of
+    # the same canonical inputs either side of a UTC midnight can diff
+    # (30-day Decisions-made cutoff, OVERDUE labels) despite zero real
+    # change — the orchestrator already always passes --today explicitly.
+    p.add_argument("--today", required=True)
     args = p.parse_args(argv)
     vault = Path(args.vault)
 
@@ -271,10 +317,15 @@ def main(argv: list[str] | None = None) -> int:
     targets = clients_with_nodes if args.all else ([args.client] if args.client else [])
 
     brain = org_brain_root(vault)
+    clients_root = brain / "clients"
     for slug in targets:
         if slug not in clients_with_nodes:
             continue
-        client_path = brain / "clients" / f"{slug}.md"
+        try:
+            client_path = validate_client_slug(slug, clients_root)
+        except NodeBlockError as exc:
+            print(f"FAILED at rollup: {exc}", file=sys.stderr)
+            return 6
         old = (
             client_path.read_text(encoding="utf-8")
             if client_path.is_file()
@@ -285,13 +336,17 @@ def main(argv: list[str] | None = None) -> int:
         if new != old:
             atomic_write(client_path, new.encode("utf-8"))
 
-    today = args.today or _today_iso()
+    today = args.today
     state_path = brain / "STATE.md"
     old_state = state_path.read_text(encoding="utf-8") if state_path.is_file() else ""
     body = render_state_sections(nodes, today)
     gen_sha = compute_generated_from(sorted(n["path"] for n in nodes.values())) if nodes else ""
     full_body = f"generated-from: {gen_sha}\n\n{body}"
-    new_state = apply_generated_region(old_state, "state", full_body)
+    try:
+        new_state = apply_state_generated_region(old_state, full_body)
+    except NodeBlockError as exc:
+        print(f"FAILED at rollup: {exc}", file=sys.stderr)
+        return 6
     if new_state != old_state:
         atomic_write(state_path, new_state.encode("utf-8"))
     print(f"rollup: {len(targets)} client(s), state generated-from={gen_sha[:12]}")

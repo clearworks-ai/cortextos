@@ -196,5 +196,99 @@ def test_main_exits_6_on_malformed_node(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
     proj = vault / "raw/areas/clearworks/org-brain/projects"
     _write(proj / "broken.md", "# Broken\n\n## Node\nid: broken\n")  # missing kind/client
-    rc = main(["--all", "--vault", str(vault)])
+    rc = main(["--all", "--vault", str(vault), "--today", "2026-09-10"])
+    assert rc == 6
+
+
+def test_main_requires_today_argument(tmp_path: Path) -> None:
+    """CH-4: --today has no wall-clock default — a rerun across UTC midnight
+    with zero canonical-input changes must never be able to produce a diff
+    from an implicit clock read. The CLI must refuse to run at all without
+    an explicit --today (argparse required -> exit 2), not silently fall
+    back to now()."""
+    import pytest
+
+    from brain_rollup import main
+
+    vault = tmp_path / "vault"
+    with pytest.raises(SystemExit) as exc:
+        main(["--all", "--vault", str(vault)])
+    assert exc.value.code == 2
+
+
+def test_main_exits_6_on_unsanitized_client_slug_path_traversal(tmp_path: Path) -> None:
+    """CH-1: a node's `client:` field is untrusted (LLM-extracted, or a
+    hand-edited node file) and must never be used to build a filesystem
+    path outside org-brain/clients/. `--all` must refuse the whole run
+    before writing anything for a slug that fails validation or whose
+    resolved path escapes the clients/ directory."""
+    from brain_rollup import main
+
+    vault = tmp_path / "vault"
+    proj = vault / "raw/areas/clearworks/org-brain/projects"
+    _write(
+        proj / "evil-01.md",
+        "## Node\nid: evil-01\nkind: engagement\nclient: ../../tmp/escaped\n"
+        "parent:\ntitle: Evil\n\n## Reporting\nlast_update:\n",
+    )
+    rc = main(["--all", "--vault", str(vault), "--today", "2026-09-10"])
+    assert rc == 6
+
+    # nothing escaped org-brain/clients/, and STATE.md (processed after the
+    # per-client loop) was never reached/written either
+    escaped = vault / "raw/areas/clearworks/tmp/escaped.md"
+    assert not escaped.exists()
+    assert not (vault / "raw/areas/clearworks/org-brain/clients").exists()
+    assert not (vault / "raw/areas/clearworks/org-brain/STATE.md").exists()
+
+
+def test_main_accepts_a_legitimately_slug_shaped_client(tmp_path: Path) -> None:
+    """Sanity check that CH-1's tightened validation doesn't reject the
+    ordinary case: a normal lowercase-alnum-and-hyphen client slug."""
+    from brain_rollup import main
+
+    vault = _seed_projects(tmp_path)
+    rc = main(["--all", "--vault", str(vault), "--today", "2026-09-10"])
+    assert rc == 0
+    client_path = vault / "raw/areas/clearworks/org-brain/clients/alloi.md"
+    assert client_path.is_file()
+    assert "<!-- generated: engagements-rollup -->" in client_path.read_text(encoding="utf-8")
+
+
+def test_main_state_generated_region_regenerates_at_the_end_of_the_file(tmp_path: Path) -> None:
+    """CH-3: FR-007 requires the generated:state block to live at the END
+    of STATE.md. A prior run (or hand-edit) that leaves a legacy section
+    AFTER the generated block must be corrected on the next regeneration —
+    the block moves to the end, the legacy section survives ahead of it."""
+    from brain_rollup import main
+
+    vault = _seed_state_fixture(tmp_path)
+    state_path = vault / "raw/areas/clearworks/org-brain/STATE.md"
+    _write(
+        state_path,
+        "# STATE\n\n<!-- generated: state -->\nOLD BODY\n<!-- /generated -->\n\n"
+        "## Legacy Notes\n\nKeep this section, written by hand.\n",
+    )
+    rc = main(["--vault", str(vault), "--today", "2026-09-10"])
+    assert rc == 0
+    state = state_path.read_text(encoding="utf-8")
+    assert "Keep this section, written by hand." in state
+    assert state.index("Legacy Notes") < state.index("<!-- generated: state -->")
+    assert state.rstrip().endswith("<!-- /generated -->")
+
+
+def test_main_exits_6_on_unterminated_state_generated_region(tmp_path: Path) -> None:
+    """CH-3: a generated:state opening marker with no closing marker must
+    never let the generic first-subsequent `<!-- /generated -->` (which
+    could belong to some other region) be treated as its close."""
+    from brain_rollup import main
+
+    vault = _seed_state_fixture(tmp_path)
+    state_path = vault / "raw/areas/clearworks/org-brain/STATE.md"
+    _write(
+        state_path,
+        "# STATE\n\n<!-- generated: state -->\nOLD BODY, NO CLOSING MARKER AT ALL\n\n"
+        "## Legacy Notes\n\ntext\n",
+    )
+    rc = main(["--vault", str(vault), "--today", "2026-09-10"])
     assert rc == 6

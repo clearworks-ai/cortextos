@@ -157,6 +157,7 @@ def test_dry_run_prints_nouns_and_diffs(tmp_path: Path, monkeypatch: pytest.Monk
     assert "---" in out and "+++" in out
     assert "meetings/" in out
     assert "quotes kept decisions=1 commitments=1" in out
+    assert "open_questions=0" in out
     assert "crm interaction rows:" in out
     # F-1 FINAL review: the fixture has 2 external participants but only 1
     # has an email (Marcos; "Sam Speaker" is email-less) — the preview's

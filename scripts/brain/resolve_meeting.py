@@ -186,7 +186,7 @@ def quote_gate(extraction: dict[str, Any], source: dict[str, Any]) -> dict[str, 
     blob = normalize_quote(
         " ".join(str(u.get("text") or "") for u in (source.get("text_units") or []) if isinstance(u, dict))
     )
-    dropped = {"decisions": 0, "commitments": 0, "promotion": False, "promotion_reason": None}
+    dropped = {"decisions": 0, "commitments": 0, "open_questions": 0, "promotion": False, "promotion_reason": None}
     decisions = []
     for item in extraction.get("decisions") or []:
         if isinstance(item, dict) and quote_grounded(item.get("quote"), blob):
@@ -199,6 +199,12 @@ def quote_gate(extraction: dict[str, Any], source: dict[str, Any]) -> dict[str, 
             commitments.append(item)
         else:
             dropped["commitments"] += 1
+    open_questions = []
+    for item in extraction.get("open_questions") or []:
+        if isinstance(item, dict) and quote_grounded(item.get("quote"), blob):
+            open_questions.append(item)
+        else:
+            dropped["open_questions"] += 1
     pds = extraction.get("proposed_delivery_state")
     if pds is not None:
         q = pds.get("quote") if isinstance(pds, dict) else None
@@ -209,6 +215,7 @@ def quote_gate(extraction: dict[str, Any], source: dict[str, Any]) -> dict[str, 
     validated = dict(extraction)
     validated["decisions"] = decisions
     validated["commitments"] = commitments
+    validated["open_questions"] = open_questions
     validated["proposed_delivery_state"] = pds
     validated["dropped"] = dropped
     return validated

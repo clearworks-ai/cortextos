@@ -270,6 +270,17 @@ def build_next_steps(meeting: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def build_open_questions(meeting: dict[str, Any]) -> str:
+    items = meeting.get("open_questions") or []
+    texts = [normalize_space(str(q)) for q in items if str(q).strip()]
+    if not texts:
+        return ""
+    lines = ["Open questions:"]
+    for idx, text in enumerate(texts, start=1):
+        lines.append(f"{idx}. {text}")
+    return "\n".join(lines)
+
+
 def build_body(meeting: dict[str, Any], voice_guidance: str) -> str:
     parts: list[str] = []
     client_context = normalize_space(str(meeting.get("client_context") or ""))
@@ -278,6 +289,9 @@ def build_body(meeting: dict[str, Any], voice_guidance: str) -> str:
         parts.append(f"Relationship context: {client_context}")
     parts.append(build_summary_paragraph(meeting, voice_guidance))
     parts.append(build_next_steps(meeting))
+    open_questions = build_open_questions(meeting)
+    if open_questions:
+        parts.append(open_questions)
     parts.append(f"— drafted automatically from the Fireflies transcript ({source_ref}); review before sending.")
     return "\n\n".join(parts)
 

@@ -56,11 +56,18 @@ def _history_block(meeting: dict[str, Any]) -> list[str]:
     if not isinstance(decisions, list):
         decisions = []
     dec_txt = " ; ".join(str(d) for d in decisions if str(d).strip()) or "none"
-    return [
+    open_questions = meeting.get("open_questions") or []
+    if not isinstance(open_questions, list):
+        open_questions = []
+    oq_txt = " ; ".join(str(q) for q in open_questions if str(q).strip())
+    lines = [
         f"- {date} — {title} (meeting: {rel}) [source: {_source_key(meeting)}]",
         f"  - Outcomes: {overview or 'none'}",
         f"  - Decisions: {dec_txt}",
     ]
+    if oq_txt:
+        lines.append(f"  - Open questions: {oq_txt}")
+    return lines
 
 
 def _open_item_rows(meeting: dict[str, Any]) -> list[str]:
@@ -186,6 +193,14 @@ def render_meeting_note(meeting: dict[str, Any]) -> str:
     summary = meeting.get("summary") or {}
     if isinstance(summary, dict) and summary.get("overview"):
         lines.extend(["## Outcomes", "", str(summary.get("overview")), ""])
+    open_questions = meeting.get("open_questions") or []
+    if isinstance(open_questions, list):
+        oq_texts = [str(q).strip() for q in open_questions if str(q).strip()]
+        if oq_texts:
+            lines.append("## Open questions")
+            lines.append("")
+            lines.extend(f"- {q}" for q in oq_texts)
+            lines.append("")
     return "\n".join(lines)
 
 

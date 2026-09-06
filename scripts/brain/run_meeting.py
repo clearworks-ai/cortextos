@@ -110,13 +110,15 @@ def _run_dry(meeting_id: str, vault: Path, repo: Path, source_dir: Path) -> int:
     dropped = {}
     kept_d = 0
     kept_c = 0
+    kept_oq = 0
     if validated_path.is_file():
         validated = json.loads(validated_path.read_text(encoding="utf-8"))
         dropped = validated.get("dropped") or {}
         kept_d = len(validated.get("decisions") or [])
         kept_c = len(validated.get("commitments") or [])
+        kept_oq = len(validated.get("open_questions") or [])
     print(
-        f"quotes kept decisions={kept_d} commitments={kept_c} "
+        f"quotes kept decisions={kept_d} commitments={kept_c} open_questions={kept_oq} "
         f"dropped={json.dumps(dropped, sort_keys=True)}"
     )
     from preview import bus_task_preview, crm_interaction_preview

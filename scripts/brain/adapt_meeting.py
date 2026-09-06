@@ -191,6 +191,9 @@ def adapt(source: dict[str, Any], validated: dict[str, Any], resolution: dict[st
             "action_items": [c["text"] for c in commitments_out],
         },
         "decisions": [d.get("text") for d in (validated.get("decisions") or []) if isinstance(d, dict)],
+        "open_questions": [
+            oq.get("text") for oq in (validated.get("open_questions") or []) if isinstance(oq, dict)
+        ],
         "next_steps": recap_steps,
         "meeting_type": validated.get("meeting_type") or "delivery",
         "deal_state": validated.get("deal_state") or resolution.get("deal_state") or None,

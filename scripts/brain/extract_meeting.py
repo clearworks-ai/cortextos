@@ -20,7 +20,7 @@ HERE = Path(__file__).resolve().parent
 SCHEMA_PATH = HERE / "extraction.schema.json"
 PROMPT_TEMPLATE = """Extract meeting intelligence as JSON matching the schema.
 Unknown keys are forbidden. The string "unknown" is illegal for every enum.
-Quotes for decisions/commitments/promotions must be normalized substrings of text_units.
+Quotes for decisions/commitments/promotions/open_questions must be normalized substrings of text_units. open_questions is optional — omit it or leave it empty when none exist.
 
 Participants (index = owner_participant):
 {participants}
@@ -64,6 +64,10 @@ STAMP_KEYS = {"inputSha", "promptSha", "model", "cost_usd", "extracted_at"}
 # envelope fields added after the model returns, but optional for backward
 # compat with extraction.json files written before these existed
 OPTIONAL_STAMP_KEYS = {"model_receipt", "usage", "variant"}
+# domain fields that are optional at the top level (unlike `decisions`,
+# which REQUIRED_ROOT requires) — old extraction.json files, including the
+# already-applied acceptance meeting's, carry none of these keys.
+OPTIONAL_DOMAIN_KEYS = {"open_questions"}
 
 # Loaded once at import; also backs _build_prompt/prompt_sha's own reads of
 # the same file. Used to drive the recursive nested-schema walker below so
@@ -164,7 +168,7 @@ def _forbid_unknown_string(value: Any, where: str) -> None:
 def validate_extraction(obj: dict[str, Any], *, stamped: bool = True) -> None:
     if not isinstance(obj, dict):
         raise ValueError("extraction is not an object")
-    allowed = REQUIRED_ROOT | STAMP_KEYS | OPTIONAL_STAMP_KEYS
+    allowed = REQUIRED_ROOT | STAMP_KEYS | OPTIONAL_STAMP_KEYS | OPTIONAL_DOMAIN_KEYS
     extra = set(obj) - allowed
     if extra:
         raise ValueError(f"unknown keys: {sorted(extra)}")
@@ -196,6 +200,16 @@ def validate_extraction(obj: dict[str, Any], *, stamped: bool = True) -> None:
         if not isinstance(dec, dict) or set(dec) - {"text", "quote"}:
             raise ValueError(f"decisions[{i}]")
         _forbid_unknown_string(dec.get("text"), f"decisions[{i}].text")
+    open_questions = obj.get("open_questions") or []
+    if not isinstance(open_questions, list):
+        raise ValueError("open_questions")
+    _validate_against_schema(
+        open_questions, EXTRACTION_SCHEMA["properties"]["open_questions"], "open_questions"
+    )
+    for i, oq in enumerate(open_questions):
+        if not isinstance(oq, dict) or set(oq) - {"text", "quote", "owner"}:
+            raise ValueError(f"open_questions[{i}]")
+        _forbid_unknown_string(oq.get("text"), f"open_questions[{i}].text")
     commitments = obj.get("commitments") or []
     _validate_against_schema(
         commitments, EXTRACTION_SCHEMA["properties"]["commitments"], "commitments"

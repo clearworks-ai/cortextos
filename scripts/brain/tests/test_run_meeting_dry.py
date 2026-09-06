@@ -66,6 +66,12 @@ delivery_state: active
         "participants": [
             {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours", "spoke": True, "notetaker": False, "handle": None},
             {"name": "Marcos", "email": "marcos@alloi.us", "side": "theirs", "spoke": True, "notetaker": False, "handle": None},
+            # F-1 FINAL review fixture: a real external speaker with no email.
+            # FR-004 fills a bare NAME string for them in fanout-meeting.json's
+            # attendees; event.json's attendees (email-only, FR-004) omits them
+            # entirely. The dry-run "crm interaction rows:" count must stay at
+            # 1 (Marcos only) — this participant must never appear as a row.
+            {"name": "Sam Speaker", "email": "", "side": "theirs", "spoke": True, "notetaker": False, "handle": None},
         ],
         "text_units": [{"i": 0, "speaker": "Marcos", "text": "hello tacticals", "ts": 0}],
         "native_summary": {"overview": "hello tacticals"},
@@ -152,6 +158,14 @@ def test_dry_run_prints_nouns_and_diffs(tmp_path: Path, monkeypatch: pytest.Monk
     assert "meetings/" in out
     assert "quotes kept decisions=1 commitments=1" in out
     assert "crm interaction rows:" in out
+    # F-1 FINAL review: the fixture has 2 external participants but only 1
+    # has an email (Marcos; "Sam Speaker" is email-less) — the preview's
+    # "crm interaction rows:" count must equal the number of EMAIL attendees,
+    # not the number of external participants.
+    crm_section = out.split("crm interaction rows:", 1)[1].split("tasks:", 1)[0]
+    assert crm_section.count('"contact":') == 1
+    assert '"contact": "marcos@alloi.us"' in crm_section
+    assert "Sam Speaker" not in crm_section
     assert "Ship dry-run · owner: Josh · due 2026-12-01" in out
     assert "task payloads:" in out
     assert "subject:" in out.lower() or "Recap:" in out

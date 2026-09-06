@@ -156,11 +156,7 @@ def load_full_meeting(meeting_id: str, full_file: str | None = None) -> dict:
         except (OSError, json.JSONDecodeError) as exc:
             _log(f"--full-file unreadable at {full_file}: {exc}; deal_state unavailable")
             return {}
-        meetings = payload.get("meetings", []) or []
-        for m in meetings:
-            if str(m.get("id") or m.get("meeting_id") or "") == meeting_id:
-                return m
-        return meetings[0] if len(meetings) == 1 else {}
+        return _select_meeting(payload.get("meetings", []) or [], meeting_id)
     if not meeting_id:
         return {}
     try:
@@ -179,48 +175,85 @@ def load_full_meeting(meeting_id: str, full_file: str | None = None) -> dict:
     except json.JSONDecodeError as exc:
         _log(f"ff-extractor stdout not JSON: {exc}; deal_state unavailable")
         return {}
-    for m in payload.get("meetings", []) or []:
+    return _select_meeting(payload.get("meetings", []) or [], meeting_id)
+
+
+def _select_meeting(meetings: list, meeting_id: str) -> dict:
+    """Match a meeting entry by id/meeting_id; fall back to the sole entry when
+    there is exactly one and none matched (single-meeting runs). Shared by
+    both ``load_full_meeting`` payload-reading branches AND (via importlib)
+    ``scripts/brain/preview.py``'s CRM-row preview, so meeting selection never
+    drifts between the apply path and the preview (F-1 FINAL review)."""
+    for m in meetings:
         if str(m.get("id") or m.get("meeting_id") or "") == meeting_id:
             return m
-    # Single-meeting runs return exactly one meeting; fall back to it if id filtering missed.
-    meetings = payload.get("meetings", []) or []
     return meetings[0] if len(meetings) == 1 else {}
 
 
 # --------------------------------------------------------------------------- attendees
 
 
-def external_attendees(event_payload: dict, full_meeting: dict) -> list[dict]:
-    """Return [{name, email}] for EXTERNAL attendees.
-
-    The event payload's ``attendees`` is a flat list of strings (emails and/or
-    speaker names — see meeting-event-emit.ts). ff-extractor's attendees are the same
-    shape. We union both, keep only external people, and de-dup by identity.
-    """
-    raw: list[str] = []
-    for src in (event_payload, full_meeting):
-        vals = src.get("attendees") or []
-        if isinstance(vals, list):
-            raw.extend(str(v).strip() for v in vals if v)
-
-    people: list[dict] = []
+def _filter_emails(raw: list[str]) -> list[str]:
+    """Keep only real, external, de-duped emails from a flat attendee-string
+    list. FR-004 fills bare NAME strings (no ``@``) for email-less speakers —
+    those are dropped here and NEVER upserted / logged as an interaction
+    (FR-009: "email-less participants are never upserted")."""
+    out: list[str] = []
     seen: set[str] = set()
     for entry in raw:
-        if _is_email(entry):
-            if _email_domain(entry) in INTERNAL_DOMAINS:
-                continue  # our side — not a CRM contact
-            key = entry.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            people.append({"name": "", "email": entry})
-        else:
-            key = f"name:{entry.lower()}"
-            if key in seen:
-                continue
-            seen.add(key)
-            people.append({"name": entry, "email": ""})
-    return people
+        entry = str(entry or "").strip()
+        if not entry or not _is_email(entry):
+            continue  # name-only entry (FR-004) — never a CRM contact
+        if _email_domain(entry) in INTERNAL_DOMAINS:
+            continue  # our side — not a CRM contact
+        key = entry.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(entry)
+    return out
+
+
+def crm_attendees(event_payload: dict, full_meeting: dict) -> list[str]:
+    """Return the emailed, EXTERNAL attendees for CRM upsert/interaction — the
+    single source of truth shared by ``external_attendees`` (below, the apply
+    path) AND ``scripts/brain/preview.py``'s CRM-row preview (loaded via
+    importlib, module has a hyphen), so apply and preview never drift (F-1
+    FINAL review, docs/pipeline/run-artifacts/brain-source-to-state-r2/
+    FINAL-fable.json).
+
+    AUTHORITATIVE FIELD: ``event_payload["attendees"]`` (the FR-002/FR-004
+    ``ff-meeting-event-<safeId>.json`` / ``event.json`` payload). It is built
+    by ``adapt_meeting.py``'s ``_emails(..., externals_only=True)`` — already
+    email-only AND already restricted to external, spoken (or unknown+spoke)
+    participants. Used whenever present.
+
+    FALLBACK: ``full_meeting["attendees"]`` (the ff-extractor / R2
+    ``--full-file`` ``fanout-meeting.json`` per-meeting payload) — used only
+    when the event payload carries no attendees at all. This field is a
+    SUPERSET of every participant regardless of side/spoke, and FR-004 fills
+    bare NAME strings (no email) for participants who spoke without one —
+    both are why it is not used as the primary source. Either way, name-only
+    entries are filtered out by ``_filter_emails`` and never upserted.
+    """
+    ev_vals = event_payload.get("attendees")
+    ev_raw = ev_vals if isinstance(ev_vals, list) else []
+    emails = _filter_emails(ev_raw)
+    if emails:
+        return emails
+    fm_vals = full_meeting.get("attendees")
+    fm_raw = fm_vals if isinstance(fm_vals, list) else []
+    return _filter_emails(fm_raw)
+
+
+def external_attendees(event_payload: dict, full_meeting: dict) -> list[dict]:
+    """Return [{name, email}] for EXTERNAL, EMAILED attendees only.
+
+    Thin wrapper around ``crm_attendees`` (the shared derivation) — see its
+    docstring for the event.json-authoritative / full_meeting-fallback rule
+    and why email-less entries are dropped (FR-009).
+    """
+    return [{"name": "", "email": email} for email in crm_attendees(event_payload, full_meeting)]
 
 
 def _name_from_email(email: str) -> str:

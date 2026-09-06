@@ -126,9 +126,16 @@ def _run_dry(meeting_id: str, vault: Path, repo: Path, source_dir: Path) -> int:
     event = json.loads(event_path.read_text(encoding="utf-8")) if event_path.is_file() else {}
     resolution = json.loads(resolution_path.read_text(encoding="utf-8")) if resolution_path.is_file() else {}
     validated_doc = validated if validated_path.is_file() else {}
+    fan_path = source_dir / "fanout-meeting.json"
+    fan = json.loads(fan_path.read_text(encoding="utf-8")) if fan_path.is_file() else {}
 
     print("crm interaction rows:")
-    crm_rows = crm_interaction_preview(event, validated_doc, resolution)
+    # F-1 FINAL review: pass `fan` (fanout-meeting.json) through so the
+    # preview uses the exact same event.json-authoritative /
+    # fanout-meeting.json-fallback attendee derivation as the real apply
+    # path (crm_attendees in meeting-crm-sync.py) — otherwise this preview
+    # and the actual --full-file apply write can silently disagree.
+    crm_rows = crm_interaction_preview(event, validated_doc, resolution, fan)
     if crm_rows:
         for row in crm_rows:
             print(json.dumps(row, sort_keys=True))
@@ -136,8 +143,6 @@ def _run_dry(meeting_id: str, vault: Path, repo: Path, source_dir: Path) -> int:
         print("(none)")
 
     print("tasks:")
-    fan_path = source_dir / "fanout-meeting.json"
-    fan = json.loads(fan_path.read_text(encoding="utf-8")) if fan_path.is_file() else {}
     task_rows = bus_task_preview(fan, set(), meeting_id=meeting_id)
     if task_rows:
         for row in task_rows:
@@ -386,7 +391,7 @@ def _apply_writes(
             "promotion_applied": bool(validated.get("proposed_delivery_state")),
         })
 
-    crm_preview = preview.crm_interaction_preview(event, validated, resolution)
+    crm_preview = preview.crm_interaction_preview(event, validated, resolution, fanout_doc)
     print("applying crm rows:")
     for row in crm_preview:
         print(json.dumps(row, sort_keys=True))

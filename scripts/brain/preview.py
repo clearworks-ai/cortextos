@@ -4,9 +4,36 @@ already-materialized JSON from FR-004's adapter output, so these previews are
 truthful without invoking meeting-crm-sync.py or meeting-fanout.py."""
 from __future__ import annotations
 
+import importlib.util
+from pathlib import Path
 from typing import Any
 
 RECAP_TO = "josh@clearworks.ai"
+
+_CODE_ROOT = Path(__file__).resolve().parent.parent.parent
+_CRM_SYNC_PATH = _CODE_ROOT / "orgs/clearworksai/agents/crm/crm/meeting-crm-sync.py"
+
+
+def _load_crm_sync_module():
+    """importlib load of meeting-crm-sync.py (hyphenated filename, can't
+    `import`) so the CRM-row preview shares the EXACT SAME attendee
+    derivation (``crm_attendees``) and meeting-selection (``_select_meeting``)
+    the real apply path uses — F-1 FINAL review
+    (docs/pipeline/run-artifacts/brain-source-to-state-r2/FINAL-fable.json):
+    the --full-file apply path previously unioned in bare NAME strings
+    (FR-004 fills those for email-less speakers) and wrote 8 interaction
+    rows where this preview showed 6. Same importlib pattern
+    test_preview.py's meeting-fanout parity test already uses."""
+    spec = importlib.util.spec_from_file_location("brain_meeting_crm_sync", _CRM_SYNC_PATH)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+_crm_sync = _load_crm_sync_module()
+crm_attendees = _crm_sync.crm_attendees
+_select_meeting = _crm_sync._select_meeting
 
 
 def recap_recipients(_payload: dict[str, Any]) -> dict[str, list[str]]:
@@ -15,15 +42,30 @@ def recap_recipients(_payload: dict[str, Any]) -> dict[str, list[str]]:
 
 
 def crm_interaction_preview(
-    event: dict[str, Any], validated: dict[str, Any], resolution: dict[str, Any]
+    event: dict[str, Any],
+    validated: dict[str, Any],
+    resolution: dict[str, Any],
+    fanout: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    attendees = event.get("attendees") or []
-    if not isinstance(attendees, list):
-        attendees = []
+    """Preview the exact CRM interaction rows the apply path will write.
+
+    ``fanout`` (the parsed ``fanout-meeting.json`` payload, when available) is
+    passed through to ``crm_attendees`` as the full-file fallback source —
+    same precedence rule the apply path uses (event.json authoritative,
+    fanout-meeting.json fallback only when event.json carries no attendees).
+    Omitting it (legacy 3-arg call) previews from event.json alone, which is
+    already email-only and externals-only.
+    """
+    meeting_id = str(event.get("meeting_id") or "")
+    full_meeting: dict[str, Any] = {}
+    if fanout:
+        meetings = fanout.get("meetings")
+        full_meeting = _select_meeting(meetings if isinstance(meetings, list) else [], meeting_id)
+    attendees = crm_attendees(event, full_meeting)
     summary = validated.get("summary") or {}
     overview = str(summary.get("overview") or "") if isinstance(summary, dict) else ""
     deal_state = validated.get("deal_state") or resolution.get("deal_state") or None
-    source_ref = f"fireflies:{event.get('meeting_id') or ''}"
+    source_ref = f"fireflies:{meeting_id}"
     rows: list[dict[str, Any]] = []
     for email in attendees:
         email = str(email).strip()

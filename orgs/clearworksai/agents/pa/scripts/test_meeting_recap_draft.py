@@ -195,10 +195,101 @@ class ProcessMeetingsTests(unittest.TestCase):
             out = stdout.getvalue()
             self.assertIn("to: josh@clearworks.ai", out)
             self.assertIn("cc: (none)", out)
+            self.assertIn("attendees: mark@msia.org", out)
             self.assertIn("Recap: MSIA recap — 2026-07-27", out)
             self.assertIn("Reviewed the audit findings.", out)
             self.assertIn("Josh: Send findings deck", out)
             self.assertEqual(ledger_path.read_text(encoding="utf-8"), "")
+
+    def test_main_dry_run_prints_attendees_two_emails(self):
+        meeting = {
+            "id": "meeting-dry-two",
+            "title": "MSIA recap",
+            "date": "2026-07-27T11:00:00Z",
+            "organizer": "josh@clearworks.ai",
+            "attendees": ["mark@msia.org", "sue@msia.org"],
+            "summary": {"overview": "Reviewed the audit findings.", "bullets": "", "action_items": ""},
+            "client_context": "Clearworks maps this meeting to client=MSIA. Deal stage=won.",
+            "next_steps": [{"text": "Send findings deck", "direction": "outbound", "owner": "Josh"}],
+        }
+
+        def boom(*_a, **_k):
+            raise AssertionError("gws/subprocess must not run in --dry-run")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            payload_path = tmp_path / "payload.json"
+            ledger_path = tmp_path / "ledger.txt"
+            voice_path = tmp_path / "voice.md"
+            vip_path = tmp_path / "vip.txt"
+            payload_path.write_text(json.dumps({"meetings": [meeting]}), encoding="utf-8")
+            ledger_path.write_text("", encoding="utf-8")
+            voice_path.write_text("", encoding="utf-8")
+            vip_path.write_text("", encoding="utf-8")
+            stdout = io.StringIO()
+            with mock.patch.object(MODULE.subprocess, "run", boom):
+                with contextlib.redirect_stdout(stdout):
+                    rc = MODULE.main(
+                        [
+                            "--payload",
+                            str(payload_path),
+                            "--ledger",
+                            str(ledger_path),
+                            "--voice",
+                            str(voice_path),
+                            "--vip-list",
+                            str(vip_path),
+                            "--dry-run",
+                        ]
+                    )
+            self.assertEqual(rc, 0)
+            out = stdout.getvalue()
+            self.assertIn("attendees: mark@msia.org, sue@msia.org", out)
+
+    def test_main_dry_run_prints_attendees_none(self):
+        meeting = {
+            "id": "meeting-dry-none",
+            "title": "MSIA recap",
+            "date": "2026-07-27T11:00:00Z",
+            "organizer": "josh@clearworks.ai",
+            "attendees": [],
+            "summary": {"overview": "Reviewed the audit findings.", "bullets": "", "action_items": ""},
+            "client_context": "Clearworks maps this meeting to client=MSIA. Deal stage=won.",
+            "next_steps": [{"text": "Send findings deck", "direction": "outbound", "owner": "Josh"}],
+        }
+
+        def boom(*_a, **_k):
+            raise AssertionError("gws/subprocess must not run in --dry-run")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            payload_path = tmp_path / "payload.json"
+            ledger_path = tmp_path / "ledger.txt"
+            voice_path = tmp_path / "voice.md"
+            vip_path = tmp_path / "vip.txt"
+            payload_path.write_text(json.dumps({"meetings": [meeting]}), encoding="utf-8")
+            ledger_path.write_text("", encoding="utf-8")
+            voice_path.write_text("", encoding="utf-8")
+            vip_path.write_text("", encoding="utf-8")
+            stdout = io.StringIO()
+            with mock.patch.object(MODULE.subprocess, "run", boom):
+                with contextlib.redirect_stdout(stdout):
+                    rc = MODULE.main(
+                        [
+                            "--payload",
+                            str(payload_path),
+                            "--ledger",
+                            str(ledger_path),
+                            "--voice",
+                            str(voice_path),
+                            "--vip-list",
+                            str(vip_path),
+                            "--dry-run",
+                        ]
+                    )
+            self.assertEqual(rc, 0)
+            out = stdout.getvalue()
+            self.assertIn("attendees: (none)", out)
 
 
 import os

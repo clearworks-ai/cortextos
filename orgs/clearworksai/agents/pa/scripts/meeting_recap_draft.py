@@ -322,6 +322,8 @@ def process_meetings(
             recipients = {"to": [DEFAULT_TO], "cc": []}
             print(f"to: {', '.join(recipients['to'])}")
             print(f"cc: {', '.join(recipients['cc']) or '(none)'}")
+            attendees = [normalize_space(str(a)) for a in (meeting.get("attendees") or []) if normalize_space(str(a))]
+            print(f"attendees: {', '.join(attendees) or '(none)'}")
             print(f"subject: {subject}")
             print(body)
             continue

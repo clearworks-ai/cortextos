@@ -381,6 +381,32 @@ def _run_dry(meeting_id: str, vault: Path, repo: Path, source_dir: Path) -> int:
             reason_match = STATUS_SKIP_REASON_RE.search(st.stdout)
             reason = reason_match.group(1).strip() if reason_match else "(no-op)"
             print(f"would-write: skip: {reason}")
+        else:
+            # D-09: the anchored "would-write: <relPath>" line only names
+            # the status artifact — the human signing this capture never
+            # saw what --apply would actually persist into it. STATUS_PLAN
+            # now carries the full body as the preview JSON's fileContent
+            # field; surface it here as an indented would-write-body:/
+            # would-write-end block. Indenting keeps every body line off
+            # column 0, so it can never itself satisfy (or be mistaken for)
+            # an anchored would-touch:/would-write:/would-file: line, and
+            # this block sits strictly between the would-write: line above
+            # and the would-file: block below, which must stay last.
+            status_json: dict = {}
+            for line in reversed(st.stdout.strip().splitlines()):
+                stripped_line = line.strip()
+                if stripped_line.startswith("{"):
+                    try:
+                        status_json = json.loads(stripped_line)
+                    except ValueError:
+                        status_json = {}
+                    break
+            file_content = status_json.get("fileContent")
+            if file_content:
+                print("would-write-body:")
+                for body_line in file_content.splitlines():
+                    print(f"  {body_line}")
+                print("would-write-end")
     else:
         print("would-write: skip: no-engagement")
 

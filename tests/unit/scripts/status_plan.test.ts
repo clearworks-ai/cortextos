@@ -203,6 +203,13 @@ describe('status_plan.ts CLI (--write parity)', () => {
     const briefContent = readFile(pathJoin(vault, writtenJson.relPath), 'utf8');
     expect(briefContent.length).toBeGreaterThan(0);
 
+    // D-09: the preview JSON must already carry the full body a human
+    // reviews before --write ever runs, and it must match what --write
+    // actually persists byte-for-byte.
+    expect(previewJson.fileContent).toBeTruthy();
+    expect(previewJson.fileContent).toBe(briefContent);
+    expect(writtenJson.fileContent).toBe(briefContent);
+
     // but last_update on the engagement node is untouched (still blank, byte-identical)
     const engagementAfter = readFile(pathJoin(vault, 'raw/areas/clearworks/org-brain/projects/alloi-01.md'), 'utf8');
     expect(engagementAfter).toBe(engagementBefore);
@@ -225,6 +232,14 @@ describe('status_plan.ts CLI (--write parity)', () => {
 
     const fileContent = readFile(pathJoin(vault, writtenJson.relPath), 'utf8');
     expect(fileContent.length).toBeGreaterThan(0);
+
+    // D-09: preview must show the reviewer the exact body --apply will
+    // write, not just the relPath — assert byte-identical to the file
+    // --write actually persists.
+    expect(previewJson.fileContent).toBeTruthy();
+    expect(previewJson.fileContent).toBe(fileContent);
+    expect(writtenJson.fileContent).toBe(fileContent);
+
     const engagementMd = readFile(pathJoin(vault, 'raw/areas/clearworks/org-brain/projects/alloi-01.md'), 'utf8');
     expect(engagementMd).toContain('last_update: 2026-09-10');
     expect(engagementMd).toContain('## History (dated, newest first)'); // heading survives (G0a F-3)

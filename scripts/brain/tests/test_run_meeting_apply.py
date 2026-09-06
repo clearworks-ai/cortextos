@@ -44,7 +44,12 @@ def _seed_signed_marker(vault: Path, meeting_id: str) -> None:
     signed_by/signed_at plus a capture_sha256 that matches a real
     capture_path file — a marker with just {"signed_by": "test"} (this
     helper's pre-fix output) no longer passes the sign-check at all, so this
-    now writes a fully valid marker."""
+    now writes a fully valid marker.
+
+    Finding 4b: signed_by must additionally be in validate_sign_marker's
+    allowlist (default {"Josh"}) — "test" is not, so this now signs as
+    "Josh" (the capture_path already lives inside the envelope directory,
+    satisfying finding 4a's containment check unchanged)."""
     marker = marker_path(vault, "fireflies", meeting_id)
     capture = marker.parent / "dry-run.txt"
     capture.parent.mkdir(parents=True, exist_ok=True)
@@ -56,7 +61,7 @@ def _seed_signed_marker(vault: Path, meeting_id: str) -> None:
     capture.write_text(capture_text, encoding="utf-8")
     atomic_write(marker, json.dumps({
         "meeting_id": meeting_id,
-        "signed_by": "test",
+        "signed_by": "Josh",
         "signed_at": "2026-09-05T00:00:00Z",
         "capture_path": str(capture),
         "capture_sha256": hashlib.sha256(capture_text.encode("utf-8")).hexdigest(),
@@ -345,6 +350,29 @@ def _fanout_commitment_id(mid: str) -> str:
     return _commitment_id("fireflies", mid, "Send the tactical report draft", 0)
 
 
+def _commitment_id_for_text(mid: str, text: str) -> str:
+    from adapt_meeting import _commitment_id
+
+    return _commitment_id("fireflies", mid, text, 0)
+
+
+def _add_second_commitment(vault: Path, mid: str) -> None:
+    """Appends a second OURS (Josh-owned) commitment to the seeded
+    extraction.json so a test can exercise a scenario needing >=2
+    commitments (e.g. CH-5's partial-task-map-recovery case) on top of
+    _seed_apply_vault's single-commitment fixture."""
+    extraction_path = vault / "raw/media/transcripts/fireflies" / mid / "extraction.json"
+    extraction = json.loads(extraction_path.read_text(encoding="utf-8"))
+    extraction["commitments"].append({
+        "text": "Send the follow-up deck",
+        "owner_participant": 0,
+        "owner_name": "Josh Weiss",
+        "deadline_iso": "2026-09-10",
+        "quote": "Please send the tactical report draft by Monday",
+    })
+    extraction_path.write_text(json.dumps(extraction), encoding="utf-8")
+
+
 def test_apply_recovers_task_map_from_bus_when_fanout_dedup_skips_after_lost_checkpoint(tmp_path):
     # CH-5: kill the parent after fanout creates a task and returns, but
     # before progress is merged. On restart, `cortextos bus event-dedup`
@@ -365,7 +393,7 @@ def test_apply_recovers_task_map_from_bus_when_fanout_dedup_skips_after_lost_che
         "#!/bin/sh\n"
         'if [ "$1 $2" = "bus event-dedup" ]; then echo SKIP; exit 0; fi\n'
         f'if [ "$1 $2" = "bus list-tasks" ]; then echo \'[{{"id": "recovered-task-1", '
-        f'"description": "owner: Josh [commitment:{cid}]"}}]\'; exit 0; fi\n'
+        f'"description": "owner: Josh [commitment:{mid}/{cid}]"}}]\'; exit 0; fi\n'
         'if [ "$1" = "list-workers" ]; then exit 1; fi\n'
         "exit 0\n"
     )
@@ -405,6 +433,7 @@ def test_apply_exits_8_when_fanout_dedup_skips_and_bus_has_no_matching_task(tmp_
     # nothing) — the orchestrator must refuse to mark tasks done with a
     # fabricated/empty mapping and exit 8 instead.
     vault, repo, mid = _seed_apply_vault(tmp_path)
+    cid = _fanout_commitment_id(mid)
 
     bindir = tmp_path / "bin"
     bindir.mkdir()
@@ -435,12 +464,79 @@ def test_apply_exits_8_when_fanout_dedup_skips_and_bus_has_no_matching_task(tmp_
         capture_output=True, text=True, env=env,
     )
     assert result.returncode == 8, result.stderr + result.stdout
-    assert "FAILED at tasks: dedup skipped but no created tasks recorded" in result.stderr
+    assert f"FAILED at tasks: dedup skipped but no created task recorded for {cid}" in result.stderr
 
     import progress
     prog_path = progress.progress_path(vault, "fireflies", mid)
     doc = progress.load_progress(prog_path)
     assert not progress.step_done(doc, "tasks")
+
+
+def test_apply_partial_task_map_recovers_only_the_still_unmapped_commitment(tmp_path):
+    # CH-5 (finding 1, round 2): the pre-fix reconstruction ran ONLY when the
+    # entire merged task_map was empty. Simulate a partial crash instead:
+    # progress.json already durably recorded c1's mapping from an earlier
+    # run, but c2's fanout succeeded and then the parent died before
+    # merge_progress recorded IT — so this run's fanout dedup-SKIPs both
+    # (both were already surfaced), created_pairs comes back non-empty (c1
+    # alone), and the pre-fix code never even looked at the bus for c2,
+    # permanently losing its mapping. The fix must recover c2 specifically
+    # without disturbing c1.
+    import progress
+
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    _add_second_commitment(vault, mid)
+    c1 = _fanout_commitment_id(mid)
+    c2 = _commitment_id_for_text(mid, "Send the follow-up deck")
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    cortextos = bindir / "cortextos"
+    cortextos.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1 $2" = "bus event-dedup" ]; then echo SKIP; exit 0; fi\n'
+        f'if [ "$1 $2" = "bus list-tasks" ]; then echo \'[{{"id": "recovered-c2-task", '
+        f'"description": "owner: Josh [commitment:{mid}/{c2}]"}}]\'; exit 0; fi\n'
+        'if [ "$1" = "list-workers" ]; then exit 1; fi\n'
+        "exit 0\n"
+    )
+    cortextos.chmod(0o755)
+    (bindir / "gws").write_text("#!/bin/sh\nexit 0\n")
+    (bindir / "gws").chmod(0o755)
+    claude = bindir / "claude"
+    claude.write_text("#!/bin/sh\necho 'claude must never be invoked by an R2 test' >&2\nexit 99\n")
+    claude.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    _sign_for_restart_test(vault, mid, tmp_path, env)
+
+    prog_path = progress.progress_path(vault, "fireflies", mid)
+    progress.merge_progress(prog_path, "tasks", {
+        "done": False,
+        "created": [{"commitmentId": c1, "taskId": "task-old-1"}],
+        "created_ids": [c1],
+        "pending": [],
+    })
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    doc = progress.load_progress(prog_path)
+    assert progress.step_done(doc, "tasks")
+    assert {"commitmentId": c1, "taskId": "task-old-1"} in doc["tasks"]["created"]
+    assert {"commitmentId": c2, "taskId": "recovered-c2-task"} in doc["tasks"]["created"]
+
+    receipt_path = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}" / "receipt.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert {"commitmentId": c1, "taskId": "task-old-1"} in receipt["tasks"]
+    assert {"commitmentId": c2, "taskId": "recovered-c2-task"} in receipt["tasks"]
 
 
 def _run_apply_with_fake_writeback(tmp_path: Path, wb_exit: int, wb_stderr: str) -> subprocess.CompletedProcess:

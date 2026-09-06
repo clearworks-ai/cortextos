@@ -47,6 +47,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"dry-run capture missing nouns: {missing}", file=sys.stderr)
         return 1
     marker = marker_path(Path(args.vault), "fireflies", meeting_id)
+    envelope = marker.parent
+    # Finding 4c: progress.validate_sign_marker() now requires capture_path
+    # to resolve INSIDE this envelope directory — a human almost always
+    # hands --dry-run-capture a path elsewhere (a scratch/tmp file from
+    # piping run_meeting.py --dry-run). Copy the exact reviewed bytes into
+    # <envelope>/dry-run.txt (atomic) so the marker's capture_path is always
+    # satisfiable, without changing what was actually reviewed — the sha256
+    # below is computed from `text`, read before this copy, so it matches
+    # either location.
+    try:
+        capture.resolve().relative_to(envelope.resolve())
+        capture_for_marker = capture
+    except ValueError:
+        capture_for_marker = envelope / "dry-run.txt"
+        atomic_write(capture_for_marker, text.encode("utf-8"))
     # CH-1/S-2: D-09's `--apply` gate must validate more than "the marker
     # file exists" — capture_path + capture_sha256 let progress.py's
     # validate_sign_marker() prove the signed capture is the exact bytes a
@@ -56,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
         "signed_by": args.signed_by,
         "signed_at": args.signed_at,
         "capture": str(capture),
-        "capture_path": str(capture),
+        "capture_path": str(capture_for_marker),
         "capture_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
         "written_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }

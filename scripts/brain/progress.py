@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -24,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from atomic import atomic_write
+from writeback_render import _split_sections
 
 
 def _state_dir(vault: Path, kind: str, meeting_id: str) -> Path:
@@ -81,14 +84,40 @@ def check_vault_gitignore(vault: Path) -> list[str]:
     return missing
 
 
+def _signer_allowlist() -> set[str]:
+    """Finding 4b: `signed_by` alone was a free-text field — anyone (or
+    anything) able to write d09-signed.json could name itself as the
+    signer. `BRAIN_SIGNERS` (comma list) overrides the default {"Josh"}."""
+    override = os.environ.get("BRAIN_SIGNERS")
+    if override:
+        return {s.strip() for s in override.split(",") if s.strip()}
+    return {"Josh"}
+
+
 def validate_sign_marker(path: Path) -> str | None:
     """CH-1/S-2: `marker.exists()` alone let `{}` (or a marker missing
     `signed_at`, exactly what the pre-fix test fixture wrote) satisfy D-09's
     human sign-off gate for the org's only production-write path. Returns
     None when the marker is valid, else the reason `--apply` should fail
-    with (exit 15). Requires non-empty `signed_by`, an RFC3339 `signed_at`,
+    with (exit 15). Requires non-empty `signed_by` (from an allowlist —
+    default {"Josh"}, override via `BRAIN_SIGNERS`), an RFC3339 `signed_at`,
     and a `capture_sha256` that matches the sha256 of the file named by
-    `capture_path` — sign_dry_run.py writes both of the latter fields."""
+    `capture_path` — sign_dry_run.py writes both of the latter fields.
+
+    Finding 4a: `capture_path` must additionally resolve to a file INSIDE
+    this marker's own envelope directory (`_state/<kind>-<meeting_id>/`) —
+    sign_dry_run.py copies any externally-supplied capture into
+    `<envelope>/dry-run.txt` so this is always satisfiable for a genuine
+    sign-off.
+
+    Threat model: this gate proves the signing STEP ran (a human invoked
+    sign_dry_run.py against a real, unmodified dry-run capture) after
+    review — it is NOT an authenticity proof against a hostile *local*
+    user. Anyone with local write access to this machine could hand-craft
+    a marker, a capture file, and a matching hash. That threat is out of
+    scope: local write access to this checkout already implies write
+    access to the vault it gates, so forging the marker buys an attacker
+    nothing they couldn't already do directly."""
     if not path.exists():
         return "d09-signed.json missing"
     try:
@@ -100,6 +129,8 @@ def validate_sign_marker(path: Path) -> str | None:
     signed_by = doc.get("signed_by")
     if not isinstance(signed_by, str) or not signed_by.strip():
         return "signed_by missing or empty"
+    if signed_by not in _signer_allowlist():
+        return f"signed_by not in allowlist: {signed_by}"
     signed_at = doc.get("signed_at")
     if not isinstance(signed_at, str) or not signed_at.strip():
         return "signed_at missing or empty"
@@ -116,6 +147,11 @@ def validate_sign_marker(path: Path) -> str | None:
     capture_file = Path(capture_path)
     if not capture_file.is_file():
         return f"capture_path not found: {capture_path}"
+    envelope_dir = path.resolve().parent
+    try:
+        capture_file.resolve().relative_to(envelope_dir)
+    except ValueError:
+        return "capture outside envelope"
     actual = hashlib.sha256(capture_file.read_bytes()).hexdigest()
     if actual != capture_sha256:
         return "capture_sha256 mismatch"
@@ -126,8 +162,17 @@ def writeback_marker_present(vault: Path, home_rel: str, key: str) -> bool:
     """CH-9: `progress.writeback.done` alone is not proof the write actually
     happened — a bogus or hand-edited checkpoint must not silently skip a
     page that was never touched. meeting_writeback.py stamps every write it
-    makes with a `[source: <kind>:<id>]` marker (its own `key` variable);
-    require it verbatim in the home page before trusting a resume."""
+    makes with a `[source: <kind>:<id>]` marker (its own `key` variable) as
+    a bullet inside the "History (dated, newest first)" section (see
+    writeback_render._history_block/render_page).
+
+    Finding 3: checking the marker string anywhere in the page (e.g. in a
+    stray paragraph, an old draft note, or a copy/pasted quote) is a false
+    positive — it proves the text exists somewhere, not that meeting_
+    writeback.py actually ran and appended the History entry. Parse
+    sections exactly the way writeback_render does (_split_sections) and
+    only trust the marker when it appears on a line inside that specific
+    section."""
     if not home_rel:
         return False
     page = Path(vault) / "raw/areas/clearworks/org-brain" / home_rel
@@ -137,7 +182,12 @@ def writeback_marker_present(vault: Path, home_rel: str, key: str) -> bool:
         text = page.read_text(encoding="utf-8")
     except OSError:
         return False
-    return f"[source: {key}]" in text
+    marker = f"[source: {key}]"
+    _, sections = _split_sections(text)
+    for heading, body in sections:
+        if heading == "History (dated, newest first)":
+            return any(marker in line for line in body.splitlines())
+    return False
 
 
 def crm_env(base_env: dict[str, str], repo: Path) -> dict[str, str]:
@@ -261,18 +311,30 @@ def merge_task_map(existing: list[dict[str, Any]], new: list[dict[str, Any]]) ->
     return [merged[cid] for cid in sorted(merged)]
 
 
-def reconstruct_task_map_from_bus(skipped_ids: list[str]) -> list[dict[str, Any]]:
-    """CH-5: a fanout run that dedup-SKIPs every commitment while
-    `progress.tasks.created` is still empty means an earlier run's task_map
-    was lost to a crash between fanout succeeding (the task DID land on the
-    bus) and `merge_progress` persisting it — marking `tasks.done: true` with
-    an empty map here would permanently lose the mapping and fail acceptance
-    forever. Reconstruct via the same `[commitment:<id>]` description marker
-    meeting-fanout.py's own `prod_find_task_by_commitment` (CH-4) filters
-    on, via `cortextos bus list-tasks --json`. Best-effort: returns [] (never
-    raises) when the daemon is down, the id truly isn't findable, or the
-    output isn't parseable JSON — the caller then refuses to mark the step
-    done rather than fabricate a mapping."""
+def reconstruct_task_map_from_bus(meeting_id: str, commitments: dict[str, str]) -> list[dict[str, Any]]:
+    """CH-5: a fanout run that dedup-SKIPs a commitment while
+    `progress.tasks.created` has no entry for it means an earlier run's
+    task_map was lost to a crash between fanout succeeding (the task DID
+    land on the bus) and `merge_progress` persisting it — marking
+    `tasks.done: true` without that mapping here would permanently lose it
+    and fail acceptance forever. `commitments` maps each still-unmapped
+    commitmentId to its commitment text (used only as an ambiguity
+    tie-break, see below); reconstruct via `cortextos bus list-tasks
+    --json`. Best-effort: returns [] entries for ids that stay unfindable
+    (never raises) — the caller then refuses to mark the step done for
+    those ids rather than fabricate a mapping.
+
+    Finding 2: the pre-fix version matched on `[commitment:<id>]` as a bare
+    substring of the description, with no meeting scoping — an unrelated
+    task from a different meeting whose id happened to be a substring
+    match (or whose description merely mentioned the id) would be silently
+    attached. This now requires the exact `[commitment:<meeting_id>/<id>]`
+    pair via an anchored regex, mirroring meeting-fanout.py's own
+    `prod_find_task_by_commitment` (CH-4) marker and matching rule. When
+    more than one bus task carries the same pair (should not happen, but
+    the bus is an external system), prefer the one whose title equals the
+    commitment text, else the newest (`created_at`), and log the ambiguity
+    to stderr rather than silently picking one."""
     try:
         proc = subprocess.run(
             ["cortextos", "bus", "list-tasks", "--json"], capture_output=True, text=True, timeout=10,
@@ -288,17 +350,37 @@ def reconstruct_task_map_from_bus(skipped_ids: list[str]) -> list[dict[str, Any]
     if not isinstance(tasks, list):
         return []
     recovered: list[dict[str, Any]] = []
-    for cid in skipped_ids:
-        needle = f"[commitment:{cid}]"
-        for task in tasks:
-            if not isinstance(task, dict):
-                continue
-            desc = str(task.get("desc") or task.get("description") or "")
-            if needle in desc:
-                task_id = task.get("id") or task.get("taskId")
-                if task_id:
-                    recovered.append({"commitmentId": cid, "taskId": str(task_id)})
-                break
+    for cid, text in commitments.items():
+        pattern = re.compile(r"\[commitment:" + re.escape(meeting_id) + "/" + re.escape(cid) + r"\]")
+        candidates = [
+            task for task in tasks
+            if isinstance(task, dict)
+            and pattern.search(str(task.get("desc") or task.get("description") or ""))
+        ]
+        if not candidates:
+            continue
+        chosen = candidates[0]
+        if len(candidates) > 1:
+            exact = [t for t in candidates if str(t.get("title") or "") == text]
+            if len(exact) == 1:
+                chosen = exact[0]
+                print(
+                    f"ambiguous commitment lookup for {meeting_id}/{cid}: "
+                    f"{len(candidates)} candidates, title match wins",
+                    file=sys.stderr,
+                )
+            else:
+                chosen = sorted(
+                    candidates, key=lambda t: str(t.get("created_at") or t.get("createdAt") or "")
+                )[-1]
+                print(
+                    f"ambiguous commitment lookup for {meeting_id}/{cid}: "
+                    f"{len(candidates)} candidates, using newest",
+                    file=sys.stderr,
+                )
+        task_id = chosen.get("id") or chosen.get("taskId")
+        if task_id:
+            recovered.append({"commitmentId": cid, "taskId": str(task_id)})
     return recovered
 
 

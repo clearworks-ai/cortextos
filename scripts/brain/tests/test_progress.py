@@ -347,6 +347,56 @@ def test_validate_sign_marker_accepts_full_valid_marker(tmp_path):
     assert validate_sign_marker(marker) is None
 
 
+def test_validate_sign_marker_rejects_unknown_signer(tmp_path):
+    # Finding 4b: signed_by must be in an allowlist (default {"Josh"}) — a
+    # marker naming any other signer is rejected even if everything else
+    # (hash, timestamp, envelope) is valid.
+    from atomic import atomic_write
+    from progress import validate_sign_marker
+
+    capture = tmp_path / "dry-run.txt"
+    capture.write_text("real capture bytes", encoding="utf-8")
+    doc = _valid_marker_doc(capture)
+    doc["signed_by"] = "Mallory"
+    marker = tmp_path / "d09-signed.json"
+    atomic_write(marker, json.dumps(doc).encode("utf-8"))
+    reason = validate_sign_marker(marker)
+    assert reason is not None
+    assert "allowlist" in reason
+
+
+def test_validate_sign_marker_accepts_signer_from_env_override(tmp_path, monkeypatch):
+    from atomic import atomic_write
+    from progress import validate_sign_marker
+
+    monkeypatch.setenv("BRAIN_SIGNERS", "Josh,Alex")
+    capture = tmp_path / "dry-run.txt"
+    capture.write_text("real capture bytes", encoding="utf-8")
+    doc = _valid_marker_doc(capture)
+    doc["signed_by"] = "Alex"
+    marker = tmp_path / "d09-signed.json"
+    atomic_write(marker, json.dumps(doc).encode("utf-8"))
+    assert validate_sign_marker(marker) is None
+
+
+def test_validate_sign_marker_rejects_capture_outside_envelope(tmp_path):
+    # Finding 4a: capture_path must resolve inside the marker's own envelope
+    # directory (its parent dir) — a marker pointing anywhere else on disk,
+    # even with a matching hash, must not pass.
+    from atomic import atomic_write
+    from progress import validate_sign_marker
+
+    envelope = tmp_path / "_state" / "fireflies-MID"
+    envelope.mkdir(parents=True)
+    outside_capture = tmp_path / "elsewhere" / "dry-run.txt"
+    outside_capture.parent.mkdir(parents=True)
+    outside_capture.write_text("real capture bytes", encoding="utf-8")
+    doc = _valid_marker_doc(outside_capture)
+    marker = envelope / "d09-signed.json"
+    atomic_write(marker, json.dumps(doc).encode("utf-8"))
+    assert validate_sign_marker(marker) == "capture outside envelope"
+
+
 # ── G2-P1-3: merge_task_map ───────────────────────────────────────────────────
 
 
@@ -385,10 +435,10 @@ def test_reconstruct_task_map_from_bus_finds_commitment_marker_in_description(tm
     bindir = _install_cortextos_shim(
         tmp_path,
         "#!/bin/sh\n"
-        'echo \'[{"id": "recovered-1", "description": "owner: Josh [commitment:cid-a]"}]\'\n',
+        'echo \'[{"id": "recovered-1", "description": "owner: Josh [commitment:MID/cid-a]"}]\'\n',
     )
     monkeypatch.setenv("PATH", f"{bindir}:/usr/bin:/bin")
-    recovered = reconstruct_task_map_from_bus(["cid-a"])
+    recovered = reconstruct_task_map_from_bus("MID", {"cid-a": "some text"})
     assert recovered == [{"commitmentId": "cid-a", "taskId": "recovered-1"}]
 
 
@@ -397,14 +447,50 @@ def test_reconstruct_task_map_from_bus_returns_empty_when_no_match(tmp_path, mon
 
     bindir = _install_cortextos_shim(tmp_path, "#!/bin/sh\necho '[]'\n")
     monkeypatch.setenv("PATH", f"{bindir}:/usr/bin:/bin")
-    assert reconstruct_task_map_from_bus(["cid-a"]) == []
+    assert reconstruct_task_map_from_bus("MID", {"cid-a": "some text"}) == []
 
 
 def test_reconstruct_task_map_from_bus_returns_empty_when_daemon_down(monkeypatch):
     from progress import reconstruct_task_map_from_bus
 
     monkeypatch.setenv("PATH", "/usr/bin:/bin")  # no cortextos on PATH
-    assert reconstruct_task_map_from_bus(["cid-a"]) == []
+    assert reconstruct_task_map_from_bus("MID", {"cid-a": "some text"}) == []
+
+
+def test_reconstruct_task_map_from_bus_ignores_task_from_different_meeting(tmp_path, monkeypatch):
+    # Finding 2: a bare commitment_id substring match (the pre-fix behavior)
+    # would have attached this task even though it belongs to a different
+    # meeting — the exact [commitment:<meeting_id>/<id>] pair must not match.
+    from progress import reconstruct_task_map_from_bus
+
+    bindir = _install_cortextos_shim(
+        tmp_path,
+        "#!/bin/sh\n"
+        'echo \'[{"id": "wrong-meeting-task", "description": "[commitment:OTHER-MID/cid-a]"}]\'\n',
+    )
+    monkeypatch.setenv("PATH", f"{bindir}:/usr/bin:/bin")
+    assert reconstruct_task_map_from_bus("MID", {"cid-a": "some text"}) == []
+
+
+def test_reconstruct_task_map_from_bus_prefers_title_match_on_ambiguity(tmp_path, monkeypatch):
+    # Finding 2: two bus tasks carry the same exact marker (should not
+    # happen on a healthy bus, but must be handled) — prefer the one whose
+    # title equals the commitment text, even though it is not the newest.
+    from progress import reconstruct_task_map_from_bus
+
+    bindir = _install_cortextos_shim(
+        tmp_path,
+        "#!/bin/sh\n"
+        "echo '["
+        '{"id": "wrong-title-task", "title": "Something else", '
+        '"description": "[commitment:MID/cid-a]", "created_at": "2026-09-01T00:00:00Z"}, '
+        '{"id": "right-title-task", "title": "Send report", '
+        '"description": "[commitment:MID/cid-a]", "created_at": "2026-08-01T00:00:00Z"}'
+        "]'\n",
+    )
+    monkeypatch.setenv("PATH", f"{bindir}:/usr/bin:/bin")
+    recovered = reconstruct_task_map_from_bus("MID", {"cid-a": "Send report"})
+    assert recovered == [{"commitmentId": "cid-a", "taskId": "right-title-task"}]
 
 
 # ── CH-9: writeback_marker_present ────────────────────────────────────────────
@@ -415,7 +501,10 @@ def test_writeback_marker_present_true_when_marker_in_page(tmp_path):
 
     page = tmp_path / "raw/areas/clearworks/org-brain/projects/alloi-03.md"
     page.parent.mkdir(parents=True)
-    page.write_text("## History\n\n- 2026-09-04 recap [source: fireflies:MID]\n", encoding="utf-8")
+    page.write_text(
+        "## History (dated, newest first)\n\n- 2026-09-04 recap [source: fireflies:MID]\n",
+        encoding="utf-8",
+    )
     assert writeback_marker_present(tmp_path, "projects/alloi-03.md", "fireflies:MID") is True
 
 
@@ -424,7 +513,7 @@ def test_writeback_marker_present_false_when_page_lacks_marker(tmp_path):
 
     page = tmp_path / "raw/areas/clearworks/org-brain/projects/alloi-03.md"
     page.parent.mkdir(parents=True)
-    page.write_text("## History\n\n- old\n", encoding="utf-8")
+    page.write_text("## History (dated, newest first)\n\n- old\n", encoding="utf-8")
     assert writeback_marker_present(tmp_path, "projects/alloi-03.md", "fireflies:MID") is False
 
 
@@ -433,6 +522,22 @@ def test_writeback_marker_present_false_when_home_rel_or_page_missing(tmp_path):
 
     assert writeback_marker_present(tmp_path, "", "fireflies:MID") is False
     assert writeback_marker_present(tmp_path, "projects/does-not-exist.md", "fireflies:MID") is False
+
+
+def test_writeback_marker_present_false_when_marker_only_outside_history_section(tmp_path):
+    # Finding 3: the marker string exists on the page, but only in a
+    # preamble paragraph — not inside the History section meeting_writeback
+    # actually appends to — so this must NOT count as proof the write ran.
+    from progress import writeback_marker_present
+
+    page = tmp_path / "raw/areas/clearworks/org-brain/projects/alloi-03.md"
+    page.parent.mkdir(parents=True)
+    page.write_text(
+        "Some unrelated note that happens to mention [source: fireflies:MID] in passing.\n\n"
+        "## History (dated, newest first)\n\n- old entry, no marker here\n",
+        encoding="utf-8",
+    )
+    assert writeback_marker_present(tmp_path, "projects/alloi-03.md", "fireflies:MID") is False
 
 
 # ── CH-7: resolve_vault_sha_from_history ──────────────────────────────────────

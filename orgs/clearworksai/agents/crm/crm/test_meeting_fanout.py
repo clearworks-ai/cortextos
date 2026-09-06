@@ -55,7 +55,7 @@ class FakeBus:
         # simulate a --retry-commitment cycle finding a task that a prior ambiguous
         # create-task failure actually did create.
         self.existing_tasks_by_commitment: dict[str, str] = {}
-        self.find_task_calls: list[str] = []
+        self.find_task_calls: list[tuple[str, str]] = []
 
     def _next(self, prefix: str) -> str:
         self._counter += 1
@@ -107,8 +107,8 @@ class FakeBus:
         self._surfaced.add(source_key)
         return True  # SURFACE — first sight
 
-    def find_task_by_commitment(self, commitment_id: str) -> str:
-        self.find_task_calls.append(commitment_id)
+    def find_task_by_commitment(self, meeting_id: str, commitment_id: str, text: str = "") -> str:
+        self.find_task_calls.append((meeting_id, commitment_id))
         return self.existing_tasks_by_commitment.get(commitment_id, "")
 
     def deps(self, full_payload: dict) -> "mf.Deps":
@@ -502,7 +502,7 @@ class StrictModeTests(unittest.TestCase):
             send_telegram=lambda *a: None,
             dedup_surface=lambda k: False,  # would normally SKIP
             dedup_surface_strict=lambda k: "SKIP",
-            find_task_by_commitment=lambda cid: "task-already-existing" if cid == "c1" else "",
+            find_task_by_commitment=lambda mid, cid, text="": "task-already-existing" if cid == "c1" else "",
         )
         result = mf.fanout(
             meeting_id="M1", event_file=None, deps=deps, strict=True,
@@ -531,7 +531,7 @@ class StrictModeTests(unittest.TestCase):
             send_telegram=lambda *a: None,
             dedup_surface=lambda k: False,
             dedup_surface_strict=lambda k: "SKIP",
-            find_task_by_commitment=lambda cid: "",
+            find_task_by_commitment=lambda mid, cid, text="": "",
         )
         result = mf.fanout(
             meeting_id="M1", event_file=None, deps=deps, strict=True,
@@ -550,7 +550,7 @@ class StrictModeTests(unittest.TestCase):
             meeting_id="M1", event_file=None, deps=bus.deps(payload),
             retry_commitments=frozenset({"c1"}),
         )
-        self.assertEqual(bus.find_task_calls, ["c1"])
+        self.assertEqual(bus.find_task_calls, [("M1", "c1")])
         self.assertEqual(bus.tasks, [])  # create_task never called
         self.assertEqual(result.task_map, [("c1", "task-42")])
 
@@ -611,6 +611,54 @@ class StrictModeTests(unittest.TestCase):
         self.assertNotIn("pending: c1", out_buf.getvalue())
 
 
+class ProdFindTaskByCommitmentTests(unittest.TestCase):
+    """Finding 2: prod_find_task_by_commitment must match the exact
+    [commitment:<meeting_id>/<id>] pair, not a bare commitment_id substring,
+    and must resolve ambiguity (title match, else newest) rather than
+    silently picking the first hit. Monkeypatches module-level `_run` (the
+    sole subprocess seam) so no real `cortextos` binary is invoked."""
+
+    def setUp(self):
+        self._original_run = mf._run
+
+    def tearDown(self):
+        mf._run = self._original_run
+
+    def test_ignores_task_from_a_different_meeting(self):
+        mf._run = lambda cmd: json.dumps([
+            {"id": "wrong-meeting-task", "description": "[commitment:OTHER-MID/c1]"},
+        ])
+        result = mf.prod_find_task_by_commitment("MID", "c1", "expected text")
+        self.assertEqual(result, "")
+
+    def test_single_exact_match_returned(self):
+        mf._run = lambda cmd: json.dumps([
+            {"id": "task-1", "description": "[commitment:MID/c1]"},
+        ])
+        result = mf.prod_find_task_by_commitment("MID", "c1", "expected text")
+        self.assertEqual(result, "task-1")
+
+    def test_two_candidates_title_match_wins(self):
+        mf._run = lambda cmd: json.dumps([
+            {"id": "wrong-title", "title": "Something else",
+             "description": "[commitment:MID/c1]", "created_at": "2026-09-02T00:00:00Z"},
+            {"id": "right-title", "title": "Send report",
+             "description": "[commitment:MID/c1]", "created_at": "2026-09-01T00:00:00Z"},
+        ])
+        result = mf.prod_find_task_by_commitment("MID", "c1", "Send report")
+        self.assertEqual(result, "right-title")
+
+    def test_two_candidates_no_title_match_falls_back_to_newest(self):
+        mf._run = lambda cmd: json.dumps([
+            {"id": "older", "title": "Neither matches",
+             "description": "[commitment:MID/c1]", "created_at": "2026-09-01T00:00:00Z"},
+            {"id": "newer", "title": "Also neither",
+             "description": "[commitment:MID/c1]", "created_at": "2026-09-02T00:00:00Z"},
+        ])
+        result = mf.prod_find_task_by_commitment("MID", "c1", "Send report")
+        self.assertEqual(result, "newer")
+
+
 class FullFileTests(unittest.TestCase):
     def test_full_file_skips_load_full_and_uses_owner_label_desc(self):
         # G0a F-7: the earlier draft of this test called mf.main([..., "--no-telegram"])
@@ -650,7 +698,8 @@ class FullFileTests(unittest.TestCase):
         self.assertEqual(
             bus.tasks[0]["desc"],
             "owner: Josh · From meeting fireflies:01M1MW2GAZ1DQ0C6PG3KJ557JA · "
-            "Send the tactical report draft · due 2026-09-08 · [commitment:abc123]",
+            "Send the tactical report draft · due 2026-09-08 · "
+            "[commitment:01M1MW2GAZ1DQ0C6PG3KJ557JA/abc123]",
         )
 
 

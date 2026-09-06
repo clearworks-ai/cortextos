@@ -450,21 +450,35 @@ def _apply_writes(
             print(f"FAILED at tasks: rc={fan_res.returncode}", file=sys.stderr)
             return 8
         created_pairs = progress.merge_task_map(existing_created, fan_out.get("task_map") or [])
-        if not created_pairs:
-            # CH-5: every commitment dedup-SKIPped (already surfaced by an
-            # earlier run) yet we have no recorded mapping at all — the most
-            # likely explanation is a crash between that earlier fanout
-            # succeeding and merge_progress persisting it, not "there was
-            # nothing to fan". Try to recover the real taskId from the bus
-            # before ever marking this step done with an empty map.
-            skipped_ids = [str(x) for x in (fan_out.get("skipped") or [])]
-            if skipped_ids:
-                recovered = progress.reconstruct_task_map_from_bus(skipped_ids)
-                if recovered:
-                    created_pairs = progress.merge_task_map(existing_created, recovered)
-                else:
+        # CH-5: reconstruction previously only ran when the ENTIRE merged
+        # map was empty — a partial crash (e.g. c1's mapping already
+        # persisted, c2's fanout succeeded but the parent died before
+        # merge_progress recorded it) left created_pairs non-empty (c1
+        # alone) and skipped recovery entirely, permanently losing c2. Check
+        # every dedup-SKIPped commitment individually: any one that still
+        # has no entry in created_pairs gets reconstructed from the bus, not
+        # just the case where nothing at all is mapped.
+        skipped_ids = [str(x) for x in (fan_out.get("skipped") or [])]
+        if skipped_ids:
+            mapped_ids = {p.get("commitmentId") for p in created_pairs}
+            unmapped_skipped = [cid for cid in skipped_ids if cid not in mapped_ids]
+            if unmapped_skipped:
+                next_steps = ((fanout_doc.get("meetings") or [{}])[0] or {}).get("next_steps") or []
+                commitment_texts = {
+                    str(step.get("commitmentId")): str(step.get("text") or "")
+                    for step in next_steps
+                    if isinstance(step, dict) and step.get("commitmentId")
+                }
+                recovered = progress.reconstruct_task_map_from_bus(
+                    meeting_id, {cid: commitment_texts.get(cid, "") for cid in unmapped_skipped}
+                )
+                created_pairs = progress.merge_task_map(created_pairs, recovered)
+                mapped_ids = {p.get("commitmentId") for p in created_pairs}
+                still_unmapped = [cid for cid in unmapped_skipped if cid not in mapped_ids]
+                if still_unmapped:
                     print(
-                        "FAILED at tasks: dedup skipped but no created tasks recorded",
+                        "FAILED at tasks: dedup skipped but no created task recorded for "
+                        + ", ".join(still_unmapped),
                         file=sys.stderr,
                     )
                     return 8

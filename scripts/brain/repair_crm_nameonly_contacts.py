@@ -31,6 +31,27 @@ Pass --apply to perform the change. On --apply, both files are backed up
 next to their originals as `<name>.bak-<UTC-ISO-stamp>` before being
 rewritten atomically (temp file + os.replace, matching brain/atomic.py).
 
+Byte-preservation (R-1, FINAL-fable-round2.json): the producers
+(add-interaction.py, upsert-contact.py) do NOT write `ensure_ascii=False`.
+Re-serialising every row/record with different JSON options than the
+producer used would rewrite hundreds of unrelated lines/records byte-for-
+byte (still JSON-equal, but it defeats a line-diff review and silently
+changes the on-disk convention). So this script never re-dumps retained
+content:
+
+  - interactions.jsonl: retained lines are spliced verbatim from the
+    original file bytes (original line endings preserved exactly);
+    only the matched rows' lines are dropped.
+  - contacts.json: the file's own `ensure_ascii` (detected from whether any
+    non-ASCII byte is present in the raw file) and `indent` (detected from
+    the raw text's own layout) are reproduced; key order is preserved
+    automatically because `json.load` keeps each object's on-disk field
+    order. Before writing, every RETAINED contact's fresh serialisation is
+    asserted byte-identical to its original on-disk text (self-check). If
+    the format can't be confidently detected, or the self-check fails for
+    any retained contact, the script REFUSES: exit code 3, no files
+    touched.
+
 The script is idempotent: once the two contacts and their interaction rows
 are gone, a second run finds nothing left to remove and exits 0 as a no-op
 (dry-run or --apply).
@@ -46,6 +67,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -67,23 +89,23 @@ def load_contacts(path: Path) -> dict[str, Any]:
     return data
 
 
-def load_interactions(path: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.rstrip("\n")
-            if not line.strip():
-                continue
-            rows.append(json.loads(line))
-    return rows
+def load_interaction_lines(path: Path) -> list[str]:
+    """Return the file's lines WITH their original line endings exactly as
+    stored on disk (no newline translation) — the byte-preserving splice
+    source for retained rows. ``newline=""`` disables Python's universal
+    newline translation so each line keeps its literal on-disk terminator."""
+    with path.open("r", encoding="utf-8", newline="") as f:
+        return f.readlines()
 
 
-def dump_interactions_bytes(rows: list[dict[str, Any]]) -> bytes:
-    lines = [json.dumps(r, ensure_ascii=False) for r in rows]
-    text = "\n".join(lines)
-    if lines:
-        text += "\n"
-    return text.encode("utf-8")
+def parse_interaction_line(raw_line: str) -> dict[str, Any] | None:
+    """Parse one on-disk line (its own trailing newline stripped first).
+    Returns None for a blank/whitespace-only line (never a removal
+    candidate, but its raw text is still preserved on output)."""
+    stripped = raw_line.rstrip("\r\n")
+    if not stripped.strip():
+        return None
+    return json.loads(stripped)
 
 
 def check_guard(contact: dict[str, Any], meeting_id: str) -> tuple[bool, str]:
@@ -107,7 +129,98 @@ def row_references_meeting(row: dict[str, Any], meeting_id: str) -> bool:
     return False
 
 
-def main() -> int:
+# --- contacts.json byte-preserving re-serialisation -------------------------
+
+def detect_ensure_ascii(raw_bytes: bytes) -> bool:
+    """The producer (upsert-contact.py:288) doesn't pass ensure_ascii, so it
+    defaults to True (\\uXXXX-escaped). Detect from the file itself rather
+    than assuming: any raw non-ASCII byte on disk means the file was written
+    with ensure_ascii=False; otherwise assume the (default) True."""
+    return not any(b >= 0x80 for b in raw_bytes)
+
+
+def detect_indent(raw_text: str) -> int | None:
+    """Detect the pretty-print indent width from the file's own top-level
+    layout (`{\\n<spaces>"key"`). Returns None for compact (no-indent) JSON."""
+    m = re.match(r'^\{\r?\n( +)"', raw_text)
+    if not m:
+        return None
+    return len(m.group(1))
+
+
+def contacts_array_element_spans(raw_text: str, key: str) -> list[tuple[int, int]]:
+    """Locate the raw-text (start, end) span of every element of the JSON
+    array at top-level key ``key``, in file order — used to pull each
+    retained contact's exact original on-disk text for the self-check."""
+    key_pat = f'"{key}"'
+    key_idx = raw_text.index(key_pat)
+    colon_idx = raw_text.index(":", key_idx + len(key_pat))
+    bracket_idx = raw_text.index("[", colon_idx)
+    decoder = json.JSONDecoder()
+    idx = bracket_idx + 1
+    n = len(raw_text)
+    spans: list[tuple[int, int]] = []
+    while True:
+        while idx < n and raw_text[idx] in " \t\r\n,":
+            idx += 1
+        if idx >= n:
+            raise ValueError(f"unterminated array while scanning contacts.json for key {key!r}")
+        if raw_text[idx] == "]":
+            break
+        _, end = decoder.raw_decode(raw_text, idx)
+        spans.append((idx, end))
+        idx = end
+    return spans
+
+
+def reindent_embedded_dump(obj: Any, indent: int | None, ensure_ascii: bool, extra_levels: int = 2) -> str:
+    """Serialise ``obj`` the same way json.dumps(..., indent=indent) would
+    render it if it were embedded ``extra_levels`` deeper than top-level
+    (contacts.json's array elements sit at depth 2: top object -> "contacts"
+    array -> element). json.dumps indents every line by ``depth * indent``
+    spaces, so shifting the base depth by a constant is equivalent to
+    prefixing every line but the first (whose leading spaces come from the
+    enclosing array's own rendering, not this object's dump) with a constant
+    number of spaces."""
+    if indent is None:
+        return json.dumps(obj, ensure_ascii=ensure_ascii)
+    text = json.dumps(obj, indent=indent, ensure_ascii=ensure_ascii)
+    if extra_levels <= 0:
+        return text
+    prefix = " " * (indent * extra_levels)
+    lines = text.split("\n")
+    shifted = [lines[0]] + [(prefix + ln if ln else ln) for ln in lines[1:]]
+    return "\n".join(shifted)
+
+
+def verify_contacts_byte_preservation(
+    raw_text: str,
+    contacts: list[dict[str, Any]],
+    target_ids: list[str],
+    indent: int | None,
+    ensure_ascii: bool,
+) -> tuple[bool, str]:
+    """Self-check (before any write): every contact NOT being removed must
+    re-serialise to exactly the text it already has on disk under the
+    detected (indent, ensure_ascii) options. Returns (ok, reason)."""
+    spans = contacts_array_element_spans(raw_text, "contacts")
+    if len(spans) != len(contacts):
+        return False, (
+            f"contacts array element count mismatch: parsed {len(contacts)} "
+            f"vs {len(spans)} text spans"
+        )
+    for i, contact in enumerate(contacts):
+        if contact.get("id") in target_ids:
+            continue  # being removed; nothing to preserve
+        start, end = spans[i]
+        original_text = raw_text[start:end]
+        reproduced = reindent_embedded_dump(contact, indent, ensure_ascii)
+        if reproduced != original_text:
+            return False, f"contact id={contact.get('id')!r} (index {i}) would not serialise byte-identically"
+    return True, ""
+
+
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="Remove name-only, email-less contacts (and their interaction rows) "
         "mistakenly upserted for one meeting. Dry-run by default.",
@@ -120,7 +233,7 @@ def main() -> int:
         help="Comma-separated contact ids/slugs to remove, e.g. ivette-ramos,joseph-chang",
     )
     ap.add_argument("--apply", action="store_true", help="Write changes. Default is dry-run (no writes).")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     crm_dir = Path(args.crm_dir)
     contacts_path = crm_dir / "contacts.json"
@@ -138,12 +251,16 @@ def main() -> int:
         print(f"ERROR: not found: {interactions_path}", file=sys.stderr)
         return 2
 
+    contacts_raw_bytes = contacts_path.read_bytes()
+    contacts_raw_text = contacts_raw_bytes.decode("utf-8")
     contacts_data = load_contacts(contacts_path)
     contacts = contacts_data["contacts"]
-    interactions = load_interactions(interactions_path)
+
+    interaction_raw_lines = load_interaction_lines(interactions_path)
+    interaction_rows = [parse_interaction_line(rl) for rl in interaction_raw_lines]
 
     before_contact_count = len(contacts)
-    before_interaction_count = len(interactions)
+    before_interaction_count = sum(1 for r in interaction_rows if r is not None)
 
     found_contacts: dict[str, dict[str, Any]] = {}
     for c in contacts:
@@ -173,16 +290,16 @@ def main() -> int:
     removed_contacts = [found_contacts[cid] for cid in target_ids if cid in found_contacts]
     kept_contacts = [c for c in contacts if c.get("id") not in target_ids]
 
-    removed_rows = []
-    kept_rows = []
-    for row in interactions:
-        if row.get("contact_id") in target_ids and row_references_meeting(row, meeting_id):
+    removed_rows: list[dict[str, Any]] = []
+    kept_raw_lines: list[str] = []
+    for raw, row in zip(interaction_raw_lines, interaction_rows):
+        if row is not None and row.get("contact_id") in target_ids and row_references_meeting(row, meeting_id):
             removed_rows.append(row)
         else:
-            kept_rows.append(row)
+            kept_raw_lines.append(raw)
 
     after_contact_count = len(kept_contacts)
-    after_interaction_count = len(kept_rows)
+    after_interaction_count = before_interaction_count - len(removed_rows)
 
     mode = "APPLY" if args.apply else "DRY-RUN"
     print(f"=== repair_crm_nameonly_contacts.py [{mode}] ===")
@@ -214,21 +331,36 @@ def main() -> int:
         print("Dry-run only; no files modified. Re-run with --apply to write changes.")
         return 0
 
+    # --- Detect contacts.json's on-disk serialisation format, and refuse
+    # rather than guess if we can't confidently reproduce it (R-1). ---
+    ensure_ascii = detect_ensure_ascii(contacts_raw_bytes)
+    indent = detect_indent(contacts_raw_text)
+
+    ok, reason = verify_contacts_byte_preservation(contacts_raw_text, contacts, target_ids, indent, ensure_ascii)
+    if not ok:
+        print(
+            f"REFUSING: contacts.json self-check failed — {reason}. "
+            "Cannot guarantee retained contacts would serialise byte-identically. "
+            "No files were modified.",
+            file=sys.stderr,
+        )
+        return 3
+
     # --- Backups (written before any mutation) ---
     stamp = utc_stamp()
     contacts_backup = contacts_path.with_name(contacts_path.name + f".bak-{stamp}")
     interactions_backup = interactions_path.with_name(interactions_path.name + f".bak-{stamp}")
 
-    atomic_write(contacts_backup, contacts_path.read_bytes())
-    atomic_write(interactions_backup, interactions_path.read_bytes())
+    atomic_write(contacts_backup, contacts_raw_bytes)
+    atomic_write(interactions_backup, "".join(interaction_raw_lines).encode("utf-8"))
 
     # --- Write updated files atomically ---
     new_contacts_data = dict(contacts_data)
     new_contacts_data["contacts"] = kept_contacts
-    contacts_bytes = (json.dumps(new_contacts_data, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    contacts_bytes = (json.dumps(new_contacts_data, indent=indent, ensure_ascii=ensure_ascii) + "\n").encode("utf-8")
     atomic_write(contacts_path, contacts_bytes)
 
-    interactions_bytes = dump_interactions_bytes(kept_rows)
+    interactions_bytes = "".join(kept_raw_lines).encode("utf-8")
     atomic_write(interactions_path, interactions_bytes)
 
     print()

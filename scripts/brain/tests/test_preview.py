@@ -150,6 +150,19 @@ def test_bus_task_preview_falls_back_to_action_when_text_missing() -> None:
     )
 
 
+def test_crm_interaction_preview_empty_attendees_key_is_authoritative() -> None:
+    # N-1: event.json's "attendees" present but [] must NOT fall back to
+    # fanout-meeting.json even when it has real emailed attendees.
+    from preview import crm_interaction_preview
+
+    event = {"meeting_id": "MID", "attendees": []}
+    validated = {"summary": {"overview": "ov"}, "deal_state": None}
+    resolution = {"deal_state": None}
+    fanout = {"meetings": [{"id": "MID", "attendees": ["marcos@alloi.us", "sam@alloi.us"]}]}
+    rows = crm_interaction_preview(event, validated, resolution, fanout)
+    assert rows == []
+
+
 def test_crm_interaction_preview_drops_name_only_attendees_via_fanout_fallback() -> None:
     # F-1 FINAL review: event.json carries no attendees (edge case / legacy
     # payload), so the preview falls back to fanout-meeting.json's attendees
@@ -157,7 +170,10 @@ def test_crm_interaction_preview_drops_name_only_attendees_via_fanout_fallback()
     # speakers. Those must never turn into a preview row.
     from preview import crm_interaction_preview
 
-    event = {"meeting_id": "MID", "attendees": []}
+    # N-1: a present-but-empty "attendees" list is now authoritative, so the
+    # legacy/no-attendees-field fallback case is represented by OMITTING the
+    # key entirely, not by an empty list.
+    event = {"meeting_id": "MID"}
     validated = {"summary": {"overview": "ov"}, "deal_state": None}
     resolution = {"deal_state": None}
     fanout = {
@@ -206,7 +222,10 @@ def test_crm_interaction_preview_matches_real_meeting_crm_sync_module() -> None:
     upsert and log — proving no --full-file apply/preview drift (F-1)."""
     module = _load_meeting_crm_sync_module()
 
-    event = {"meeting_id": "MID", "attendees": []}
+    # N-1: a present-but-empty "attendees" list is now authoritative, so the
+    # legacy/no-attendees-field fallback case is represented by OMITTING the
+    # key entirely, not by an empty list.
+    event = {"meeting_id": "MID"}
     full_meeting = {
         "id": "MID",
         "attendees": [

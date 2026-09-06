@@ -226,21 +226,25 @@ def crm_attendees(event_payload: dict, full_meeting: dict) -> list[str]:
     ``ff-meeting-event-<safeId>.json`` / ``event.json`` payload). It is built
     by ``adapt_meeting.py``'s ``_emails(..., externals_only=True)`` — already
     email-only AND already restricted to external, spoken (or unknown+spoke)
-    participants. Used whenever present.
+    participants. Used whenever the key is PRESENT, even if it is an empty
+    list — FR-009 (state/specs/brain-source-to-state-2026-09-04-spec.md
+    ~line 268) says "no attendees -> write nothing", and a present-but-empty
+    list from adapt_meeting.py's own externals-only filtering IS that "no
+    attendees" answer, not a signal to go looking elsewhere for more names.
 
     FALLBACK: ``full_meeting["attendees"]`` (the ff-extractor / R2
-    ``--full-file`` ``fanout-meeting.json`` per-meeting payload) — used only
-    when the event payload carries no attendees at all. This field is a
-    SUPERSET of every participant regardless of side/spoke, and FR-004 fills
-    bare NAME strings (no email) for participants who spoke without one —
-    both are why it is not used as the primary source. Either way, name-only
-    entries are filtered out by ``_filter_emails`` and never upserted.
+    ``--full-file`` ``fanout-meeting.json`` per-meeting payload) — used ONLY
+    when ``event_payload`` has NO ``"attendees"`` key at all (legacy
+    payloads that predate FR-002/FR-004). This field is a SUPERSET of every
+    participant regardless of side/spoke, and FR-004 fills bare NAME strings
+    (no email) for participants who spoke without one — both are why it is
+    not used as the primary source. Either way, name-only entries are
+    filtered out by ``_filter_emails`` and never upserted.
     """
-    ev_vals = event_payload.get("attendees")
-    ev_raw = ev_vals if isinstance(ev_vals, list) else []
-    emails = _filter_emails(ev_raw)
-    if emails:
-        return emails
+    if "attendees" in event_payload:
+        ev_vals = event_payload.get("attendees")
+        ev_raw = ev_vals if isinstance(ev_vals, list) else []
+        return _filter_emails(ev_raw)
     fm_vals = full_meeting.get("attendees")
     fm_raw = fm_vals if isinstance(fm_vals, list) else []
     return _filter_emails(fm_raw)

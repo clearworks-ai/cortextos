@@ -216,6 +216,169 @@ def test_dry_run_node_parse_failure_exits_6_no_phase3_preview(
     assert "would-file:" not in captured.out
 
 
+def _fake_binary(tmp_path: Path, name: str, rc: int, stderr_msg: str) -> Path:
+    script = tmp_path / name
+    script.write_text(
+        f"import sys\nsys.stderr.write({stderr_msg!r} + \"\\n\")\nsys.exit({rc})\n",
+        encoding="utf-8",
+    )
+    return script
+
+
+def _run_dry_with_fake_fetch_extract(monkeypatch: pytest.MonkeyPatch, mid: str, repo: Path, vault: Path):
+    from run_meeting import main
+
+    def fake_fetch(argv=None):
+        return 0
+
+    def fake_extract(argv=None):
+        return 0
+
+    monkeypatch.setattr("run_meeting.fetch_main", fake_fetch)
+    monkeypatch.setattr("run_meeting.extract_main", fake_extract)
+    return main(
+        ["--meeting-id", f"fireflies:{mid}", "--dry-run", "--repo-root", str(repo), "--vault", str(vault)]
+    )
+
+
+@pytest.mark.parametrize("wb_rc", [1, 64])
+def test_dry_run_writeback_failure_exits_7_with_stderr_tail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys, wb_rc: int
+) -> None:
+    """CH-8: _run_dry previously returned the writeback dry-run subprocess's
+    OWN raw exit code (1, 64, ...) instead of the FR-012 exit-code table's
+    fixed 7 — exactly the leak --apply's writeback path already closed."""
+    import run_meeting
+
+    vault, repo, mid = _seed(tmp_path)
+    fake_wb = _fake_binary(tmp_path, "fake_writeback.py", wb_rc, "writeback dry-run exploded")
+    monkeypatch.setattr(run_meeting, "WRITEBACK", fake_wb)
+
+    rc = _run_dry_with_fake_fetch_extract(monkeypatch, mid, repo, vault)
+    assert rc == 7
+    err = capsys.readouterr().err
+    assert f"FAILED at writeback: rc={wb_rc}" in err
+    assert "writeback dry-run exploded" in err
+
+
+@pytest.mark.parametrize("rec_rc", [1, 64])
+def test_dry_run_recap_failure_exits_9_with_stderr_tail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys, rec_rc: int
+) -> None:
+    """CH-8: same leak on the recap dry-run subprocess — must map to the
+    FR-012 table's fixed 9, not the recap script's own raw return code."""
+    import run_meeting
+
+    vault, repo, mid = _seed(tmp_path)
+    fake_rec = _fake_binary(tmp_path, "fake_recap.py", rec_rc, "recap dry-run exploded")
+    monkeypatch.setattr(run_meeting, "RECAP", fake_rec)
+
+    rc = _run_dry_with_fake_fetch_extract(monkeypatch, mid, repo, vault)
+    assert rc == 9
+    err = capsys.readouterr().err
+    assert f"FAILED at recap: rc={rec_rc}" in err
+    assert "recap dry-run exploded" in err
+
+
+def test_dry_run_state_preview_uses_apply_state_generated_region_end_placement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """Preview/apply parity fold: brain_rollup.main() writes STATE.md via
+    apply_state_generated_region (CH-3/FR-007 — strips any existing
+    generated:state block wherever it sits, always re-appends a fresh one
+    at the END). The dry-run preview must call the SAME function, not the
+    generic in-place apply_generated_region, so the signed preview's
+    would-touch diff actually matches what --apply produces."""
+    import brain_rollup
+    from run_meeting import main
+
+    vault, repo, mid = _seed(tmp_path)
+    state_path = vault / "raw/areas/clearworks/org-brain/STATE.md"
+    state_path.write_text(
+        "# Brain State\n\n"
+        "<!-- generated: state -->\n"
+        "generated-from: deadbeef\n\nold body\n"
+        "<!-- /generated -->\n"
+        "## Legacy Notes\n\nkeep me\n",
+        encoding="utf-8",
+    )
+
+    real_generic = brain_rollup.apply_generated_region
+    real_state = brain_rollup.apply_state_generated_region
+    captured_state: dict = {}
+
+    def guarded_generic(old_text, name, body, **kwargs):
+        assert name != "state", "STATE.md preview must use apply_state_generated_region, not apply_generated_region"
+        return real_generic(old_text, name, body, **kwargs)
+
+    def spy_state(old_text, body):
+        result = real_state(old_text, body)
+        captured_state["new_state"] = result
+        return result
+
+    monkeypatch.setattr(brain_rollup, "apply_generated_region", guarded_generic)
+    monkeypatch.setattr(brain_rollup, "apply_state_generated_region", spy_state)
+
+    def fake_fetch(argv=None):
+        return 0
+
+    def fake_extract(argv=None):
+        return 0
+
+    monkeypatch.setattr("run_meeting.fetch_main", fake_fetch)
+    monkeypatch.setattr("run_meeting.extract_main", fake_extract)
+
+    rc = main(
+        ["--meeting-id", f"fireflies:{mid}", "--dry-run", "--repo-root", str(repo), "--vault", str(vault)]
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "would-touch: STATE.md (state)" in out
+
+    new_state = captured_state["new_state"]
+    # The pre-existing "## Legacy Notes" section used to sit AFTER the
+    # generated block; apply_state_generated_region always moves the
+    # (re-)generated block to the end, so it must now sit BEFORE it.
+    assert new_state.index("## Legacy Notes") < new_state.index("<!-- generated: state -->")
+    assert new_state.rstrip().endswith("<!-- /generated -->")
+
+
+def test_dry_run_state_unterminated_generated_region_exits_6(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """A STATE.md with an opening `<!-- generated: state -->` marker and no
+    matching `<!-- /generated -->` must fail the dry-run closed — exit 6,
+    same as any other rollup failure — not silently treat some unrelated
+    later `<!-- /generated -->` as this region's close."""
+    from run_meeting import main
+
+    vault, repo, mid = _seed(tmp_path)
+    state_path = vault / "raw/areas/clearworks/org-brain/STATE.md"
+    state_path.write_text(
+        "# Brain State\n\n<!-- generated: state -->\nno closing marker here\n",
+        encoding="utf-8",
+    )
+
+    def fake_fetch(argv=None):
+        return 0
+
+    def fake_extract(argv=None):
+        return 0
+
+    monkeypatch.setattr("run_meeting.fetch_main", fake_fetch)
+    monkeypatch.setattr("run_meeting.extract_main", fake_extract)
+
+    rc = main(
+        ["--meeting-id", f"fireflies:{mid}", "--dry-run", "--repo-root", str(repo), "--vault", str(vault)]
+    )
+    assert rc == 6
+    captured = capsys.readouterr()
+    assert "FAILED at rollup:" in captured.err
+    assert "unterminated generated region" in captured.err
+    assert "would-write:" not in captured.out
+    assert "would-file:" not in captured.out
+
+
 def test_defaults_are_shared_checkout() -> None:
     from run_meeting import DEFAULT_REPO_ROOT, DEFAULT_VAULT
     from pathlib import Path as P

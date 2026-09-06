@@ -45,6 +45,18 @@ def _norm(text: str) -> str:
     return " ".join(text.casefold().split())
 
 
+# CH-7 defense in depth: extract_meeting.validate_extraction rejects control
+# characters/newlines outright, but a run of internal whitespace (multiple
+# spaces/tabs) is still legal text and can visually fragment a rendered
+# History/Open-Items line. Collapse it here, once, at the single place every
+# consumer (writeback/recap/fanout payloads) is built from.
+_WS_RUN_RE = re.compile(r"\s+")
+
+
+def _collapse_ws(text: str) -> str:
+    return _WS_RUN_RE.sub(" ", text).strip()
+
+
 def _commitment_id(kind: str, source_id: str, text: str, ordinal: int) -> str:
     payload = f"{kind}:{source_id}|{_norm(text)}|{ordinal}"
     return hashlib.sha1(payload.encode()).hexdigest()[:16]
@@ -129,13 +141,13 @@ def adapt(source: dict[str, Any], validated: dict[str, Any], resolution: dict[st
     for c in validated.get("commitments") or []:
         if not isinstance(c, dict):
             continue
-        text = str(c.get("text") or "")
+        text = _collapse_ws(str(c.get("text") or ""))
         key = _norm(text)
         ordinal = counts.get(key, 0)
         counts[key] = ordinal + 1
         cid = _commitment_id(kind, source_id, text, ordinal)
         idx = c.get("owner_participant")
-        owner_name = str(c.get("owner_name") or "")
+        owner_name = _collapse_ws(str(c.get("owner_name") or ""))
         side = _side(source, idx if isinstance(idx, int) else None, owner_name)
         ident, label = _owner_identity(side, owner_name, enabled_agents)
         deadline = _deadline(c.get("deadline_iso") if isinstance(c.get("deadline_iso"), str) else None, now)
@@ -190,9 +202,13 @@ def adapt(source: dict[str, Any], validated: dict[str, Any], resolution: dict[st
             "bullets": summary.get("bullets") if isinstance(summary, dict) else [],
             "action_items": [c["text"] for c in commitments_out],
         },
-        "decisions": [d.get("text") for d in (validated.get("decisions") or []) if isinstance(d, dict)],
+        "decisions": [
+            _collapse_ws(str(d.get("text") or "")) for d in (validated.get("decisions") or []) if isinstance(d, dict)
+        ],
         "open_questions": [
-            oq.get("text") for oq in (validated.get("open_questions") or []) if isinstance(oq, dict)
+            _collapse_ws(str(oq.get("text") or ""))
+            for oq in (validated.get("open_questions") or [])
+            if isinstance(oq, dict)
         ],
         "next_steps": recap_steps,
         "meeting_type": validated.get("meeting_type") or "delivery",

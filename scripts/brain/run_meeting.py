@@ -211,7 +211,13 @@ def _run_dry(meeting_id: str, vault: Path, repo: Path, source_dir: Path) -> int:
         sys.stdout.write(wb.stdout)
         if wb.returncode != 0:
             sys.stderr.write(wb.stderr)
-            return wb.returncode
+            # CH-8: FR-005 dry-run failures must map to the FR-012 exit-code
+            # table's fixed 7, exactly like the --apply path already does —
+            # not leak the writeback subprocess's own raw return code (1,
+            # 64, ...).
+            tail = (wb.stderr or wb.stdout or "").strip().splitlines()
+            print(f"FAILED at writeback: rc={wb.returncode} {tail[-1] if tail else ''}", file=sys.stderr)
+            return 7
         rec = subprocess.run(
             [
                 sys.executable,
@@ -234,7 +240,12 @@ def _run_dry(meeting_id: str, vault: Path, repo: Path, source_dir: Path) -> int:
         sys.stdout.write(rec.stdout)
         if rec.returncode != 0:
             sys.stderr.write(rec.stderr)
-            return rec.returncode
+            # CH-8: FR-008 dry-run failures must map to the FR-012 exit-code
+            # table's fixed 9, not leak the recap subprocess's own raw
+            # return code.
+            tail = (rec.stderr or rec.stdout or "").strip().splitlines()
+            print(f"FAILED at recap: rc={rec.returncode} {tail[-1] if tail else ''}", file=sys.stderr)
+            return 9
         if ledger.read_text(encoding="utf-8").strip():
             print("ledger mutated in dry-run", file=sys.stderr)
             return 3
@@ -244,6 +255,13 @@ def _run_dry(meeting_id: str, vault: Path, repo: Path, source_dir: Path) -> int:
     # SAME pure functions / subprocess --write-less path apply uses (no
     # duplicated logic to drift out of sync), so a signed capture (Task 5)
     # actually covers what --apply will write.
+    #
+    # CH-6: a structured header, printed once immediately before the
+    # phase-3 preview block, lets sign_dry_run.py prove these are real
+    # structured `_run_dry` outputs (re.MULTILINE-anchored "phase3-preview:
+    # v1" + "^would-(touch|write|file): " lines) rather than incidental
+    # substrings elsewhere in an R2-era capture.
+    print("phase3-preview: v1")
     source = json.loads((source_dir / "source.json").read_text(encoding="utf-8"))
     key = f"fireflies:{meeting_id}"
     client_slug = str(resolution.get("counterparty_slug") or "")
@@ -271,9 +289,19 @@ def _run_dry(meeting_id: str, vault: Path, repo: Path, source_dir: Path) -> int:
     state_path = org_brain_root(vault) / "STATE.md"
     old_state = state_path.read_text(encoding="utf-8") if state_path.is_file() else ""
     gen_sha = brain_rollup.compute_generated_from(sorted(n["path"] for n in nodes.values())) if nodes else ""
-    new_state = brain_rollup.apply_generated_region(
-        old_state, "state", f"generated-from: {gen_sha}\n\n{brain_rollup.render_state_sections(nodes, today)}",
-    )
+    full_state_body = f"generated-from: {gen_sha}\n\n{brain_rollup.render_state_sections(nodes, today)}"
+    # Preview/apply parity: brain_rollup.main() writes STATE.md via
+    # apply_state_generated_region (CH-3/FR-007 — strips any existing
+    # generated:state block wherever it sits and always appends a fresh one
+    # at the END of the file), not the generic in-place apply_generated_region.
+    # A preview built from the latter would show a different diff than what
+    # --apply actually produces, and would never surface an unterminated
+    # generated-region marker as the same exit-6 failure apply itself takes.
+    try:
+        new_state = brain_rollup.apply_state_generated_region(old_state, full_state_body)
+    except brain_rollup.NodeBlockError as exc:
+        print(f"FAILED at rollup: {exc}", file=sys.stderr)
+        return 6
     if new_state != old_state:
         print("would-touch: STATE.md (state)")
 

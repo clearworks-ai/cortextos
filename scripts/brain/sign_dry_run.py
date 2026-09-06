@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,7 +24,17 @@ FR012_NOUNS = ("home=", "--- a/", "quotes kept", "tasks:", "subject:")
 # artifact, filed digest) predate FR-012 line 324's noun list. A capture
 # taken before this release's dry-run extension existed cannot contain
 # these — that is the exact stale-marker case this field exists to catch.
-PHASE3_NOUNS = ("would-touch:", "would-write:", "would-file:")
+#
+# CH-6: substring containment alone let an R2-era capture whose page diff or
+# meeting text merely *mentions* "would-touch:" etc. (as prose, inside a
+# diff hunk, or mid-line) forge the phase-3 signal. `_run_dry` now emits a
+# structured `phase3-preview: v1` header line immediately before the
+# phase-3 preview block, with every preview line anchored at column 0 —
+# require BOTH that exact header line and at least one real anchored
+# would-* line, via re.MULTILINE so `^`/`$` bind to line boundaries rather
+# than the whole capture.
+PHASE3_HEADER_RE = re.compile(r"^phase3-preview: v1$", re.MULTILINE)
+PHASE3_NOUN_RE = re.compile(r"^would-(?:touch|write|file): ", re.MULTILINE)
 
 
 def marker_path(vault: Path, kind: str, meeting_id: str) -> Path:
@@ -52,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
     if missing:
         print(f"dry-run capture missing nouns: {missing}", file=sys.stderr)
         return 1
-    phase3_ok = all(n in text for n in PHASE3_NOUNS)
+    phase3_ok = bool(PHASE3_HEADER_RE.search(text)) and bool(PHASE3_NOUN_RE.search(text))
     marker = marker_path(Path(args.vault), "fireflies", meeting_id)
     envelope = marker.parent
     # Finding 4c: progress.validate_sign_marker() now requires capture_path

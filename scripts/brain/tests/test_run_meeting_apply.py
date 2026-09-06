@@ -359,21 +359,51 @@ def _write_capture(tmp_path: Path) -> Path:
     return capture
 
 
-def _write_phase3_capture(tmp_path: Path) -> Path:
+def _write_phase3_capture(
+    tmp_path: Path, vault: Path, repo: Path, mid: str, env: dict[str, str] | None = None
+) -> Path:
+    """CH-9: this used to hand-write the three phase-3 nouns directly into
+    the capture file, so the sign/apply integration tests never actually
+    exercised `_run_dry`'s real preview path — a regression there could
+    slip through with every test still green. Run the REAL `_run_dry` (via
+    `run_meeting.main([..., "--dry-run", ...])`, in-process, stdout
+    captured) against the fixture and write THAT as the capture instead.
+
+    `env["PATH"]` (when a caller has already built one, e.g. to add a real
+    `node` for the one fixture that reaches FR-011's tsx subprocess) is
+    applied to the real process environment for the duration of the call —
+    `_run_dry`'s STATUS_PLAN subprocess reads `os.environ` directly, not a
+    passed-in env, so a subprocess-only `env` dict has no effect on it."""
+    import contextlib
+    import io
+
+    import run_meeting
+
+    original_path = os.environ.get("PATH")
+    if env is not None and "PATH" in env:
+        os.environ["PATH"] = env["PATH"]
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            rc = run_meeting.main([
+                "--meeting-id", f"fireflies:{mid}", "--dry-run",
+                "--repo-root", str(repo), "--vault", str(vault),
+            ])
+    finally:
+        if original_path is None:
+            os.environ.pop("PATH", None)
+        else:
+            os.environ["PATH"] = original_path
+    output = buf.getvalue()
+    assert rc == 0, output
+    assert "phase3-preview: v1" in output, output
+    if not (vault / "raw/areas/clearworks/org-brain/projects/alloi-01.md").is_file():
+        # The standard _seed_apply_vault fixture never seeds the alloi-03
+        # parent (alloi-01) as a real node — FR-011's engagement lookup must
+        # resolve empty and the real code must print this exact skip line.
+        assert "would-write: skip: no-engagement" in output, output
     capture = tmp_path / "dry-run-phase3.txt"
-    capture.write_text(
-        "home=projects/alloi-03.md node=alloi-03 rule=2 created=none promotion=none\n"
-        "--- a/projects/alloi-03.md\n+++ b/projects/alloi-03.md\n"
-        "quotes kept decisions=1 commitments=1 open_questions=0 dropped={}\n"
-        "tasks:\nSend the tactical report draft · owner: Josh · due 2026-09-08\n"
-        "subject: Recap: Weekly tacticals review — 2026-09-04\n"
-        "would-touch: clients/alloi.md (engagements-rollup)\n"
-        "would-touch: STATE.md (state)\n"
-        "would-write: raw/areas/clearworks/clients/alloi/status-update-2026-09-04.md\n"
-        "would-file: 2026-09-04 filed \"Weekly tacticals review\" under alloi-03 "
-        "→ alloi-03 (rule 2, conf 1.0) fireflies:" + MID + "\n",
-        encoding="utf-8",
-    )
+    capture.write_text(output, encoding="utf-8")
     return capture
 
 
@@ -462,7 +492,7 @@ def test_apply_recovers_task_map_from_bus_when_fanout_dedup_skips_after_lost_che
     env["PATH"] = f"{bindir}:{env['PATH']}"
     env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
     (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
-    _sign_for_restart_test(vault, mid, tmp_path, env)
+    _sign_for_restart_test(vault, mid, tmp_path, env, repo)
 
     result = subprocess.run(
         [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
@@ -510,7 +540,7 @@ def test_apply_exits_8_when_fanout_dedup_skips_and_bus_has_no_matching_task(tmp_
     env["PATH"] = f"{bindir}:{env['PATH']}"
     env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
     (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
-    _sign_for_restart_test(vault, mid, tmp_path, env)
+    _sign_for_restart_test(vault, mid, tmp_path, env, repo)
 
     result = subprocess.run(
         [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
@@ -565,7 +595,7 @@ def test_apply_partial_task_map_recovers_only_the_still_unmapped_commitment(tmp_
     env["PATH"] = f"{bindir}:{env['PATH']}"
     env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
     (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
-    _sign_for_restart_test(vault, mid, tmp_path, env)
+    _sign_for_restart_test(vault, mid, tmp_path, env, repo)
 
     prog_path = progress.progress_path(vault, "fireflies", mid)
     progress.merge_progress(prog_path, "tasks", {
@@ -600,7 +630,7 @@ def _run_apply_with_fake_writeback(tmp_path: Path, wb_exit: int, wb_stderr: str)
     env["PATH"] = f"{bindir}:{env['PATH']}"
     env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
     (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
-    _sign_for_restart_test(vault, mid, tmp_path, env)
+    _sign_for_restart_test(vault, mid, tmp_path, env, repo)
 
     fake_wb = tmp_path / "fake_writeback.py"
     fake_wb.write_text(
@@ -662,7 +692,7 @@ def test_apply_restart_and_force_are_zero_new_writes(tmp_path):
     sign = subprocess.run(
         [sys.executable, str(BRAIN / "sign_dry_run.py"), "--meeting-id", mid, "--vault", str(vault),
          "--signed-by", "Josh", "--signed-at", "2026-09-05T00:00:00Z",
-         "--dry-run-capture", str(_write_phase3_capture(tmp_path))],
+         "--dry-run-capture", str(_write_phase3_capture(tmp_path, vault, repo, mid, env))],
         capture_output=True, text=True, env=env,
     )
     assert sign.returncode == 0, sign.stderr
@@ -745,7 +775,7 @@ def test_apply_ledger_already_skipped_recovers_subject_and_still_passes_minimums
     sign = subprocess.run(
         [sys.executable, str(BRAIN / "sign_dry_run.py"), "--meeting-id", mid, "--vault", str(vault),
          "--signed-by", "Josh", "--signed-at", "2026-09-05T00:00:00Z",
-         "--dry-run-capture", str(_write_phase3_capture(tmp_path))],
+         "--dry-run-capture", str(_write_phase3_capture(tmp_path, vault, repo, mid, env))],
         capture_output=True, text=True, env=env,
     )
     assert sign.returncode == 0, sign.stderr
@@ -785,7 +815,7 @@ def test_apply_recap_recovers_real_subject_from_ledger_tab_row(tmp_path):
     sign = subprocess.run(
         [sys.executable, str(BRAIN / "sign_dry_run.py"), "--meeting-id", mid, "--vault", str(vault),
          "--signed-by", "Josh", "--signed-at", "2026-09-05T00:00:00Z",
-         "--dry-run-capture", str(_write_phase3_capture(tmp_path))],
+         "--dry-run-capture", str(_write_phase3_capture(tmp_path, vault, repo, mid, env))],
         capture_output=True, text=True, env=env,
     )
     assert sign.returncode == 0, sign.stderr
@@ -835,7 +865,7 @@ def test_apply_exits_9_when_decisions_shortfall_blocks_commit_before_vault_write
     sign = subprocess.run(
         [sys.executable, str(BRAIN / "sign_dry_run.py"), "--meeting-id", mid, "--vault", str(vault),
          "--signed-by", "Josh", "--signed-at", "2026-09-05T00:00:00Z",
-         "--dry-run-capture", str(_write_phase3_capture(tmp_path))],
+         "--dry-run-capture", str(_write_phase3_capture(tmp_path, vault, repo, mid, env))],
         capture_output=True, text=True, env=env,
     )
     assert sign.returncode == 0, sign.stderr
@@ -884,7 +914,7 @@ def test_apply_non_acceptance_meeting_never_blocked_by_minimums_shortfall(tmp_pa
     sign = subprocess.run(
         [sys.executable, str(BRAIN / "sign_dry_run.py"), "--meeting-id", mid, "--vault", str(vault),
          "--signed-by", "Josh", "--signed-at", "2026-09-05T00:00:00Z",
-         "--dry-run-capture", str(_write_phase3_capture(tmp_path))],
+         "--dry-run-capture", str(_write_phase3_capture(tmp_path, vault, repo, mid, env))],
         capture_output=True, text=True, env=env,
     )
     assert sign.returncode == 0, sign.stderr
@@ -917,17 +947,21 @@ def test_acceptance_meeting_ids_default_and_env_override(monkeypatch):
     assert run_meeting._acceptance_meeting_ids() == {"abc", "def", "ghi"}
 
 
-def _sign_for_restart_test(vault: Path, mid: str, tmp_path: Path, env: dict) -> None:
+def _sign_for_restart_test(vault: Path, mid: str, tmp_path: Path, env: dict, repo: Path) -> None:
     # Task 5 landed: sign_dry_run.py itself sets phase3_capture_sha256 when
     # the reviewed capture contains the phase-3 preview nouns, so signing
     # against _write_phase3_capture's fixture (rather than the R2-only
     # _write_capture) is now real end-to-end coverage of Task 4's gate,
     # replacing the interim _stamp_phase3_capture hand-stamp this helper
     # used before Task 5 existed.
+    #
+    # CH-9: _write_phase3_capture now runs the real `_run_dry` rather than
+    # hand-writing the phase-3 nouns — it needs vault/repo/mid/env to do
+    # that, hence the added `repo` parameter here.
     sign = subprocess.run(
         [sys.executable, str(BRAIN / "sign_dry_run.py"), "--meeting-id", mid, "--vault", str(vault),
          "--signed-by", "Josh", "--signed-at", "2026-09-05T00:00:00Z",
-         "--dry-run-capture", str(_write_phase3_capture(tmp_path))],
+         "--dry-run-capture", str(_write_phase3_capture(tmp_path, vault, repo, mid, env))],
         capture_output=True, text=True, env=env,
     )
     assert sign.returncode == 0, sign.stderr
@@ -970,7 +1004,7 @@ def test_apply_rejects_when_source_changed_after_signoff(tmp_path):
     env["PATH"] = f"{bindir}:{env['PATH']}"
     env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
     (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
-    _sign_for_restart_test(vault, mid, tmp_path, env)
+    _sign_for_restart_test(vault, mid, tmp_path, env, repo)
 
     env_dir = vault / "raw/media/transcripts/fireflies" / mid
     source_path = env_dir / "source.json"
@@ -1025,7 +1059,7 @@ def test_apply_restart_resumes_after_writeback_when_marker_present_leaves_page_u
     env["PATH"] = f"{bindir}:{env['PATH']}"
     env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
     (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
-    _sign_for_restart_test(vault, mid, tmp_path, env)
+    _sign_for_restart_test(vault, mid, tmp_path, env, repo)
 
     home_page = vault / "raw/areas/clearworks/org-brain/projects/alloi-03.md"
     home_page.write_text(
@@ -1093,7 +1127,7 @@ def test_apply_restart_redoes_writeback_when_bogus_checkpoint_has_no_marker(tmp_
     env["PATH"] = f"{bindir}:{env['PATH']}"
     env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
     (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
-    _sign_for_restart_test(vault, mid, tmp_path, env)
+    _sign_for_restart_test(vault, mid, tmp_path, env, repo)
 
     home_page = vault / "raw/areas/clearworks/org-brain/projects/alloi-03.md"
     before_bytes = home_page.read_bytes()  # no [source: ...] marker — bogus checkpoint
@@ -1171,7 +1205,7 @@ def test_apply_runs_phase3_rollup_status_filed_before_commit(tmp_path):
     sign = subprocess.run(
         [sys.executable, str(BRAIN / "sign_dry_run.py"), "--meeting-id", mid, "--vault", str(vault),
          "--signed-by", "Josh", "--signed-at", "2026-09-05T00:00:00Z",
-         "--dry-run-capture", str(_write_phase3_capture(tmp_path))],
+         "--dry-run-capture", str(_write_phase3_capture(tmp_path, vault, repo, mid, env))],
         capture_output=True, text=True, env=env,
     )
     assert sign.returncode == 0, sign.stderr
@@ -1214,7 +1248,7 @@ def test_existing_r2_fixtures_skip_status_update_no_engagement_no_subprocess(tmp
     sign = subprocess.run(
         [sys.executable, str(BRAIN / "sign_dry_run.py"), "--meeting-id", mid, "--vault", str(vault),
          "--signed-by", "Josh", "--signed-at", "2026-09-05T00:00:00Z",
-         "--dry-run-capture", str(_write_phase3_capture(tmp_path))],
+         "--dry-run-capture", str(_write_phase3_capture(tmp_path, vault, repo, mid, env))],
         capture_output=True, text=True, env=env,
     )
     assert sign.returncode == 0, sign.stderr

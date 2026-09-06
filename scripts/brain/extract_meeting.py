@@ -165,6 +165,21 @@ def _forbid_unknown_string(value: Any, where: str) -> None:
         raise ValueError(f"illegal enum unknown at {where}")
 
 
+# CH-7: decisions[].text, commitments[].text/owner_name, and
+# open_questions[].text/owner all flow unescaped into writeback_render's
+# History block, meeting-note rendering, and the Open Items table
+# (adapt_meeting.py never strips or re-splits them). A value containing
+# newlines (e.g. "Question?\n\n## History") injects Markdown structure into
+# a canonical vault page. Reject any control character — not just "\n" —
+# so a lone "\r" or other C0 control can't slip past a naive "\n" check.
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0a-\x1f\x7f]")
+
+
+def _require_single_line(value: Any, where: str) -> None:
+    if isinstance(value, str) and _CONTROL_CHAR_RE.search(value):
+        raise ValueError(f"{where}: must be single-line")
+
+
 def validate_extraction(obj: dict[str, Any], *, stamped: bool = True) -> None:
     if not isinstance(obj, dict):
         raise ValueError("extraction is not an object")
@@ -200,6 +215,7 @@ def validate_extraction(obj: dict[str, Any], *, stamped: bool = True) -> None:
         if not isinstance(dec, dict) or set(dec) - {"text", "quote"}:
             raise ValueError(f"decisions[{i}]")
         _forbid_unknown_string(dec.get("text"), f"decisions[{i}].text")
+        _require_single_line(dec.get("text"), f"decisions[{i}].text")
     open_questions = obj.get("open_questions") or []
     if not isinstance(open_questions, list):
         raise ValueError("open_questions")
@@ -210,6 +226,8 @@ def validate_extraction(obj: dict[str, Any], *, stamped: bool = True) -> None:
         if not isinstance(oq, dict) or set(oq) - {"text", "quote", "owner"}:
             raise ValueError(f"open_questions[{i}]")
         _forbid_unknown_string(oq.get("text"), f"open_questions[{i}].text")
+        _require_single_line(oq.get("text"), f"open_questions[{i}].text")
+        _require_single_line(oq.get("owner"), f"open_questions[{i}].owner")
     commitments = obj.get("commitments") or []
     _validate_against_schema(
         commitments, EXTRACTION_SCHEMA["properties"]["commitments"], "commitments"
@@ -220,6 +238,11 @@ def validate_extraction(obj: dict[str, Any], *, stamped: bool = True) -> None:
         extra_c = set(c) - {"text", "owner_participant", "owner_name", "deadline_iso", "quote"}
         if extra_c:
             raise ValueError(f"commitments[{i}] unknown keys")
+        # CH-7: decisions/commitments carry the identical rendering exposure
+        # as open_questions (writeback History block + Open Items table) —
+        # apply the same single-line rule here too.
+        _require_single_line(c.get("text"), f"commitments[{i}].text")
+        _require_single_line(c.get("owner_name"), f"commitments[{i}].owner_name")
     pds = obj.get("proposed_delivery_state")
     if pds is not None:
         if not isinstance(pds, dict) or set(pds) - {"state", "quote"}:

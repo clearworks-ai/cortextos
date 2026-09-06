@@ -662,11 +662,10 @@ def test_apply_restart_and_force_are_zero_new_writes(tmp_path):
     sign = subprocess.run(
         [sys.executable, str(BRAIN / "sign_dry_run.py"), "--meeting-id", mid, "--vault", str(vault),
          "--signed-by", "Josh", "--signed-at", "2026-09-05T00:00:00Z",
-         "--dry-run-capture", str(_write_capture(tmp_path))],
+         "--dry-run-capture", str(_write_phase3_capture(tmp_path))],
         capture_output=True, text=True, env=env,
     )
     assert sign.returncode == 0, sign.stderr
-    _stamp_phase3_capture(vault, mid)
 
     def run_apply(*extra: str) -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -746,11 +745,10 @@ def test_apply_ledger_already_skipped_recovers_subject_and_still_passes_minimums
     sign = subprocess.run(
         [sys.executable, str(BRAIN / "sign_dry_run.py"), "--meeting-id", mid, "--vault", str(vault),
          "--signed-by", "Josh", "--signed-at", "2026-09-05T00:00:00Z",
-         "--dry-run-capture", str(_write_capture(tmp_path))],
+         "--dry-run-capture", str(_write_phase3_capture(tmp_path))],
         capture_output=True, text=True, env=env,
     )
     assert sign.returncode == 0, sign.stderr
-    _stamp_phase3_capture(vault, mid)
 
     ledger = vault / "raw/media/transcripts/_recap-ledger.txt"
     ledger.parent.mkdir(parents=True, exist_ok=True)
@@ -787,11 +785,10 @@ def test_apply_recap_recovers_real_subject_from_ledger_tab_row(tmp_path):
     sign = subprocess.run(
         [sys.executable, str(BRAIN / "sign_dry_run.py"), "--meeting-id", mid, "--vault", str(vault),
          "--signed-by", "Josh", "--signed-at", "2026-09-05T00:00:00Z",
-         "--dry-run-capture", str(_write_capture(tmp_path))],
+         "--dry-run-capture", str(_write_phase3_capture(tmp_path))],
         capture_output=True, text=True, env=env,
     )
     assert sign.returncode == 0, sign.stderr
-    _stamp_phase3_capture(vault, mid)
 
     real_subject = "Recap: Weekly tacticals review — 2026-09-04"
     ledger = vault / "raw/media/transcripts/_recap-ledger.txt"
@@ -838,11 +835,10 @@ def test_apply_exits_9_when_decisions_shortfall_blocks_commit_before_vault_write
     sign = subprocess.run(
         [sys.executable, str(BRAIN / "sign_dry_run.py"), "--meeting-id", mid, "--vault", str(vault),
          "--signed-by", "Josh", "--signed-at", "2026-09-05T00:00:00Z",
-         "--dry-run-capture", str(_write_capture(tmp_path))],
+         "--dry-run-capture", str(_write_phase3_capture(tmp_path))],
         capture_output=True, text=True, env=env,
     )
     assert sign.returncode == 0, sign.stderr
-    _stamp_phase3_capture(vault, mid)
 
     pre_head = _git(vault, "rev-parse", "HEAD").stdout.strip()
 
@@ -888,11 +884,10 @@ def test_apply_non_acceptance_meeting_never_blocked_by_minimums_shortfall(tmp_pa
     sign = subprocess.run(
         [sys.executable, str(BRAIN / "sign_dry_run.py"), "--meeting-id", mid, "--vault", str(vault),
          "--signed-by", "Josh", "--signed-at", "2026-09-05T00:00:00Z",
-         "--dry-run-capture", str(_write_capture(tmp_path))],
+         "--dry-run-capture", str(_write_phase3_capture(tmp_path))],
         capture_output=True, text=True, env=env,
     )
     assert sign.returncode == 0, sign.stderr
-    _stamp_phase3_capture(vault, mid)
 
     result = subprocess.run(
         [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
@@ -922,34 +917,20 @@ def test_acceptance_meeting_ids_default_and_env_override(monkeypatch):
     assert run_meeting._acceptance_meeting_ids() == {"abc", "def", "ghi"}
 
 
-def _stamp_phase3_capture(vault: Path, mid: str) -> None:
-    """Deviation (Task 4/Task 5 boundary): `progress.validate_phase3_capture`
-    (this task) requires a `phase3_capture_sha256` field on the SAME
-    d09-signed.json marker `validate_sign_marker` already checks — but
-    `sign_dry_run.py` (Task 5's exclusive file, D-09 phase-3 re-sign CLI) is
-    the thing that writes it, and Task 5 has not landed yet. Rather than
-    touch sign_dry_run.py out of scope, hand-stamp the same field directly
-    onto the real marker sign_dry_run.py just wrote, hashed from the exact
-    bytes of the capture file it already bound via `capture_path` — this
-    exercises Task 4's own gate (which only re-verifies the hash against the
-    capture file's CURRENT bytes, never its noun content) faithfully end to
-    end for every test that runs the full --apply path past FR-008."""
-    marker = marker_path(vault, "fireflies", mid)
-    doc = json.loads(marker.read_text(encoding="utf-8"))
-    capture_file = Path(doc["capture_path"])
-    doc["phase3_capture_sha256"] = hashlib.sha256(capture_file.read_bytes()).hexdigest()
-    atomic_write(marker, json.dumps(doc, sort_keys=True).encode("utf-8"))
-
-
 def _sign_for_restart_test(vault: Path, mid: str, tmp_path: Path, env: dict) -> None:
+    # Task 5 landed: sign_dry_run.py itself sets phase3_capture_sha256 when
+    # the reviewed capture contains the phase-3 preview nouns, so signing
+    # against _write_phase3_capture's fixture (rather than the R2-only
+    # _write_capture) is now real end-to-end coverage of Task 4's gate,
+    # replacing the interim _stamp_phase3_capture hand-stamp this helper
+    # used before Task 5 existed.
     sign = subprocess.run(
         [sys.executable, str(BRAIN / "sign_dry_run.py"), "--meeting-id", mid, "--vault", str(vault),
          "--signed-by", "Josh", "--signed-at", "2026-09-05T00:00:00Z",
-         "--dry-run-capture", str(_write_capture(tmp_path))],
+         "--dry-run-capture", str(_write_phase3_capture(tmp_path))],
         capture_output=True, text=True, env=env,
     )
     assert sign.returncode == 0, sign.stderr
-    _stamp_phase3_capture(vault, mid)
 
 
 def test_apply_rejects_marker_missing_source_binding_fields(tmp_path):
@@ -1194,7 +1175,6 @@ def test_apply_runs_phase3_rollup_status_filed_before_commit(tmp_path):
         capture_output=True, text=True, env=env,
     )
     assert sign.returncode == 0, sign.stderr
-    _stamp_phase3_capture(vault, mid)
 
     r = subprocess.run(
         [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
@@ -1238,7 +1218,6 @@ def test_existing_r2_fixtures_skip_status_update_no_engagement_no_subprocess(tmp
         capture_output=True, text=True, env=env,
     )
     assert sign.returncode == 0, sign.stderr
-    _stamp_phase3_capture(vault, mid)
 
     r = subprocess.run(
         [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,

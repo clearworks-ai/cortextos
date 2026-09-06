@@ -19,6 +19,12 @@ from paths import DEFAULT_VAULT, envelope_dir, safe_meeting_id
 # produces), quotes kept/dropped, task list, draft subject. G0a F-12.
 FR012_NOUNS = ("home=", "--- a/", "quotes kept", "tasks:", "subject:")
 
+# G0a F-9 ruling: phase 3's three new writers (rollup region, status
+# artifact, filed digest) predate FR-012 line 324's noun list. A capture
+# taken before this release's dry-run extension existed cannot contain
+# these — that is the exact stale-marker case this field exists to catch.
+PHASE3_NOUNS = ("would-touch:", "would-write:", "would-file:")
+
 
 def marker_path(vault: Path, kind: str, meeting_id: str) -> Path:
     return Path(vault) / "raw/media/transcripts/_state" / f"{kind}-{meeting_id}" / "d09-signed.json"
@@ -46,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     if missing:
         print(f"dry-run capture missing nouns: {missing}", file=sys.stderr)
         return 1
+    phase3_ok = all(n in text for n in PHASE3_NOUNS)
     marker = marker_path(Path(args.vault), "fireflies", meeting_id)
     envelope = marker.parent
     # Finding 4c: progress.validate_sign_marker() now requires capture_path
@@ -103,6 +110,9 @@ def main(argv: list[str] | None = None) -> int:
         "capture": str(capture),
         "capture_path": str(capture_for_marker),
         "capture_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        "phase3_capture_sha256": (
+            hashlib.sha256(text.encode("utf-8")).hexdigest() if phase3_ok else None
+        ),
         "source_sha256": source_sha256,
         "extraction_input_sha": extraction_input_sha,
         "written_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),

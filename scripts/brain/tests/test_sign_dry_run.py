@@ -219,6 +219,62 @@ def test_sign_dry_run_records_null_binding_fields_when_envelope_data_absent(tmp_
     assert doc["extraction_input_sha"] is None
 
 
+def test_sign_dry_run_sets_phase3_hash_when_nouns_present(tmp_path: Path) -> None:
+    # G0a F-9 ruling (Task 5): a capture containing the phase-3 preview
+    # nouns Task 4 added to _run_dry (would-touch:/would-write:/
+    # would-file:) must get a phase3_capture_sha256 alongside the existing
+    # R2-era capture_sha256.
+    from sign_dry_run import main as sign_main, marker_path
+
+    vault = tmp_path / "vault"
+    (vault / "raw/media/transcripts/fireflies/MID").mkdir(parents=True)
+    capture = tmp_path / "dry-run.txt"
+    capture.write_text(
+        "home=projects/alloi-03.md node=alloi-03 rule=2 created=none promotion=none\n"
+        "--- a/x\n+++ b/x\nquotes kept decisions=1 commitments=1 dropped={}\n"
+        "tasks:\nsubject: Recap: x\n"
+        "would-touch: clients/alloi.md (engagements-rollup)\n"
+        "would-write: raw/areas/clearworks/clients/alloi/status-update-2026-09-10.md\n"
+        'would-file: 2026-09-10 filed "x" under alloi-03 fireflies:MID\n',
+        encoding="utf-8",
+    )
+    rc = sign_main([
+        "--meeting-id", "MID", "--vault", str(vault), "--signed-by", "Josh",
+        "--signed-at", "2026-09-05T00:00:00Z", "--dry-run-capture", str(capture),
+    ])
+    assert rc == 0
+    marker = json.loads(marker_path(vault, "fireflies", "MID").read_text(encoding="utf-8"))
+    assert marker["phase3_capture_sha256"]
+
+
+def test_sign_dry_run_leaves_phase3_hash_null_for_r2_era_capture(tmp_path: Path) -> None:
+    """The exact stale-marker scenario: a capture taken before this release
+    existed, containing only the R2-era five nouns and none of the new
+    phase-3 preview lines."""
+    from sign_dry_run import main as sign_main, marker_path
+
+    vault = tmp_path / "vault"
+    (vault / "raw/media/transcripts/fireflies/MID").mkdir(parents=True)
+    capture = tmp_path / "dry-run-r2.txt"
+    capture.write_text(
+        "home=projects/alloi-03.md node=alloi-03 rule=2 created=none promotion=none\n"
+        "--- a/x\n+++ b/x\nquotes kept decisions=1 commitments=1 dropped={}\n"
+        "tasks:\nsubject: Recap: x\n",
+        encoding="utf-8",
+    )
+    rc = sign_main([
+        "--meeting-id", "MID", "--vault", str(vault), "--signed-by", "Josh",
+        "--signed-at", "2026-09-05T00:00:00Z", "--dry-run-capture", str(capture),
+    ])
+    assert rc == 0
+    marker = json.loads(marker_path(vault, "fireflies", "MID").read_text(encoding="utf-8"))
+    assert marker.get("phase3_capture_sha256") is None
+
+    from progress import validate_phase3_capture
+
+    assert validate_phase3_capture(marker_path(vault, "fireflies", "MID")) == "phase-3 capture unsigned"
+
+
 def test_sign_dry_run_rejects_unknown_signer(tmp_path):
     # Finding 4b: sign_dry_run.py's own output must also fail
     # validate_sign_marker's allowlist check for a non-allowlisted signer —

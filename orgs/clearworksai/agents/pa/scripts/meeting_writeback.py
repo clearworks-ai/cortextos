@@ -36,6 +36,12 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+_BRAIN_DIR = Path(__file__).resolve().parents[5] / "scripts" / "brain"
+if str(_BRAIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_BRAIN_DIR))
+from atomic import atomic_write  # noqa: E402
+from writeback_render import payload_has_resolution, planned_files, print_dry_run  # noqa: E402
+
 
 @contextlib.contextmanager
 def client_file_lock(client_path: Path):
@@ -552,6 +558,85 @@ def process_writeback(
     }
 
 
+def _load_ledger_ids(ledger_path: Path) -> set[str]:
+    if not ledger_path.exists():
+        return set()
+    return {
+        line.strip().split()[0]
+        for line in ledger_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    }
+
+
+def _append_ledger_atomic(ledger_path: Path, key: str) -> None:
+    """G0b C2-1 (D-15 spec line 58 / FR-005 line 192): every resolution-mode
+    write is temp + os.replace — including the ledger append, which was a
+    bare `open(..., "a")` in the round-2 draft. `atomic_write` is already
+    imported above (used for the home/note writes); reused here rather than
+    a separate 6-line helper since it's confirmed importable from this
+    file's location."""
+    existing = ledger_path.read_text(encoding="utf-8") if ledger_path.exists() else ""
+    if existing and not existing.endswith("\n"):
+        existing += "\n"
+    atomic_write(ledger_path, (existing + f"{key}\n").encode("utf-8"))
+
+
+def apply_resolution(payload: dict, *, org_root: Path, ledger_path: Path) -> dict:
+    """FR-005 --apply: write every planned file atomically, idempotent on
+    [source: <kind>:<id>]. Raises SystemExit(7) on a genuine create-conflict
+    (resolution.created is set but the target page already exists and does not
+    carry our marker — see Task 3)."""
+    meetings = payload.get("meetings") or []
+    written: list[str] = []
+    skipped: list[str] = []
+    created: list[str] = []
+    ledger_ids = _load_ledger_ids(ledger_path)
+    for meeting in meetings:
+        if not isinstance(meeting, dict):
+            continue
+        mid = str(meeting.get("id") or "")
+        # G0b C2-2 (D-16 spec line 59 / FR-005 line 192): writeback is
+        # source-agnostic — the idempotency key comes from the payload's own
+        # source{kind,id} (adapt_meeting.py emits it, Task 6), never a
+        # hardcoded "fireflies:" literal. Fail loud (not a silently wrong
+        # key) if a resolution-mode payload is missing it — every payload
+        # apply_resolution() receives has gone through the R2 adapter, which
+        # always sets this field.
+        src = meeting.get("source") or {}
+        if not isinstance(src, dict) or not src.get("kind") or not src.get("id"):
+            print(f"apply_resolution: meeting {mid!r} missing source.kind/source.id (D-16)", file=sys.stderr)
+            raise SystemExit(1)
+        key = f"{src['kind']}:{src['id']}"
+        res = meeting.get("resolution") or {}
+        is_create = bool(isinstance(res, dict) and res.get("created"))
+        planned = planned_files(org_root, meeting)
+        home_path, old_home, new_home = planned[0]
+        note_path, old_note, new_note = planned[1]
+        marker = f"[source: {key}]"
+        if is_create and old_home and marker not in old_home:
+            raise SystemExit(7)
+        with client_file_lock(home_path):
+            if marker in old_home:
+                skipped.append(str(home_path))
+            else:
+                atomic_write(home_path, new_home.encode("utf-8"))
+                written.append(str(home_path))
+                if is_create:
+                    created.append(str(home_path))
+        if old_note:
+            skipped.append(str(note_path))
+        else:
+            atomic_write(note_path, new_note.encode("utf-8"))
+            written.append(str(note_path))
+        if key in ledger_ids:
+            skipped.append(f"ledger:{key}")
+        else:
+            _append_ledger_atomic(ledger_path, key)
+            ledger_ids.add(key)
+            written.append(f"ledger:{key}")
+    return {"written": written, "created": created, "skipped": skipped}
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="File meeting intelligence into knowledge/meetings + knowledge/clients")
     parser.add_argument("--payload", default="/tmp/ff-writeback.json")
@@ -569,13 +654,15 @@ def main(argv: list[str] | None = None) -> int:
 
     payload = json.loads(Path(args.payload).read_text(encoding="utf-8"))
 
-    brain_dir = Path(__file__).resolve().parents[5] / "scripts" / "brain"
-    if str(brain_dir) not in sys.path:
-        sys.path.insert(0, str(brain_dir))
-    from writeback_render import payload_has_resolution, print_dry_run
-
     if args.apply:
-        print("R1: --apply refused until goal-brain-source-to-state-r2-apply", file=sys.stderr)
+        if payload_has_resolution(payload):
+            try:
+                result = apply_resolution(payload, org_root=org_root, ledger_path=ledger_path)
+            except SystemExit as exc:
+                return int(exc.code) if isinstance(exc.code, int) else 7
+            print(json.dumps(result))
+            return 0
+        print("R1: --apply refused for legacy (no-resolution) payloads until R2 wiring", file=sys.stderr)
         return 64
     if args.dry_run:
         print_dry_run(org_root, payload)

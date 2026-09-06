@@ -174,3 +174,27 @@ def test_make_variant_default_protected_vaults_names_real_knowledge_sync() -> No
     from make_variant import PROTECTED_VAULTS
 
     assert any(str(p) == "/Users/joshweiss/code/knowledge-sync" for p in PROTECTED_VAULTS)
+
+
+def test_main_cli_refusal_path_exits_2(tmp_path: Path, monkeypatch, capsys) -> None:
+    """S-1: main() calls sys.stderr on the refusal path but is invoked
+    programmatically here (never through `if __name__ == "__main__":`), so
+    `sys` must be a real module-level import, not one scoped to that guard —
+    otherwise this raises NameError instead of returning the refusal code."""
+    import make_variant as mv
+
+    fake_protected = tmp_path / "protected-knowledge-sync"
+    fake_protected.mkdir()
+    monkeypatch.setattr(mv, "PROTECTED_VAULTS", (fake_protected,))
+    source_vault = _seed_source_vault(tmp_path)
+
+    rc = mv.main([
+        "--meeting-id", MID,
+        "--vault", str(source_vault),
+        "--dest", str(fake_protected / "copy"),
+        "--variant", "A",
+    ])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "refused:" in err
+    assert list(fake_protected.iterdir()) == []

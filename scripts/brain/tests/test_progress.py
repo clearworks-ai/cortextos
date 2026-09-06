@@ -795,13 +795,12 @@ def test_fr014_pathspec_backward_compatible_without_phase3_args() -> None:
     assert "raw/areas/clearworks/org-brain/_filed.log" not in spec
 
 
-def test_validate_phase3_capture_missing_field() -> None:
+def test_validate_phase3_capture_missing_field(tmp_path: Path) -> None:
     from progress import validate_phase3_capture
 
-    path = Path("/tmp/test_d09_phase3_missing.json")
-    path.write_text(json.dumps({"signed_by": "Josh", "capture_path": "/tmp/x"}), encoding="utf-8")
+    path = tmp_path / "test_d09_phase3_missing.json"
+    path.write_text(json.dumps({"signed_by": "Josh", "capture_path": str(tmp_path / "x")}), encoding="utf-8")
     assert validate_phase3_capture(path) == "phase-3 capture unsigned"
-    path.unlink()
 
 
 def test_validate_phase3_capture_matches_hashed_file(tmp_path: Path) -> None:

@@ -252,8 +252,8 @@ def _run_dry(meeting_id: str, vault: Path, repo: Path, source_dir: Path) -> int:
     try:
         nodes = brain_rollup.load_nodes(vault)
     except brain_rollup.NodeBlockError as exc:
-        print(f"would-touch: FAILED reading ## Node blocks ({exc})")
-        nodes = {}
+        print(f"FAILED at rollup: {exc}", file=sys.stderr)
+        return 6
 
     if client_slug and any(n.get("client") == client_slug for n in nodes.values()):
         client_path = org_brain_root(vault) / "clients" / f"{client_slug}.md"
@@ -733,6 +733,7 @@ def _apply_writes(
 
     if not progress.step_done(doc, "status_update"):
         if eng_skip:
+            print(f"status: skip: {eng_skip}")
             doc = progress.merge_progress(prog_path, "status_update", {
                 "done": True, "relPath": None, "action": f"skip: {eng_skip}",
             })

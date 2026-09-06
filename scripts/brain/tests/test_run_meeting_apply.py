@@ -1227,5 +1227,8 @@ def test_existing_r2_fixtures_skip_status_update_no_engagement_no_subprocess(tmp
     assert r.returncode == 0, r.stderr + r.stdout
     prog = json.loads((vault / "raw/media/transcripts/_state" / f"fireflies-{mid}" / "progress.json").read_text(encoding="utf-8"))
     assert prog["status_update"]["action"] == "skip: no-engagement"
+    # Spec P-1: apply prints the same wording as the dry-run's
+    # "would-write: skip: no-engagement" when it records the skip.
+    assert "status: skip: no-engagement" in r.stdout
     npx_trap_log = tmp_path / "npx-tsx-trap.log"
     assert not npx_trap_log.exists() or npx_trap_log.read_text(encoding="utf-8").strip() == ""

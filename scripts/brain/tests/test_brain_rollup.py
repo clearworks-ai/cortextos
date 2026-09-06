@@ -70,10 +70,10 @@ def _seed_state_fixture(tmp_path: Path) -> Path:
     return vault
 
 
-def test_parse_node_block_reads_required_keys() -> None:
+def test_parse_node_block_reads_required_keys(tmp_path: Path) -> None:
     from brain_rollup import parse_node_block
 
-    tmp = Path("/tmp/brain_rollup_test_node.md")
+    tmp = tmp_path / "brain_rollup_test_node.md"
     tmp.write_text(
         "## Node\nid: alloi-03\nkind: project\nclient: alloi\nparent: alloi-01\ntitle: Tactical Reports\n"
         "\n## Reporting\ncadence:\n",
@@ -84,17 +84,15 @@ def test_parse_node_block_reads_required_keys() -> None:
         "id": "alloi-03", "kind": "project", "client": "alloi", "parent": "alloi-01",
         "title": "Tactical Reports",
     }
-    tmp.unlink()
 
 
-def test_parse_node_block_raises_on_missing_required_keys() -> None:
+def test_parse_node_block_raises_on_missing_required_keys(tmp_path: Path) -> None:
     from brain_rollup import NodeBlockError, parse_node_block
 
-    tmp = Path("/tmp/brain_rollup_test_bad_node.md")
+    tmp = tmp_path / "brain_rollup_test_bad_node.md"
     tmp.write_text("## Node\nid: alloi-99\n", encoding="utf-8")
     with pytest.raises(NodeBlockError):
         parse_node_block(tmp)
-    tmp.unlink()
 
 
 def test_load_nodes_skips_underscore_stems(tmp_path: Path) -> None:

@@ -175,6 +175,47 @@ def test_dry_run_prints_nouns_and_diffs(tmp_path: Path, monkeypatch: pytest.Monk
     assert not (vault / "raw/media/transcripts/_state").exists()
 
 
+def test_dry_run_node_parse_failure_exits_6_no_phase3_preview(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """G2-P1-1: a malformed ## Node block must fail the dry-run closed —
+    exit 6 with 'FAILED at rollup: <reason>' on stderr, and stdout must
+    NOT carry the phase-3 preview nouns (no signable preview on failure)."""
+    from run_meeting import main
+
+    vault, repo, mid = _seed(tmp_path)
+    (vault / "raw/areas/clearworks/org-brain/projects/broken.md").write_text(
+        "# Broken\n\n## Node\nid: broken\n",  # missing required kind/client keys
+        encoding="utf-8",
+    )
+
+    def fake_fetch(argv=None):
+        return 0
+
+    def fake_extract(argv=None):
+        return 0
+
+    monkeypatch.setattr("run_meeting.fetch_main", fake_fetch)
+    monkeypatch.setattr("run_meeting.extract_main", fake_extract)
+    rc = main(
+        [
+            "--meeting-id",
+            f"fireflies:{mid}",
+            "--dry-run",
+            "--repo-root",
+            str(repo),
+            "--vault",
+            str(vault),
+        ]
+    )
+    assert rc == 6
+    captured = capsys.readouterr()
+    assert "FAILED at rollup:" in captured.err
+    assert "would-touch:" not in captured.out
+    assert "would-write:" not in captured.out
+    assert "would-file:" not in captured.out
+
+
 def test_defaults_are_shared_checkout() -> None:
     from run_meeting import DEFAULT_REPO_ROOT, DEFAULT_VAULT
     from pathlib import Path as P

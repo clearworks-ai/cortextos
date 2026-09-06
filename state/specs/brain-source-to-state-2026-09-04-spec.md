@@ -11,7 +11,7 @@ repo: /Users/joshweiss/code/cortextos
 base-branch: feat/cortextos-backup-dr
 mockup: N/A — backend only
 claims: state/specs/brain-source-to-state-2026-09-04-claims.json
-version: 1.7
+version: 1.8
 date: 2026-09-04
 keywords:
   - org-brain
@@ -49,7 +49,7 @@ One real Fireflies meeting becomes durable canonical state and the four outputs 
 | D-06 | Extraction runtime | One headless `claude -p --setting-sources "" --disallowedTools "*" --model sonnet --output-format json --max-turns 1` call from `scripts/brain/extract_meeting.py`, run from an empty scratch cwd; no `spawn-worker`, no daemon dependency; output validated in code (`--bare` never reads keychain OAuth and requires ANTHROPIC_API_KEY, which G-29 says does not exist; `--setting-sources ""` skips hooks/plugins/CLAUDE.md while keeping keychain auth — patched 2026-09-05, Josh) | settled | roast | G-27, G-49 | Josh (RESHAPE accepted) | 2026-09-04 |
 | D-07 | Scope | Gmail recap draft, CRM interaction row, commitments→bus tasks are IN scope as deterministic projections off the same validated JSON | settled | grill | n/a | Josh | 2026-09-04 |
 | D-08 | Evidence rule | Every `decisions[]` item, every `commitments[]` item, every `open_questions[]` item, and any proposed `delivery_state` change must carry a verbatim quote that is a normalized substring of the source text; otherwise it is dropped and counted, never written. `deal_state`, `meeting_type`, and `classification` are recorded in `resolution.json` and the meeting note only — never written to canonical History, `pipeline.json`, or a page's `relationship:` beyond the rule-5/6/7/8 creation value | settled | grill | n/a | Josh | 2026-09-04 |
-| D-09 | Review gate | `--dry-run` prints a human diff (home + rule that chose it, History line, quotes kept/dropped, task list, draft subject) in the terminal and commits nothing; `--apply` writes. Mechanically: `--apply` requires `_state/<kind>-<id>/d09-signed.json` (`signed_by`, `signed_at`, `capture_sha256`) written by the orchestrator's `--sign` step after human review (v1.6). | settled | grill | n/a | Josh | 2026-09-04 |
+| D-09 | Review gate | `--dry-run` prints a human diff (home + rule that chose it, History line, quotes kept/dropped, task list, draft subject) in the terminal and commits nothing; `--apply` writes. Mechanically: `--apply` requires `_state/<kind>-<id>/d09-signed.json` (`signed_by`, `signed_at`, `capture_sha256`) written by the orchestrator's `--sign` step after human review (v1.6). Phase-3 writes (FR-007/011/013) additionally require the marker's `phase3_capture_sha256`, set by `sign_dry_run.py` only when the reviewed capture carries the phase-3 preview nouns; absent → exit 15 after the R2 steps. | settled | grill | n/a | Josh | 2026-09-04 |
 | D-10 | Branch | Code built in worktree `brain-loop` → PR into `feat/cortextos-backup-dr`; data (vault, runtime tasks, CRM jsonl) is written where it lives today via `--repo-root` / `--vault` (defaults: shared checkout, `~/code/knowledge-sync`) | directive | n/a | n/a | coordinator | 2026-09-04 |
 | D-11 | Acceptance case | `fireflies:01M1MW2GAZ1DQ0C6PG3KJ557JA` → client `alloi` → node `alloi-03` via alias (rule 2, corroborated by rule 3); variant A: aliases stripped → `clients/alloi.md`, `node: none`; variant B: `@alloi.us` participants replaced by `sam@newco-fixture.test` → `created: {kind: org, slug: newco-fixture}`; variants are `--dry-run` on a copied vault (D-18) | settled | grill | n/a | Josh | 2026-09-04 |
 | D-12 | Task owners | Only Josh / fleet-agent owners become bus tasks (Josh's land on `pa-codex` with `owner: Josh`); client-side owners stay in the recap draft, the History line, and Open Items | settled | roast | n/a | Josh (RESHAPE accepted) | 2026-09-04 |
@@ -326,7 +326,7 @@ No UI surface; mockup gate N/A.
 - WHEN `--apply` runs and `receipt.json` has `vault_sha` and `--force` is absent THE SYSTEM SHALL print `already applied: <vault_sha>` and exit 0.
 - WHEN `--apply` proceeds THE SYSTEM SHALL re-run FR-001–FR-004 (idempotent; no LLM call when `extraction.json` exists), then FR-005 `--apply` → FR-009 → FR-010 → FR-008 → (phase 3) FR-007 → FR-011 → FR-013 → commit (FR-014), each step gated and recorded per FR-014.
 - WHEN any step exits non-zero THE SYSTEM SHALL stop, print `FAILED at <step>: <reason>`, exit with that step's code — FR-001: 2, FR-002: 3, FR-003: 4/5, FR-005: 7, FR-010: 8, FR-008: 9, commit: 10, FR-009: 11, FR-004: 12, worker guard: 13, FR-011: 14, FR-007: 6, sign-check: 15 — and leave already-written files and `progress.json` in place; a re-run continues from the first step whose `progress` key is not `done`.
-- WHEN `--apply` runs and `_state/<kind>-<id>/d09-signed.json` is absent or does not name `signed_by` and `signed_at` THE SYSTEM SHALL print `FAILED at sign-check: d09-signed.json missing` and exit 15 before any write; there is no flag that bypasses this check (D-09; v1.6).
+- WHEN `--apply` runs and `_state/<kind>-<id>/d09-signed.json` is absent or does not name `signed_by` and `signed_at` THE SYSTEM SHALL print `FAILED at sign-check: d09-signed.json missing` and exit 15 before any write; there is no flag that bypasses this check (D-09; v1.6). Phase-3 writes (FR-007/011/013) additionally require the marker's `phase3_capture_sha256`, set by `sign_dry_run.py` only when the reviewed capture carries the phase-3 preview nouns; absent → exit 15 after the R2 steps.
 - WHEN `--apply --force` runs after a successful apply THE SYSTEM SHALL create zero new tasks, drafts, rows, History lines, or `_filed.log` lines; `receipt.json` SHALL differ only in `last_run_at`; and `git -C <vault> status --porcelain -- <the FR-014 pathspec>` SHALL be empty.
 - WHEN the cortextos daemon is not running THE SYSTEM SHALL complete `--apply` (no step uses IPC: G-20, G-12, G-60).
 - WHEN `cortextos restart` follows an `--apply` THE SYSTEM SHALL still satisfy: recomputed sha256 of `source.json` equals `source.sha256`, the History line is present with its citation, `receipt.json` has `vault_sha`, and no new `interactions.jsonl` row or task appears for this meeting.
@@ -509,6 +509,7 @@ Probed against: local checkout `/Users/joshweiss/code/cortextos` @ `feat/cortext
 **For plan mode:** start from §4a + §4 + §7.
 
 ## Changelog
+- **2026-09-06** — v1.8 patch. D-09/FR-012: phase-3 re-sign gate (phase3_capture_sha256) documented (G0a F-9 ruling, reviewify P-2).
 - **2026-09-06** — v1.7 patch. `open_questions` added to extraction.json (D-08 quote gate), meeting note, History sub-line, recap block, dry-run line (Josh scope add 2026-09-05; implemented afb0589f).
 - **2026-09-04** — v1.0. Mode=standard. Roast RESHAPE. Probed 37 claims (37 VERIFIED). Round 1 dispatched (Codex + Fable).
 - **2026-09-04** — v1.1. Round 1 merged: Codex (4 ledger corrections, 21 unrecorded assumptions, 3 bucket corrections) + Fable (3 CRITICAL, 13 HIGH, 14 MEDIUM, 8 LOW). Ledger 48 rows. FRs covered: FR-001–FR-013.

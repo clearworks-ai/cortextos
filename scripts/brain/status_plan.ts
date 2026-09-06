@@ -244,11 +244,16 @@ export function main(argv: string[]): number {
   const tmp = `${destPath}.tmp-${process.pid}`;
   writeFileSync(tmp, target.fileContent);
   renameSync(tmp, destPath);
-  const newEngagementMd = setLastUpdate(engagementMd, today);
-  if (newEngagementMd !== engagementMd) {
-    const engTmp = `${engagement.path}.tmp-${process.pid}`;
-    writeFileSync(engTmp, newEngagementMd);
-    renameSync(engTmp, engagement.path);
+  // G2-P1-2: last_update tracks CLIENT-VISIBLE status draft delivery only —
+  // a private brief (BAD/MIXED, Josh-only) must not advance it even though
+  // the brief content is still persisted above.
+  if (plan.action === 'draft') {
+    const newEngagementMd = setLastUpdate(engagementMd, today);
+    if (newEngagementMd !== engagementMd) {
+      const engTmp = `${engagement.path}.tmp-${process.pid}`;
+      writeFileSync(engTmp, newEngagementMd);
+      renameSync(engTmp, engagement.path);
+    }
   }
   process.stdout.write(`wrote: ${target.relPath}\n`);
   process.stdout.write(JSON.stringify({ relPath: target.relPath, action: plan.action }) + '\n');

@@ -127,7 +127,65 @@ function seedVault(): string {
   return vault;
 }
 
+const ENGAGEMENT_MD_BAD = `# Client: Alloi — Managed Services
+
+## Node
+id: alloi-01
+kind: engagement
+client: alloi
+parent:
+title: Managed Services
+domains: alloi.us
+delivery_state: active
+
+## Reporting
+cadence: weekly
+channel: email
+contact: marcos@alloi.us
+last_update:
+
+## History (dated, newest first)
+
+- 2026-09-09 — Client escalated concerns about delayed reports.
+
+## Open Items
+`;
+
+function seedVaultBrief(): string {
+  const vault = mkdtempSync(pathJoin(tmpdir(), 'status-plan-brief-'));
+  const proj = pathJoin(vault, 'raw/areas/clearworks/org-brain/projects');
+  mkdirSync(proj, { recursive: true });
+  writeFile(pathJoin(proj, 'alloi-01.md'), ENGAGEMENT_MD_BAD);
+  return vault;
+}
+
 describe('status_plan.ts CLI (--write parity)', () => {
+  it('G2-P1-2: a private brief (BAD/MIXED) is persisted but last_update stays untouched', () => {
+    const vault = seedVaultBrief();
+    const tsxBin = require.resolve('tsx/cli');
+    const scriptPath = pathJoin(__dirname, '../../../scripts/brain/status_plan.ts');
+    const preview = execFileSync('node', [tsxBin, scriptPath, '--client', 'alloi', '--node', 'alloi-01', '--today', '2026-09-10', '--vault', vault], { encoding: 'utf8' });
+    const previewJson = JSON.parse(preview.trim().split('\n').pop() as string);
+    expect(previewJson.action).toBe('brief');
+
+    const engagementBefore = readFile(pathJoin(vault, 'raw/areas/clearworks/org-brain/projects/alloi-01.md'), 'utf8');
+
+    const written = execFileSync('node', [tsxBin, scriptPath, '--client', 'alloi', '--node', 'alloi-01', '--today', '2026-09-10', '--write', '--vault', vault], { encoding: 'utf8' });
+    const writtenJson = JSON.parse(written.trim().split('\n').pop() as string);
+    expect(writtenJson.action).toBe('brief');
+    expect(String(writtenJson.relPath)).toContain('status-brief-2026-09-10.md');
+
+    // brief content IS persisted
+    const briefContent = readFile(pathJoin(vault, writtenJson.relPath), 'utf8');
+    expect(briefContent.length).toBeGreaterThan(0);
+
+    // but last_update on the engagement node is untouched (still blank, byte-identical)
+    const engagementAfter = readFile(pathJoin(vault, 'raw/areas/clearworks/org-brain/projects/alloi-01.md'), 'utf8');
+    expect(engagementAfter).toBe(engagementBefore);
+    expect(engagementAfter).not.toContain('last_update: 2026-09-10');
+    rmSync(vault, { recursive: true, force: true });
+  });
+
   it('the --write file matches the no-write preview relPath, and last_update advances', () => {
     const vault = seedVault();
     const tsxBin = require.resolve('tsx/cli');

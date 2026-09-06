@@ -14,6 +14,7 @@ from typing import Any
 
 from atomic import atomic_write
 from paths import DEFAULT_VAULT, load_enabled_agents, org_brain_root
+from writeback_render import _split_sections
 
 GENERATED_START = "<!-- generated: {name} -->"
 GENERATED_END = "<!-- /generated -->"
@@ -99,25 +100,6 @@ def render_engagements_rollup(client_slug: str, nodes: dict[str, dict[str, Any]]
             c_update = child.get("last_update") or "—"
             lines.append(f"| {eng.get('title') or eng['id']} | {child.get('title') or child['id']} | {c_state} | {c_update} |")
     return "\n".join(lines)
-
-
-def _split_sections(text: str) -> tuple[str, list[tuple[str, str]]]:
-    lines = text.splitlines(keepends=True)
-    preamble: list[str] = []
-    sections: list[tuple[str, list[str]]] = []
-    current: tuple[str, list[str]] | None = None
-    for line in lines:
-        if line.startswith("## "):
-            if current is not None:
-                sections.append((current[0], current[1]))
-            current = (line[3:].strip(), [line])
-        elif current is None:
-            preamble.append(line)
-        else:
-            current[1].append(line)
-    if current is not None:
-        sections.append((current[0], current[1]))
-    return "".join(preamble), [(h, "".join(b)) for h, b in sections]
 
 
 def _latest_history(body: str) -> tuple[str, str] | None:

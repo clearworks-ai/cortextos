@@ -141,12 +141,26 @@ def load_event_payload(*, meeting_id: str | None, event_file: str | None) -> dic
     return payload if isinstance(payload, dict) else {}
 
 
-def load_full_meeting(meeting_id: str) -> dict:
+def load_full_meeting(meeting_id: str, full_file: str | None = None) -> dict:
     """Run ff-extractor --mode full for this meeting; return the per-meeting dict or {}.
+
+    WHEN full_file is given, read it directly (FR-009 --full-file, R2) instead
+    of spawning ff-extractor — no live API keys/network required.
 
     ff-extractor needs live API keys and network — a failure is logged and the sync
     proceeds with whatever the event payload supplied (deal_state simply absent).
     """
+    if full_file:
+        try:
+            payload = json.loads(Path(full_file).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            _log(f"--full-file unreadable at {full_file}: {exc}; deal_state unavailable")
+            return {}
+        meetings = payload.get("meetings", []) or []
+        for m in meetings:
+            if str(m.get("id") or m.get("meeting_id") or "") == meeting_id:
+                return m
+        return meetings[0] if len(meetings) == 1 else {}
     if not meeting_id:
         return {}
     try:
@@ -386,7 +400,7 @@ def build_summary_text(event_payload: dict, full_meeting: dict, meeting_id: str)
 
 
 def process(
-    *, meeting_id: str | None, event_file: str | None, dry_run: bool = False
+    *, meeting_id: str | None, event_file: str | None, full_file: str | None = None, dry_run: bool = False
 ) -> dict:
     event_payload = load_event_payload(meeting_id=meeting_id, event_file=event_file)
 
@@ -396,7 +410,7 @@ def process(
         _log("no meeting_id available from --meeting-id or the event payload; nothing to sync")
         return {"worker": "meeting-crm-sync", "error": "no_meeting_id"}
 
-    full_meeting = load_full_meeting(resolved_id)
+    full_meeting = load_full_meeting(resolved_id, full_file)
 
     meeting_type = str(event_payload.get("meeting_type") or full_meeting.get("meeting_type") or "other").strip().lower()
     deal_state = (full_meeting.get("deal_state") or "").strip() or None
@@ -451,9 +465,13 @@ def main() -> int:
     src.add_argument("--meeting-id", help="Fireflies meeting id (locates the event payload + drives ff-extractor)")
     src.add_argument("--event-file", help="Path to an ff-meeting-event-<safeId>.json payload (fallback)")
     parser.add_argument("--dry-run", action="store_true", help="Plan the writes without executing them")
+    parser.add_argument("--full-file", default=None, help="FR-009 --full-file: fanout-meeting.json")
     args = parser.parse_args()
 
-    summary = process(meeting_id=args.meeting_id, event_file=args.event_file, dry_run=args.dry_run)
+    summary = process(
+        meeting_id=args.meeting_id, event_file=args.event_file,
+        full_file=args.full_file, dry_run=args.dry_run,
+    )
     print(json.dumps(summary, indent=2))
     return 0 if "error" not in summary else 1
 

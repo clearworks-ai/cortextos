@@ -301,5 +301,52 @@ class RealWriteTests(unittest.TestCase):
         self.assertEqual(len(self._rows()), 1)
 
 
+class FullFileTests(unittest.TestCase):
+    def setUp(self):
+        self.mod = _load_worker()
+        self.calls: list[list[str]] = []
+
+        def fake_run(argv, env=None):
+            self.calls.append(argv)
+            if "upsert-contact.py" in argv[1]:
+                idx = argv.index("--id") + 1
+                return subprocess.CompletedProcess(argv, 0, argv[idx], "")
+            return subprocess.CompletedProcess(argv, 0, "{}", "")
+
+        self.mod._run = fake_run
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = Path(self.tmp.name)
+        os.environ["CRM_CONTACTS_PATH"] = str(self.tmp_path / "contacts.json")
+        os.environ["CRM_PIPELINE_PATH"] = str(self.tmp_path / "pipeline.json")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+        os.environ.pop("CRM_CONTACTS_PATH", None)
+        os.environ.pop("CRM_PIPELINE_PATH", None)
+
+    def test_full_file_skips_ff_extractor(self):
+        full = self.tmp_path / "fanout-meeting.json"
+        full.write_text(json.dumps({
+            "meetings": [{
+                "id": "01M1MW2GAZ1DQ0C6PG3KJ557JA",
+                "meeting_type": "delivery",
+                "summary": {"overview": "Scoped tactical reports."},
+                "deal_state": None,
+            }]
+        }))
+        event = _write_event(
+            self.tmp_path, meeting_id="01M1MW2GAZ1DQ0C6PG3KJ557JA",
+            meeting_type="delivery", attendees=["marcos@alloi.us"],
+        )
+        result = self.mod.process(
+            meeting_id="01M1MW2GAZ1DQ0C6PG3KJ557JA",
+            event_file=str(event),
+            full_file=str(full),
+        )
+        assert not any("ff-extractor.py" in c[1] for c in self.calls)
+        assert result["meeting_id"] == "01M1MW2GAZ1DQ0C6PG3KJ557JA"
+        assert result["contacts"]
+
+
 if __name__ == "__main__":
     unittest.main()

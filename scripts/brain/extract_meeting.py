@@ -20,7 +20,7 @@ HERE = Path(__file__).resolve().parent
 SCHEMA_PATH = HERE / "extraction.schema.json"
 PROMPT_TEMPLATE = """Extract meeting intelligence as JSON matching the schema.
 Unknown keys are forbidden. The string "unknown" is illegal for every enum.
-Quotes for decisions/commitments/promotions must be normalized substrings of text_units.
+Quotes for decisions/commitments/promotions/open_questions must be normalized substrings of text_units. open_questions is optional — omit it or leave it empty when none exist.
 
 Participants (index = owner_participant):
 {participants}
@@ -63,7 +63,11 @@ REQUIRED_ROOT = {
 STAMP_KEYS = {"inputSha", "promptSha", "model", "cost_usd", "extracted_at"}
 # envelope fields added after the model returns, but optional for backward
 # compat with extraction.json files written before these existed
-OPTIONAL_STAMP_KEYS = {"model_receipt", "usage"}
+OPTIONAL_STAMP_KEYS = {"model_receipt", "usage", "variant"}
+# domain fields that are optional at the top level (unlike `decisions`,
+# which REQUIRED_ROOT requires) — old extraction.json files, including the
+# already-applied acceptance meeting's, carry none of these keys.
+OPTIONAL_DOMAIN_KEYS = {"open_questions"}
 
 # Loaded once at import; also backs _build_prompt/prompt_sha's own reads of
 # the same file. Used to drive the recursive nested-schema walker below so
@@ -161,10 +165,25 @@ def _forbid_unknown_string(value: Any, where: str) -> None:
         raise ValueError(f"illegal enum unknown at {where}")
 
 
+# CH-7: decisions[].text, commitments[].text/owner_name, and
+# open_questions[].text/owner all flow unescaped into writeback_render's
+# History block, meeting-note rendering, and the Open Items table
+# (adapt_meeting.py never strips or re-splits them). A value containing
+# newlines (e.g. "Question?\n\n## History") injects Markdown structure into
+# a canonical vault page. Reject any control character — not just "\n" —
+# so a lone "\r" or other C0 control can't slip past a naive "\n" check.
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0a-\x1f\x7f]")
+
+
+def _require_single_line(value: Any, where: str) -> None:
+    if isinstance(value, str) and _CONTROL_CHAR_RE.search(value):
+        raise ValueError(f"{where}: must be single-line")
+
+
 def validate_extraction(obj: dict[str, Any], *, stamped: bool = True) -> None:
     if not isinstance(obj, dict):
         raise ValueError("extraction is not an object")
-    allowed = REQUIRED_ROOT | STAMP_KEYS | OPTIONAL_STAMP_KEYS
+    allowed = REQUIRED_ROOT | STAMP_KEYS | OPTIONAL_STAMP_KEYS | OPTIONAL_DOMAIN_KEYS
     extra = set(obj) - allowed
     if extra:
         raise ValueError(f"unknown keys: {sorted(extra)}")
@@ -196,6 +215,19 @@ def validate_extraction(obj: dict[str, Any], *, stamped: bool = True) -> None:
         if not isinstance(dec, dict) or set(dec) - {"text", "quote"}:
             raise ValueError(f"decisions[{i}]")
         _forbid_unknown_string(dec.get("text"), f"decisions[{i}].text")
+        _require_single_line(dec.get("text"), f"decisions[{i}].text")
+    open_questions = obj.get("open_questions") or []
+    if not isinstance(open_questions, list):
+        raise ValueError("open_questions")
+    _validate_against_schema(
+        open_questions, EXTRACTION_SCHEMA["properties"]["open_questions"], "open_questions"
+    )
+    for i, oq in enumerate(open_questions):
+        if not isinstance(oq, dict) or set(oq) - {"text", "quote", "owner"}:
+            raise ValueError(f"open_questions[{i}]")
+        _forbid_unknown_string(oq.get("text"), f"open_questions[{i}].text")
+        _require_single_line(oq.get("text"), f"open_questions[{i}].text")
+        _require_single_line(oq.get("owner"), f"open_questions[{i}].owner")
     commitments = obj.get("commitments") or []
     _validate_against_schema(
         commitments, EXTRACTION_SCHEMA["properties"]["commitments"], "commitments"
@@ -206,6 +238,11 @@ def validate_extraction(obj: dict[str, Any], *, stamped: bool = True) -> None:
         extra_c = set(c) - {"text", "owner_participant", "owner_name", "deadline_iso", "quote"}
         if extra_c:
             raise ValueError(f"commitments[{i}] unknown keys")
+        # CH-7: decisions/commitments carry the identical rendering exposure
+        # as open_questions (writeback History block + Open Items table) —
+        # apply the same single-line rule here too.
+        _require_single_line(c.get("text"), f"commitments[{i}].text")
+        _require_single_line(c.get("owner_name"), f"commitments[{i}].owner_name")
     pds = obj.get("proposed_delivery_state")
     if pds is not None:
         if not isinstance(pds, dict) or set(pds) - {"state", "quote"}:

@@ -77,6 +77,19 @@
         }
       }
     },
+    "open_questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "quote"],
+        "properties": {
+          "text": { "type": "string" },
+          "quote": { "type": "string" },
+          "owner": { "type": "string" }
+        }
+      }
+    },
     "proposed_delivery_state": {
       "oneOf": [
         { "type": "null" },

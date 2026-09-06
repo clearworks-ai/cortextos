@@ -12,6 +12,25 @@ ORG_BRAIN = Path("raw/areas/clearworks/org-brain")
 OPEN_ITEMS_HEADER = "| Item | Owner | Deadline | Source | Status |\n|---|---|---|---|---|\n"
 
 
+def _escape_md_leading(text: str) -> str:
+    """CH-7: decisions/commitments/open_questions text is validated
+    single-line upstream (extract_meeting.validate_extraction), but a value
+    that legitimately starts with '#', '-', or '|' could still open a
+    heading, list item, or table row when it lands at the start of its own
+    rendered line/bullet/cell. Prefix a backslash so it renders as literal
+    text instead."""
+    if text[:1] in ("#", "-", "|"):
+        return "\\" + text
+    return text
+
+
+def _escape_table_cell(text: str) -> str:
+    """As `_escape_md_leading`, plus: a '|' ANYWHERE in an Open Items cell
+    (not just leading) splits the row into extra columns — escape every
+    occurrence before the leading-character check."""
+    return _escape_md_leading(text.replace("|", "\\|"))
+
+
 def _slug(text: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return s or "meeting"
@@ -55,12 +74,19 @@ def _history_block(meeting: dict[str, Any]) -> list[str]:
     decisions = meeting.get("decisions") or []
     if not isinstance(decisions, list):
         decisions = []
-    dec_txt = " ; ".join(str(d) for d in decisions if str(d).strip()) or "none"
-    return [
+    dec_txt = " ; ".join(_escape_md_leading(str(d)) for d in decisions if str(d).strip()) or "none"
+    open_questions = meeting.get("open_questions") or []
+    if not isinstance(open_questions, list):
+        open_questions = []
+    oq_txt = " ; ".join(_escape_md_leading(str(q)) for q in open_questions if str(q).strip())
+    lines = [
         f"- {date} — {title} (meeting: {rel}) [source: {_source_key(meeting)}]",
         f"  - Outcomes: {overview or 'none'}",
         f"  - Decisions: {dec_txt}",
     ]
+    if oq_txt:
+        lines.append(f"  - Open questions: {oq_txt}")
+    return lines
 
 
 def _open_item_rows(meeting: dict[str, Any]) -> list[str]:
@@ -78,6 +104,9 @@ def _open_item_rows(meeting: dict[str, Any]) -> list[str]:
         deadline = str(it.get("deadline") or "—") or "—"
         source = str(it.get("source") or "")
         status = str(it.get("status") or "open")
+        item, owner, deadline, source, status = (
+            _escape_table_cell(v) for v in (item, owner, deadline, source, status)
+        )
         rows.append(f"| {item} | {owner} | {deadline} | {source} | {status} |")
     return rows
 
@@ -186,6 +215,14 @@ def render_meeting_note(meeting: dict[str, Any]) -> str:
     summary = meeting.get("summary") or {}
     if isinstance(summary, dict) and summary.get("overview"):
         lines.extend(["## Outcomes", "", str(summary.get("overview")), ""])
+    open_questions = meeting.get("open_questions") or []
+    if isinstance(open_questions, list):
+        oq_texts = [str(q).strip() for q in open_questions if str(q).strip()]
+        if oq_texts:
+            lines.append("## Open questions")
+            lines.append("")
+            lines.extend(f"- {_escape_md_leading(q)}" for q in oq_texts)
+            lines.append("")
     return "\n".join(lines)
 
 

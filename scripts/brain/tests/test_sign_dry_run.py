@@ -219,6 +219,276 @@ def test_sign_dry_run_records_null_binding_fields_when_envelope_data_absent(tmp_
     assert doc["extraction_input_sha"] is None
 
 
+def test_sign_dry_run_sets_phase3_hash_when_nouns_present(tmp_path: Path) -> None:
+    # G0a F-9 ruling (Task 5): a capture containing the phase3-preview: v1
+    # header plus the phase-3 preview nouns Task 4 added to _run_dry
+    # (would-touch:/would-write:/would-file:, anchored at column 0) must get
+    # a phase3_capture_sha256 alongside the existing R2-era capture_sha256.
+    from sign_dry_run import main as sign_main, marker_path
+
+    vault = tmp_path / "vault"
+    (vault / "raw/media/transcripts/fireflies/MID").mkdir(parents=True)
+    capture = tmp_path / "dry-run.txt"
+    capture.write_text(
+        "home=projects/alloi-03.md node=alloi-03 rule=2 created=none promotion=none\n"
+        "--- a/x\n+++ b/x\nquotes kept decisions=1 commitments=1 dropped={}\n"
+        "tasks:\nsubject: Recap: x\n"
+        "phase3-preview: v1\n"
+        "would-touch: clients/alloi.md (engagements-rollup)\n"
+        "would-write: raw/areas/clearworks/clients/alloi/status-update-2026-09-10.md\n"
+        'would-file: 2026-09-10 filed "x" under alloi-03 fireflies:MID\n',
+        encoding="utf-8",
+    )
+    rc = sign_main([
+        "--meeting-id", "MID", "--vault", str(vault), "--signed-by", "Josh",
+        "--signed-at", "2026-09-05T00:00:00Z", "--dry-run-capture", str(capture),
+    ])
+    assert rc == 0
+    marker = json.loads(marker_path(vault, "fireflies", "MID").read_text(encoding="utf-8"))
+    assert marker["phase3_capture_sha256"]
+
+
+def test_sign_dry_run_leaves_phase3_hash_null_on_truncated_capture_missing_writer_evidence(
+    tmp_path: Path,
+) -> None:
+    """Finding 1 (P1): the old check accepted the `phase3-preview: v1`
+    header plus ANY single anchored would-* line, so a capture truncated
+    right after `would-touch:` (never reaching the status writer's
+    would-write: or the filed-log's would-file:) was treated as a complete
+    phase-3 review. Each of the three phase-3 writers now needs its own
+    evidence line; missing any must leave phase3_capture_sha256 null and
+    print an explicit incomplete-preview message naming what's missing."""
+    from sign_dry_run import main as sign_main, marker_path
+
+    vault = tmp_path / "vault"
+    (vault / "raw/media/transcripts/fireflies/MID").mkdir(parents=True)
+    capture = tmp_path / "dry-run-truncated.txt"
+    capture.write_text(
+        "home=projects/alloi-03.md node=alloi-03 rule=2 created=none promotion=none\n"
+        "--- a/x\n+++ b/x\nquotes kept decisions=1 commitments=1 dropped={}\n"
+        "tasks:\nsubject: Recap: x\n"
+        "phase3-preview: v1\n"
+        "would-touch: clients/alloi.md (engagements-rollup)\n",
+        encoding="utf-8",
+    )
+    rc, err = _run_sign_capturing_stderr(sign_main, [
+        "--meeting-id", "MID", "--vault", str(vault), "--signed-by", "Josh",
+        "--signed-at", "2026-09-05T00:00:00Z", "--dry-run-capture", str(capture),
+    ])
+    assert rc == 0  # R2-era sign still succeeds; only the phase-3 field is affected
+    assert "phase-3 preview incomplete: missing" in err
+    marker = json.loads(marker_path(vault, "fireflies", "MID").read_text(encoding="utf-8"))
+    assert marker.get("phase3_capture_sha256") is None
+
+
+def test_sign_dry_run_leaves_phase3_hash_null_when_would_file_is_not_the_last_line(
+    tmp_path: Path,
+) -> None:
+    """Finding 1: the capture must END with the would-file: block (trailing
+    whitespace only) — content appended after it (a truncation-in-the-
+    middle symptom, or stray trailing prose) must not be treated as a
+    fully-reviewed preview."""
+    from sign_dry_run import main as sign_main, marker_path
+
+    vault = tmp_path / "vault"
+    (vault / "raw/media/transcripts/fireflies/MID").mkdir(parents=True)
+    capture = tmp_path / "dry-run-trailing.txt"
+    capture.write_text(
+        "home=projects/alloi-03.md node=alloi-03 rule=2 created=none promotion=none\n"
+        "--- a/x\n+++ b/x\nquotes kept decisions=1 commitments=1 dropped={}\n"
+        "tasks:\nsubject: Recap: x\n"
+        "phase3-preview: v1\n"
+        "would-touch: clients/alloi.md (engagements-rollup)\n"
+        "would-write: raw/areas/clearworks/clients/alloi/status-update-2026-09-10.md\n"
+        'would-file: 2026-09-10 filed "x" under alloi-03 fireflies:MID\n'
+        "unexpected trailing line after the filed-log block\n",
+        encoding="utf-8",
+    )
+    rc, err = _run_sign_capturing_stderr(sign_main, [
+        "--meeting-id", "MID", "--vault", str(vault), "--signed-by", "Josh",
+        "--signed-at", "2026-09-05T00:00:00Z", "--dry-run-capture", str(capture),
+    ])
+    assert rc == 0
+    assert "phase-3 preview incomplete: missing" in err
+    marker = json.loads(marker_path(vault, "fireflies", "MID").read_text(encoding="utf-8"))
+    assert marker.get("phase3_capture_sha256") is None
+
+
+def test_sign_dry_run_sets_phase3_hash_for_skip_status_capture(tmp_path: Path) -> None:
+    """Finding 1: `would-write: skip: no-engagement` (the normalized form
+    _run_dry now always emits for the status writer, even when there is
+    nothing to write) must count as the reviewer having seen that writer's
+    decision — a legitimately empty writer is still evidenced."""
+    from sign_dry_run import main as sign_main, marker_path
+
+    vault = tmp_path / "vault"
+    (vault / "raw/media/transcripts/fireflies/MID").mkdir(parents=True)
+    capture = tmp_path / "dry-run-skip-status.txt"
+    capture.write_text(
+        "home=projects/alloi-03.md node=alloi-03 rule=2 created=none promotion=none\n"
+        "--- a/x\n+++ b/x\nquotes kept decisions=1 commitments=1 dropped={}\n"
+        "tasks:\nsubject: Recap: x\n"
+        "phase3-preview: v1\n"
+        "would-touch: clients/alloi.md (engagements-rollup)\n"
+        "would-write: skip: no-engagement\n"
+        'would-file: 2026-09-10 filed "x" under alloi-03 fireflies:MID\n',
+        encoding="utf-8",
+    )
+    rc = sign_main([
+        "--meeting-id", "MID", "--vault", str(vault), "--signed-by", "Josh",
+        "--signed-at", "2026-09-05T00:00:00Z", "--dry-run-capture", str(capture),
+    ])
+    assert rc == 0
+    marker = json.loads(marker_path(vault, "fireflies", "MID").read_text(encoding="utf-8"))
+    assert marker["phase3_capture_sha256"]
+
+
+def _run_sign_capturing_stderr(sign_main, argv: list[str]) -> tuple[int, str]:
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stderr(buf):
+        rc = sign_main(argv)
+    return rc, buf.getvalue()
+
+
+def test_sign_dry_run_leaves_phase3_hash_null_when_nouns_only_incidental(tmp_path: Path) -> None:
+    # CH-6: substring containment alone let an R2-era capture whose page
+    # diff (or meeting text) merely *mentions* "would-touch:"/"would-write:"
+    # etc. — inside a diff hunk, or embedded mid-line — forge the phase-3
+    # signal. Neither of these lines is a real anchored `_run_dry` noun
+    # (both fail the re.MULTILINE "^would-(touch|write|file): " check), and
+    # there is no "phase3-preview: v1" header line at all, so the field must
+    # stay null even though the raw substrings are present in the text.
+    from sign_dry_run import main as sign_main, marker_path
+
+    vault = tmp_path / "vault"
+    (vault / "raw/media/transcripts/fireflies/MID").mkdir(parents=True)
+    capture = tmp_path / "dry-run.txt"
+    capture.write_text(
+        "home=projects/alloi-03.md node=alloi-03 rule=2 created=none promotion=none\n"
+        "--- a/x\n+++ b/x\n"
+        "+some prose that says would-touch: this page next quarter\n"
+        "quotes kept decisions=1 commitments=1 dropped={}\n"
+        "tasks:\nsubject: Recap: mentions would-write: nothing real and would-file: too\n",
+        encoding="utf-8",
+    )
+    rc = sign_main([
+        "--meeting-id", "MID", "--vault", str(vault), "--signed-by", "Josh",
+        "--signed-at", "2026-09-05T00:00:00Z", "--dry-run-capture", str(capture),
+    ])
+    assert rc == 0
+    marker = json.loads(marker_path(vault, "fireflies", "MID").read_text(encoding="utf-8"))
+    assert marker.get("phase3_capture_sha256") is None
+
+
+def test_sign_dry_run_sets_phase3_hash_from_real_run_dry_capture(tmp_path: Path) -> None:
+    # CH-6 end-to-end: a genuine `run_meeting.py --dry-run` capture (real
+    # header + real anchored would-* lines, produced by the actual _run_dry
+    # phase-3 block, not hand-typed) must set phase3_capture_sha256.
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    import run_meeting
+    from sign_dry_run import main as sign_main, marker_path
+
+    vault = tmp_path / "vault"
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients").mkdir(parents=True)
+    (brain / "projects").mkdir()
+    (brain / "orgs").mkdir()
+    (brain / "projects" / "alloi-03.md").write_text(
+        "# Client: Alloi — Tactical Reports\n\n## Node\nid: alloi-03\nkind: project\nclient: alloi\n"
+        "parent: alloi-01\ntitle: Tactical Reports\naliases: tacticals\ndomains: alloi.us\n"
+        "delivery_state: active\n\n## History (dated, newest first)\n\n- old\n\n## Open Items\n",
+        encoding="utf-8",
+    )
+    mid = "01M1MW2GAZ1DQ0C6PG3KJ557JA"
+    env_dir = vault / "raw/media/transcripts/fireflies" / mid
+    env_dir.mkdir(parents=True)
+    source = {
+        "schema": "brain.source/1", "source": {"kind": "fireflies", "id": mid},
+        "title": "Weekly tacticals review", "occurred_at": "2026-09-04T17:00:00Z", "duration_s": 12,
+        "participants": [
+            {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours", "spoke": True, "notetaker": False, "handle": None},
+            {"name": "Marcos", "email": "marcos@alloi.us", "side": "theirs", "spoke": True, "notetaker": False, "handle": None},
+        ],
+        "text_units": [{"i": 0, "speaker": "Marcos", "text": "hello tacticals", "ts": 0}],
+        "native_summary": {"overview": "hello tacticals"},
+    }
+    raw = json.dumps(source, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    (env_dir / "source.json").write_bytes(raw)
+    sha = hashlib.sha256(raw).hexdigest()
+    (env_dir / "source.sha256").write_text(sha + "\n", encoding="utf-8")
+    extraction = {
+        "schema": "brain.extraction/1", "inputSha": sha, "promptSha": "p", "model": "sonnet",
+        "cost_usd": 0, "extracted_at": "2026-09-05T00:00:00Z",
+        "classification": {"org_name": "Alloi", "domain": "alloi.us", "relationship": "client", "confidence": 0.9, "evidence": "hello tacticals"},
+        "summary": {"overview": "hello tacticals", "bullets": []},
+        "decisions": [{"text": "Keep cadence", "quote": "hello"}],
+        "commitments": [],
+        "proposed_delivery_state": None, "deal_state": "won", "meeting_type": "delivery",
+    }
+    (env_dir / "extraction.json").write_text(json.dumps(extraction), encoding="utf-8")
+    repo = tmp_path / "repo"
+    (repo / "orgs/clearworksai/agents/crm-codex/crm").mkdir(parents=True)
+    (repo / "orgs/clearworksai/agents/crm-codex/crm/org-aliases.json").write_text("{}", encoding="utf-8")
+    (repo / "orgs/clearworksai/agents/crm-codex/crm/contacts.json").write_text('{"contacts":[]}', encoding="utf-8")
+
+    if str(_Path(__file__).resolve().parents[1]) not in _sys.path:
+        _sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = run_meeting.main([
+            "--meeting-id", f"fireflies:{mid}", "--dry-run",
+            "--repo-root", str(repo), "--vault", str(vault),
+        ])
+    assert rc == 0, buf.getvalue()
+    real_capture = tmp_path / "real-dry-run.txt"
+    real_capture.write_text(buf.getvalue(), encoding="utf-8")
+    assert "phase3-preview: v1" in buf.getvalue()
+
+    sign_rc = sign_main([
+        "--meeting-id", mid, "--vault", str(vault), "--signed-by", "Josh",
+        "--signed-at", "2026-09-05T00:00:00Z", "--dry-run-capture", str(real_capture),
+    ])
+    assert sign_rc == 0
+    marker = json.loads(marker_path(vault, "fireflies", mid).read_text(encoding="utf-8"))
+    assert marker["phase3_capture_sha256"]
+
+
+def test_sign_dry_run_leaves_phase3_hash_null_for_r2_era_capture(tmp_path: Path) -> None:
+    """The exact stale-marker scenario: a capture taken before this release
+    existed, containing only the R2-era five nouns and none of the new
+    phase-3 preview lines."""
+    from sign_dry_run import main as sign_main, marker_path
+
+    vault = tmp_path / "vault"
+    (vault / "raw/media/transcripts/fireflies/MID").mkdir(parents=True)
+    capture = tmp_path / "dry-run-r2.txt"
+    capture.write_text(
+        "home=projects/alloi-03.md node=alloi-03 rule=2 created=none promotion=none\n"
+        "--- a/x\n+++ b/x\nquotes kept decisions=1 commitments=1 dropped={}\n"
+        "tasks:\nsubject: Recap: x\n",
+        encoding="utf-8",
+    )
+    rc = sign_main([
+        "--meeting-id", "MID", "--vault", str(vault), "--signed-by", "Josh",
+        "--signed-at", "2026-09-05T00:00:00Z", "--dry-run-capture", str(capture),
+    ])
+    assert rc == 0
+    marker = json.loads(marker_path(vault, "fireflies", "MID").read_text(encoding="utf-8"))
+    assert marker.get("phase3_capture_sha256") is None
+
+    from progress import validate_phase3_capture
+
+    assert validate_phase3_capture(marker_path(vault, "fireflies", "MID")) == "phase-3 capture unsigned"
+
+
 def test_sign_dry_run_rejects_unknown_signer(tmp_path):
     # Finding 4b: sign_dry_run.py's own output must also fail
     # validate_sign_marker's allowlist check for a non-allowlisted signer —

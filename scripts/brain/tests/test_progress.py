@@ -769,3 +769,63 @@ def test_resolve_vault_sha_from_history_returns_none_when_pathspec_has_no_histor
     subprocess.run(["git", "-C", str(vault), "commit", "-q", "-m", "seed"], check=True)
 
     assert resolve_vault_sha_from_history(vault, ["never-touched.txt"]) is None
+
+
+def test_fr014_pathspec_includes_phase3_artifacts_when_given() -> None:
+    from progress import fr014_pathspec
+
+    spec = fr014_pathspec(
+        "01M1MW2G", "projects/alloi-03.md", "meetings/x.md",
+        client_slug="alloi", engagement_id="alloi-01",
+        status_rel="raw/areas/clearworks/clients/alloi/status-update-2026-09-10.md",
+        filed=True, state_touched=True,
+    )
+    assert "raw/areas/clearworks/org-brain/clients/alloi.md" in spec
+    assert "raw/areas/clearworks/org-brain/projects/alloi-01.md" in spec
+    assert "raw/areas/clearworks/org-brain/STATE.md" in spec
+    assert "raw/areas/clearworks/org-brain/_filed.log" in spec
+    assert "raw/areas/clearworks/clients/alloi/status-update-2026-09-10.md" in spec
+
+
+def test_fr014_pathspec_backward_compatible_without_phase3_args() -> None:
+    from progress import fr014_pathspec
+
+    spec = fr014_pathspec("01M1MW2G", "projects/alloi-03.md", "meetings/x.md")
+    assert "raw/areas/clearworks/org-brain/STATE.md" not in spec
+    assert "raw/areas/clearworks/org-brain/_filed.log" not in spec
+
+
+def test_validate_phase3_capture_missing_field(tmp_path: Path) -> None:
+    from progress import validate_phase3_capture
+
+    path = tmp_path / "test_d09_phase3_missing.json"
+    path.write_text(json.dumps({"signed_by": "Josh", "capture_path": str(tmp_path / "x")}), encoding="utf-8")
+    assert validate_phase3_capture(path) == "phase-3 capture unsigned"
+
+
+def test_validate_phase3_capture_matches_hashed_file(tmp_path: Path) -> None:
+    from progress import validate_phase3_capture
+    import hashlib
+
+    capture = tmp_path / "dry-run.txt"
+    capture.write_text("would-touch: x\nwould-write: y\nwould-file: z\n", encoding="utf-8")
+    sha = hashlib.sha256(capture.read_bytes()).hexdigest()
+    marker = tmp_path / "d09-signed.json"
+    marker.write_text(json.dumps({"capture_path": str(capture), "phase3_capture_sha256": sha}), encoding="utf-8")
+    assert validate_phase3_capture(marker) is None
+
+
+def test_validate_phase3_capture_rejects_stale_hash(tmp_path: Path) -> None:
+    from progress import validate_phase3_capture
+
+    capture = tmp_path / "dry-run.txt"
+    capture.write_text("would-touch: x\nwould-write: y\nwould-file: z\n", encoding="utf-8")
+    marker = tmp_path / "d09-signed.json"
+    marker.write_text(json.dumps({"capture_path": str(capture), "phase3_capture_sha256": "deadbeef"}), encoding="utf-8")
+    assert validate_phase3_capture(marker) == "phase-3 capture unsigned"
+
+
+def test_validate_phase3_capture_missing_marker_file(tmp_path: Path) -> None:
+    from progress import validate_phase3_capture
+
+    assert validate_phase3_capture(tmp_path / "no-such-marker.json") == "d09-signed.json missing"

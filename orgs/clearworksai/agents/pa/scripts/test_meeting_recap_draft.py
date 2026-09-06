@@ -256,5 +256,86 @@ def test_legacy_no_source_falls_back_to_fireflies_prefixed_id(tmp_path, monkeypa
     assert ledger.read_text(encoding="utf-8").strip().startswith("fireflies:legacy123")
 
 
+class AppendLedgerAtomicTests(unittest.TestCase):
+    """S-3 (reviewify-standards.json): append_ledger must use the shared
+    atomic_write helper (scripts/brain/atomic.py), same import mechanism as
+    meeting_writeback.py, instead of a hand-rolled temp+os.replace. The ledger
+    row also now carries the draft subject after the key (`<key>\\t<subject>`)
+    so an orchestrator resume can recover it, with backward-compat reading of
+    legacy no-tab rows."""
+
+    def test_append_ledger_uses_atomic_write_no_stray_tmp_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            ledger = tmp_dir / "ledger.txt"
+            MODULE.append_ledger(ledger, "fireflies:a", "Recap: A — 2026-09-04")
+            # append_ledger's own former hand-rolled tmp scheme used
+            # ".{name}.tmp" — assert that's gone, and atomic_write's own
+            # ".tmp-*" residue is cleaned up (os.replace already happened).
+            leftovers = [p.name for p in tmp_dir.iterdir() if p.name != "ledger.txt"]
+            self.assertEqual(leftovers, [])
+
+    def test_append_ledger_row_format_is_key_tab_subject(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / "ledger.txt"
+            MODULE.append_ledger(ledger, "fireflies:a", "Recap: A — 2026-09-04")
+            line = ledger.read_text(encoding="utf-8").strip()
+            self.assertEqual(line, "fireflies:a\tRecap: A — 2026-09-04")
+
+    def test_append_ledger_two_sequential_appends_keep_both_keys(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / "ledger.txt"
+            MODULE.append_ledger(ledger, "fireflies:a", "Subject A")
+            MODULE.append_ledger(ledger, "fireflies:b", "Subject B")
+            lines = [ln for ln in ledger.read_text(encoding="utf-8").splitlines() if ln.strip()]
+            self.assertEqual(lines, ["fireflies:a\tSubject A", "fireflies:b\tSubject B"])
+
+    def test_load_ledger_backward_compat_with_legacy_no_tab_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / "ledger.txt"
+            ledger.write_text("fireflies:legacy 1735689600\n", encoding="utf-8")
+            seen = MODULE.load_ledger(ledger)
+            self.assertEqual(seen, {"fireflies:legacy"})
+
+    def test_load_ledger_dedup_still_works_with_new_tab_format(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / "ledger.txt"
+            MODULE.append_ledger(ledger, "fireflies:a", "Subject A")
+            seen = MODULE.load_ledger(ledger)
+            self.assertEqual(seen, {"fireflies:a"})
+
+    def test_load_ledger_subjects_recovers_subject_and_handles_legacy_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / "ledger.txt"
+            ledger.write_text(
+                "fireflies:legacy 1735689600\n"
+                "fireflies:new\tRecap: New — 2026-09-04\n",
+                encoding="utf-8",
+            )
+            subjects = MODULE.load_ledger_subjects(ledger)
+            self.assertEqual(subjects["fireflies:legacy"], "")
+            self.assertEqual(subjects["fireflies:new"], "Recap: New — 2026-09-04")
+
+
+class LedgerKeySingleSourceOfTruthTests(unittest.TestCase):
+    """S-4 (reviewify-standards.json): ledger_key must delegate to
+    writeback_render._source_key (single source of truth) instead of
+    re-implementing the same `<kind>:<id>` derivation."""
+
+    def test_ledger_key_delegates_to_writeback_render_source_key(self):
+        meeting = {"id": "m1", "source": {"kind": "omi", "id": "OMI-1"}}
+        self.assertEqual(MODULE.ledger_key(meeting), "omi:OMI-1")
+
+    def test_ledger_key_legacy_fallback_unchanged(self):
+        meeting = {"id": "legacy123"}
+        self.assertEqual(MODULE.ledger_key(meeting), "fireflies:legacy123")
+
+    def test_ledger_key_matches_writeback_render_source_key_exactly(self):
+        import writeback_render  # already importable: MODULE's own sys.path shim
+
+        meeting = {"id": "x", "source": {"kind": "gmail", "id": "t1"}}
+        self.assertEqual(MODULE.ledger_key(meeting), writeback_render._source_key(meeting))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -40,7 +40,12 @@ _BRAIN_DIR = Path(__file__).resolve().parents[5] / "scripts" / "brain"
 if str(_BRAIN_DIR) not in sys.path:
     sys.path.insert(0, str(_BRAIN_DIR))
 from atomic import atomic_write  # noqa: E402
-from writeback_render import payload_has_resolution, planned_files, print_dry_run  # noqa: E402
+from writeback_render import (  # noqa: E402
+    home_path_for,
+    payload_has_resolution,
+    planned_files,
+    print_dry_run,
+)
 
 
 @contextlib.contextmanager
@@ -574,11 +579,18 @@ def _append_ledger_atomic(ledger_path: Path, key: str) -> None:
     bare `open(..., "a")` in the round-2 draft. `atomic_write` is already
     imported above (used for the home/note writes); reused here rather than
     a separate 6-line helper since it's confirmed importable from this
-    file's location."""
-    existing = ledger_path.read_text(encoding="utf-8") if ledger_path.exists() else ""
-    if existing and not existing.endswith("\n"):
-        existing += "\n"
-    atomic_write(ledger_path, (existing + f"{key}\n").encode("utf-8"))
+    file's location.
+
+    G2-P1-4: the read-modify-write (read existing -> append -> atomic_write)
+    was not serialized, so two concurrent applies could each read the same
+    "existing" snapshot and the second write would drop the first's key.
+    Reuse client_file_lock (FR-008) on a `<ledger>.lock` sibling path so
+    concurrent appenders serialize here exactly like the client-file RMW."""
+    with client_file_lock(ledger_path):
+        existing = ledger_path.read_text(encoding="utf-8") if ledger_path.exists() else ""
+        if existing and not existing.endswith("\n"):
+            existing += "\n"
+        atomic_write(ledger_path, (existing + f"{key}\n").encode("utf-8"))
 
 
 def apply_resolution(payload: dict, *, org_root: Path, ledger_path: Path) -> dict:
@@ -609,13 +621,20 @@ def apply_resolution(payload: dict, *, org_root: Path, ledger_path: Path) -> dic
         key = f"{src['kind']}:{src['id']}"
         res = meeting.get("resolution") or {}
         is_create = bool(isinstance(res, dict) and res.get("created"))
-        planned = planned_files(org_root, meeting)
-        home_path, old_home, new_home = planned[0]
-        note_path, old_note, new_note = planned[1]
         marker = f"[source: {key}]"
-        if is_create and old_home and marker not in old_home:
-            raise SystemExit(7)
+        # G2-P1-2: home_path is derivable WITHOUT reading the file (home_path_for
+        # does no I/O), so it's safe to compute here to name the lock. The actual
+        # read + render (planned_files) and the create-conflict check MUST happen
+        # INSIDE the lock — otherwise two meetings resolving to the same home page
+        # can each read stale content before either writes, and the second write
+        # clobbers the first's freshly-appended History/Open-Items.
+        home_path = home_path_for(org_root, meeting)
         with client_file_lock(home_path):
+            planned = planned_files(org_root, meeting)
+            home_path, old_home, new_home = planned[0]
+            note_path, old_note, new_note = planned[1]
+            if is_create and old_home and marker not in old_home:
+                raise SystemExit(7)
             if marker in old_home:
                 skipped.append(str(home_path))
             else:

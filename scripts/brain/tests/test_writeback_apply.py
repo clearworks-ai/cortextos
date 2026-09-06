@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import sys
 from pathlib import Path
@@ -178,3 +179,116 @@ def test_apply_promotion_changes_delivery_state_once(tmp_path):
     text = home.read_text(encoding="utf-8")
     assert "delivery_state: delivered" in text
     assert "[source: fireflies:01M1MW2GAZ1DQ0C6PG3KJ557JA]" in text
+
+
+def _payload_for(mid: str, decision_text: str) -> dict:
+    return {
+        "meetings": [
+            {
+                "id": mid,
+                "source": {"kind": "fireflies", "id": mid},
+                "title": f"Tacticals sync {mid}",
+                "date": "2026-09-04T17:00:00Z",
+                "summary": {"overview": f"Scoped {decision_text}."},
+                "decisions": [decision_text],
+                "resolution": {
+                    "home_path": "projects/alloi-03.md",
+                    "node": "alloi-03",
+                    "rule": 2,
+                    "created": None,
+                },
+                "open_items": [],
+            }
+        ]
+    }
+
+
+def test_apply_resolution_home_read_happens_inside_lock_no_lost_update(tmp_path):
+    # G2-P1-2 (D-15 spec FR-005/FR-008, G2-codex.json): planned_files() used to
+    # read+render the home page BEFORE the client-file lock was acquired, so two
+    # meetings resolving to the SAME home page could each read stale content and
+    # the second write would clobber the first's freshly-appended History line.
+    # Fixed: the read + render + create-conflict check now happens INSIDE the
+    # lock (see apply_resolution).
+    #
+    # Simulated race: monkeypatch client_file_lock so that when meeting A's
+    # apply_resolution enters the lock — the exact point under test — meeting
+    # B's ENTIRE apply_resolution runs to completion first and writes its own
+    # History line. With the fix, A's read (now inside the lock, after this
+    # callback) sees B's write and both survive. With the bug (read before the
+    # lock), A's stale read happens before this callback ever fires, so A's
+    # write clobbers B's.
+    vault = tmp_path / "vault"
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "projects").mkdir(parents=True)
+    home = brain / "projects" / "alloi-03.md"
+    home.write_text(
+        "# Client: Alloi — Tactical Reports\n\n"
+        "## Current state\n\nSome untouched prose.\n\n"
+        "## History (dated, newest first)\n\n- 2026-08-01 — old entry\n\n"
+        "## Open Items\n\n| Item | Owner | Deadline | Source | Status |\n|---|---|---|---|---|\n",
+        encoding="utf-8",
+    )
+    ledger = tmp_path / "ledger.txt"
+
+    payload_a = _payload_for("MEETING-A-ID", "Meeting A decision")
+    payload_b = _payload_for("MEETING-B-ID", "Meeting B decision")
+
+    real_lock = WB.client_file_lock
+    state = {"entered": 0}
+
+    @contextlib.contextmanager
+    def racing_lock(path):
+        if state["entered"] == 0:
+            state["entered"] += 1
+            WB.apply_resolution(payload_b, org_root=vault, ledger_path=ledger)
+        with real_lock(path):
+            yield
+
+    WB.client_file_lock = racing_lock
+    try:
+        WB.apply_resolution(payload_a, org_root=vault, ledger_path=ledger)
+    finally:
+        WB.client_file_lock = real_lock
+
+    text = home.read_text(encoding="utf-8")
+    assert "Some untouched prose." in text
+    assert "[source: fireflies:MEETING-A-ID]" in text
+    assert "[source: fireflies:MEETING-B-ID]" in text
+
+
+def test_append_ledger_atomic_sequential_appends_keep_both_keys(tmp_path):
+    ledger = tmp_path / "ledger.txt"
+    WB._append_ledger_atomic(ledger, "fireflies:a")
+    WB._append_ledger_atomic(ledger, "fireflies:b")
+    lines = [ln for ln in ledger.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert lines == ["fireflies:a", "fireflies:b"]
+
+
+def test_append_ledger_atomic_concurrent_read_does_not_drop_a_key(tmp_path):
+    # G2-P1-4 (D-15 spec line 58 / FR-005 line 192, G2-codex.json): the ledger
+    # read-modify-write must be serialized under a lock (reused client_file_lock
+    # helper on a `<ledger>.lock` path) so two concurrent appenders never both
+    # read the same "existing" snapshot and clobber each other's key on write.
+    ledger = tmp_path / "ledger.txt"
+    real_lock = WB.client_file_lock
+    state = {"entered": 0}
+
+    @contextlib.contextmanager
+    def racing_lock(path):
+        if state["entered"] == 0 and str(path) == str(ledger):
+            state["entered"] += 1
+            # Simulate a second process appending its own key while the first
+            # is inside its locked read-modify-write window.
+            WB._append_ledger_atomic(ledger, "fireflies:b")
+        with real_lock(path):
+            yield
+
+    WB.client_file_lock = racing_lock
+    try:
+        WB._append_ledger_atomic(ledger, "fireflies:a")
+    finally:
+        WB.client_file_lock = real_lock
+
+    lines = [ln for ln in ledger.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert set(lines) == {"fireflies:a", "fireflies:b"}

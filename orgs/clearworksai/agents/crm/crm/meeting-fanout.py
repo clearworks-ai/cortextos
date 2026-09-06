@@ -87,6 +87,13 @@ class Deps:
     # already-surfaced commitment ("SKIP") or a first sight ("SURFACE"). None (default)
     # means --strict was not requested; fanout() then falls back to dedup_surface.
     dedup_surface_strict: Callable[[str], str] | None = None
+    # CH-4: on a --retry-commitment cycle, look up whether a task already exists
+    # for this commitmentId (an earlier create-task call may have durably
+    # succeeded on the bus even though the command reported failure/timed out —
+    # an "ambiguous failure"). Returns the existing task id, or "" if none is
+    # found. None (default) means the lookup is unavailable; fanout() then
+    # falls back to unconditionally re-creating, same as before this fix.
+    find_task_by_commitment: Callable[[str], str] | None = None
 
 
 # ── commitment model ─────────────────────────────────────────────────────────
@@ -294,7 +301,8 @@ def fanout(
 
     for c in commitments:
         source_key = f"commitment:{c.commitment_id}"
-        if c.commitment_id in retry_commitments:
+        is_retry = c.commitment_id in retry_commitments
+        if is_retry:
             pass  # explicit checkpoint retry — bypass the dedup check for this id
         elif strict and deps.dedup_surface_strict is not None:
             state = deps.dedup_surface_strict(source_key)
@@ -320,17 +328,33 @@ def fanout(
         if c.owner_label:
             desc = (
                 f"{c.owner_label} · From meeting fireflies:{meeting_id} · "
-                f"{c.text} · due {c.deadline or 'none'}"
+                f"{c.text} · due {c.deadline or 'none'} · [{source_key}]"
             )
         else:
-            desc = f"From meeting {meeting_id}" + (f" · due {c.deadline}" if c.deadline else "")
-        task_id = deps.create_task(
-            title=task_title,
-            assignee=assignee,
-            needs_approval=c.client_facing,
-            desc=desc,
-            due=c.deadline or None,
-        )
+            desc = (
+                f"From meeting {meeting_id}"
+                + (f" · due {c.deadline}" if c.deadline else "")
+                + f" · [{source_key}]"
+            )
+        # CH-4: a --retry-commitment cycle may be retrying a commitment whose
+        # earlier create-task call actually succeeded on the bus despite an
+        # ambiguous command failure (empty/nonzero result). Check for an
+        # existing task carrying this commitmentId before re-creating — the
+        # `[commitment:<id>]` marker embedded in `desc` above is what makes
+        # that existing task findable by description.
+        existing_task_id = ""
+        if is_retry and deps.find_task_by_commitment is not None:
+            existing_task_id = deps.find_task_by_commitment(c.commitment_id) or ""
+        if existing_task_id:
+            task_id = existing_task_id
+        else:
+            task_id = deps.create_task(
+                title=task_title,
+                assignee=assignee,
+                needs_approval=c.client_facing,
+                desc=desc,
+                due=c.deadline or None,
+            )
         if task_id:
             result.tasks.append(task_id)
             result.task_map.append((c.commitment_id, task_id))
@@ -498,6 +522,33 @@ def prod_dedup_surface_strict(source_key: str) -> str:
     return "SURFACE" if out.upper().startswith("SURFACE") else "SKIP"
 
 
+def prod_find_task_by_commitment(commitment_id: str) -> str:
+    """CH-4: before a --retry-commitment cycle re-creates a task, check whether
+    an earlier (ambiguous-failure) create-task call already landed on the bus —
+    avoids duplicating a task when the create command itself failed/timed out
+    but the write succeeded. Filters `cortextos bus list-tasks --json` on the
+    `[commitment:<id>]` marker embedded in each task's description (see the
+    Sink-1 `desc` construction in fanout())."""
+    out = _run(["cortextos", "bus", "list-tasks", "--json"])
+    if not out:
+        return ""
+    try:
+        tasks = json.loads(out)
+    except ValueError:
+        LOGGER.warning("list-tasks output was not JSON — cannot find existing task")
+        return ""
+    if not isinstance(tasks, list):
+        return ""
+    needle = f"[commitment:{commitment_id}]"
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        desc = str(task.get("desc") or task.get("description") or "")
+        if needle in desc:
+            return str(task.get("id") or "")
+    return ""
+
+
 def prod_post_briefs(commitment: dict[str, Any]) -> bool:
     """POST one commitment to $BRIEFS_INGEST_URL (x-api-key: $TASKS_INGEST_TOKEN).
 
@@ -534,6 +585,7 @@ def production_deps() -> Deps:
         send_telegram=prod_send_telegram,
         dedup_surface=prod_dedup_surface,
         dedup_surface_strict=None,
+        find_task_by_commitment=prod_find_task_by_commitment,
     )
 
 

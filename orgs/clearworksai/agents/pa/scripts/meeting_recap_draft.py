@@ -5,10 +5,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import subprocess
-from datetime import datetime, timezone
+import sys
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -23,6 +22,17 @@ SUPPRESSED_NAMES = ("marcos santa ana",)
 DEFAULT_TO = "josh@clearworks.ai"
 RunResult = subprocess.CompletedProcess[str]
 Runner = Callable[[Sequence[str]], RunResult]
+
+# S-3/S-4 (reviewify-standards.json): reach scripts/brain the same way
+# meeting_writeback.py does (sys.path shim), so append_ledger can reuse the
+# repo's one sanctioned atomic-write helper instead of a hand-rolled
+# temp+os.replace, and ledger_key can delegate to writeback_render's
+# _source_key instead of re-implementing the same derivation.
+_BRAIN_DIR = Path(__file__).resolve().parents[5] / "scripts" / "brain"
+if str(_BRAIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_BRAIN_DIR))
+from atomic import atomic_write  # noqa: E402
+from writeback_render import _source_key  # noqa: E402
 
 
 def normalize_space(value: str) -> str:
@@ -49,26 +59,51 @@ def load_ledger(path: Path) -> set[str]:
     return seen
 
 
-def append_ledger(path: Path, meeting_id: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(f".{path.name}.tmp")
+def append_ledger(path: Path, key: str, subject: str = "") -> None:
+    """S-3: temp + os.replace via the repo's one sanctioned atomic_write helper
+    (scripts/brain/atomic.py) instead of a hand-rolled tmp/os.replace sequence —
+    picks up atomic_write's fsync-before-replace, fixed 0o644 dest mode, and
+    cleanup-of-tmp-on-exception for free.
+
+    The row also carries the draft subject after the key, tab-separated
+    (`<key>\\t<subject>`), so a resuming orchestrator can recover which subject
+    was filed for a given key. `load_ledger`'s dedup (first whitespace token)
+    and `load_ledger_subjects` below both stay backward-compatible with legacy
+    rows that carry no tab (pre-this-change: `<key> <timestamp>`)."""
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
-    row = f"{meeting_id} {int(datetime.now(timezone.utc).timestamp())}\n"
-    tmp_path.write_text(existing + row, encoding="utf-8")
-    os.replace(tmp_path, path)
+    if existing and not existing.endswith("\n"):
+        existing += "\n"
+    row = f"{key}\t{subject}\n" if subject else f"{key}\n"
+    atomic_write(path, (existing + row).encode("utf-8"))
+
+
+def load_ledger_subjects(path: Path) -> dict[str, str]:
+    """S-3: read back `<key>\\t<subject>` rows so a resuming caller (e.g. the
+    meeting orchestrator) can recover which draft subject was filed for a
+    given key. Legacy rows with no tab (pre-this-change: `<key> <timestamp>`)
+    still parse — they simply carry no recoverable subject (empty string)."""
+    subjects: dict[str, str] = {}
+    if not path.exists():
+        return subjects
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip("\n")
+        if not line.strip():
+            continue
+        if "\t" in line:
+            key, _, subject = line.partition("\t")
+            subjects[key.strip()] = subject
+        else:
+            key = line.split()[0]
+            subjects[key] = ""
+    return subjects
 
 
 def ledger_key(meeting: dict[str, Any]) -> str:
-    """D-16/N3-1: mirror writeback's `_source_key` (scripts/brain/writeback_render.py)
-    — derive `<kind>:<id>` from the payload's own `source{kind,id}` so the recap
-    ledger dedupes on the same source-agnostic key as writeback/CRM. Falls back to
-    the legacy `fireflies:<id>` literal only when `source` is absent or malformed
-    (no unconditional `fireflies:` literal for payloads that do carry a source)."""
-    meeting_id = normalize_space(str(meeting.get("id") or ""))
-    source = meeting.get("source")
-    if isinstance(source, dict) and source.get("kind") and source.get("id"):
-        return f"{source['kind']}:{source['id']}"
-    return f"fireflies:{meeting_id}"
+    """S-4 (reviewify-standards.json): single source of truth — delegate to
+    writeback_render._source_key so the recap ledger dedupes on the exact same
+    source-agnostic `<kind>:<id>` key as writeback/CRM, instead of maintaining
+    a byte-identical duplicate here that could silently drift from it."""
+    return _source_key(meeting)
 
 
 def load_voice_guidance(path: Path) -> str:
@@ -292,14 +327,14 @@ def process_meetings(
             continue
 
         if tier == "L2":
-            append_ledger(ledger_path, key)
+            append_ledger(ledger_path, key, subject)
             summary["auto_filed"] += 1
             ledger_ids.add(key)
             continue
 
         result = run_gmail_draft(subject, body, runner)
         if result.returncode == 0:
-            append_ledger(ledger_path, key)
+            append_ledger(ledger_path, key, subject)
             summary["drafts_created"] += 1
             ledger_ids.add(key)
             continue

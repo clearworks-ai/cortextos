@@ -51,6 +51,11 @@ class FakeBus:
         self._surfaced: set[str] = set()
         self._briefs_env_present = briefs_env_present
         self._counter = 0
+        # CH-4: commitmentId -> already-existing bus task id, settable per-test to
+        # simulate a --retry-commitment cycle finding a task that a prior ambiguous
+        # create-task failure actually did create.
+        self.existing_tasks_by_commitment: dict[str, str] = {}
+        self.find_task_calls: list[str] = []
 
     def _next(self, prefix: str) -> str:
         self._counter += 1
@@ -102,6 +107,10 @@ class FakeBus:
         self._surfaced.add(source_key)
         return True  # SURFACE — first sight
 
+    def find_task_by_commitment(self, commitment_id: str) -> str:
+        self.find_task_calls.append(commitment_id)
+        return self.existing_tasks_by_commitment.get(commitment_id, "")
+
     def deps(self, full_payload: dict) -> "mf.Deps":
         return mf.Deps(
             load_full=lambda _mid: full_payload,
@@ -111,6 +120,7 @@ class FakeBus:
             add_followup=self.add_followup,
             send_telegram=self.send_telegram,
             dedup_surface=self.dedup_surface,
+            find_task_by_commitment=self.find_task_by_commitment,
         )
 
 
@@ -465,6 +475,85 @@ class StrictModeTests(unittest.TestCase):
         self.assertEqual(result.tasks, ["task-1"])
         self.assertEqual(result.failed, [])
 
+    def test_retry_commitment_finds_existing_task_and_skips_recreate(self):
+        # CH-4 (G2b-codex-challenge.json): an earlier --retry-commitment cycle's
+        # create-task call may have durably created the task on the bus even
+        # though the command itself returned empty/nonzero (ambiguous failure).
+        # Before re-creating, fanout() must ask deps.find_task_by_commitment for
+        # an existing task carrying this commitmentId; if found, it must record
+        # that id in task_map and never call create_task again.
+        create_calls: list[dict] = []
+
+        def create_task(**kw):
+            create_calls.append(kw)
+            return "should-not-be-used"
+
+        deps = mf.Deps(
+            load_full=lambda _mid: {
+                "meetings": [{"id": "M1", "next_steps": [
+                    {"commitmentId": "c1", "text": "t1", "direction": "internal",
+                     "owner_identity": "pa-codex", "deadline": None}
+                ]}]
+            },
+            create_task=create_task,
+            create_approval=lambda **kw: "",
+            post_briefs=lambda body: True,
+            add_followup=lambda **kw: "",
+            send_telegram=lambda *a: None,
+            dedup_surface=lambda k: False,  # would normally SKIP
+            dedup_surface_strict=lambda k: "SKIP",
+            find_task_by_commitment=lambda cid: "task-already-existing" if cid == "c1" else "",
+        )
+        result = mf.fanout(
+            meeting_id="M1", event_file=None, deps=deps, strict=True,
+            retry_commitments=frozenset({"c1"}),
+        )
+        self.assertEqual(create_calls, [])
+        self.assertEqual(result.tasks, ["task-already-existing"])
+        self.assertEqual(result.task_map, [("c1", "task-already-existing")])
+        self.assertEqual(result.failed, [])
+
+    def test_retry_commitment_creates_when_find_task_by_commitment_finds_nothing(self):
+        # CONTROL for CH-4: when find_task_by_commitment reports no existing task
+        # (empty string — the common case, a real create-task failure), retry
+        # must still create normally.
+        deps = mf.Deps(
+            load_full=lambda _mid: {
+                "meetings": [{"id": "M1", "next_steps": [
+                    {"commitmentId": "c1", "text": "t1", "direction": "internal",
+                     "owner_identity": "pa-codex", "deadline": None}
+                ]}]
+            },
+            create_task=lambda **kw: "task-2",
+            create_approval=lambda **kw: "",
+            post_briefs=lambda body: True,
+            add_followup=lambda **kw: "",
+            send_telegram=lambda *a: None,
+            dedup_surface=lambda k: False,
+            dedup_surface_strict=lambda k: "SKIP",
+            find_task_by_commitment=lambda cid: "",
+        )
+        result = mf.fanout(
+            meeting_id="M1", event_file=None, deps=deps, strict=True,
+            retry_commitments=frozenset({"c1"}),
+        )
+        self.assertEqual(result.tasks, ["task-2"])
+        self.assertEqual(result.task_map, [("c1", "task-2")])
+
+    def test_retry_commitment_with_fakebus_finds_existing_task(self):
+        # CH-4 with the FakeBus seam (as required by the fix): FakeBus records
+        # every find_task_by_commitment query.
+        bus = FakeBus()
+        bus.existing_tasks_by_commitment["c1"] = "task-42"
+        payload = make_meeting([commitment("c1", "t1", "pa-codex")], meeting_type="internal", client="")
+        result = mf.fanout(
+            meeting_id="M1", event_file=None, deps=bus.deps(payload),
+            retry_commitments=frozenset({"c1"}),
+        )
+        self.assertEqual(bus.find_task_calls, ["c1"])
+        self.assertEqual(bus.tasks, [])  # create_task never called
+        self.assertEqual(result.task_map, [("c1", "task-42")])
+
     def test_non_strict_run_never_touches_dedup_surface_strict(self):
         # CONTROL-adjacent: dedup_surface_strict defaults to None; a non-strict fanout()
         # call must take the plain dedup_surface branch exactly as before Task 7.
@@ -561,7 +650,7 @@ class FullFileTests(unittest.TestCase):
         self.assertEqual(
             bus.tasks[0]["desc"],
             "owner: Josh · From meeting fireflies:01M1MW2GAZ1DQ0C6PG3KJ557JA · "
-            "Send the tactical report draft · due 2026-09-08",
+            "Send the tactical report draft · due 2026-09-08 · [commitment:abc123]",
         )
 
 

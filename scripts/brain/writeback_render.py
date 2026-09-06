@@ -270,14 +270,27 @@ def org_brain_root(org_root: Path) -> Path:
     return org_root
 
 
+def home_path_for(org_root: Path, meeting: dict[str, Any]) -> Path:
+    """G2-P1-2: compute the home-page path WITHOUT reading its contents, so a
+    caller (meeting_writeback.apply_resolution) can acquire a lock on this
+    exact path before doing the read + render that planned_files() below
+    performs — otherwise two meetings resolving to the same home page can
+    each read stale contents and clobber each other's write."""
+    brain = org_brain_root(org_root)
+    res = meeting.get("resolution") or {}
+    if not isinstance(res, dict):
+        res = {}
+    home_rel = str(res.get("home_path") or "")
+    return brain / home_rel if home_rel else brain / "clients" / "unknown.md"
+
+
 def planned_files(org_root: Path, meeting: dict[str, Any]) -> list[tuple[Path, str, str]]:
     """Return (path, old_text, new_text) for every file --apply would touch."""
     brain = org_brain_root(org_root)
     res = meeting.get("resolution") or {}
     if not isinstance(res, dict):
         res = {}
-    home_rel = str(res.get("home_path") or "")
-    home = brain / home_rel if home_rel else brain / "clients" / "unknown.md"
+    home = home_path_for(org_root, meeting)
     old_home = home.read_text(encoding="utf-8") if home.exists() else ""
     created = res.get("created")
     if created:

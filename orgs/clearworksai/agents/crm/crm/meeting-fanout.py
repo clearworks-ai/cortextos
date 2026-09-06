@@ -83,6 +83,10 @@ class Deps:
     send_telegram: Callable[[str, str], None]
     # `cortextos bus event-dedup --source commitment:<id> --fire-once` → True if SURFACE.
     dedup_surface: Callable[[str], bool]
+    # --strict variant: distinguishes a dedup command FAILURE ("FAIL") from an
+    # already-surfaced commitment ("SKIP") or a first sight ("SURFACE"). None (default)
+    # means --strict was not requested; fanout() then falls back to dedup_surface.
+    dedup_surface_strict: Callable[[str], str] | None = None
 
 
 # ── commitment model ─────────────────────────────────────────────────────────
@@ -93,6 +97,7 @@ class Commitment:
     commitment_id: str
     text: str
     owner_identity: str
+    owner_label: str
     direction: str
     deadline: str
     client_facing: bool
@@ -161,6 +166,7 @@ def parse_commitments(
                 commitment_id=commitment_id,
                 text=text,
                 owner_identity=_s(step.get("owner_identity")),
+                owner_label=_s(step.get("owner_label")),
                 direction=direction,
                 deadline=_s(step.get("deadline")),
                 client_facing=commitment_is_client_facing(direction, meeting_client_facing),
@@ -228,18 +234,25 @@ class FanoutResult:
     surfaced: list[Commitment] = field(default_factory=list)
     skipped: list[Commitment] = field(default_factory=list)
     tasks: list[str] = field(default_factory=list)
+    task_map: list[tuple[str, str]] = field(default_factory=list)
     approvals: list[str] = field(default_factory=list)
     followups: list[str] = field(default_factory=list)
     briefs_attempted: int = 0
     briefs_degraded: int = 0
     telegram_sent: bool = False
+    # --strict: commitment ids whose dedup command failed, or whose create_task returned
+    # empty — distinct from `skipped` (already-surfaced). A checkpoint retries these via
+    # --retry-commitment.
+    failed: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "meeting_id": self.meeting_id,
             "surfaced": [c.commitment_id for c in self.surfaced],
             "skipped": [c.commitment_id for c in self.skipped],
+            "failed": self.failed,
             "tasks": self.tasks,
+            "task_map": [{"commitmentId": cid, "taskId": tid} for cid, tid in self.task_map],
             "approvals": self.approvals,
             "followups": self.followups,
             "briefs_attempted": self.briefs_attempted,
@@ -255,6 +268,8 @@ def fanout(
     deps: Deps,
     dry_run: bool = False,
     telegram_chat_id: str = DEFAULT_TELEGRAM_CHAT_ID,
+    strict: bool = False,
+    retry_commitments: frozenset[str] = frozenset(),
 ) -> FanoutResult:
     """Deterministically fan a meeting's commitments to the four sinks (dedup-gated)."""
     result = FanoutResult(meeting_id=meeting_id)
@@ -279,7 +294,18 @@ def fanout(
 
     for c in commitments:
         source_key = f"commitment:{c.commitment_id}"
-        if not deps.dedup_surface(source_key):
+        if c.commitment_id in retry_commitments:
+            pass  # explicit checkpoint retry — bypass the dedup check for this id
+        elif strict and deps.dedup_surface_strict is not None:
+            state = deps.dedup_surface_strict(source_key)
+            if state == "SKIP":
+                result.skipped.append(c)
+                continue
+            if state == "FAIL":
+                # Dedup command itself failed — never masquerade as "already surfaced".
+                result.failed.append(c.commitment_id)
+                continue
+        elif not deps.dedup_surface(source_key):
             # Already surfaced — skip ALL four sinks for this commitmentId.
             result.skipped.append(c)
             continue
@@ -291,16 +317,28 @@ def fanout(
 
         # Sink 1: bus create-task (+ create-approval if client-facing).
         task_title = c.text if len(c.text) <= 120 else c.text[:117] + "..."
+        if c.owner_label:
+            desc = (
+                f"{c.owner_label} · From meeting fireflies:{meeting_id} · "
+                f"{c.text} · due {c.deadline or 'none'}"
+            )
+        else:
+            desc = f"From meeting {meeting_id}" + (f" · due {c.deadline}" if c.deadline else "")
         task_id = deps.create_task(
             title=task_title,
             assignee=assignee,
             needs_approval=c.client_facing,
-            desc=f"From meeting {meeting_id}"
-            + (f" · due {c.deadline}" if c.deadline else ""),
+            desc=desc,
             due=c.deadline or None,
         )
         if task_id:
             result.tasks.append(task_id)
+            result.task_map.append((c.commitment_id, task_id))
+        elif strict:
+            # create_task returned empty (command failed) — a strict run must not silently
+            # treat this commitment as done; record it for --retry-commitment.
+            result.failed.append(c.commitment_id)
+            continue
         if c.client_facing:
             approval_id = deps.create_approval(
                 title=f"Client-facing commitment: {task_title}",
@@ -446,6 +484,20 @@ def prod_dedup_surface(source_key: str) -> bool:
     return out.upper().startswith("SURFACE")
 
 
+def prod_dedup_surface_strict(source_key: str) -> str:
+    """--strict variant: distinguish a command FAILURE from an already-surfaced
+    SKIP, so a broken dedup check never masquerades as 'already surfaced'."""
+    proc = subprocess.run(
+        ["cortextos", "bus", "event-dedup", "--source", source_key, "--fire-once"],
+        capture_output=True,
+        text=True,
+    )
+    out = (proc.stdout or "").strip()
+    if proc.returncode != 0 or not out:
+        return "FAIL"
+    return "SURFACE" if out.upper().startswith("SURFACE") else "SKIP"
+
+
 def prod_post_briefs(commitment: dict[str, Any]) -> bool:
     """POST one commitment to $BRIEFS_INGEST_URL (x-api-key: $TASKS_INGEST_TOKEN).
 
@@ -481,6 +533,7 @@ def production_deps() -> Deps:
         add_followup=prod_add_followup,
         send_telegram=prod_send_telegram,
         dedup_surface=prod_dedup_surface,
+        dedup_surface_strict=None,
     )
 
 
@@ -504,20 +557,58 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--telegram-chat-id",
         default=DEFAULT_TELEGRAM_CHAT_ID,
     )
+    parser.add_argument(
+        "--full-file",
+        default=None,
+        help="FR-010 --full-file: read this fanout-meeting.json instead of spawning ff-extractor",
+    )
+    parser.add_argument("--no-telegram", action="store_true", help="No-op the Telegram sink")
+    parser.add_argument("--no-followups", action="store_true", help="No-op the followup-row sink")
+    parser.add_argument(
+        "--retry-commitment",
+        action="append",
+        default=[],
+        help="Commitment id to retry, bypassing the dedup check (repeatable)",
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Distinguish a dedup command FAILURE from an already-surfaced SKIP; "
+        "exit 8 with `pending: <id>` (stderr) per failure",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     args = parse_args(argv)
+    deps = production_deps()
+    if args.full_file:
+        full_path = Path(args.full_file)
+        deps.load_full = lambda _mid, _p=full_path: json.loads(_p.read_text(encoding="utf-8"))
+    if args.no_telegram:
+        deps.send_telegram = lambda chat_id, message: None
+    if args.no_followups:
+        deps.add_followup = lambda **kw: ""
+    if args.strict:
+        deps.dedup_surface_strict = prod_dedup_surface_strict
     result = fanout(
         meeting_id=args.meeting_id,
         event_file=args.event_file,
-        deps=production_deps(),
+        deps=deps,
         dry_run=args.dry_run,
         telegram_chat_id=args.telegram_chat_id,
+        strict=args.strict,
+        retry_commitments=frozenset(args.retry_commitment),
     )
     print(json.dumps(result.as_dict(), indent=2))
+    if args.strict and result.failed:
+        # G0a F-1: `pending: <id>` lines must never land on stdout — the orchestrator's
+        # stdout-is-JSON-only parsing seam (Task 9) treats stdout as exactly one JSON
+        # document. Print to stderr instead.
+        for cid in result.failed:
+            print(f"pending: {cid}", file=sys.stderr)
+        return 8
     return 0
 
 

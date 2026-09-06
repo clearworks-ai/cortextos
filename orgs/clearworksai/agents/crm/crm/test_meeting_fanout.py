@@ -8,6 +8,7 @@ tests exercise the real add-followup.py + the prod_post_briefs DEGRADED path dir
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -410,6 +411,158 @@ class EventFileTests(unittest.TestCase):
             mf.fanout(meeting_id="M1", event_file=str(ef), deps=bus.deps(payload))
         self.assertEqual(len(bus.approvals), 1)  # client came from the event file
         self.assertTrue(bus.tasks[0]["needs_approval"])
+
+
+class StrictModeTests(unittest.TestCase):
+    """FR-010 --strict / --retry-commitment / --no-telegram / --no-followups.
+
+    Constructs `mf.Deps(...)` directly (all fields explicit) rather than via
+    `FakeBus.deps()` — that seam is Task 6's territory and does not carry
+    `dedup_surface_strict` yet; this class must not touch it.
+    """
+
+    def test_strict_dedup_command_failure_is_a_failure_not_a_skip(self):
+        deps = mf.Deps(
+            load_full=lambda _mid: {
+                "meetings": [{"id": "M1", "next_steps": [
+                    {"commitmentId": "c1", "text": "t1", "direction": "internal",
+                     "owner_identity": "pa-codex", "deadline": None}
+                ]}]
+            },
+            create_task=lambda **kw: "task-1",
+            create_approval=lambda **kw: "",
+            post_briefs=lambda body: True,
+            add_followup=lambda **kw: "",
+            send_telegram=lambda *a: None,
+            dedup_surface=lambda k: True,  # non-strict path would say SURFACE
+            dedup_surface_strict=lambda k: "FAIL",  # strict path: command failed
+        )
+        result = mf.fanout(meeting_id="M1", event_file=None, deps=deps, strict=True)
+        self.assertEqual(result.failed, ["c1"])
+        self.assertEqual(result.tasks, [])
+        self.assertEqual(result.surfaced, [])
+
+    def test_retry_commitment_skips_dedup_for_named_ids(self):
+        deps = mf.Deps(
+            load_full=lambda _mid: {
+                "meetings": [{"id": "M1", "next_steps": [
+                    {"commitmentId": "c1", "text": "t1", "direction": "internal",
+                     "owner_identity": "pa-codex", "deadline": None}
+                ]}]
+            },
+            create_task=lambda **kw: "task-1",
+            create_approval=lambda **kw: "",
+            post_briefs=lambda body: True,
+            add_followup=lambda **kw: "",
+            send_telegram=lambda *a: None,
+            dedup_surface=lambda k: False,  # would normally SKIP
+            dedup_surface_strict=lambda k: "SKIP",
+        )
+        result = mf.fanout(
+            meeting_id="M1", event_file=None, deps=deps, strict=True,
+            retry_commitments=frozenset({"c1"}),
+        )
+        self.assertEqual(result.tasks, ["task-1"])
+        self.assertEqual(result.failed, [])
+
+    def test_non_strict_run_never_touches_dedup_surface_strict(self):
+        # CONTROL-adjacent: dedup_surface_strict defaults to None; a non-strict fanout()
+        # call must take the plain dedup_surface branch exactly as before Task 7.
+        deps = mf.Deps(
+            load_full=lambda _mid: {
+                "meetings": [{"id": "M1", "next_steps": [
+                    {"commitmentId": "c1", "text": "t1", "direction": "internal",
+                     "owner_identity": "pa-codex", "deadline": None}
+                ]}]
+            },
+            create_task=lambda **kw: "task-1",
+            create_approval=lambda **kw: "",
+            post_briefs=lambda body: True,
+            add_followup=lambda **kw: "",
+            send_telegram=lambda *a: None,
+            dedup_surface=lambda k: True,
+        )
+        result = mf.fanout(meeting_id="M1", event_file=None, deps=deps)
+        self.assertEqual(result.surfaced[0].commitment_id, "c1")
+        self.assertEqual(result.failed, [])
+
+    def test_main_strict_exit_8_prints_pending_lines(self):
+        # G0a F-10: this was a unittest.TestCase method declaring the pytest `capsys`
+        # fixture — pytest never injects fixtures into TestCase methods (TypeError:
+        # missing 1 required positional argument), and the parameter was unused anyway
+        # since the body already captures stdout itself. Dropped in favor of
+        # contextlib.redirect_stdout/redirect_stderr.
+        #
+        # `--full-file` (Task 6) landed in this file concurrently with this task, so
+        # payload injection uses it directly, same as the plan intends — main() still
+        # only exercises Task 7's own --no-telegram/--strict wiring plus a monkeypatched
+        # mf.prod_dedup_surface_strict (Task 7 seam, real command never spawned).
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+
+        full = Path(tempfile.mkdtemp()) / "fanout-meeting.json"
+        full.write_text(json.dumps({
+            "meetings": [{"id": "M1", "next_steps": [
+                {"commitmentId": "c1", "text": "t1", "direction": "internal",
+                 "owner_identity": "pa-codex", "deadline": None}
+            ]}]
+        }))
+        original = mf.prod_dedup_surface_strict
+        mf.prod_dedup_surface_strict = lambda k: "FAIL"
+        try:
+            out_buf, err_buf = io.StringIO(), io.StringIO()
+            with redirect_stdout(out_buf), redirect_stderr(err_buf):
+                rc = mf.main(
+                    ["--meeting-id", "M1", "--full-file", str(full), "--no-telegram", "--strict"]
+                )
+        finally:
+            mf.prod_dedup_surface_strict = original
+        self.assertEqual(rc, 8)
+        self.assertIn("pending: c1", err_buf.getvalue())
+        self.assertNotIn("pending: c1", out_buf.getvalue())
+
+
+class FullFileTests(unittest.TestCase):
+    def test_full_file_skips_load_full_and_uses_owner_label_desc(self):
+        # G0a F-7: the earlier draft of this test called mf.main([..., "--no-telegram"])
+        # against a tree that doesn't define --no-telegram until Task 7 (SystemExit(2)),
+        # and then built its Deps from mf.production_deps() — whose create_task,
+        # add_followup, and post_briefs are the REAL bus/CRM/network sinks (D-18
+        # forbids this; this file's own module docstring says no test touches them).
+        # Fixed per the fix: drop the main()/production_deps() half entirely (Task 7's
+        # test_main_strict_exit_8_prints_pending_lines already smoke-tests --full-file
+        # through main() once --no-telegram exists) and build Deps from this file's
+        # own FakeBus.deps() helper (defined above), swapping only load_full for a
+        # file reader — exactly what --full-file does in main(). This file has no
+        # class literally named FanoutTests, so this lands as its own test class
+        # matching the file's existing per-feature grouping convention.
+        full = Path(tempfile.mkdtemp()) / "fanout-meeting.json"
+        full.write_text(json.dumps({
+            "meetings": [{
+                "id": "01M1MW2GAZ1DQ0C6PG3KJ557JA",
+                "title": "Tacticals sync",
+                "meeting_type": "delivery",
+                "client_context": "alloi",
+                "next_steps": [{
+                    "commitmentId": "abc123",
+                    "text": "Send the tactical report draft",
+                    "direction": "internal",
+                    "owner_identity": "pa-codex",
+                    "owner_label": "owner: Josh",
+                    "deadline": "2026-09-08",
+                }],
+            }]
+        }))
+        loaded = json.loads(full.read_text())
+        bus = FakeBus()
+        deps = bus.deps(loaded)
+        result = mf.fanout(meeting_id="01M1MW2GAZ1DQ0C6PG3KJ557JA", event_file=None, deps=deps)
+        self.assertEqual(result.task_map, [("abc123", "task-1")])
+        self.assertEqual(
+            bus.tasks[0]["desc"],
+            "owner: Josh · From meeting fireflies:01M1MW2GAZ1DQ0C6PG3KJ557JA · "
+            "Send the tactical report draft · due 2026-09-08",
+        )
 
 
 if __name__ == "__main__":

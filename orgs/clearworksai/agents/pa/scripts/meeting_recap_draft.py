@@ -34,6 +34,16 @@ if str(_BRAIN_DIR) not in sys.path:
 from atomic import atomic_write  # noqa: E402
 from writeback_render import _source_key  # noqa: E402
 
+# P1 (review 2026-09-05): reuse meeting_writeback.py's FR-008 per-file
+# fcntl.flock helper for the recap ledger too, instead of a lock-free
+# read-modify-write — see append_ledger below. meeting_writeback.py lives in
+# this same scripts/ directory, so no extra sys.path shim is needed beyond
+# what's already set up for this file's own module resolution.
+_PA_SCRIPTS_DIR = SCRIPT_PATH.parent
+if str(_PA_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_PA_SCRIPTS_DIR))
+from meeting_writeback import client_file_lock  # noqa: E402
+
 
 def normalize_space(value: str) -> str:
     return " ".join(value.split()).strip()
@@ -59,6 +69,19 @@ def load_ledger(path: Path) -> set[str]:
     return seen
 
 
+def _append_ledger_locked(path: Path, key: str, subject: str = "") -> None:
+    """Append a ledger row assuming the caller already holds
+    ``client_file_lock(path)``. Split out from `append_ledger` so callers that
+    must hold the lock across a larger critical section (e.g.
+    `process_meetings`'s check -> gws-draft -> append sequence, P2-followup
+    below) can append without re-acquiring the lock and deadlocking on it."""
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    if existing and not existing.endswith("\n"):
+        existing += "\n"
+    row = f"{key}\t{subject}\n" if subject else f"{key}\n"
+    atomic_write(path, (existing + row).encode("utf-8"))
+
+
 def append_ledger(path: Path, key: str, subject: str = "") -> None:
     """S-3: temp + os.replace via the repo's one sanctioned atomic_write helper
     (scripts/brain/atomic.py) instead of a hand-rolled tmp/os.replace sequence —
@@ -69,12 +92,17 @@ def append_ledger(path: Path, key: str, subject: str = "") -> None:
     (`<key>\\t<subject>`), so a resuming orchestrator can recover which subject
     was filed for a given key. `load_ledger`'s dedup (first whitespace token)
     and `load_ledger_subjects` below both stay backward-compatible with legacy
-    rows that carry no tab (pre-this-change: `<key> <timestamp>`)."""
-    existing = path.read_text(encoding="utf-8") if path.exists() else ""
-    if existing and not existing.endswith("\n"):
-        existing += "\n"
-    row = f"{key}\t{subject}\n" if subject else f"{key}\n"
-    atomic_write(path, (existing + row).encode("utf-8"))
+    rows that carry no tab (pre-this-change: `<key> <timestamp>`).
+
+    P1 (review 2026-09-05): the read-modify-write below was not serialized, so
+    two concurrent recap workers could both read the same "existing" snapshot
+    and the later `atomic_write` would drop the earlier one's row (a lost
+    dedup key -> a duplicate Gmail draft later). Reuse meeting_writeback.py's
+    FR-008 `client_file_lock` (fcntl.flock on a sibling `<ledger>.lock`) the
+    same way it guards meeting_writeback's own ledger append, so concurrent
+    appenders serialize here instead of racing."""
+    with client_file_lock(path):
+        _append_ledger_locked(path, key, subject)
 
 
 def load_ledger_subjects(path: Path) -> dict[str, str]:
@@ -328,25 +356,41 @@ def process_meetings(
             print(body)
             continue
 
-        if tier == "L2":
-            append_ledger(ledger_path, key, subject)
-            summary["auto_filed"] += 1
-            ledger_ids.add(key)
-            continue
+        # P2-followup (review 2026-09-05): the key-check above is a fast,
+        # unlocked pre-filter against this process's own `ledger_ids`
+        # snapshot. Two recap processes racing on the SAME absent key could
+        # both pass that check, both call gws +draft, and both append ->
+        # duplicate external Gmail drafts. Hold the same per-ledger
+        # client_file_lock append_ledger uses across the whole
+        # re-check -> draft -> append sequence for this meeting, and
+        # re-verify the key from the file itself (not the in-memory
+        # `ledger_ids`, which a concurrent worker's append cannot update)
+        # immediately before drafting.
+        with client_file_lock(ledger_path):
+            if key in load_ledger(ledger_path):
+                summary["skipped_ledger"] += 1
+                ledger_ids.add(key)
+                continue
 
-        result = run_gmail_draft(subject, body, runner)
-        if result.returncode == 0:
-            append_ledger(ledger_path, key, subject)
-            summary["drafts_created"] += 1
-            ledger_ids.add(key)
-            continue
-        summary["draft_failures"].append(
-            {
-                "meeting_id": meeting_id,
-                "returncode": result.returncode,
-                "stderr": normalize_space(result.stderr or ""),
-            }
-        )
+            if tier == "L2":
+                _append_ledger_locked(ledger_path, key, subject)
+                summary["auto_filed"] += 1
+                ledger_ids.add(key)
+                continue
+
+            result = run_gmail_draft(subject, body, runner)
+            if result.returncode == 0:
+                _append_ledger_locked(ledger_path, key, subject)
+                summary["drafts_created"] += 1
+                ledger_ids.add(key)
+                continue
+            summary["draft_failures"].append(
+                {
+                    "meeting_id": meeting_id,
+                    "returncode": result.returncode,
+                    "stderr": normalize_space(result.stderr or ""),
+                }
+            )
 
     return summary
 

@@ -573,7 +573,7 @@ def _load_ledger_ids(ledger_path: Path) -> set[str]:
     }
 
 
-def _append_ledger_atomic(ledger_path: Path, key: str) -> None:
+def _append_ledger_atomic(ledger_path: Path, key: str) -> bool:
     """G0b C2-1 (D-15 spec line 58 / FR-005 line 192): every resolution-mode
     write is temp + os.replace — including the ledger append, which was a
     bare `open(..., "a")` in the round-2 draft. `atomic_write` is already
@@ -585,12 +585,27 @@ def _append_ledger_atomic(ledger_path: Path, key: str) -> None:
     was not serialized, so two concurrent applies could each read the same
     "existing" snapshot and the second write would drop the first's key.
     Reuse client_file_lock (FR-008) on a `<ledger>.lock` sibling path so
-    concurrent appenders serialize here exactly like the client-file RMW."""
+    concurrent appenders serialize here exactly like the client-file RMW.
+
+    G3-P2 (review 2026-09-05): `apply_resolution`'s key-presence check used to
+    happen entirely OUTSIDE this lock, against a `ledger_ids` set loaded once
+    before its loop — so two concurrent `apply_resolution` calls (e.g. two
+    writeback workers, each with their own process-local `ledger_ids`
+    snapshot) filing the SAME source could both see the key absent and both
+    reach this function, producing a duplicate ledger row. The presence check
+    is now re-verified INSIDE the lock (the sole authoritative check) and
+    this returns False without writing when the key is already present, so
+    the caller must honor the return value instead of trusting its own
+    pre-loaded `ledger_ids` membership test."""
     with client_file_lock(ledger_path):
         existing = ledger_path.read_text(encoding="utf-8") if ledger_path.exists() else ""
+        current_ids = {line.strip().split()[0] for line in existing.splitlines() if line.strip()}
+        if key in current_ids:
+            return False
         if existing and not existing.endswith("\n"):
             existing += "\n"
         atomic_write(ledger_path, (existing + f"{key}\n").encode("utf-8"))
+        return True
 
 
 def apply_resolution(payload: dict, *, org_root: Path, ledger_path: Path) -> dict:
@@ -650,9 +665,15 @@ def apply_resolution(payload: dict, *, org_root: Path, ledger_path: Path) -> dic
         if key in ledger_ids:
             skipped.append(f"ledger:{key}")
         else:
-            _append_ledger_atomic(ledger_path, key)
+            # G3-P2: _append_ledger_atomic re-checks presence inside its own
+            # lock and returns False (no write) if a concurrent caller filed
+            # this key first -- honor that instead of assuming our stale
+            # pre-loop `ledger_ids` membership test is still accurate.
+            if _append_ledger_atomic(ledger_path, key):
+                written.append(f"ledger:{key}")
+            else:
+                skipped.append(f"ledger:{key}")
             ledger_ids.add(key)
-            written.append(f"ledger:{key}")
     return {"written": written, "created": created, "skipped": skipped}
 
 

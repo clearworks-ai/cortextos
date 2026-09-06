@@ -292,3 +292,87 @@ def test_append_ledger_atomic_concurrent_read_does_not_drop_a_key(tmp_path):
 
     lines = [ln for ln in ledger.read_text(encoding="utf-8").splitlines() if ln.strip()]
     assert set(lines) == {"fireflies:a", "fireflies:b"}
+
+
+def test_append_ledger_atomic_pre_existing_key_returns_false_no_duplicate(tmp_path):
+    # G3-P2 (review 2026-09-05): apply_resolution's ledger_ids presence check
+    # happened before the lock; re-verify presence INSIDE _append_ledger_atomic
+    # instead and skip writing (return False) when the key is already there.
+    ledger = tmp_path / "ledger.txt"
+    ledger.write_text("fireflies:existing\n", encoding="utf-8")
+    result = WB._append_ledger_atomic(ledger, "fireflies:existing")
+    assert result is False
+    lines = [ln for ln in ledger.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert lines == ["fireflies:existing"]
+
+
+def test_append_ledger_atomic_concurrent_same_key_appends_once(tmp_path):
+    # G3-P2: two concurrent appenders of the SAME key must produce exactly
+    # one row -- the presence check must be re-verified INSIDE the lock, not
+    # trusted from a caller's pre-loaded set. Simulated race: monkeypatch
+    # client_file_lock so a second appender for the SAME key wins the race
+    # and completes first; the outer call must then see the key already
+    # present and return False without writing a duplicate row.
+    ledger = tmp_path / "ledger.txt"
+    real_lock = WB.client_file_lock
+    state = {"entered": 0}
+
+    @contextlib.contextmanager
+    def racing_lock(path):
+        if state["entered"] == 0 and str(path) == str(ledger):
+            state["entered"] += 1
+            WB._append_ledger_atomic(ledger, "fireflies:dup")
+        with real_lock(path):
+            yield
+
+    WB.client_file_lock = racing_lock
+    try:
+        result = WB._append_ledger_atomic(ledger, "fireflies:dup")
+    finally:
+        WB.client_file_lock = real_lock
+
+    assert result is False
+    lines = [ln for ln in ledger.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert lines == ["fireflies:dup"]
+
+
+def test_apply_resolution_concurrent_same_source_appends_ledger_once(tmp_path):
+    # G3-P2: apply_resolution's caller must honor _append_ledger_atomic's
+    # return value instead of trusting its own stale pre-loop `ledger_ids`
+    # membership test -- two concurrent apply_resolution calls filing the
+    # SAME source must write the ledger row exactly once, with the losing
+    # call recorded as skipped, never written.
+    vault = tmp_path / "vault"
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "projects").mkdir(parents=True)
+    home = brain / "projects" / "alloi-03.md"
+    home.write_text(
+        "## Node\nid: alloi-03\n\n## History (dated, newest first)\n\n- old\n\n## Open Items\n\n",
+        encoding="utf-8",
+    )
+    ledger = tmp_path / "ledger.txt"
+    payload = _payload_for("MEETING-DUP-ID", "Meeting dup decision")
+
+    real_lock = WB.client_file_lock
+    state = {"entered": 0}
+
+    @contextlib.contextmanager
+    def racing_lock(path):
+        if state["entered"] == 0 and str(path) == str(ledger):
+            state["entered"] += 1
+            # Simulate a second apply_resolution() call for the SAME source
+            # winning the ledger-append race first.
+            WB._append_ledger_atomic(ledger, "fireflies:MEETING-DUP-ID")
+        with real_lock(path):
+            yield
+
+    WB.client_file_lock = racing_lock
+    try:
+        result = WB.apply_resolution(payload, org_root=vault, ledger_path=ledger)
+    finally:
+        WB.client_file_lock = real_lock
+
+    lines = [ln for ln in ledger.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert lines == ["fireflies:MEETING-DUP-ID"]
+    assert "ledger:fireflies:MEETING-DUP-ID" in result["skipped"]
+    assert "ledger:fireflies:MEETING-DUP-ID" not in result["written"]

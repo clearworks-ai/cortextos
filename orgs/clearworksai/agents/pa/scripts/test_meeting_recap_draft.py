@@ -130,6 +130,68 @@ class ProcessMeetingsTests(unittest.TestCase):
         self.assertEqual(summary["auto_filed"], 1)
         self.assertIn("meeting-internal", ledger_contents)
 
+    def test_process_meetings_check_draft_append_race_skips_duplicate_draft(self):
+        """Review 2026-09-05 finding: the ledger key-check -> gws +draft ->
+        ledger-append sequence must be atomic w.r.t. other recap workers, or
+        two concurrent workers can both see the key absent, both call
+        gws +draft, and both append -- producing a duplicate external Gmail
+        draft. Simulated race: monkeypatch client_file_lock so that, right
+        as our own critical section is entered, a second recap worker's
+        entire check -> draft -> append cycle for the SAME key runs to
+        completion first. With the fix, our re-check (now inside the lock)
+        sees that key and skips drafting -- the gws shim is called exactly
+        once (by the simulated other worker), never twice."""
+        meeting = {
+            "id": "meeting-race",
+            "title": "Race client recap",
+            "date": "2026-07-27T11:00:00Z",
+            "organizer": "josh@clearworks.ai",
+            "attendees": ["mark@msia.org"],
+            "summary": {"overview": "Reviewed the audit findings.", "bullets": "", "action_items": ""},
+            "client_context": "Clearworks maps this meeting to client=MSIA. Deal stage=won.",
+            "next_steps": [{"text": "Send findings deck", "direction": "outbound", "owner": "Josh"}],
+        }
+        key = MODULE.ledger_key(meeting)
+        calls: list[list[str]] = []
+
+        def runner(args):
+            calls.append(list(args))
+            return subprocess.CompletedProcess(args, 0, stdout="drafted", stderr="")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / "ledger.txt"
+            real_lock = MODULE.client_file_lock
+            state = {"entered": 0}
+
+            @contextlib.contextmanager
+            def racing_lock(path):
+                if state["entered"] == 0 and str(path) == str(ledger_path):
+                    state["entered"] += 1
+                    # Simulate a second recap worker winning the race: it
+                    # calls gws +draft AND appends the ledger key before our
+                    # own critical section starts.
+                    runner(["gws", "gmail", "+draft", "--other-worker"])
+                    MODULE._append_ledger_locked(ledger_path, key, "Other worker's subject")
+                with real_lock(path):
+                    yield
+
+            MODULE.client_file_lock = racing_lock
+            try:
+                summary = MODULE.process_meetings(
+                    [meeting],
+                    ledger_path=ledger_path,
+                    voice_guidance="Keep it direct.",
+                    vip_list=set(),
+                    runner=runner,
+                )
+            finally:
+                MODULE.client_file_lock = real_lock
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0], ["gws", "gmail", "+draft", "--other-worker"])
+        self.assertEqual(summary["drafts_created"], 0)
+        self.assertEqual(summary["skipped_ledger"], 1)
+
     def test_build_body_includes_client_context_and_next_steps(self):
         meeting = {
             "id": "meeting-body",
@@ -363,7 +425,16 @@ class AppendLedgerAtomicTests(unittest.TestCase):
             # append_ledger's own former hand-rolled tmp scheme used
             # ".{name}.tmp" — assert that's gone, and atomic_write's own
             # ".tmp-*" residue is cleaned up (os.replace already happened).
-            leftovers = [p.name for p in tmp_dir.iterdir() if p.name != "ledger.txt"]
+            # P1 (review 2026-09-05): append_ledger now also holds
+            # client_file_lock, whose sibling "<ledger>.lock" file is an
+            # intentional, permanent lock handle (same as
+            # meeting_writeback.py's own client-file locks) -- not stray
+            # tmp-write residue, so it's expected here and excluded below.
+            leftovers = [
+                p.name
+                for p in tmp_dir.iterdir()
+                if p.name not in ("ledger.txt", "ledger.txt.lock")
+            ]
             self.assertEqual(leftovers, [])
 
     def test_append_ledger_row_format_is_key_tab_subject(self):
@@ -380,6 +451,36 @@ class AppendLedgerAtomicTests(unittest.TestCase):
             MODULE.append_ledger(ledger, "fireflies:b", "Subject B")
             lines = [ln for ln in ledger.read_text(encoding="utf-8").splitlines() if ln.strip()]
             self.assertEqual(lines, ["fireflies:a\tSubject A", "fireflies:b\tSubject B"])
+
+    def test_append_ledger_concurrent_read_does_not_drop_a_key(self):
+        """P1 (review 2026-09-05): append_ledger's read -> atomic_write was
+        not serialized, so two concurrent recap workers could both read the
+        same "existing" snapshot and the later write would drop the
+        earlier one's row. Simulated race: monkeypatch client_file_lock so
+        a second append runs to completion during the first append's lock
+        acquisition; with the fix (both appends serialized under the same
+        `<ledger>.lock`), both rows survive."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / "ledger.txt"
+            real_lock = MODULE.client_file_lock
+            state = {"entered": 0}
+
+            @contextlib.contextmanager
+            def racing_lock(path):
+                if state["entered"] == 0 and str(path) == str(ledger):
+                    state["entered"] += 1
+                    MODULE.append_ledger(ledger, "fireflies:b", "Subject B")
+                with real_lock(path):
+                    yield
+
+            MODULE.client_file_lock = racing_lock
+            try:
+                MODULE.append_ledger(ledger, "fireflies:a", "Subject A")
+            finally:
+                MODULE.client_file_lock = real_lock
+
+            lines = [ln for ln in ledger.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        self.assertEqual(set(lines), {"fireflies:a\tSubject A", "fireflies:b\tSubject B"})
 
     def test_load_ledger_backward_compat_with_legacy_no_tab_lines(self):
         with tempfile.TemporaryDirectory() as tmp:

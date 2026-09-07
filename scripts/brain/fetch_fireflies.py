@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -24,6 +25,7 @@ from paths import (
     safe_meeting_id,
     secrets_path,
 )
+from progress import _state_dir
 
 FETCHER_VERSION = "fetch_fireflies/1"
 GRAPHQL_URL = "https://api.fireflies.ai/graphql"
@@ -61,6 +63,47 @@ _sleep = time.sleep  # test seam
 
 class FirefliesListError(RuntimeError):
     """The transcripts list query returned a GraphQL `errors` payload."""
+
+
+FETCH_ERROR_CLASSES = ("auth", "rate_limit", "not_ready", "server", "network")
+_AUTH_WORDS = re.compile(r"auth|token|unauthori|forbidden|api key", re.IGNORECASE)
+
+
+def fetch_error_path(vault: Path, kind: str, meeting_id: str) -> Path:
+    return _state_dir(Path(vault), kind, meeting_id) / "fetch-error.json"
+
+
+def write_fetch_error(vault: Path, kind: str, meeting_id: str, cls: str, *, status: int | None = None, message: str = "") -> Path:
+    """FR-017 adapter contract (G-109): every exit-2 path leaves a classified
+    error so backfill.py can stop a batch on `auth` without parsing stderr."""
+    assert cls in FETCH_ERROR_CLASSES, cls
+    path = fetch_error_path(vault, kind, meeting_id)
+    doc = {"class": cls, "status": status, "message": message[:500],
+           "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    atomic_write(path, (json.dumps(doc, sort_keys=True, indent=2) + "\n").encode("utf-8"))
+    return path
+
+
+def clear_fetch_error(vault: Path, kind: str, meeting_id: str) -> None:
+    path = fetch_error_path(vault, kind, meeting_id)
+    if path.exists():
+        path.unlink()
+
+
+def classify_exception(exc: BaseException) -> tuple[str, int | None]:
+    if isinstance(exc, urllib.error.HTTPError):
+        if exc.code in (401, 403):
+            return "auth", exc.code
+        if exc.code == 429:
+            return "rate_limit", exc.code
+        return "server", exc.code
+    if isinstance(exc, (urllib.error.URLError, TimeoutError, ConnectionError, OSError)):
+        return "network", None
+    return "server", None
+
+
+def classify_graphql_message(message: str) -> str:
+    return "auth" if _AUTH_WORDS.search(message or "") else "server"
 
 
 def _canonical_bytes(obj: dict[str, Any]) -> bytes:
@@ -286,35 +329,39 @@ def main(argv: list[str] | None = None) -> int:
 
     if source_path.exists() and not args.refetch:
         raw = source_path.read_bytes()
+        clear_fetch_error(vault, "fireflies", meeting_id)
         print(hashlib.sha256(raw).hexdigest())
         return 0
 
+    def _fail(cls: str, message: str, status: int | None = None) -> int:
+        print(message, file=sys.stderr)
+        write_fetch_error(vault, "fireflies", meeting_id, cls, status=status, message=message)
+        return 2
+
     api_key = _load_api_key(Path(args.repo_root))
     if not api_key:
-        print("missing FIREFLIES_API_KEY", file=sys.stderr)
-        return 2
+        return _fail("auth", "missing FIREFLIES_API_KEY")
 
     try:
         payload = _post_graphql(api_key, meeting_id)
-    except Exception as exc:
-        print(f"fetch failed: {exc}", file=sys.stderr)
-        return 2
+    except Exception as exc:  # classified below; never re-raised (exit 2 contract)
+        cls, status = classify_exception(exc)
+        return _fail(cls, f"fetch failed: {exc}", status)
 
     errors = payload.get("errors") or []
     if errors:
         msg = errors[0].get("message") if isinstance(errors[0], dict) else str(errors[0])
-        print(msg or "graphql error", file=sys.stderr)
-        return 2
+        return _fail(classify_graphql_message(msg or ""), msg or "graphql error")
     tr = (payload.get("data") or {}).get("transcript") if isinstance(payload.get("data"), dict) else None
     if not isinstance(tr, dict):
-        print("no transcript", file=sys.stderr)
-        return 2
+        return _fail("not_ready", "no transcript")
 
     sentences = tr.get("sentences") or []
     n = len(sentences) if isinstance(sentences, list) else 0
     if (n < 20 or tr.get("duration") is None) and not args.allow_short:
-        print(f"not-ready: sentences={n}", file=sys.stderr)
-        return 2
+        return _fail("not_ready", f"not-ready: sentences={n}")
+
+    clear_fetch_error(vault, "fireflies", meeting_id)
 
     envelope = envelope_from_transcript(tr)
     raw = _canonical_bytes(envelope)

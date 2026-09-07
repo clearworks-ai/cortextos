@@ -419,3 +419,95 @@ def test_list_transcripts_raises_on_graphql_errors(monkeypatch):
     with pytest.raises(ff.FirefliesListError) as exc:
         ff.list_transcripts("key")
     assert "Unauthorized" in str(exc.value)
+
+
+# --- R4 (FR-017 slice, G-109/G-125): fetch-error.json --------------------------
+def _fe(vault, mid):
+    p = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}" / "fetch-error.json"
+    return _json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+
+
+def test_fetch_error_missing_api_key_is_auth(tmp_path, monkeypatch):
+    import fetch_fireflies as ff
+
+    monkeypatch.delenv("FIREFLIES_API_KEY", raising=False)
+    repo = tmp_path / "repo"; (repo / "orgs/clearworksai").mkdir(parents=True)
+    (repo / "orgs/clearworksai/secrets.env").write_text("OTHER=1\n", encoding="utf-8")
+    vault = tmp_path / "vault"
+    assert ff.main(["--meeting-id", "FE1", "--vault", str(vault), "--repo-root", str(repo)]) == 2
+    doc = _fe(vault, "FE1")
+    assert doc["class"] == "auth" and doc["status"] is None and "FIREFLIES_API_KEY" in doc["message"]
+
+
+def test_fetch_error_http_status_classes(tmp_path, monkeypatch):
+    import fetch_fireflies as ff
+
+    monkeypatch.setenv("FIREFLIES_API_KEY", "k")
+    monkeypatch.setattr(ff, "_sleep", lambda s: None)
+    vault = tmp_path / "vault"
+    for code, cls in ((401, "auth"), (403, "auth"), (429, "rate_limit"), (502, "server"), (418, "server")):
+        def fake_urlopen(req, timeout=0, code=code):
+            raise _uerr.HTTPError(ff.GRAPHQL_URL, code, "x", {}, _io.BytesIO(b""))
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+        assert ff.main(["--meeting-id", f"FE{code}", "--vault", str(vault), "--repo-root", str(tmp_path)]) == 2
+        doc = _fe(vault, f"FE{code}")
+        assert (doc["class"], doc["status"]) == (cls, code), code
+
+
+def test_fetch_error_network_graphql_and_not_ready(tmp_path, monkeypatch):
+    import fetch_fireflies as ff
+
+    monkeypatch.setenv("FIREFLIES_API_KEY", "k")
+    vault = tmp_path / "vault"
+
+    def net(req, timeout=0):
+        raise _uerr.URLError("dns")
+    monkeypatch.setattr("urllib.request.urlopen", net)
+    assert ff.main(["--meeting-id", "NET", "--vault", str(vault), "--repo-root", str(tmp_path)]) == 2
+    assert _fe(vault, "NET")["class"] == "network"
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=0: _RawResp({"errors": [{"message": "Not authorized"}]}))
+    assert ff.main(["--meeting-id", "GQA", "--vault", str(vault), "--repo-root", str(tmp_path)]) == 2
+    assert _fe(vault, "GQA")["class"] == "auth"
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=0: _RawResp({"errors": [{"message": "Internal"}]}))
+    assert ff.main(["--meeting-id", "GQS", "--vault", str(vault), "--repo-root", str(tmp_path)]) == 2
+    assert _fe(vault, "GQS")["class"] == "server"
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=0: _RawResp({"data": {"transcript": None}}))
+    assert ff.main(["--meeting-id", "NOTR", "--vault", str(vault), "--repo-root", str(tmp_path)]) == 2
+    assert _fe(vault, "NOTR")["class"] == "not_ready"
+
+    short = {"data": {"transcript": {"id": "SHORT", "title": "t", "date": 1756684800000, "duration": None,
+                                     "sentences": [], "participants": [], "meeting_attendees": [], "summary": {}}}}
+    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=0: _RawResp(short))
+    assert ff.main(["--meeting-id", "SHORT", "--vault", str(vault), "--repo-root", str(tmp_path)]) == 2
+    assert _fe(vault, "SHORT")["class"] == "not_ready"
+
+
+def test_already_fetched_short_circuit_clears_stale_fetch_error(tmp_path):
+    import fetch_fireflies as ff
+
+    vault = tmp_path / "vault"
+    env = vault / "raw/media/transcripts/fireflies/SC1"; env.mkdir(parents=True)
+    (env / "source.json").write_bytes(b"{}")
+    ff.write_fetch_error(vault, "fireflies", "SC1", "auth", status=401, message="old")
+    assert ff.main(["--meeting-id", "SC1", "--vault", str(vault), "--repo-root", str(tmp_path)]) == 0
+    assert _fe(vault, "SC1") is None
+
+
+def test_fetch_success_clears_stale_fetch_error(tmp_path, monkeypatch):
+    import fetch_fireflies as ff
+
+    monkeypatch.setenv("FIREFLIES_API_KEY", "k")
+    vault = tmp_path / "vault"
+    ff.write_fetch_error(vault, "fireflies", "OK1", "server", status=500, message="old")
+    assert _fe(vault, "OK1")["class"] == "server"
+    ok = {"data": {"transcript": {"id": "OK1", "title": "t", "date": 1756684800000, "duration": 12.0,
+                                  "organizer_email": "josh@clearworks.ai", "participants": ["a@x.io"],
+                                  "meeting_attendees": [{"displayName": "A", "email": "a@x.io"}],
+                                  "sentences": [{"index": i, "speaker_name": "A", "text": f"s{i}", "start_time": i} for i in range(25)],
+                                  "summary": {"overview": "o"}}}}
+    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=0: _RawResp(ok))
+    assert ff.main(["--meeting-id", "OK1", "--vault", str(vault), "--repo-root", str(tmp_path)]) == 0
+    assert _fe(vault, "OK1") is None

@@ -621,6 +621,17 @@ def derive_pairs(vault: Path, kind: str, meeting_ids: list[str]) -> list[tuple[s
     return sorted(pairs)
 
 
+def _post_batch_committed(prog: dict[str, Any]) -> bool:
+    """True only when post_batch.commit records a REAL outcome — a successful commit
+    (`{"vault_sha": sha, "committed": True}`) or the legitimate no-op
+    (`{"vault_sha": None, "committed": False}`) — never `post_batch.commit_error`,
+    and never mere key-presence (N1, task-10-review-r1): reserving `commit` for a
+    real outcome keeps both the I1 closure gate and the once-per-batch gate from
+    reading a transient git failure as a completed commit."""
+    commit = (prog.get("post_batch") or {}).get("commit")
+    return isinstance(commit, dict) and "committed" in commit
+
+
 def cmd_apply(args: argparse.Namespace) -> int:
     vault, repo, kind = Path(args.vault), Path(args.repo_root), args.source
     loaded = _load_batch(vault, args.batch)
@@ -661,14 +672,16 @@ def cmd_apply(args: argparse.Namespace) -> int:
     today = started_at[:10]
     _save_batch(bd, prog)
 
-    # I1 (task-10-review): once post-batch has already committed, a still-failed row
-    # (e.g. exit 124) must NOT be silently re-run — a late success here would get only
+    # I1 (task-10-review): once post-batch has ACTUALLY committed (a real outcome,
+    # never a commit_error — N1, task-10-review-r1), a still-failed row (e.g. exit
+    # 124) must NOT be silently re-run — a late success here would get only
     # run_meeting's per-meeting state-only rollup and never its client-region rebuild
     # or its (client, engagement) status update (those happen ONCE, in the post-batch
-    # block below, which is gated off as soon as post_batch.commit exists). Close it
-    # instead: count it as skipped and name it in one stderr line. It stays un-applied,
-    # so a future `list`/batch will re-include it.
-    post_closed = bool((prog.get("post_batch") or {}).get("commit"))
+    # block below). Close it instead: count it as skipped and name it in one stderr
+    # line. It stays un-applied, so a future `list`/batch will re-include it. A
+    # transient commit failure must NOT close anything — the block below re-enters
+    # and retries the commit until it actually succeeds.
+    post_closed = _post_batch_committed(prog)
     closed_failed_ids: list[str] = []
     ok = failed = skipped = 0
     for row in manifest["rows"]:
@@ -722,7 +735,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
         apply_of = lambda mid: ((prog["rows"].get(f"{kind}:{mid}") or {}).get("apply") or {})
         all_ok_ids = [mid for mid in authorized if apply_of(mid).get("exit") == 0]
         attempted = sorted(mid for mid in authorized if apply_of(mid).get("exit") is not None)
-        if attempted == authorized and not (prog.get("post_batch") or {}).get("commit"):
+        if attempted == authorized and not _post_batch_committed(prog):
             post: dict[str, Any] = prog.get("post_batch") or {"today": today, "started_at": _now(), "status_pairs": []}
             post["failed_ids"] = sorted(set(authorized) - set(all_ok_ids))
             prog["post_batch"] = post
@@ -743,12 +756,16 @@ def cmd_apply(args: argparse.Namespace) -> int:
             pathspec = post_batch_pathspec(vault, pairs, [p["relPath"] for p in post["status_pairs"] if p.get("relPath")])
             # M5 (task-10-review): a real git failure (progress.vault_commit raises
             # SystemExit(10)) must not preempt the FR-015 exit contract / `applied:` line
-            # — contain it, record it, and fall through.
+            # — contain it, record it, and fall through. N1 (task-10-review-r1): the
+            # failure goes to its OWN `commit_error` key, never `commit` — `commit` is
+            # reserved for a real outcome (see _post_batch_committed) so a transient
+            # failure never closes rows and a re-run retries ONLY the commit (rollup
+            # and per-pair status stay checkpointed above and are not repeated).
             try:
                 sha, committed = commit_post_batch(vault, pathspec, f"brain: backfill {args.batch} post-batch rollup + status ({len(pairs)} pairs)")
                 post["commit"] = {"pathspec": pathspec, "vault_sha": sha, "committed": committed}
             except SystemExit as exc:
-                post["commit"] = {"error": str(exc.code)}
+                post["commit_error"] = {"code": str(exc.code), "at": _now()}
                 print(f"post-batch commit failed: {exc.code}", file=sys.stderr)
             _save_batch(bd, prog)                                   # checkpoint: complete
         elif attempted != authorized:

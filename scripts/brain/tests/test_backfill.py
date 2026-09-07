@@ -779,6 +779,9 @@ def test_apply_closes_failed_rows_after_post_batch_instead_of_silently_retrying(
 def test_commit_post_batch_failure_is_contained_and_recorded(tmp_path, monkeypatch, capsys):
     # M5: a real git failure in commit_post_batch (progress.vault_commit raises
     # SystemExit(10)) must not preempt the FR-015 `applied:` line / exit contract.
+    # N1 (task-10-review-r1): the failure is recorded under its OWN `commit_error`
+    # key — `commit` stays reserved for a real outcome, so a transient git failure
+    # never reads as a completed commit.
     import backfill
     vault, bd = _seed_signed(tmp_path)
     monkeypatch.setattr(backfill, "run_apply_subprocess", lambda mid, v, repo: (_receipt(vault, mid, "s"), 0)[1])
@@ -792,7 +795,91 @@ def test_commit_post_batch_failure_is_contained_and_recorded(tmp_path, monkeypat
     assert rc == 0  # FR-015 exit contract: failed == 0 → 0, regardless of the commit failure
     out = capsys.readouterr()
     assert "applied: 3 ok, 0 failed, 0 skipped" in out.out
-    assert _bp(bd)["post_batch"]["commit"] == {"error": "10"}
+    post_batch = _bp(bd)["post_batch"]
+    assert post_batch["commit_error"]["code"] == "10"
+    assert "commit" not in post_batch
+
+
+def test_apply_retries_only_the_commit_after_a_commit_error_then_never_reruns_it(tmp_path, monkeypatch, capsys):
+    # N1: a commit error must not permanently close the batch — a re-run must
+    # re-enter the post-batch block, retry ONLY the commit (rollup/status stay
+    # checkpointed), and once it truly succeeds, never run rollup/status/commit again.
+    import backfill
+    vault, bd = _seed_signed(tmp_path)
+    monkeypatch.setattr(backfill, "run_apply_subprocess", lambda mid, v, repo: (_receipt(vault, mid, "s"), 0)[1])
+    rollups, statuses, commits = [], [], []
+    monkeypatch.setattr(backfill, "run_rollup_all", lambda v, today: (rollups.append(today), 0)[1])
+    monkeypatch.setattr(backfill, "run_status_plan", lambda *a: (statuses.append(a), (0, None))[1])
+
+    def boom(v, ps, m):
+        raise SystemExit(10)
+    monkeypatch.setattr(backfill, "commit_post_batch", boom)
+    base = ["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"]
+    assert backfill.main(base) == 0
+    assert len(rollups) == 1
+    post = _bp(bd)["post_batch"]
+    assert "commit_error" in post and "commit" not in post
+
+    commit_calls: list[int] = []
+    monkeypatch.setattr(backfill, "commit_post_batch", lambda v, ps, m: (commit_calls.append(1), ("sha2", True))[1])
+    assert backfill.main(base) == 0
+    assert len(commit_calls) == 1                     # run 2: commit retried exactly once
+    # rollup already ran (checkpointed); status never had a pair (all nodes "none" in
+    # this fixture) — neither is re-run by the commit retry.
+    assert len(rollups) == 1 and len(statuses) == 0
+    post2 = _bp(bd)["post_batch"]
+    assert post2["commit"]["vault_sha"] == "sha2" and post2["commit"]["committed"] is True
+
+    # run 3: fully closed now — a repeat is a pure no-op, nothing re-invoked.
+    assert backfill.main(base) == 0
+    assert len(commit_calls) == 1 and len(rollups) == 1 and len(statuses) == 0
+
+
+def test_apply_a_pending_commit_error_does_not_close_still_failing_rows(tmp_path, monkeypatch, capsys):
+    # N1: while post_batch.commit_error exists (no real commit yet), a failed row
+    # (B, exit 124) must still be RE-RUN on the next invocation, never closed with
+    # "post-batch already ran" — that message is reserved for an actually-completed
+    # commit. Once B applies clean AND the commit truly succeeds, nothing is left
+    # to close and the commit runs exactly once.
+    import backfill
+    vault, bd = _seed_signed(tmp_path)
+    calls: list[str] = []
+    b_attempts = {"n": 0}
+
+    def fake_apply(mid, v, repo):
+        calls.append(mid)
+        if mid == "B":
+            b_attempts["n"] += 1
+            if b_attempts["n"] < 3:
+                return 124
+        _receipt(vault, mid, f"s-{mid}")
+        return 0
+    monkeypatch.setattr(backfill, "run_apply_subprocess", fake_apply)
+    monkeypatch.setattr(backfill, "run_rollup_all", lambda v, today: 0)
+    monkeypatch.setattr(backfill, "run_status_plan", lambda *a: (0, None))
+
+    def boom(v, ps, m):
+        raise SystemExit(10)
+    monkeypatch.setattr(backfill, "commit_post_batch", boom)
+    base = ["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"]
+    assert backfill.main(base) == 1   # run 1: B fails 124 (attempt 1); commit also errors
+    post1 = _bp(bd)["post_batch"]
+    assert "commit_error" in post1 and "commit" not in post1
+
+    calls.clear()
+    rc2 = backfill.main(base)
+    assert rc2 == 1                   # run 2: B fails again (attempt 2); commit still errors
+    assert calls == ["B"]             # B WAS re-dispatched, not closed
+    assert "post-batch already ran" not in capsys.readouterr().err
+
+    calls.clear()
+    commit_calls: list[int] = []
+    monkeypatch.setattr(backfill, "commit_post_batch", lambda v, ps, m: (commit_calls.append(1), ("sha3", True))[1])
+    assert backfill.main(base) == 0   # run 3: B succeeds (attempt 3), real commit lands
+    assert calls == ["B"]
+    assert len(commit_calls) == 1
+    post3 = _bp(bd)["post_batch"]
+    assert post3["commit"]["vault_sha"] == "sha3" and post3["commit"]["committed"] is True
 
 
 def test_apply_skips_post_batch_block_when_nothing_authorized(tmp_path, monkeypatch, capsys):

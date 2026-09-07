@@ -1758,12 +1758,24 @@ def test_cmd_list_returns_2_on_json_decode_error_from_list_transcripts(tmp_path,
 
 # --- Micro-fold 5 (fold-5-brief.md) — CH-3 (G2b r1 Critical): nominal charge
 # for a paid extraction attempt that fails before writing extraction.json.
+def _fetched_then_extraction_fails(vault: Path, rc: int = 3):
+    """Fold-5 review: a real 'extraction wrapper failure' attempt necessarily
+    got PAST fetch first (extract_meeting.py needs source.json as input) —
+    write it so `got_past_fetch` sees positive evidence, matching what a
+    real failed-after-fetch attempt actually leaves on disk."""
+    def fake(argv):
+        mid = argv[argv.index("--meeting-id") + 1]
+        env = vault / "raw/media/transcripts/fireflies" / mid
+        env.mkdir(parents=True, exist_ok=True)
+        (env / "source.json").write_text("{}", encoding="utf-8")
+        return rc
+    return fake
+
+
 def test_dry_run_charges_nominal_for_failed_extraction_with_no_new_extraction_json(tmp_path, monkeypatch):
     import backfill
     vault, bd = _seed_batch(tmp_path, ids=("A",))
-
-    def fake(argv):
-        return 3   # extraction wrapper failure: no extraction.json, no fetch-error.json
+    fake = _fetched_then_extraction_fails(vault)   # extraction wrapper failure: fetch OK, no extraction.json, no fetch-error.json
     monkeypatch.setattr(backfill, "run_meeting_main", fake)
     assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"]) == 0
     row = _bp(bd)["rows"]["fireflies:A"]["dry_run"]
@@ -1775,10 +1787,7 @@ def test_dry_run_charges_nominal_for_failed_extraction_with_no_new_extraction_js
 def test_dry_run_nominal_charge_accumulates_across_repeated_failed_attempts(tmp_path, monkeypatch):
     import backfill
     vault, bd = _seed_batch(tmp_path, ids=("A",))
-
-    def fake(argv):
-        return 3
-    monkeypatch.setattr(backfill, "run_meeting_main", fake)
+    monkeypatch.setattr(backfill, "run_meeting_main", _fetched_then_extraction_fails(vault))
     base = ["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"]
     assert backfill.main(base) == 0
     assert backfill.main(base) == 0   # resume: still exit != 0 -> retried
@@ -1808,10 +1817,7 @@ def test_dry_run_no_nominal_charge_when_failure_is_at_fetch(tmp_path, monkeypatc
 def test_dry_run_nominal_charges_count_toward_budget_halt(tmp_path, monkeypatch, capsys):
     import backfill
     vault, bd = _seed_batch(tmp_path, ids=("A", "B"))
-
-    def fake(argv):
-        return 3
-    monkeypatch.setattr(backfill, "run_meeting_main", fake)
+    monkeypatch.setattr(backfill, "run_meeting_main", _fetched_then_extraction_fails(vault))
     cap = 2 * backfill.FAILED_EXTRACTION_NOMINAL_USD - 0.01
     rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name,
                          "dry-run", "--max-usd", str(cap)])
@@ -1825,10 +1831,47 @@ def test_dry_run_nominal_charges_count_toward_budget_halt(tmp_path, monkeypatch,
 def test_dry_run_digest_header_cost_usd_includes_nominal_charges(tmp_path, monkeypatch):
     import backfill
     vault, bd = _seed_batch(tmp_path, ids=("A",))
-
-    def fake(argv):
-        return 3
-    monkeypatch.setattr(backfill, "run_meeting_main", fake)
+    monkeypatch.setattr(backfill, "run_meeting_main", _fetched_then_extraction_fails(vault))
     assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"]) == 0
     text = (bd / "digest.md").read_text(encoding="utf-8")
     assert f"cost_usd: {backfill.FAILED_EXTRACTION_NOMINAL_USD:.2f}" in text
+
+
+# --- Micro-fold 6 (fold-5-review.md, "New issues introduced" Important #1 / Minor #3) ---
+# (1) an EXISTING extraction.json (reused) means extract_meeting's own inputSha
+# short-circuit ran — a deterministically failing downstream step must never be
+# charged a phantom nominal cost.
+def test_dry_run_no_nominal_charge_when_extraction_already_existed_before_attempt(tmp_path, monkeypatch):
+    import backfill
+    vault, bd = _seed_batch(tmp_path, ids=("A",))
+    env = vault / "raw/media/transcripts/fireflies/A"
+    env.mkdir(parents=True, exist_ok=True)
+    (env / "source.json").write_text("{}", encoding="utf-8")
+    (env / "extraction.json").write_text(
+        json.dumps({"inputSha": "x", "cost_usd": 0.5, "extracted_at": "2020-01-01T00:00:00Z"}), encoding="utf-8")
+
+    def fake(argv):
+        return 7   # a deterministic downstream failure (resolve/adapt/writeback/CRM); extraction.json untouched
+    monkeypatch.setattr(backfill, "run_meeting_main", fake)
+    assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"]) == 0
+    row = _bp(bd)["rows"]["fireflies:A"]["dry_run"]
+    assert row["exit"] == 7
+    assert row["cost_usd"] == 0.0        # unchanged — no new spend, and no phantom nominal charge either
+    assert row["cost_nominal"] is False
+    assert row["cost_reused"] is True
+
+
+# (3) a pre-fetch failure (no source.json at all) must never be charged nominally,
+# regardless of its exit code.
+def test_dry_run_no_nominal_charge_for_pre_fetch_failure_with_no_source_json(tmp_path, monkeypatch):
+    import backfill
+    vault, bd = _seed_batch(tmp_path, ids=("A",))
+
+    def fake(argv):
+        return 64   # a pre-fetch argparse/usage-style failure: fetch never ran, no source.json exists
+    monkeypatch.setattr(backfill, "run_meeting_main", fake)
+    assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"]) == 0
+    row = _bp(bd)["rows"]["fireflies:A"]["dry_run"]
+    assert row["exit"] == 64
+    assert row["cost_usd"] == 0.0
+    assert row["cost_nominal"] is False

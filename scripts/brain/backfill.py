@@ -513,23 +513,42 @@ def _dry_run_record(vault: Path, kind: str, meeting_id: str, rc: int, capture: s
     # Charge only when THIS attempt produced the extraction (G0b-5): a retry after a
     # later-stage failure finds extract_meeting's inputSha short-circuit — no new spend.
     reused = bool(extracted_at) and extracted_at == stamp_before
-    # CH-3 (G2b r1, Critical): a paid `claude -p` extraction call can be
-    # billed by the provider and still exit non-zero BEFORE writing
-    # extraction.json (wrapper failure, invalid JSON, schema failure) —
-    # `no_new_extraction` (the stamp is unchanged from before this attempt,
-    # whether that stamp is a real prior timestamp or the empty string for
-    # "never extracted") is true in exactly that case as well as the
-    # already-handled `reused` case. Fetch-stage failures (a real
-    # fetch-error.json, or a synthesized `usage` exit-2) never reached
-    # extraction at all and must NOT be charged — only a failure that got
-    # PAST fetch, still failed, and produced no new extraction.json is
-    # billed nominally.
+    # CH-3 (G2b r1, Critical) + fold-5 review Important #1: a paid `claude -p`
+    # extraction call can be billed by the provider and still exit non-zero
+    # BEFORE writing extraction.json (wrapper failure, invalid JSON, schema
+    # failure). That is the ONLY scenario a nominal charge may cover — if
+    # `stamp_before` is already non-empty, extraction.json existed BEFORE
+    # this attempt, so extract_meeting.py's own inputSha short-circuit means
+    # it never called `claude -p` again this attempt (a deterministically
+    # failing DOWNSTREAM step — resolve/adapt/writeback/CRM — must never be
+    # charged a phantom nominal cost just because its extraction stamp
+    # "didn't change": it didn't change because no paid call could have
+    # happened). The exact predicate implemented: `rc != 0 and
+    # got_past_fetch and not extracted_at and not stamp_before` — no
+    # extraction.json existed before the attempt AND none exists after it
+    # either, which is the only state consistent with "a paid call might
+    # have happened and left no artifact behind." This also makes
+    # `cost_nominal` and `cost_reused` mutually exclusive by construction:
+    # `reused` requires `extracted_at` truthy, nominal requires it falsy.
+    #
+    # `got_past_fetch`: fetch (not extraction) actually completing is the
+    # precondition for a paid extraction call being possible at all, so a
+    # pre-fetch failure (argparse/usage inside run_meeting.py before it ever
+    # calls the fetch adapter, or a crash `_run_dry_capture` catches before
+    # fetch ran) must never be charged either, regardless of its exit code —
+    # rc alone can't distinguish "crashed before fetch" from "crashed after
+    # fetch, before extraction" (`_run_dry_capture` collapses every
+    # non-SystemExit crash to exit 1). The predicate implemented: the
+    # envelope's own `source.json` (written only once fetch succeeds) exists
+    # on disk right now, AND this attempt didn't itself record a real
+    # fetch-error.json — positive evidence fetch completed (this attempt or
+    # an earlier one) with nothing since invalidating it.
     fe = _read_json(fetch_error_path(vault, kind, meeting_id), None)
     has_real_fetch_error = rc != 0 and isinstance(fe, dict)
     is_synthesized_usage = rc == 2 and not has_real_fetch_error
-    got_past_fetch = not has_real_fetch_error and not is_synthesized_usage
-    no_new_extraction = extracted_at == stamp_before
-    cost_nominal = rc != 0 and no_new_extraction and got_past_fetch
+    source_exists = (env / "source.json").is_file()
+    got_past_fetch = source_exists and not has_real_fetch_error
+    cost_nominal = rc != 0 and got_past_fetch and not extracted_at and not stamp_before
     if cost_nominal:
         added_cost = FAILED_EXTRACTION_NOMINAL_USD
     elif reused:

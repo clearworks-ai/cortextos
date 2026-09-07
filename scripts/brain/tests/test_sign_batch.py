@@ -196,9 +196,12 @@ def test_sign_batch_ignores_phantom_progress_rows(tmp_path):
     import sign_batch
     from sign_marker import marker_path
     vault, bd, bid = _seed(tmp_path)
+    # F15 (CH-9): appended in (occurred_at, id) canonical order — Y before Z
+    # — so this fixture's own manifest stays canonical; only the base ids
+    # (A, B, C) plus these two phantoms are under test here, not ordering.
     manifest = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
-    manifest["rows"].append({"id": "Z", "kind": "fireflies"})
     manifest["rows"].append({"id": "Y", "kind": "fireflies"})
+    manifest["rows"].append({"id": "Z", "kind": "fireflies"})
     (bd / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     prog = json.loads((bd / "batch-progress.json").read_text(encoding="utf-8"))
     prog["rows"]["fireflies:Z"] = {}
@@ -210,6 +213,112 @@ def test_sign_batch_ignores_phantom_progress_rows(tmp_path):
     assert signed["meeting_count"] == 3
     assert not marker_path(vault, "fireflies", "Z").exists()
     assert not marker_path(vault, "fireflies", "Y").exists()
+
+
+def test_sign_batch_writes_fanout_complete_true_after_last_marker(tmp_path):
+    """F2 addendum (CH-5/CH-6): the initial batch-signed.json write (before
+    any marker lands) carries fanout_complete: false; only after every
+    candidate marker is written does sign_batch atomically flip it to true
+    and record markers_written — apply's preflight (backfill.py) trusts
+    this file alone rather than re-deriving completeness from disk."""
+    import sign_batch
+    vault, bd, bid = _seed(tmp_path, failed=("C",))
+    assert sign_batch.main(_args(vault, bd, bid)) == 0
+    signed = json.loads((bd / "batch-signed.json").read_text(encoding="utf-8"))
+    assert signed["fanout_complete"] is True
+    assert signed["markers_written"] == 2
+
+
+def test_sign_batch_refuses_manifest_row_missing_id(tmp_path, capsys):
+    """M4 (Std 11): a corrupt manifest.rows[i] (missing 'id') must refuse
+    with a clean message, never an uncaught traceback (KeyError/AttributeError)."""
+    import sign_batch
+    from sign_marker import marker_path
+    vault, bd, bid = _seed(tmp_path)
+    manifest = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
+    manifest["rows"][1] = {"kind": "fireflies"}  # no "id" key
+    (bd / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert sign_batch.main(_args(vault, bd, bid)) == 1
+    err = capsys.readouterr().err
+    assert "corrupt" in err and "traceback" not in err.lower()
+    assert not (bd / "batch-signed.json").exists()
+    assert not any(marker_path(vault, "fireflies", i).exists() for i in ("A", "B", "C"))
+
+
+def test_sign_batch_refuses_non_dict_progress_row(tmp_path, capsys):
+    """M4 (Std 11): a batch-progress.json row that is not a JSON object
+    (e.g. a bare string, from hand-editing or ledger corruption) must
+    refuse cleanly instead of AttributeError'ing on entry.get(...)."""
+    import sign_batch
+    from sign_marker import marker_path
+    vault, bd, bid = _seed(tmp_path)
+    prog = json.loads((bd / "batch-progress.json").read_text(encoding="utf-8"))
+    prog["rows"]["fireflies:A"] = "not-an-object"
+    (bd / "batch-progress.json").write_text(json.dumps(prog), encoding="utf-8")
+    assert sign_batch.main(_args(vault, bd, bid)) == 1
+    err = capsys.readouterr().err
+    assert "not an object" in err
+    assert not (bd / "batch-signed.json").exists()
+    assert not any(marker_path(vault, "fireflies", i).exists() for i in ("A", "B", "C"))
+
+
+def test_sign_batch_refuses_manifest_id_not_filesystem_safe(tmp_path, capsys):
+    """F14 (CH-8): a manifest id that fails to round-trip through
+    safe_meeting_id (path-traversal-shaped, or a 'fireflies:'-prefixed id
+    that safe_meeting_id would strip) must be refused BEFORE any per-meeting
+    path (progress._state_dir, marker_path) is built from it."""
+    import sign_batch
+    from sign_marker import marker_path
+    vault, bd, bid = _seed(tmp_path)
+    manifest = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
+    manifest["rows"][0]["id"] = "../../etc"
+    (bd / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert sign_batch.main(_args(vault, bd, bid)) == 1
+    assert "not filesystem-safe" in capsys.readouterr().err
+    assert not (bd / "batch-signed.json").exists()
+    assert not any(marker_path(vault, "fireflies", i).exists() for i in ("A", "B", "C"))
+
+
+def test_sign_batch_refuses_unknown_kind(tmp_path, capsys):
+    """F14 (CH-8): a manifest kind outside backfill.SOURCES must be refused
+    before any per-meeting path is built."""
+    import sign_batch
+    vault, bd, bid = _seed(tmp_path)
+    manifest = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
+    manifest["kind"] = "carrier-pigeon"
+    (bd / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert sign_batch.main(_args(vault, bd, bid)) == 1
+    assert "unknown kind" in capsys.readouterr().err
+    assert not (bd / "batch-signed.json").exists()
+
+
+def test_sign_batch_refuses_non_canonical_manifest_order(tmp_path, capsys):
+    """F15 (CH-9): manifest rows out of (occurred_at, id) order must be
+    refused with 'manifest not canonical; re-run list' — a reordered
+    manifest hides drift from the human digest review."""
+    import sign_batch
+    from sign_marker import marker_path
+    vault, bd, bid = _seed(tmp_path)
+    manifest = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
+    manifest["rows"] = list(reversed(manifest["rows"]))  # C, B, A — not canonical
+    (bd / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert sign_batch.main(_args(vault, bd, bid)) == 1
+    assert "manifest not canonical; re-run list" in capsys.readouterr().err
+    assert not (bd / "batch-signed.json").exists()
+    assert not any(marker_path(vault, "fireflies", i).exists() for i in ("A", "B", "C"))
+
+
+def test_sign_batch_refuses_duplicate_manifest_ids(tmp_path, capsys):
+    """F15 (CH-9): duplicate ids in the manifest must be refused the same
+    way as a reordered manifest — both mean 'manifest not canonical'."""
+    import sign_batch
+    vault, bd, bid = _seed(tmp_path)
+    manifest = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
+    manifest["rows"].append({"id": "C", "kind": "fireflies"})  # duplicate of the existing C row
+    (bd / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert sign_batch.main(_args(vault, bd, bid)) == 1
+    assert "manifest not canonical; re-run list" in capsys.readouterr().err
+    assert not (bd / "batch-signed.json").exists()
 
 
 def test_sign_batch_refuses_batch_id_mismatch(tmp_path, capsys):

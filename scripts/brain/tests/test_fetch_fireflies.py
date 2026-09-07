@@ -313,6 +313,9 @@ def test_path_traversal_meeting_id_rejected_exit_64(
     assert rc == 64
     assert "invalid meeting id" in capsys.readouterr().err
     assert not vault.exists() or not any(vault.rglob("source.json"))
+    # M2 (Spec M-3): the exit-64 usage error is refused before any envelope
+    # dir even exists — it must never leave a fetch-error.json behind.
+    assert not vault.exists() or not any(vault.rglob("fetch-error.json"))
 
 
 # --- R4 (FR-015): list query + backoff -------------------------------------
@@ -490,10 +493,38 @@ def test_already_fetched_short_circuit_clears_stale_fetch_error(tmp_path):
 
     vault = tmp_path / "vault"
     env = vault / "raw/media/transcripts/fireflies/SC1"; env.mkdir(parents=True)
+    # F18 (CH-17): a coherent envelope — all three of source.json,
+    # source.sha256 and meta.json — is what makes this short-circuit valid;
+    # see test_incoherent_envelope_falls_through_to_fresh_fetch below for
+    # the source.json-only (partial-write) case.
     (env / "source.json").write_bytes(b"{}")
+    (env / "source.sha256").write_text(hashlib.sha256(b"{}").hexdigest() + "\n", encoding="utf-8")
+    (env / "meta.json").write_text(json.dumps({"fetched_at": "x", "fetcher": "y"}), encoding="utf-8")
     ff.write_fetch_error(vault, "fireflies", "SC1", "auth", status=401, message="old")
     assert ff.main(["--meeting-id", "SC1", "--vault", str(vault), "--repo-root", str(tmp_path)]) == 0
     assert _fe(vault, "SC1") is None
+
+
+def test_incoherent_envelope_falls_through_to_fresh_fetch(tmp_path, monkeypatch):
+    """F18 (CH-17): source.json existing alone (source.sha256/meta.json
+    missing — a crash between the three atomic writes, each independent)
+    is NOT proof of a coherent envelope; the short-circuit must fall
+    through to a fresh fetch, which rewrites all three."""
+    import fetch_fireflies as ff
+
+    monkeypatch.setenv("FIREFLIES_API_KEY", "k")
+    vault = tmp_path / "vault"
+    env = vault / "raw/media/transcripts/fireflies/INCO"; env.mkdir(parents=True)
+    (env / "source.json").write_bytes(b"{}")  # source.sha256, meta.json missing
+    ok = {"data": {"transcript": {"id": "INCO", "title": "t", "date": 1756684800000, "duration": 12.0,
+                                  "organizer_email": "josh@clearworks.ai", "participants": ["a@x.io"],
+                                  "meeting_attendees": [{"displayName": "A", "email": "a@x.io"}],
+                                  "sentences": [{"index": i, "speaker_name": "A", "text": f"s{i}", "start_time": i} for i in range(25)],
+                                  "summary": {"overview": "o"}}}}
+    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=0: _RawResp(ok))
+    rc = ff.main(["--meeting-id", "INCO", "--vault", str(vault), "--repo-root", str(tmp_path)])
+    assert rc == 0
+    assert (env / "source.sha256").is_file() and (env / "meta.json").is_file()
 
 
 def test_fetch_success_clears_stale_fetch_error(tmp_path, monkeypatch):

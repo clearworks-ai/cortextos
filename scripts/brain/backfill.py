@@ -13,9 +13,13 @@ never written here."""
 from __future__ import annotations
 
 import argparse
+import contextlib
+import hashlib
+import io
 import json
 import re
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -23,8 +27,10 @@ from typing import Any
 import progress
 from atomic import atomic_write
 from fetch_fireflies import _load_api_key as load_api_key
+from fetch_fireflies import fetch_error_path
 from fetch_fireflies import list_transcripts  # module attribute: test seam
-from paths import DEFAULT_REPO_ROOT, DEFAULT_VAULT, safe_meeting_id
+from paths import DEFAULT_REPO_ROOT, DEFAULT_VAULT, envelope_dir, safe_meeting_id
+from run_meeting import main as run_meeting_main  # module attribute: test seam
 
 SOURCES = ("fireflies",)  # R5 (FR-017) generalizes to fetch_<kind>.py dispatch
 # Batch ids are produced by _batch_id(); anything else is refused before it touches a path (G0b-11).
@@ -205,8 +211,131 @@ def main(argv: list[str] | None = None) -> int:
     return cmd_apply(args)
 
 
-def cmd_dry_run(args: argparse.Namespace) -> int:  # Task 7
-    raise NotImplementedError
+# The status preview body carries `**Classification:** GOOD|MIXED|BAD` (status_plan.ts
+# via would-write-body); a capture with no status writer (skip: no-engagement) has none → null.
+CLASSIFICATION_RE = re.compile(r"\*\*Classification:\*\*\s*([A-Za-z]+)")
+
+
+def _progress_path(bd: Path) -> Path:
+    return bd / "batch-progress.json"
+
+
+def _load_batch(vault: Path, batch_id: str) -> tuple[Path, dict[str, Any], dict[str, Any]]:
+    bd = batch_dir(vault, batch_id)
+    manifest = _read_json(bd / "manifest.json", None)
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("rows"), list):
+        raise SystemExit(f"manifest.json missing or invalid for batch {batch_id}")
+    prog = _read_json(_progress_path(bd), {})
+    if not isinstance(prog, dict):
+        prog = {}
+    prog.setdefault("batch_id", batch_id)
+    prog.setdefault("kind", manifest.get("kind"))
+    prog.setdefault("rows", {})
+    return bd, manifest, prog
+
+
+def _save_batch(bd: Path, prog: dict[str, Any]) -> None:
+    _write_json(_progress_path(bd), prog)
+
+
+def _row(prog: dict[str, Any], kind: str, meeting_id: str) -> dict[str, Any]:
+    return prog["rows"].setdefault(f"{kind}:{meeting_id}", {})
+
+
+def _run_dry_capture(meeting_id: str, vault: Path, repo: Path) -> tuple[int, str, str]:
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        try:
+            rc = int(run_meeting_main(["--meeting-id", meeting_id, "--dry-run", "--vault", str(vault), "--repo-root", str(repo)]))
+        except SystemExit as exc:  # argparse or explicit SystemExit inside the loop
+            rc = int(exc.code or 0) if isinstance(exc.code, int) or exc.code is None else 1
+    return rc, out.getvalue(), err.getvalue()
+
+
+def _extraction_stamp(vault: Path, kind: str, meeting_id: str) -> str:
+    doc = _read_json(envelope_dir(vault, kind, meeting_id) / "extraction.json", {})
+    return str(doc.get("extracted_at") or "") if isinstance(doc, dict) else ""
+
+
+def _dry_run_record(vault: Path, kind: str, meeting_id: str, rc: int, capture: str, stamp_before: str, elapsed: float) -> dict[str, Any]:
+    env = envelope_dir(vault, kind, meeting_id)
+    resolution = _read_json(env / "resolution.json", {}) if rc == 0 else {}
+    validated = _read_json(env / "validated.json", {}) if rc == 0 else {}
+    extraction = _read_json(env / "extraction.json", {})
+    kept = {k: len(validated.get(k) or []) for k in ("decisions", "commitments", "open_questions")}
+    cost = float(extraction.get("cost_usd") or 0.0) if isinstance(extraction, dict) else 0.0
+    extracted_at = str(extraction.get("extracted_at") or "") if isinstance(extraction, dict) else ""
+    # Charge only when THIS attempt produced the extraction (G0b-5): a retry after a
+    # later-stage failure finds extract_meeting's inputSha short-circuit — no new spend.
+    reused = bool(extracted_at) and extracted_at == stamp_before
+    m = CLASSIFICATION_RE.search(capture or "")
+    rec: dict[str, Any] = {
+        "exit": rc,
+        "home": resolution.get("home_path") if isinstance(resolution, dict) else None,
+        "rule": resolution.get("rule") if isinstance(resolution, dict) else None,
+        "created": resolution.get("created") if isinstance(resolution, dict) else None,
+        "kept": kept,
+        "dropped": validated.get("dropped") if isinstance(validated, dict) else None,
+        "classification": m.group(1) if m else None,
+        "capture_sha256": hashlib.sha256(capture.encode("utf-8")).hexdigest() if capture else None,
+        "cost_usd": 0.0 if reused else cost,
+        "cost_reused": reused,
+        "elapsed_s": round(elapsed, 3),
+        "at": _now(),
+    }
+    fe = _read_json(fetch_error_path(vault, kind, meeting_id), None)
+    if rc != 0 and isinstance(fe, dict):
+        rec["fetch_error"] = fe
+    elif rc == 2:
+        # FR-017 (G-125): argparse/usage exits are 2 with no file — never auth, never a batch stop.
+        rec["fetch_error"] = {"class": "usage", "synthesized": True, "message": "exit 2 without fetch-error.json"}
+    return rec
+
+
+def cmd_dry_run(args: argparse.Namespace) -> int:
+    vault, repo, kind = Path(args.vault), Path(args.repo_root), args.source
+    bd, manifest, prog = _load_batch(vault, args.batch)
+    started_at = prog.get("dry_run_started_at") or _now()
+    prog["dry_run_started_at"] = started_at
+
+    def _spent() -> float:  # always derived from the rows on disk — a resume must not re-add a re-run row (G0a-6)
+        return sum(float((r.get("dry_run") or {}).get("cost_usd") or 0.0) for r in prog["rows"].values())
+
+    spent = _spent()
+    ok = failed = 0
+    for row in manifest["rows"]:
+        if row.get("already_applied"):
+            continue
+        mid = str(row["id"])
+        entry = _row(prog, kind, mid)
+        if (entry.get("dry_run") or {}).get("exit") == 0:
+            ok += 1
+            continue
+        stamp_before = _extraction_stamp(vault, kind, mid)
+        t0 = time.monotonic()
+        rc, capture, stderr = _run_dry_capture(mid, vault, repo)
+        elapsed = time.monotonic() - t0
+        state = progress._state_dir(vault, kind, mid)
+        if capture:
+            atomic_write(state / "dry-run.txt", capture.encode("utf-8"))
+        if stderr:
+            atomic_write(state / "dry-run.stderr.txt", stderr.encode("utf-8"))
+        rec = _dry_run_record(vault, kind, mid, rc, capture, stamp_before, elapsed)
+        entry["dry_run"] = rec
+        spent = _spent()
+        _save_batch(bd, prog)  # checkpoint after every meeting (resumable)
+        if rc == 0:
+            ok += 1
+        else:
+            failed += 1
+            if (rec.get("fetch_error") or {}).get("class") == "auth":
+                print(f"stopped: auth ({kind}:{mid}) — fix credentials and re-run --batch {args.batch} dry-run", file=sys.stderr)
+                return 2
+        if spent > args.max_usd:
+            print(f"budget: spent ${spent:.2f} > --max-usd {args.max_usd:.2f} after {kind}:{mid}", file=sys.stderr)
+            return 12
+    print(f"dry-run: {ok} ok, {failed} failed, ${spent:.2f} spent")
+    return 0
 
 
 def cmd_apply(args: argparse.Namespace) -> int:  # Task 10

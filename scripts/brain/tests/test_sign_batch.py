@@ -1,9 +1,11 @@
 # scripts/brain/tests/test_sign_batch.py
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -13,6 +15,39 @@ if str(BRAIN) not in sys.path:
 
 GOOD = ("home=clients/a.md node=none rule=2\n--- a/x\nquotes kept decisions=1 commitments=1 open_questions=0\n"
         "tasks:\nsubject: Recap\nphase3-preview: v1\nwould-touch: STATE.md\nwould-write: skip: no-engagement\nwould-file: X\n")
+
+
+@contextlib.contextmanager
+def _external_flock_holder(lock_path: Path):
+    """B2 (G2b r2 CH2-3): same pattern as test_backfill.py's helper of the
+    same name (Agent A, fold round 3, A9) — spawns a real helper SUBPROCESS
+    that opens `lock_path` (O_CREAT|O_RDWR) and takes a genuine
+    `fcntl.flock(LOCK_EX)` on it, prints 'locked' once held, then blocks
+    reading a line from stdin before releasing (on process exit). No
+    in-process fake can substitute: `_acquire_batch_lock`'s contention path
+    is a kernel-level advisory lock tied to a SEPARATE process's open file
+    description, which only a genuinely separate process can hold."""
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    code = (
+        "import fcntl, os, sys\n"
+        f"fd = os.open({str(lock_path)!r}, os.O_CREAT | os.O_RDWR, 0o644)\n"
+        "fcntl.flock(fd, fcntl.LOCK_EX)\n"
+        "os.write(fd, str(os.getpid()).encode())\n"
+        "print('locked', flush=True)\n"
+        "sys.stdin.readline()\n"
+    )
+    proc = subprocess.Popen([sys.executable, "-c", code], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    try:
+        line = proc.stdout.readline()
+        assert line.strip() == "locked", f"helper failed to lock: {line!r}"
+        yield proc.pid
+    finally:
+        try:
+            proc.stdin.write("go\n")
+            proc.stdin.flush()
+        except (BrokenPipeError, OSError):
+            pass
+        proc.wait(timeout=5)
 
 
 def _digest_bytes(status: str = "complete") -> bytes:
@@ -528,3 +563,34 @@ def test_sign_batch_refuses_empty_string_manifest_id(tmp_path, capsys):
     assert "corrupt (missing id)" in capsys.readouterr().err
     assert not (bd / "batch-signed.json").exists()
     assert not any(marker_path(vault, "fireflies", i).exists() for i in ("A", "B", "C"))
+
+
+def test_sign_batch_refuses_when_batch_locked_by_another_process(tmp_path, capsys):
+    """B2 (G2b r2 CH2-3): a real external process holding the batch flock
+    must make sign_batch refuse before ever reading manifest.json/
+    batch-progress.json — nothing gets written, no markers stamped."""
+    import sign_batch
+    from sign_marker import marker_path
+    vault, bd, bid = _seed(tmp_path)
+    with _external_flock_holder(bd / ".lock"):
+        rc = sign_batch.main(_args(vault, bd, bid))
+    assert rc == 1
+    assert "locked; retry later" in capsys.readouterr().err
+    assert not (bd / "batch-signed.json").exists()
+    assert not any(marker_path(vault, "fireflies", i).exists() for i in ("A", "B", "C"))
+
+
+def test_sign_batch_releases_lock_after_happy_path(tmp_path):
+    """B2 (G2b r2 CH2-3): the happy path still signs successfully, and the
+    lock is released afterwards — a second _acquire_batch_lock call (a
+    stand-in for a subsequent real invocation) succeeds immediately rather
+    than finding sign_batch's own process still holding it."""
+    import sign_batch
+    from backfill import _acquire_batch_lock, _release_batch_lock
+    vault, bd, bid = _seed(tmp_path, failed=("C",))
+    assert sign_batch.main(_args(vault, bd, bid)) == 0
+    assert (bd / "batch-signed.json").exists()
+    # A fresh acquire must succeed immediately — sign_batch.py released its
+    # own lock in `finally` on the success path, not just on refusal paths.
+    assert _acquire_batch_lock(bd) == 0
+    _release_batch_lock(bd)

@@ -42,7 +42,7 @@ from pathlib import Path
 
 import progress
 from atomic import atomic_write
-from backfill import BATCH_ID_RE, SOURCES, batch_dir
+from backfill import BATCH_ID_RE, SOURCES, _acquire_batch_lock, _release_batch_lock, batch_dir
 from paths import DEFAULT_VAULT, safe_meeting_id
 from sign_marker import check_capture, write_marker
 
@@ -68,6 +68,30 @@ def main(argv: list[str] | None = None) -> int:
     vault = Path(args.vault).resolve()
     bd = batch_dir(vault, args.batch)
 
+    # B2 (G2b r2 CH2-3) / mirrors backfill.py's A10: check manifest.json
+    # exists BEFORE ever calling _acquire_batch_lock, which unconditionally
+    # `mkdir(parents=True, exist_ok=True)`s bd — a typo'd --batch must not
+    # leave an empty directory (or a stray .lock file) behind.
+    if not (bd / "manifest.json").is_file():
+        print(f"batch files unreadable: manifest.json not found in {bd}", file=sys.stderr)
+        return 1
+
+    # B2: hold the SAME batch flock backfill.py's dry-run/apply hold, for
+    # the entire remainder of this run (every read, every check, the
+    # batch-signed.json writes, the marker fan-out, the fanout_complete
+    # rewrite) — two concurrent sign_batch.py/backfill.py invocations
+    # against the same batch must never interleave.
+    lock_rc = _acquire_batch_lock(bd)
+    if lock_rc != 0:
+        print(f"batch {args.batch} locked; retry later", file=sys.stderr)
+        return 1
+    try:
+        return _sign_locked(args, vault, bd)
+    finally:
+        _release_batch_lock(bd)
+
+
+def _sign_locked(args: argparse.Namespace, vault: Path, bd: Path) -> int:
     # Load files (read-only; nothing decided yet).
     try:
         manifest = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))

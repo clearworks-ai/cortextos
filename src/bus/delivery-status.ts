@@ -420,7 +420,8 @@ export function renderDrafts(
         ? `Heads-down progress on ${inProgress[0]}`
         : `Steady progress on ${client.name}`;
   // The lead already states done[0]; do not repeat it as the first bullet.
-  const doneBullets = done.slice(1, 5);
+  // No length cap (Josh 2026-09-06): the update is as long as the material.
+  const doneBullets = done.slice(1);
 
   // ----- Slack format (tighter, no subject) -----
   const slackParts: string[] = [];
@@ -435,7 +436,7 @@ export function renderDrafts(
   if (inProgress.length > 0) {
     slackParts.push('');
     slackParts.push('*In progress*');
-    for (const p of inProgress.slice(0, 2)) slackParts.push(`• ${p}`);
+    for (const p of inProgress) slackParts.push(`• ${p}`);
   }
   slackParts.push('');
   slackParts.push(`Next up: ${nextMilestone}. More soon.`);
@@ -454,7 +455,7 @@ export function renderDrafts(
   if (inProgress.length > 0) {
     emailParts.push('');
     emailParts.push('In progress:');
-    for (const p of inProgress.slice(0, 2)) emailParts.push(`  - ${p}`);
+    for (const p of inProgress) emailParts.push(`  - ${p}`);
   }
   emailParts.push('');
   emailParts.push(`Next up is ${nextMilestone}. I'll check back in with the next update.`);

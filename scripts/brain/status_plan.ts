@@ -137,9 +137,6 @@ function openItemRows(md: string): string[] {
 
 const SENTENCE_SPLIT_RE = /(?<=[.!?])\s+(?=[A-Z"'(])/;
 const OUR_SIDE_OWNER_RE = /\b(josh|clearworks)\b/i;
-/** Per meeting: how many outcome sentences / decisions reach the engine. */
-const OUTCOMES_PER_ENTRY = 2;
-const DECISIONS_PER_ENTRY = 2;
 
 function singleLine(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
@@ -189,9 +186,12 @@ export interface StatusMaterial {
  * keeps only the top-level `- DATE — title` line, so the meeting's Outcomes
  * and Decisions sub-bullets (written by R2) never reached the draft and the
  * client got "Steady progress … the next milestone". The engine stays
- * byte-unchanged (spec Bucket A); this feeds the same facts through its
+ * (render-only change aside); this feeds the same facts through its
  * existing `completedTasks` (done bullets, newest meeting first) and
  * `issues` in_progress (our-side open commitments) channels.
+ *
+ * No caps (Josh 2026-09-06: "as long as it reasonably needs to be") —
+ * every outcome sentence, every decision, every our-side open commitment.
  */
 export function deriveStatusMaterial(
   engagementMd: string,
@@ -203,8 +203,8 @@ export function deriveStatusMaterial(
   const completedTasks: GatherTask[] = [];
   for (const entry of merged) {
     const { outcomes, decisions } = historySubBullets(entry.text);
-    for (const o of outcomes.slice(0, OUTCOMES_PER_ENTRY)) completedTasks.push({ title: o, completedAt: entry.date });
-    for (const d of decisions.slice(0, DECISIONS_PER_ENTRY)) completedTasks.push({ title: `Decided: ${d}`, completedAt: entry.date });
+    for (const o of outcomes) completedTasks.push({ title: o, completedAt: entry.date });
+    for (const d of decisions) completedTasks.push({ title: `Decided: ${d}`, completedAt: entry.date });
   }
   const issues: GatherIssue[] = [];
   for (const row of allDocs.flatMap(openItemRows)) {

@@ -52,8 +52,8 @@ last_update:
 ## History (dated, newest first)
 
 - 2026-09-04 — Alloi Tacticals Troubleshooting (meeting: meetings/x.md) [source: fireflies:01M1MW2G]
-  - Outcomes: Installed skill v4 and resolved the version mismatch. Weekly runs now post to Slack job channels. A third sentence that the per-meeting cap drops.
-  - Decisions: Reports land Monday EOD. ; Use the Alloi skill config. ; A third decision the cap drops.
+  - Outcomes: Installed skill v4 and resolved the version mismatch. Weekly runs now post to Slack job channels. A third sentence that also ships.
+  - Decisions: Reports land Monday EOD. ; Use the Alloi skill config. ; A third decision that also ships.
 
 ## Open Items
 
@@ -82,13 +82,15 @@ describe('deriveStatusMaterial (Josh 2026-09-06: the draft must carry real meeti
     { node: { id: 'alloi-03', kind: 'project', client: 'alloi', parent: 'alloi-01', title: 'Tactical Reports', path: '' }, md: CHILD_MD },
   ];
 
-  it('turns Outcomes sentences and Decisions into completedTasks, capped per meeting, newest first', () => {
+  it('turns every Outcomes sentence and every Decision into completedTasks, no cap, newest first', () => {
     const { completedTasks } = deriveStatusMaterial(ENGAGEMENT_MD, children, '2026-09-10');
     expect(completedTasks.map((t) => t.title)).toEqual([
       'Installed skill v4 and resolved the version mismatch',
       'Weekly runs now post to Slack job channels',
+      'A third sentence that also ships',
       'Decided: Reports land Monday EOD',
       'Decided: Use the Alloi skill config',
+      'Decided: A third decision that also ships',
     ]);
     expect(completedTasks.every((t) => t.completedAt === '2026-09-04')).toBe(true);
   });
@@ -261,6 +263,7 @@ describe('status_plan.ts CLI (draft content — Josh 2026-09-06 changes requeste
     expect(body).toContain('*Installed skill v4 and resolved the version mismatch.*');
     expect(body).toContain('• Weekly runs now post to Slack job channels');
     expect(body).toContain('• Decided: Reports land Monday EOD');
+    expect(body).toContain('• Decided: A third decision that also ships'); // no cap
     expect(body).toContain('• Send the updated skill and calendar codes');
     expect(body).toContain('Next up: Tactical Reports.');
     expect(body).not.toContain('Steady progress');

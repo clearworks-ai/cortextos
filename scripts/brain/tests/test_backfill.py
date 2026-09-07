@@ -504,3 +504,231 @@ def test_dry_run_sample_excludes_exit0_row_missing_dry_run_txt(tmp_path, monkeyp
     out = capsys.readouterr()
     assert "digest: " in out.out and "sample 1" in out.out
     assert "sample: skipped A (no dry-run.txt)" in out.err
+
+
+# --- apply ------------------------------------------------------------------------
+def _seed_signed(tmp_path: Path, ids=("A", "B", "C"), dry_exit=None, nodes=None):
+    import backfill, hashlib
+    dry_exit = dry_exit or {}
+    vault, bd = _seed_batch(tmp_path, ids=ids)
+    rows = {f"fireflies:{i}": {"dry_run": {"exit": dry_exit.get(i, 0)}} for i in ids}
+    (bd / "batch-progress.json").write_text(json.dumps({"batch_id": bd.name, "kind": "fireflies", "rows": rows}), encoding="utf-8")
+    (bd / "digest.md").write_text("# d\n", encoding="utf-8")
+    sha = hashlib.sha256(b"# d\n").hexdigest()
+    (bd / "digest.sha256").write_text(sha + "\n", encoding="utf-8")
+    ok_ids = [i for i in ids if dry_exit.get(i, 0) == 0]
+    (bd / "batch-signed.json").write_text(json.dumps({"batch_id": bd.name, "digest_sha256": sha,
+        "manifest_sha256": hashlib.sha256((bd / "manifest.json").read_bytes()).hexdigest(), "signed_ids": ok_ids}), encoding="utf-8")
+    brain = vault / "raw/areas/clearworks/org-brain/projects"; brain.mkdir(parents=True)
+    for i in ids:
+        env = vault / "raw/media/transcripts/fireflies" / i; env.mkdir(parents=True, exist_ok=True)
+        (env / "resolution.json").write_text(json.dumps({"counterparty_slug": "acme", "node": (nodes or {}).get(i, "none"), "home_path": "clients/acme.md"}), encoding="utf-8")
+    (brain / "acme-01.md").write_text("# E\n\n## Node\nid: acme-01\nkind: engagement\nclient: acme\ntitle: E\n", encoding="utf-8")
+    (brain / "acme-03.md").write_text("# P\n\n## Node\nid: acme-03\nkind: project\nclient: acme\nparent: acme-01\ntitle: P\n", encoding="utf-8")
+    return vault, bd
+
+
+def test_apply_refuses_without_matching_signature(tmp_path, monkeypatch, capsys):
+    import backfill
+    vault, bd = _seed_signed(tmp_path)
+    (bd / "digest.md").write_text("# changed\n", encoding="utf-8")
+    import hashlib
+    (bd / "digest.sha256").write_text(hashlib.sha256(b"# changed\n").hexdigest() + "\n", encoding="utf-8")
+    assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"]) == 15
+    assert "batch-signed.json" in capsys.readouterr().err
+    (bd / "batch-signed.json").unlink()
+    assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"]) == 15
+
+
+def test_apply_runs_exit0_rows_in_order_then_rollup_all_and_status_per_pair(tmp_path, monkeypatch, capsys):
+    import backfill
+    vault, bd = _seed_signed(tmp_path, dry_exit={"B": 3}, nodes={"A": "acme-03", "C": "acme-01"})
+    applied, rollups, statuses = [], [], []
+
+    def fake_apply(mid, v, repo):
+        applied.append(mid)
+        _receipt(vault, mid, f"sha-{mid}")
+        return 0
+    monkeypatch.setattr(backfill, "run_apply_subprocess", fake_apply)
+    monkeypatch.setattr(backfill, "run_rollup_all", lambda v, today: (rollups.append(today), 0)[1])
+    monkeypatch.setattr(backfill, "run_status_plan", lambda client, eng, today, v: (statuses.append((client, eng, today)), (0, "raw/areas/clearworks/clients/acme/status-update-2026-09-07.md"))[1])
+    commits = []
+    monkeypatch.setattr(backfill, "commit_post_batch", lambda v, pathspec, msg: (commits.append((pathspec, msg)), ("abc123", True))[1])
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"])
+    assert rc == 0
+    assert applied == ["A", "C"]                       # B skipped: dry_run.exit != 0
+    assert len(rollups) == 1
+    today = rollups[0]
+    assert statuses == [("acme", "acme-01", today)]    # A→parent acme-01, C→acme-01: ONE pair
+    assert len(commits) == 1
+    spec, msg = commits[0]
+    assert "raw/areas/clearworks/org-brain/STATE.md" in spec and "raw/areas/clearworks/org-brain/projects/acme-01.md" in spec
+    assert "raw/areas/clearworks/clients/acme/status-update-2026-09-07.md" in spec and bd.name in msg
+    assert _bp(bd)["post_batch"]["commit"] == {"pathspec": spec, "vault_sha": "abc123", "committed": True}
+    doc = _bp(bd)
+    assert doc["rows"]["fireflies:A"]["apply"]["exit"] == 0 and doc["rows"]["fireflies:A"]["apply"]["vault_sha"] == "sha-A"
+    assert "apply" not in doc["rows"]["fireflies:B"]
+    assert doc["apply_started_at"][:10] == today
+    assert doc["post_batch"]["rollup_all"] == 0 and doc["post_batch"]["status_pairs"][0]["engagement"] == "acme-01"
+    assert "applied: 2 ok, 0 failed, 1 skipped" in capsys.readouterr().out
+
+
+def test_apply_continues_past_failure_and_exits_1(tmp_path, monkeypatch, capsys):
+    import backfill
+    vault, bd = _seed_signed(tmp_path)
+    # B's capture was edited after signing → run_meeting exits 15 (existing validate_sign_marker,
+    # pinned by test_apply_rejects_when_source_changed_after_signoff); the batch records it and continues.
+    monkeypatch.setattr(backfill, "run_apply_subprocess", lambda mid, v, repo: 15 if mid == "B" else (_receipt(vault, mid, "s"), 0)[1])
+    monkeypatch.setattr(backfill, "run_rollup_all", lambda v, today: 0)
+    monkeypatch.setattr(backfill, "run_status_plan", lambda *a: (0, None))
+    monkeypatch.setattr(backfill, "commit_post_batch", lambda v, ps, m: (None, False))
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"])
+    assert rc == 1
+    assert _bp(bd)["rows"]["fireflies:B"]["apply"]["exit"] == 15
+    out = capsys.readouterr()
+    assert "applied: 2 ok, 1 failed, 0 skipped" in out.out
+    post = _bp(bd)["post_batch"]                                        # every authorized row attempted → post-batch ran (FR-015)
+    assert post["failed_ids"] == ["B"] and post["rollup_all"] == 0 and "commit" in post
+
+
+def test_apply_post_batch_is_deferred_until_every_row_is_attempted_then_runs_once(tmp_path, monkeypatch):
+    import backfill
+    vault, bd = _seed_signed(tmp_path)
+    rollups = []
+    # Simulate a mid-batch stop: the runner records A, then raises before B/C are attempted.
+    def fake_apply(mid, v, repo):
+        if mid == "B":
+            raise KeyboardInterrupt
+        _receipt(vault, mid, f"s-{mid}"); return 0
+    monkeypatch.setattr(backfill, "run_apply_subprocess", fake_apply)
+    monkeypatch.setattr(backfill, "run_rollup_all", lambda v, today: (rollups.append(today), 0)[1])
+    monkeypatch.setattr(backfill, "run_status_plan", lambda *a: (0, None))
+    monkeypatch.setattr(backfill, "commit_post_batch", lambda v, ps, m: (None, False))
+    base = ["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"]
+    import pytest
+    with pytest.raises(KeyboardInterrupt):
+        backfill.main(base)
+    assert rollups == [] and "post_batch" not in _bp(bd)              # un-attempted rows → no post-batch
+    monkeypatch.setattr(backfill, "run_apply_subprocess", lambda mid, v, repo: (_receipt(vault, mid, f"s-{mid}"), 0)[1])
+    assert backfill.main(base) == 0 and len(rollups) == 1              # all attempted → once
+    assert backfill.main(base) == 0 and len(rollups) == 1              # repeat: still once
+
+
+def test_apply_post_batch_resumes_from_its_progressive_checkpoint(tmp_path, monkeypatch):
+    import backfill
+    vault, bd = _seed_signed(tmp_path, nodes={"A": "acme-01"})
+    rollups, statuses = [], []
+    monkeypatch.setattr(backfill, "run_apply_subprocess", lambda mid, v, repo: (_receipt(vault, mid, f"s-{mid}"), 0)[1])
+    monkeypatch.setattr(backfill, "run_rollup_all", lambda v, today: (rollups.append(today), 0)[1])
+    def crash_status(*a):
+        statuses.append(a)
+        raise RuntimeError("crash after rollup, before commit")
+    monkeypatch.setattr(backfill, "run_status_plan", crash_status)
+    commits = []
+    monkeypatch.setattr(backfill, "commit_post_batch", lambda v, ps, m: (commits.append(ps), ("sha", True))[1])
+    base = ["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"]
+    import pytest
+    with pytest.raises(RuntimeError):
+        backfill.main(base)
+    post = _bp(bd)["post_batch"]
+    assert post["rollup_all"] == 0 and "commit" not in post            # checkpoint survived the crash
+    monkeypatch.setattr(backfill, "run_status_plan", lambda *a: (statuses.append(a), (0, "raw/areas/x.md"))[1])
+    assert backfill.main(base) == 0
+    assert len(rollups) == 1 and len(commits) == 1                     # rollup NOT repeated; commit ran once
+    assert _bp(bd)["post_batch"]["commit"]["vault_sha"] == "sha"
+
+
+def test_run_apply_subprocess_returns_124_on_timeout(tmp_path, monkeypatch):
+    import backfill, subprocess as sp
+
+    def boom(*a, **kw):
+        raise sp.TimeoutExpired(cmd="run_meeting.py", timeout=kw.get("timeout", 0))
+    monkeypatch.setattr(backfill.subprocess, "run", boom)
+    assert backfill.run_apply_subprocess("X", tmp_path, tmp_path) == 124
+
+
+def test_apply_repeat_is_a_pure_noop(tmp_path, monkeypatch, capsys):
+    import backfill
+    vault, bd = _seed_signed(tmp_path)
+    calls, rollups = [], []
+    monkeypatch.setattr(backfill, "run_apply_subprocess", lambda mid, v, repo: (calls.append(mid), _receipt(vault, mid, "s"), 0)[2])
+    monkeypatch.setattr(backfill, "run_rollup_all", lambda v, today: (rollups.append(today), 0)[1])
+    monkeypatch.setattr(backfill, "run_status_plan", lambda *a: (0, None))
+    monkeypatch.setattr(backfill, "commit_post_batch", lambda v, ps, m: (None, False))
+    base = ["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"]
+    assert backfill.main(base) == 0 and calls == ["A", "B", "C"] and len(rollups) == 1
+    calls.clear(); capsys.readouterr()
+    assert backfill.main(base) == 0
+    assert calls == [] and len(rollups) == 1 and "commit" in _bp(bd)["post_batch"]   # no re-apply, no second rollup/status (D-19 once-after-batch)
+    assert "applied: 0 ok, 0 failed, 3 skipped" in capsys.readouterr().out   # goal G4 evidence 7 wording
+
+
+def test_post_batch_pathspec_and_real_commit_seam(tmp_path):
+    import backfill, subprocess as sp
+    vault = tmp_path / "vault"
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients").mkdir(parents=True); (brain / "projects").mkdir()
+    (brain / "STATE.md").write_text("# S\n", encoding="utf-8")
+    (brain / "clients" / "acme.md").write_text("# C\n", encoding="utf-8")
+    (brain / "clients" / "_template.md").write_text("# T\n", encoding="utf-8")
+    (brain / "projects" / "acme-01.md").write_text("# E\n", encoding="utf-8")
+    spec = backfill.post_batch_pathspec(vault, [("acme", "acme-01")], ["raw/areas/clearworks/clients/acme/status-update-2026-09-07.md", None])
+    assert spec == sorted(["raw/areas/clearworks/org-brain/STATE.md", "raw/areas/clearworks/org-brain/clients/acme.md",
+                           "raw/areas/clearworks/org-brain/projects/acme-01.md", "raw/areas/clearworks/clients/acme/status-update-2026-09-07.md"])
+    sp.run(["git", "-C", str(vault), "init", "-q"], check=True)
+    sp.run(["git", "-C", str(vault), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"], check=True)
+    sha, committed = backfill.commit_post_batch(vault, spec, "brain: test post-batch")
+    assert committed and sha and len(sha) == 40
+    assert sp.run(["git", "-C", str(vault), "status", "--porcelain", "--", *spec], capture_output=True, text=True).stdout.strip() == ""
+    assert "_template.md" in sp.run(["git", "-C", str(vault), "status", "--porcelain", "--", "raw/areas"], capture_output=True, text=True).stdout  # deliberately excluded, still untracked
+    sha2, committed2 = backfill.commit_post_batch(vault, spec, "brain: test post-batch again")
+    assert (sha2, committed2) == (None, False)   # nothing to commit = success (D-14)
+
+
+def test_apply_exit_is_zero_when_no_meeting_failed_even_if_post_batch_rollup_failed(tmp_path, monkeypatch):
+    import backfill
+    vault, bd = _seed_signed(tmp_path)
+    monkeypatch.setattr(backfill, "run_apply_subprocess", lambda mid, v, repo: (_receipt(vault, mid, "s"), 0)[1])
+    monkeypatch.setattr(backfill, "run_rollup_all", lambda v, today: 6)
+    monkeypatch.setattr(backfill, "run_status_plan", lambda *a: (0, None))
+    monkeypatch.setattr(backfill, "commit_post_batch", lambda v, ps, m: (None, False))
+    assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"]) == 0
+    assert _bp(bd)["post_batch"]["rollup_all"] == 6   # recorded for G4, not folded into the FR-015 exit
+
+
+def test_apply_refuses_when_manifest_or_exit0_set_changed_after_signing(tmp_path, monkeypatch):
+    import backfill
+    vault, bd = _seed_signed(tmp_path)
+    monkeypatch.setattr(backfill, "run_apply_subprocess", lambda *a: 0)
+    m = json.loads((bd / "manifest.json").read_text(encoding="utf-8")); m["rows"] = m["rows"][:2]
+    (bd / "manifest.json").write_text(json.dumps(m), encoding="utf-8")   # a row removed after signing
+    assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"]) == 15
+    vault, bd = _seed_signed(tmp_path / "second", dry_exit={"C": 3})
+    p = _bp(bd); p["rows"]["fireflies:C"]["dry_run"]["exit"] = 0          # C passed a later dry-run but was never signed
+    (bd / "batch-progress.json").write_text(json.dumps(p), encoding="utf-8")
+    assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"]) == 15
+
+
+def test_apply_refuses_when_digest_md_edited_even_if_sidecar_updated(tmp_path, monkeypatch):
+    import backfill, hashlib
+    vault, bd = _seed_signed(tmp_path)
+    (bd / "digest.md").write_text("# edited\n", encoding="utf-8")
+    (bd / "digest.sha256").write_text(hashlib.sha256(b"# edited\n").hexdigest() + "\n", encoding="utf-8")   # sidecar "fixed" too
+    monkeypatch.setattr(backfill, "run_apply_subprocess", lambda *a: 0)
+    assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"]) == 15
+
+
+# --- CARRY-3 (Task 10): dry-run over an empty/all-already-applied manifest must still
+# leave batch-progress.json on disk — apply's guard chain depends on Task 7's M7 contract.
+def test_dry_run_empty_manifest_still_persists_batch_progress(tmp_path):
+    import backfill
+    vault, bd = _seed_batch(tmp_path, ids=())
+    assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"]) == 0
+    assert (bd / "batch-progress.json").is_file()
+
+
+def test_dry_run_all_already_applied_still_persists_batch_progress(tmp_path):
+    import backfill
+    vault, bd = _seed_batch(tmp_path, ids=("A", "B"), applied=("A", "B"))
+    assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"]) == 0
+    assert (bd / "batch-progress.json").is_file()

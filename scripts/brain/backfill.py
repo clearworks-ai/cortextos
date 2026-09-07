@@ -21,6 +21,7 @@ import os
 import random
 import re
 import shutil
+import subprocess
 import sys
 import time
 import traceback
@@ -28,7 +29,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import brain_rollup
 import progress
+import run_meeting
 from atomic import atomic_write
 from fetch_fireflies import _load_api_key as load_api_key
 from fetch_fireflies import fetch_error_path
@@ -511,8 +514,219 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_apply(args: argparse.Namespace) -> int:  # Task 10
-    raise NotImplementedError
+APPLY_TIMEOUT_S = 6 * run_meeting.CHILD_TIMEOUT_S  # one meeting = up to six child steps (G0a-7)
+
+
+def run_apply_subprocess(meeting_id: str, vault: Path, repo: Path) -> int:
+    """One meeting through the unchanged per-meeting loop with D-19 policy.
+    A subprocess (not in-process): --apply spawns its own children and the
+    batch must survive one meeting's failure or hang (exit 124 on timeout)."""
+    try:
+        res = subprocess.run(
+            [sys.executable, str(Path(__file__).with_name("run_meeting.py")), "--meeting-id", meeting_id,
+             "--vault", str(vault), "--repo-root", str(repo), "--apply", "--backfill"],
+            capture_output=True, text=True, timeout=APPLY_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        print(f"FAILED at apply ({meeting_id}): timeout after {APPLY_TIMEOUT_S}s", file=sys.stderr)
+        return 124
+    sys.stdout.write(res.stdout)
+    if res.returncode != 0:
+        sys.stderr.write(res.stderr)
+    return res.returncode
+
+
+def run_rollup_all(vault: Path, today: str) -> int:
+    try:
+        res = subprocess.run([sys.executable, str(run_meeting.BRAIN_ROLLUP), "--vault", str(vault), "--all", "--today", today],
+                             capture_output=True, text=True, timeout=run_meeting.CHILD_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        print("FAILED at rollup: timeout", file=sys.stderr)
+        return 6
+    sys.stdout.write(res.stdout)
+    if res.returncode != 0:
+        sys.stderr.write(res.stderr)
+    return res.returncode
+
+
+def run_status_plan(client: str, engagement: str, today: str, vault: Path) -> tuple[int, str | None]:
+    """Returns (rc, relPath of the written status artifact or None) — the relPath joins
+    the post-batch commit pathspec (G0a2-2)."""
+    try:
+        res = subprocess.run(
+            [*run_meeting._status_plan_argv(), str(run_meeting.STATUS_PLAN), "--client", client, "--node", engagement,
+             "--today", today, "--write", "--vault", str(vault)],
+            capture_output=True, text=True, cwd=str(run_meeting.CODE_ROOT), env=run_meeting._status_env(os.environ),
+            timeout=run_meeting.CHILD_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        print(f"FAILED at status_update ({client}/{engagement}): timeout", file=sys.stderr)
+        return 14, None
+    sys.stdout.write(res.stdout)
+    if res.returncode != 0:
+        sys.stderr.write(res.stderr)
+        return res.returncode, None
+    out = progress.parse_subprocess_json(res.stdout)
+    rel = out.get("relPath") if isinstance(out, dict) else None
+    return 0, (str(rel) if rel else None)
+
+
+def commit_post_batch(vault: Path, pathspec: list[str], message: str) -> tuple[str | None, bool]:
+    """Seam over progress.vault_commit (FR-014 semantics: pathspec-scoped add+commit,
+    'nothing to commit' = (None, False)). Post-batch rollup/status writes happen AFTER
+    every per-meeting FR-014 commit, so they need their own commit (G0a2-2) — never
+    left to the vault auto-sync cron.
+
+    Pre-checks the pathspec's own `git status` before delegating: on a real vault
+    (untracked scratch/notes elsewhere are the norm, not the exception), a clean,
+    already-committed pathspec makes `git commit -- <pathspec>` print "nothing added
+    to commit but untracked files present" rather than "nothing to commit" —
+    progress.vault_commit's substring match doesn't recognize that wording and would
+    SystemExit(10) on a true no-op. Filed here, not in progress.py (Task 9, out of
+    scope): when the pathspec itself has nothing to add, return (None, False)
+    directly; any real change still goes through progress.vault_commit unchanged."""
+    existing = [p for p in pathspec if (Path(vault) / p).exists()]
+    if existing:
+        status = subprocess.run(["git", "-C", str(vault), "status", "--porcelain", "--", *existing],
+                                 capture_output=True, text=True, timeout=60)
+        if status.returncode == 0 and not status.stdout.strip():
+            return None, False
+    return progress.vault_commit(vault, pathspec, message)
+
+
+def post_batch_pathspec(vault: Path, pairs: list[tuple[str, str]], status_rels: list[str]) -> list[str]:
+    brain = "raw/areas/clearworks/org-brain"
+    spec = {f"{brain}/STATE.md"}
+    clients_dir = vault / brain / "clients"
+    if clients_dir.is_dir():  # --all rewrites every client's engagements-rollup region
+        spec.update(f"{brain}/clients/{p.name}" for p in clients_dir.glob("*.md") if not p.name.startswith("_"))
+    for _client, eng in pairs:
+        spec.add(f"{brain}/projects/{eng}.md")
+    spec.update(r for r in status_rels if r)
+    return sorted(spec)
+
+
+def derive_pairs(vault: Path, kind: str, meeting_ids: list[str]) -> list[tuple[str, str]]:
+    """Distinct (client, engagement) pairs exactly as run_meeting's status step
+    derives them (G-120/G-124): resolution.json node → engagement itself, or a
+    project's parent only when that parent exists and is an engagement."""
+    nodes = brain_rollup.load_nodes(vault)
+    pairs: set[tuple[str, str]] = set()
+    for mid in meeting_ids:
+        resolution = _read_json(envelope_dir(vault, kind, mid) / "resolution.json", {})
+        if not isinstance(resolution, dict):
+            continue
+        eng_id, skip = run_meeting.resolve_engagement(resolution, nodes)
+        client = str(resolution.get("counterparty_slug") or "")
+        if eng_id and client and not skip:
+            pairs.add((client, eng_id))
+    return sorted(pairs)
+
+
+def cmd_apply(args: argparse.Namespace) -> int:
+    vault, repo, kind = Path(args.vault), Path(args.repo_root), args.source
+    loaded = _load_batch(vault, args.batch)
+    if loaded is None:  # review I4: refuse like every other bad-input path, never raise
+        print(f"manifest.json missing or invalid for batch {args.batch}", file=sys.stderr)
+        return 64
+    bd, manifest, prog = loaded
+    if manifest.get("kind") != kind:  # never apply one kind's ids against another's batch
+        print(f"batch {args.batch} kind {manifest.get('kind')!r} != --source {kind!r}", file=sys.stderr)
+        return 64
+    signed = _read_json(bd / "batch-signed.json", None)
+    sidecar = (bd / "digest.sha256").read_text(encoding="utf-8").strip() if (bd / "digest.sha256").is_file() else ""
+    actual = hashlib.sha256((bd / "digest.md").read_bytes()).hexdigest() if (bd / "digest.md").is_file() else ""
+    # G0b-7: recompute digest.md's hash — the sidecar alone can be edited alongside the digest.
+    if not isinstance(signed, dict) or not actual or actual != sidecar or signed.get("digest_sha256") != actual:
+        print(f"refuse apply: batch-signed.json missing or digest changed since signing (digest.md={actual or 'missing'} sidecar={sidecar or 'missing'} signed={(signed or {}).get('digest_sha256') if isinstance(signed, dict) else 'missing'}) — re-run dry-run + sign_batch.py", file=sys.stderr)
+        return 15
+    # G0b r2 N6: the signature also binds the manifest and the exact set of meetings it authorizes.
+    manifest_sha = hashlib.sha256((bd / "manifest.json").read_bytes()).hexdigest()
+    # CARRY-1 (Josh): the authorized set is EXACTLY the intersection of real exit-0
+    # dry_run rows and batch-signed.json's own signed_ids — never prog["rows"].keys()
+    # unfiltered. Reconciled with the brief's own derivation (manifest non-applied
+    # rows with dry_run.exit == 0): the check just below already forces the two to be
+    # equal before any row is processed, so `authorized` computed either way is
+    # identical whenever apply is allowed to proceed at all; any drift between them
+    # (a row silently added/removed from signed_ids, or a dry_run re-run after
+    # signing) is caught HERE and refuses the WHOLE batch (15, nothing written) —
+    # stricter than a per-row skip, per CARRY-2's fail-closed contract.
+    authorized = sorted(
+        mid for mid in (str(r["id"]) for r in manifest["rows"] if not r.get("already_applied"))
+        if ((prog["rows"].get(f"{kind}:{mid}") or {}).get("dry_run") or {}).get("exit") == 0
+    )
+    if signed.get("manifest_sha256") != manifest_sha or sorted(signed.get("signed_ids") or []) != authorized:
+        print(f"refuse apply: manifest or the exit-0 set changed since signing (signed {len(signed.get('signed_ids') or [])} ids, now {len(authorized)}) — re-run dry-run + sign_batch.py", file=sys.stderr)
+        return 15
+    started_at = prog.get("apply_started_at") or _now()
+    prog["apply_started_at"] = started_at
+    today = started_at[:10]
+    _save_batch(bd, prog)
+
+    ok = failed = skipped = 0
+    for row in manifest["rows"]:
+        if row.get("already_applied"):
+            continue
+        mid = str(row["id"])
+        entry = _row(prog, kind, mid)
+        if (entry.get("dry_run") or {}).get("exit") != 0:
+            skipped += 1
+            continue
+        if (entry.get("apply") or {}).get("exit") == 0:
+            skipped += 1  # already applied by an earlier run: a repeat is a no-op
+            continue
+        t0 = time.monotonic()
+        rc = run_apply_subprocess(mid, vault, repo)
+        receipt = _read_json(progress.receipt_path(vault, kind, mid), {})
+        entry["apply"] = {"exit": rc, "vault_sha": (receipt or {}).get("vault_sha") if isinstance(receipt, dict) else None,
+                          "elapsed_s": round(time.monotonic() - t0, 3), "at": _now()}
+        _save_batch(bd, prog)
+        if rc == 0:
+            ok += 1
+        else:
+            failed += 1
+
+    # FR-015 / D-19: FR-007 once (state + every client region, G-114) and FR-011 once
+    # per distinct (client, engagement) — EXACTLY once per batch, after the LAST meeting:
+    # only when every authorized meeting has applied (this run may be the retry that
+    # completes it) and never twice (G0b r2 N5). A partially failed batch defers it.
+    # FR-015 sequence: "continue past per-meeting failures, and after the LAST meeting run FR-007
+    # once … and FR-011 once per pair derived from each APPLIED meeting … then print … exit 0/1".
+    # So the gate is "every authorized meeting has been ATTEMPTED" (G0a3-1), never "all green";
+    # pairs come from the meetings that did apply; failed ids are recorded for evidence 5/6.
+    # Exactly-once is a PROGRESSIVE checkpoint (G0b r3 N5): post_batch is saved before the first
+    # effect and after each one, and a resume performs only the steps not yet recorded.
+    apply_of = lambda mid: ((prog["rows"].get(f"{kind}:{mid}") or {}).get("apply") or {})
+    all_ok_ids = [mid for mid in authorized if apply_of(mid).get("exit") == 0]
+    attempted = sorted(mid for mid in authorized if apply_of(mid).get("exit") is not None)
+    if attempted == authorized and not (prog.get("post_batch") or {}).get("commit"):
+        post: dict[str, Any] = prog.get("post_batch") or {"today": today, "started_at": _now(), "status_pairs": []}
+        post["failed_ids"] = sorted(set(authorized) - set(all_ok_ids))
+        prog["post_batch"] = post
+        _save_batch(bd, prog)                                   # checkpoint: started
+        if "rollup_all" not in post:
+            post["rollup_all"] = run_rollup_all(vault, today)
+            _save_batch(bd, prog)                               # checkpoint: rollup done
+        pairs = derive_pairs(vault, kind, all_ok_ids)
+        done_pairs = {(p["client"], p["engagement"]) for p in post["status_pairs"] if p.get("exit") is not None}
+        for client, eng in pairs:
+            if (client, eng) in done_pairs:
+                continue
+            rc, rel = run_status_plan(client, eng, today, vault)
+            post["status_pairs"].append({"client": client, "engagement": eng, "exit": rc, "relPath": rel})
+            _save_batch(bd, prog)                               # checkpoint: each pair
+        # G0a2-2: commit the post-batch writes (STATE.md, every client region, touched
+        # projects/<eng>.md last_update, each status artifact) — their own FR-014-style commit.
+        pathspec = post_batch_pathspec(vault, pairs, [p["relPath"] for p in post["status_pairs"] if p.get("relPath")])
+        sha, committed = commit_post_batch(vault, pathspec, f"brain: backfill {args.batch} post-batch rollup + status ({len(pairs)} pairs)")
+        post["commit"] = {"pathspec": pathspec, "vault_sha": sha, "committed": committed}
+        _save_batch(bd, prog)                                   # checkpoint: complete
+    elif attempted != authorized:
+        print(f"post-batch: deferred ({len(authorized) - len(attempted)} authorized meetings not yet attempted) — re-run apply; rollup/status run once after the last meeting", file=sys.stderr)
+    print(f"applied: {ok} ok, {failed} failed, {skipped} skipped")
+    # FR-015 exit contract: 0 when failed = 0, else 1. Post-batch rollup/status outcomes are
+    # recorded in prog["post_batch"] and gated separately by G4 (6_rollup_all_ran_exactly_once_ok / 6_status_pairs_ok).
+    return 0 if failed == 0 else 1
 
 
 if __name__ == "__main__":

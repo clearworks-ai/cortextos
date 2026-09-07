@@ -42,7 +42,7 @@
     },
     {
       "id": "fixture-06",
-      "name": "Jaime Neary",
+      "name": "Russian Riverkeeper Contact 06",
       "company": "Russian Riverkeeper",
       "emails": ["contact06@russianriverkeeper.org"],
       "aliases": [],
@@ -82,7 +82,7 @@
     },
     {
       "id": "fixture-11",
-      "name": "johnmurawski",
+      "name": "CalAsia Construction, Inc. Contact 11",
       "company": "CalAsia Construction, Inc.",
       "emails": ["contact11@calasiaconstruction.com"],
       "aliases": [],
@@ -106,7 +106,7 @@
     },
     {
       "id": "fixture-14",
-      "name": "abbey",
+      "name": "CalAsia Construction, Inc. Contact 14",
       "company": "CalAsia Construction, Inc.",
       "emails": ["contact14@calasiaconstruction.com"],
       "aliases": [],
@@ -114,7 +114,7 @@
     },
     {
       "id": "fixture-15",
-      "name": "chrisocampo",
+      "name": "calasiaconstruction.com Contact 15",
       "company": "calasiaconstruction.com",
       "emails": ["contact15@calasiaconstruction.com"],
       "aliases": [],

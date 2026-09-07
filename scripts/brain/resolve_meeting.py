@@ -458,6 +458,14 @@ def resolve(
         pname = _norm_title(str(p.get("name") or ""))
         if not pname:
             return None
+        if len(pname.split()) < 2:
+            # R3-1 (round 4, Critical): a bare first name is not an identity
+            # (mirrors rule 7's len(tokens) >= 2) — matching it against a
+            # contacts.json row let the B override (rule 4) silently re-home
+            # a meeting onto that row's company over the real email-domain
+            # pick (production repro: "Michelle" -> clients/alloi.md rule 4,
+            # over the correct clients/oakrootsaccounting.md rule 3).
+            return None
         matches = [row for row in contact_rows if _norm_title(str(row.get("name") or "")) == pname]
         if not matches:
             return None
@@ -536,7 +544,20 @@ def resolve(
     # page (contacts.json) pre-empts the community predicate and routes the
     # meeting to that attendee's own org/client instead of the community org.
     no_external_emails = not any("@" in str(p.get("email") or "") for p in externals)
-    if externals and no_external_emails and cls.get("relationship") in {"colleague", "personal"} and cls.get("org_name"):
+    # R3-2 (round 4, Important, coordinator-decided option b): a single
+    # email-less external is a 1:1, not a community/teaching session — leave
+    # it to rule 7's person page instead of creating a new org page named by
+    # whatever the classifier put in org_name (production repro: "Steven
+    # Burns" -> WRONGLY created orgs/core-boards.md; D-20 accepted the
+    # existing orgs/steven-burns-faia.md person page). R1/R2 (5 externals)
+    # are unaffected.
+    if (
+        externals
+        and len(externals) >= 2
+        and no_external_emails
+        and cls.get("relationship") in {"colleague", "personal"}
+        and cls.get("org_name")
+    ):
         slug = _community_org_slug(str(cls.get("org_name")))
         if slug:
             # N2 (round 3): don't create a duplicate orgs/<slug>.md beside an
@@ -551,6 +572,16 @@ def resolve(
             # even when its file slug differs from _community_org_slug's
             # computed value) before falling back to create-or-reuse-by-slug.
             existing_org_slug = closed["org_name_to_slug"].get(_norm_title(str(cls.get("org_name"))))
+            # R3-3 (round 4, Minor): org_name_to_slug is built from BOTH
+            # clients/ and orgs/ pages (load_closed_sets), so a
+            # page-declared name that resolves to an existing CLIENT page
+            # must reuse it too — otherwise this door creates a duplicate
+            # orgs/<slug>.md beside clients/<existing_org_slug>.md (the N2
+            # bug via a second path).
+            if existing_org_slug and existing_org_slug in clients:
+                hit = _client_hit(existing_org_slug, nodes, clients, rule=10)
+                hit["also_present"] = []
+                return hit
             if existing_org_slug and existing_org_slug in closed["orgs"]:
                 page_rel = _relationship_from_text(
                     closed["orgs"][existing_org_slug].read_text(encoding="utf-8")

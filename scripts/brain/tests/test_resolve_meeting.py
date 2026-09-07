@@ -1850,3 +1850,137 @@ def test_n5_org_cands_requires_email_match_not_just_has_email(tmp_path) -> None:
     assert res["counterparty_slug"] != "hntb-corporation"
     assert res["home_path"] == "orgs/someunknownco.md"
     assert res["rule"] == 6
+
+
+def test_bare_first_name_contact_match_does_not_override_domain_pick(tmp_path) -> None:
+    """R3-1 (round 4, Critical): _match_contact must not treat a bare first
+    name as an identity — a name-only participant "Michelle" must not match
+    a contacts.json row named exactly "Michelle" and drive the B override
+    (rule 4) onto that row's company over the real email-domain pick
+    (production repro: 01KZSBRA9776MXKWVEWNQ4M1GG, clients/oakrootsaccounting.md
+    r3 -> WRONGLY re-homed to clients/alloi.md r4). Per-test contacts.json
+    override with one bare-first-name row (mirrors test_n4/test_n7)."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_r4_vault(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients" / "oakrootsaccounting.md").write_text(
+        "# Client: Oak Roots Accounting\n\n## Contacts\n", encoding="utf-8"
+    )
+    (repo / "orgs/clearworksai/agents/crm-codex/crm/contacts.json").write_text(
+        json.dumps(
+            {
+                "contacts": [
+                    {
+                        "id": "fixture-michelle",
+                        "name": "Michelle",
+                        "company": "Alloi",
+                        "emails": ["contact99@alloi.us"],
+                        "aliases": [],
+                        "type": "person",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    src = tmp_path / "env"
+    src.mkdir()
+    participants = [
+        {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours", "spoke": True, "notetaker": False},
+        {
+            "name": None,
+            "email": "michelle@oakrootsaccounting.com",
+            "side": "theirs",
+            "spoke": False,
+            "notetaker": False,
+        },
+        {"name": "Michelle", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
+    ]
+    _write_source(
+        src,
+        title="Michelle Jaimes and Josh Weiss",
+        participants=participants,
+        org_name="Oak Roots Accounting",
+        domain="oakrootsaccounting.com",
+        relationship="vendor",
+        confidence=0.9,
+        meeting_type="delivery",
+        deal_state="none",
+        fireflies_id="01KZSBRA9776MXKWVEWNQ4M1GG",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "clients/oakrootsaccounting.md"
+    assert res["rule"] == 3
+    assert res["also_present"] == []
+    assert res["created"] is None
+
+
+def test_rule10_requires_at_least_two_externals_single_external_falls_to_rule7(tmp_path) -> None:
+    """R3-2 (round 4, Important, coordinator-decided option b): rule 10's
+    community predicate must additionally require len(externals) >= 2, so a
+    single-external email-less colleague/personal 1:1 (production repro:
+    "Steven Burns", 01KZC5W0RCVEKEV0WBA7DCKKP1) falls through to rule 7's
+    person page instead of creating a new org page named after whatever the
+    classifier put in org_name (was WRONGLY creating orgs/core-boards.md
+    r10; D-20 accepted orgs/steven-burns-faia.md r7). R1/R2 (5 externals)
+    are unaffected controls."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_r4_vault(tmp_path)
+    src = tmp_path / "env"
+    src.mkdir()
+    # R1 participants truncated to keep both "ours" rows plus exactly one
+    # external ("Douglas Teiger", unknown+spoke) instead of R1's five.
+    participants = _r1_participants()[:3]
+    _write_source(
+        src,
+        title="Steven Burns",
+        participants=participants,
+        org_name="Core Boards (BQE)",
+        domain=None,
+        relationship="colleague",
+        confidence=0.65,
+        meeting_type="other",
+        fireflies_id="01KZC5W0RCVEKEV0WBA7DCKKP1",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"].startswith("orgs/")
+    assert res["rule"] == 7
+    assert res["kind"] == "person"
+
+
+def test_rule10_page_declared_name_reuses_client_page_by_org_name(tmp_path) -> None:
+    """R3-3 (round 4, Minor): rule 10's page-declared-name branch must check
+    closed["org_name_to_slug"] against CLIENT pages too, not only orgs/ pages
+    (org_name_to_slug is built from both — load_closed_sets). Without this,
+    an org_name that normalizes to an existing clients/<slug>.md's declared
+    "CRM org name" (here msia.md's "Movement of Spiritual Awareness") falls
+    through to create a duplicate orgs/movement-of-spiritual-awareness.md
+    beside clients/msia.md — the N2 bug via the second door."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_r4_vault(tmp_path)
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="MSIA catchup",
+        participants=_r1_participants(),
+        org_name="Movement of Spiritual Awareness",
+        domain=None,
+        relationship="colleague",
+        confidence=0.6,
+        meeting_type="other",
+        fireflies_id="01R3-3MSIA",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "clients/msia.md"
+    assert res["rule"] == 10
+    assert res["created"] is None

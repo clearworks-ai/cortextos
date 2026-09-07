@@ -909,15 +909,21 @@ def _apply_writes(
     # ("receipt.json SHALL differ only in last_run_at") and Task 10's own G4
     # assertion. Always recompose and write the receipt; only the commit
     # itself is gated by `progress.step_done`.
-    if not progress.step_done(doc, "commit"):
-        adapted_meeting = (wb_payload_doc.get("meetings") or [{}])[0]
-        home_rel = str(resolution.get("home_path") or "")
-        pathspec = progress.fr014_pathspec(
-            meeting_id, home_rel, meeting_note_rel(adapted_meeting),
-            client_slug=client_slug or None, engagement_id=(eng_id or None),
-            status_rel=(doc.get("status_update") or {}).get("relPath"),
-            filed=progress.step_done(doc, "filed"), state_touched=True,
-        )
+    adapted_meeting = (wb_payload_doc.get("meetings") or [{}])[0]
+    home_rel = str(resolution.get("home_path") or "")
+    pathspec = progress.fr014_pathspec(
+        meeting_id, home_rel, meeting_note_rel(adapted_meeting),
+        client_slug=client_slug or None, engagement_id=(eng_id or None),
+        status_rel=(doc.get("status_update") or {}).get("relPath"),
+        filed=progress.step_done(doc, "filed"), state_touched=True,
+    )
+    # Josh sign-off 2026-09-06 (R3 phase-3 apply on the R2-applied acceptance
+    # meeting): the `commit` progress key was already done from R2, so the
+    # phase-3 writers' output (STATE.md, clients/<slug>.md, the status
+    # artifact, _filed.log, last_update) was left uncommitted and the receipt
+    # kept R2's vault_sha. Commit whenever the FR-014 pathspec is dirty, not
+    # only on the first run — a clean pathspec still means "no new commit".
+    if not progress.step_done(doc, "commit") or progress.pathspec_dirty(vault, pathspec):
         message = f"brain: {_home_slug(resolution)} {str(source.get('occurred_at') or '')[:10]} from {key}"
         sha, committed_now = progress.vault_commit(vault, pathspec, message)
         final_sha = sha if committed_now else (prior_receipt or {}).get("vault_sha")

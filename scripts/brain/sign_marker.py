@@ -36,10 +36,12 @@ def _phase3_missing(text: str) -> list[str]:
         missing.append("would-touch:")
     if not PHASE3_WRITE_RE.search(text):
         missing.append("would-write:")
-    if len(PHASE3_FILE_RE.findall(text)) != 1:
+    file_lines = PHASE3_FILE_RE.findall(text)
+    if len(file_lines) != 1:
         missing.append("would-file: (exactly one)")
-    tail = [line for line in text.splitlines() if line.strip()]
-    if not tail or not tail[-1].startswith("would-file: "):
+    stripped = text.rstrip()
+    last_line = stripped.rsplit("\n", 1)[-1] if stripped else ""
+    if not last_line.startswith("would-file: "):
         missing.append("would-file: (must end capture)")
     return missing
 
@@ -111,6 +113,9 @@ def write_marker(
         "written_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
     if extra:
+        clash = set(extra) & set(doc)
+        if clash:
+            raise ValueError(f"extra must not override marker keys: {sorted(clash)}")
         doc.update(extra)
     atomic_write(marker, json.dumps(doc, sort_keys=True).encode("utf-8"))
     return 0, marker, warning

@@ -312,12 +312,16 @@ def _md_cell(value: Any) -> str:
     return str("" if value is None else value).replace("|", "\\|").replace("\n", " ")
 
 
-def write_digest(vault: Path, bd: Path, manifest: dict[str, Any], prog: dict[str, Any]) -> tuple[Path, str, list[str]]:
+def write_digest(vault: Path, bd: Path, manifest: dict[str, Any], prog: dict[str, Any],
+                  status: str = "complete") -> tuple[Path, str, list[str]]:
     """D-20 human review surface: `digest.md` (one row per meeting), `digest.sha256`
     (hex sha256 of digest.md bytes), and a seeded `sample/` of up to SAMPLE_SIZE
     exit-0 dry-run captures for spot-checking before sign-off. `vault` is passed
     explicitly rather than derived from `bd` (`bd.parents[1]` would land in
-    `<vault>/raw/media/transcripts`, not the vault root)."""
+    `<vault>/raw/media/transcripts`, not the vault root). `status` (task-8-review
+    Important #2) is caller-supplied — "complete" on the normal end-of-loop exit,
+    "partial (budget)" / "partial (auth)" on the two halt paths — so a partial
+    digest can never be mistaken for a finished batch on the D-20 signed surface."""
     kind = str(manifest.get("kind") or prog.get("kind") or "fireflies")
     by_id = {str(r["id"]): r for r in manifest["rows"]}
     lines = [f"# Backfill digest — {prog['batch_id']}", ""]
@@ -348,14 +352,31 @@ def write_digest(vault: Path, bd: Path, manifest: dict[str, Any], prog: dict[str
             ok += 1
         else:
             failed += 1
-    lines += [f"kind: {kind} · meetings: {ok + failed} · ok: {ok} · failed: {failed} · cost_usd: {spent:.2f}", "",
+    # task-8-review Important #2: a partial batch (halted on budget/auth) must not read
+    # like a finished one — manifest is the batch's full row count regardless of how many
+    # were actually attempted; unattempted is derived, never independently tracked, so it
+    # can't drift from ok/failed; status is caller-supplied, never inferred here.
+    manifest_n = len(manifest.get("rows") or [])
+    lines += [f"kind: {kind} · manifest: {manifest_n} · meetings: {ok + failed} · ok: {ok} · "
+              f"failed: {failed} · unattempted: {manifest_n - (ok + failed)} · cost_usd: {spent:.2f}",
+              f"status: {status}", "",
               "| id | date | title | home | created org | kept/dropped | classification | exit |",
               "|---|---|---|---|---|---|---|---|", *rows_out, ""]
     digest_path = bd / "digest.md"
     data = "\n".join(lines).encode("utf-8")
     sha = hashlib.sha256(data).hexdigest()
 
-    eligible = sorted(k.split(":", 1)[1] for k, v in prog["rows"].items() if (v.get("dry_run") or {}).get("exit") == 0)
+    # task-8-review Important #3: an exit-0 row whose dry-run.txt is missing (never
+    # written, or lost after the fact) must be dropped BEFORE the seeded pick, not after —
+    # otherwise `picked`/`sample_ids`/the stdout count can name a file that was never
+    # written, and Task 9's sign-off would validate against a sample it doesn't have.
+    exit0_ids = sorted(k.split(":", 1)[1] for k, v in prog["rows"].items() if (v.get("dry_run") or {}).get("exit") == 0)
+    eligible: list[str] = []
+    for mid in exit0_ids:
+        if (progress._state_dir(vault, kind, mid) / "dry-run.txt").is_file():
+            eligible.append(mid)
+        else:
+            print(f"sample: skipped {mid} (no dry-run.txt)", file=sys.stderr)
     picked = sorted(random.Random(prog["batch_id"]).sample(eligible, min(SAMPLE_SIZE, len(eligible)))) if eligible else []
     # Review surface = a fully written, digest-versioned directory `sample-<sha12>/`
     # made visible by ONE atomic rename of a symlink `sample -> sample-<sha12>`
@@ -384,20 +405,26 @@ def write_digest(vault: Path, bd: Path, manifest: dict[str, Any], prog: dict[str
         tmp_link.unlink()
     os.symlink(versioned.name, tmp_link)
     os.replace(tmp_link, link)  # atomic symlink swap
-    for old in bd.glob("sample-*"):
-        if old.is_dir() and old.name != versioned.name and ".tmp-" not in old.name:
-            shutil.rmtree(old)
     # digest.md + digest.sha256 are written LAST: a matching sidecar implies the versioned sample dir it names is complete.
     atomic_write(digest_path, data)
     atomic_write(bd / "digest.sha256", (sha + "\n").encode("utf-8"))
+    # task-8-review Minor #2/#3: prune AFTER the sidecar is published, not before — pruning
+    # first left a crash window where digest.sha256 could point at an already-deleted dir.
+    # Also sweep orphaned `sample-*.tmp-*` build dirs here (crash-left, any pid): once the
+    # current versioned dir + sidecar exist, nothing else under `sample-*` can still be needed.
+    for old in bd.glob("sample-*"):
+        if old.is_dir() and old.name != versioned.name:
+            shutil.rmtree(old)
     return digest_path, sha, picked
 
 
-def _finish_digest(vault: Path, bd: Path, manifest: dict[str, Any], prog: dict[str, Any]) -> tuple[Path, str, list[str]]:
+def _finish_digest(vault: Path, bd: Path, manifest: dict[str, Any], prog: dict[str, Any],
+                    status: str = "complete") -> tuple[Path, str, list[str]]:
     """Called on every cmd_dry_run exit path (0, 2, 12) so a partial batch — halted
     on an auth error or a budget cap — still leaves a reviewable digest + sample
-    behind, not just a batch-progress.json."""
-    digest_path, sha, picked = write_digest(vault, bd, manifest, prog)
+    behind, not just a batch-progress.json. `status` is forwarded to write_digest
+    verbatim (task-8-review Important #2)."""
+    digest_path, sha, picked = write_digest(vault, bd, manifest, prog, status=status)
     prog["digest_sha256"] = sha
     prog["sample_ids"] = picked
     _save_batch(bd, prog)
@@ -427,17 +454,22 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
         if row.get("already_applied"):
             continue
         mid = str(row["id"])
-        entry = _row(prog, kind, mid)
-        if (entry.get("dry_run") or {}).get("exit") == 0:
+        key = f"{kind}:{mid}"
+        # task-8-review Important #1: read-only lookup — never mutate prog["rows"] until we
+        # are actually committed to attempting this meeting, so a halt below (budget guard)
+        # leaves no phantom {} entry in batch-progress.json for a meeting never run.
+        prior_entry = prog["rows"].get(key) or {}
+        if (prior_entry.get("dry_run") or {}).get("exit") == 0:
             ok += 1
             continue
         # review C2: HALT before launching when the ledger already exceeds the cap — a resume
         # after a 12 (or a --max-usd already below recorded spend) must make zero new attempts.
         if spent > args.max_usd:
             print(f"budget: spent ${spent:.2f} > --max-usd {args.max_usd:.2f} before {kind}:{mid}", file=sys.stderr)
-            _finish_digest(vault, bd, manifest, prog)
+            _finish_digest(vault, bd, manifest, prog, status="partial (budget)")
             return 12
-        prior_dry = entry.get("dry_run") or {}
+        entry = _row(prog, kind, mid)  # only mutate the ledger once we're committed to attempting it
+        prior_dry = prior_entry.get("dry_run") or {}
         prior_cost = float(prior_dry.get("cost_usd") or 0.0)
         prior_attempts = int(prior_dry.get("attempts") or 0)
         stamp_before = _extraction_stamp(vault, kind, mid)
@@ -460,14 +492,16 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
             failed += 1
             if (rec.get("fetch_error") or {}).get("class") == "auth":
                 print(f"stopped: auth ({kind}:{mid}) — fix credentials and re-run --batch {args.batch} dry-run", file=sys.stderr)
-                _finish_digest(vault, bd, manifest, prog)
+                _finish_digest(vault, bd, manifest, prog, status="partial (auth)")
                 return 2
         if spent > args.max_usd:
             print(f"budget: spent ${spent:.2f} > --max-usd {args.max_usd:.2f} after {kind}:{mid}", file=sys.stderr)
-            _finish_digest(vault, bd, manifest, prog)
+            _finish_digest(vault, bd, manifest, prog, status="partial (budget)")
             return 12
-    _save_batch(bd, prog)  # review M7: checkpoint exists even when no row ran (empty/all-skipped batch)
-    _finish_digest(vault, bd, manifest, prog)
+    # review M7's checkpoint (empty/all-skipped batch still persists) is now subsumed by
+    # _finish_digest's own _save_batch call below (task-8-review Minor #4) — no separate
+    # save needed here; every exit path from this function calls _finish_digest.
+    _finish_digest(vault, bd, manifest, prog, status="complete")
     print(f"dry-run: {ok} ok, {failed} failed, ${spent:.2f} spent")
     return 0
 

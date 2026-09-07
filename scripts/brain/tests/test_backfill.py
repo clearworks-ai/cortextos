@@ -404,3 +404,88 @@ def test_digest_sample_takes_all_when_fewer_than_ten(tmp_path, monkeypatch):
     monkeypatch.setattr(backfill, "run_meeting_main", _fake_run_meeting(vault))
     assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"]) == 0
     assert sorted(p.stem for p in (bd / "sample").glob("*.txt")) == ["A", "B"]
+
+
+# --- task-8 review fix round 1 (Important #1/#2/#3) ------------------------------
+def test_dry_run_budget_halt_no_phantom_row_and_resume_digest_is_idempotent(tmp_path, monkeypatch):
+    """Important #1: the pre-launch budget guard must not persist a {} placeholder
+    entry for the NEXT (never-attempted) meeting into batch-progress.json, and a
+    resume that makes zero new calls must reproduce a byte-identical digest."""
+    import backfill
+    vault, bd = _seed_batch(tmp_path)
+    calls = []
+    inner = _fake_run_meeting(vault, cost=0.6)
+
+    def counting(argv):
+        calls.append(argv[argv.index("--meeting-id") + 1])
+        return inner(argv)
+    monkeypatch.setattr(backfill, "run_meeting_main", counting)
+    base = ["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run", "--max-usd", "1.0"]
+    assert backfill.main(base) == 12
+    rows = _bp(bd)["rows"]
+    assert set(rows) == {"fireflies:A", "fireflies:B"}            # no phantom fireflies:C entry
+    assert all(isinstance(v.get("dry_run"), dict) for v in rows.values())
+    sha1 = (bd / "digest.sha256").read_text(encoding="utf-8").strip()
+    calls.clear()
+    assert backfill.main(base) == 12                              # resume: halts before C
+    assert calls == []                                             # zero new run_meeting_main calls
+    rows2 = _bp(bd)["rows"]
+    assert set(rows2) == {"fireflies:A", "fireflies:B"}            # still no phantom entry after resume
+    sha2 = (bd / "digest.sha256").read_text(encoding="utf-8").strip()
+    assert sha1 == sha2
+
+
+def test_digest_header_discloses_partial_batch_on_budget_halt(tmp_path, monkeypatch):
+    """Important #2: a halted batch's digest header must disclose it is partial and
+    how many manifest rows were never attempted."""
+    import backfill
+    vault, bd = _seed_batch(tmp_path)
+    monkeypatch.setattr(backfill, "run_meeting_main", _fake_run_meeting(vault, cost=0.6))
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run", "--max-usd", "1.0"])
+    assert rc == 12
+    text = (bd / "digest.md").read_text(encoding="utf-8")
+    assert "status: partial (budget)" in text
+    assert "unattempted: 1" in text           # 3 manifest rows, 2 attempted (A, B)
+
+
+def test_digest_header_status_complete_on_full_run(tmp_path, monkeypatch):
+    """Important #2: a fully-completed batch's digest header must read complete /
+    unattempted: 0, never mistakable for a partial one."""
+    import backfill
+    vault, bd = _seed_batch(tmp_path, ids=("A", "B"))
+    monkeypatch.setattr(backfill, "run_meeting_main", _fake_run_meeting(vault))
+    assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"]) == 0
+    text = (bd / "digest.md").read_text(encoding="utf-8")
+    assert "status: complete" in text and "unattempted: 0" in text
+
+
+def test_dry_run_sample_excludes_exit0_row_missing_dry_run_txt(tmp_path, monkeypatch, capsys):
+    """Important #3: sample_ids / stdout `sample <n>` must never overstate the on-disk
+    sample — an exit-0 row with no captured dry-run.txt is excluded from the seeded
+    pick before sampling, with a stderr diagnostic, so picked always matches the files."""
+    import backfill, json
+    vault, bd = _seed_batch(tmp_path, ids=("A", "B"))
+    inner = _fake_run_meeting(vault)
+
+    def fake(argv):
+        mid = argv[argv.index("--meeting-id") + 1]
+        if mid == "A":  # succeeds (rc 0) but prints nothing -> no dry-run.txt is ever written
+            env = vault / "raw/media/transcripts/fireflies" / mid
+            env.mkdir(parents=True, exist_ok=True)
+            (env / "resolution.json").write_text(json.dumps({"home_path": None, "rule": None, "node": "none", "counterparty_slug": None, "created": None}), encoding="utf-8")
+            (env / "validated.json").write_text(json.dumps({"decisions": [], "commitments": [], "open_questions": [], "dropped": {"decisions": 0, "commitments": 0, "open_questions": 0}}), encoding="utf-8")
+            (env / "extraction.json").write_text(json.dumps({"inputSha": "x", "cost_usd": 0.1, "extracted_at": "2099-01-01T00:00:01Z"}), encoding="utf-8")
+            return 0
+        return inner(argv)
+    monkeypatch.setattr(backfill, "run_meeting_main", fake)
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"])
+    assert rc == 0
+    cap_a = vault / "raw/media/transcripts/_state/fireflies-A/dry-run.txt"
+    assert not cap_a.exists()
+    prog = _bp(bd)
+    assert prog["sample_ids"] == ["B"]
+    on_disk = sorted(p.stem for p in (bd / "sample").glob("*.txt"))
+    assert on_disk == ["B"]
+    out = capsys.readouterr()
+    assert "digest: " in out.out and "sample 1" in out.out
+    assert "sample: skipped A (no dry-run.txt)" in out.err

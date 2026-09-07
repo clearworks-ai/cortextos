@@ -114,6 +114,28 @@ def _relationship_from_text(text: str) -> str | None:
     return None
 
 
+def _org_name_from_text(text: str) -> str | None:
+    """Parse a '- CRM org name: X' (or bare 'CRM org name: X') line from a client/org page."""
+    for line in text.splitlines():
+        m = re.match(r"^\s*-?\s*CRM org name\s*:\s*(.+)$", line, re.I)
+        if m:
+            val = m.group(1).strip()
+            return val or None
+    return None
+
+
+def _community_org_slug(org_name: str) -> str:
+    """D: normalize community/teaching-session org names to one deterministic slug.
+
+    Strip parentheticals, then strip the standalone words 'office hours'/'community',
+    then slugify. 'AIA LA (Office Hours community)' and 'AIA LA Office Hours' both
+    normalize to 'aia-la'.
+    """
+    s = re.sub(r"\([^)]*\)", "", str(org_name or ""))
+    s = re.sub(r"\b(office hours|community)\b", "", s, flags=re.I)
+    return slugify(s)
+
+
 def _company_slug(company: str, aliases: Any) -> str:
     """G-32/G-55: alias table first (keys are display names), only then slugify(company)."""
     c = str(company)
@@ -130,6 +152,7 @@ def load_closed_sets(vault: Path) -> dict[str, Any]:
     orgs: dict[str, Path] = {}
     nodes: dict[str, dict[str, Any]] = {}
     domain_to_slug: dict[str, str] = {}
+    org_name_to_slug: dict[str, str] = {}
     for folder, dest in (("clients", clients), ("orgs", orgs)):
         d = brain / folder
         if not d.is_dir():
@@ -142,6 +165,9 @@ def load_closed_sets(vault: Path) -> dict[str, Any]:
             for dom in _domains_from_text(text):
                 domain_to_slug[registrable_label(dom)] = path.stem
                 domain_to_slug[dom] = path.stem
+            oname = _org_name_from_text(text)
+            if oname:
+                org_name_to_slug[_norm_title(oname)] = path.stem
     proj = brain / "projects"
     if proj.is_dir():
         for path in proj.glob("*.md"):
@@ -165,6 +191,7 @@ def load_closed_sets(vault: Path) -> dict[str, Any]:
         "orgs": orgs,
         "nodes": nodes,
         "domain_to_slug": domain_to_slug,
+        "org_name_to_slug": org_name_to_slug,
         "brain": brain,
     }
 
@@ -286,6 +313,7 @@ def resolve(
     org_cands: set[str] = set()
     unknown_labels: dict[str, tuple[str, str]] = {}
     unknown_counts: dict[str, int] = {}
+    all_label_counts: dict[str, int] = {}
     for p in externals:
         email = str(p.get("email") or "")
         if "@" not in email:
@@ -295,6 +323,7 @@ def resolve(
             continue
         lab = registrable_label(domain)
         tld = domain.rsplit(".", 1)[-1]
+        all_label_counts[lab] = all_label_counts.get(lab, 0) + 1
         mapped = domain_to_slug.get(lab) or domain_to_slug.get(domain) or ""
         if mapped in clients:
             client_cands.add(mapped)
@@ -308,10 +337,14 @@ def resolve(
             unknown_labels[lab] = (tld, domain)
             unknown_counts[lab] = unknown_counts.get(lab, 0) + 1
 
-    def _also(picked: str) -> list[str]:
-        return sorted(c for c in (client_cands | org_cands) if c != picked)
-
-    def _pick(cands: set[str]) -> str:
+    # G-R4: contacts.json can map a domain label to a company slug that matches
+    # no real client/org page (alias values are display names, or a later
+    # contact row's company overwrites an earlier, correct one). A plain
+    # `domain_to_slug.get(lab) or ... or (lab if lab in cands else "")` chain
+    # silently drops that participant's vote when the mapped value is truthy
+    # but wrong. Check membership independently instead (mirrors the
+    # candidate-collection loop above).
+    def _counts(cands: set[str]) -> dict[str, int]:
         counts: dict[str, int] = {}
         for p in externals:
             email = str(p.get("email") or "")
@@ -321,9 +354,17 @@ def resolve(
             if domain in FREE_MAIL:
                 continue
             lab = registrable_label(domain)
-            slug = domain_to_slug.get(lab) or domain_to_slug.get(domain) or (lab if lab in cands else "")
-            if slug in cands:
+            mapped = domain_to_slug.get(lab) or domain_to_slug.get(domain) or ""
+            slug = mapped if mapped in cands else (lab if lab in cands else "")
+            if slug:
                 counts[slug] = counts.get(slug, 0) + 1
+        return counts
+
+    def _also(picked: str) -> list[str]:
+        return sorted(c for c in (client_cands | org_cands | rule4) if c != picked)
+
+    def _pick(cands: set[str]) -> str:
+        counts = _counts(cands)
         return min(
             cands,
             key=lambda s: (
@@ -338,6 +379,54 @@ def resolve(
             ),
         )
 
+    # B: contacts.json (by email or normalized name) beats a bare email-domain
+    # guess for a named person. Match every external participant against
+    # contacts.json; resolve their company to a client via the alias table
+    # (existing _company_slug) or, when the alias table's value is a display
+    # name rather than a slug, via a client page's declared "CRM org name:".
+    def _resolve_company_slug(company: Any) -> str | None:
+        if not company:
+            return None
+        slug = _company_slug(str(company), aliases)
+        if slug in clients or slug in closed["orgs"]:
+            return slug
+        alt = closed["org_name_to_slug"].get(_norm_title(str(company)))
+        if alt:
+            return alt
+        return None
+
+    def _match_contact(p: dict[str, Any]) -> dict[str, Any] | None:
+        email = str(p.get("email") or "").strip().lower()
+        if email:
+            for row in contact_rows:
+                emails = [str(e).lower() for e in (row.get("emails") or [])]
+                if email in emails:
+                    return row
+        pname = _norm_title(str(p.get("name") or ""))
+        if not pname:
+            return None
+        for row in contact_rows:
+            if pname and _norm_title(str(row.get("name") or "")) == pname:
+                return row
+        return None
+
+    rule4: set[str] = set()
+    name_only_rule4: set[str] = set()
+    for p in externals:
+        row = _match_contact(p)
+        if not row:
+            continue
+        slug = _resolve_company_slug(row.get("company"))
+        if not slug:
+            continue
+        if slug in clients:
+            rule4.add(slug)
+            if "@" not in str(p.get("email") or ""):
+                name_only_rule4.add(slug)
+        if slug in closed["orgs"]:
+            org_cands.add(slug)
+
+    cls = classification if isinstance(classification, dict) else {}
     # (1) node id in title
     for nid, node in nodes.items():
         if re.search(r"(?<![a-z0-9])" + re.escape(nid.casefold()) + r"(?![a-z0-9])", ntitle):
@@ -357,32 +446,79 @@ def resolve(
         no_ext = not externals
         if client in client_cands or no_ext:
             return _hit(node, nid, rule=2, clients=clients, client_cands=client_cands, corroborated=True)
+    # (B, folded into rule 4) contacts.json identifies a person by name that a
+    # bare email-domain guess cannot see at all (no email on that participant
+    # object). When that identity resolves to a different client than the
+    # domain/contacts pick would otherwise reach, the identified contact wins.
+    default_pick: str | None = None
+    if name_only_rule4:
+        b_pick = _pick(name_only_rule4)
+        if client_cands:
+            default_pick = _pick(client_cands)
+        elif rule4:
+            default_pick = _pick(rule4)
+        if default_pick != b_pick:
+            hit = _client_hit(b_pick, nodes, clients, rule=4)
+            hit["also_present"] = _also(b_pick)
+            return hit
     # (3) candidate client from non-free-mail domain
+    default_pick = None
+    default_rule = 0
     if client_cands:
-        picked = _pick(client_cands)
-        hit = _client_hit(picked, nodes, clients, rule=3)
-        hit["also_present"] = _also(picked)
-        return hit
-    # (4) contacts.json company
-    rule4: set[str] = set()
-    for p in externals:
-        email = str(p.get("email") or "").lower()
-        for row in contact_rows:
-            emails = [str(e).lower() for e in (row.get("emails") or [])]
-            if email not in emails:
-                continue
-            company = row.get("company")
-            if not company:
-                continue
-            slug = _company_slug(str(company), aliases)
-            if slug in clients:
-                rule4.add(slug)
-            if slug in closed["orgs"]:
-                org_cands.add(slug)
-    if rule4:
-        picked = _pick(rule4)
-        hit = _client_hit(picked, nodes, clients, rule=4)
-        hit["also_present"] = _also(picked)
+        default_pick = _pick(client_cands)
+        default_rule = 3
+    elif rule4:
+        default_pick = _pick(rule4)
+        default_rule = 4
+    # (9) high-confidence classification over a minority client candidate:
+    # only overrides an existing rule-3/4 pick (never fires when there is no
+    # recognized client candidate at all — that stays rule 6/unknown-label
+    # territory), and only when the classified org actually outnumbers it.
+    if default_pick is not None:
+        cls_domain = str(cls.get("domain") or "").strip().lower()
+        cls_org_name = str(cls.get("org_name") or "").strip()
+        cls_conf = float(cls.get("confidence") or 0)
+        cls_label = registrable_label(cls_domain) if cls_domain else None
+        slug_for_cls = slugify(cls_org_name) if cls_org_name else cls_label
+        already_matches = default_pick in {cls_label, slug_for_cls}
+        if cls_conf >= 0.8 and slug_for_cls and not already_matches:
+            cls_count = all_label_counts.get(cls_label, 0) if cls_label else 0
+            default_count = _counts({default_pick}).get(default_pick, 0)
+            if cls_count > default_count:
+                rel = str(cls.get("relationship") or "")
+                if rel not in RELATIONSHIPS:
+                    rel = "prospect"
+                if slug_for_cls in clients:
+                    hit = _client_hit(slug_for_cls, nodes, clients, rule=9)
+                    hit["also_present"] = _also(slug_for_cls)
+                    return hit
+                if cls_label and cls_label in clients:
+                    hit = _client_hit(cls_label, nodes, clients, rule=9)
+                    hit["also_present"] = _also(cls_label)
+                    return hit
+                org_slug = slug_for_cls if slug_for_cls in closed["orgs"] else (
+                    cls_label if cls_label and cls_label in closed["orgs"] else slug_for_cls
+                )
+                exists = org_slug in closed["orgs"]
+                if exists:
+                    page_rel = _relationship_from_text(closed["orgs"][org_slug].read_text(encoding="utf-8"))
+                    if page_rel in RELATIONSHIPS:
+                        rel = page_rel
+                return {
+                    "counterparty_slug": org_slug,
+                    "kind": "org",
+                    "relationship": rel,
+                    "home_path": f"orgs/{org_slug}.md",
+                    "node": "none",
+                    "created": None if exists else {"kind": "org", "slug": org_slug, "relationship": rel},
+                    "confidence": cls_conf,
+                    "rule": 9,
+                    "corroborated": False,
+                    "also_present": _also(org_slug),
+                }
+    if default_pick is not None:
+        hit = _client_hit(default_pick, nodes, clients, rule=default_rule)
+        hit["also_present"] = _also(default_pick)
         return hit
     # (5) free-mail → person org page
     for p in externals:
@@ -408,7 +544,6 @@ def resolve(
                     "corroborated": False,
                     "also_present": [],
                 }
-    cls = classification if isinstance(classification, dict) else {}
     rel_ok = {"prospect", "vendor", "partner", "personal"}
     # (6) org candidate from domain/company, else create from non-free-mail label
     if org_cands:
@@ -463,6 +598,28 @@ def resolve(
             "corroborated": False,
             "also_present": _also(slug),
         }
+    # (10) community / teaching sessions: no external participant has an
+    # email at all (nothing for rule 3/4/5/6 to see) and the classifier calls
+    # it a colleague/personal community context with a named org — home is
+    # that community's org page, never a person page carved from an attendee.
+    no_external_emails = not any("@" in str(p.get("email") or "") for p in externals)
+    if externals and no_external_emails and cls.get("relationship") in {"colleague", "personal"} and cls.get("org_name"):
+        slug = _community_org_slug(str(cls.get("org_name")))
+        if slug:
+            exists = slug in closed["orgs"]
+            rel = str(cls.get("relationship"))
+            return {
+                "counterparty_slug": slug,
+                "kind": "org",
+                "relationship": rel,
+                "home_path": f"orgs/{slug}.md",
+                "node": "none",
+                "created": None if exists else {"kind": "org", "slug": slug, "relationship": rel},
+                "confidence": float(cls.get("confidence") or 0),
+                "rule": 10,
+                "corroborated": False,
+                "also_present": [],
+            }
     # (7) only free-mail or email-less external participants
     hard_domain = False
     for p in externals:

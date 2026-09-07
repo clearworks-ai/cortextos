@@ -263,12 +263,16 @@ def _write_source(
     participants: list[dict],
     text: str = "hello",
     org_name: str = "Internal",
-    domain: str = "clearworks.ai",
+    domain: str | None = "clearworks.ai",
     relationship: str = "internal",
+    confidence: float = 0.9,
+    meeting_type: str = "internal",
+    deal_state: str | None = "none",
+    fireflies_id: str = "01RULE8",
 ) -> None:
     source = {
         "schema": "brain.source/1",
-        "source": {"kind": "fireflies", "id": "01RULE8"},
+        "source": {"kind": "fireflies", "id": fireflies_id},
         "title": title,
         "occurred_at": "2026-09-04T17:00:00Z",
         "duration_s": 12,
@@ -291,15 +295,15 @@ def _write_source(
             "org_name": org_name,
             "domain": domain,
             "relationship": relationship,
-            "confidence": 0.9,
+            "confidence": confidence,
             "evidence": text,
         },
         "summary": {"overview": text, "bullets": []},
         "decisions": [{"text": "Keep cadence", "quote": text.split()[0]}],
         "commitments": [],
         "proposed_delivery_state": None,
-        "deal_state": "none",
-        "meeting_type": "internal",
+        "deal_state": deal_state,
+        "meeting_type": meeting_type,
     }
     (dir_path / "extraction.json").write_text(json.dumps(extraction), encoding="utf-8")
 
@@ -915,3 +919,336 @@ def test_f7_contact_company_alias_first_not_slugify(tmp_path) -> None:
     assert res["rule"] == 3
     assert res["counterparty_slug"] == "alloi"
     assert res["home_path"] == "clients/alloi.md"
+
+
+# --- R4 resolver-fix (2026-09-06 brain-backfill-r4 D-20 review): 5/15 wrong
+# homes from batch fireflies-20260907T173226Z. These tests use the REAL,
+# read-only CRM closed sets (contacts.json/org-aliases.json have 521 real
+# rows and messy real-world alias/company data that a hand-rolled stub can't
+# reproduce) — see .pipeline/sdd/2026-09-06-brain-backfill-r4/resolver-fix-brief.md.
+# Fixtures below carry ONLY participants + classification copied from the real
+# envelopes (never transcript text).
+REAL_REPO_ROOT = Path("/Users/joshweiss/code/cortextos")
+
+
+def _seed_r4_vault(tmp_path: Path) -> Path:
+    vault = tmp_path / "vault"
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients").mkdir(parents=True)
+    (brain / "projects").mkdir()
+    (brain / "orgs").mkdir()
+    (brain / "clients" / "msia.md").write_text(
+        "# Client: MSIA\n\n## Contacts\n\n## Current state\n\n"
+        "- CRM org name: Movement of Spiritual Awareness\n",
+        encoding="utf-8",
+    )
+    for slug, name in (
+        ("pts", "PTS"),
+        ("logictcg", "LogicTCG"),
+        ("calasiaconstruction", "CalAsia Construction"),
+        ("allsafeit", "AllSafe IT"),
+        ("kadre", "Kadre"),
+    ):
+        (brain / "clients" / f"{slug}.md").write_text(f"# Client: {name}\n\n## Contacts\n", encoding="utf-8")
+    (brain / "clients" / "alloi.md").write_text(
+        "# Client: Alloi\n\n## Contacts\n\ndomains: alloi.us\n", encoding="utf-8"
+    )
+    return vault
+
+
+def test_r1_aia_office_hours_creates_community_org_not_person(tmp_path) -> None:
+    """D-20: internal AIA LA teaching session — home is the community org page,
+    never a person page carved from an attendee (was rule 7 -> orgs/douglas-teiger.md,
+    01KYGEE6TGNCNZ1YMYHQMZH9KC)."""
+    from resolve_meeting import main
+
+    vault = _seed_r4_vault(tmp_path)
+    src = tmp_path / "env"
+    src.mkdir()
+    participants = [
+        {"name": None, "email": "josh@clearworks.ai", "side": "ours", "spoke": False, "notetaker": False},
+        {"name": "Josh Weiss", "email": None, "side": "ours", "spoke": True, "notetaker": False},
+        {"name": "Douglas Teiger", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
+        {
+            "name": "Eddie Cortez | Kluger Architects",
+            "email": None,
+            "side": "unknown",
+            "spoke": True,
+            "notetaker": False,
+        },
+        {"name": "Steven Burns, FAIA", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
+        {"name": "Melvin Williams", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
+        {"name": "Thesla Collier", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
+    ]
+    _write_source(
+        src,
+        title="AI Office Hours (AIA LA TAP Committee)",
+        participants=participants,
+        org_name="AIA LA (Office Hours community)",
+        domain=None,
+        relationship="colleague",
+        confidence=0.55,
+        meeting_type="other",
+        fireflies_id="01KYGEE6TGNCNZ1YMYHQMZH9KC",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(REAL_REPO_ROOT)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "orgs/aia-la.md"
+    assert res["rule"] == 10
+    assert res["counterparty_slug"] == "aia-la"
+    assert res["kind"] == "org"
+    assert res["created"] == {"kind": "org", "relationship": "colleague", "slug": "aia-la"}
+
+
+def test_r2_aia_office_hours_number_2_same_community_org(tmp_path) -> None:
+    """D-20: second AIA LA session normalizes to the SAME org page as R1
+    (01KZ4G1SY192WQRSQD5SGCR171, was rule 7 -> orgs/thesla-collier.md)."""
+    from resolve_meeting import main
+
+    vault = _seed_r4_vault(tmp_path)
+    src = tmp_path / "env"
+    src.mkdir()
+    participants = [
+        {"name": "Thesla Collier", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
+        {"name": "Josh Weiss", "email": None, "side": "ours", "spoke": True, "notetaker": False},
+        {
+            "name": "Eddie Cortez | Kluger Architects",
+            "email": None,
+            "side": "unknown",
+            "spoke": True,
+            "notetaker": False,
+        },
+        {"name": "Melvin Williams", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
+        {"name": "Douglas Teiger", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
+        {"name": "Steven Burns, FAIA", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
+    ]
+    _write_source(
+        src,
+        title="AIA AI Office Hours Number 2",
+        participants=participants,
+        org_name="AIA LA Office Hours",
+        domain=None,
+        relationship="colleague",
+        confidence=0.55,
+        meeting_type="other",
+        fireflies_id="01KZ4G1SY192WQRSQD5SGCR171",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(REAL_REPO_ROOT)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "orgs/aia-la.md"
+    assert res["rule"] == 10
+    assert res["counterparty_slug"] == "aia-la"
+
+
+def test_r3_russian_riverkeeper_classification_over_minority_client(tmp_path) -> None:
+    """D-20: 4 Russian Riverkeeper participants outnumber the 1 logictcg
+    participant; no client/org page exists for Russian Riverkeeper yet, so
+    the high-confidence classification creates one (was rule 3 ->
+    clients/logictcg.md, 01KYGEE6SHKHM67BFY8B0DK1FP)."""
+    from resolve_meeting import main
+
+    vault = _seed_r4_vault(tmp_path)
+    src = tmp_path / "env"
+    src.mkdir()
+    participants = [
+        {"name": None, "email": "yohanr@logictcg.com", "side": "theirs", "spoke": False, "notetaker": False},
+        {"name": None, "email": "markj@jensen-architects.com", "side": "theirs", "spoke": False, "notetaker": False},
+        {"name": None, "email": "jaime@russianriverkeeper.org", "side": "theirs", "spoke": False, "notetaker": False},
+        {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours", "spoke": True, "notetaker": False},
+        {"name": None, "email": "ariel@russianriverkeeper.org", "side": "theirs", "spoke": False, "notetaker": False},
+        {"name": None, "email": "rob@russianriverkeeper.org", "side": "theirs", "spoke": False, "notetaker": False},
+        {"name": None, "email": "amelia@russianriverkeeper.org", "side": "theirs", "spoke": False, "notetaker": False},
+        {"name": "Rob Schwenker (he, him)", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
+        {"name": "Mark Jensen", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
+        {
+            "name": "Jaime Neary, Russian Riverkeeper",
+            "email": None,
+            "side": "unknown",
+            "spoke": True,
+            "notetaker": False,
+        },
+    ]
+    _write_source(
+        src,
+        title="Tech Committee Meeting #4",
+        participants=participants,
+        org_name="Russian Riverkeeper",
+        domain="russianriverkeeper.org",
+        relationship="client",
+        confidence=0.85,
+        meeting_type="delivery",
+        deal_state="won",
+        fireflies_id="01KYGEE6SHKHM67BFY8B0DK1FP",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(REAL_REPO_ROOT)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "orgs/russian-riverkeeper.md"
+    assert res["rule"] == 9
+    assert res["counterparty_slug"] == "russian-riverkeeper"
+    assert res["created"] == {"kind": "org", "relationship": "client", "slug": "russian-riverkeeper"}
+
+
+def test_r4_calasia_vs_allsafe_participant_count_weighting(tmp_path) -> None:
+    """D-20: 3 CalAsia participants vs 1 AllSafe IT participant — pick by
+    participant count (was rule 3 -> clients/allsafeit.md, alphabetical
+    fallback, 01KZCM9K0PQJTS5S6BP1P2VKY9)."""
+    from resolve_meeting import main
+
+    vault = _seed_r4_vault(tmp_path)
+    src = tmp_path / "env"
+    src.mkdir()
+    participants = [
+        {
+            "name": None,
+            "email": "myrnamurawski@calasiaconstruction.com",
+            "side": "theirs",
+            "spoke": False,
+            "notetaker": False,
+        },
+        {
+            "name": None,
+            "email": "johnmurawski@calasiaconstruction.com",
+            "side": "theirs",
+            "spoke": False,
+            "notetaker": False,
+        },
+        {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours", "spoke": False, "notetaker": False},
+        {"name": None, "email": "abbey@calasiaconstruction.com", "side": "theirs", "spoke": False, "notetaker": False},
+        {"name": "Nathan Phinney", "email": "nphinney@allsafeit.com", "side": "theirs", "spoke": True, "notetaker": False},
+        {"name": "John Murawski", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
+        {"name": "Abbey Ocampo", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
+        {"name": "Chris", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
+    ]
+    _write_source(
+        src,
+        title="AllSafe IT <> CalAsia Construction: Introductory Call",
+        participants=participants,
+        org_name="CalAsia Construction",
+        domain="calasiaconstruction.com",
+        relationship="prospect",
+        confidence=0.8,
+        meeting_type="sales",
+        deal_state="proposal",
+        fireflies_id="01KZCM9K0PQJTS5S6BP1P2VKY9",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(REAL_REPO_ROOT)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "clients/calasiaconstruction.md"
+    assert res["rule"] == 3
+    assert res["counterparty_slug"] == "calasiaconstruction"
+    assert res["created"] is None
+
+
+def test_r5_contacts_beats_domain_julie_lurie_msia_not_pts(tmp_path) -> None:
+    """D-20: julie@pts.org (domain) vs "julie lurie" contacts.json match
+    (company Movement of Spiritual Awareness -> msia) — the identified
+    contact wins (was rule 3 -> clients/pts.md, 01KZF06155XKMBF7Y0YXD5KB5F;
+    the classification LLM also said PTS here and was wrong)."""
+    from resolve_meeting import main
+
+    vault = _seed_r4_vault(tmp_path)
+    src = tmp_path / "env"
+    src.mkdir()
+    participants = [
+        {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours", "spoke": True, "notetaker": False},
+        {"name": None, "email": "julie@pts.org", "side": "theirs", "spoke": False, "notetaker": False},
+        {"name": "julie lurie", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
+    ]
+    _write_source(
+        src,
+        title="Julie Lurie and Josh Weiss",
+        participants=participants,
+        org_name="PTS",
+        domain="pts.org",
+        relationship="client",
+        confidence=0.85,
+        meeting_type="delivery",
+        deal_state="none",
+        fireflies_id="01KZF06155XKMBF7Y0YXD5KB5F",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(REAL_REPO_ROOT)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "clients/msia.md"
+    assert res["rule"] == 4
+    assert res["counterparty_slug"] == "msia"
+    assert res["created"] is None
+
+
+def test_control_kadre_low_confidence_classification_stays_rule3(tmp_path) -> None:
+    """Control: 01KYZASJY2ZTWC9F4ET3QZ5RFZ. classification.confidence=0.6 is
+    below the 0.8 rule-9 threshold, so the single-domain rule-3 pick is
+    untouched (kadre)."""
+    from resolve_meeting import main
+
+    vault = _seed_r4_vault(tmp_path)
+    src = tmp_path / "env"
+    src.mkdir()
+    participants = [
+        {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours", "spoke": True, "notetaker": False},
+        {"name": None, "email": "nerin@kadre.org", "side": "theirs", "spoke": False, "notetaker": False},
+        {"name": "Zoom user", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
+    ]
+    _write_source(
+        src,
+        title="Nerin Kadribegovic and Josh Weiss",
+        participants=participants,
+        org_name="Kadre",
+        domain="kadre.org",
+        relationship="client",
+        confidence=0.6,
+        meeting_type="sales",
+        deal_state="proposal",
+        fireflies_id="01KYZASJY2ZTWC9F4ET3QZ5RFZ",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(REAL_REPO_ROOT)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "clients/kadre.md"
+    assert res["rule"] == 3
+    assert res["counterparty_slug"] == "kadre"
+
+
+def test_control_alloi_single_domain_candidate_stays_rule3(tmp_path) -> None:
+    """Control: 01KZF3MM897VEM5FDQN5R7HASA. classification agrees with the
+    only domain candidate — no rule-9 override, no contacts-name override
+    (alloi)."""
+    from resolve_meeting import main
+
+    vault = _seed_r4_vault(tmp_path)
+    src = tmp_path / "env"
+    src.mkdir()
+    participants = [
+        {"name": None, "email": "marcos@alloi.us", "side": "theirs", "spoke": False, "notetaker": False},
+        {"name": None, "email": "josh@clearworks.ai", "side": "ours", "spoke": False, "notetaker": False},
+        {"name": "Josh Weiss", "email": None, "side": "ours", "spoke": True, "notetaker": False},
+        {
+            "name": "Marcos  Alloi  Architect, Builder, Mountaineer",
+            "email": None,
+            "side": "unknown",
+            "spoke": True,
+            "notetaker": False,
+        },
+    ]
+    _write_source(
+        src,
+        title="Alloi — Marcos Santa Ana",
+        participants=participants,
+        org_name="Alloi",
+        domain="alloi.us",
+        relationship="client",
+        confidence=0.9,
+        meeting_type="delivery",
+        deal_state="won",
+        fireflies_id="01KZF3MM897VEM5FDQN5R7HASA",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(REAL_REPO_ROOT)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "clients/alloi.md"
+    assert res["rule"] == 3
+    assert res["counterparty_slug"] == "alloi"

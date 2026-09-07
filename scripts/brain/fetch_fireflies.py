@@ -327,7 +327,12 @@ def main(argv: list[str] | None = None) -> int:
     sha_path = dest_dir / "source.sha256"
     meta_path = dest_dir / "meta.json"
 
-    if source_path.exists() and not args.refetch:
+    # F18 (CH-17): existence of source.json alone is not proof of a coherent
+    # envelope — a crash between writing source.json and meta.json/source.sha256
+    # (each written atomically but not as one transaction) must fall through
+    # to a fresh fetch, which rewrites all three, rather than short-circuit
+    # on a partial envelope forever.
+    if source_path.exists() and sha_path.exists() and meta_path.exists() and not args.refetch:
         raw = source_path.read_bytes()
         clear_fetch_error(vault, "fireflies", meeting_id)
         print(hashlib.sha256(raw).hexdigest())

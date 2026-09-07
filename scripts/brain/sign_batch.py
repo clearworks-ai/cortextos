@@ -35,8 +35,8 @@ from pathlib import Path
 
 import progress
 from atomic import atomic_write
-from backfill import BATCH_ID_RE, batch_dir
-from paths import DEFAULT_VAULT
+from backfill import BATCH_ID_RE, SOURCES, batch_dir
+from paths import DEFAULT_VAULT, safe_meeting_id
 from sign_marker import check_capture, write_marker
 
 
@@ -66,6 +66,15 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError) as exc:
         print(f"batch files unreadable: {exc}", file=sys.stderr)
         return 1
+    # M4 (Std 11): a hand-edited or corrupt batch dir must refuse cleanly,
+    # never traceback — every dict-shaped access below assumes these two are
+    # actually objects.
+    if not isinstance(manifest, dict):
+        print("manifest.json is not a JSON object", file=sys.stderr)
+        return 1
+    if not isinstance(prog, dict):
+        print("batch-progress.json is not a JSON object", file=sys.stderr)
+        return 1
 
     # M5: a signing tool must not silently default or trust an unbound batch
     # dir — refuse rather than default "kind" to "fireflies" or sign against
@@ -74,12 +83,55 @@ def main(argv: list[str] | None = None) -> int:
         print("manifest missing 'kind'", file=sys.stderr)
         return 1
     kind = str(manifest["kind"])
+    # F14 (CH-8): a kind outside backfill.SOURCES must be refused before any
+    # per-meeting path (progress._state_dir, marker_path) is built from it.
+    if kind not in SOURCES:
+        print(f"unknown kind: {kind!r} (not in {SOURCES})", file=sys.stderr)
+        return 1
     if manifest.get("batch_id") != args.batch:
         print(f"manifest batch_id {manifest.get('batch_id')!r} != --batch {args.batch!r}", file=sys.stderr)
         return 1
     if prog.get("batch_id") != args.batch:
         print(f"batch-progress.json batch_id {prog.get('batch_id')!r} != --batch {args.batch!r}", file=sys.stderr)
         return 1
+
+    # F14/M4: every manifest row must be a real object with an id that
+    # round-trips through safe_meeting_id (path-traversal-shaped ids, or ids
+    # carrying a 'fireflies:' prefix, must never reach a path builder) —
+    # checked BEFORE the candidates loop below ever builds a per-meeting
+    # path from one of these ids.
+    raw_rows = manifest.get("rows")
+    if not isinstance(raw_rows, list):
+        print("manifest.rows is not a list", file=sys.stderr)
+        return 1
+    for i, row in enumerate(raw_rows):
+        if not isinstance(row, dict) or not isinstance(row.get("id"), str) or not row["id"]:
+            print(f"manifest.rows[{i}] is corrupt (missing id)", file=sys.stderr)
+            return 1
+        rid = row["id"]
+        if safe_meeting_id(rid) != rid:
+            print(f"manifest.rows[{i}] id not filesystem-safe: {rid!r}", file=sys.stderr)
+            return 1
+
+    # F15 (CH-9): the manifest must be canonical — sorted by (occurred_at,
+    # id), no duplicate ids — the same order `apply` walks; a hand-edited or
+    # stale manifest that drifted from that order hides the drift from the
+    # human digest review sign_batch is meant to authorize.
+    canonical_keys = [(str(r.get("occurred_at") or ""), r["id"]) for r in raw_rows]
+    if canonical_keys != sorted(canonical_keys) or len(set(k[1] for k in canonical_keys)) != len(canonical_keys):
+        print("manifest not canonical; re-run list", file=sys.stderr)
+        return 1
+
+    # M4: a progress row that is not an object would otherwise raise
+    # AttributeError inside the candidates loop below (`entry.get(...)`).
+    raw_prog_rows = prog.get("rows")
+    if raw_prog_rows is not None and not isinstance(raw_prog_rows, dict):
+        print("batch-progress.json rows is not an object", file=sys.stderr)
+        return 1
+    for row_key, entry in (raw_prog_rows or {}).items():
+        if not isinstance(entry, dict):
+            print(f"progress row {row_key!r} is not an object", file=sys.stderr)
+            return 1
 
     # I1 (task-9-review Important #1): mirror progress.validate_sign_marker's
     # OWN acceptance rule for signed_at EXACTLY (progress.py ~L180-186) so
@@ -186,6 +238,11 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     # Every check passed — now write. batch-signed.json first, then markers.
+    # F2 addendum (CH-5/CH-6): fanout_complete starts false — apply's
+    # preflight (backfill.py, Agent A) must never authorize against a batch
+    # whose fan-out is only partially written (a crash mid-loop below would
+    # otherwise leave batch-signed.json looking fully signed while some
+    # candidate markers are still missing).
     signed = {
         "batch_id": args.batch,
         "digest_sha256": actual,
@@ -195,6 +252,7 @@ def main(argv: list[str] | None = None) -> int:
         "meeting_count": len(candidates),
         "signed_by": args.signed_by,
         "signed_at": args.signed_at,
+        "fanout_complete": False,
         "written_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
     atomic_write(bd / "batch-signed.json", (json.dumps(signed, sort_keys=True, indent=2) + "\n").encode("utf-8"))
@@ -215,6 +273,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"signed: {written}/{len(candidates)} markers written before failure at {kind}-{mid}: {message}", file=sys.stderr)
             return 1
         written += 1
+    # F2 addendum: every candidate marker landed — atomically flip
+    # fanout_complete true and record how many, so apply's preflight can
+    # trust this file alone rather than re-deriving completeness from the
+    # marker files on disk.
+    signed["fanout_complete"] = True
+    signed["markers_written"] = written
+    atomic_write(bd / "batch-signed.json", (json.dumps(signed, sort_keys=True, indent=2) + "\n").encode("utf-8"))
     print(f"signed: {written} markers")
     return 0
 

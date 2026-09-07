@@ -177,6 +177,42 @@ def _bp(bd: Path):
     return json.loads((bd / "batch-progress.json").read_text(encoding="utf-8"))
 
 
+import contextlib as _contextlib
+import subprocess as _subprocess
+
+
+@_contextlib.contextmanager
+def _external_flock_holder(lock_path: Path):
+    """A9: spawns a real helper SUBPROCESS that opens `lock_path`
+    (O_CREAT|O_RDWR) and takes a genuine `fcntl.flock(LOCK_EX)` on it, prints
+    'locked' once held, then blocks reading a line from stdin before
+    releasing (on process exit) and terminating. No in-process fake can
+    substitute for this: `_acquire_batch_lock`'s contention path is a
+    kernel-level advisory lock tied to a SEPARATE process's open file
+    description, which only a genuinely separate process can hold."""
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    code = (
+        "import fcntl, os, sys\n"
+        f"fd = os.open({str(lock_path)!r}, os.O_CREAT | os.O_RDWR, 0o644)\n"
+        "fcntl.flock(fd, fcntl.LOCK_EX)\n"
+        "os.write(fd, str(os.getpid()).encode())\n"
+        "print('locked', flush=True)\n"
+        "sys.stdin.readline()\n"
+    )
+    proc = _subprocess.Popen([sys.executable, "-c", code], stdin=_subprocess.PIPE, stdout=_subprocess.PIPE, text=True)
+    try:
+        line = proc.stdout.readline()
+        assert line.strip() == "locked", f"helper failed to lock: {line!r}"
+        yield proc.pid
+    finally:
+        try:
+            proc.stdin.write("go\n")
+            proc.stdin.flush()
+        except (BrokenPipeError, OSError):
+            pass
+        proc.wait(timeout=5)
+
+
 def test_dry_run_records_rows_and_writes_captures(tmp_path, monkeypatch, capsys):
     import backfill
     vault, bd = _seed_batch(tmp_path, applied=("A",))
@@ -510,11 +546,13 @@ def test_dry_run_sample_excludes_exit0_row_missing_dry_run_txt(tmp_path, monkeyp
 
 
 # --- apply ------------------------------------------------------------------------
-def _write_marker(vault: Path, kind: str, mid: str, *, batch_id: str, digest_sha256: str) -> None:
+def _write_marker(vault: Path, kind: str, mid: str, *, batch_id: str, digest_sha256: str,
+                   signed_by: str = "josh", signed_at: str = "2026-09-07T00:00:00Z") -> None:
     import sign_marker
     marker = sign_marker.marker_path(vault, kind, mid)
     marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(json.dumps({"meeting_id": mid, "batch_id": batch_id, "digest_sha256": digest_sha256}), encoding="utf-8")
+    marker.write_text(json.dumps({"meeting_id": mid, "batch_id": batch_id, "digest_sha256": digest_sha256,
+                                   "signed_by": signed_by, "signed_at": signed_at}), encoding="utf-8")
 
 
 def _seed_signed(tmp_path: Path, ids=("A", "B", "C"), dry_exit=None, nodes=None):
@@ -529,7 +567,8 @@ def _seed_signed(tmp_path: Path, ids=("A", "B", "C"), dry_exit=None, nodes=None)
     ok_ids = [i for i in ids if dry_exit.get(i, 0) == 0]
     (bd / "batch-signed.json").write_text(json.dumps({"batch_id": bd.name, "digest_sha256": sha,
         "manifest_sha256": hashlib.sha256((bd / "manifest.json").read_bytes()).hexdigest(), "signed_ids": ok_ids,
-        "fanout_complete": True, "markers_written": len(ok_ids)}), encoding="utf-8")
+        "fanout_complete": True, "markers_written": len(ok_ids),
+        "signed_by": "josh", "signed_at": "2026-09-07T00:00:00Z"}), encoding="utf-8")
     for i in ok_ids:
         _write_marker(vault, "fireflies", i, batch_id=bd.name, digest_sha256=sha)
     brain = vault / "raw/areas/clearworks/org-brain/projects"; brain.mkdir(parents=True)
@@ -1027,39 +1066,42 @@ def test_load_batch_refuses_noncanonical_manifest_unsorted(tmp_path, capsys):
 
 
 # --- F12 (CH-4): exclusive batch lock -----------------------------------------------
-def test_dry_run_refuses_when_batch_locked_by_live_pid(tmp_path, monkeypatch, capsys):
+def test_dry_run_refuses_when_batch_locked_by_another_process(tmp_path, monkeypatch, capsys):
     import backfill
-    import os as _os
     vault, bd = _seed_batch(tmp_path)
-    (bd / ".lock").write_text(str(_os.getpid()), encoding="utf-8")
     monkeypatch.setattr(backfill, "run_meeting_main", _fake_run_meeting(vault))
-    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"])
+    with _external_flock_holder(bd / ".lock"):
+        rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"])
     assert rc == 64
-    assert f"locked by pid {_os.getpid()}" in capsys.readouterr().err
+    assert "locked (pid" in capsys.readouterr().err
     assert not (bd / "batch-progress.json").exists()   # nothing was attempted or checkpointed
 
 
-def test_dry_run_breaks_stale_lock_from_dead_pid_and_proceeds(tmp_path, monkeypatch):
+def test_dry_run_reuses_lock_file_left_by_a_dead_process(tmp_path, monkeypatch):
+    """A9: no stale-lock detection/breaking exists any more — a `.lock` file
+    left behind by a process that has since exited (the kernel already
+    released its flock the instant it did) is silently and immediately
+    reusable. The bytes in the file are a diagnostic pid hint only, never
+    consulted to decide ownership."""
     import backfill
     vault, bd = _seed_batch(tmp_path, ids=("A",))
-    (bd / ".lock").write_text("999999", encoding="utf-8")  # not a live pid
+    (bd / ".lock").parent.mkdir(parents=True, exist_ok=True)
+    (bd / ".lock").write_text("999999", encoding="utf-8")  # leftover diagnostic text, no real flock held on it
     monkeypatch.setattr(backfill, "run_meeting_main", _fake_run_meeting(vault))
     rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"])
     assert rc == 0
-    assert not (bd / ".lock").exists()   # released after the run
     assert _bp(bd)["rows"]["fireflies:A"]["dry_run"]["exit"] == 0
 
 
-def test_apply_refuses_when_batch_locked_by_live_pid(tmp_path, monkeypatch, capsys):
+def test_apply_refuses_when_batch_locked_by_another_process(tmp_path, monkeypatch, capsys):
     import backfill
-    import os as _os
     vault, bd = _seed_signed(tmp_path)
-    (bd / ".lock").write_text(str(_os.getpid()), encoding="utf-8")
     calls: list[str] = []
     monkeypatch.setattr(backfill, "run_apply_subprocess", lambda mid, v, repo: (calls.append(mid), 0)[1])
-    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"])
+    with _external_flock_holder(bd / ".lock"):
+        rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"])
     assert rc == 64 and calls == []
-    assert f"locked by pid {_os.getpid()}" in capsys.readouterr().err
+    assert "locked (pid" in capsys.readouterr().err
     assert "apply_started_at" not in _bp(bd)
 
 
@@ -1198,12 +1240,12 @@ def test_post_batch_status_pair_retried_after_nonzero_exit(tmp_path, monkeypatch
     base = ["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"]
     assert backfill.main(base) == 0
     post1 = _bp(bd)["post_batch"]
-    assert post1["status_pairs"] == [{"client": "acme", "engagement": "acme-01", "exit": 14, "relPath": None}]
+    assert post1["status_pairs"] == [{"client": "acme", "engagement": "acme-01", "exit": 14, "relPath": None, "ok_ids": ["A"]}]
     assert backfill.main(base) == 0   # rollup already checkpointed rc==0, coverage unchanged: not re-run; status pair retried
     post2 = _bp(bd)["post_batch"]
     assert len(status_calls) == 2
-    assert post2["status_pairs"] == [{"client": "acme", "engagement": "acme-01", "exit": 0, "relPath": "raw/areas/x.md"}]
-    assert post2["status_pairs_history"] == [{"client": "acme", "engagement": "acme-01", "exit": 14, "relPath": None}]
+    assert post2["status_pairs"] == [{"client": "acme", "engagement": "acme-01", "exit": 0, "relPath": "raw/areas/x.md", "ok_ids": ["A"]}]
+    assert post2["status_pairs_history"] == [{"client": "acme", "engagement": "acme-01", "exit": 14, "relPath": None, "ok_ids": ["A"]}]
 
 
 # --- F2 (G2a P1-2 / CH-5/6): marker preflight + fanout/batch_id binding -------------
@@ -1306,11 +1348,9 @@ def test_apply_skipped_post_batch_stays_untouched_when_still_nothing_authorized(
 # overwrite the holder's final checkpoint at its own first _save_batch.
 def test_dry_run_lock_toctou_never_calls_load_batch_when_locked(tmp_path, monkeypatch):
     import backfill
-    import os as _os
     vault, bd = _seed_batch(tmp_path)
     (bd / "batch-progress.json").write_text('{"batch_id": "x", "kind": "fireflies", "rows": {}}', encoding="utf-8")
     before = (bd / "batch-progress.json").read_bytes()
-    (bd / ".lock").write_text(str(_os.getpid()), encoding="utf-8")
     calls: list[str] = []
     real_load = backfill._load_batch
 
@@ -1318,7 +1358,8 @@ def test_dry_run_lock_toctou_never_calls_load_batch_when_locked(tmp_path, monkey
         calls.append(batch_id)
         return real_load(vault_, batch_id)
     monkeypatch.setattr(backfill, "_load_batch", spy)
-    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"])
+    with _external_flock_holder(bd / ".lock"):
+        rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"])
     assert rc == 64
     assert calls == []   # never read — lock lost BEFORE any load attempt
     assert (bd / "batch-progress.json").read_bytes() == before
@@ -1326,10 +1367,8 @@ def test_dry_run_lock_toctou_never_calls_load_batch_when_locked(tmp_path, monkey
 
 def test_apply_lock_toctou_never_calls_load_batch_when_locked(tmp_path, monkeypatch):
     import backfill
-    import os as _os
     vault, bd = _seed_signed(tmp_path)
     before = (bd / "batch-progress.json").read_bytes()
-    (bd / ".lock").write_text(str(_os.getpid()), encoding="utf-8")
     calls: list[str] = []
     real_load = backfill._load_batch
 
@@ -1337,7 +1376,8 @@ def test_apply_lock_toctou_never_calls_load_batch_when_locked(tmp_path, monkeypa
         calls.append(batch_id)
         return real_load(vault_, batch_id)
     monkeypatch.setattr(backfill, "_load_batch", spy)
-    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"])
+    with _external_flock_holder(bd / ".lock"):
+        rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"])
     assert rc == 64
     assert calls == []
     assert (bd / "batch-progress.json").read_bytes() == before
@@ -1369,28 +1409,243 @@ def test_load_batch_refuses_manifest_with_null_occurred_at_instead_of_crashing(t
     assert "manifest not canonical" in capsys.readouterr().err
 
 
-# M3: stale-lock break races — a loser whose os.rename hits FileNotFoundError
-# (another waiter/holder already replaced the lock) must retry cleanly rather
-# than unlink a lock it no longer owns. A true concurrent-process race is
-# expensive/flaky to simulate in this suite; this exercises the retry path
-# deterministically via one forced FileNotFoundError, and the manual-reasoning
-# note in fold-1A-report.md covers the atomicity argument for the real race.
-def test_dry_run_stale_lock_rename_aside_retries_when_rename_loses_race(tmp_path, monkeypatch):
-    import backfill
-    import os as _os
-    vault, bd = _seed_batch(tmp_path, ids=("A",))
-    (bd / ".lock").write_text("999999", encoding="utf-8")  # not a live pid
-    real_rename = _os.rename
-    calls = {"n": 0}
+# M3's rename-aside stale-lock-break mechanism was REMOVED by A9 (fold-2
+# re-review): the lock is now a real fcntl.flock, which the kernel releases
+# automatically on process death — there is no stale-lock state left to race
+# over, so the M3 rename-aside test (test_dry_run_stale_lock_rename_aside_
+# retries_when_rename_loses_race) no longer applies and is deleted rather
+# than adapted. See test_dry_run_reuses_lock_file_left_by_a_dead_process
+# above for the A9-era equivalent ("a leftover lock file is just reused").
 
-    def flaky_rename(src, dst):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise FileNotFoundError()
-        return real_rename(src, dst)
-    monkeypatch.setattr(backfill.os, "rename", flaky_rename)
-    monkeypatch.setattr(backfill, "run_meeting_main", _fake_run_meeting(vault))
+
+# --- Fold round 3 (fold-3A-brief.md) ------------------------------------------------
+# A1 (G2a r2 P2-1): a (client, engagement) pair whose ok-id COVERAGE grows —
+# even though it already ran (and succeeded) once — must re-run, its stale
+# record moving to status_pairs_history.
+def test_post_batch_status_pair_reruns_when_ok_id_coverage_for_pair_grows(tmp_path, monkeypatch):
+    import backfill
+    vault, bd = _seed_signed(tmp_path, ids=("A", "B"), nodes={"A": "acme-01", "B": "acme-01"})
+    b_attempts = {"n": 0}
+
+    def fake_apply(mid, v, repo):
+        if mid == "B":
+            b_attempts["n"] += 1
+            if b_attempts["n"] == 1:
+                return 124
+        _receipt(vault, mid, f"s-{mid}")
+        return 0
+    monkeypatch.setattr(backfill, "run_apply_subprocess", fake_apply)
+    monkeypatch.setattr(backfill, "run_rollup_all", lambda v, today: 0)
+    statuses: list[tuple[str, str]] = []
+    monkeypatch.setattr(backfill, "run_status_plan", lambda client, eng, today, v: (statuses.append((client, eng)), (0, None))[1])
+
+    def boom(v, ps, m):
+        raise SystemExit(10)
+    monkeypatch.setattr(backfill, "commit_post_batch", boom)
+    base = ["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"]
+    assert backfill.main(base) == 1   # run 1: B fails; commit errors (batch stays open)
+    post1 = _bp(bd)["post_batch"]
+    assert post1["status_pairs"] == [{"client": "acme", "engagement": "acme-01", "exit": 0, "relPath": None, "ok_ids": ["A"]}]
+    assert len(statuses) == 1
+
+    real_commit_calls: list[int] = []
+    monkeypatch.setattr(backfill, "commit_post_batch", lambda v, ps, m: (real_commit_calls.append(1), ("sha", True))[1])
+    assert backfill.main(base) == 0   # run 2: B succeeds -> pair's ok_ids coverage grows
+    post2 = _bp(bd)["post_batch"]
+    assert len(statuses) == 2   # the pair (already exit 0) re-ran once because coverage grew
+    assert post2["status_pairs"] == [{"client": "acme", "engagement": "acme-01", "exit": 0, "relPath": None, "ok_ids": ["A", "B"]}]
+    assert post2["status_pairs_history"] == [{"client": "acme", "engagement": "acme-01", "exit": 0, "relPath": None, "ok_ids": ["A"]}]
+    assert len(real_commit_calls) == 1
+
+    assert backfill.main(base) == 0   # run 3: fully closed and stable — no more calls
+    assert len(statuses) == 2 and len(real_commit_calls) == 1
+
+
+# A2 (G2a r2 P2-2): --rate must be finite and >= 0.
+def test_rate_arg_rejects_non_finite_or_negative_before_any_list_call(tmp_path, monkeypatch):
+    import backfill
+    calls: list[dict] = []
+    monkeypatch.setattr(backfill, "list_transcripts", lambda api_key, **kw: (calls.append(kw), [])[1])
+    monkeypatch.setattr(backfill, "load_api_key", lambda repo: "k")
+    for bad in ("-1", "nan", "inf"):
+        with pytest.raises(SystemExit) as excinfo:
+            backfill.main(["--source", "fireflies", "--vault", str(tmp_path), "--repo-root", str(tmp_path),
+                           "--rate", bad, "list"])
+        assert excinfo.value.code == 2
+    assert calls == []
+
+
+# A3 (CH2-4): a corrupt (non-finite/negative) persisted ledger cost refuses
+# the whole batch before any work.
+def test_load_batch_refuses_invalid_ledger_cost_usd(tmp_path, capsys):
+    import backfill
+    for bad_cost, label in ((float("nan"), "nan"), (-1.0, "negative")):
+        sub = tmp_path / label
+        vault, bd = _seed_batch(sub, ids=("A",))
+        (bd / "batch-progress.json").write_text(json.dumps({"batch_id": bd.name, "kind": "fireflies",
+            "rows": {"fireflies:A": {"dry_run": {"exit": 0, "cost_usd": bad_cost}}}}), encoding="utf-8")
+        rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(sub), "--batch", bd.name, "dry-run"])
+        assert rc == 64, label
+        assert "ledger invalid" in capsys.readouterr().err, label
+
+
+# A4 (CH2-5 backfill side): the --batch id's kind prefix must agree with both
+# manifest.kind and batch-progress.kind.
+def test_load_batch_refuses_when_progress_kind_mismatches_manifest_and_prefix(tmp_path, capsys):
+    import backfill
+    vault, bd = _seed_batch(tmp_path, ids=("A",))
+    (bd / "batch-progress.json").write_text(json.dumps({"batch_id": bd.name, "kind": "omi", "rows": {}}), encoding="utf-8")
     rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"])
-    assert rc == 0
-    assert calls["n"] >= 2   # the forced loss, then the real break
-    assert not (bd / ".lock").exists()
+    assert rc == 64
+    assert "batch id kind prefix" in capsys.readouterr().err
+
+
+# A5 (CH2-6 backfill side): occurred_at must be a real ISO timestamp, and
+# every row's own kind must match the manifest's kind.
+def test_manifest_canonical_refuses_missing_occurred_at(tmp_path, capsys):
+    import backfill
+    vault, bd = _seed_batch(tmp_path, ids=("A",))
+    m = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
+    del m["rows"][0]["occurred_at"]
+    (bd / "manifest.json").write_text(json.dumps(m), encoding="utf-8")
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"])
+    assert rc == 64
+    assert "manifest not canonical" in capsys.readouterr().err
+
+
+def test_manifest_canonical_refuses_row_kind_mismatch(tmp_path, capsys):
+    import backfill
+    vault, bd = _seed_batch(tmp_path, ids=("A",))
+    m = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
+    m["rows"][0]["kind"] = "omi"
+    (bd / "manifest.json").write_text(json.dumps(m), encoding="utf-8")
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"])
+    assert rc == 64
+    assert "manifest not canonical" in capsys.readouterr().err
+
+
+# A6 (CH-5 PARTIAL / CH2-3 apply half): the marker's own signer identity must
+# also match batch-signed.json's.
+def test_apply_refuses_when_marker_signed_by_mismatches(tmp_path, monkeypatch, capsys):
+    import backfill
+    import sign_marker
+    vault, bd = _seed_signed(tmp_path)
+    marker = sign_marker.marker_path(vault, "fireflies", "A")
+    doc = json.loads(marker.read_text(encoding="utf-8"))
+    doc["signed_by"] = "someone-else"
+    marker.write_text(json.dumps(doc), encoding="utf-8")
+    calls: list[str] = []
+    monkeypatch.setattr(backfill, "run_apply_subprocess", lambda mid, v, repo: (calls.append(mid), 0)[1])
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"])
+    assert rc == 15
+    assert calls == []
+    assert "marker batch binding mismatch for fireflies:A" in capsys.readouterr().err
+
+
+def test_apply_refuses_when_marker_signed_at_mismatches(tmp_path, monkeypatch, capsys):
+    import backfill
+    import sign_marker
+    vault, bd = _seed_signed(tmp_path)
+    marker = sign_marker.marker_path(vault, "fireflies", "B")
+    doc = json.loads(marker.read_text(encoding="utf-8"))
+    doc["signed_at"] = "2020-01-01T00:00:00Z"
+    marker.write_text(json.dumps(doc), encoding="utf-8")
+    calls: list[str] = []
+    monkeypatch.setattr(backfill, "run_apply_subprocess", lambda mid, v, repo: (calls.append(mid), 0)[1])
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"])
+    assert rc == 15
+    assert calls == []
+    assert "marker batch binding mismatch for fireflies:B" in capsys.readouterr().err
+
+
+# A7 (CH-12 PARTIAL): rc 0 with no valid relPath must never be treated as done.
+def test_run_status_plan_garbage_stdout_on_rc0_is_treated_as_failure(tmp_path, monkeypatch):
+    import backfill
+
+    class FakeResult:
+        returncode = 0
+        stdout = "not json at all, some npx banner noise"
+        stderr = ""
+    monkeypatch.setattr(backfill.subprocess, "run", lambda *a, **kw: FakeResult())
+    vault = tmp_path / "vault"; vault.mkdir()
+    rc, rel = backfill.run_status_plan("acme", "acme-01", "2026-09-07", vault)
+    assert rc == 14 and rel is None
+
+
+def test_run_status_plan_relpath_missing_on_disk_is_treated_as_failure(tmp_path, monkeypatch):
+    import backfill
+
+    class FakeResult:
+        returncode = 0
+        stdout = json.dumps({"relPath": "raw/areas/does-not-exist.md"})
+        stderr = ""
+    monkeypatch.setattr(backfill.subprocess, "run", lambda *a, **kw: FakeResult())
+    vault = tmp_path / "vault"; vault.mkdir()
+    rc, rel = backfill.run_status_plan("acme", "acme-01", "2026-09-07", vault)
+    assert rc == 14 and rel is None
+
+
+def test_run_status_plan_relpath_escaping_vault_is_treated_as_failure(tmp_path, monkeypatch):
+    import backfill
+
+    class FakeResult:
+        returncode = 0
+        stdout = json.dumps({"relPath": "../outside.md"})
+        stderr = ""
+    monkeypatch.setattr(backfill.subprocess, "run", lambda *a, **kw: FakeResult())
+    vault = tmp_path / "vault"; vault.mkdir()
+    (tmp_path / "outside.md").write_text("x", encoding="utf-8")
+    rc, rel = backfill.run_status_plan("acme", "acme-01", "2026-09-07", vault)
+    assert rc == 14 and rel is None
+
+
+def test_run_status_plan_explicit_null_relpath_stays_legitimate_success(tmp_path, monkeypatch):
+    import backfill
+
+    class FakeResult:
+        returncode = 0
+        stdout = json.dumps({"relPath": None})
+        stderr = ""
+    monkeypatch.setattr(backfill.subprocess, "run", lambda *a, **kw: FakeResult())
+    vault = tmp_path / "vault"; vault.mkdir()
+    rc, rel = backfill.run_status_plan("acme", "acme-01", "2026-09-07", vault)
+    assert rc == 0 and rel is None
+
+
+# A8 (fold-2 re-review residual): an empty id refuses before any envelope/
+# state path is touched.
+def test_manifest_canonical_refuses_empty_id_before_any_path_touched(tmp_path, capsys):
+    import backfill
+    vault, bd = _seed_batch(tmp_path, ids=("A",))
+    m = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
+    m["rows"][0]["id"] = ""
+    (bd / "manifest.json").write_text(json.dumps(m), encoding="utf-8")
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"])
+    assert rc == 64
+    assert "manifest not canonical (unsafe id" in capsys.readouterr().err
+    assert not (vault / "raw/media/transcripts/_state").exists()
+    assert not (vault / "raw/media/transcripts/fireflies").exists()
+
+
+# A10 (fold-2 re-review residual): a typo'd --batch with no manifest.json at
+# all must leave no empty batch dir (and no .lock) behind.
+def test_dry_run_missing_manifest_leaves_no_batch_dir(tmp_path, capsys):
+    import backfill
+    vault = tmp_path / "vault"
+    bd = backfill.batch_dir(vault, "fireflies-20260906T000000Z")
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path),
+                         "--batch", "fireflies-20260906T000000Z", "dry-run"])
+    assert rc == 64
+    assert "manifest.json" in capsys.readouterr().err
+    assert not bd.exists()
+
+
+def test_apply_missing_manifest_leaves_no_batch_dir(tmp_path, capsys):
+    import backfill
+    vault = tmp_path / "vault"
+    bd = backfill.batch_dir(vault, "fireflies-20260906T000000Z")
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path),
+                         "--batch", "fireflies-20260906T000000Z", "apply"])
+    assert rc == 64
+    assert "manifest.json" in capsys.readouterr().err
+    assert not bd.exists()

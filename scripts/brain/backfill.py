@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import fcntl
 import hashlib
 import io
 import json
@@ -217,13 +218,26 @@ def _max_usd_arg(value: str) -> float:
     return parsed
 
 
+def _rate_arg(value: str) -> float:
+    """argparse `type=` for --rate (G2 r2 P2-2): same finite/non-negative
+    contract as --max-usd — a NaN/inf/negative throttle must never reach
+    list_transcripts."""
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"invalid --rate {value!r} (expected a finite number >= 0)") from exc
+    if not math.isfinite(parsed) or parsed < 0:
+        raise argparse.ArgumentTypeError(f"invalid --rate {value!r} (expected a finite number >= 0)")
+    return parsed
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="FR-015 backfill lister + batch runner")
     p.add_argument("--source", default="fireflies")
     p.add_argument("--vault", default=str(DEFAULT_VAULT))
     p.add_argument("--repo-root", default=str(DEFAULT_REPO_ROOT))
     p.add_argument("--batch")
-    p.add_argument("--rate", type=float, default=2.0, help="seconds between list pages (A-08)")
+    p.add_argument("--rate", type=_rate_arg, default=2.0, help="seconds between list pages (A-08)")
     sub = p.add_subparsers(dest="command", required=True)
     s_list = sub.add_parser("list")
     s_list.add_argument("--since", type=_date_arg)
@@ -258,18 +272,26 @@ def _progress_path(bd: Path) -> Path:
     return bd / "batch-progress.json"
 
 
-def _manifest_is_canonical(rows: list[Any]) -> str | None:
-    """F15 (CH-9) + N2 (fold-1 re-review, F14 backfill half): every manifest row
-    must be a dict with a unique string `id` that round-trips through
-    `safe_meeting_id` (never a traversal-shaped or otherwise unsafe id — the
-    same rule sign_batch.py enforces on its own side, checked here BEFORE any
-    `_state`/envelope path is ever built from one of these ids), and the rows
-    must already be sorted by (occurred_at, id) — the same order
-    `build_manifest` produces and the digest/apply loops assume. `occurred_at`
-    is coerced via `str(... or "")` exactly like sign_batch.py's own check
-    (M5): a `null`/non-string value must refuse cleanly, never raise
-    `TypeError` out of `sorted()`. Returns None when canonical, or a
-    diagnostic string to print otherwise."""
+def _manifest_is_canonical(rows: list[Any], manifest_kind: Any) -> str | None:
+    """F15 (CH-9) + N2/A8 (fold-1/2 re-review, F14 backfill half) + A5 (CH2-6):
+    every manifest row must be a dict with a non-empty, unique string `id`
+    that round-trips through `safe_meeting_id` (never a traversal-shaped or
+    otherwise unsafe id, including the empty string — `not rid` is checked
+    explicitly because `safe_meeting_id("") == "" == rid` would otherwise
+    slip past the round-trip check by coincidence — the same rule
+    sign_batch.py enforces on its own side, checked here BEFORE any
+    `_state`/envelope path is ever built from one of these ids); every row's
+    `occurred_at` must be a non-empty string that parses as a real ISO-8601
+    timestamp via `datetime.fromisoformat(v.replace("Z","+00:00"))` — never
+    coerced from `null`/missing (superseding the M5 `str(... or "")`
+    workaround, which only avoided a `TypeError` but let a missing/garbage
+    date slip through as a bare empty-string sort key); and every row's own
+    `kind` must equal `manifest_kind` (a mixed-kind manifest is corruption,
+    not something the digest/apply loops — which resolve a single `kind`'s
+    envelopes — can process). The rows must already be sorted by
+    (occurred_at, id) — the same order `build_manifest` produces and the
+    digest/apply loops assume. Returns None when canonical, or a diagnostic
+    string to print otherwise."""
     keys: list[tuple[str, str]] = []
     seen: set[str] = set()
     for r in rows:
@@ -278,10 +300,19 @@ def _manifest_is_canonical(rows: list[Any]) -> str | None:
         rid = r.get("id")
         if not isinstance(rid, str) or rid in seen:
             return "manifest not canonical; re-run list"
-        if safe_meeting_id(rid) != rid:
+        if not rid or safe_meeting_id(rid) != rid:
             return f"manifest not canonical (unsafe id {rid!r}); re-run list"
         seen.add(rid)
-        keys.append((str(r.get("occurred_at") or ""), rid))
+        occurred_raw = r.get("occurred_at")
+        if not isinstance(occurred_raw, str) or not occurred_raw:
+            return f"manifest not canonical (missing occurred_at for id {rid!r}); re-run list"
+        try:
+            datetime.fromisoformat(occurred_raw.replace("Z", "+00:00"))
+        except ValueError:
+            return f"manifest not canonical (unparseable occurred_at {occurred_raw!r} for id {rid!r}); re-run list"
+        if r.get("kind") != manifest_kind:
+            return f"manifest not canonical (row kind {r.get('kind')!r} != manifest kind {manifest_kind!r} for id {rid!r}); re-run list"
+        keys.append((occurred_raw, rid))
     if keys != sorted(keys):
         return "manifest not canonical; re-run list"
     return None
@@ -294,7 +325,7 @@ def _load_batch(vault: Path, batch_id: str) -> tuple[Path, dict[str, Any], dict[
     manifest = _read_json(bd / "manifest.json", None)
     if not isinstance(manifest, dict) or not isinstance(manifest.get("rows"), list):
         return None
-    canonical_error = _manifest_is_canonical(manifest["rows"])
+    canonical_error = _manifest_is_canonical(manifest["rows"], manifest.get("kind"))
     if canonical_error:
         print(f"{canonical_error} ({bd / 'manifest.json'})", file=sys.stderr)
         return None
@@ -304,6 +335,29 @@ def _load_batch(vault: Path, batch_id: str) -> tuple[Path, dict[str, Any], dict[
     prog.setdefault("batch_id", batch_id)
     prog.setdefault("kind", manifest.get("kind"))
     prog.setdefault("rows", {})
+    # A4 (CH2-5 backfill side): the --batch id's own kind prefix (before the
+    # first '-') must agree with both manifest.kind and batch-progress.kind —
+    # a hand-edited or mismatched batch id/progress file must never be
+    # silently trusted (the caller's own manifest.kind != --source check
+    # closes the remaining leg of the chain).
+    prefix = batch_id.split("-", 1)[0]
+    for label, k in (("manifest.kind", manifest.get("kind")), ("batch-progress.kind", prog.get("kind"))):
+        if prefix != k:
+            print(f"batch id kind prefix {prefix!r} != kind {k!r} ({label})", file=sys.stderr)
+            return None
+    # A3 (CH2-4): every persisted ledger cost must be finite & non-negative —
+    # fail closed rather than ever incorporate a corrupt/negative value into
+    # a budget decision.
+    for key, row in prog["rows"].items():
+        if not isinstance(row, dict):
+            continue
+        dr = row.get("dry_run")
+        if not isinstance(dr, dict) or "cost_usd" not in dr:
+            continue
+        v = dr.get("cost_usd")
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0:
+            print(f"batch-progress.json ledger invalid (row {key} cost_usd={v!r})", file=sys.stderr)
+            return None
     return bd, manifest, prog
 
 
@@ -311,69 +365,59 @@ def _save_batch(bd: Path, prog: dict[str, Any]) -> None:
     _write_json(_progress_path(bd), prog)
 
 
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except OSError:
-        # Any other errno (e.g. EPERM) means the pid exists but we cannot signal
-        # it — treat conservatively as alive rather than break a live lock.
-        return True
-    return True
+_LOCK_FDS: dict[str, int] = {}  # str(bd) -> open fd holding this process's flock, until released
 
 
 def _acquire_batch_lock(bd: Path) -> int:
-    """F12 (CH-4): an exclusive `bd/.lock` held for the duration of cmd_dry_run
-    and cmd_apply — two concurrent invocations against the same batch must
-    never both load-process-checkpoint the same whole-file batch-progress.json.
-    Returns 0 once the lock is held (release with `_release_batch_lock`), or 64
-    when a live process already holds it. A lock left by a dead pid is broken
-    automatically (crash-safe, bounded retries — M3: a stale-lock break can
-    lose a race and need another pass)."""
+    """A9 (fold-2 re-review): a real, kernel-enforced advisory lock on
+    `bd/.lock` via `fcntl.flock(LOCK_EX | LOCK_NB)`, held for the duration of
+    cmd_dry_run and cmd_apply — two concurrent invocations against the same
+    batch must never both load-process-checkpoint the same whole-file
+    batch-progress.json. This is NOT a pid-file convention: lock ownership is
+    tied to the open file description itself, so the kernel releases it
+    automatically the instant the holding process exits or dies for any
+    reason (crash, SIGKILL, ...) — there is no stale-lock detection or
+    breaking logic at all, because there is nothing that can go stale. The
+    pid written into the file is a diagnostic hint ONLY (surfaced in the
+    refusal message for a human to `ps`), never consulted to decide
+    ownership. Returns 0 once the lock is held (release with
+    `_release_batch_lock`), or 64 when another live process already holds
+    it."""
     bd.mkdir(parents=True, exist_ok=True)
     lock_path = bd / ".lock"
-    for _ in range(5):  # a handful of stale-lock-break/re-acquire passes
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
         try:
-            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        except FileExistsError:
-            held_pid: int | None = None
-            try:
-                held_pid = int(lock_path.read_text(encoding="utf-8").strip())
-            except (OSError, ValueError):
-                held_pid = None
-            if held_pid is not None and _pid_alive(held_pid):
-                print(f"batch {bd.name} locked by pid {held_pid}", file=sys.stderr)
-                return 64
-            # M3 (fold-1 re-review): rename-aside rather than a blind unlink —
-            # os.rename is atomic, so only ONE racing waiter can win the
-            # rename of THIS specific stale lock file. A loser sees
-            # FileNotFoundError (the file was already renamed by another
-            # waiter, or replaced by a fresh holder in between) and retries
-            # from scratch instead of unlinking a lock it no longer owns.
-            stale_aside = lock_path.with_name(f".lock.stale-{os.getpid()}")
-            try:
-                os.rename(str(lock_path), str(stale_aside))
-            except FileNotFoundError:
-                continue
-            print(f"batch {bd.name}: breaking stale lock (pid {held_pid})", file=sys.stderr)
-            try:
-                stale_aside.unlink()
-            except OSError:
-                pass
-            continue
-        with os.fdopen(fd, "w") as f:
-            f.write(str(os.getpid()))
-        return 0
-    print(f"batch {bd.name}: could not acquire lock", file=sys.stderr)
-    return 64
+            held_pid = lock_path.read_text(encoding="utf-8").strip() or "?"
+        except OSError:
+            held_pid = "?"
+        print(f"batch {bd.name} locked (pid {held_pid} per file)", file=sys.stderr)
+        os.close(fd)
+        return 64
+    os.ftruncate(fd, 0)
+    os.write(fd, str(os.getpid()).encode("utf-8"))
+    _LOCK_FDS[str(bd)] = fd
+    return 0
 
 
 def _release_batch_lock(bd: Path) -> None:
-    try:
-        (bd / ".lock").unlink()
-    except OSError:
-        pass
+    """Closes the fd THIS process opened in `_acquire_batch_lock` (which also
+    releases its flock) — never unlinks `.lock` itself, so a lock file left
+    behind between runs is inert (no flock held on it) and simply reused by
+    the next `_acquire_batch_lock` call; it is never mistaken for another
+    holder's lock."""
+    fd = _LOCK_FDS.pop(str(bd), None)
+    if fd is not None:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        try:
+            os.close(fd)
+        except OSError:
+            pass
 
 
 def _row(prog: dict[str, Any], kind: str, meeting_id: str) -> dict[str, Any]:
@@ -587,6 +631,13 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
     # loser read a stale snapshot and overwrite the holder's final checkpoint
     # at its own first _save_batch.
     bd = batch_dir(vault, args.batch)
+    # A10 (fold-2 re-review): refuse BEFORE touching the lock (reads no
+    # progress state — just an existence check) when there's no manifest.json
+    # at all, so a typo'd --batch never leaves an empty batch dir (or a
+    # stray .lock file) behind.
+    if not (bd / "manifest.json").is_file():
+        print(f"manifest.json missing or invalid for batch {args.batch}", file=sys.stderr)
+        return 64
     lock_rc = _acquire_batch_lock(bd)
     if lock_rc:
         return lock_rc
@@ -735,8 +786,32 @@ def run_status_plan(client: str, engagement: str, today: str, vault: Path) -> tu
         sys.stderr.write(res.stderr)
         return res.returncode, None
     out = progress.parse_subprocess_json(res.stdout)
-    rel = out.get("relPath") if isinstance(out, dict) else None
-    return 0, (str(rel) if rel else None)
+    # A7 (CH-12 PARTIAL): rc == 0 is only trustworthy alongside a real JSON
+    # payload that actually carries a `relPath` key (`parse_subprocess_json`
+    # itself never raises — garbage/empty stdout silently becomes `{}`, which
+    # must NOT be read as "nothing to write"). Downgrade to (14, None) so the
+    # pair is recorded failed and retried, never counted done, on garbage
+    # stdout — the FR-015 exit contract itself is untouched (still gated on
+    # per-meeting apply failures, not this pair's rc).
+    if not isinstance(out, dict) or "relPath" not in out:
+        print(f"FAILED at status_update ({client}/{engagement}): rc 0 with no relPath in stdout JSON", file=sys.stderr)
+        return 14, None
+    rel = out.get("relPath")
+    if rel is None:
+        return 0, None  # a real, well-formed "nothing needed writing" outcome
+    rel = str(rel)
+    # A7: relPath must resolve to a real file INSIDE the vault — absent or
+    # traversal-shaped values are never trusted as a completed write.
+    try:
+        target = (Path(vault) / rel).resolve()
+        target.relative_to(Path(vault).resolve())
+    except ValueError:
+        print(f"FAILED at status_update ({client}/{engagement}): relPath {rel!r} escapes the vault", file=sys.stderr)
+        return 14, None
+    if not target.is_file():
+        print(f"FAILED at status_update ({client}/{engagement}): relPath {rel!r} not found on disk", file=sys.stderr)
+        return 14, None
+    return 0, rel
 
 
 def commit_post_batch(vault: Path, pathspec: list[str], message: str) -> tuple[str | None, bool]:
@@ -766,12 +841,17 @@ def post_batch_pathspec(vault: Path, pairs: list[tuple[str, str]], status_rels: 
     return sorted(spec)
 
 
-def derive_pairs(vault: Path, kind: str, meeting_ids: list[str]) -> list[tuple[str, str]]:
-    """Distinct (client, engagement) pairs exactly as run_meeting's status step
-    derives them (G-120/G-124): resolution.json node → engagement itself, or a
-    project's parent only when that parent exists and is an engagement."""
+def _pair_ok_ids(vault: Path, kind: str, meeting_ids: list[str]) -> dict[tuple[str, str], list[str]]:
+    """A1 (G2a r2 P2-1): per-(client, engagement)-pair contributing id set —
+    the exact same derivation `derive_pairs` uses (resolution.json node →
+    engagement itself, or a project's parent only when that parent exists
+    and is an engagement, G-120/G-124), but also records WHICH of
+    `meeting_ids` produced each pair. A re-entry can then tell whether a
+    previously-recorded pair's authorship has grown (a meeting that failed
+    apply run 1 now also contributes to it) even when the pair's own exit
+    was already 0 — coverage growing must still re-run it."""
     nodes = brain_rollup.load_nodes(vault)
-    pairs: set[tuple[str, str]] = set()
+    out: dict[tuple[str, str], list[str]] = {}
     for mid in meeting_ids:
         resolution = _read_json(envelope_dir(vault, kind, mid) / "resolution.json", {})
         if not isinstance(resolution, dict):
@@ -779,8 +859,15 @@ def derive_pairs(vault: Path, kind: str, meeting_ids: list[str]) -> list[tuple[s
         eng_id, skip = run_meeting.resolve_engagement(resolution, nodes)
         client = str(resolution.get("counterparty_slug") or "")
         if eng_id and client and not skip:
-            pairs.add((client, eng_id))
-    return sorted(pairs)
+            out.setdefault((client, eng_id), []).append(mid)
+    return {pair: sorted(ids) for pair, ids in out.items()}
+
+
+def derive_pairs(vault: Path, kind: str, meeting_ids: list[str]) -> list[tuple[str, str]]:
+    """Distinct (client, engagement) pairs exactly as run_meeting's status step
+    derives them (G-120/G-124): resolution.json node → engagement itself, or a
+    project's parent only when that parent exists and is an engagement."""
+    return sorted(_pair_ok_ids(vault, kind, meeting_ids))
 
 
 def _post_batch_committed(prog: dict[str, Any]) -> bool:
@@ -832,6 +919,10 @@ def cmd_apply(args: argparse.Namespace) -> int:
     # for the same reason as cmd_dry_run above — every preflight check and the
     # first _save_batch must happen only once the lock is actually held.
     bd = batch_dir(vault, args.batch)
+    # A10 (fold-2 re-review): same pre-lock existence check as cmd_dry_run.
+    if not (bd / "manifest.json").is_file():
+        print(f"manifest.json missing or invalid for batch {args.batch}", file=sys.stderr)
+        return 64
     lock_rc = _acquire_batch_lock(bd)
     if lock_rc:
         return lock_rc
@@ -907,8 +998,14 @@ def _cmd_apply_locked(args: argparse.Namespace, vault: Path, repo: Path, kind: s
         except (OSError, ValueError) as exc:
             print(f"refuse apply: marker unreadable for {kind}:{mid} ({marker}): {exc} — re-run sign_batch.py", file=sys.stderr)
             return 15
+        # A6 (CH-5 PARTIAL / CH2-3 apply half): also bind signer identity —
+        # signed_by/signed_at — from the SAME marker_doc already loaded above
+        # (no extra file read); a marker whose batch_id/digest matches but
+        # whose signer doesn't must still refuse.
         if (not isinstance(marker_doc, dict) or marker_doc.get("batch_id") != signed.get("batch_id")
-                or marker_doc.get("digest_sha256") != signed.get("digest_sha256")):
+                or marker_doc.get("digest_sha256") != signed.get("digest_sha256")
+                or marker_doc.get("signed_by") != signed.get("signed_by")
+                or marker_doc.get("signed_at") != signed.get("signed_at")):
             print(f"refuse apply: marker batch binding mismatch for {kind}:{mid} ({marker}) — re-run sign_batch.py", file=sys.stderr)
             return 15
     started_at = prog.get("apply_started_at") or _now()
@@ -1010,23 +1107,30 @@ def _cmd_apply_locked(args: argparse.Namespace, vault: Path, repo: Path, kind: s
                 else:
                     post["rollup_all_last_exit"] = rollup_rc
                 _save_batch(bd, prog)                               # checkpoint: rollup done
-            pairs = derive_pairs(vault, kind, all_ok_ids)
-            # F17 (CH-12): a pair is "done" only on a verified exit == 0 — a failed
-            # pair (nonzero exit) is retried on the next entry instead of being
-            # treated as complete by mere presence in status_pairs. Its stale
-            # record moves to status_pairs_history so status_pairs never carries
-            # two rows for the same pair.
+            pair_ok_ids = _pair_ok_ids(vault, kind, all_ok_ids)
+            pairs = sorted(pair_ok_ids)
+            # F17 (CH-12) + A1 (G2a r2 P2-1): a pair is "done" only on a verified
+            # exit == 0 AND its recorded `ok_ids` matching the CURRENT contributing
+            # set — a failed pair (nonzero exit), or one whose coverage grew since
+            # it last ran (a meeting that failed apply run 1 now also contributes
+            # to it, even though the pair itself already succeeded once), is
+            # retried on the next entry instead of being treated as complete by
+            # mere presence in status_pairs. Its stale record moves to
+            # status_pairs_history so status_pairs never carries two rows for the
+            # same pair. On the fully-successful once-per-batch path, ok_ids never
+            # changes between checkpoint and read, so nothing here reruns twice.
             history = post.setdefault("status_pairs_history", [])
             current_by_pair = {(p["client"], p["engagement"]): p for p in post["status_pairs"]}
             for client, eng in pairs:
                 prior = current_by_pair.get((client, eng))
-                if prior is not None and prior.get("exit") == 0:
+                ok_ids_for_pair = pair_ok_ids[(client, eng)]
+                if prior is not None and prior.get("exit") == 0 and prior.get("ok_ids") == ok_ids_for_pair:
                     continue
                 if prior is not None:
                     history.append(prior)
                     post["status_pairs"] = [p for p in post["status_pairs"] if (p["client"], p["engagement"]) != (client, eng)]
                 rc, rel = run_status_plan(client, eng, today, vault)
-                post["status_pairs"].append({"client": client, "engagement": eng, "exit": rc, "relPath": rel})
+                post["status_pairs"].append({"client": client, "engagement": eng, "exit": rc, "relPath": rel, "ok_ids": ok_ids_for_pair})
                 _save_batch(bd, prog)                               # checkpoint: each pair
             # G0a2-2: commit the post-batch writes (STATE.md, every client region, touched
             # projects/<eng>.md last_update, each status artifact) — their own FR-014-style commit.

@@ -104,6 +104,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--apply", action="store_true")
     p.add_argument("--force", action="store_true")
+    p.add_argument("--backfill", action="store_true")
     p.add_argument("--repo-root", default=str(DEFAULT_REPO_ROOT))
     p.add_argument("--vault", default=str(DEFAULT_VAULT))
     args = p.parse_args(argv)
@@ -115,13 +116,16 @@ def main(argv: list[str] | None = None) -> int:
     if not args.dry_run and not args.apply:
         print("need --dry-run or --apply", file=sys.stderr)
         return 64
+    if args.backfill and not args.apply:
+        print("--backfill requires --apply", file=sys.stderr)
+        return 64
 
     vault = Path(args.vault)
     repo = Path(args.repo_root)
     source_dir = envelope_dir(vault, "fireflies", meeting_id)
 
     if args.apply:
-        return _run_apply(meeting_id, vault, repo, source_dir, force=args.force)
+        return _run_apply(meeting_id, vault, repo, source_dir, force=args.force, backfill=args.backfill)
     return _run_dry(meeting_id, vault, repo, source_dir)
 
 
@@ -337,7 +341,7 @@ def _run_dry(meeting_id: str, vault: Path, repo: Path, source_dir: Path) -> int:
         # nothing to do" apart from "capture truncated before this writer".
         print("would-touch: (none)")
 
-    eng_id, _eng_skip = resolve_engagement(resolution, nodes)
+    eng_id, _ = resolve_engagement(resolution, nodes)
     if eng_id:
         try:
             st = subprocess.run(
@@ -449,7 +453,7 @@ def _check_crm_scripts_support_full_file() -> int:
     return 0
 
 
-def _run_apply(meeting_id, vault, repo, source_dir, *, force) -> int:
+def _run_apply(meeting_id, vault, repo, source_dir, *, force, backfill=False) -> int:
     # G0b C2-3: unconditional — no --skip-sign-check bypass exists.
     # CH-1/S-2: existence alone is not proof of a real sign-off — validate
     # signed_by/signed_at/capture_sha256 (progress.validate_sign_marker).
@@ -515,7 +519,7 @@ def _run_apply(meeting_id, vault, repo, source_dir, *, force) -> int:
         print(f"FAILED at adapt: rc={adapt_rc}", file=sys.stderr)
         return 12
 
-    return _apply_writes(meeting_id, vault, repo, source_dir, prior_receipt=prior_receipt)
+    return _apply_writes(meeting_id, vault, repo, source_dir, prior_receipt=prior_receipt, backfill=backfill)
 
 
 def _writeback_env(vault: Path) -> dict[str, str]:
@@ -555,7 +559,8 @@ def resolve_engagement(resolution: dict, nodes: dict) -> tuple[str, str]:
 
 
 def _apply_writes(
-    meeting_id: str, vault: Path, repo: Path, source_dir: Path, *, prior_receipt: dict | None
+    meeting_id: str, vault: Path, repo: Path, source_dir: Path, *, prior_receipt: dict | None,
+    backfill: bool = False,
 ) -> int:
     # R2-F-1 (fold, rev3): CRM_SYNC/FANOUT_SCRIPT are fixed CODE_ROOT
     # constants (defined alongside WRITEBACK/RECAP) — the shared checkout's
@@ -576,6 +581,23 @@ def _apply_writes(
     receipt_p = progress.receipt_path(vault, "fireflies", meeting_id)
     pending_path = progress.fanout_pending_path(vault, "fireflies", meeting_id)
     doc = progress.load_progress(prog_path)
+
+    if backfill and doc.get("backfill_run") is not True:
+        doc = progress.merge_progress(prog_path, "backfill_run", True)  # lets compose_receipt report prior-done steps
+
+    def _backfill_skip(step: str) -> None:
+        nonlocal doc
+        # D-19 / G-110: `done` stays False — step_done() must not treat a
+        # skipped step as performed, and --force never clears keys. Never
+        # DOWNGRADE either (G0b r2): a step that already ran live keeps its
+        # done:true checkpoint so FR-014's later-run skip still holds.
+        existing = doc.get(step)
+        if isinstance(existing, dict) and (existing.get("done") is True or existing.get("skipped") == "backfill"):
+            return
+        doc = progress.merge_progress(prog_path, step, {
+            "done": False, "skipped": "backfill", "at": progress._now_iso(),
+        })
+        print(f"{step}: skip: backfill")
 
     # CH-9: `progress.writeback.done: true` alone is not proof the write
     # actually happened — verify the home page carries meeting_writeback's
@@ -646,7 +668,9 @@ def _apply_writes(
             "interactions": len(crm_out.get("interactions") or []),
         })
 
-    if not progress.step_done(doc, "tasks"):
+    if backfill:
+        _backfill_skip("tasks")
+    elif not progress.step_done(doc, "tasks"):
         existing_created = list((doc.get("tasks") or {}).get("created") or [])
         pending_ids = progress.read_fanout_pending(pending_path)
         fanout_cmd = [
@@ -732,7 +756,9 @@ def _apply_writes(
             "created_ids": [p.get("commitmentId") for p in created_pairs], "pending": [],
         })
 
-    if not progress.step_done(doc, "draft"):
+    if backfill:
+        _backfill_skip("draft")
+    elif not progress.step_done(doc, "draft"):
         env = _writeback_env(vault)
         ledger_path = vault / "raw/media/transcripts/_recap-ledger.txt"
         try:
@@ -818,7 +844,9 @@ def _apply_writes(
         # --client is passed only when we have one, for the per-client
         # rollup region.
         argv = [sys.executable, str(BRAIN_ROLLUP), "--vault", str(vault), "--today", today]
-        if client_slug:
+        # D-19: a backfill apply regenerates STATE.md only; the per-client
+        # regions are rebuilt once after the batch (backfill.py, --all).
+        if client_slug and not backfill:
             argv += ["--client", client_slug]
         try:
             roll = subprocess.run(argv, capture_output=True, text=True, timeout=CHILD_TIMEOUT_S)
@@ -831,13 +859,17 @@ def _apply_writes(
             print(f"FAILED at rollup: rc={roll.returncode}", file=sys.stderr)
             return 6
         outcome = {"done": True}
-        if not client_slug:
+        if backfill:
+            outcome["state_only"] = True
+        elif not client_slug:
             outcome["skipped"] = "no-client"
         doc = progress.merge_progress(prog_path, "rollup", outcome)
 
     eng_id, eng_skip = resolve_engagement(resolution, nodes)
 
-    if not progress.step_done(doc, "status_update"):
+    if backfill:
+        _backfill_skip("status_update")
+    elif not progress.step_done(doc, "status_update"):
         if eng_skip:
             print(f"status: skip: {eng_skip}")
             doc = progress.merge_progress(prog_path, "status_update", {
@@ -891,7 +923,7 @@ def _apply_writes(
     # G2-P1-1: only the acceptance meeting id(s) actually gate on shortfalls
     # (exit 9, no commit); every other meeting still gets minimums computed
     # into the receipt for visibility but is never blocked by them.
-    enforced = meeting_id in _acceptance_meeting_ids()
+    enforced = (meeting_id in _acceptance_meeting_ids()) and not backfill
     if enforced and shortfalls:
         receipt["minimums"] = {"ok": False, "missing": shortfalls, "enforced": True}
         atomic_write(receipt_p, (json.dumps(receipt, sort_keys=True, indent=2) + "\n").encode("utf-8"))

@@ -635,7 +635,18 @@ def compose_receipt(
     crm = doc.get("crm") or {}
     tasks = doc.get("tasks") or {}
     draft = doc.get("draft") or {}
-    return {
+    # FR-015 D-19 (G-110): steps a backfill apply deliberately skipped carry
+    # `done: false, skipped: "backfill"` so a later live `--apply --force`
+    # still performs them; the receipt lists them (only when any exist, so
+    # every pre-R4 receipt stays byte-identical).
+    # Contract: alphabetically sorted display names → ["recap", "status", "tasks"] when all three are skipped
+    # (the goal file's G4 evidence 5 was aligned to this order — G0a-5).
+    skipped_names = {"draft": "recap", "tasks": "tasks", "status_update": "status"}
+    backfill_skipped = sorted(
+        name for key, name in skipped_names.items()
+        if isinstance(doc.get(key), dict) and doc[key].get("skipped") == "backfill"
+    )
+    receipt = {
         "meeting_id": meeting_id,
         "source": source,
         "extraction_sha": doc.get("extraction_sha"),
@@ -651,3 +662,14 @@ def compose_receipt(
         "first_applied_at": first_applied_at,
         "last_run_at": now,
     }
+    if backfill_skipped:
+        receipt["backfill_skipped"] = backfill_skipped
+    # A step that already ran live before this backfill apply keeps done:true (never downgraded) and
+    # is reported separately so evidence 5 can require skipped ∪ prior_done == {recap, status, tasks} (G0b r3).
+    prior_done = sorted(
+        name for key, name in skipped_names.items()
+        if isinstance(doc.get(key), dict) and doc[key].get("done") is True and doc.get("backfill_run") is True
+    )
+    if prior_done:
+        receipt["backfill_prior_done"] = prior_done
+    return receipt

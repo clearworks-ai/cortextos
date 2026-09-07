@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, existsSync, unlinkSync, statSync } from 'fs'
 import { join } from 'path';
 import type { Heartbeat, BusPaths } from '../types/index.js';
 import { atomicWriteSync, ensureDir } from '../utils/atomic.js';
+import { enabledAgentsPath, readEnabledAgentsMap } from './enabled-agents-io.js';
 
 /**
  * SessionEnd-hook end-type markers (see src/hooks/hook-crash-alert.ts). A
@@ -117,13 +118,25 @@ export function detectDayNightMode(timezone: string): 'day' | 'night' {
 }
 
 /**
- * Read all agent heartbeats.
- * Scans state/ directory for agent subdirs containing heartbeat.json.
+ * Read all enabled agent heartbeats.
+ * Scans state/ directory for agent subdirs containing heartbeat.json, then
+ * filters them through enabled-agents.json when that registry exists. State
+ * directories outlive agent disable/removal, so treating state/ as a roster
+ * leaks disabled and historical identities into fleet health output.
  * Matches dashboard heartbeat path: state/{agent}/heartbeat.json
  */
 export function readAllHeartbeats(paths: BusPaths): Heartbeat[] {
   const heartbeats: Heartbeat[] = [];
   const stateDir = join(paths.ctxRoot, 'state');
+  const enabledPath = enabledAgentsPath(paths.ctxRoot);
+  const enabledMap = readEnabledAgentsMap(paths.ctxRoot);
+  const enabledNames = existsSync(enabledPath) && Object.keys(enabledMap).length > 0
+    ? new Set(
+      Object.entries(enabledMap)
+        .filter(([, entry]) => entry.enabled !== false)
+        .map(([name]) => name),
+    )
+    : null;
   let agentDirs: string[];
   try {
     agentDirs = readdirSync(stateDir, { withFileTypes: true })
@@ -134,6 +147,7 @@ export function readAllHeartbeats(paths: BusPaths): Heartbeat[] {
   }
 
   for (const agent of agentDirs) {
+    if (enabledNames && !enabledNames.has(agent)) continue;
     const hbPath = join(stateDir, agent, 'heartbeat.json');
     try {
       const content = readFileSync(hbPath, 'utf-8');

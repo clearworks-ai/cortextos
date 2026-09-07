@@ -83,24 +83,46 @@ def _dry_run_attempted(dr: Any) -> bool:
     dict carrying a real int `exit` code — `{}` (the pre-launch placeholder
     `backfill._row` setdefaults, CARRY-C) or a dict with a missing/malformed
     `exit` must NOT silently count as reviewed, or `unattempted`/`partial`
-    would understate what a halted dry-run actually left unattempted."""
+    would understate what a halted dry-run actually left unattempted.
+
+    B3 (micro-fold 5, fold-4 review): this is sign_batch.py's OWN
+    predicate, pinned by test — `backfill.write_digest`'s digest-header
+    counts (`meetings`/`ok`/`failed`/`unattempted`) are computed by a
+    DIFFERENT, looser rule (`isinstance(dr_raw, dict)` alone, no `exit`
+    check — see write_digest's own loop) that this module does not import
+    or call. The two counters can therefore disagree on a `{}` row
+    specifically; aligning `write_digest` to this same rule is out of
+    scope for this file (backfill.py is Agent A's this round) and is left
+    on the carry list, not fixed here."""
     return isinstance(dr, dict) and isinstance(dr.get("exit"), int)
 
 
+_UNESCAPED_PIPE_RE = re.compile(r"(?<!\\)\|")
+
+
 def _digest_row_ids(text: str) -> set[str]:
-    """B1 (G2 r3 CH3-1): the id column (first cell) of every genuine data
-    row in backfill.write_digest's markdown table — `| id | date | title |
-    home | created org | kept/dropped | classification | exit |` (8 cells).
-    Skips the header row (first cell literally "id") and the `|---|...|`
-    separator row (first cell all dashes) by content, not by fixed line
-    position, since blank lines and the stats/status lines precede the
-    table."""
+    r"""B1 (G2 r3 CH3-1; pipe-safety fix — fold-4 review, Important): the id
+    column (first cell) of every genuine data row in backfill.write_digest's
+    markdown table — `| id | date | title | home | created org |
+    kept/dropped | classification | exit |` (8 cells). Skips the header row
+    (first cell literally "id") and the `|---|...|` separator row (first
+    cell all dashes) by content, not by fixed line position, since blank
+    lines and the stats/status lines precede the table.
+
+    fold-4 review Important: `backfill._md_cell` escapes a literal `|`
+    inside a cell (e.g. a meeting title "Clearworks | Kadre sync") as `\|`
+    — a plain `line.split("|")` splits on THAT escaped pipe too, inflating
+    the cell count past 8 and silently dropping the row's id from the
+    result (a false "digest rows differ from progress" refusal on a
+    perfectly good digest). Split on UNESCAPED pipes only
+    (`(?<!\\)\|`, a negative lookbehind) and unescape `\|` -> `|` in each
+    cell afterward."""
     ids: set[str] = set()
     for line in text.splitlines():
         line = line.strip()
         if not line.startswith("|") or not line.endswith("|") or len(line) < 2:
             continue
-        cells = [c.strip() for c in line[1:-1].split("|")]
+        cells = [c.strip().replace("\\|", "|") for c in _UNESCAPED_PIPE_RE.split(line[1:-1])]
         if len(cells) != 8:
             continue
         first = cells[0]

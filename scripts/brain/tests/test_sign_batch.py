@@ -699,3 +699,98 @@ def test_sign_batch_releases_lock_after_happy_path(tmp_path):
     # own lock in `finally` on the success path, not just on refusal paths.
     assert _acquire_batch_lock(bd) == 0
     _release_batch_lock(bd)
+
+
+def test_digest_row_ids_two_pipes_in_title(tmp_path):
+    """B1 (fold-4 review, Important): a title with TWO escaped pipes must
+    still parse to the right cell count and the correct id — a plain
+    `line.split("|")` would inflate the cell count to 10 and drop the row
+    entirely (fold-4's bug)."""
+    from sign_batch import _digest_row_ids
+    text = (
+        "| id | date | title | home | created org | kept/dropped | classification | exit |\n"
+        "|---|---|---|---|---|---|---|---|\n"
+        "| A | 2026-09-01 | a \\| b \\| c | h |  |  |  | 0 |\n"
+    )
+    assert _digest_row_ids(text) == {"A"}
+
+
+def test_sign_batch_round_trip_with_write_digest_pipe_and_newline_titles(tmp_path):
+    """B1 (fold-4 review, Important): a REAL backfill.write_digest round
+    trip — one title containing a pipe ("Clearworks | Kadre sync") and one
+    containing a newline — must still let sign_batch.main sign the real
+    digest it produces. Before the pipe-safe fix, `_digest_row_ids`' plain
+    `line.split("|")` would inflate the pipe-titled row's cell count past 8
+    (the escaped `\\|` `_md_cell` writes for a literal pipe splits just
+    like a real column separator) and silently drop id "A" from the
+    parsed set, refusing "digest rows differ from progress" against a
+    perfectly good, real digest.md."""
+    import backfill
+    import progress
+    import sign_batch
+
+    vault = tmp_path / "vault"
+    bid = "fireflies-20260910T000000Z"
+    bd = backfill.batch_dir(vault, bid)
+    bd.mkdir(parents=True)
+
+    manifest = {
+        "batch_id": bid, "kind": "fireflies",
+        "rows": [
+            {"id": "A", "kind": "fireflies", "occurred_at": "2026-09-01T00:00:00Z",
+             "title": "Clearworks | Kadre sync", "already_applied": False},
+            {"id": "B", "kind": "fireflies", "occurred_at": "2026-09-02T00:00:00Z",
+             "title": "Line one\nLine two", "already_applied": False},
+        ],
+    }
+    (bd / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    dry_run_row = {"exit": 0, "home": "clients/a.md", "rule": 2, "created": None,
+                   "kept": {"decisions": 1, "commitments": 1, "open_questions": 0},
+                   "dropped": {}, "classification": None, "cost_usd": 0.1}
+    prog = {
+        "batch_id": bid, "kind": "fireflies",
+        "rows": {"fireflies:A": {"dry_run": dict(dry_run_row)}, "fireflies:B": {"dry_run": dict(dry_run_row)}},
+    }
+
+    for i in ("A", "B"):
+        state = progress._state_dir(vault, "fireflies", i); state.mkdir(parents=True)
+        (state / "dry-run.txt").write_text(GOOD, encoding="utf-8")
+        env = vault / "raw/media/transcripts/fireflies" / i; env.mkdir(parents=True)
+        (env / "source.sha256").write_text("a" * 64 + "\n", encoding="utf-8")
+        (env / "extraction.json").write_text(json.dumps({"inputSha": "b" * 64}), encoding="utf-8")
+
+    # The REAL production writer — builds digest.md/digest.sha256/sample/
+    # for real, with _md_cell's real pipe/newline escaping.
+    digest_path, sha, picked = backfill.write_digest(vault, bd, manifest, prog, status="complete")
+    assert "\\|" in digest_path.read_text(encoding="utf-8")  # confirms the escaped-pipe row is actually on disk
+    prog["sample_ids"] = picked
+    (bd / "batch-progress.json").write_text(json.dumps(prog), encoding="utf-8")
+
+    result = sign_batch.main(_args(vault, bd, bid))
+    assert result == 0, result
+    signed = json.loads((bd / "batch-signed.json").read_text(encoding="utf-8"))
+    assert signed["signed_ids"] == ["A", "B"]
+
+
+def test_sign_batch_empty_dry_run_dict_counts_as_unattempted(tmp_path, capsys):
+    """B2 (fold-4 review, pinning B5): a progress row `"dry_run": {}`
+    (present but empty — no `exit` key at all, exactly `backfill._row`'s
+    pre-launch placeholder) is NOT attempted and must require
+    --allow-partial the same way a row with no dry_run key at all does."""
+    import sign_batch
+    vault, bd, bid = _seed(tmp_path, ids=("A", "B"), unattempted=("C",))
+    prog = json.loads((bd / "batch-progress.json").read_text(encoding="utf-8"))
+    prog["rows"]["fireflies:C"] = {}  # present but empty, not absent
+    (bd / "batch-progress.json").write_text(json.dumps(prog), encoding="utf-8")
+
+    rc = sign_batch.main(_args(vault, bd, bid))
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "batch is partial" in err and "--allow-partial" in err
+    assert not (bd / "batch-signed.json").exists()
+
+    rc2 = sign_batch.main(_args(vault, bd, bid) + ["--allow-partial"])
+    assert rc2 == 0
+    signed = json.loads((bd / "batch-signed.json").read_text(encoding="utf-8"))
+    assert "C" in signed["unattempted_ids"]

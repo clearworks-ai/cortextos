@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 BRAIN = Path(__file__).resolve().parents[1]
 if str(BRAIN) not in sys.path:
     sys.path.insert(0, str(BRAIN))
@@ -70,6 +72,40 @@ def test_cmd_list_writes_manifest_and_prints_counts(tmp_path, monkeypatch, capsy
     assert "manifest: 3 total, 1 already applied, 2 pending" in out
     doc = json.loads((vault / "raw/media/transcripts/_backfill/fireflies-20260906T000000Z/manifest.json").read_text(encoding="utf-8"))
     assert doc["batch_id"] == "fireflies-20260906T000000Z" and [r["id"] for r in doc["rows"]] == ["A", "B", "C"]
+
+
+def test_build_manifest_counts_dateless_rows(tmp_path):
+    import backfill
+
+    rows = _rows() + [
+        {"id": "D", "title": "no date", "date": None, "duration": 1.0, "participants": []},
+        {"id": "E", "title": "bad date", "date": "not-a-number", "duration": 1.0, "participants": []},
+    ]
+    out = backfill.build_manifest(rows, vault=tmp_path / "v", kind="fireflies", since=None, until=None)
+    assert [r["id"] for r in out] == ["A", "B", "C"]
+    assert backfill.build_manifest.skipped_no_date == 2
+
+
+def test_build_manifest_dedupes_paged_duplicate_ids(tmp_path):
+    import backfill
+
+    rows = _rows() + [{"id": "A", "title": "First (dup page)", "date": 1756684800000, "duration": 12.5, "participants": ["a@x.io"]}]
+    out = backfill.build_manifest(rows, vault=tmp_path / "v", kind="fireflies", since=None, until=None)
+    assert [r["id"] for r in out] == ["A", "B", "C"]
+    assert backfill.build_manifest.duplicates == 1
+
+
+def test_cmd_list_rejects_malformed_since_and_writes_no_manifest(tmp_path, monkeypatch):
+    import backfill
+
+    vault = tmp_path / "vault"
+    monkeypatch.setattr(backfill, "list_transcripts", lambda api_key, **kw: _rows())
+    monkeypatch.setattr(backfill, "load_api_key", lambda repo: "k")
+    with pytest.raises(SystemExit) as excinfo:
+        backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path),
+                       "list", "--since", "2025-9-2"])
+    assert excinfo.value.code == 2
+    assert not (vault / "raw/media/transcripts/_backfill").exists()
 
 
 def test_cmd_list_refuses_unknown_source_and_missing_key(tmp_path, monkeypatch, capsys):

@@ -70,16 +70,29 @@ def _applied(vault: Path, kind: str, meeting_id: str) -> bool:
 def build_manifest(rows: list[dict[str, Any]], *, vault: Path, kind: str, since: str | None, until: str | None) -> list[dict[str, Any]]:
     """API rows → manifest rows. An id that fails `safe_meeting_id` (traversal-shaped
     or otherwise unsafe) is dropped and counted in `build_manifest.invalid` — it must
-    never reach a `_state`/envelope/sample path (G0b r2 N2)."""
+    never reach a `_state`/envelope/sample path (G0b r2 N2). A row with a missing or
+    unparseable `date` is dropped and counted in `build_manifest.skipped_no_date`
+    (task-6 review finding 1) rather than vanishing silently. A repeated id (skip/limit
+    paging can return the same transcript twice across pages) keeps only the first
+    occurrence and is counted in `build_manifest.duplicates` (finding 3)."""
     out: list[dict[str, Any]] = []
     invalid = 0
+    skipped_no_date = 0
+    duplicates = 0
+    seen: set[str] = set()
     for r in rows:
         mid = safe_meeting_id(str(r.get("id") or ""))
         if not mid or mid != str(r.get("id")):
             invalid += 1
             continue
+        row_id = str(r["id"])
+        if row_id in seen:
+            duplicates += 1
+            continue
+        seen.add(row_id)
         occurred_at = _iso_from_epoch_ms(r.get("date"))
         if occurred_at is None:
+            skipped_no_date += 1
             continue
         day = occurred_at[:10]
         if since and day < since:
@@ -90,15 +103,17 @@ def build_manifest(rows: list[dict[str, Any]], *, vault: Path, kind: str, since:
         participants = r.get("participants") or []
         out.append({
             "kind": kind,
-            "id": str(r["id"]),
+            "id": row_id,
             "title": str(r.get("title") or ""),
             "occurred_at": occurred_at,
             "duration_s": int(round(float(duration) * 60)) if isinstance(duration, (int, float)) else None,
             "participant_count": len(participants) if isinstance(participants, list) else 0,
-            "already_applied": _applied(vault, kind, str(r["id"])),
+            "already_applied": _applied(vault, kind, row_id),
         })
     out.sort(key=lambda row: (row["occurred_at"], row["id"]))
     build_manifest.invalid = invalid  # type: ignore[attr-defined]
+    build_manifest.skipped_no_date = skipped_no_date  # type: ignore[attr-defined]
+    build_manifest.duplicates = duplicates  # type: ignore[attr-defined]
     return out
 
 
@@ -129,8 +144,33 @@ def cmd_list(args: argparse.Namespace) -> int:
     print(f"manifest: {len(manifest_rows)} total, {applied} already applied, {len(manifest_rows) - applied} pending")
     if getattr(build_manifest, "invalid", 0):
         print(f"invalid ids skipped: {build_manifest.invalid}", file=sys.stderr)
+    if getattr(build_manifest, "skipped_no_date", 0):
+        print(f"rows skipped (no date): {build_manifest.skipped_no_date}", file=sys.stderr)
+    if getattr(build_manifest, "duplicates", 0):
+        print(f"duplicate ids skipped: {build_manifest.duplicates}", file=sys.stderr)
     print(f"batch: {batch_id}")
     return 0
+
+
+_DATE_ARG_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _date_arg(value: str) -> str:
+    """argparse `type=` for --since/--until (task-6 review finding 2): reject anything
+    that is not a real, strictly zero-padded YYYY-MM-DD date before it reaches the
+    lexical day-string compare in `build_manifest`, or before it is recorded verbatim
+    in the manifest. `datetime.strptime` alone accepts non-zero-padded values like
+    "2025-9-2" (`%m`/`%d` are lenient), which would corrupt the lexical compare, so the
+    regex enforces the exact shape and strptime enforces a real calendar date.
+    Argparse turns `ArgumentTypeError` into a usage message on stderr and
+    `SystemExit(2)`."""
+    if not _DATE_ARG_RE.match(value):
+        raise argparse.ArgumentTypeError(f"invalid date {value!r} (expected YYYY-MM-DD)")
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"invalid date {value!r} (expected YYYY-MM-DD)") from exc
+    return value
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -142,8 +182,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--rate", type=float, default=2.0, help="seconds between list pages (A-08)")
     sub = p.add_subparsers(dest="command", required=True)
     s_list = sub.add_parser("list")
-    s_list.add_argument("--since")
-    s_list.add_argument("--until")
+    s_list.add_argument("--since", type=_date_arg)
+    s_list.add_argument("--until", type=_date_arg)
     s_dry = sub.add_parser("dry-run")
     s_dry.add_argument("--max-usd", type=float, default=DEFAULT_MAX_USD)
     sub.add_parser("apply")

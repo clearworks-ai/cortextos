@@ -217,6 +217,12 @@ def validate_sign_marker(path: Path, envelope: Path | None = None) -> str | None
     return None
 
 
+# B2 (G2 r3 CH3-2): copied verbatim from backfill.BATCH_ID_RE — progress.py
+# must NOT import backfill.py (backfill.py already imports progress — a
+# cycle).
+_BATCH_ID_RE = re.compile(r"^[a-z][a-z0-9]{0,15}-\d{8}T\d{6}Z$")
+
+
 def _batch_signed_path(vault: Path, batch_id: str) -> Path:
     """G2b r2 CH2-2/CH-1: the literal path to a batch's signed record.
     progress.py must NOT import backfill.py (backfill.py already imports
@@ -225,14 +231,17 @@ def _batch_signed_path(vault: Path, batch_id: str) -> Path:
     return Path(vault) / "raw/media/transcripts/_backfill" / batch_id / "batch-signed.json"
 
 
-def validate_batch_marker(vault: Path, path: Path, meeting_id: str) -> str | None:
-    """G2-F1 / G2b r2 CH2-2 (CH-1 upgraded from PARTIAL): under `--backfill`,
-    the D-09 marker at `path` must be batch-bound — written by
-    `sign_batch.py`'s D-20 fan-out (which stamps `batch_id` and
-    `digest_sha256` onto every per-meeting marker via `sign_marker.write_marker`'s
-    `extra=` kwarg), never a per-meeting `sign_dry_run.py` marker. The latter
-    proves only that a human reviewed ONE meeting's dry-run, not that a batch
-    digest covering it was ever reviewed and signed (D-20).
+def validate_batch_marker(
+    path: Path, vault: Path, meeting_id: str, expected_batch_id: str | None = None,
+) -> str | None:
+    """G2-F1 / G2b r2 CH2-2 (CH-1 upgraded from PARTIAL) / G2 r3 CH3-2
+    (Critical, supersedes the CH2-2 version): under `--backfill`, the D-09
+    marker at `path` must be batch-bound — written by `sign_batch.py`'s
+    D-20 fan-out (which stamps `batch_id` and `digest_sha256` onto every
+    per-meeting marker via `sign_marker.write_marker`'s `extra=` kwarg),
+    never a per-meeting `sign_dry_run.py` marker. The latter proves only
+    that a human reviewed ONE meeting's dry-run, not that a batch digest
+    covering it was ever reviewed and signed (D-20).
 
     G2b round-2 review CH2-2 (Critical): carrying `batch_id`/`digest_sha256`
     on the marker alone is not proof the referenced batch was ever actually
@@ -242,8 +251,23 @@ def validate_batch_marker(vault: Path, path: Path, meeting_id: str) -> str | Non
     batch-signed.json, a meeting dropped from `signed_ids` (never a
     candidate, or removed by a later re-sign), or a batch whose fan-out
     never finished (`fanout_complete` still false, F2 addendum) must all be
-    refused exactly as a bare per-meeting marker is. Resolves and re-reads
-    `<vault>/raw/media/transcripts/_backfill/<marker.batch_id>/batch-signed.json`
+    refused exactly as a bare per-meeting marker is.
+
+    G2 r3 CH3-2 (Critical): matching `batch-signed.json`'s own
+    `digest_sha256`/`manifest_sha256` fields is not proof those fields
+    still describe the CURRENT `digest.md`/`manifest.json` bytes on disk —
+    both are independently re-hashed here and cross-checked against the
+    sidecar AND `batch-signed.json` together, so a replaced/hand-edited
+    digest or manifest (with `batch-signed.json` left untouched) is caught.
+    `signed_by`/`signed_at` on the marker must also match `batch-signed.json`'s
+    own recorded values (a hand-edited marker signer/date), `signed_ids`
+    must actually be a list (not e.g. `null` from a corrupt write), the
+    marker's own `batch_id` must be `BATCH_ID_RE`-shaped, and when
+    `expected_batch_id` is given (run_meeting's `--batch`, B3) the marker's
+    `batch_id` must equal it exactly.
+
+    Resolves and re-reads
+    `<vault>/raw/media/transcripts/_backfill/<marker.batch_id>/{batch-signed.json,digest.md,digest.sha256,manifest.json}`
     and checks every binding sign_batch.py itself established.
 
     Call this ONLY after `validate_sign_marker` has already returned None
@@ -257,9 +281,13 @@ def validate_batch_marker(vault: Path, path: Path, meeting_id: str) -> str | Non
     if not isinstance(doc, dict) or not doc.get("batch_id") or not doc.get("digest_sha256"):
         return "backfill apply requires a batch-signed marker (sign_batch.py); per-meeting marker found"
     batch_id = str(doc["batch_id"])
-    signed_path = _batch_signed_path(Path(vault), batch_id)
+    if not _BATCH_ID_RE.match(batch_id):
+        return f"marker batch_id {batch_id!r} is not a valid batch id"
+    if expected_batch_id is not None and batch_id != expected_batch_id:
+        return f"marker batch_id {batch_id!r} != --batch {expected_batch_id!r}"
+    bd = _batch_signed_path(Path(vault), batch_id).parent
     try:
-        signed = json.loads(signed_path.read_text(encoding="utf-8"))
+        signed = json.loads((bd / "batch-signed.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return f"batch-signed.json missing or unreadable for batch {batch_id} (orphaned marker; re-run sign_batch.py)"
     if not isinstance(signed, dict):
@@ -268,7 +296,32 @@ def validate_batch_marker(vault: Path, path: Path, meeting_id: str) -> str | Non
         return f"batch-signed.json batch_id {signed.get('batch_id')!r} != marker batch_id {batch_id!r}"
     if signed.get("digest_sha256") != doc.get("digest_sha256"):
         return f"batch-signed.json digest_sha256 does not match marker digest_sha256 for batch {batch_id}"
-    if meeting_id not in (signed.get("signed_ids") or []):
+
+    # B2: the digest.md/digest.sha256/manifest.json bytes ON DISK, right
+    # now, must still match — not just batch-signed.json's own recollection
+    # of what they hashed to at sign time.
+    try:
+        digest_bytes = (bd / "digest.md").read_bytes()
+        sidecar_sha = (bd / "digest.sha256").read_text(encoding="utf-8").strip()
+        manifest_bytes = (bd / "manifest.json").read_bytes()
+    except OSError:
+        return f"batch {batch_id} digest.md/digest.sha256/manifest.json missing or unreadable"
+    digest_sha = hashlib.sha256(digest_bytes).hexdigest()
+    if digest_sha != sidecar_sha or digest_sha != signed.get("digest_sha256"):
+        return f"batch {batch_id} digest.md/digest.sha256/batch-signed.json digest_sha256 disagree"
+    manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
+    if manifest_sha != signed.get("manifest_sha256"):
+        return f"batch {batch_id} manifest.json sha256 does not match batch-signed.json manifest_sha256"
+
+    if doc.get("signed_by") != signed.get("signed_by"):
+        return f"marker signed_by {doc.get('signed_by')!r} != batch-signed.json signed_by {signed.get('signed_by')!r} for batch {batch_id}"
+    if doc.get("signed_at") != signed.get("signed_at"):
+        return f"marker signed_at {doc.get('signed_at')!r} != batch-signed.json signed_at {signed.get('signed_at')!r} for batch {batch_id}"
+
+    signed_ids = signed.get("signed_ids")
+    if not isinstance(signed_ids, list):
+        return f"batch-signed.json signed_ids is not a list for batch {batch_id}"
+    if meeting_id not in signed_ids:
         return f"meeting {meeting_id!r} not in batch {batch_id} signed_ids"
     if signed.get("fanout_complete") is not True:
         return f"batch {batch_id} fanout_complete is not true (sign_batch.py fan-out incomplete)"

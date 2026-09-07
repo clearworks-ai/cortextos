@@ -39,12 +39,75 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import progress
 from atomic import atomic_write
 from backfill import BATCH_ID_RE, SOURCES, _acquire_batch_lock, _release_batch_lock, batch_dir
 from paths import DEFAULT_VAULT, safe_meeting_id
 from sign_marker import check_capture, write_marker
+
+# B4/B5/B6 header-line regexes (G2 r3 CH3-6/7, fold-3 minors): mirrored
+# against backfill.write_digest's exact literal formats — "unattempted: N"
+# lives inside the compound `kind: ... · unattempted: N · cost_usd: ...`
+# stats line, not on its own line, so this is a substring search, not
+# MULTILINE-anchored like the status line.
+_DIGEST_STATUS_RE = re.compile(r"^status: (.+)$", re.MULTILINE)
+_DIGEST_UNATTEMPTED_RE = re.compile(r"unattempted: (\d+)")
+
+
+def _occurred_at_utc(value: Any) -> datetime | None:
+    """B4 (G2 r3 CH3-6, mirrors backfill.py's A4): `occurred_at` must carry
+    an explicit zone — a trailing 'Z' or a numeric UTC offset — never a
+    naive or date-only string, which `datetime.fromisoformat` would
+    otherwise happily accept (parsed as local midnight) and let the
+    canonical-order check below sort by wall-clock TEXT instead of a real
+    instant. Returns the value converted to a UTC instant, or None when it
+    isn't a non-empty string, carries no explicit zone, or fails to parse."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    v = value.strip()
+    if not (v.endswith("Z") or re.search(r"[+-]\d{2}:\d{2}$", v)):
+        return None
+    try:
+        dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        return None
+    return dt.astimezone(timezone.utc)
+
+
+def _dry_run_attempted(dr: Any) -> bool:
+    """B5 (G2 r3 CH3-7): a row counts as attempted only when `dry_run` is a
+    dict carrying a real int `exit` code — `{}` (the pre-launch placeholder
+    `backfill._row` setdefaults, CARRY-C) or a dict with a missing/malformed
+    `exit` must NOT silently count as reviewed, or `unattempted`/`partial`
+    would understate what a halted dry-run actually left unattempted."""
+    return isinstance(dr, dict) and isinstance(dr.get("exit"), int)
+
+
+def _digest_row_ids(text: str) -> set[str]:
+    """B1 (G2 r3 CH3-1): the id column (first cell) of every genuine data
+    row in backfill.write_digest's markdown table — `| id | date | title |
+    home | created org | kept/dropped | classification | exit |` (8 cells).
+    Skips the header row (first cell literally "id") and the `|---|...|`
+    separator row (first cell all dashes) by content, not by fixed line
+    position, since blank lines and the stats/status lines precede the
+    table."""
+    ids: set[str] = set()
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("|") or not line.endswith("|") or len(line) < 2:
+            continue
+        cells = [c.strip() for c in line[1:-1].split("|")]
+        if len(cells) != 8:
+            continue
+        first = cells[0]
+        if not first or first == "id" or set(first) == {"-"}:
+            continue
+        ids.add(first)
+    return ids
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -159,30 +222,33 @@ def _sign_locked(args: argparse.Namespace, vault: Path, bd: Path) -> int:
             print(f"manifest.rows[{i}] id not filesystem-safe: {rid!r}", file=sys.stderr)
             return 1
 
-    # B4 (G2b r2 CH2-6): every row needs a non-empty, RFC3339-parseable
-    # occurred_at and a kind matching the manifest's own kind — a row
-    # missing either is not safely sortable/attributable, and the
-    # canonical-order check right below would silently treat a missing
-    # occurred_at as "" (sorts first) rather than refusing outright.
+    # B4 (G2 r3 CH3-6, mirrors backfill.py's A4): every row needs a
+    # non-empty occurred_at that carries an explicit zone (Z or a numeric
+    # UTC offset) and parses to a real instant — never naive/date-only,
+    # which the OLD `datetime.fromisoformat` check accepted outright — and
+    # a kind matching the manifest's own kind.
     for i, row in enumerate(raw_rows):
         occurred_at = row.get("occurred_at")
         if not isinstance(occurred_at, str) or not occurred_at.strip():
             print(f"manifest.rows[{i}] occurred_at missing or empty", file=sys.stderr)
             return 1
-        try:
-            datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
-        except ValueError:
-            print(f"manifest.rows[{i}] occurred_at is not RFC3339: {occurred_at!r}", file=sys.stderr)
+        if _occurred_at_utc(occurred_at) is None:
+            print(
+                f"manifest.rows[{i}] occurred_at is not RFC3339 (needs an explicit Z or UTC offset): {occurred_at!r}",
+                file=sys.stderr,
+            )
             return 1
         if row.get("kind") != kind:
             print(f"manifest.rows[{i}] kind {row.get('kind')!r} != manifest kind {kind!r}", file=sys.stderr)
             return 1
 
-    # F15 (CH-9): the manifest must be canonical — sorted by (occurred_at,
-    # id), no duplicate ids — the same order `apply` walks; a hand-edited or
-    # stale manifest that drifted from that order hides the drift from the
-    # human digest review sign_batch is meant to authorize.
-    canonical_keys = [(str(r.get("occurred_at") or ""), r["id"]) for r in raw_rows]
+    # F15 (CH-9) / B4: the manifest must be canonical — sorted by the REAL
+    # UTC INSTANT (not the raw occurred_at text: two rows a day apart in
+    # local text but reordered once converted to UTC must sort by instant),
+    # then id, no duplicate ids — the same order `apply` walks; a
+    # hand-edited or stale manifest that drifted from that order hides the
+    # drift from the human digest review sign_batch is meant to authorize.
+    canonical_keys = [(_occurred_at_utc(r.get("occurred_at")), r["id"]) for r in raw_rows]
     if canonical_keys != sorted(canonical_keys) or len(set(k[1] for k in canonical_keys)) != len(canonical_keys):
         print("manifest not canonical; re-run list", file=sys.stderr)
         return 1
@@ -206,14 +272,15 @@ def _sign_locked(args: argparse.Namespace, vault: Path, bd: Path) -> int:
     # signed_ids binds exactly the reviewed rows, so it is not silent — but
     # FR-015's letter is "dry-run every pending meeting", so partial sign-off
     # is now an explicit, recorded opt-in rather than a side effect of
-    # whatever happened to be in batch-progress.json. Same definition
-    # backfill's own digest header uses: every non-already_applied manifest
-    # row whose progress row carries no real `dry_run` dict.
+    # whatever happened to be in batch-progress.json. B5 (G2 r3 CH3-7): a
+    # row counts as attempted only via `_dry_run_attempted` (a real int
+    # exit) — a `{}` placeholder or a malformed dry_run must not silently
+    # count as reviewed, or `partial` would understate reality.
     prog_rows_map = raw_prog_rows or {}
     unattempted_ids: list[str] = [
         row["id"] for row in raw_rows
         if not row.get("already_applied")
-        and not isinstance((prog_rows_map.get(f"{kind}:{row['id']}") or {}).get("dry_run"), dict)
+        and not _dry_run_attempted((prog_rows_map.get(f"{kind}:{row['id']}") or {}).get("dry_run"))
     ]
     if unattempted_ids and not args.allow_partial:
         preview = ", ".join(unattempted_ids[:3])
@@ -247,15 +314,37 @@ def _sign_locked(args: argparse.Namespace, vault: Path, bd: Path) -> int:
         print(f"digest sha256 mismatch: digest.md={actual} digest.sha256={expected or '(missing)'}", file=sys.stderr)
         return 1
 
-    # G2 r2 P1: cross-check the digest's own `status: complete|partial (...)`
-    # line (backfill.write_digest) against the unattempted computation
-    # above — a hand-edited digest or a batch-progress.json that drifted
-    # from what was actually reviewed must not silently sign.
-    digest_status_match = re.search(r"^status: (.+)$", digest.read_text(encoding="utf-8"), re.MULTILINE)
-    digest_status = digest_status_match.group(1).strip() if digest_status_match else ""
-    digest_says_complete = digest_status == "complete"
-    digest_says_partial = digest_status.startswith("partial")
-    if (digest_says_complete and unattempted_ids) or (digest_says_partial and not unattempted_ids):
+    digest_text = digest.read_text(encoding="utf-8")
+
+    # B1 (G2 r3 CH3-1, Critical): the digest's own table must name EXACTLY
+    # the set of progress rows that were actually attempted (ok + failed,
+    # `_dry_run_attempted`) — under this batch's own kind, whether or not
+    # they're in the manifest (backfill.write_digest itself iterates
+    # `prog["rows"]`, not the manifest). A drift here (a row attempted
+    # after the digest was last published, or a hand-edited digest) means
+    # the reviewed digest and the batch being signed are not the same
+    # batch.
+    attempted_progress_ids: set[str] = set()
+    for row_key, entry in prog_rows_map.items():
+        prefix, sep, pid = row_key.partition(":")
+        if sep and prefix == kind and _dry_run_attempted(entry.get("dry_run")):
+            attempted_progress_ids.add(pid)
+    if _digest_row_ids(digest_text) != attempted_progress_ids:
+        print("digest rows differ from progress (re-run dry-run to republish the digest)", file=sys.stderr)
+        return 1
+
+    # B6 (fold-3 Minors 1-3): cross-check the digest's own header — both
+    # `status:` (its own line) and `unattempted: N` (embedded in the
+    # compound stats line, backfill.write_digest) must be PRESENT, and the
+    # NUMBER must equal the unattempted computation above — comparing the
+    # status WORD (complete/partial) was a weaker proxy for the same fact
+    # and is superseded by comparing the actual count.
+    status_match = _DIGEST_STATUS_RE.search(digest_text)
+    unattempted_match = _DIGEST_UNATTEMPTED_RE.search(digest_text)
+    if status_match is None or unattempted_match is None:
+        print("digest missing status/unattempted header; re-run dry-run", file=sys.stderr)
+        return 1
+    if int(unattempted_match.group(1)) != len(unattempted_ids):
         print("digest status disagrees with progress; re-run dry-run", file=sys.stderr)
         return 1
 

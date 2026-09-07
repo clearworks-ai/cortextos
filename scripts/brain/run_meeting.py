@@ -105,6 +105,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--apply", action="store_true")
     p.add_argument("--force", action="store_true")
     p.add_argument("--backfill", action="store_true")
+    # B3 (G2 r3 CH3-4): optional — only meaningful with --backfill.
+    # backfill.py's run_apply_subprocess (Agent A) passes this through so
+    # validate_batch_marker can require the marker's own batch_id to equal
+    # THIS invocation's batch, not just some real, fully-signed batch.
+    p.add_argument("--batch", default=None)
     p.add_argument("--repo-root", default=str(DEFAULT_REPO_ROOT))
     p.add_argument("--vault", default=str(DEFAULT_VAULT))
     args = p.parse_args(argv)
@@ -125,7 +130,10 @@ def main(argv: list[str] | None = None) -> int:
     source_dir = envelope_dir(vault, "fireflies", meeting_id)
 
     if args.apply:
-        return _run_apply(meeting_id, vault, repo, source_dir, force=args.force, backfill=args.backfill)
+        return _run_apply(
+            meeting_id, vault, repo, source_dir, force=args.force, backfill=args.backfill,
+            expected_batch_id=args.batch,
+        )
     return _run_dry(meeting_id, vault, repo, source_dir)
 
 
@@ -453,7 +461,7 @@ def _check_crm_scripts_support_full_file() -> int:
     return 0
 
 
-def _run_apply(meeting_id, vault, repo, source_dir, *, force, backfill=False) -> int:
+def _run_apply(meeting_id, vault, repo, source_dir, *, force, backfill=False, expected_batch_id=None) -> int:
     # G0b C2-3: unconditional — no --skip-sign-check bypass exists.
     # CH-1/S-2: existence alone is not proof of a real sign-off — validate
     # signed_by/signed_at/capture_sha256 (progress.validate_sign_marker).
@@ -467,7 +475,7 @@ def _run_apply(meeting_id, vault, repo, source_dir, *, force, backfill=False) ->
     # reviewed and signed (D-20) — --backfill must refuse a marker that
     # sign_batch.py did not fan out.
     if backfill:
-        batch_failure = progress.validate_batch_marker(vault, marker, meeting_id)
+        batch_failure = progress.validate_batch_marker(marker, vault, meeting_id, expected_batch_id=expected_batch_id)
         if batch_failure:
             print(batch_failure, file=sys.stderr)
             return 15
@@ -518,7 +526,7 @@ def _run_apply(meeting_id, vault, repo, source_dir, *, force, backfill=False) ->
     # the same envelope-bound re-check point as the line above, and the
     # requirement is unconditional for the rest of this run.
     if backfill:
-        post_fetch_batch_failure = progress.validate_batch_marker(vault, marker, meeting_id)
+        post_fetch_batch_failure = progress.validate_batch_marker(marker, vault, meeting_id, expected_batch_id=expected_batch_id)
         if post_fetch_batch_failure:
             print(post_fetch_batch_failure, file=sys.stderr)
             return 15

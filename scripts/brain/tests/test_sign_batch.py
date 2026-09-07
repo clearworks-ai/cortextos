@@ -50,12 +50,25 @@ def _external_flock_holder(lock_path: Path):
         proc.wait(timeout=5)
 
 
-def _digest_bytes(status: str = "complete") -> bytes:
-    # G2 r2 P1: real digest.md (backfill.write_digest) always carries a
-    # `status: complete|partial (...)` line — the fixture's own digest must
-    # carry one too so the new digest/progress cross-check has something
-    # real to agree or disagree with.
-    return f"# digest\nstatus: {status}\n".encode("utf-8")
+def _digest_bytes(attempted_ids=("A", "B", "C"), status: str = "complete", unattempted_n: int = 0) -> bytes:
+    # G2 r3 CH3-1/CH3-7/fold-3 minors: a real digest.md (backfill.write_digest)
+    # always carries BOTH a real markdown table (id is the first column of
+    # every data row, B1) AND a compound stats line with `unattempted: N`
+    # embedded in it (B6) alongside its own `status:` line — the fixture's
+    # own digest must carry all three, in the real shapes, or the new
+    # cross-checks (which are correctness checks, never weakened to fit a
+    # fixture) refuse every test that doesn't genuinely match.
+    header = (
+        "# digest\n\n"
+        f"kind: fireflies · manifest: {len(attempted_ids) + unattempted_n} · applied: 0 · "
+        f"meetings: {len(attempted_ids)} · ok: {len(attempted_ids)} · failed: 0 · "
+        f"unattempted: {unattempted_n} · cost_usd: 0.00\n"
+        f"status: {status}\n\n"
+        "| id | date | title | home | created org | kept/dropped | classification | exit |\n"
+        "|---|---|---|---|---|---|---|---|\n"
+    )
+    rows = "".join(f"| {mid} | 2026-09-01 | t | h |  |  |  | 0 |\n" for mid in attempted_ids)
+    return (header + rows + "\n").encode("utf-8")
 
 
 def _occurred_at_for(mid: str) -> str:
@@ -69,7 +82,7 @@ def _occurred_at_for(mid: str) -> str:
 
 
 def _seed(tmp_path: Path, ids=("A", "B", "C"), bad=(), failed=(), extra_progress_ids=(), unattempted=(),
-          digest_status="complete"):
+          digest_status="complete", digest_unattempted_n=None):
     import backfill, progress
     vault = tmp_path / "vault"
     bid = "fireflies-20260906T000000Z"
@@ -80,7 +93,15 @@ def _seed(tmp_path: Path, ids=("A", "B", "C"), bad=(), failed=(), extra_progress
     manifest_rows = [{"id": i, "kind": "fireflies", "occurred_at": _occurred_at_for(i)} for i in (*ids, *unattempted)]
     (bd / "manifest.json").write_text(json.dumps({"batch_id": bid, "kind": "fireflies", "rows": manifest_rows}), encoding="utf-8")
     (bd / "batch-progress.json").write_text(json.dumps({"batch_id": bid, "kind": "fireflies", "rows": rows, "sample_ids": [i for i in ids if i not in failed]}), encoding="utf-8")
-    digest_bytes = _digest_bytes(digest_status)
+    # B1: the digest table must name EXACTLY the ids with a real dry_run
+    # dict in `rows` above — every id in (*ids, *extra_progress_ids), since
+    # `rows` gives every one of them a real int `exit`. B6:
+    # `digest_unattempted_n` lets one adversarial test (the disagreement
+    # case) override the count without touching the real `unattempted`
+    # param above; every other caller gets the true `len(unattempted)`.
+    attempted_ids = (*ids, *extra_progress_ids)
+    unattempted_n = len(unattempted) if digest_unattempted_n is None else digest_unattempted_n
+    digest_bytes = _digest_bytes(attempted_ids, digest_status, unattempted_n)
     (bd / "digest.md").write_bytes(digest_bytes)
     sha = hashlib.sha256(digest_bytes).hexdigest()
     (bd / "digest.sha256").write_text(sha + "\n", encoding="utf-8")
@@ -253,10 +274,11 @@ def test_sign_batch_ignores_phantom_progress_rows(tmp_path):
     the discriminating RED this test now proves is guarded against."""
     import sign_batch
     from sign_marker import marker_path
-    # G2 r2 P1: Y/Z below have no real dry_run dict, so this batch is
-    # genuinely partial — the digest must say so or the new cross-check
-    # refuses before ever reaching the phantom-row guard under test.
-    vault, bd, bid = _seed(tmp_path, digest_status="partial (budget)")
+    # G2 r2 P1 / B6: Y/Z below have no real dry_run dict, so this batch is
+    # genuinely partial — the digest's unattempted:2 header must match that
+    # (Y, Z) or the new count cross-check refuses before ever reaching the
+    # phantom-row guard under test.
+    vault, bd, bid = _seed(tmp_path, digest_status="partial (budget)", digest_unattempted_n=2)
     # F15 (CH-9): appended in (occurred_at, id) canonical order — Y before Z
     # — so this fixture's own manifest stays canonical; only the base ids
     # (A, B, C) plus these two phantoms are under test here, not ordering.
@@ -330,17 +352,49 @@ def test_sign_batch_complete_batch_records_partial_false(tmp_path):
 
 
 def test_sign_batch_refuses_digest_status_disagreeing_with_progress(tmp_path, capsys):
-    """G2 r2 P1 (3): the digest says `status: partial (budget)` but every
-    manifest row actually has a real dry_run entry (unattempted is empty) —
-    a hand-edited digest or a batch-progress.json that drifted from what was
-    reviewed must refuse, not sign against a stale claim."""
+    """G2 r2 P1 (3) / B6 (fold-3 minors, the header count supersedes the
+    status word): the digest's `unattempted: 2` header claims 2 unattempted
+    rows, but every manifest row actually has a real dry_run entry
+    (computed unattempted is empty) — a hand-edited digest or a
+    batch-progress.json that drifted from what was reviewed must refuse,
+    not sign against a stale claim. `digest_unattempted_n` overrides only
+    the header text, independent of the real `unattempted=()` (so the
+    table/row-id check, B1, still agrees with progress — isolating B6)."""
     import sign_batch
     from sign_marker import marker_path
-    vault, bd, bid = _seed(tmp_path, digest_status="partial (budget)")
+    vault, bd, bid = _seed(tmp_path, digest_status="partial (budget)", digest_unattempted_n=2)
     assert sign_batch.main(_args(vault, bd, bid)) == 1
     assert "digest status disagrees with progress; re-run dry-run" in capsys.readouterr().err
     assert not (bd / "batch-signed.json").exists()
     assert not any(marker_path(vault, "fireflies", i).exists() for i in ("A", "B", "C"))
+
+
+def test_sign_batch_refuses_digest_missing_status_or_unattempted_header(tmp_path, capsys):
+    """B6 (fold-3 minors): a digest with no `status:` line and/or no
+    `unattempted: N` embedded in its stats line must refuse outright, not
+    treat the absence as vacuously agreeing."""
+    import sign_batch
+    vault, bd, bid = _seed(tmp_path)
+    bad_digest = b"# digest\n\n| id | date | title | home | created org | kept/dropped | classification | exit |\n|---|---|---|---|---|---|---|---|\n| A | 2026-09-01 | t | h |  |  |  | 0 |\n| B | 2026-09-01 | t | h |  |  |  | 0 |\n| C | 2026-09-01 | t | h |  |  |  | 0 |\n\n"
+    (bd / "digest.md").write_bytes(bad_digest)
+    (bd / "digest.sha256").write_text(hashlib.sha256(bad_digest).hexdigest() + "\n", encoding="utf-8")
+    assert sign_batch.main(_args(vault, bd, bid)) == 1
+    assert "digest missing status/unattempted header; re-run dry-run" in capsys.readouterr().err
+    assert not (bd / "batch-signed.json").exists()
+
+
+def test_sign_batch_refuses_digest_row_ids_differ_from_progress(tmp_path, capsys):
+    """B1 (G2 r3 CH3-1, Critical): an exit-0 progress row (D) not named in
+    the digest's own table must refuse — the digest being reviewed is not
+    the same set of meetings as the batch about to be signed."""
+    import sign_batch
+    vault, bd, bid = _seed(tmp_path)
+    prog = json.loads((bd / "batch-progress.json").read_text(encoding="utf-8"))
+    prog["rows"]["fireflies:D"] = {"dry_run": {"exit": 0}}
+    (bd / "batch-progress.json").write_text(json.dumps(prog), encoding="utf-8")
+    assert sign_batch.main(_args(vault, bd, bid)) == 1
+    assert "digest rows differ from progress (re-run dry-run to republish the digest)" in capsys.readouterr().err
+    assert not (bd / "batch-signed.json").exists()
 
 
 def test_sign_batch_writes_fanout_complete_true_after_last_marker(tmp_path):
@@ -533,6 +587,57 @@ def test_sign_batch_refuses_row_occurred_at_not_rfc3339(tmp_path, capsys):
     assert sign_batch.main(_args(vault, bd, bid)) == 1
     assert "occurred_at is not RFC3339" in capsys.readouterr().err
     assert not (bd / "batch-signed.json").exists()
+
+
+def test_sign_batch_refuses_naive_or_date_only_occurred_at(tmp_path, capsys):
+    """B4 (G2 r3 CH3-6, mirrors backfill.py's A4): a naive or date-only
+    occurred_at (no 'Z', no UTC offset) is exactly the string
+    datetime.fromisoformat WOULD happily parse (as local midnight) — the
+    old check let it through; it must now be refused the same way a
+    genuinely malformed string is."""
+    import sign_batch
+    vault, bd, bid = _seed(tmp_path)
+    manifest = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
+    manifest["rows"][0]["occurred_at"] = "2026-09-01T00:00:00"  # naive: no zone
+    (bd / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert sign_batch.main(_args(vault, bd, bid)) == 1
+    assert "occurred_at is not RFC3339" in capsys.readouterr().err
+    assert not (bd / "batch-signed.json").exists()
+
+    manifest["rows"][0]["occurred_at"] = "2026-09-01"  # date-only: also naive
+    (bd / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert sign_batch.main(_args(vault, bd, bid)) == 1
+    assert "occurred_at is not RFC3339" in capsys.readouterr().err
+    assert not (bd / "batch-signed.json").exists()
+
+
+def test_sign_batch_canonical_order_by_utc_instant_not_local_text(tmp_path, capsys):
+    """B4 (G2 r3 CH3-6, mirrors backfill.py's A4): two rows whose raw text
+    would sort one way but whose real UTC instants sort the OPPOSITE way
+    must be ordered — and refused as non-canonical — by the real instant,
+    never the offset-naive text. Row A: 2026-09-01T23:00:00-05:00 = UTC
+    2026-09-02T04:00:00. Row B: 2026-09-02T00:00:00Z = UTC
+    2026-09-02T00:00:00 — earlier than A by instant despite A's text
+    sorting first."""
+    import sign_batch
+    vault, bd, bid = _seed(tmp_path, ids=("A", "B"))
+    manifest = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
+    by_id = {r["id"]: r for r in manifest["rows"]}
+    by_id["A"]["occurred_at"] = "2026-09-01T23:00:00-05:00"
+    by_id["B"]["occurred_at"] = "2026-09-02T00:00:00Z"
+    # Text-sorted (A, B) order is what's on disk here — this must refuse as
+    # non-canonical, since by UTC instant B (00:00) precedes A (04:00).
+    (bd / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert sign_batch.main(_args(vault, bd, bid)) == 1
+    assert "manifest not canonical; re-run list" in capsys.readouterr().err
+    assert not (bd / "batch-signed.json").exists()
+
+    # Reordered to true UTC-instant order (B, then A) — now canonical, and
+    # nothing else in the fixture was disturbed, so signing succeeds fully.
+    manifest["rows"] = [by_id["B"], by_id["A"]]
+    (bd / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert sign_batch.main(_args(vault, bd, bid)) == 0, capsys.readouterr().err
+    assert (bd / "batch-signed.json").exists()
 
 
 def test_sign_batch_refuses_row_kind_mismatch(tmp_path, capsys):

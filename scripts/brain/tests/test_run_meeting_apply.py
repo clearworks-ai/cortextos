@@ -975,20 +975,41 @@ def _sign_for_restart_test(vault: Path, mid: str, tmp_path: Path, env: dict, rep
     assert sign.returncode == 0, sign.stderr
 
 
-def _write_batch_signed(vault: Path, batch_id: str, digest_sha256: str, meeting_ids: list[str]) -> None:
-    """B1 (G2b r2 CH2-2): validate_batch_marker now re-resolves and re-reads
-    `_backfill/<batch_id>/batch-signed.json` (batch_id/digest_sha256 must
-    match, meeting_id must be in signed_ids, fanout_complete must be true)
-    — a marker carrying batch_id/digest_sha256 alone is no longer enough.
-    Tests that hand-write a batch-bound marker via sign_marker.write_marker
-    directly (rather than driving the real sign_batch.py) must also write
-    this companion file so the marker isn't orphaned."""
+def _write_batch_signed(
+    vault: Path, batch_id: str, meeting_ids: list[str], *, signed_by: str = "Josh",
+    signed_at: str = "2026-09-05T00:00:00Z", fanout_complete: bool = True,
+) -> str:
+    """B1 (G2b r2 CH2-2) / B2 (G2 r3 CH3-2, Critical — supersedes the B1
+    version): validate_batch_marker now re-resolves `_backfill/<batch_id>/`
+    and re-HASHES digest.md/manifest.json ON DISK (never trusting
+    batch-signed.json's own recollection of what they hashed to), and
+    cross-checks marker.signed_by/signed_at against batch-signed.json's own
+    recorded values too. A minimal batch-signed.json with an arbitrary
+    digest_sha256 is no longer enough — per the coordinator's key rule for
+    this fold, the fixture is upgraded to a FULLY CONSISTENT batch dir
+    (real digest.md + digest.sha256 sidecar + manifest.json, genuinely
+    hashed) rather than weakening validate_batch_marker to fit it. Returns
+    the real digest_sha256 so the caller stamps the SAME value onto the
+    marker via sign_marker.write_marker's `extra=`."""
     bd = vault / "raw/media/transcripts/_backfill" / batch_id
     bd.mkdir(parents=True, exist_ok=True)
+    digest_bytes = b"# digest\nstatus: complete\n"
+    (bd / "digest.md").write_bytes(digest_bytes)
+    digest_sha256 = hashlib.sha256(digest_bytes).hexdigest()
+    (bd / "digest.sha256").write_text(digest_sha256 + "\n", encoding="utf-8")
+    manifest = {
+        "batch_id": batch_id, "kind": "fireflies",
+        "rows": [{"id": mid, "kind": "fireflies", "occurred_at": "2026-09-01T00:00:00Z"} for mid in meeting_ids],
+    }
+    manifest_bytes = json.dumps(manifest).encode("utf-8")
+    (bd / "manifest.json").write_bytes(manifest_bytes)
+    manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
     (bd / "batch-signed.json").write_text(json.dumps({
-        "batch_id": batch_id, "digest_sha256": digest_sha256, "signed_ids": list(meeting_ids),
-        "fanout_complete": True,
+        "batch_id": batch_id, "digest_sha256": digest_sha256, "manifest_sha256": manifest_sha256,
+        "signed_ids": list(meeting_ids), "signed_by": signed_by, "signed_at": signed_at,
+        "fanout_complete": fanout_complete,
     }), encoding="utf-8")
+    return digest_sha256
 
 
 def test_apply_rejects_marker_missing_source_binding_fields(tmp_path):
@@ -1414,12 +1435,13 @@ def test_backfill_apply_skips_tasks_draft_status_with_done_false_and_still_commi
     # fan-out uses), rather than _sign_for_restart_test's per-meeting shape.
     from sign_marker import write_marker
     capture = _write_phase3_capture(tmp_path, vault, repo, mid, env)
+    batch_id = "fireflies-20260906T000000Z"
+    digest_sha256 = _write_batch_signed(vault, batch_id, [mid])
     marker_rc, _marker_path, _marker_msg = write_marker(
         vault, "fireflies", mid, capture, signed_by="Josh", signed_at="2026-09-05T00:00:00Z",
-        extra={"batch_id": "fireflies-20260906T000000Z", "digest_sha256": "0" * 64},
+        extra={"batch_id": batch_id, "digest_sha256": digest_sha256},
     )
     assert marker_rc == 0
-    _write_batch_signed(vault, "fireflies-20260906T000000Z", "0" * 64, [mid])
     # Spy shims: log argv, then exec the _install_fakes shim of the same name.
     spy = tmp_path / "spy"; spy.mkdir()
     for name in ("cortextos", "gws"):
@@ -1560,13 +1582,14 @@ def test_backfill_apply_refuses_marker_not_in_signed_ids(tmp_path):
     from sign_marker import write_marker
     capture = _write_phase3_capture(tmp_path, vault, repo, mid, env)
     batch_id = "fireflies-20260908T000001Z"
+    # batch-signed.json is real, digest/manifest hashes real, signer/date
+    # match — but signed_ids never named this meeting.
+    digest_sha256 = _write_batch_signed(vault, batch_id, ["some-other-meeting-id"])
     marker_rc, _marker_path, _marker_msg = write_marker(
         vault, "fireflies", mid, capture, signed_by="Josh", signed_at="2026-09-05T00:00:00Z",
-        extra={"batch_id": batch_id, "digest_sha256": "5" * 64},
+        extra={"batch_id": batch_id, "digest_sha256": digest_sha256},
     )
     assert marker_rc == 0
-    # batch-signed.json is real, digest matches, but signed_ids never named this meeting.
-    _write_batch_signed(vault, batch_id, "5" * 64, ["some-other-meeting-id"])
 
     result = subprocess.run(
         [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
@@ -1579,6 +1602,134 @@ def test_backfill_apply_refuses_marker_not_in_signed_ids(tmp_path):
     state = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}"
     assert not (state / "receipt.json").exists()
     assert not (state / "progress.json").exists()
+
+
+def _sign_batch_marker(tmp_path, vault, repo, mid, env, batch_id):
+    from sign_marker import write_marker
+    capture = _write_phase3_capture(tmp_path, vault, repo, mid, env)
+    digest_sha256 = _write_batch_signed(vault, batch_id, [mid])
+    marker_rc, _marker_path, _marker_msg = write_marker(
+        vault, "fireflies", mid, capture, signed_by="Josh", signed_at="2026-09-05T00:00:00Z",
+        extra={"batch_id": batch_id, "digest_sha256": digest_sha256},
+    )
+    assert marker_rc == 0
+
+
+def test_backfill_apply_refuses_drifted_digest(tmp_path):
+    """B2 (G2 r3 CH3-2, Critical): batch-signed.json's own digest_sha256
+    still matches the marker, but the REAL digest.md bytes on disk have
+    since drifted (hand-edited, or a stale sidecar) — validate_batch_marker
+    must re-hash digest.md itself, not just trust batch-signed.json's
+    recollection."""
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    batch_id = "fireflies-20260909T000000Z"
+    _sign_batch_marker(tmp_path, vault, repo, mid, env, batch_id)
+    bd = vault / "raw/media/transcripts/_backfill" / batch_id
+    (bd / "digest.md").write_bytes(b"# digest\nstatus: complete\ntampered\n")  # sidecar/batch-signed.json left stale
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--backfill"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 15, result.stderr + result.stdout
+    assert "digest_sha256" in result.stderr
+
+
+def test_backfill_apply_refuses_manifest_sha_mismatch(tmp_path):
+    """B2 (G2 r3 CH3-2, Critical): manifest.json's real bytes no longer
+    hash to batch-signed.json's own manifest_sha256 — the manifest
+    reviewed at sign time is not the manifest on disk now."""
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    batch_id = "fireflies-20260909T000001Z"
+    _sign_batch_marker(tmp_path, vault, repo, mid, env, batch_id)
+    bd = vault / "raw/media/transcripts/_backfill" / batch_id
+    (bd / "manifest.json").write_bytes(b'{"batch_id": "tampered"}')
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--backfill"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 15, result.stderr + result.stdout
+    assert "manifest_sha256" in result.stderr
+
+
+def test_backfill_apply_refuses_signer_mismatch(tmp_path):
+    """B2 (G2 r3 CH3-2, Critical): the marker's own signed_by disagrees
+    with batch-signed.json's recorded signed_by — a hand-edited marker
+    signer must be refused even though every other binding holds."""
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    # BRAIN_SIGNERS override so "SomeoneElse" passes validate_sign_marker's
+    # OWN allowlist check (which runs before validate_batch_marker) —
+    # otherwise this would (mis)test that earlier, pre-existing gate
+    # instead of isolating B2's NEW signed_by-vs-batch-signed.json check.
+    env["BRAIN_SIGNERS"] = "Josh,SomeoneElse"
+    from sign_marker import write_marker
+    capture = _write_phase3_capture(tmp_path, vault, repo, mid, env)
+    batch_id = "fireflies-20260909T000002Z"
+    digest_sha256 = _write_batch_signed(vault, batch_id, [mid], signed_by="Josh")
+    marker_rc, _marker_path, _marker_msg = write_marker(
+        vault, "fireflies", mid, capture, signed_by="SomeoneElse", signed_at="2026-09-05T00:00:00Z",
+        extra={"batch_id": batch_id, "digest_sha256": digest_sha256},
+    )
+    assert marker_rc == 0
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--backfill"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 15, result.stderr + result.stdout
+    assert "signed_by" in result.stderr
+
+
+def test_backfill_apply_refuses_batch_flag_mismatch(tmp_path):
+    """B3 (G2 r3 CH3-4, run_meeting half): --batch <id> is optional and
+    only meaningful with --backfill — when given, the marker's own
+    batch_id must equal it exactly, even when the marker is otherwise
+    fully valid for a DIFFERENT real, fully-signed batch."""
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    batch_id = "fireflies-20260909T000003Z"
+    _sign_batch_marker(tmp_path, vault, repo, mid, env, batch_id)
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--backfill",
+         "--batch", "fireflies-20260909T999999Z"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 15, result.stderr + result.stdout
+    assert "!= --batch" in result.stderr
+
+    # Sanity: the SAME marker with the CORRECT --batch still authorizes normally.
+    matching = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--backfill",
+         "--batch", batch_id],
+        capture_output=True, text=True, env=env,
+    )
+    assert matching.returncode == 0, matching.stderr + matching.stdout
 
 
 def test_backfill_prior_done_snapshot_survives_later_live_force(tmp_path):
@@ -1598,12 +1749,13 @@ def test_backfill_prior_done_snapshot_survives_later_live_force(tmp_path):
     (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
     from sign_marker import write_marker
     capture = _write_phase3_capture(tmp_path, vault, repo, mid, env)
+    batch_id = "fireflies-20260907T000000Z"
+    digest_sha256 = _write_batch_signed(vault, batch_id, [mid])
     marker_rc, _marker_path, _marker_msg = write_marker(
         vault, "fireflies", mid, capture, signed_by="Josh", signed_at="2026-09-05T00:00:00Z",
-        extra={"batch_id": "fireflies-20260907T000000Z", "digest_sha256": "1" * 64},
+        extra={"batch_id": batch_id, "digest_sha256": digest_sha256},
     )
     assert marker_rc == 0
-    _write_batch_signed(vault, "fireflies-20260907T000000Z", "1" * 64, [mid])
 
     state = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}"
     state.mkdir(parents=True, exist_ok=True)
@@ -1654,12 +1806,13 @@ def test_live_force_after_backfill_apply_performs_tasks_draft_status(tmp_path):
     (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
     from sign_marker import write_marker
     capture = _write_phase3_capture(tmp_path, vault, repo, mid, env)
+    batch_id = "fireflies-20260907T000001Z"
+    digest_sha256 = _write_batch_signed(vault, batch_id, [mid])
     marker_rc, _marker_path, _marker_msg = write_marker(
         vault, "fireflies", mid, capture, signed_by="Josh", signed_at="2026-09-05T00:00:00Z",
-        extra={"batch_id": "fireflies-20260907T000001Z", "digest_sha256": "2" * 64},
+        extra={"batch_id": batch_id, "digest_sha256": digest_sha256},
     )
     assert marker_rc == 0
-    _write_batch_signed(vault, "fireflies-20260907T000001Z", "2" * 64, [mid])
     spy = tmp_path / "spy2"; spy.mkdir()
     for name in ("cortextos", "gws"):
         (spy / name).write_text(f"#!/bin/sh\necho \"{name} $*\" >> {spy / 'calls.log'}\nexec {bindir / name} \"$@\"\n", encoding="utf-8")
@@ -1712,12 +1865,13 @@ def test_backfill_apply_does_not_enforce_acceptance_minimums(tmp_path):
     assert mid in _acceptance_meeting_ids()
     from sign_marker import write_marker
     capture = _write_phase3_capture(tmp_path, vault, repo, mid, env)
+    batch_id = "fireflies-20260907T000002Z"
+    digest_sha256 = _write_batch_signed(vault, batch_id, [mid])
     marker_rc, _marker_path, _marker_msg = write_marker(
         vault, "fireflies", mid, capture, signed_by="Josh", signed_at="2026-09-05T00:00:00Z",
-        extra={"batch_id": "fireflies-20260907T000002Z", "digest_sha256": "3" * 64},
+        extra={"batch_id": batch_id, "digest_sha256": digest_sha256},
     )
     assert marker_rc == 0
-    _write_batch_signed(vault, "fireflies-20260907T000002Z", "3" * 64, [mid])
 
     result = subprocess.run(
         [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
@@ -1756,7 +1910,19 @@ def test_backfill_apply_real_path_records_15_when_capture_edited_after_batch_sig
         {"id": mid, "kind": "fireflies", "occurred_at": "2026-09-01T00:00:00+00:00", "already_applied": False}]}), encoding="utf-8")
     (bd / "batch-progress.json").write_text(json.dumps({"batch_id": bid, "kind": "fireflies",
         "rows": {f"fireflies:{mid}": {"dry_run": {"exit": 0}}}, "sample_ids": [mid]}), encoding="utf-8")
-    digest = b"# d\n"; sha = hashlib.sha256(digest).hexdigest()
+    # B1/B6 (G2 r3 CH3-1/fold-3 minors): sign_batch.py now requires the
+    # digest's own table to name exactly the attempted progress ids, plus a
+    # real status/unattempted header — a bare "# d\n" digest (pre-fold-4)
+    # no longer round-trips through the real sign_batch.py this test drives.
+    digest = (
+        "# digest\n\n"
+        "kind: fireflies · manifest: 1 · applied: 0 · meetings: 1 · ok: 1 · failed: 0 · unattempted: 0 · cost_usd: 0.00\n"
+        "status: complete\n\n"
+        "| id | date | title | home | created org | kept/dropped | classification | exit |\n"
+        "|---|---|---|---|---|---|---|---|\n"
+        f"| {mid} | 2026-09-01 | t | h |  |  |  | 0 |\n\n"
+    ).encode("utf-8")
+    sha = hashlib.sha256(digest).hexdigest()
     (bd / "digest.md").write_bytes(digest); (bd / "digest.sha256").write_text(sha + "\n", encoding="utf-8")
     versioned = bd / f"sample-{sha[:12]}"; versioned.mkdir()
     (versioned / f"{mid}.txt").write_bytes(capture.read_bytes())
@@ -1796,7 +1962,19 @@ def test_backfill_apply_real_path_happy_path_applies_signed_meeting(tmp_path):
         {"id": mid, "kind": "fireflies", "occurred_at": "2026-09-01T00:00:00+00:00", "already_applied": False}]}), encoding="utf-8")
     (bd / "batch-progress.json").write_text(json.dumps({"batch_id": bid, "kind": "fireflies",
         "rows": {f"fireflies:{mid}": {"dry_run": {"exit": 0}}}, "sample_ids": [mid]}), encoding="utf-8")
-    digest = b"# d\n"; sha = hashlib.sha256(digest).hexdigest()
+    # B1/B6 (G2 r3 CH3-1/fold-3 minors): sign_batch.py now requires the
+    # digest's own table to name exactly the attempted progress ids, plus a
+    # real status/unattempted header — a bare "# d\n" digest (pre-fold-4)
+    # no longer round-trips through the real sign_batch.py this test drives.
+    digest = (
+        "# digest\n\n"
+        "kind: fireflies · manifest: 1 · applied: 0 · meetings: 1 · ok: 1 · failed: 0 · unattempted: 0 · cost_usd: 0.00\n"
+        "status: complete\n\n"
+        "| id | date | title | home | created org | kept/dropped | classification | exit |\n"
+        "|---|---|---|---|---|---|---|---|\n"
+        f"| {mid} | 2026-09-01 | t | h |  |  |  | 0 |\n\n"
+    ).encode("utf-8")
+    sha = hashlib.sha256(digest).hexdigest()
     (bd / "digest.md").write_bytes(digest); (bd / "digest.sha256").write_text(sha + "\n", encoding="utf-8")
     versioned = bd / f"sample-{sha[:12]}"; versioned.mkdir()
     (versioned / f"{mid}.txt").write_bytes(capture.read_bytes())

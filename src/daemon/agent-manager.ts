@@ -23,9 +23,16 @@ import { readEnabledAgentsMap } from '../bus/enabled-agents-io.js';
 import { killProcessTree, getProcessElapsedSeconds } from '../utils/process-tree.js';
 import { maybeEmitMeetingEvent } from './meeting-event-emit.js';
 import { dispatchMeetingConsumers } from './meeting-consumer-dispatch.js';
+import { BuzzRelayClient, BuzzDispatcher, loadBuzzConfig, type NostrEvent } from '../buzz/index.js';
+import { computeDormancy, parseHeartbeatIntervalMs } from '../utils/dormancy.js';
+import { CRONS_DIRECTORY, CRONS_FILENAME } from '../bus/crons-schema.js';
 
 type LogFn = (msg: string) => void;
 
+/**
+ * One agent's registry entry. Named (was an inline literal on `agents`) so the
+ * map-entry-race identity guard below can be typed honestly.
+ */
 type AgentEntry = {
   process: AgentProcess;
   checker: FastChecker;
@@ -33,7 +40,19 @@ type AgentEntry = {
   activityPoller?: TelegramPoller;
   telegramRejectCount?: number;
   telegramLastRejectAlertAt?: number;
-  /** Set synchronously when teardown begins so parked start/callback work cannot re-arm. */
+  /**
+   * Round 3 (F5/F2): set by stopAgent the moment a teardown of THIS entry begins.
+   *
+   * Distinct from `stillMapped()` on purpose, and the distinction is the whole
+   * point. stillMapped answers "does the name still resolve to me", which is
+   * false in TWO very different situations: I was stopped, or I am still running
+   * and somebody else took my name. Callbacks that arrive from MY OWN poller are
+   * legitimately mine in the second case and must still be handled — that is what
+   * T13/T14 pin. Only the first case means "do not act on the world".
+   *
+   * A per-entry flag rather than a map lookup because teardown is a fact about
+   * this object, and the object is what we still hold across the await.
+   */
   stopped?: boolean;
 };
 
@@ -43,14 +62,41 @@ type AgentEntry = {
 export class AgentManager {
   private agents: Map<string, AgentEntry> = new Map();
   private workers: Map<string, WorkerProcess> = new Map();
+  /**
+   * Org-level singleton Buzz relay client + dispatcher, keyed by org — one
+   * shared WebSocket connection per org (mirrors the Slack Socket Mode
+   * shape: one relay per workspace/org, not one connection per agent).
+   * Only the org's orchestrator starts these; every other agent in the org
+   * registers into the same dispatcher instance without opening its own
+   * connection.
+   */
+  private buzzClients: Map<string, { client: BuzzRelayClient; dispatcher: BuzzDispatcher; started: boolean }> = new Map();
   /** Daemon-level cron scheduler registry: one CronScheduler per enabled agent. */
   private cronSchedulers: Map<string, CronScheduler> = new Map();
   // Tracks agents that received a start request while still stopping.
   // stopAgent() honors these after cleanup completes so restart-all is race-free.
   private pendingRestarts: Set<string> = new Set();
-  /** Names whose stale registry entry is being stopped before a replacement starts. */
+  // liveness fix: names currently being evicted+restarted. Claimed synchronously
+  // BEFORE the eviction's `await`, so a concurrent startAgent() for the same dead
+  // entry returns instead of double-spawning a PTY (same hazard class BUG-011's
+  // pendingRestarts guards for alive entries).
   private evictingAgents: Set<string> = new Set();
-  /** Names whose normal stop teardown is in flight. Claimed before the first await. */
+  // idempotency fix: names with a stopAgent() teardown currently in flight.
+  // Claimed synchronously on stopAgent() entry (before its first await), so a
+  // concurrent startAgent() hitting the alive-branch can tell a legit in-flight
+  // restart (queue via pendingRestarts) from a pure duplicate start (no-op).
+  //
+  // ORDERING INVARIANT (relied on by the alive-branch no-op path): for any
+  // coordinated stop+start pair on the same name, stopAgent() must claim
+  // `stoppingAgents` synchronously BEFORE the paired startAgent() runs its
+  // synchronous prefix (the alive-branch check). All CURRENT dispatch paths
+  // satisfy this: restartAgent() and stopAll() are sequential-await (stop is
+  // fully entered — marker claimed — before start begins), and IPC stop/start
+  // messages are processed in arrival order (a restart-all sends stop first).
+  // A hypothetical FUTURE caller that dispatched startAgent() BEFORE stopAgent()
+  // for a coordinated restart would find `stoppingAgents` still empty, take the
+  // idempotent no-op path, and have its start SWALLOWED — so callers MUST keep
+  // stop-before-start ordering for coordinated restarts.
   private stoppingAgents: Set<string> = new Set();
   private instanceId: string;
   private ctxRoot: string;
@@ -73,6 +119,12 @@ export class AgentManager {
   // the orchestrator (e.g. a restart) while this daemon process is alive.
   private slackSocketStarted = false;
   private slackSocketClient: SlackSocketModeClient | null = null;
+
+  // silent-dormancy fix: epoch ms of when this AgentManager (i.e. the daemon)
+  // was constructed. Used as the Face-B liveness baseline for enabled agents
+  // that are absent from the mapped set — there is no per-agent uptime for
+  // them, so staleness is measured relative to daemon start.
+  private daemonStartMs: number = Date.now();
 
   constructor(instanceId: string, ctxRoot: string, frameworkRoot: string, org: string) {
     this.instanceId = instanceId;
@@ -214,7 +266,7 @@ export class AgentManager {
   }
 
   /**
-   * RW-3 fix: classify a registry pid before reconcile acts on it.
+   * RW-3 fix: classify a registry pid before liveness/eviction acts on it.
    *
    * - 'alive'    — pid is running AND plausibly still our process.
    * - 'dead'     — pid is gone (ESRCH). Safe to include in the tree-kill
@@ -255,89 +307,6 @@ export class AgentManager {
       }
     }
     return 'alive';
-  }
-
-  /**
-   * If `name` is registered but its process is not actually alive (no pid, a
-   * pid that is no longer running, or a recycled pid that is no longer OUR
-   * process), tear the phantom registry entry down and return true so the
-   * caller can proceed with a fresh start. A genuinely-alive pid keeps the
-   * entry (returns false).
-   *
-   * RW-3 fix (UPSTREAM-ROOT-WOUND.md): before deleting the Map entry, SIGKILL
-   * the FULL process tree — the pty-host child AND the inner claude pid plus
-   * every discoverable descendant. The pre-fix delete-without-kill authorized
-   * a fresh spawn on top of whatever was still alive (pty-host dead ≠ claude
-   * dead — the grandchild reparents), which is the confirmed +1-orphan-per-
-   * cycle accumulation behind the posix_spawnp fleet death. This module
-   * remains a fork-only band-aid slated for REMOVAL once RW-1 (restart churn)
-   * and RW-6 (orphan reaper) land and hold — do not extend it.
-   */
-  private reconcileDeadRegistryEntry(name: string): boolean {
-    const entry = this.agents.get(name);
-    if (!entry) return false;
-
-    const status = entry.process.getStatus();
-    const pid = status.pid;
-    const verdict = pid ? this.classifyRegistryPid(pid, status.sessionStart) : 'dead';
-    if (verdict === 'alive') return false;
-
-    console.warn(
-      `[agent-manager] Reconciled dead registry entry for ${name} ` +
-      `(pid ${pid ?? 'none'} ${verdict === 'recycled' ? 'recycled — not our process' : 'not alive'})`,
-    );
-    entry.poller?.stop();
-    entry.activityPoller?.stop();
-    entry.checker.stop();
-
-    // Kill/reap the full tree BEFORE deleting the entry, so the respawn this
-    // reconcile authorizes never lands on top of live leftovers. Roots:
-    //  - pty-host child pid (parent of the inner pid) — always fair game,
-    //    it is unambiguously ours.
-    //  - the registered inner pid — ONLY when not classified as recycled
-    //    (a recycled pid belongs to an innocent process; ESRCH-dead pids are
-    //    harmless to include, SIGKILL just no-ops).
-    const killRoots: number[] = [];
-    // typeof guard: unit tests inject minimal AgentProcess fakes.
-    const hostPid = typeof entry.process.getHostPid === 'function' ? entry.process.getHostPid() : null;
-    if (hostPid) killRoots.push(hostPid);
-    if (pid && verdict !== 'recycled') killRoots.push(pid);
-    if (killRoots.length > 0) {
-      killProcessTree(killRoots, (msg) => console.warn(`[agent-manager] reconcile(${name}): ${msg}`));
-    }
-
-    this.agents.delete(name);
-    this.pendingRestarts.delete(name);
-
-    const scheduler = this.cronSchedulers.get(name);
-    if (scheduler) {
-      scheduler.stop();
-      this.cronSchedulers.delete(name);
-    }
-    return true;
-  }
-
-  /**
-   * Registry presence is not liveness. A start that is still spawning is live
-   * even before it has a pid; a running entry must also own a live pid.
-   */
-  private isAgentActuallyAlive(name: string): boolean {
-    const entry = this.agents.get(name);
-    if (!entry) return false;
-    const { status, pid, sessionStart } = entry.process.getStatus();
-    if (status === 'starting') return true;
-    // Conservative compatibility for partial status adapters: a live,
-    // non-recycled pid is stronger liveness evidence than an omitted label.
-    if (status === undefined) {
-      return !!pid && this.classifyRegistryPid(pid, sessionStart) === 'alive';
-    }
-    if (status !== 'running') return false;
-    return !!pid && this.classifyRegistryPid(pid, sessionStart) === 'alive';
-  }
-
-  /** True only while the name still resolves to the exact captured lifecycle. */
-  private stillMapped(name: string, entry: AgentEntry): boolean {
-    return this.agents.get(name) === entry;
   }
 
   /**
@@ -452,8 +421,48 @@ export class AgentManager {
    * restartAgent is unchanged — this read-only check exists purely to give
    * the IPC layer enough info to set IPCResponse.code. See issue #346.
    */
+  /**
+   * liveness fix: true liveness for a mapped agent — presence in this.agents is
+   * NOT proof of life. An entry is actually alive only if its AgentProcess
+   * reports a live status AND (for a running entry) its OS pid is actually alive.
+   * 'starting' is treated as alive with NO pid check: an in-flight start has not
+   * spawned a pid yet, and preempting it would break the BUG-011 in-flight-restart
+   * dedup. All other statuses (stopped/crashed/halted) — and 'running' with a
+   * dead/absent pid — are dead and eligible for eviction.
+   */
+  private isAgentActuallyAlive(name: string): boolean {
+    const entry = this.agents.get(name);
+    if (!entry) return false;
+    const { status, pid, sessionStart } = entry.process.getStatus();
+    if (status === 'starting') return true;   // in-flight start — never evict
+    // Conservative compatibility for partial status adapters: a live,
+    // non-recycled pid is stronger liveness evidence than an omitted label.
+    if (status === undefined) {
+      return !!pid && this.classifyRegistryPid(pid, sessionStart) === 'alive';
+    }
+    if (status !== 'running') return false;   // stopped / crashed / halted => dead
+    // running => must have a live, non-recycled pid (RW-3)
+    return !!pid && this.classifyRegistryPid(pid, sessionStart) === 'alive';
+  }
+
+  /**
+   * map-entry-race fix: true iff `name` still resolves to the exact instance
+   * captured before an await. `this.agents.set` is the single call site in this
+   * class and always stores a freshly-constructed object literal, so reference
+   * identity is exact and cannot ABA (a re-registered agent is never the same
+   * object as the one we captured).
+   *
+   * Same question AgentProcess.lifecycleGeneration answers one layer down ("is
+   * this still my lifecycle?"), but compared against the object rather than a
+   * counter: the caller already holds the reference across the await, so no
+   * parallel counter keyed by the re-bindable name is needed.
+   */
+  private stillMapped(name: string, entry: AgentEntry): boolean {
+    return this.agents.get(name) === entry;
+  }
+
   inspectAgentOp(op: 'start' | 'stop' | 'restart', name: string): { ok: true } | { ok: false; code: 'DEDUPED' | 'NOT_FOUND'; message: string } {
-    const inRegistry = this.agents.has(name);
+    let inRegistry = this.agents.has(name);
     if (op === 'start') {
       if (inRegistry && this.isAgentActuallyAlive(name)) {
         return { ok: false, code: 'DEDUPED', message: `start request for "${name}" deduped — agent already in registry (in-flight start or already running)` };
@@ -473,80 +482,183 @@ export class AgentManager {
       // (restart-all could send stop+start simultaneously, and the new
       // start would arrive while the old stop's PTY exit was still in
       // flight). PR #11 closed BUG-011 by making `AgentProcess.stop()`
-      // await the actual PTY exit before resolving. A healthy duplicate start
-      // is now an idempotent no-op; only a genuine in-flight stop queues work.
+      // await the actual PTY exit before resolving.
+      //
+      // The idempotency fix then repurposed the queue path: the alive sub-branch
+      // below distinguishes a LEGIT in-flight restart (a stopAgent() teardown is
+      // genuinely in flight — stoppingAgents.has — so we queue via pendingRestarts)
+      // from a pure duplicate start against a healthy agent (idempotent no-op).
+      // The legit-restart case fires on every concurrent restart-all and is logged
+      // at info level, NOT as a regression alarm — see the per-case comments below.
       if (this.isAgentActuallyAlive(name)) {
         if (this.daemonJustCrashed) {
+          // Post-crash startup. The previous daemon exited via
+          // uncaughtException without running stopAll(), so the in-memory
+          // registry from the prior process is gone — but the post-crash
+          // discoverAndStart pass can briefly re-enter startAgent for an
+          // agent whose pendingRestarts entry survived. This is benign and
+          // distinct from the BUG-011 in-flight race PR #11 closed. Log at
+          // info level so operators don't think PR #11 has regressed.
           console.log(`[agent-manager] ${name} already in registry (post-crash discovery overlap, expected). Queueing restart.`);
           this.pendingRestarts.add(name);
           return;
         }
         if (this.stoppingAgents.has(name)) {
+          // LEGIT in-flight restart: a concurrent stopAgent() is tearing this
+          // agent down but hasn't reached its final PTY-exit line yet, so the
+          // entry still reads as alive. Queue the restart so stopAgent()'s honor
+          // path brings the agent back — the real BUG-011/BUG-031 race path.
+          //
+          // Info-level, NOT a regression alarm: after the idempotency fix this
+          // is the EXPECTED legit-restart race (stoppingAgents proves a teardown
+          // is genuinely in flight), so it fires on every concurrent restart-all.
+          // A true BUG-011 regression (start racing a stop WITHOUT a marker) does
+          // NOT reach here — it falls through to the no-op path below instead.
           console.log(`[agent-manager] ${name} start raced an in-flight stop (expected legit in-flight restart) — queueing via pendingRestarts; stopAgent's honor path will bring it back.`);
           this.pendingRestarts.add(name);
           return;
         }
+        // SPURIOUS pure duplicate start against a healthy agent nobody is
+        // stopping. No teardown is in flight, so a queued restart would cause a
+        // later spurious restart. Idempotent no-op instead — no warn, no queue.
         console.log(`[agent-manager] ${name} already running and healthy — duplicate start ignored (idempotent no-op).`);
         return;
       }
-
+      // liveness fix: entry exists but is NOT actually alive (halted/crashed/
+      // stopped, or a running entry whose OS pid is gone). Evict the stale entry
+      // and fall through to a fresh start rather than stranding the agent.
       if (this.evictingAgents.has(name)) {
+        // DELIBERATE EXCEPTION to the identity rule below: this set is keyed by
+        // NAME on purpose. The thing being deduplicated is "spawn a PTY for this
+        // name", which is a claim about the name, not about an object — so a
+        // membership test is the right question here and an identity guard would
+        // be the wrong one. Residual, judged acceptable: if our eviction later
+        // aborts because it was superseded, a start that arrived during our
+        // await was refused for nothing. The marker is cleared synchronously in
+        // the `finally` on the same tick as that abort, so the stale window is
+        // the eviction's own lifetime and never outlives it.
+        //
+        // A concurrent startAgent is already evicting+restarting this dead entry.
+        // Return instead of spawning a second PTY — the in-flight eviction will
+        // bring the agent up. Mirrors the alive in-flight dedup above.
         console.log(`[agent-manager] ${name} eviction already in flight — skipping duplicate start.`);
         return;
       }
-
+      // Claimed synchronously BEFORE the eviction's `await` so a second caller
+      // hits the guard above. The fresh-start path below has NO await before
+      // `this.agents.set(name, ...)`, so once we release the marker and fall
+      // through, the new entry is mapped before any caller can interleave.
       this.evictingAgents.add(name);
       try {
+        console.log(`[agent-manager] ${name} in registry but not actually alive — evicting stale entry and starting fresh.`);
         const stale = this.agents.get(name)!;
+        // Round 4 (F-B1): mark the teardown on the entry itself, BEFORE the await
+        // below, exactly as stopAgent does at its own pre-await point. Eviction is
+        // a teardown of `stale` and was the only teardown path that never said so.
+        //
+        // Without this write, a start still parked in agentProcess.start() resumes
+        // after we have stopped its checker and unmapped it, reads
+        // `!ownEntry.stopped` as true at the checker-start guard, and re-arms that
+        // checker. Nothing can ever stop it again: every later stopAgent reaches a
+        // checker only by name, and the name belongs to the newcomer — so it keeps
+        // injecting into a dead PTY for the life of the daemon.
+        //
+        // Set here rather than next to this branch's `agents.delete(name)` because
+        // the hazard is the AWAIT, not the unmapping: the parked start can resume
+        // any time after `stale.process.stop()` yields, which is before the delete
+        // is reached. Deferring the write to the delete leaves that sub-window open.
+        //
+        // Referred to by symbol, not by line number, on purpose: this very comment
+        // shifted every line below it by 15, which silently falsified 41 numeric
+        // references in the round-4 tests. A line number in a comment is a
+        // hand-maintained index with no checker, and it rots on the next edit.
         stale.stopped = true;
+        // map-entry-race fix: capture the scheduler BEFORE the await below.
+        // `evictingAgents` blocks a concurrent startAgent but NOT a concurrent
+        // stopAgent, so the name can be re-bound while we are parked here.
+        // RULE: act unconditionally on the objects you captured; act by name
+        // only while the name still resolves to you. See stillMapped().
         const staleScheduler = this.cronSchedulers.get(name);
+        // RW-3: classify the stale pid BEFORE stop() (which may clear it) so the
+        // tree-kill below can exclude a recycled pid that belongs to an
+        // unrelated successor process.
         const staleStatus = stale.process.getStatus();
         const stalePid = staleStatus.pid;
         const stalePidVerdict = stalePid
           ? this.classifyRegistryPid(stalePid, staleStatus.sessionStart)
           : 'dead';
+        // typeof guard: unit tests inject minimal AgentProcess fakes.
         const staleHostPid = typeof stale.process.getHostPid === 'function'
           ? stale.process.getHostPid()
           : null;
+        try { stale.poller?.stop(); } catch { /* best-effort */ }
+        try { stale.activityPoller?.stop(); } catch { /* best-effort */ }
+        try { stale.checker.stop(); } catch { /* best-effort */ }
+        // process.stop() sets status='stopped', which neutralizes any pending
+        // crash-backoff setTimeout on the old AgentProcess (its `if (status ===
+        // 'crashed')` guard now fails), so no orphan PTY is spawned after eviction.
+        try { await stale.process.stop(); } catch { /* best-effort */ }
 
-        try { stale.poller?.stop(); } catch { /* best effort */ }
-        try { stale.activityPoller?.stop(); } catch { /* best effort */ }
-        try { stale.checker.stop(); } catch { /* best effort */ }
-        try { await stale.process.stop(); } catch { /* best effort */ }
-
-        // Retain the fork's full-tree cleanup guarantee. The death-confirmed
-        // AgentProcess stop normally makes this a no-op, while a recycled pid is
-        // deliberately excluded so an unrelated successor process is untouched.
+        // RW-3 (UPSTREAM-ROOT-WOUND.md): retain the fork's full-tree cleanup
+        // guarantee — SIGKILL the pty-host child AND the inner pid plus every
+        // discoverable descendant before the fresh spawn below, so the respawn
+        // never lands on top of live leftovers (pty-host dead ≠ claude dead —
+        // the grandchild reparents). The death-confirmed AgentProcess.stop()
+        // normally makes this a no-op; a recycled pid is deliberately excluded.
         const killRoots: number[] = [];
         if (staleHostPid) killRoots.push(staleHostPid);
         if (stalePid && stalePidVerdict !== 'recycled') killRoots.push(stalePid);
         if (killRoots.length > 0) {
           killProcessTree(killRoots, (msg) => console.warn(`[agent-manager] reconcile(${name}): ${msg}`));
         }
-
         if (staleScheduler) {
           staleScheduler.stop();
           if (this.cronSchedulers.get(name) === staleScheduler) {
             this.cronSchedulers.delete(name);
+            // Symmetric with stopAgent below: if a new instance took the name
+            // while we were tearing down, its own startAgentCronScheduler() may
+            // have been refused by the "already running" guard because OURS was
+            // still mapped. Re-wire now the slot is free.
             if (!this.stillMapped(name, stale)) this.startAgentCronScheduler(name);
           }
         } else if (this.stillMapped(name, stale)) {
+          // The hoisted capture above has a blind spot the post-await read it
+          // replaced did not: a scheduler wired for the stale entry DURING our
+          // await (startAgent's post-start wiring, or reloadCrons' lazy-create)
+          // was not capturable before it. Nothing else will ever stop it — it
+          // outlives the agent as a live setInterval AND blocks the fresh start
+          // below from getting a scheduler at all. Safe to act by name here
+          // precisely because the name still resolves to the entry we are
+          // evicting, so anything under it is ours.
           const late = this.cronSchedulers.get(name);
           if (late) {
             late.stop();
             this.cronSchedulers.delete(name);
           }
         }
-
+        // Round 3 (F3): stillMapped() is `agents.get(name) === entry`, which is
+        // false BOTH when a different entry holds the name AND when nothing holds
+        // it at all. Only the first case means "somebody else is starting" — the
+        // second means the slot is empty and we should carry on with the fresh
+        // start. Ask the has() question first so the two stop being the same
+        // answer; without it we abort a start that nothing is replacing and the
+        // warning below asserts a re-registration that provably did not happen.
         if (this.agents.has(name) && !this.stillMapped(name, stale)) {
+          // A different instance took this name while we tore the stale one
+          // down. The fresh-start path below deletes by name and then ends in an
+          // UNCONDITIONAL agents.set(), either of which would orphan a live
+          // agent — the exact failure this fix exists to prevent. The newcomer
+          // is already starting; our work here is done. The return is inside
+          // the try, so `finally` still clears the evicting marker.
           console.warn(`[agent-manager] ${name} was re-registered during eviction — aborting this start.`);
           return;
         }
-        if (this.stillMapped(name, stale)) this.agents.delete(name);
+        this.agents.delete(name);
         this.pendingRestarts.delete(name);
       } finally {
         this.evictingAgents.delete(name);
       }
+      // fall through synchronously to the fresh-start path below
     }
 
     // BUG-043 fix: resolve the agent's true org instead of using `this.org`.
@@ -1084,7 +1196,26 @@ export class AgentManager {
       // — follow-up task_1776054009969_099 tracks migrating to a dedicated
       // singleton or Telegram webhook if the coupling ever causes real
       // operator pain. Non-orchestrator agents skip this entirely.
+      // Round 3 (F1): resolvedOrg, NOT the raw `org` parameter. Only
+      // discoverAndStart passes an org; restartAgent, the pendingRestarts honor
+      // path and ipc-server's start-agent handler all pass none, and
+      // maybeStartActivityChannelPoller returns immediately on a falsy org — so
+      // every restart silently dropped the orchestrator's approval-button path,
+      // with stopAgent seeing activityPoller undefined and nothing reporting it.
       await this.maybeStartActivityChannelPoller(name, resolvedOrg, agentDir, log, ownEntry);
+    }
+
+    // Buzz (Nostr/NIP-29) registration + org-level relay start. Every agent
+    // with a buzz.json registers into the org's shared dispatcher (even if
+    // this agent isn't the orchestrator); only the orchestrator opens the
+    // actual relay connection. Non-blocking by construction — both the
+    // dispatcher registration and the relay start below are wrapped so a
+    // Buzz misconfiguration or outage can never block agent/orchestrator
+    // startup.
+    try {
+      await this.maybeRegisterBuzzAgent(name, org, agentDir, log);
+    } catch (err) {
+      log(`Buzz registration failed (non-fatal): ${err}`);
     }
 
     // Slack Socket Mode. Deliberately OUTSIDE the Telegram gate above —
@@ -1311,6 +1442,80 @@ export class AgentManager {
   }
 
   /**
+   * Ensures this org has a running Buzz relay client (started once, by the
+   * orchestrator only) and registers this agent's buzz.json into that org's
+   * shared BuzzDispatcher — mirrors maybeStartActivityChannelPoller's
+   * "org.json says who the orchestrator is, only it starts the shared
+   * connection" gate, but every agent (not just the orchestrator) still
+   * needs to register itself so the dispatcher knows to route messages to
+   * it. Safe no-op if the agent has no buzz.json, org is unset, or
+   * context.json is missing/corrupt.
+   */
+  private async maybeRegisterBuzzAgent(
+    name: string,
+    org: string | undefined,
+    agentDir: string,
+    log: LogFn,
+  ): Promise<void> {
+    if (!org) return;
+    const buzzConfig = loadBuzzConfig(agentDir);
+    if (!buzzConfig) return; // no buzz.json / no BUZZ_PRIVATE_KEY — Buzz disabled for this agent
+
+    let entry = this.buzzClients.get(org);
+    if (!entry) {
+      const relayUrl = buzzConfig.relay_url || process.env.BUZZ_RELAY_URL;
+      if (!relayUrl) {
+        log('Buzz configured but no relay_url (buzz.json or BUZZ_RELAY_URL) — skipping');
+        return;
+      }
+      const dispatcher = new BuzzDispatcher();
+      const client = new BuzzRelayClient(relayUrl, buzzConfig.secret_key, (msg) => log(`[buzz] ${msg}`));
+      client.onMessage((channelId, event: NostrEvent) => {
+        const results = dispatcher.dispatch(channelId, event);
+        for (const result of results) {
+          const target = this.agents.get(result.agentName);
+          if (!target) continue;
+          const formatted = FastChecker.formatBuzzTextMessage(event.pubkey, channelId, event.content);
+          target.checker.queueBuzzMessage(formatted);
+        }
+      });
+      entry = { client, dispatcher, started: false };
+      this.buzzClients.set(org, entry);
+    }
+
+    // Only the org's orchestrator opens the actual relay connection — same
+    // gate as the activity-channel poller. Checked on every call (not just
+    // entry creation) so a non-orchestrator registering first does not
+    // permanently prevent the orchestrator from later starting the shared
+    // connection once it also registers.
+    if (!entry.started) {
+      const orgDir = join(this.frameworkRoot, 'orgs', org);
+      let orchestratorName: string | undefined;
+      try {
+        const contextJson = stripBom(readFileSync(join(orgDir, 'context.json'), 'utf-8'));
+        orchestratorName = JSON.parse(contextJson).orchestrator;
+      } catch {
+        // No context.json — fall back to "whichever agent registers first
+        // starts the connection" rather than never starting it at all.
+      }
+      if (!orchestratorName || orchestratorName === name) {
+        entry.started = true;
+        try {
+          entry.client.start().catch((err) => {
+            log(`Buzz relay client wrapper crashed (non-fatal): ${err}`);
+          });
+        } catch (err) {
+          log(`Buzz relay client failed to start (non-fatal): ${err}`);
+        }
+      }
+    }
+
+    entry.dispatcher.register(name, buzzConfig);
+    entry.client.subscribeChannels(entry.dispatcher.allChannels());
+    log(`Buzz registered for org ${org} (channels: ${buzzConfig.channels.join(', ') || 'none'})`);
+  }
+
+  /**
    * Stop a specific agent.
    */
   async stopAgent(name: string, userInitiated = false): Promise<void> {
@@ -1320,40 +1525,99 @@ export class AgentManager {
       return;
     }
 
+    // idempotency fix (#923): claim the name synchronously BEFORE the first await
+    // (entry.process.stop() below) so a startAgent() racing this teardown sees
+    // the marker and queues via pendingRestarts instead of taking the no-op
+    // path. finally (NOT catch) so a throw from process.stop() still propagates
+    // to callers while the marker is always released.
     this.stoppingAgents.add(name);
     try {
-      // Capture name-keyed resources before the process teardown yields.
+      // map-entry-race fix (#895): capture every name-keyed resource we own
+      // BEFORE the await below. entry.process.stop() yields for up to ~21s
+      // (BUG-032's graceful /exit dance plus BUG-040's 15s exit wait), and a NEW
+      // instance can be registered under this same name inside that window
+      // (startAgent's eviction path, or a fire-and-forget IPC start —
+      // ipc-server.ts never awaits startAgent/stopAgent/restartAgent). After the
+      // await, `name` is no longer a reliable handle to us.
+      // RULE: act unconditionally on the objects you captured; act by name only
+      // while the name still resolves to you. See stillMapped().
       const scheduler = this.cronSchedulers.get(name);
+
+      // Round 3 (F5/F2): mark the teardown BEFORE it starts, not after it
+      // finishes. A poller's stop() cannot recall a getUpdates batch that is
+      // already open, and process.stop() yields for up to ~21s — so callbacks and
+      // a parked startAgent both land DURING the teardown, which is exactly when
+      // they must not act.
       entry.stopped = true;
 
-      entry.poller?.stop();
-      entry.activityPoller?.stop();
+      if (entry.poller) entry.poller.stop();
+      if (entry.activityPoller) entry.activityPoller.stop();
+      // Unregister from every org's Buzz dispatcher — harmless no-op for orgs
+      // this agent was never registered in. We don't track which org this
+      // agent belongs to on the entry itself, so this sweeps all of them
+      // rather than requiring an extra lookup.
+      for (const buzzEntry of this.buzzClients.values()) {
+        buzzEntry.dispatcher.unregister(name);
+      }
       entry.checker.stop();
       await entry.process.stop();
 
+      // Our scheduler object: stopping it is always correct (the interval is
+      // ours, and skipping it leaks a setInterval forever). Unmapping it is only
+      // correct while the name still points at it.
       if (!scheduler && this.stillMapped(name, entry)) {
+        // The capture above has a blind spot the post-await read it replaced did
+        // not: a scheduler wired for US during the await (startAgent's post-start
+        // wiring at the `startAgentCronScheduler` call below, or reloadCrons'
+        // lazy-create) did not exist when we captured. Nothing else ever stops it
+        // — it outlives the agent as a live setInterval whose onFire injects into
+        // a name that is gone, AND it makes the next start's scheduler request hit
+        // the "already running — skipped" guard, so the replacement inherits a
+        // dead scheduler. Acting by name is safe here BECAUSE the name still
+        // resolves to us, so whatever is under it is ours.
         const late = this.cronSchedulers.get(name);
         if (late) {
           late.stop();
           this.cronSchedulers.delete(name);
         }
       }
+
       if (scheduler) {
         scheduler.stop();
         if (this.cronSchedulers.get(name) === scheduler) {
           this.cronSchedulers.delete(name);
+          // If a new instance took the name while we were stopping, it may have
+          // been refused a scheduler by startAgentCronScheduler's "already
+          // running" guard because OURS was still mapped. Re-wire now the slot is
+          // free — otherwise the new agent runs with no crons at all. Calling a
+          // start-path helper from the stop path is deliberate: the method is
+          // idempotent and map-driven, and this is the only moment at which the
+          // newcomer's missing scheduler is detectable.
           if (!this.stillMapped(name, entry)) this.startAgentCronScheduler(name);
         }
       }
-
-      // Never delete a successor that acquired the same name while teardown
-      // awaited actual process death.
+      // Round 3 (F4): same conflation as the eviction path — see the F3 comment in
+      // startAgent(). Reachable here via two concurrent stops for one name (ipc-server
+      // never awaits stopAgent): the first to finish deletes the name, and the second
+      // then took this branch, warned about a re-registration that never happened, and
+      // returned BEFORE the pendingRestarts handling below — stranding a queued restart
+      // that later fires against an unrelated stop.
       if (this.agents.has(name) && !this.stillMapped(name, entry)) {
+        // Superseded: our instance is fully torn down, but the name belongs to
+        // someone else now. Deleting it here would empty the map slot while the
+        // new agent keeps running — an untracked orphan. pendingRestarts is
+        // deliberately left alone: the queue refers to whoever is mapped. The
+        // finally below still releases stoppingAgents.
         console.warn(`[agent-manager] ${name} was re-registered while stopping — old instance fully torn down, new instance left mapped.`);
         return;
       }
-      if (this.stillMapped(name, entry)) this.agents.delete(name);
 
+      this.agents.delete(name);
+
+      // disable-resurrection fix: an explicit user stop/disable must win against a
+      // racing queued restart. Drop the pending entry instead of honoring it.
+      // Internal callers (restartAgent, stopAll) pass userInitiated=false, so the
+      // BUG-011/BUG-031 restart-all honor path below is preserved unchanged.
       if (userInitiated) {
         if (this.pendingRestarts.delete(name)) {
           console.log(`[agent-manager] Dropped queued restart for ${name} — explicit user stop/disable wins.`);
@@ -1361,6 +1625,14 @@ export class AgentManager {
         return;
       }
 
+      // BUG-031: honor any restart that was queued while we were stopping.
+      // After the idempotency fix `pendingRestarts` is a NORMAL control-flow
+      // signal, not a BUG-011 canary. Writers enumeration (both `pendingRestarts.add`
+      // sites in this file): (1) startAgent's post-crash branch — guarded by
+      // daemonJustCrashed=true; (2) startAgent's stoppingAgents.has branch — the
+      // legit in-flight restart. So reaching this honor branch with
+      // daemonJustCrashed=false means writer (2): the EXPECTED legit-restart race.
+      // Both cases are info-level; neither is a regression, so honoring is normal.
       if (this.pendingRestarts.has(name)) {
         if (this.daemonJustCrashed) {
           console.log(`[agent-manager] pendingRestarts fired for ${name} (post-crash safety net, expected). Honoring queued restart.`);
@@ -1432,6 +1704,25 @@ export class AgentManager {
     this.slackSocketClient?.stop();
     this.slackSocketClient = null;
     this.slackSocketStarted = false;
+    // DELIBERATE EXCEPTION to the identity rule used everywhere else in this
+    // file, and NOT an oversight. Shutdown wants "stop whatever is running under
+    // this name", which is a name question, so acting by name is correct routing
+    // here — an identity guard would make us skip an instance that replaced the
+    // one we snapshotted, i.e. leave MORE running, not less.
+    //
+    // KNOWN RESIDUAL, left unfixed on purpose, and stated at its true scope:
+    // an instance registered under ANY name in this snapshot is never stopped and
+    // survives daemon shutdown as an orphan PTY. That includes the name being
+    // processed RIGHT NOW — the await inside stopAgent is itself a window in which
+    // a newcomer can take the name, and stopAgent then deliberately leaves it
+    // mapped, after which this loop has moved on and never revisits it. It is NOT
+    // limited to names the loop has already passed.
+    // Worse, the .daemon-stop markers are all written in the loop above BEFORE any
+    // stop runs, so the crash-alert hook reports a clean shutdown for an instance
+    // that is still running. Closing this needs a second pass over the map,
+    // not an identity guard — a behaviour change with its own termination
+    // question (a caller that keeps starting agents), so it is deliberately out
+    // of scope for a concurrency-guard change and tracked separately.
     const names = [...this.agents.keys()];
 
     for (const name of names) {
@@ -1454,21 +1745,132 @@ export class AgentManager {
         console.error(`[agent-manager] Error stopping ${name}:`, err);
       }
     }
+
+    // Close every org's shared Buzz relay connection now that all agents
+    // (and thus all dispatcher registrations) are torn down.
+    for (const [org, buzzEntry] of this.buzzClients) {
+      try {
+        buzzEntry.client.stop();
+      } catch (err) {
+        console.error(`[agent-manager] Error stopping Buzz relay client for org ${org}:`, err);
+      }
+    }
+    this.buzzClients.clear();
   }
 
   /**
    * Get status of all agents.
    */
   getAllStatuses(): AgentStatus[] {
+    const nowMs = Date.now();
+    const daemonUptimeMs = nowMs - this.daemonStartMs;
+    // silent-dormancy fix: agents not in enabled-agents.json default to enabled
+    // (matching discoverAndStart's default-on behavior); an explicit
+    // `enabled: false` entry is the only way to be disabled.
+    const enabledList = this.readInstanceEnableList();
+    const isEnabled = (name: string): boolean => enabledList[name]?.enabled !== false;
+
     const statuses: AgentStatus[] = [];
-    for (const [, entry] of this.agents) {
+    const mapped = new Set<string>();
+    for (const [name, entry] of this.agents) {
       const status = entry.process.getStatus();
+      // liveness fix: a mapped entry still reporting 'running' whose OS pid is
+      // gone is dead, not running. getStatus() returns a fresh object, so
+      // correcting .status here does not mutate AgentProcess internal state.
       if (status.status === 'running' && (!status.pid || !this.isPidAlive(status.pid))) {
         status.status = 'stopped';
       }
+      mapped.add(name);
+      // Face A — staleness relative to the agent's own process uptime.
+      const d = computeDormancy({
+        agent: name,
+        org: enabledList[name]?.org,
+        enabled: isEnabled(name),
+        mapped: true,
+        nowMs,
+        lastSeenMs: this.readHeartbeatMs(name),
+        uptimeMs: status.uptime != null ? status.uptime * 1000 : null,
+        daemonUptimeMs,
+        expectedIntervalMs: this.readHeartbeatIntervalMs(name),
+      });
+      if (d.dormant) {
+        status.dormant = true;
+        status.dormancyReason = d.reason;
+      }
       statuses.push(status);
     }
+
+    // Face B — roster-diff: enabled agents absent from the mapped set. There is
+    // no per-agent uptime, so staleness is measured relative to daemon start.
+    for (const name of Object.keys(enabledList)) {
+      if (mapped.has(name) || !isEnabled(name)) continue;
+      const d = computeDormancy({
+        agent: name,
+        org: enabledList[name]?.org,
+        enabled: true,
+        mapped: false,
+        nowMs,
+        lastSeenMs: this.readHeartbeatMs(name),
+        uptimeMs: null,
+        daemonUptimeMs,
+        expectedIntervalMs: this.readHeartbeatIntervalMs(name),
+      });
+      statuses.push({
+        name,
+        status: 'stopped',
+        ...(d.dormant ? { dormant: true, dormancyReason: d.reason } : {}),
+      });
+    }
+
     return statuses;
+  }
+
+  /**
+   * silent-dormancy fix: read the epoch ms of an agent's last heartbeat from
+   * its canonical state/<agent>/heartbeat.json. Returns null if missing or
+   * unparseable — best effort, never throws.
+   */
+  private readHeartbeatMs(agent: string): number | null {
+    const hbPath = join(this.ctxRoot, 'state', agent, 'heartbeat.json');
+    if (!existsSync(hbPath)) return null;
+    try {
+      const hb = JSON.parse(readFileSync(hbPath, 'utf-8'));
+      const ts = hb.last_heartbeat || hb.timestamp;
+      if (!ts) return null;
+      const ms = new Date(ts).getTime();
+      return isNaN(ms) ? null : ms;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * silent-dormancy fix: read an agent's expected heartbeat cadence (ms) from
+   * its ENABLED `heartbeat` cron, so computeDormancy derives the staleness
+   * threshold from the agent's OWN configured cadence rather than a fixed
+   * default. Returns null when there is no enabled `heartbeat` cron or its
+   * schedule form is unparseable — best effort, never throws; the caller then
+   * falls back to FALLBACK_INTERVAL_MS (24h).
+   *
+   * Root resolution is load-bearing. We build the crons path directly from
+   * `this.ctxRoot` (mirroring readHeartbeatMs) using CRONS_DIRECTORY/
+   * CRONS_FILENAME — NOT `readCrons()` from bus/crons.ts, whose cronsFilePath
+   * resolves its root from `process.env.CTX_ROOT ?? process.cwd()`
+   * independently of the daemon's own ctxRoot. A wrong root would read zero
+   * crons and silently drop every agent to the 24h fallback.
+   */
+  private readHeartbeatIntervalMs(agent: string): number | null {
+    const cronsPath = join(this.ctxRoot, CRONS_DIRECTORY, agent, CRONS_FILENAME);
+    if (!existsSync(cronsPath)) return null;
+    try {
+      const parsed = JSON.parse(readFileSync(cronsPath, 'utf-8'));
+      const crons: CronDefinition[] = Array.isArray(parsed?.crons) ? parsed.crons : [];
+      const heartbeat = crons.find(c => c.name === 'heartbeat' && c.enabled !== false);
+      if (!heartbeat) return null;
+      return parseHeartbeatIntervalMs(heartbeat.schedule);
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -1738,6 +2140,11 @@ export class AgentManager {
     }
 
     const onFire = async (cron: CronDefinition, context?: import('./cron-scheduler.js').CronDispatchContext): Promise<void> => {
+      // DELIBERATE EXCEPTION to the identity rule: this fires on a timer long
+      // after any await and injects by NAME, so a cron fires into whichever
+      // instance currently holds the name. That is the intended routing — a cron
+      // belongs to the agent name, not to one PTY lifecycle, and binding it to a
+      // captured entry would silently stop firing across every restart.
       const prompt = cron.prompt ?? `[cron] ${cron.name} fired`;
       // Salt with the fire timestamp so MessageDedup (which hashes the last 100
       // injects) does not reject identical cron prompts on subsequent fires.

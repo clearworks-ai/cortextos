@@ -484,13 +484,19 @@ export class TelegramAPI {
 
   /**
    * Get updates via long polling.
+   *
+   * `signal` lets the caller (TelegramPoller) abort the in-flight request
+   * immediately on stop() instead of leaving it to age out on its own —
+   * without this, a stopped poller's still-open getUpdates connection races
+   * the next poller's getUpdates on the same bot token and Telegram 409s one
+   * of them (the "conflict-self-die" path).
    */
-  async getUpdates(offset: number, timeout: number = 1): Promise<any> {
+  async getUpdates(offset: number, timeout: number = 1, signal?: AbortSignal): Promise<any> {
     return this.post('getUpdates', {
       offset,
       timeout,
       allowed_updates: ['message', 'callback_query', 'message_reaction'],
-    });
+    }, signal);
   }
 
   /**
@@ -738,14 +744,19 @@ export class TelegramAPI {
 
   /**
    * Make a POST request to the Telegram API.
+   *
+   * `signal` (currently only passed by getUpdates) lets a caller abort the
+   * request early — combined with the standing 15s safety timeout via
+   * AbortSignal.any so an external abort never removes that backstop.
    */
-  private async post(method: string, data: object): Promise<any> {
+  private async post(method: string, data: object, signal?: AbortSignal): Promise<any> {
+    const timeoutSignal = AbortSignal.timeout(15000);
     try {
       const response = await fetch(`${this.baseUrl}/${method}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
-        signal: AbortSignal.timeout(15000),
+        signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal,
       });
       const result = await response.json() as any;
       if (!result.ok) {
@@ -755,6 +766,12 @@ export class TelegramAPI {
     } catch (err) {
       if (err instanceof Error && err.message.startsWith('Telegram API error')) {
         throw err;
+      }
+      // An externally-aborted request (poller.stop() mid-flight) is neither a
+      // timeout nor a Conflict — classify it distinctly so callers don't log
+      // a false "timed out" or misroute it into the conflict-self-die path.
+      if (signal?.aborted) {
+        throw new Error(`Telegram API request aborted: ${method}`);
       }
       // AbortSignal.timeout surfaces as DOMException name=TimeoutError (or AbortError).
       // Surface as a clean retryable error so the poller loop recovers next tick

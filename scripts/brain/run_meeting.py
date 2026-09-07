@@ -462,6 +462,15 @@ def _run_apply(meeting_id, vault, repo, source_dir, *, force, backfill=False) ->
     if sign_failure:
         print(f"FAILED at sign-check: {sign_failure}", file=sys.stderr)
         return 15
+    # F1 (G2 P1-1): a per-meeting sign_dry_run.py marker proves a human
+    # reviewed only THIS meeting, never that a batch digest covering it was
+    # reviewed and signed (D-20) — --backfill must refuse a marker that
+    # sign_batch.py did not fan out.
+    if backfill:
+        batch_failure = progress.validate_batch_marker(marker)
+        if batch_failure:
+            print(batch_failure, file=sys.stderr)
+            return 15
 
     guard_rc = _worker_guard(meeting_id)
     if guard_rc != 0:
@@ -505,6 +514,14 @@ def _run_apply(meeting_id, vault, repo, source_dir, *, force, backfill=False) ->
     if post_fetch_sign_failure:
         print(f"FAILED at sign-check: {post_fetch_sign_failure}", file=sys.stderr)
         return 15
+    # F1: re-checked here too — fetch never rewrites the marker, but this is
+    # the same envelope-bound re-check point as the line above, and the
+    # requirement is unconditional for the rest of this run.
+    if backfill:
+        post_fetch_batch_failure = progress.validate_batch_marker(marker)
+        if post_fetch_batch_failure:
+            print(post_fetch_batch_failure, file=sys.stderr)
+            return 15
 
     extract_rc = extract_main(["--source", str(source_dir), "--vault", str(vault)])
     if extract_rc != 0:
@@ -583,7 +600,18 @@ def _apply_writes(
     doc = progress.load_progress(prog_path)
 
     if backfill and doc.get("backfill_run") is not True:
+        # F3 (G2 P2): snapshot which of the three backfill-skipped steps were
+        # ALREADY done:true at this exact moment — the only moment this can
+        # ever be computed correctly, since the very next lines below are
+        # about to mark them skipped instead. Stored once, read verbatim by
+        # progress.compose_receipt from here on (never re-derived), so a
+        # later live `--apply --force` performing draft/status_update never
+        # gets misreported as having been done before this backfill run.
+        prior_done_names = sorted(
+            name for key, name in progress.BACKFILL_STEP_DISPLAY_NAMES.items() if progress.step_done(doc, key)
+        )
         doc = progress.merge_progress(prog_path, "backfill_run", True)  # lets compose_receipt report prior-done steps
+        doc = progress.merge_progress(prog_path, "backfill_prior_done", prior_done_names)
 
     def _backfill_skip(step: str) -> None:
         nonlocal doc

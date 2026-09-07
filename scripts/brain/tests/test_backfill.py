@@ -142,6 +142,7 @@ def _fake_run_meeting(vault: Path, *, cost=0.5, rc_for=None, fetch_error_for=Non
     def fake(argv):
         mid = argv[argv.index("--meeting-id") + 1]
         assert "--dry-run" in argv and "--vault" in argv
+        print(f"note: dry-run for {mid}", file=sys.stderr)  # review I5(b): stderr capture contract
         attempts[mid] = attempts.get(mid, 0) + 1
         if mid in fetch_error_for:
             import fetch_fireflies
@@ -190,7 +191,7 @@ def test_dry_run_records_rows_and_writes_captures(tmp_path, monkeypatch, capsys)
     assert row["elapsed_s"] >= 0 and row["at"]
     cap = vault / "raw/media/transcripts/_state/fireflies-B/dry-run.txt"
     assert cap.exists() and cap.read_text(encoding="utf-8").startswith("home=clients/b.md")
-    assert "dry-run: 2 ok, 0 failed" in capsys.readouterr().out or True  # summary format asserted below
+    assert "dry-run: 2 ok, 0 failed" in capsys.readouterr().out
 
 
 def test_dry_run_is_resumable_and_continues_past_failures(tmp_path, monkeypatch):
@@ -266,4 +267,112 @@ def test_dry_run_retry_after_late_failure_does_not_charge_twice(tmp_path, monkey
     assert first["exit"] == 6 and first["cost_usd"] == 0.7          # attempt 1 extracted, then failed later: charged once
     assert backfill.main(base) == 0                                  # not 12
     second = _bp(bd)["rows"]["fireflies:A"]["dry_run"]
-    assert second["exit"] == 0 and second["cost_usd"] == 0.0 and second["cost_reused"] is True
+    # review C1: "retry adds, never replaces" — the ledger keeps the $0.7 already spent on attempt 1;
+    # this attempt reused the extraction (adds $0.0), so cumulative cost_usd stays 0.7, not resets to 0.0.
+    assert second["exit"] == 0 and second["cost_usd"] == 0.7 and second["cost_reused"] is True
+
+
+# --- fix round 1 (task-7-review.md: Critical #1/#2, Important #3/#4, #5) --------
+def test_dry_run_capture_sha256_matches_written_capture(tmp_path, monkeypatch):
+    """review I5(a): sha256 computed independently over the bytes actually written
+    to dry-run.txt must equal capture_sha256 — not just len == 64."""
+    import backfill
+    import hashlib
+    vault, bd = _seed_batch(tmp_path, applied=("A",))
+    monkeypatch.setattr(backfill, "run_meeting_main", _fake_run_meeting(vault, cost=0.4))
+    assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"]) == 0
+    row = _bp(bd)["rows"]["fireflies:B"]["dry_run"]
+    cap_bytes = (vault / "raw/media/transcripts/_state/fireflies-B/dry-run.txt").read_bytes()
+    assert row["capture_sha256"] == hashlib.sha256(cap_bytes).hexdigest()
+
+
+def test_dry_run_writes_stderr_capture(tmp_path, monkeypatch):
+    """review I5(b): dry-run.stderr.txt must hold what the runner wrote to stderr."""
+    import backfill
+    vault, bd = _seed_batch(tmp_path, ids=("A",))
+    monkeypatch.setattr(backfill, "run_meeting_main", _fake_run_meeting(vault, cost=0.1))
+    assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"]) == 0
+    stderr_path = vault / "raw/media/transcripts/_state/fireflies-A/dry-run.stderr.txt"
+    assert stderr_path.exists() and "note: dry-run for A" in stderr_path.read_text(encoding="utf-8")
+
+
+def test_dry_run_crash_is_recorded_and_batch_continues(tmp_path, monkeypatch):
+    """review I3 + I5(c): a non-SystemExit crash from the runner is not an auth stop —
+    the crashing row is recorded (exit 1, traceback in its stderr capture) and the batch
+    continues past it, checkpointing the later rows too (mid-batch crash checkpoint)."""
+    import backfill
+    vault, bd = _seed_batch(tmp_path)
+    inner = _fake_run_meeting(vault, cost=0.3)
+
+    def crashing(argv):
+        mid = argv[argv.index("--meeting-id") + 1]
+        if mid == "B":
+            raise RuntimeError("boom")
+        return inner(argv)
+    monkeypatch.setattr(backfill, "run_meeting_main", crashing)
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"])
+    assert rc == 0  # a crash is not an auth stop; the batch runs to completion
+    rows = _bp(bd)["rows"]
+    assert rows["fireflies:B"]["dry_run"]["exit"] == 1
+    b_stderr = (vault / "raw/media/transcripts/_state/fireflies-B/dry-run.stderr.txt").read_text(encoding="utf-8")
+    assert "boom" in b_stderr and "RuntimeError" in b_stderr
+    assert rows["fireflies:A"]["dry_run"]["exit"] == 0 and rows["fireflies:C"]["dry_run"]["exit"] == 0  # continued past B
+
+
+def test_dry_run_missing_manifest_returns_64(tmp_path, capsys):
+    """review I4: a missing/invalid manifest.json is a refusal (64), never a raised SystemExit."""
+    import backfill
+    vault = tmp_path / "vault"
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path),
+                         "--batch", "fireflies-20260906T000000Z", "dry-run"])
+    assert rc == 64
+    assert "manifest.json" in capsys.readouterr().err
+
+
+def test_dry_run_resumed_after_budget_halt_makes_no_calls(tmp_path, monkeypatch, capsys):
+    """review C2: once the ledger already exceeds --max-usd, a resumed invocation must
+    HALT before launching anything — zero run_meeting_main calls, never a raised cap."""
+    import backfill
+    vault, bd = _seed_batch(tmp_path)
+    calls = []
+    inner = _fake_run_meeting(vault, cost=0.6)
+
+    def counting(argv):
+        calls.append(argv[argv.index("--meeting-id") + 1])
+        return inner(argv)
+    monkeypatch.setattr(backfill, "run_meeting_main", counting)
+    base = ["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run", "--max-usd", "1.0"]
+    assert backfill.main(base) == 12          # A (0.6) ok, B (1.2 > 1.0) recorded then stop
+    assert calls == ["A", "B"]
+    calls.clear()
+    rc = backfill.main(base)                   # resume: recorded spend is already 1.2 > 1.0
+    assert rc == 12
+    assert calls == []                          # pre-launch guard fires before any run_meeting_main call
+    assert "budget" in capsys.readouterr().err
+
+
+def test_dry_run_max_usd_zero_still_runs_the_first_unattempted_meeting(tmp_path, monkeypatch):
+    """review C2 (--max-usd 0 case): a fresh batch has recorded spend of $0, which is not
+    > --max-usd 0, so the pre-launch guard cannot block the very first, never-yet-run
+    meeting (its cost is unknowable before it runs). It halts with 12 immediately after
+    that one attempt is recorded — exactly one run_meeting_main call, not zero. (Zero
+    calls only happens on a *resumed* invocation once spend is already recorded above the
+    cap — see test_dry_run_resumed_after_budget_halt_makes_no_calls. An EMPTY manifest,
+    by contrast, never enters the loop body at all and exits 0 — see
+    test_dry_run_missing_manifest_returns_64 sibling behavior is 64 for a missing
+    manifest, not 0/12; an empty-but-valid manifest is out of this fix's required scope.)"""
+    import backfill
+    vault, bd = _seed_batch(tmp_path)
+    calls = []
+    inner = _fake_run_meeting(vault, cost=0.1)
+
+    def counting(argv):
+        calls.append(argv[argv.index("--meeting-id") + 1])
+        return inner(argv)
+    monkeypatch.setattr(backfill, "run_meeting_main", counting)
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path),
+                         "--batch", bd.name, "dry-run", "--max-usd", "0"])
+    assert rc == 12
+    assert calls == ["A"]
+    rows = _bp(bd)["rows"]
+    assert len(rows) == 1 and rows["fireflies:A"]["dry_run"]["cost_usd"] == 0.1

@@ -20,6 +20,7 @@ import json
 import re
 import sys
 import time
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -220,11 +221,13 @@ def _progress_path(bd: Path) -> Path:
     return bd / "batch-progress.json"
 
 
-def _load_batch(vault: Path, batch_id: str) -> tuple[Path, dict[str, Any], dict[str, Any]]:
+def _load_batch(vault: Path, batch_id: str) -> tuple[Path, dict[str, Any], dict[str, Any]] | None:
+    """Returns None (never raises) when manifest.json is missing/invalid — callers
+    print + return 64, consistent with every other refusal in this module (review I4)."""
     bd = batch_dir(vault, batch_id)
     manifest = _read_json(bd / "manifest.json", None)
     if not isinstance(manifest, dict) or not isinstance(manifest.get("rows"), list):
-        raise SystemExit(f"manifest.json missing or invalid for batch {batch_id}")
+        return None
     prog = _read_json(_progress_path(bd), {})
     if not isinstance(prog, dict):
         prog = {}
@@ -249,6 +252,9 @@ def _run_dry_capture(meeting_id: str, vault: Path, repo: Path) -> tuple[int, str
             rc = int(run_meeting_main(["--meeting-id", meeting_id, "--dry-run", "--vault", str(vault), "--repo-root", str(repo)]))
         except SystemExit as exc:  # argparse or explicit SystemExit inside the loop
             rc = int(exc.code or 0) if isinstance(exc.code, int) or exc.code is None else 1
+        except Exception:  # review I3: a crash is not an auth stop — record the row (with its
+            err.write(traceback.format_exc())  # spend intact) and let the batch continue past it
+            rc = 1
     return rc, out.getvalue(), err.getvalue()
 
 
@@ -257,7 +263,8 @@ def _extraction_stamp(vault: Path, kind: str, meeting_id: str) -> str:
     return str(doc.get("extracted_at") or "") if isinstance(doc, dict) else ""
 
 
-def _dry_run_record(vault: Path, kind: str, meeting_id: str, rc: int, capture: str, stamp_before: str, elapsed: float) -> dict[str, Any]:
+def _dry_run_record(vault: Path, kind: str, meeting_id: str, rc: int, capture: str, stamp_before: str,
+                     elapsed: float, *, prior_cost: float = 0.0, attempts: int = 1) -> dict[str, Any]:
     env = envelope_dir(vault, kind, meeting_id)
     resolution = _read_json(env / "resolution.json", {}) if rc == 0 else {}
     validated = _read_json(env / "validated.json", {}) if rc == 0 else {}
@@ -278,8 +285,11 @@ def _dry_run_record(vault: Path, kind: str, meeting_id: str, rc: int, capture: s
         "dropped": validated.get("dropped") if isinstance(validated, dict) else None,
         "classification": m.group(1) if m else None,
         "capture_sha256": hashlib.sha256(capture.encode("utf-8")).hexdigest() if capture else None,
-        "cost_usd": 0.0 if reused else cost,
+        # review C1: "retry adds, never replaces" — this attempt's ledger contribution
+        # accumulates onto whatever was already recorded for this row, it never resets.
+        "cost_usd": prior_cost + (0.0 if reused else cost),
         "cost_reused": reused,
+        "attempts": attempts,
         "elapsed_s": round(elapsed, 3),
         "at": _now(),
     }
@@ -294,7 +304,14 @@ def _dry_run_record(vault: Path, kind: str, meeting_id: str, rc: int, capture: s
 
 def cmd_dry_run(args: argparse.Namespace) -> int:
     vault, repo, kind = Path(args.vault), Path(args.repo_root), args.source
-    bd, manifest, prog = _load_batch(vault, args.batch)
+    loaded = _load_batch(vault, args.batch)
+    if loaded is None:  # review I4: refuse like every other bad-input path, never raise
+        print(f"manifest.json missing or invalid for batch {args.batch}", file=sys.stderr)
+        return 64
+    bd, manifest, prog = loaded
+    if manifest.get("kind") != kind:  # review M8: never dry-run one kind's ids against another's batch
+        print(f"batch {args.batch} kind {manifest.get('kind')!r} != --source {kind!r}", file=sys.stderr)
+        return 64
     started_at = prog.get("dry_run_started_at") or _now()
     prog["dry_run_started_at"] = started_at
 
@@ -311,6 +328,14 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
         if (entry.get("dry_run") or {}).get("exit") == 0:
             ok += 1
             continue
+        # review C2: HALT before launching when the ledger already exceeds the cap — a resume
+        # after a 12 (or a --max-usd already below recorded spend) must make zero new attempts.
+        if spent > args.max_usd:
+            print(f"budget: spent ${spent:.2f} > --max-usd {args.max_usd:.2f} before {kind}:{mid}", file=sys.stderr)
+            return 12
+        prior_dry = entry.get("dry_run") or {}
+        prior_cost = float(prior_dry.get("cost_usd") or 0.0)
+        prior_attempts = int(prior_dry.get("attempts") or 0)
         stamp_before = _extraction_stamp(vault, kind, mid)
         t0 = time.monotonic()
         rc, capture, stderr = _run_dry_capture(mid, vault, repo)
@@ -320,7 +345,8 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
             atomic_write(state / "dry-run.txt", capture.encode("utf-8"))
         if stderr:
             atomic_write(state / "dry-run.stderr.txt", stderr.encode("utf-8"))
-        rec = _dry_run_record(vault, kind, mid, rc, capture, stamp_before, elapsed)
+        rec = _dry_run_record(vault, kind, mid, rc, capture, stamp_before, elapsed,
+                               prior_cost=prior_cost, attempts=prior_attempts + 1)
         entry["dry_run"] = rec
         spent = _spent()
         _save_batch(bd, prog)  # checkpoint after every meeting (resumable)
@@ -334,6 +360,7 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
         if spent > args.max_usd:
             print(f"budget: spent ${spent:.2f} > --max-usd {args.max_usd:.2f} after {kind}:{mid}", file=sys.stderr)
             return 12
+    _save_batch(bd, prog)  # review M7: checkpoint exists even when no row ran (empty/all-skipped batch)
     print(f"dry-run: {ok} ok, {failed} failed, ${spent:.2f} spent")
     return 0
 

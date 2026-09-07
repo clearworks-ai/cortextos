@@ -8,13 +8,19 @@ Refuses BEFORE writing anything, checked in this order: bad --batch (64);
 manifest/progress binding to the batch (kind present, manifest+progress
 batch_id == --batch, no row's kind prefix disagreeing with the batch's own
 kind — task-9-review Minor #5: no silent "fireflies" default in a signing
-tool); signed_at not RFC3339 (task-9-review Important #1: mirrors
-progress.validate_sign_marker's own acceptance rule EXACTLY, so sign_batch
-never accepts a signature the R3 gate would later reject at apply time —
-one typo must not fan out N markers that all get rejected downstream);
-signer outside BRAIN_SIGNERS (spec G-112: sign_dry_run.py itself never
-checked, validate_sign_marker did at apply time — a batch must not fan out an
-invalid signature); digest sha mismatch; the `sample` symlink not resolving to
+tool); a halted/partial dry-run's unattempted manifest rows without
+--allow-partial (G2 round-2 review P1 — a batch whose dry-run stopped early
+on budget/auth is only reviewed on its successful prefix; signing it needs
+an explicit opt-in, recorded as `partial`/`unattempted_count`/
+`unattempted_ids` on batch-signed.json); signed_at not RFC3339 (task-9-review
+Important #1: mirrors progress.validate_sign_marker's own acceptance rule
+EXACTLY, so sign_batch never accepts a signature the R3 gate would later
+reject at apply time — one typo must not fan out N markers that all get
+rejected downstream); signer outside BRAIN_SIGNERS (spec G-112: sign_dry_run.py
+never checked, validate_sign_marker did at apply time — a batch must not fan
+out an invalid signature); digest sha mismatch; the digest's own `status:`
+line disagreeing with the unattempted computation (a hand-edited digest or a
+drifted batch-progress.json); the `sample` symlink not resolving to
 `sample-<sha12>` for THIS digest; the sample/ directory listing not matching
 the recorded sample_ids (CARRY-B: the listing is the authoritative review
 surface — fail closed on any drift, including a shrunk or widened prog
@@ -29,6 +35,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,6 +54,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--signed-by", required=True)
     p.add_argument("--signed-at", required=True)
     p.add_argument("--digest", required=True, help="path to the reviewed digest.md")
+    p.add_argument("--allow-partial", action="store_true",
+                    help="sign a batch whose dry-run halted early (budget/auth), authorizing only the reviewed rows")
     args = p.parse_args(argv)
 
     if not BATCH_ID_RE.match(args.batch):
@@ -133,6 +142,32 @@ def main(argv: list[str] | None = None) -> int:
             print(f"progress row {row_key!r} is not an object", file=sys.stderr)
             return 1
 
+    # G2 r2 P1 (Codex round-2 review): a dry-run that halted early (exit 12
+    # budget, exit 2 auth) leaves manifest rows with no real `dry_run` dict
+    # in batch-progress.json at all — signing that batch signs a PARTIALLY
+    # reviewed set. This is disclosed on the digest (`status: partial
+    # (budget|auth)` + `unattempted: N`, backfill.write_digest) and
+    # signed_ids binds exactly the reviewed rows, so it is not silent — but
+    # FR-015's letter is "dry-run every pending meeting", so partial sign-off
+    # is now an explicit, recorded opt-in rather than a side effect of
+    # whatever happened to be in batch-progress.json. Same definition
+    # backfill's own digest header uses: every non-already_applied manifest
+    # row whose progress row carries no real `dry_run` dict.
+    prog_rows_map = raw_prog_rows or {}
+    unattempted_ids: list[str] = [
+        row["id"] for row in raw_rows
+        if not row.get("already_applied")
+        and not isinstance((prog_rows_map.get(f"{kind}:{row['id']}") or {}).get("dry_run"), dict)
+    ]
+    if unattempted_ids and not args.allow_partial:
+        preview = ", ".join(unattempted_ids[:3])
+        print(
+            f"batch is partial: {len(unattempted_ids)} unattempted rows ({preview}...); "
+            "re-run dry-run, or pass --allow-partial to sign only the reviewed rows",
+            file=sys.stderr,
+        )
+        return 1
+
     # I1 (task-9-review Important #1): mirror progress.validate_sign_marker's
     # OWN acceptance rule for signed_at EXACTLY (progress.py ~L180-186) so
     # sign_batch never accepts a value the R3 gate rejects at apply time.
@@ -154,6 +189,18 @@ def main(argv: list[str] | None = None) -> int:
     actual = hashlib.sha256(digest.read_bytes()).hexdigest()
     if not expected or actual != expected:
         print(f"digest sha256 mismatch: digest.md={actual} digest.sha256={expected or '(missing)'}", file=sys.stderr)
+        return 1
+
+    # G2 r2 P1: cross-check the digest's own `status: complete|partial (...)`
+    # line (backfill.write_digest) against the unattempted computation
+    # above — a hand-edited digest or a batch-progress.json that drifted
+    # from what was actually reviewed must not silently sign.
+    digest_status_match = re.search(r"^status: (.+)$", digest.read_text(encoding="utf-8"), re.MULTILINE)
+    digest_status = digest_status_match.group(1).strip() if digest_status_match else ""
+    digest_says_complete = digest_status == "complete"
+    digest_says_partial = digest_status.startswith("partial")
+    if (digest_says_complete and unattempted_ids) or (digest_says_partial and not unattempted_ids):
+        print("digest status disagrees with progress; re-run dry-run", file=sys.stderr)
         return 1
 
     # sample/ must be the symlink write_digest made, bound to THIS digest.
@@ -252,6 +299,9 @@ def main(argv: list[str] | None = None) -> int:
         "meeting_count": len(candidates),
         "signed_by": args.signed_by,
         "signed_at": args.signed_at,
+        "partial": bool(unattempted_ids),
+        "unattempted_count": len(unattempted_ids),
+        "unattempted_ids": sorted(unattempted_ids),
         "fanout_complete": False,
         "written_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }

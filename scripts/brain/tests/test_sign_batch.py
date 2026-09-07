@@ -15,16 +15,29 @@ GOOD = ("home=clients/a.md node=none rule=2\n--- a/x\nquotes kept decisions=1 co
         "tasks:\nsubject: Recap\nphase3-preview: v1\nwould-touch: STATE.md\nwould-write: skip: no-engagement\nwould-file: X\n")
 
 
-def _seed(tmp_path: Path, ids=("A", "B", "C"), bad=(), failed=(), extra_progress_ids=()):
+def _digest_bytes(status: str = "complete") -> bytes:
+    # G2 r2 P1: real digest.md (backfill.write_digest) always carries a
+    # `status: complete|partial (...)` line — the fixture's own digest must
+    # carry one too so the new digest/progress cross-check has something
+    # real to agree or disagree with.
+    return f"# digest\nstatus: {status}\n".encode("utf-8")
+
+
+def _seed(tmp_path: Path, ids=("A", "B", "C"), bad=(), failed=(), extra_progress_ids=(), unattempted=(),
+          digest_status="complete"):
     import backfill, progress
     vault = tmp_path / "vault"
     bid = "fireflies-20260906T000000Z"
     bd = backfill.batch_dir(vault, bid); bd.mkdir(parents=True)
     rows = {f"fireflies:{i}": {"dry_run": {"exit": 0 if i not in failed else 3}} for i in (*ids, *extra_progress_ids)}
-    (bd / "manifest.json").write_text(json.dumps({"batch_id": bid, "kind": "fireflies", "rows": [{"id": i, "kind": "fireflies"} for i in ids]}), encoding="utf-8")
+    # `unattempted`: manifest ids with NO progress row at all — simulates a
+    # dry-run halted early (budget/auth) before ever reaching them (G2 r2 P1).
+    manifest_rows = [{"id": i, "kind": "fireflies"} for i in (*ids, *unattempted)]
+    (bd / "manifest.json").write_text(json.dumps({"batch_id": bid, "kind": "fireflies", "rows": manifest_rows}), encoding="utf-8")
     (bd / "batch-progress.json").write_text(json.dumps({"batch_id": bid, "kind": "fireflies", "rows": rows, "sample_ids": [i for i in ids if i not in failed]}), encoding="utf-8")
-    (bd / "digest.md").write_text("# digest\n", encoding="utf-8")
-    sha = hashlib.sha256(b"# digest\n").hexdigest()
+    digest_bytes = _digest_bytes(digest_status)
+    (bd / "digest.md").write_bytes(digest_bytes)
+    sha = hashlib.sha256(digest_bytes).hexdigest()
     (bd / "digest.sha256").write_text(sha + "\n", encoding="utf-8")
     versioned = bd / f"sample-{sha[:12]}"; versioned.mkdir()
     os.symlink(versioned.name, bd / "sample")
@@ -49,7 +62,7 @@ def test_sign_batch_writes_signed_json_and_markers_for_exit0_rows(tmp_path, caps
     vault, bd, bid = _seed(tmp_path, failed=("C",))
     assert sign_batch.main(_args(vault, bd, bid)) == 0
     signed = json.loads((bd / "batch-signed.json").read_text(encoding="utf-8"))
-    assert signed["batch_id"] == bid and signed["digest_sha256"] == hashlib.sha256(b"# digest\n").hexdigest()
+    assert signed["batch_id"] == bid and signed["digest_sha256"] == hashlib.sha256(_digest_bytes()).hexdigest()
     assert signed["meeting_count"] == 2 and signed["sample_ids"] == ["A", "B"] and signed["signed_by"] == "Josh"  # C failed → not sampled
     assert signed["signed_ids"] == ["A", "B"] and signed["manifest_sha256"] == hashlib.sha256((bd / "manifest.json").read_bytes()).hexdigest()
     good_sha256 = hashlib.sha256(GOOD.encode("utf-8")).hexdigest()
@@ -195,7 +208,10 @@ def test_sign_batch_ignores_phantom_progress_rows(tmp_path):
     the discriminating RED this test now proves is guarded against."""
     import sign_batch
     from sign_marker import marker_path
-    vault, bd, bid = _seed(tmp_path)
+    # G2 r2 P1: Y/Z below have no real dry_run dict, so this batch is
+    # genuinely partial — the digest must say so or the new cross-check
+    # refuses before ever reaching the phantom-row guard under test.
+    vault, bd, bid = _seed(tmp_path, digest_status="partial (budget)")
     # F15 (CH-9): appended in (occurred_at, id) canonical order — Y before Z
     # — so this fixture's own manifest stays canonical; only the base ids
     # (A, B, C) plus these two phantoms are under test here, not ordering.
@@ -207,12 +223,79 @@ def test_sign_batch_ignores_phantom_progress_rows(tmp_path):
     prog["rows"]["fireflies:Z"] = {}
     prog["rows"]["fireflies:Y"] = {"dry_run": None}
     (bd / "batch-progress.json").write_text(json.dumps(prog), encoding="utf-8")
-    assert sign_batch.main(_args(vault, bd, bid)) == 0
+    # G2 r2 P1: Y and Z carry no real `dry_run` dict — they are now genuinely
+    # "unattempted" rows under the new partial-batch gate, so this needs
+    # --allow-partial (the phantom-row guard under test here is orthogonal:
+    # they must still never receive markers or count toward signed_ids).
+    assert sign_batch.main(_args(vault, bd, bid) + ["--allow-partial"]) == 0
     signed = json.loads((bd / "batch-signed.json").read_text(encoding="utf-8"))
     assert "Z" not in signed["signed_ids"] and "Y" not in signed["signed_ids"]
     assert signed["meeting_count"] == 3
+    assert signed["partial"] is True
+    assert signed["unattempted_ids"] == ["Y", "Z"]
     assert not marker_path(vault, "fireflies", "Z").exists()
     assert not marker_path(vault, "fireflies", "Y").exists()
+
+
+def test_sign_batch_refuses_partial_batch_without_allow_partial(tmp_path, capsys):
+    """G2 r2 P1 (a): manifest rows D, E have no progress entry at all (a
+    dry-run halted early on budget/auth before reaching them) — without
+    --allow-partial this must refuse, writing nothing."""
+    import sign_batch
+    from sign_marker import marker_path
+    vault, bd, bid = _seed(tmp_path, unattempted=("D", "E"), digest_status="partial (budget)")
+    assert sign_batch.main(_args(vault, bd, bid)) == 1
+    err = capsys.readouterr().err
+    assert "batch is partial: 2 unattempted rows" in err
+    assert "--allow-partial" in err
+    assert not (bd / "batch-signed.json").exists()
+    assert not any(marker_path(vault, "fireflies", i).exists() for i in ("A", "B", "C", "D", "E"))
+
+
+def test_sign_batch_allow_partial_signs_reviewed_rows_only(tmp_path):
+    """G2 r2 P1 (b): --allow-partial proceeds, records partial: true and the
+    unattempted ids, and stamps markers only for the actually-reviewed
+    candidates (A, B, C) — D and E get nothing."""
+    import sign_batch
+    from sign_marker import marker_path
+    vault, bd, bid = _seed(tmp_path, unattempted=("D", "E"), digest_status="partial (budget)")
+    result = sign_batch.main(_args(vault, bd, bid) + ["--allow-partial"])
+    assert result == 0
+    signed = json.loads((bd / "batch-signed.json").read_text(encoding="utf-8"))
+    assert signed["partial"] is True
+    assert signed["unattempted_count"] == 2
+    assert signed["unattempted_ids"] == ["D", "E"]
+    assert signed["signed_ids"] == ["A", "B", "C"]
+    for i in ("A", "B", "C"):
+        assert marker_path(vault, "fireflies", i).exists()
+    for i in ("D", "E"):
+        assert not marker_path(vault, "fireflies", i).exists()
+
+
+def test_sign_batch_complete_batch_records_partial_false(tmp_path):
+    """G2 r2 P1 (c): a fully-attempted batch (the default fixture) records
+    partial: false / unattempted_count: 0 on batch-signed.json."""
+    import sign_batch
+    vault, bd, bid = _seed(tmp_path)
+    assert sign_batch.main(_args(vault, bd, bid)) == 0
+    signed = json.loads((bd / "batch-signed.json").read_text(encoding="utf-8"))
+    assert signed["partial"] is False
+    assert signed["unattempted_count"] == 0
+    assert signed["unattempted_ids"] == []
+
+
+def test_sign_batch_refuses_digest_status_disagreeing_with_progress(tmp_path, capsys):
+    """G2 r2 P1 (3): the digest says `status: partial (budget)` but every
+    manifest row actually has a real dry_run entry (unattempted is empty) —
+    a hand-edited digest or a batch-progress.json that drifted from what was
+    reviewed must refuse, not sign against a stale claim."""
+    import sign_batch
+    from sign_marker import marker_path
+    vault, bd, bid = _seed(tmp_path, digest_status="partial (budget)")
+    assert sign_batch.main(_args(vault, bd, bid)) == 1
+    assert "digest status disagrees with progress; re-run dry-run" in capsys.readouterr().err
+    assert not (bd / "batch-signed.json").exists()
+    assert not any(marker_path(vault, "fireflies", i).exists() for i in ("A", "B", "C"))
 
 
 def test_sign_batch_writes_fanout_complete_true_after_last_marker(tmp_path):

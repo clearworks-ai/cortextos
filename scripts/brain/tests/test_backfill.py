@@ -459,6 +459,21 @@ def test_digest_header_status_complete_on_full_run(tmp_path, monkeypatch):
     assert "status: complete" in text and "unattempted: 0" in text
 
 
+def test_digest_header_applied_count_excluded_from_unattempted(tmp_path, monkeypatch):
+    """task-8-review carry (CARRY-A): an already-applied manifest row must be
+    counted in a dedicated `applied:` header field, and `unattempted` must
+    subtract it — so a batch with one already-applied row plus a fully
+    attempted remainder still reads `status: complete · unattempted: 0`,
+    never a false `unattempted: 1` for the applied row it never needed to
+    re-run."""
+    import backfill
+    vault, bd = _seed_batch(tmp_path, applied=("A",))
+    monkeypatch.setattr(backfill, "run_meeting_main", _fake_run_meeting(vault))
+    assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"]) == 0
+    text = (bd / "digest.md").read_text(encoding="utf-8")
+    assert "applied: 1" in text and "unattempted: 0" in text and "status: complete" in text
+
+
 def test_dry_run_sample_excludes_exit0_row_missing_dry_run_txt(tmp_path, monkeypatch, capsys):
     """Important #3: sample_ids / stdout `sample <n>` must never overstate the on-disk
     sample — an exit-0 row with no captured dry-run.txt is excluded from the seeded

@@ -356,9 +356,14 @@ def write_digest(vault: Path, bd: Path, manifest: dict[str, Any], prog: dict[str
     # like a finished one — manifest is the batch's full row count regardless of how many
     # were actually attempted; unattempted is derived, never independently tracked, so it
     # can't drift from ok/failed; status is caller-supplied, never inferred here.
+    # task-8-review carry (CARRY-A): already-applied rows are never attempted this run
+    # (cmd_dry_run skips them outright) — count them separately as `applied` and subtract
+    # from `unattempted`, so an all-attempted batch with live-applied rows still reads
+    # `status: complete · unattempted: 0` instead of a false-partial-looking count.
     manifest_n = len(manifest.get("rows") or [])
-    lines += [f"kind: {kind} · manifest: {manifest_n} · meetings: {ok + failed} · ok: {ok} · "
-              f"failed: {failed} · unattempted: {manifest_n - (ok + failed)} · cost_usd: {spent:.2f}",
+    applied = sum(1 for r in manifest.get("rows") or [] if r.get("already_applied"))
+    lines += [f"kind: {kind} · manifest: {manifest_n} · applied: {applied} · meetings: {ok + failed} · ok: {ok} · "
+              f"failed: {failed} · unattempted: {manifest_n - applied - (ok + failed)} · cost_usd: {spent:.2f}",
               f"status: {status}", "",
               "| id | date | title | home | created org | kept/dropped | classification | exit |",
               "|---|---|---|---|---|---|---|---|", *rows_out, ""]

@@ -419,16 +419,18 @@ export function renderDrafts(
       : inProgress.length > 0
         ? `Heads-down progress on ${inProgress[0]}`
         : `Steady progress on ${client.name}`;
+  // The lead already states done[0]; do not repeat it as the first bullet.
+  const doneBullets = done.slice(1, 5);
 
   // ----- Slack format (tighter, no subject) -----
   const slackParts: string[] = [];
   slackParts.push(`Hi ${firstName} — quick update on ${client.name}.`);
   slackParts.push('');
   slackParts.push(`*${lead}.*`);
-  if (done.length > 0) {
+  if (doneBullets.length > 0) {
     slackParts.push('');
     slackParts.push('*Done since last update*');
-    for (const d of done.slice(0, 4)) slackParts.push(`• ${d}`);
+    for (const d of doneBullets) slackParts.push(`• ${d}`);
   }
   if (inProgress.length > 0) {
     slackParts.push('');
@@ -444,10 +446,10 @@ export function renderDrafts(
   emailParts.push(`Hi ${firstName},`);
   emailParts.push('');
   emailParts.push(`${lead}.`);
-  if (done.length > 0) {
+  if (doneBullets.length > 0) {
     emailParts.push('');
     emailParts.push('Done since last update:');
-    for (const d of done.slice(0, 4)) emailParts.push(`  - ${d}`);
+    for (const d of doneBullets) emailParts.push(`  - ${d}`);
   }
   if (inProgress.length > 0) {
     emailParts.push('');

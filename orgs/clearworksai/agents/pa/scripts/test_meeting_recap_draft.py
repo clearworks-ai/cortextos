@@ -531,3 +531,14 @@ class LedgerKeySingleSourceOfTruthTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_marcos_meeting_is_never_suppressed():
+    # Josh 2026-08-11: suppression is a broken system — Marcos needs zero suppression.
+    meeting = {
+        "title": "Alloi — Marcos Santa Ana",
+        "client_context": "Alloi",
+        "attendees": [{"email": "marcos@alloi.us"}, {"email": "josh@clearworks.ai"}],
+    }
+    assert meeting_recap_draft.SUPPRESSED_NAMES == ()
+    assert meeting_recap_draft.is_suppressed_meeting(meeting) is False

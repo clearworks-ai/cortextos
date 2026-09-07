@@ -773,24 +773,59 @@ def test_sign_batch_round_trip_with_write_digest_pipe_and_newline_titles(tmp_pat
     assert signed["signed_ids"] == ["A", "B"]
 
 
-def test_sign_batch_empty_dry_run_dict_counts_as_unattempted(tmp_path, capsys):
-    """B2 (fold-4 review, pinning B5): a progress row `"dry_run": {}`
-    (present but empty — no `exit` key at all, exactly `backfill._row`'s
-    pre-launch placeholder) is NOT attempted and must require
-    --allow-partial the same way a row with no dry_run key at all does."""
+def test_sign_batch_row_present_but_dry_run_key_absent_counts_as_unattempted(tmp_path, capsys):
+    """B2 (fold-4 review, pinning B5). fold-5 review correction (B2
+    PARTIAL, Minor #4): this test's progress ROW is the empty dict `{}`
+    (present in `prog["rows"]`, but with no `dry_run` KEY at all — `.get("dry_run")`
+    returns `None`) — a DIFFERENT shape from `{"dry_run": {}}` (the row
+    present with `dry_run` itself present but empty), which
+    test_sign_batch_dry_run_key_present_but_empty_dict_counts_as_unattempted
+    below covers. Both must count as unattempted the same way a row
+    missing entirely does, and must require --allow-partial."""
     import sign_batch
     vault, bd, bid = _seed(tmp_path, ids=("A", "B"), unattempted=("C",))
     prog = json.loads((bd / "batch-progress.json").read_text(encoding="utf-8"))
-    prog["rows"]["fireflies:C"] = {}  # present but empty, not absent
+    prog["rows"]["fireflies:C"] = {}  # row present, no "dry_run" key at all
     (bd / "batch-progress.json").write_text(json.dumps(prog), encoding="utf-8")
 
     rc = sign_batch.main(_args(vault, bd, bid))
     assert rc == 1
     err = capsys.readouterr().err
-    assert "batch is partial" in err and "--allow-partial" in err
+    assert "batch is partial" in err and "--allow-partial" in err and "C" in err
     assert not (bd / "batch-signed.json").exists()
 
     rc2 = sign_batch.main(_args(vault, bd, bid) + ["--allow-partial"])
     assert rc2 == 0
     signed = json.loads((bd / "batch-signed.json").read_text(encoding="utf-8"))
     assert "C" in signed["unattempted_ids"]
+
+
+def test_sign_batch_dry_run_key_present_but_empty_dict_counts_as_unattempted(tmp_path, capsys):
+    """B2 (fold-5 review PARTIAL + Minor #4): the sibling test above sets
+    the whole progress ROW to `{}` (`dry_run` key absent). This test covers
+    the distinct shape the fold-5 re-review actually asked for: the row
+    exists and carries a `dry_run` KEY whose value is itself an empty dict
+    (`{"dry_run": {}}`, `backfill._row`'s pre-launch placeholder shape) —
+    no `exit` key either way, so `_dry_run_attempted` must still say False
+    and this must still count as unattempted, require --allow-partial
+    (message naming Z), sign with the flag, list Z in unattempted_ids, and
+    never stamp Z a marker."""
+    import sign_batch
+    from sign_marker import marker_path
+    vault, bd, bid = _seed(tmp_path, ids=("A", "B"), unattempted=("Z",))
+    prog = json.loads((bd / "batch-progress.json").read_text(encoding="utf-8"))
+    prog["rows"]["fireflies:Z"] = {"dry_run": {}}  # row present, dry_run key present but empty
+    (bd / "batch-progress.json").write_text(json.dumps(prog), encoding="utf-8")
+
+    rc = sign_batch.main(_args(vault, bd, bid))
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "batch is partial" in err and "--allow-partial" in err and "Z" in err
+    assert not (bd / "batch-signed.json").exists()
+    assert not marker_path(vault, "fireflies", "Z").exists()
+
+    rc2 = sign_batch.main(_args(vault, bd, bid) + ["--allow-partial"])
+    assert rc2 == 0
+    signed = json.loads((bd / "batch-signed.json").read_text(encoding="utf-8"))
+    assert "Z" in signed["unattempted_ids"]
+    assert not marker_path(vault, "fireflies", "Z").exists()

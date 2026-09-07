@@ -1,9 +1,8 @@
 # cortextOS Fleet Restic Backup & Disaster Recovery
 
 This runbook covers the encrypted replacement for the legacy same-Mac tar
-archives. The scripts are intentionally **not scheduled or activated by this
-repository change**. Keep the five intact legacy archives until an offsite
-snapshot and a restore from that snapshot are both green.
+archives. The scripts themselves perform no scheduling; activation is an
+operator step recorded in the "Activation record" section at the end.
 
 ## What is protected
 
@@ -242,3 +241,32 @@ bash tests/fleet-restic-backup.test.sh
 
 Do not delete or rotate the five good legacy archives until a real offsite
 snapshot and an independently verified restore receipt exist.
+
+## Activation record (2026-09-06)
+
+Activated by Josh's approval on 2026-09-06 after the gates above were green
+(R2 repositories initialized, real offsite snapshots, scratch restore with
+sentinels verified, audit GREEN).
+
+Scheduling is **launchd**, not daemon crons: daemon `crons.json` entries only
+inject an LLM prompt into an agent PTY, which is the wrong tool for a
+30-90 minute shell job that must run even when every agent is down or
+context-full.
+
+```text
+~/Library/LaunchAgents/com.cortextos.fleet-restic-framework.plist  02:00 local  backup --profile framework
+~/Library/LaunchAgents/com.cortextos.fleet-restic-business.plist   03:30 local  backup --profile business
+~/Library/LaunchAgents/com.cortextos.fleet-restic-audit.plist      08:00 local  audit both profiles
+```
+
+Job stdout/stderr land in `~/.cortextos/backup-dr/launchd/`. The audit job
+alerts the configured Telegram chat on MISSING or RED. Reload after editing a
+plist with `launchctl bootout gui/$(id -u)/<label>` then
+`launchctl bootstrap gui/$(id -u) <plist>`.
+
+Health check at any time (reads receipts only, never opens the repository):
+
+```bash
+scripts/fleet-restic-audit.sh --profile framework
+scripts/fleet-restic-audit.sh --profile business
+```

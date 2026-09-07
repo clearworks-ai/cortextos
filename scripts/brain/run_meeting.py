@@ -337,16 +337,7 @@ def _run_dry(meeting_id: str, vault: Path, repo: Path, source_dir: Path) -> int:
         # nothing to do" apart from "capture truncated before this writer".
         print("would-touch: (none)")
 
-    eng_id = ""
-    node_id = resolution.get("node")
-    if node_id and node_id != "none":
-        node = nodes.get(node_id)
-        if node and node.get("kind") == "engagement":
-            eng_id = node_id
-        elif node and node.get("kind") == "project" and node.get("parent"):
-            parent = nodes.get(node["parent"])
-            if parent and parent.get("kind") == "engagement":
-                eng_id = node["parent"]
+    eng_id, _eng_skip = resolve_engagement(resolution, nodes)
     if eng_id:
         try:
             st = subprocess.run(
@@ -540,6 +531,27 @@ def _home_slug(resolution: dict) -> str:
     slug = Path(home).stem or "unknown"
     node = resolution.get("node")
     return f"{slug}/{node}" if node and node != "none" else slug
+
+
+def resolve_engagement(resolution: dict, nodes: dict) -> tuple[str, str]:
+    """FR-011 engagement derivation (spec G-120/G-124). Returns
+    (engagement_id, skip_reason): the node itself when `kind: engagement`;
+    its `parent` only when the node is `kind: project` AND that parent exists
+    in this vault AND is itself `kind: engagement` (G0a F-6 — node.parent is
+    copied verbatim from the child's own ## Node block, never cross-checked);
+    otherwise ("", "no-engagement"). Shared by the per-meeting status step and
+    backfill.py's once-per-pair post-batch status run."""
+    eng_id, eng_skip = ("", "no-engagement")
+    node_id = resolution.get("node")
+    if node_id and node_id != "none":
+        node = nodes.get(node_id)
+        if node and node.get("kind") == "engagement":
+            eng_id, eng_skip = node_id, ""
+        elif node and node.get("kind") == "project" and node.get("parent"):
+            parent = nodes.get(node["parent"])
+            if parent and parent.get("kind") == "engagement":
+                eng_id, eng_skip = node["parent"], ""
+    return eng_id, eng_skip
 
 
 def _apply_writes(
@@ -823,23 +835,7 @@ def _apply_writes(
             outcome["skipped"] = "no-client"
         doc = progress.merge_progress(prog_path, "rollup", outcome)
 
-    eng_id, eng_skip = ("", "no-engagement")
-    node_id = resolution.get("node")
-    if node_id and node_id != "none":
-        node = nodes.get(node_id)
-        if node and node.get("kind") == "engagement":
-            eng_id, eng_skip = node_id, ""
-        elif node and node.get("kind") == "project" and node.get("parent"):
-            # G0a F-6: only trust the parent id when it actually exists in
-            # this vault AND is itself kind: engagement — resolution.json's
-            # node.parent is copied verbatim from the child's own ## Node
-            # block (FR-006) and was never cross-checked against the real
-            # node set. Every pre-existing R2 fixture seeds only the child
-            # (alloi-03), never alloi-01, so this must resolve to a clean
-            # skip, not a subprocess call.
-            parent = nodes.get(node["parent"])
-            if parent and parent.get("kind") == "engagement":
-                eng_id, eng_skip = node["parent"], ""
+    eng_id, eng_skip = resolve_engagement(resolution, nodes)
 
     if not progress.step_done(doc, "status_update"):
         if eng_skip:

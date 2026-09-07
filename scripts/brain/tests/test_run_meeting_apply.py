@@ -1344,3 +1344,21 @@ def test_existing_r2_fixtures_skip_status_update_no_engagement_no_subprocess(tmp
     assert "status: skip: no-engagement" in r.stdout
     npx_trap_log = tmp_path / "npx-tsx-trap.log"
     assert not npx_trap_log.exists() or npx_trap_log.read_text(encoding="utf-8").strip() == ""
+
+
+# --- R4 (G-120/G-124): resolve_engagement extracted, three branches pinned ----
+def test_resolve_engagement_three_branches():
+    import run_meeting
+
+    nodes = {
+        "eng-1": {"id": "eng-1", "kind": "engagement", "client": "acme"},
+        "proj-ok": {"id": "proj-ok", "kind": "project", "client": "acme", "parent": "eng-1"},
+        "proj-orphan": {"id": "proj-orphan", "kind": "project", "client": "acme", "parent": "eng-missing"},
+        "proj-badparent": {"id": "proj-badparent", "kind": "project", "client": "acme", "parent": "proj-ok"},
+    }
+    assert run_meeting.resolve_engagement({"node": "eng-1"}, nodes) == ("eng-1", "")
+    assert run_meeting.resolve_engagement({"node": "proj-ok"}, nodes) == ("eng-1", "")
+    assert run_meeting.resolve_engagement({"node": "proj-orphan"}, nodes) == ("", "no-engagement")
+    assert run_meeting.resolve_engagement({"node": "proj-badparent"}, nodes) == ("", "no-engagement")
+    assert run_meeting.resolve_engagement({"node": "none"}, nodes) == ("", "no-engagement")
+    assert run_meeting.resolve_engagement({}, nodes) == ("", "no-engagement")

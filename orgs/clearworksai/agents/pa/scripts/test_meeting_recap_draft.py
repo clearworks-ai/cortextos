@@ -540,5 +540,5 @@ def test_marcos_meeting_is_never_suppressed():
         "client_context": "Alloi",
         "attendees": [{"email": "marcos@alloi.us"}, {"email": "josh@clearworks.ai"}],
     }
-    assert meeting_recap_draft.SUPPRESSED_NAMES == ()
-    assert meeting_recap_draft.is_suppressed_meeting(meeting) is False
+    assert MODULE.SUPPRESSED_NAMES == ()
+    assert MODULE.is_suppressed_meeting(meeting) is False

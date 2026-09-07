@@ -23,6 +23,7 @@ import os
 import random
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -152,11 +153,13 @@ def cmd_list(args: argparse.Namespace) -> int:
     if not api_key:
         print("missing FIREFLIES_API_KEY", file=sys.stderr)
         return 2
-    # M1 (Spec M-1): a Fireflies API failure (bad key, network, transport) must
-    # refuse cleanly — never an uncaught traceback, never a half-written batch.
+    # M1 (Spec M-1) + A5 (G2a r3 P2-2): a Fireflies API failure (bad key,
+    # network, transport, or a malformed JSON response body — ValueError
+    # covers json.JSONDecodeError) must refuse cleanly — never an uncaught
+    # traceback, never a half-written batch.
     try:
         rows = list_transcripts(api_key, throttle_s=args.rate)
-    except (FirefliesListError, urllib.error.URLError, OSError) as exc:
+    except (FirefliesListError, urllib.error.URLError, OSError, ValueError) as exc:
         print(f"list failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
     manifest_rows = build_manifest(rows, vault=vault, kind=args.source, since=args.since, until=args.until)
@@ -292,7 +295,7 @@ def _manifest_is_canonical(rows: list[Any], manifest_kind: Any) -> str | None:
     (occurred_at, id) — the same order `build_manifest` produces and the
     digest/apply loops assume. Returns None when canonical, or a diagnostic
     string to print otherwise."""
-    keys: list[tuple[str, str]] = []
+    keys: list[tuple[datetime, str]] = []
     seen: set[str] = set()
     for r in rows:
         if not isinstance(r, dict):
@@ -307,12 +310,19 @@ def _manifest_is_canonical(rows: list[Any], manifest_kind: Any) -> str | None:
         if not isinstance(occurred_raw, str) or not occurred_raw:
             return f"manifest not canonical (missing occurred_at for id {rid!r}); re-run list"
         try:
-            datetime.fromisoformat(occurred_raw.replace("Z", "+00:00"))
+            occurred_dt = datetime.fromisoformat(occurred_raw.replace("Z", "+00:00"))
         except ValueError:
             return f"manifest not canonical (unparseable occurred_at {occurred_raw!r} for id {rid!r}); re-run list"
+        # A4 (CH3-6 backfill half): a naive value (no Z, no explicit offset)
+        # is refused — the batch cannot safely order rows whose instant is
+        # ambiguous; canonical order below is computed from the UTC instant,
+        # not the original text, so two rows written with different offsets
+        # compare by real time rather than lexical string.
+        if occurred_dt.tzinfo is None:
+            return f"manifest not canonical (occurred_at {occurred_raw!r} has no UTC offset for id {rid!r}); re-run list"
         if r.get("kind") != manifest_kind:
             return f"manifest not canonical (row kind {r.get('kind')!r} != manifest kind {manifest_kind!r} for id {rid!r}); re-run list"
-        keys.append((occurred_raw, rid))
+        keys.append((occurred_dt.astimezone(timezone.utc), rid))
     if keys != sorted(keys):
         return "manifest not canonical; re-run list"
     return None
@@ -380,12 +390,35 @@ def _acquire_batch_lock(bd: Path) -> int:
     breaking logic at all, because there is nothing that can go stale. The
     pid written into the file is a diagnostic hint ONLY (surfaced in the
     refusal message for a human to `ps`), never consulted to decide
-    ownership. Returns 0 once the lock is held (release with
-    `_release_batch_lock`), or 64 when another live process already holds
-    it."""
+    ownership.
+
+    A1 (CH3-5): opened with O_NOFOLLOW — `.lock` replaced by a symlink (to
+    escalate a write elsewhere via the pid-diagnostic write) is refused
+    before that write ever happens, and `os.fstat` additionally requires a
+    REGULAR file with exactly one hard link, so a hardlinked `.lock` (which
+    would let the pid write land on a second path too) is refused the same
+    way. Both checks happen BEFORE any truncate/write — a rejected fd is
+    closed untouched. A2 (CH3-3): the fd is marked inheritable so
+    `run_apply_subprocess` can pass it into each per-meeting child via
+    `pass_fds`, keeping the flock held for that child's lifetime even if
+    this parent process were to die mid-batch.
+
+    Returns 0 once the lock is held (release with `_release_batch_lock`, or
+    look the fd up via `_batch_lock_fd`), or 64 when the lock file is not a
+    plain regular file, or another live process already holds it."""
     bd.mkdir(parents=True, exist_ok=True)
     lock_path = bd / ".lock"
-    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o644)
+    except OSError as exc:
+        print(f"batch {bd.name}: batch lock is not a regular file: {exc}", file=sys.stderr)
+        return 64
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+        os.close(fd)
+        print(f"batch {bd.name}: batch lock is not a regular file", file=sys.stderr)
+        return 64
+    os.set_inheritable(fd, True)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
@@ -400,6 +433,13 @@ def _acquire_batch_lock(bd: Path) -> int:
     os.write(fd, str(os.getpid()).encode("utf-8"))
     _LOCK_FDS[str(bd)] = fd
     return 0
+
+
+def _batch_lock_fd(bd: Path) -> int | None:
+    """A2 (CH3-3): the fd this process currently holds the batch flock on for
+    `bd`, or None if not held — exposed so `run_apply_subprocess` can
+    inherit it into each per-meeting child (`pass_fds`)."""
+    return _LOCK_FDS.get(str(bd))
 
 
 def _release_batch_lock(bd: Path) -> None:
@@ -736,16 +776,38 @@ def _cmd_dry_run_locked(args: argparse.Namespace, vault: Path, repo: Path, kind:
 APPLY_TIMEOUT_S = 6 * run_meeting.CHILD_TIMEOUT_S  # one meeting = up to six child steps (G0a-7)
 
 
+# A2/A3 (CH3-3/CH3-4 backfill halves): set by cmd_apply for the duration of
+# its (locked) run, read by run_apply_subprocess below. A module-level
+# variable rather than an extra parameter — run_apply_subprocess's 3-arg
+# call signature (meeting_id, vault, repo) is depended on verbatim by every
+# existing `monkeypatch.setattr(backfill, "run_apply_subprocess", lambda mid,
+# v, repo: ...)` test fixture in this file; changing its arity would break
+# every one of them for a concern (the batch id / lock fd) those fakes never
+# needed to know about.
+_CURRENT_BATCH_ID: str | None = None
+
+
 def run_apply_subprocess(meeting_id: str, vault: Path, repo: Path) -> int:
     """One meeting through the unchanged per-meeting loop with D-19 policy.
     A subprocess (not in-process): --apply spawns its own children and the
-    batch must survive one meeting's failure or hang (exit 124 on timeout)."""
+    batch must survive one meeting's failure or hang (exit 124 on timeout).
+
+    A3 (CH3-4 backfill half): passes --batch <batch_id> (from
+    _CURRENT_BATCH_ID) so run_meeting can bind its marker validation to the
+    exact batch that authorized it (agent B wires --batch/expected_batch_id
+    on the receiving end). A2 (CH3-3): if this process currently holds that
+    batch's flock, inherits the fd into the child via pass_fds so the lock
+    survives parent death for the child's own lifetime."""
+    argv = [sys.executable, str(Path(__file__).with_name("run_meeting.py")), "--meeting-id", meeting_id,
+            "--vault", str(vault), "--repo-root", str(repo), "--apply", "--backfill"]
+    kwargs: dict[str, Any] = {}
+    if _CURRENT_BATCH_ID:
+        argv += ["--batch", _CURRENT_BATCH_ID]
+        lock_fd = _batch_lock_fd(batch_dir(vault, _CURRENT_BATCH_ID))
+        if lock_fd is not None:
+            kwargs["pass_fds"] = [lock_fd]
     try:
-        res = subprocess.run(
-            [sys.executable, str(Path(__file__).with_name("run_meeting.py")), "--meeting-id", meeting_id,
-             "--vault", str(vault), "--repo-root", str(repo), "--apply", "--backfill"],
-            capture_output=True, text=True, timeout=APPLY_TIMEOUT_S,
-        )
+        res = subprocess.run(argv, capture_output=True, text=True, timeout=APPLY_TIMEOUT_S, **kwargs)
     except subprocess.TimeoutExpired:
         print(f"FAILED at apply ({meeting_id}): timeout after {APPLY_TIMEOUT_S}s", file=sys.stderr)
         return 124
@@ -926,6 +988,8 @@ def cmd_apply(args: argparse.Namespace) -> int:
     lock_rc = _acquire_batch_lock(bd)
     if lock_rc:
         return lock_rc
+    global _CURRENT_BATCH_ID
+    _CURRENT_BATCH_ID = args.batch  # A2/A3: available to run_apply_subprocess for the lifetime of this locked run
     try:
         loaded = _load_batch(vault, args.batch)
         if loaded is None:  # review I4: refuse like every other bad-input path, never raise
@@ -937,6 +1001,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
             return 64
         return _cmd_apply_locked(args, vault, repo, kind, bd, manifest, prog)
     finally:
+        _CURRENT_BATCH_ID = None
         _release_batch_lock(bd)
 
 

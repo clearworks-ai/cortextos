@@ -1649,3 +1649,108 @@ def test_apply_missing_manifest_leaves_no_batch_dir(tmp_path, capsys):
     assert rc == 64
     assert "manifest.json" in capsys.readouterr().err
     assert not bd.exists()
+
+
+# --- Fold round 4 (fold-4-brief.md, agent A) -----------------------------------------
+# A1 (CH3-5 Critical): a `.lock` replaced by a symlink must be refused
+# (O_NOFOLLOW) before any pid-diagnostic write happens.
+def test_acquire_batch_lock_refuses_when_lock_path_is_a_symlink(tmp_path, capsys):
+    import backfill
+    vault, bd = _seed_batch(tmp_path, ids=("A",))
+    target = vault / "real-target.txt"
+    target.write_text("original bytes", encoding="utf-8")
+    (bd / ".lock").symlink_to(target)
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"])
+    assert rc == 64
+    assert "batch lock is not a regular file" in capsys.readouterr().err
+    assert target.read_text(encoding="utf-8") == "original bytes"   # never touched
+
+
+# A2 (CH3-3 Critical): the held lock fd is inherited into the apply child via pass_fds.
+def test_run_apply_subprocess_inherits_the_lock_fd_via_pass_fds(tmp_path, monkeypatch):
+    import backfill
+    vault, bd = _seed_batch(tmp_path, ids=("A",))
+    assert backfill._acquire_batch_lock(bd) == 0
+    lock_fd = backfill._batch_lock_fd(bd)
+    assert lock_fd is not None
+    backfill._CURRENT_BATCH_ID = bd.name
+    captured: dict = {}
+
+    def fake_run(argv, **kwargs):
+        captured["kwargs"] = kwargs
+        class R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return R()
+    monkeypatch.setattr(backfill.subprocess, "run", fake_run)
+    try:
+        rc = backfill.run_apply_subprocess("A", vault, tmp_path)
+    finally:
+        backfill._CURRENT_BATCH_ID = None
+        backfill._release_batch_lock(bd)
+    assert rc == 0
+    assert captured["kwargs"].get("pass_fds") == [lock_fd]
+
+
+# A3 (CH3-4 Important, backfill half): --batch <id> is passed to the apply child argv.
+def test_run_apply_subprocess_passes_batch_flag_to_child(tmp_path, monkeypatch):
+    import backfill
+    backfill._CURRENT_BATCH_ID = "fireflies-20260906T000000Z"
+    captured: dict = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        class R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return R()
+    monkeypatch.setattr(backfill.subprocess, "run", fake_run)
+    try:
+        rc = backfill.run_apply_subprocess("A", tmp_path, tmp_path)
+    finally:
+        backfill._CURRENT_BATCH_ID = None
+    assert rc == 0
+    argv = captured["argv"]
+    assert "--batch" in argv
+    assert argv[argv.index("--batch") + 1] == "fireflies-20260906T000000Z"
+
+
+# A4 (CH3-6 backfill half): occurred_at must carry Z/offset; order is by UTC instant.
+def test_manifest_canonical_refuses_naive_occurred_at(tmp_path, capsys):
+    import backfill
+    vault, bd = _seed_batch(tmp_path, ids=("A",))
+    m = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
+    m["rows"][0]["occurred_at"] = "2025-09-01T00:00:00"   # naive: no Z, no offset
+    (bd / "manifest.json").write_text(json.dumps(m), encoding="utf-8")
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"])
+    assert rc == 64
+    assert "manifest not canonical" in capsys.readouterr().err
+
+
+def test_manifest_canonical_orders_by_utc_instant_not_text(tmp_path):
+    import backfill
+    vault, bd = _seed_batch(tmp_path, ids=("A", "B"))
+    m = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
+    # Text order (A's string < B's string) would look canonical, but by the
+    # TRUE UTC instant B (01:00Z) precedes A (04:00Z) -- must be refused.
+    m["rows"][0]["occurred_at"] = "2025-09-01T23:00:00-05:00"  # == 2025-09-02T04:00:00Z
+    m["rows"][1]["occurred_at"] = "2025-09-02T01:00:00+00:00"  # == 2025-09-02T01:00:00Z (earlier)
+    (bd / "manifest.json").write_text(json.dumps(m), encoding="utf-8")
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"])
+    assert rc == 64
+
+
+# A5 (G2a r3 P2-2): a malformed JSON response (ValueError) from list_transcripts refuses 2.
+def test_cmd_list_returns_2_on_json_decode_error_from_list_transcripts(tmp_path, monkeypatch, capsys):
+    import backfill
+    vault = tmp_path / "vault"
+
+    def raising(api_key, **kw):
+        raise ValueError("Expecting value: line 1 column 1 (char 0)")
+    monkeypatch.setattr(backfill, "list_transcripts", raising)
+    monkeypatch.setattr(backfill, "load_api_key", lambda repo: "k")
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "list"])
+    assert rc == 2
+    assert "list failed: ValueError" in capsys.readouterr().err

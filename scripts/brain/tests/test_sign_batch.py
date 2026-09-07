@@ -52,10 +52,12 @@ def test_sign_batch_writes_signed_json_and_markers_for_exit0_rows(tmp_path, caps
     assert signed["batch_id"] == bid and signed["digest_sha256"] == hashlib.sha256(b"# digest\n").hexdigest()
     assert signed["meeting_count"] == 2 and signed["sample_ids"] == ["A", "B"] and signed["signed_by"] == "Josh"  # C failed → not sampled
     assert signed["signed_ids"] == ["A", "B"] and signed["manifest_sha256"] == hashlib.sha256((bd / "manifest.json").read_bytes()).hexdigest()
+    good_sha256 = hashlib.sha256(GOOD.encode("utf-8")).hexdigest()
     for i in ("A", "B"):
         doc = json.loads(marker_path(vault, "fireflies", i).read_text(encoding="utf-8"))
         assert doc["batch_id"] == bid and doc["digest_sha256"] == signed["digest_sha256"]
-        assert doc["signed_by"] == "Josh" and doc["phase3_capture_sha256"] and doc["source_sha256"] == "a" * 64
+        assert doc["signed_by"] == "Josh" and doc["source_sha256"] == "a" * 64
+        assert doc["phase3_capture_sha256"] == good_sha256 and doc["capture_sha256"] == good_sha256
     assert not marker_path(vault, "fireflies", "C").exists()
     assert "signed: 2 markers" in capsys.readouterr().out
 
@@ -98,20 +100,26 @@ def test_sign_batch_refuses_shrunken_sample_set(tmp_path, capsys):
     recorded sample_ids) so listing == sample_ids (2 == 2) while
     expected_n = min(10, len(candidates)=3) = 3, forcing the count check."""
     import sign_batch
+    from sign_marker import marker_path
     vault, bd, bid = _seed(tmp_path)          # 3 candidates → sample must hold min(10, 3) = 3; _seed wrote 3; shrink to 2
     (bd / "sample" / "C.txt").unlink()
     prog = json.loads((bd / "batch-progress.json").read_text(encoding="utf-8")); prog["sample_ids"] = ["A", "B"]
     (bd / "batch-progress.json").write_text(json.dumps(prog), encoding="utf-8")
     assert sign_batch.main(_args(vault, bd, bid)) == 1
     assert "exactly 3" in capsys.readouterr().err
+    assert not (bd / "batch-signed.json").exists()
+    assert not any(marker_path(vault, "fireflies", i).exists() for i in ("A", "B", "C"))
 
 
 def test_sign_batch_refuses_sample_dir_not_bound_to_digest(tmp_path, capsys):
     import sign_batch
+    from sign_marker import marker_path
     vault, bd, bid = _seed(tmp_path)
     (bd / "sample").unlink(); os.symlink("sample-000000000000", bd / "sample")
     assert sign_batch.main(_args(vault, bd, bid)) == 1
     assert "does not match the digest" in capsys.readouterr().err
+    assert not (bd / "batch-signed.json").exists()
+    assert not any(marker_path(vault, "fireflies", i).exists() for i in ("A", "B", "C"))
 
 
 def test_sign_batch_refuses_bad_batch_id_before_any_read(tmp_path):
@@ -141,6 +149,28 @@ def test_sign_batch_refuses_stale_digest(tmp_path, capsys):
     assert "digest sha256 mismatch" in capsys.readouterr().err
 
 
+def test_sign_batch_refuses_non_rfc3339_signed_at_before_any_write(tmp_path, capsys):
+    """review Important #1: signed_at must pass the SAME acceptance rule
+    validate_sign_marker uses at apply time (progress.py's
+    `datetime.fromisoformat(signed_at.replace("Z", "+00:00"))` in a try/except
+    ValueError) — mirrored exactly, so sign_batch never accepts what the R3
+    gate would later reject. "not-a-time" is the discriminating case:
+    Python's `datetime.fromisoformat` genuinely raises ValueError on it (a
+    bare date like "2026-09-06" does NOT raise — it parses to midnight,
+    under the identical rule validate_sign_marker itself uses — so it is
+    not usable as a must-reject example without contradicting the very rule
+    being mirrored)."""
+    import sign_batch
+    from sign_marker import marker_path
+    vault, bd, bid = _seed(tmp_path)
+    args = _args(vault, bd, bid)
+    args[args.index("--signed-at") + 1] = "not-a-time"
+    assert sign_batch.main(args) == 1
+    assert not (bd / "batch-signed.json").exists()
+    assert not any(marker_path(vault, "fireflies", i).exists() for i in ("A", "B", "C"))
+    assert "signed_at is not RFC3339" in capsys.readouterr().err
+
+
 def test_sign_batch_names_first_incomplete_capture_and_writes_nothing(tmp_path, capsys):
     import sign_batch
     from sign_marker import marker_path
@@ -152,16 +182,46 @@ def test_sign_batch_names_first_incomplete_capture_and_writes_nothing(tmp_path, 
 
 
 def test_sign_batch_ignores_phantom_progress_rows(tmp_path):
-    """CARRY-C: a legacy phantom `{}` row (no `dry_run` key at all) in
-    batch-progress.json must never be treated as a candidate — not counted
-    in meeting_count, not in signed_ids, no marker written for it."""
+    """CARRY-C, made discriminating per review Important #2: the original
+    version of this test put `fireflies:Z` only in batch-progress.json, not
+    in manifest.rows — so the manifest-∩ filter alone excluded it and the
+    test passed whether or not the `isinstance(dry_run, dict)` guard
+    existed. Both phantoms are now real manifest ids: `Z` -> `{}` (no
+    `dry_run` key at all — exactly what real pre-fix ledgers had) and
+    `Y` -> `{"dry_run": None}` (an explicit null). Without the isinstance
+    guard, `None.get("exit")` on the `Y` row would raise `AttributeError`
+    (proved via a standalone repro against the identical candidate-loop
+    logic — see the fix report) — that crash, not just a wrong count, is
+    the discriminating RED this test now proves is guarded against."""
     import sign_batch
     from sign_marker import marker_path
     vault, bd, bid = _seed(tmp_path)
+    manifest = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
+    manifest["rows"].append({"id": "Z", "kind": "fireflies"})
+    manifest["rows"].append({"id": "Y", "kind": "fireflies"})
+    (bd / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     prog = json.loads((bd / "batch-progress.json").read_text(encoding="utf-8"))
     prog["rows"]["fireflies:Z"] = {}
+    prog["rows"]["fireflies:Y"] = {"dry_run": None}
     (bd / "batch-progress.json").write_text(json.dumps(prog), encoding="utf-8")
     assert sign_batch.main(_args(vault, bd, bid)) == 0
     signed = json.loads((bd / "batch-signed.json").read_text(encoding="utf-8"))
-    assert "Z" not in signed["signed_ids"] and signed["meeting_count"] == 3
+    assert "Z" not in signed["signed_ids"] and "Y" not in signed["signed_ids"]
+    assert signed["meeting_count"] == 3
     assert not marker_path(vault, "fireflies", "Z").exists()
+    assert not marker_path(vault, "fireflies", "Y").exists()
+
+
+def test_sign_batch_refuses_batch_id_mismatch(tmp_path, capsys):
+    """review Minor #5: a signing tool must not silently trust a batch dir
+    whose own manifest.json disagrees with --batch — refuse rather than
+    sign against the wrong batch's manifest."""
+    import sign_batch
+    from sign_marker import marker_path
+    vault, bd, bid = _seed(tmp_path)
+    manifest = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
+    manifest["batch_id"] = "fireflies-19700101T000000Z"
+    (bd / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert sign_batch.main(_args(vault, bd, bid)) == 1
+    assert not (bd / "batch-signed.json").exists()
+    assert not any(marker_path(vault, "fireflies", i).exists() for i in ("A", "B", "C"))

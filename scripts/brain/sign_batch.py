@@ -5,6 +5,13 @@ batch by stamping each meeting's own d09-signed.json through the shared
 sign_marker writer — so `--apply`'s per-meeting binding is unchanged.
 
 Refuses BEFORE writing anything, checked in this order: bad --batch (64);
+manifest/progress binding to the batch (kind present, manifest+progress
+batch_id == --batch, no row's kind prefix disagreeing with the batch's own
+kind — task-9-review Minor #5: no silent "fireflies" default in a signing
+tool); signed_at not RFC3339 (task-9-review Important #1: mirrors
+progress.validate_sign_marker's own acceptance rule EXACTLY, so sign_batch
+never accepts a signature the R3 gate would later reject at apply time —
+one typo must not fan out N markers that all get rejected downstream);
 signer outside BRAIN_SIGNERS (spec G-112: sign_dry_run.py itself never
 checked, validate_sign_marker did at apply time — a batch must not fan out an
 invalid signature); digest sha mismatch; the `sample` symlink not resolving to
@@ -46,7 +53,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"invalid --batch {args.batch!r} (expected <kind>-YYYYMMDDTHHMMSSZ)", file=sys.stderr)
         return 64
 
-    vault = Path(args.vault)
+    # M7: an absolute vault path so a relative --vault cannot leak a
+    # cwd-dependent capture_path into a marker that validate_sign_marker
+    # later resolves from a different cwd.
+    vault = Path(args.vault).resolve()
     bd = batch_dir(vault, args.batch)
 
     # Load files (read-only; nothing decided yet).
@@ -56,7 +66,29 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError) as exc:
         print(f"batch files unreadable: {exc}", file=sys.stderr)
         return 1
-    kind = str(manifest.get("kind") or "fireflies")
+
+    # M5: a signing tool must not silently default or trust an unbound batch
+    # dir — refuse rather than default "kind" to "fireflies" or sign against
+    # a manifest/progress ledger meant for a different batch.
+    if "kind" not in manifest:
+        print("manifest missing 'kind'", file=sys.stderr)
+        return 1
+    kind = str(manifest["kind"])
+    if manifest.get("batch_id") != args.batch:
+        print(f"manifest batch_id {manifest.get('batch_id')!r} != --batch {args.batch!r}", file=sys.stderr)
+        return 1
+    if prog.get("batch_id") != args.batch:
+        print(f"batch-progress.json batch_id {prog.get('batch_id')!r} != --batch {args.batch!r}", file=sys.stderr)
+        return 1
+
+    # I1 (task-9-review Important #1): mirror progress.validate_sign_marker's
+    # OWN acceptance rule for signed_at EXACTLY (progress.py ~L180-186) so
+    # sign_batch never accepts a value the R3 gate rejects at apply time.
+    try:
+        datetime.fromisoformat(args.signed_at.replace("Z", "+00:00"))
+    except ValueError:
+        print(f"signed_at is not RFC3339: {args.signed_at}", file=sys.stderr)
+        return 1
 
     if args.signed_by not in progress._signer_allowlist():
         print(f"signer not in allowlist: {args.signed_by}", file=sys.stderr)
@@ -87,10 +119,16 @@ def main(argv: list[str] | None = None) -> int:
     manifest_ids = {str(r["id"]) for r in manifest.get("rows") or [] if not r.get("already_applied")}
     candidates: list[tuple[str, Path]] = []
     for key, entry in sorted((prog.get("rows") or {}).items()):
+        # M5: a progress row keyed for a different kind than this batch's own
+        # kind is ledger corruption, not a row to silently skip — refuse the
+        # whole batch rather than sign around it.
+        prefix, sep, mid = key.partition(":")
+        if not sep or prefix != kind:
+            print(f"progress row {key!r} kind prefix != batch kind {kind!r}", file=sys.stderr)
+            return 1
         dr = entry.get("dry_run")
         if not isinstance(dr, dict) or dr.get("exit") != 0:
             continue
-        mid = key.split(":", 1)[1]
         if mid not in manifest_ids:
             continue
         candidates.append((mid, progress._state_dir(vault, kind, mid) / "dry-run.txt"))
@@ -162,12 +200,19 @@ def main(argv: list[str] | None = None) -> int:
     atomic_write(bd / "batch-signed.json", (json.dumps(signed, sort_keys=True, indent=2) + "\n").encode("utf-8"))
     written = 0
     for mid, capture in candidates:
-        rc, _marker, message = write_marker(
-            vault, kind, mid, capture, signed_by=args.signed_by, signed_at=args.signed_at,
-            extra={"batch_id": args.batch, "digest_sha256": actual},
-        )
+        try:
+            rc, _marker, message = write_marker(
+                vault, kind, mid, capture, signed_by=args.signed_by, signed_at=args.signed_at,
+                extra={"batch_id": args.batch, "digest_sha256": actual},
+            )
+        except OSError as exc:
+            # M3: batch-signed.json is already on disk by design (Task 10
+            # diffs signed_ids against markers to find exactly what's
+            # missing) — report how far the fan-out got before failing.
+            print(f"signed: {written}/{len(candidates)} markers written before failure at {kind}-{mid}: {exc}", file=sys.stderr)
+            return 1
         if rc != 0:  # cannot happen after the checks above; keep the contract honest
-            print(f"marker write failed for {kind}:{mid}: {message}", file=sys.stderr)
+            print(f"signed: {written}/{len(candidates)} markers written before failure at {kind}-{mid}: {message}", file=sys.stderr)
             return 1
         written += 1
     print(f"signed: {written} markers")

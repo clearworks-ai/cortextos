@@ -1,0 +1,45 @@
+## WRONG LEDGER ROWS
+
+none
+
+## UNRECORDED ASSUMPTIONS
+
+[LOW] (confidence: 9/10) scripts/brain/tests/test_run_meeting_apply.py:309 — FR-017 inaccurately implies the existing harness already monkeypatches a CRM subprocess seam: it PATH-shims commands, while CRM currently uses the generic `subprocess.run` at `run_meeting.py:617`; `test_kind_sink.py` must add a selective in-process monkeypatch, but no existing GREEN test is endangered.
+
+## BUCKET CORRECTIONS
+
+none
+
+## VERIFIED-CORRECT
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:684 — G-120’s widened probe now supports the complete claim about `validated.json`, `resolution.json`, and engagement derivation.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:686 — G-122’s probe now covers the complete `render_created_page` body through line 256 and correctly establishes that aliases are not rendered.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:688 — G-124 correctly limits the named CONTROL to the missing-parent branch and cites the code for the two unpinned engagement branches.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:689 — G-125’s widened probe supports the `parse_args` ordering, missing-argument exit 2, and post-parse invalid-ID exit 64.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:690 — G-126’s widened probe supports both `--allow-short` admission and the resulting nullable `duration_s`.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:691 — G-127 correctly describes the empty-`externals` rule-8 path at `resolve_meeting.py:496-512`.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:437 — YES, the two-leg `test_kind_sink.py` criterion is satisfiable and non-vacuous: `_run_dry` supplies preview/path evidence, while `_run_apply` validates the pre-written marker, creates progress and receipt state, and invokes CRM at `run_meeting.py:461-617`.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:439 — The `sign_dry_run.py --source-kind` sentence now correctly records its FR-016/G-111 dependency, and G-111 appears in FR-017’s Depends list.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:446 — FR-017’s bucket rationale is accurate: ten runtime string hard-codes remain in `run_meeting.py`, with at least eleven additional kind-bearing files.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:460 — FR-018 now correctly identifies the kind gate plus a non-empty external-participant set.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:514 — FR-021 correctly specifies lookup order as `binding.key` followed by `binding.org_key`.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:529 — FR-022’s external-presence guard preserves rule 8 for internal-only items and leaves Fireflies rule 7 unchanged.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:535 — FR-022’s Depends list correctly includes G-127.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:537 — FR-022’s verification now explicitly covers an internal-only Slack fixture resolving through rule 8.
+
+scripts/brain/tests/test_resolve_meeting.py:393 — The scoped changes introduce no unlisted existing GREEN casualty; the current rule-8 test remains protected by the required non-empty-externals guard.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:753 — Section 12 R5 correctly includes FR-022, both `test_kind_sink.py` legs, and CONTROL G-124.

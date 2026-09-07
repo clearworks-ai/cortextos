@@ -668,17 +668,40 @@ def write_digest(vault: Path, bd: Path, manifest: dict[str, Any], prog: dict[str
     versioned = bd / f"sample-{sha[:12]}"
     link = bd / "sample"
     # Build in a temp sibling and rename INTO place; never delete a directory the
-    # published symlink may point at (G0b r3): an unchanged digest reuses its dir.
-    if not versioned.exists():
+    # published symlink may point at while it is the only complete copy (G0b r3):
+    # an unchanged digest normally reuses its dir. But a dry-run resume can
+    # re-run a row whose structured dr fields (and so the digest sha) come out
+    # byte-identical while its captured dry-run.txt content drifted — in that
+    # case the existing versioned dir is stale and must be rebuilt, or
+    # sign_batch's stale-sample check loops forever (never re-run dry-run).
+    current_picks: dict[str, bytes] = {}
+    for mid in picked:
+        src = progress._state_dir(vault, kind, mid) / "dry-run.txt"
+        if src.is_file():
+            current_picks[mid] = src.read_bytes()
+
+    def _versioned_matches() -> bool:
+        if {p.stem for p in versioned.glob("*.txt")} != set(current_picks):
+            return False
+        return all((versioned / f"{mid}.txt").read_bytes() == data for mid, data in current_picks.items())
+
+    stale = versioned.exists() and not _versioned_matches()
+    if not versioned.exists() or stale:
         build = bd / f"sample-{sha[:12]}.tmp-{os.getpid()}"
         if build.exists():
             shutil.rmtree(build)
         build.mkdir(parents=True)
-        for mid in picked:
-            src = progress._state_dir(vault, kind, mid) / "dry-run.txt"
-            if src.is_file():
-                atomic_write(build / f"{mid}.txt", src.read_bytes())
-        os.replace(build, versioned)
+        for mid, cap_bytes in current_picks.items():
+            atomic_write(build / f"{mid}.txt", cap_bytes)
+        if stale:
+            stale_dir = bd / f"sample-{sha[:12]}.stale-{os.getpid()}"
+            if stale_dir.exists():
+                shutil.rmtree(stale_dir)
+            os.replace(versioned, stale_dir)
+            os.replace(build, versioned)
+            shutil.rmtree(stale_dir)
+        else:
+            os.replace(build, versioned)
     if link.exists() and not link.is_symlink():  # pre-versioning layout: move it aside, then remove
         legacy = bd / f"sample.legacy-{os.getpid()}"
         os.replace(link, legacy)

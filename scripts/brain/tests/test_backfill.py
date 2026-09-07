@@ -445,6 +445,73 @@ def test_digest_sample_takes_all_when_fewer_than_ten(tmp_path, monkeypatch):
     assert sorted(p.stem for p in (bd / "sample").glob("*.txt")) == ["A", "B"]
 
 
+# --- R4 G4 sign: same-sha resume must rebuild a stale sample dir -----------------
+def test_write_digest_rebuilds_stale_sample_dir_when_picked_capture_changed(tmp_path, monkeypatch):
+    """Reproduces the fireflies-20260907T173226Z / 01KZF3MM897VEM5FDQN5R7HASA
+    'sample stale' infinite loop: a dry-run resume can re-run a picked meeting
+    whose structured dr fields (and so the digest sha) come out byte-identical
+    while the on-disk dry-run.txt capture drifted. write_digest must detect that
+    drift and rebuild sample-<sha12>/ in place — never keep serving the stale
+    bytes just because `versioned.exists()` was already true."""
+    import backfill, os
+    vault, bd = _seed_batch(tmp_path, ids=("A", "B"))
+    monkeypatch.setattr(backfill, "run_meeting_main", _fake_run_meeting(vault))
+    assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path),
+                          "--batch", bd.name, "dry-run"]) == 0
+    sha1 = (bd / "digest.sha256").read_text(encoding="utf-8").strip()
+    versioned = bd / f"sample-{sha1[:12]}"
+    assert (versioned / "A.txt").is_file()  # both picked at this batch size (2 < SAMPLE_SIZE)
+
+    # Simulate a re-run of meeting A whose capture text changed (e.g. reworded
+    # quote) while every field write_digest folds into digest.md stayed the same.
+    import progress
+    cap_path = progress._state_dir(vault, "fireflies", "A") / "dry-run.txt"
+    new_bytes = cap_path.read_bytes() + b"\n# re-run drift marker\n"
+    cap_path.write_bytes(new_bytes)
+
+    bd2, manifest, prog = backfill._load_batch(vault, bd.name)
+    digest_path, sha2, picked2 = backfill.write_digest(vault, bd2, manifest, prog)
+
+    assert sha2 == sha1                                    # digest bytes genuinely unchanged
+    assert os.readlink(bd / "sample") == versioned.name    # symlink target name never changes here
+    # RED (pre-fix): this reads the STALE bytes because `if not versioned.exists()`
+    # short-circuited the rebuild. GREEN (post-fix): rebuilt in place.
+    assert (versioned / "A.txt").read_bytes() == new_bytes
+    assert (versioned / "B.txt").is_file()                 # untouched pick survives the rebuild
+    # no leftover .stale-*/.tmp-* dirs after the swap
+    assert sorted(p.name for p in bd.glob("sample-*")) == [versioned.name]
+
+
+def test_write_digest_reuses_dir_when_all_picked_captures_unchanged(tmp_path, monkeypatch):
+    """Fast path (G0b r3) must survive the new staleness check: a resume that
+    changes nothing must not rebuild sample-<sha12>/ at all."""
+    import backfill, os
+    vault, bd = _seed_batch(tmp_path, ids=("A", "B"))
+    monkeypatch.setattr(backfill, "run_meeting_main", _fake_run_meeting(vault))
+    assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path),
+                          "--batch", bd.name, "dry-run"]) == 0
+    sha1 = (bd / "digest.sha256").read_text(encoding="utf-8").strip()
+    versioned = bd / f"sample-{sha1[:12]}"
+    inode_before = versioned.stat().st_ino
+    a_bytes_before = (versioned / "A.txt").read_bytes()
+
+    calls: list[Path] = []
+    real_atomic_write = backfill.atomic_write
+
+    def spy(path, data):
+        calls.append(Path(path))
+        return real_atomic_write(path, data)
+    monkeypatch.setattr(backfill, "atomic_write", spy)
+
+    bd2, manifest, prog = backfill._load_batch(vault, bd.name)
+    digest_path, sha2, picked2 = backfill.write_digest(vault, bd2, manifest, prog)
+
+    assert sha2 == sha1
+    assert versioned.stat().st_ino == inode_before          # dir never rebuilt
+    assert (versioned / "A.txt").read_bytes() == a_bytes_before
+    assert not any(p.parent == versioned for p in calls)    # no per-meeting file rewritten
+
+
 # --- task-8 review fix round 1 (Important #1/#2/#3) ------------------------------
 def test_dry_run_budget_halt_no_phantom_row_and_resume_digest_is_idempotent(tmp_path, monkeypatch):
     """Important #1: the pre-launch budget guard must not persist a {} placeholder

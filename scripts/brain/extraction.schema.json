@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "brain.extraction/1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "inputSha",
+    "promptSha",
+    "model",
+    "cost_usd",
+    "extracted_at",
+    "classification",
+    "summary",
+    "decisions",
+    "commitments",
+    "proposed_delivery_state",
+    "deal_state",
+    "meeting_type"
+  ],
+  "properties": {
+    "schema": { "const": "brain.extraction/1" },
+    "inputSha": { "type": "string" },
+    "promptSha": { "type": "string" },
+    "model": { "type": "string" },
+    "cost_usd": { "type": "number" },
+    "extracted_at": { "type": "string" },
+    "model_receipt": { "type": "string" },
+    "usage": { "type": "object" },
+    "classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["org_name", "domain", "relationship", "confidence", "evidence"],
+      "properties": {
+        "org_name": { "type": "string" },
+        "domain": { "type": ["string", "null"] },
+        "relationship": {
+          "enum": ["client", "prospect", "vendor", "partner", "colleague", "personal", "internal"]
+        },
+        "confidence": { "type": "number" },
+        "evidence": { "type": "string" }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["overview", "bullets"],
+      "properties": {
+        "overview": { "type": "string" },
+        "bullets": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "quote"],
+        "properties": {
+          "text": { "type": "string" },
+          "quote": { "type": "string" }
+        }
+      }
+    },
+    "commitments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "owner_participant", "owner_name", "deadline_iso", "quote"],
+        "properties": {
+          "text": { "type": "string" },
+          "owner_participant": { "type": ["integer", "null"] },
+          "owner_name": { "type": "string" },
+          "deadline_iso": { "type": ["string", "null"] },
+          "quote": { "type": "string" }
+        }
+      }
+    },
+    "open_questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "quote"],
+        "properties": {
+          "text": { "type": "string" },
+          "quote": { "type": "string" },
+          "owner": { "type": "string" }
+        }
+      }
+    },
+    "proposed_delivery_state": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "quote"],
+          "properties": {
+            "state": {
+              "enum": [
+                "scoping",
+                "active",
+                "paused",
+                "delivered",
+                "accepted",
+                "adopted",
+                "closed",
+                "rolled_back",
+                "abandoned"
+              ]
+            },
+            "quote": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "deal_state": {
+      "enum": [null, "none", "prospect", "proposal", "won", "lost"]
+    },
+    "meeting_type": {
+      "enum": ["sales", "delivery", "internal", "other"]
+    }
+  }
+}

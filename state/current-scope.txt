@@ -1,0 +1,7 @@
+UPSTREAM RECONCILIATION SCOPE (Josh, 2026-08-17)
+
+Verbatim approval: "yes lets do it"
+
+Scope update: "Replace the Clearworks guards with upstream"
+
+Context: reconcile the high-signal upstream reliability and adapter releases into an isolated branch; preserve the dirty local main worktree, use .claude/orchestration-fleet-build/research/upstream-merge-conflict-map.md for sensitive files, and produce a merge-ready branch with verification evidence. The full 24-commit merge was rejected after confirming this fork is 738 commits ahead of upstream/main and produced 14 substantive conflicts. Target releases are the Aug 13 Slack/Nostr and reliability batch plus the seven Aug 16 reliability releases. Do not merge to main, push, deploy, or mutate production.

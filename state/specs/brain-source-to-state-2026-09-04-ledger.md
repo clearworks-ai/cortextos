@@ -1,0 +1,28 @@
+| ID | Claim | Probe | Evidence | Verdict |
+|----|-------|-------|----------|---------|
+| G-01 | meeting-crm-sync.py --event-file still calls load_full_meeting (ff-extractor --mode full) unconditionally | /def load_full_meeting\|--event-file/ in orgs/clearworksai/agents/crm/crm/meeting-crm-sync.py | match at orgs/clearworksai/agents/crm/crm/meeting-crm-sync.py:32 | VERIFIED |
+| G-02 | meeting-fanout.py has a Deps.load_full seam and prod_load_full shells ff-extractor --mode full | /load_full/ in orgs/clearworksai/agents/crm/crm/meeting-fanout.py | match at orgs/clearworksai/agents/crm/crm/meeting-fanout.py:73 | VERIFIED |
+| G-03 | meeting-fanout.py TRIAGE_OWNER defaults to pa (disabled agent) | /TRIAGE_OWNER.*"pa"\|TRIAGE_OWNER.*'pa'/ in orgs/clearworksai/agents/crm/crm/meeting-fanout.py | match at orgs/clearworksai/agents/crm/crm/meeting-fanout.py:63 | VERIFIED |
+| G-04 | meeting-fanout.py dedups tasks on commitment:<commitmentId> via bus event-dedup | /event-dedup\|commitment:/ in orgs/clearworksai/agents/crm/crm/meeting-fanout.py | match at orgs/clearworksai/agents/crm/crm/meeting-fanout.py:17 | VERIFIED |
+| G-05 | meeting_writeback.py rebuilds the client file from a fixed heading whitelist (drops other ## sections) | /rebuilt = \[/ in orgs/clearworksai/agents/pa/scripts/meeting_writeback.py | match at orgs/clearworksai/agents/pa/scripts/meeting_writeback.py:472 | VERIFIED |
+| G-06 | meeting_writeback.py accepts --payload JSON and dedupes History on meeting_rel | /--payload/ in orgs/clearworksai/agents/pa/scripts/meeting_writeback.py | match at orgs/clearworksai/agents/pa/scripts/meeting_writeback.py:18 | VERIFIED |
+| G-07 | meeting_recap_draft.py hardcodes --to josh@clearworks.ai and shells gws gmail +draft | /\+draft/ in orgs/clearworksai/agents/pa/scripts/meeting_recap_draft.py | match at orgs/clearworksai/agents/pa/scripts/meeting_recap_draft.py:209 | VERIFIED |
+| G-08 | ff-extractor.py has no fetch-only mode; every mode requires OPENROUTER_API_KEY | /require_env\("OPENROUTER_API_KEY"\)/ in orgs/clearworksai/agents/pa/scripts/ff-extractor.py | match at orgs/clearworksai/agents/pa/scripts/ff-extractor.py:1875 | VERIFIED |
+| G-09 | ff-extractor.py has no fetch-only argparse mode | /fetch-only\|fetch_only/ in orgs/clearworksai/agents/pa/scripts/ff-extractor.py | no match in orgs/clearworksai/agents/pa/scripts/ff-extractor.py (as expected) | VERIFIED |
+| G-10 | delivery-status.ts exports buildStatusReportPlan and parseClientFile | /export function buildStatusReportPlan\|export function parseClientFile/ in src/bus/delivery-status.ts | match at src/bus/delivery-status.ts:261 | VERIFIED |
+| G-11 | delivery-status unit tests exist | test -e tests/unit/bus/delivery-status.test.ts | exists: tests/unit/bus/delivery-status.test.ts | VERIFIED |
+| G-12 | bus create-task writes the task file directly (no daemon IPC required) | /atomicWriteSync\|writeFileSync/ in src/bus/task.ts | match at src/bus/task.ts:24 | VERIFIED |
+| G-13 | bus event-dedup --source --fire-once exists in bus.ts | /event-dedup/ in src/cli/bus.ts | match at src/cli/bus.ts:72 | VERIFIED |
+| G-14 | org-brain clients/_template.md exists | test -e orgs/clearworksai/knowledge/clients/_template.md | exists: orgs/clearworksai/knowledge/clients/_template.md | VERIFIED |
+| G-15 | org-brain clients/alloi.md exists | test -e orgs/clearworksai/knowledge/clients/alloi.md | exists: orgs/clearworksai/knowledge/clients/alloi.md | VERIFIED |
+| G-16 | File not found: orgs/clearworksai/knowledge/projects | test -e orgs/clearworksai/knowledge/projects | missing: orgs/clearworksai/knowledge/projects | VERIFIED |
+| G-17 | File not found: orgs/clearworksai/knowledge/orgs | test -e orgs/clearworksai/knowledge/orgs | missing: orgs/clearworksai/knowledge/orgs | VERIFIED |
+| G-18 | CRM contacts.json contains alloi.us contacts (resolver can reach alloi via attendee email) | /@alloi\.us/ in orgs/clearworksai/agents/crm-codex/crm/contacts.json | match at orgs/clearworksai/agents/crm-codex/crm/contacts.json:6109 | VERIFIED |
+| G-19 | gws-dwd shim supports gmail +draft with --to --subject --body | /\+draft/ in /Users/joshweiss/.local/bin/gws-dwd | match at /Users/joshweiss/.local/bin/gws-dwd:8 | VERIFIED |
+| G-20 | spawn-worker CLI is daemon IPC (returns on enqueue, no exit code) | /IPCClient\|spawn-worker/ in src/cli/workers.ts | match at src/cli/workers.ts:4 | VERIFIED |
+| G-21 | meeting-consumer-dispatch fires crm-sync/fanout only from daemon onDone for meeting-writeback-* workers | /dispatchMeetingConsumers/ in src/daemon/agent-manager.ts | match at src/daemon/agent-manager.ts:25 | VERIFIED |
+| G-22 | meeting_writeback unit tests exist (casualty/control classification pending) | test -e orgs/clearworksai/agents/pa/scripts/test_meeting_writeback.py | exists: orgs/clearworksai/agents/pa/scripts/test_meeting_writeback.py | VERIFIED |
+| G-23 | delivery-status-plan CLI is absent from bus.ts (removed 013de1e8) | /delivery-status-plan/ in src/cli/bus.ts | no match in src/cli/bus.ts (as expected) | VERIFIED |
+| G-24 | package.json has no zod/ajv runtime dep (schema validation must be hand-rolled) | /"zod"\|"ajv"/ in package.json | no match in package.json (as expected) | VERIFIED |
+| G-25 | File not found: knowledge-base/venv/lib/python3.12/site-packages/anthropic | test -e knowledge-base/venv/lib/python3.12/site-packages/anthropic | missing: knowledge-base/venv/lib/python3.12/site-packages/anthropic | VERIFIED |
+| G-26 | meeting-crm-sync add-interaction.py dedups on source_ref + contact_id | /source_ref/ in orgs/clearworksai/agents/crm/crm/add-interaction.py | match at orgs/clearworksai/agents/crm/crm/add-interaction.py:4 | VERIFIED |

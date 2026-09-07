@@ -145,8 +145,9 @@ def merge_unique(existing: list, additions: list) -> list:
     seen = set()
     merged = []
     for item in [*existing, *additions]:
-        if item and item not in seen:
-            seen.add(item)
+        key = json.dumps(item, sort_keys=True) if isinstance(item, (dict, list)) else item
+        if item and key not in seen:
+            seen.add(key)
             merged.append(item)
     return merged
 

@@ -98,10 +98,11 @@ describe('AgentManager occupied-slot recovery', () => {
     (am as unknown as { agents: Map<string, unknown> }).agents.set('alice', fakeEntry);
 
     vi.spyOn(am as unknown as { isPidAlive(pid: number): boolean }, 'isPidAlive').mockReturnValue(true);
-    vi.spyOn(am, 'stopAgent').mockResolvedValue(false);
+    const stopSpy = vi.spyOn(am, 'stopAgent').mockResolvedValue(false);
 
     await am.startAgent('alice', agentDir, {}, 'acme');
 
+    expect(stopSpy).not.toHaveBeenCalled();
     expect((am as unknown as { pendingRestarts: Map<string, unknown> }).pendingRestarts.has('alice')).toBe(false);
     expect((am as unknown as { agents: Map<string, unknown> }).agents.has('alice')).toBe(true);
   });

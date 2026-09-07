@@ -29,15 +29,22 @@ def _load_worker():
 
 
 def _write_event(tmp: Path, *, meeting_id, meeting_type, attendees, client="Acme", commitment_ids=None):
-    path = tmp / f"ff-meeting-event-{meeting_id}.json"
-    path.write_text(json.dumps({
+    """``attendees=None`` omits the key entirely — the legacy/no-attendees-
+    field payload shape (N-1: falls back to full_meeting). Any other value,
+    including ``[]``, writes that literal ``attendees`` value — a
+    present-but-empty list is now authoritative (N-1), NOT a fallback
+    trigger."""
+    payload = {
         "meeting_id": meeting_id,
         "meeting_type": meeting_type,
-        "attendees": attendees,
         "client": client,
         "commitmentIds": commitment_ids or [],
         "writeback_ok": True,
-    }))
+    }
+    if attendees is not None:
+        payload["attendees"] = attendees
+    path = tmp / f"ff-meeting-event-{meeting_id}.json"
+    path.write_text(json.dumps(payload))
     return path
 
 
@@ -299,6 +306,143 @@ class RealWriteTests(unittest.TestCase):
 
         self.assertEqual(result["meeting_id"], "MR6")
         self.assertEqual(len(self._rows()), 1)
+
+
+class EmailLessAttendeeTests(unittest.TestCase):
+    """F-1 FINAL review: FR-004 fills bare NAME strings (no email) into
+    fanout-meeting.json's attendees for email-less speakers; FR-009 requires
+    they are NEVER upserted / logged. Live apply upserted two email-less
+    contacts (ivette-ramos, joseph-chang) and wrote 8 rows instead of 6
+    before this fix."""
+
+    def setUp(self):
+        self.mod = _load_worker()
+        self.calls: list[list[str]] = []
+
+        def fake_run(argv, env=None):
+            self.calls.append(argv)
+            if "upsert-contact.py" in argv[1]:
+                idx = argv.index("--id") + 1
+                return subprocess.CompletedProcess(argv, 0, argv[idx], "")
+            return subprocess.CompletedProcess(argv, 0, "{}", "")
+
+        self.mod._run = fake_run
+
+    def tearDown(self):
+        for k in ("CRM_CONTACTS_PATH", "CRM_PIPELINE_PATH", "FF_EVENT_PAYLOAD_PATH"):
+            os.environ.pop(k, None)
+
+    def _contact_calls(self):
+        return [c for c in self.calls if "upsert-contact.py" in c[1]]
+
+    def _interaction_calls(self):
+        return [c for c in self.calls if "add-interaction.py" in c[1]]
+
+    def test_crm_attendees_drops_name_only_entries(self):
+        # Unit-level: the shared derivation function itself.
+        full_meeting = {"attendees": ["marcos@alloi.us", "Ivette Ramos", "joe@alloi.us"]}
+        self.assertEqual(
+            self.mod.crm_attendees({}, full_meeting),
+            ["marcos@alloi.us", "joe@alloi.us"],
+        )
+
+    def test_external_attendees_drops_name_only_entries(self):
+        full_meeting = {"attendees": ["marcos@alloi.us", "Ivette Ramos", "joe@alloi.us"]}
+        self.assertEqual(
+            self.mod.external_attendees({}, full_meeting),
+            [{"name": "", "email": "marcos@alloi.us"}, {"name": "", "email": "joe@alloi.us"}],
+        )
+
+    def test_crm_attendees_present_empty_list_is_authoritative(self):
+        # N-1: event.json's "attendees" key present but [] means the
+        # adapter already decided there are no external, emailed attendees
+        # (FR-009 "no attendees -> write nothing") -- must NOT fall back to
+        # full_meeting even though full_meeting has real emailed attendees.
+        full_meeting = {"attendees": ["marcos@alloi.us", "joe@alloi.us"]}
+        self.assertEqual(self.mod.crm_attendees({"attendees": []}, full_meeting), [])
+
+    def test_crm_attendees_missing_key_falls_back_to_full_meeting(self):
+        # N-1: only a WHOLLY ABSENT "attendees" key (legacy payload) falls
+        # back to full_meeting.
+        full_meeting = {"attendees": ["marcos@alloi.us", "Ivette Ramos", "joe@alloi.us"]}
+        self.assertEqual(
+            self.mod.crm_attendees({"meeting_id": "M9"}, full_meeting),
+            ["marcos@alloi.us", "joe@alloi.us"],
+        )
+
+    def test_full_file_name_only_attendees_never_upserted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            full = tmp / "fanout-meeting.json"
+            full.write_text(json.dumps({
+                "meetings": [{
+                    "id": "M9",
+                    "meeting_type": "delivery",
+                    "attendees": ["marcos@alloi.us", "Ivette Ramos", "joe@alloi.us"],
+                }]
+            }))
+            # event.json carries no attendees at all -> falls back to full_meeting.
+            ev = _write_event(tmp, meeting_id="M9", meeting_type="delivery", attendees=None)
+            os.environ["FF_EVENT_PAYLOAD_PATH"] = str(ev)
+
+            result = self.mod.process(meeting_id="M9", event_file=None, full_file=str(full))
+
+            contact_calls = self._contact_calls()
+            self.assertEqual(len(contact_calls), 2)  # 2 emails only
+            emails = {c[c.index("--email") + 1] for c in contact_calls}
+            self.assertEqual(emails, {"marcos@alloi.us", "joe@alloi.us"})
+            self.assertTrue(all("Ivette" not in " ".join(c) for c in contact_calls))
+
+            interaction_calls = self._interaction_calls()
+            self.assertEqual(len(interaction_calls), 2)  # 2 interaction rows, not 3
+            self.assertEqual(result["external_attendees"], 2)
+
+
+class FullFileTests(unittest.TestCase):
+    def setUp(self):
+        self.mod = _load_worker()
+        self.calls: list[list[str]] = []
+
+        def fake_run(argv, env=None):
+            self.calls.append(argv)
+            if "upsert-contact.py" in argv[1]:
+                idx = argv.index("--id") + 1
+                return subprocess.CompletedProcess(argv, 0, argv[idx], "")
+            return subprocess.CompletedProcess(argv, 0, "{}", "")
+
+        self.mod._run = fake_run
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = Path(self.tmp.name)
+        os.environ["CRM_CONTACTS_PATH"] = str(self.tmp_path / "contacts.json")
+        os.environ["CRM_PIPELINE_PATH"] = str(self.tmp_path / "pipeline.json")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+        os.environ.pop("CRM_CONTACTS_PATH", None)
+        os.environ.pop("CRM_PIPELINE_PATH", None)
+
+    def test_full_file_skips_ff_extractor(self):
+        full = self.tmp_path / "fanout-meeting.json"
+        full.write_text(json.dumps({
+            "meetings": [{
+                "id": "01M1MW2GAZ1DQ0C6PG3KJ557JA",
+                "meeting_type": "delivery",
+                "summary": {"overview": "Scoped tactical reports."},
+                "deal_state": None,
+            }]
+        }))
+        event = _write_event(
+            self.tmp_path, meeting_id="01M1MW2GAZ1DQ0C6PG3KJ557JA",
+            meeting_type="delivery", attendees=["marcos@alloi.us"],
+        )
+        result = self.mod.process(
+            meeting_id="01M1MW2GAZ1DQ0C6PG3KJ557JA",
+            event_file=str(event),
+            full_file=str(full),
+        )
+        assert not any("ff-extractor.py" in c[1] for c in self.calls)
+        assert result["meeting_id"] == "01M1MW2GAZ1DQ0C6PG3KJ557JA"
+        assert result["contacts"]
 
 
 if __name__ == "__main__":

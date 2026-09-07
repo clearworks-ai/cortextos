@@ -117,7 +117,8 @@ export class FastChecker {
   // must NOT touch lastMessageInjectedAt, which drives the Telegram typing
   // indicator — Slack traffic has no equivalent indicator and mixing the
   // two would restart/extend a Telegram typing indicator for Slack-only
-  // activity.
+  // activity. Peek-then-drain matches the current Telegram inject contract
+  // so a failed inject does not drop Slack inbound.
   private slackMessages: string[] = [];
 
   // Persistent dedup: message hashes to prevent duplicate delivery
@@ -306,9 +307,10 @@ export class FastChecker {
     // Process queued Slack messages. Deliberately does NOT set
     // hasTelegramMessage / lastMessageInjectedAt — see slackMessages'
     // declaration for why the typing-indicator timer must stay
-    // Telegram-only.
-    while (this.slackMessages.length > 0) {
-      messageBlock += this.slackMessages.shift()!;
+    // Telegram-only. Peek, then drain only after inject succeeds.
+    const slackPendingCount = this.slackMessages.length;
+    for (let i = 0; i < slackPendingCount; i++) {
+      messageBlock += this.slackMessages[i];
     }
 
 
@@ -328,6 +330,9 @@ export class FastChecker {
         if (pendingCount > 0) {
           this.telegramMessages.splice(0, pendingCount);
           this.savePendingTelegram();
+        }
+        if (slackPendingCount > 0) {
+          this.slackMessages.splice(0, slackPendingCount);
         }
         // ACK inbox messages
         for (const id of ackIds) {

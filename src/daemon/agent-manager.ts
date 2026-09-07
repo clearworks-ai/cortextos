@@ -13,13 +13,14 @@ import { SlackAPI } from '../slack/api.js';
 import { SlackSocketModeClient } from '../slack/socket-mode.js';
 import { dispatchSlackMessage, makeUserNameResolver, type DispatchTarget } from '../slack/dispatcher.js';
 import { resolvePaths } from '../utils/paths.js';
-import { resolveEnv } from '../utils/env.js';
+import { resolveEnv, loadEnvFileInto } from '../utils/env.js';
 import { recordInboundTelegram, cacheLastSent, logOutboundMessage, buildRecentHistory } from '../telegram/logging.js';
 import { collectTelegramCommands, registerTelegramCommands } from '../bus/metrics.js';
 import { stripControlChars } from '../utils/validate.js';
 import { processMediaMessage } from '../telegram/media.js';
 import { stripBom } from '../utils/strip-bom.js';
 import { readEnabledAgentsMap } from '../bus/enabled-agents-io.js';
+import { killProcessTree, getProcessElapsedSeconds } from '../utils/process-tree.js';
 import { maybeEmitMeetingEvent } from './meeting-event-emit.js';
 import { dispatchMeetingConsumers } from './meeting-consumer-dispatch.js';
 import { BuzzRelayClient, BuzzDispatcher, loadBuzzConfig, type NostrEvent } from '../buzz/index.js';
@@ -54,20 +55,6 @@ type AgentEntry = {
    */
   stopped?: boolean;
 };
-
-// liveness fix: OS-level pid liveness probe using the same signal-0 idiom as
-// src/utils/lock.ts — signal 0 sends nothing, it only tests process existence +
-// our permission to signal it. We DELIBERATELY diverge from lock.ts on EPERM:
-// lock.ts treats every error as dead, but here a process owned by another user
-// (EPERM) is alive and must NOT be evicted — only ESRCH (process gone) is dead.
-function isPidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === 'EPERM';
-  }
-}
 
 /**
  * Manages all agents in a cortextOS instance.
@@ -279,6 +266,50 @@ export class AgentManager {
   }
 
   /**
+   * RW-3 fix: classify a registry pid before liveness/eviction acts on it.
+   *
+   * - 'alive'    — pid is running AND plausibly still our process.
+   * - 'dead'     — pid is gone (ESRCH). Safe to include in the tree-kill
+   *                sweep (SIGKILL on a dead pid is a no-op).
+   * - 'recycled' — a process is running under this pid but it is NOT the one
+   *                we spawned (foreign-uid EPERM, or a same-uid process whose
+   *                start time postdates our session start). The entry is dead,
+   *                and the pid must be EXCLUDED from any kill sweep — it
+   *                belongs to an innocent process.
+   *
+   * Same-uid recycle detection compares `ps -o etime=` against the entry's
+   * sessionStart: the process we spawned started AT session start, so a
+   * process substantially younger than the session cannot be ours. The 120s
+   * slack absorbs ps rounding and spawn latency. If ps is unavailable the
+   * check degrades to 'alive' (keep the entry — never kill on uncertainty).
+   */
+  private classifyRegistryPid(pid: number, sessionStart?: string): 'alive' | 'dead' | 'recycled' {
+    if (!this.isPidAlive(pid)) {
+      // Not alive per the probe. Distinguish foreign-uid recycle (EPERM) from
+      // plain dead (ESRCH) so the kill sweep can exclude the innocent pid.
+      try {
+        process.kill(pid, 0);
+        return 'recycled'; // probe succeeded here ⇒ isPidAlive's false came from EPERM
+      } catch (err) {
+        return (err as NodeJS.ErrnoException).code === 'EPERM' ? 'recycled' : 'dead';
+      }
+    }
+
+    if (sessionStart) {
+      const sessionAgeSec = (Date.now() - new Date(sessionStart).getTime()) / 1000;
+      const elapsedSec = getProcessElapsedSeconds(pid);
+      if (
+        Number.isFinite(sessionAgeSec) &&
+        elapsedSec !== null &&
+        elapsedSec + 120 < sessionAgeSec
+      ) {
+        return 'recycled';
+      }
+    }
+    return 'alive';
+  }
+
+  /**
    * Boot-time self-heal pass: start any enabled agent that is still absent
    * from the live registry after the main bulk-start loop. Closes the
    * sage-drop failure mode where an agent failed both start attempts (or was
@@ -402,10 +433,16 @@ export class AgentManager {
   private isAgentActuallyAlive(name: string): boolean {
     const entry = this.agents.get(name);
     if (!entry) return false;
-    const { status, pid } = entry.process.getStatus();
+    const { status, pid, sessionStart } = entry.process.getStatus();
     if (status === 'starting') return true;   // in-flight start — never evict
+    // Conservative compatibility for partial status adapters: a live,
+    // non-recycled pid is stronger liveness evidence than an omitted label.
+    if (status === undefined) {
+      return !!pid && this.classifyRegistryPid(pid, sessionStart) === 'alive';
+    }
     if (status !== 'running') return false;   // stopped / crashed / halted => dead
-    return !!pid && isPidAlive(pid);           // running => must have a live pid
+    // running => must have a live, non-recycled pid (RW-3)
+    return !!pid && this.classifyRegistryPid(pid, sessionStart) === 'alive';
   }
 
   /**
@@ -542,6 +579,18 @@ export class AgentManager {
         // RULE: act unconditionally on the objects you captured; act by name
         // only while the name still resolves to you. See stillMapped().
         const staleScheduler = this.cronSchedulers.get(name);
+        // RW-3: classify the stale pid BEFORE stop() (which may clear it) so the
+        // tree-kill below can exclude a recycled pid that belongs to an
+        // unrelated successor process.
+        const staleStatus = stale.process.getStatus();
+        const stalePid = staleStatus.pid;
+        const stalePidVerdict = stalePid
+          ? this.classifyRegistryPid(stalePid, staleStatus.sessionStart)
+          : 'dead';
+        // typeof guard: unit tests inject minimal AgentProcess fakes.
+        const staleHostPid = typeof stale.process.getHostPid === 'function'
+          ? stale.process.getHostPid()
+          : null;
         try { stale.poller?.stop(); } catch { /* best-effort */ }
         try { stale.activityPoller?.stop(); } catch { /* best-effort */ }
         try { stale.checker.stop(); } catch { /* best-effort */ }
@@ -549,6 +598,19 @@ export class AgentManager {
         // crash-backoff setTimeout on the old AgentProcess (its `if (status ===
         // 'crashed')` guard now fails), so no orphan PTY is spawned after eviction.
         try { await stale.process.stop(); } catch { /* best-effort */ }
+
+        // RW-3 (UPSTREAM-ROOT-WOUND.md): retain the fork's full-tree cleanup
+        // guarantee — SIGKILL the pty-host child AND the inner pid plus every
+        // discoverable descendant before the fresh spawn below, so the respawn
+        // never lands on top of live leftovers (pty-host dead ≠ claude dead —
+        // the grandchild reparents). The death-confirmed AgentProcess.stop()
+        // normally makes this a no-op; a recycled pid is deliberately excluded.
+        const killRoots: number[] = [];
+        if (staleHostPid) killRoots.push(staleHostPid);
+        if (stalePid && stalePidVerdict !== 'recycled') killRoots.push(stalePid);
+        if (killRoots.length > 0) {
+          killProcessTree(killRoots, (msg) => console.warn(`[agent-manager] reconcile(${name}): ${msg}`));
+        }
         if (staleScheduler) {
           staleScheduler.stop();
           if (this.cronSchedulers.get(name) === staleScheduler) {
@@ -1164,7 +1226,7 @@ export class AgentManager {
     // SLACK_APP_TOKEN), not one bot per agent like Telegram, so there must
     // be exactly one Socket Mode connection for the whole org, not one per
     // agent.
-    await this.maybeStartSlackSocketMode(name, org, log);
+    await this.maybeStartSlackSocketMode(name, resolvedOrg, log);
   }
 
   /**
@@ -1174,6 +1236,11 @@ export class AgentManager {
    * through dispatchSlackMessage() to every agent whose slack.json allows
    * the channel+user. Safe no-op otherwise (non-orchestrator agent, or the
    * tokens absent — Slack inbound is simply not configured yet).
+   *
+   * Token resolution: process.env wins; org secrets.env is the fallback so
+   * the current runtime (tokens live in orgs/<org>/secrets.env, not in the
+   * PM2 ecosystem env) can start Socket Mode without writing secrets into
+   * source or rotating values.
    *
    * Failure isolation is deliberate and load-bearing: a Slack Socket Mode
    * failure (a runtime that predates the Node 22 WebSocket global, an
@@ -1201,8 +1268,10 @@ export class AgentManager {
     }
     if (!orchestratorName || orchestratorName !== name) return;
 
-    const appToken = process.env.SLACK_APP_TOKEN;
-    const botToken = process.env.SLACK_BOT_TOKEN;
+    const orgSecrets: Record<string, string> = {};
+    loadEnvFileInto(join(orgDir, 'secrets.env'), orgSecrets);
+    const appToken = process.env.SLACK_APP_TOKEN || orgSecrets.SLACK_APP_TOKEN;
+    const botToken = process.env.SLACK_BOT_TOKEN || orgSecrets.SLACK_BOT_TOKEN;
     if (!appToken || !botToken) return; // Slack inbound not configured — normal state
 
     this.slackSocketStarted = true;
@@ -1708,7 +1777,7 @@ export class AgentManager {
       // liveness fix: a mapped entry still reporting 'running' whose OS pid is
       // gone is dead, not running. getStatus() returns a fresh object, so
       // correcting .status here does not mutate AgentProcess internal state.
-      if (status.status === 'running' && (!status.pid || !isPidAlive(status.pid))) {
+      if (status.status === 'running' && (!status.pid || !this.isPidAlive(status.pid))) {
         status.status = 'stopped';
       }
       mapped.add(name);

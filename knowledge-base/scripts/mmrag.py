@@ -497,8 +497,204 @@ def describe_media(client, config, file_path, media_type="video"):
 # ---------------------------------------------------------------------------
 # ChromaDB
 # ---------------------------------------------------------------------------
+NATIVE_HOLD_FILENAME = "NATIVE_HOLD"
+NATIVE_HOLD_EXIT_CODE = 3
+NATIVE_HOLD_MODES = {"exclusive", "writers"}
+CHROMA_COMMANDS = {
+    "ingest", "query", "status", "list", "collections", "delete", "reset",
+    "reconcile", "deliver", "verify-retrieval", "reindex-indexes",
+}
+WRITE_OPERATIONS = {"ingest", "reconcile", "delete", "reset", "reindex-indexes"}
+READ_OPERATIONS = {
+    "query", "status", "list", "collections", "deliver", "verify-retrieval",
+}
+
+_CURRENT_OPERATION = ""
+
+
+class NativeHoldError(Exception):
+    """Fail-closed refusal to construct or mutate a live PersistentClient."""
+
+    def __init__(
+        self,
+        result="STORE_QUARANTINED",
+        *,
+        hold_mode="",
+        operation="",
+        chroma_dir="",
+        live_dir="",
+        detail="",
+    ):
+        self.result = result
+        self.store_health = "QUARANTINED" if result == "STORE_QUARANTINED" else "UNKNOWN"
+        self.hold_mode = hold_mode
+        self.operation = operation
+        self.chroma_dir = str(chroma_dir)
+        self.live_dir = str(live_dir)
+        self.detail = detail
+        super().__init__(self.to_json())
+
+    def to_dict(self):
+        payload = {
+            "result": self.result,
+            "store_health": self.store_health,
+            "hold_mode": self.hold_mode,
+            "operation": self.operation,
+            "chroma_dir": self.chroma_dir,
+            "live_dir": self.live_dir,
+        }
+        if self.detail:
+            payload["detail"] = self.detail
+        return payload
+
+    def to_json(self):
+        return json.dumps(self.to_dict(), separators=(",", ":"))
+
+
+def set_mmrag_operation(name):
+    global _CURRENT_OPERATION
+    _CURRENT_OPERATION = (name or "").strip().lower()
+
+
+def _mmrag_operation():
+    env_op = os.environ.get("MMRAG_OPERATION", "").strip().lower()
+    return env_op or _CURRENT_OPERATION
+
+
+def _resolve_fs_path(path):
+    return Path(path).expanduser().resolve()
+
+
+def _native_hold_path():
+    return Path(MMRAG_DIR) / NATIVE_HOLD_FILENAME
+
+
+def _load_native_hold():
+    hold_path = _native_hold_path()
+    if not hold_path.is_file():
+        return None
+    raw = hold_path.read_text(encoding="utf-8").strip()
+    if not raw:
+        raise NativeHoldError(
+            "INVALID_CONFIG",
+            hold_mode="",
+            operation=_mmrag_operation(),
+            chroma_dir=CHROMADB_DIR,
+            live_dir=CHROMADB_DIR,
+            detail="NATIVE_HOLD is empty",
+        )
+    try:
+        if raw[0] == "{":
+            mode = str(json.loads(raw).get("mode", "")).strip().lower()
+        else:
+            mode = raw.split()[0].strip().lower()
+    except (json.JSONDecodeError, IndexError, TypeError) as exc:
+        raise NativeHoldError(
+            "INVALID_CONFIG",
+            hold_mode="",
+            operation=_mmrag_operation(),
+            chroma_dir=CHROMADB_DIR,
+            live_dir=CHROMADB_DIR,
+            detail=f"NATIVE_HOLD is not parseable: {exc}",
+        ) from exc
+    if mode not in NATIVE_HOLD_MODES:
+        raise NativeHoldError(
+            "INVALID_CONFIG",
+            hold_mode=mode,
+            operation=_mmrag_operation(),
+            chroma_dir=CHROMADB_DIR,
+            live_dir=CHROMADB_DIR,
+            detail="NATIVE_HOLD mode must be exclusive or writers",
+        )
+    return {"mode": mode, "path": str(hold_path)}
+
+
+def _side_capability_dir():
+    raw = os.environ.get("MMRAG_SIDE_CHROMADB_DIR", "").strip()
+    if not raw:
+        return None
+    return _resolve_fs_path(raw)
+
+
+def _live_chroma_dir():
+    """Hosted live persist is always MMRAG_DIR/chromadb, even if a side dir is selected."""
+    return _resolve_fs_path(Path(MMRAG_DIR) / "chromadb")
+
+
+def _assert_chroma_allowed(chroma_dir=None):
+    """Refuse live PersistentClient construction when NATIVE_HOLD is active."""
+    target = _resolve_fs_path(chroma_dir or CHROMADB_DIR)
+    live = _live_chroma_dir()
+    operation = _mmrag_operation()
+    hold = _load_native_hold()
+    if hold is None:
+        return
+    side = _side_capability_dir()
+    if side is not None and target == side and target != live:
+        return
+    mode = hold["mode"]
+    if target != live:
+        raise NativeHoldError(
+            hold_mode=mode,
+            operation=operation,
+            chroma_dir=target,
+            live_dir=live,
+            detail="hold is active; chroma_dir is neither live nor the approved side path",
+        )
+    if mode == "exclusive":
+        raise NativeHoldError(
+            hold_mode=mode,
+            operation=operation,
+            chroma_dir=target,
+            live_dir=live,
+            detail="exclusive hold refuses every live PersistentClient",
+        )
+    # writers: reads of live are allowed; writes and unknown ops fail closed.
+    if operation in READ_OPERATIONS:
+        return
+    raise NativeHoldError(
+        hold_mode=mode,
+        operation=operation,
+        chroma_dir=target,
+        live_dir=live,
+        detail="writers hold refuses live ingest/reconcile/delete/reset and unknown ops",
+    )
+
+
+def _emit_native_hold_error(exc, *, json_out=False):
+    payload = exc.to_json()
+    print(payload)
+    if not json_out:
+        print(
+            f"NATIVE_HOLD refused result={exc.result} mode={exc.hold_mode or '-'} "
+            f"operation={exc.operation or '-'}",
+            file=sys.stderr,
+        )
+
+
 def get_chroma_collection(collection_name="default", *, chroma_dir=None, chroma_client=None):
     client = chroma_client or get_chroma_client(chroma_dir=chroma_dir)
+    # Caller-supplied clients (side rebuild temp) keep get_or_create. The live
+    # factory path is the only one that must refuse creating a missing name.
+    if chroma_client is not None and chroma_dir is None:
+        return client.get_or_create_collection(
+            name=collection_name,
+            metadata={"hnsw:space": "cosine"},
+        )
+    hold = _load_native_hold()
+    target = _resolve_fs_path(chroma_dir or CHROMADB_DIR)
+    live = _live_chroma_dir()
+    if hold and hold["mode"] == "writers" and target == live:
+        existing = _get_existing_collection(client, collection_name)
+        if existing is None:
+            raise NativeHoldError(
+                hold_mode="writers",
+                operation=_mmrag_operation(),
+                chroma_dir=target,
+                live_dir=live,
+                detail="writers hold refuses get_or_create of a missing live collection",
+            )
+        return existing
     return client.get_or_create_collection(
         name=collection_name,
         metadata={"hnsw:space": "cosine"},
@@ -506,6 +702,7 @@ def get_chroma_collection(collection_name="default", *, chroma_dir=None, chroma_
 
 
 def get_chroma_client(chroma_dir=None):
+    _assert_chroma_allowed(chroma_dir)
     import chromadb
     return chromadb.PersistentClient(path=str(chroma_dir or CHROMADB_DIR))
 
@@ -514,18 +711,105 @@ def _embed_cache_enabled():
     return os.environ.get("MMRAG_EMBED_CACHE", "1").strip() != "0"
 
 
+def _live_embed_cache_path():
+    return (Path(MMRAG_DIR) / DEFAULT_EMBED_CACHE_FILENAME).resolve()
+
+
 def _embed_cache_path():
     override = os.environ.get("MMRAG_EMBED_CACHE_PATH", "").strip()
     if override:
         return Path(override).expanduser().resolve()
-    return (MMRAG_DIR / DEFAULT_EMBED_CACHE_FILENAME).resolve()
+    if _side_capability_dir() is not None:
+        raise NativeHoldError(
+            "INVALID_CONFIG",
+            operation=_mmrag_operation() or "embed-cache",
+            chroma_dir=CHROMADB_DIR,
+            live_dir=CHROMADB_DIR,
+            detail="side worker must set MMRAG_EMBED_CACHE_PATH under the side tree",
+        )
+    return _live_embed_cache_path()
+
+
+def _assert_embed_cache_allowed(cache_path=None):
+    """Refuse live embedding-cache.sqlite while hold is active or a side persist is set."""
+    resolved = _resolve_fs_path(cache_path or _embed_cache_path())
+    live_cache = _live_embed_cache_path()
+    hold = _load_native_hold()
+    side = _side_capability_dir()
+    if side is not None and resolved == live_cache:
+        raise NativeHoldError(
+            "INVALID_CONFIG",
+            hold_mode=(hold or {}).get("mode", "") if hold else "",
+            operation=_mmrag_operation() or "embed-cache",
+            chroma_dir=CHROMADB_DIR,
+            live_dir=CHROMADB_DIR,
+            detail="side worker must set MMRAG_EMBED_CACHE_PATH under the side tree",
+        )
+    if hold is None:
+        return resolved
+    if resolved == live_cache:
+        raise NativeHoldError(
+            hold_mode=hold["mode"],
+            operation=_mmrag_operation() or "embed-cache",
+            chroma_dir=CHROMADB_DIR,
+            live_dir=CHROMADB_DIR,
+            detail="hold refuses opening the live embedding-cache.sqlite",
+        )
+    return resolved
+
+
+def _is_chroma_persist_dir(path):
+    candidate = _resolve_fs_path(path)
+    if (candidate / "chroma.sqlite3").exists():
+        return True
+    live = _resolve_fs_path(CHROMADB_DIR)
+    if candidate == live:
+        return True
+    side = _side_capability_dir()
+    return side is not None and candidate == side
+
+
+def prepare_side_embed_cache(side_dir, *, copy_from_live=False):
+    """Point MMRAG_EMBED_CACHE_PATH at a file under the side work tree.
+
+    Optionally copies the live cache bytes into the side file first (read of
+    live, write of side). Never sqlite-opens the live cache for write.
+    """
+    side = _resolve_fs_path(side_dir)
+    if _is_chroma_persist_dir(side):
+        raise NativeHoldError(
+            "INVALID_CONFIG",
+            operation=_mmrag_operation() or "embed-cache",
+            chroma_dir=CHROMADB_DIR,
+            live_dir=CHROMADB_DIR,
+            detail="side embedding-cache must not live inside a chroma persist dir",
+        )
+    side.mkdir(parents=True, exist_ok=True)
+    prepared = (side / DEFAULT_EMBED_CACHE_FILENAME).resolve()
+    live_cache = _live_embed_cache_path()
+    if prepared == live_cache:
+        raise NativeHoldError(
+            "INVALID_CONFIG",
+            operation=_mmrag_operation() or "embed-cache",
+            chroma_dir=CHROMADB_DIR,
+            live_dir=CHROMADB_DIR,
+            detail="side embedding-cache path must not resolve to the live cache",
+        )
+    if copy_from_live:
+        if not live_cache.is_file():
+            raise FileNotFoundError(
+                f"live embedding-cache.sqlite missing; cannot copy into side cache: {live_cache}"
+            )
+        shutil.copyfile(live_cache, prepared)
+    os.environ["MMRAG_EMBED_CACHE_PATH"] = str(prepared)
+    return prepared
 
 
 def _open_embed_cache():
     if not _embed_cache_enabled():
         return None
 
-    cache_path = _embed_cache_path()
+    cache_path = _assert_embed_cache_allowed()
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(cache_path))
     conn.execute(
@@ -1129,6 +1413,33 @@ def _is_ignored(path: Path) -> bool:
     if path.suffix.lower() in IGNORE_FILE_EXTS:
         return True
     return False
+
+
+def _is_meeting_frame_image(file_path):
+    """True for derived meeting-frame JPEGs that blew the 6h caption wall."""
+    path = Path(file_path)
+    if path.suffix.lower() not in IMAGE_EXTS:
+        return False
+    parts = {part.lower() for part in path.parts}
+    if "derived" in parts and "frames" in parts:
+        return True
+    name = path.name.lower()
+    if name.startswith(("periodic-", "target-")) and name.endswith(".jpg"):
+        return True
+    if name.startswith("frame-") and name.endswith(".jpg"):
+        return True
+    return False
+
+
+def _meeting_frame_skip_description(file_path):
+    """Deterministic caption substitute so conservation still records the source path."""
+    path = Path(file_path)
+    return (
+        "meeting-frame\n"
+        f"source={_normalize_source_path(path)}\n"
+        f"sha256={_file_content_hash(path)}\n"
+        f"filename={path.name}"
+    )
 
 
 def _normalize_source_path(file_path: Path) -> str:
@@ -2215,15 +2526,23 @@ def ingest_image(client, config, collection, file_path):
         print(f"  SKIP (exists): {file_path}")
         return 0
 
-    print(f"  Generating description for {file_path.name}...")
-    description, media_bytes, mime = describe_media(client, config, file_path, "image")
-
-    # Option B: embed text description + raw image together
-    try:
-        embedding = embed_multimodal(client, config, description, media_bytes, mime)
-    except Exception:
-        # Fallback to text-only embedding if multimodal fails (e.g., file too large)
+    skip_caption = (
+        os.environ.get("MMRAG_SKIP_MEETING_FRAME_CAPTION", "").strip() == "1"
+        and _is_meeting_frame_image(file_path)
+    )
+    if skip_caption:
+        media_bytes = file_path.read_bytes()
+        mime = mimetypes.guess_type(str(file_path))[0] or "image/jpeg"
+        description = _meeting_frame_skip_description(file_path)
+        print(f"  SKIP caption (meeting-frame): {file_path.name}")
         embedding = embed_content(client, config, description)
+    else:
+        print(f"  Generating description for {file_path.name}...")
+        description, media_bytes, mime = describe_media(client, config, file_path, "image")
+        try:
+            embedding = embed_multimodal(client, config, description, media_bytes, mime)
+        except Exception:
+            embedding = embed_content(client, config, description)
 
     collection.upsert(
         ids=[doc_id],
@@ -2234,6 +2553,7 @@ def ingest_image(client, config, collection, file_path):
             "type": "image",
             "mime_type": mime,
             "ingested_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "caption_skipped": bool(skip_caption),
         }],
     )
     return 1
@@ -3731,6 +4051,8 @@ def cmd_status(args):
     try:
         collection = get_chroma_collection(collection_name)
         count = collection.count()
+    except NativeHoldError:
+        raise
     except Exception:
         count = 0
 
@@ -3778,6 +4100,8 @@ def cmd_list(args):
 
     try:
         collection = get_chroma_collection(collection_name)
+    except NativeHoldError:
+        raise
     except Exception:
         print("No data found.")
         return
@@ -4034,7 +4358,14 @@ def main():
         "usage": cmd_usage,
     }
 
-    commands[args.command](args)
+    set_mmrag_operation(args.command)
+    try:
+        if args.command in CHROMA_COMMANDS:
+            _assert_chroma_allowed()
+        commands[args.command](args)
+    except NativeHoldError as exc:
+        _emit_native_hold_error(exc, json_out=bool(getattr(args, "json", False)))
+        sys.exit(NATIVE_HOLD_EXIT_CODE)
 
 
 if __name__ == "__main__":

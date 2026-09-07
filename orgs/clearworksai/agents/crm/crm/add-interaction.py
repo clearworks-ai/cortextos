@@ -17,6 +17,8 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from contact_identity import load_contact_aliases, resolve_contact_id
+
 
 ROOT = Path(__file__).resolve().parent
 
@@ -60,6 +62,7 @@ def main() -> int:
     # sales stage only via a deterministic keyword dict — never a silent LLM-prose flip).
     parser.add_argument("--deal-state", default=None)
     args = parser.parse_args()
+    args.contact_id = resolve_contact_id(args.contact_id, load_contact_aliases())
 
     decisions = args.decisions or []
     path = _interactions_path()

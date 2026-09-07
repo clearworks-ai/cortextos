@@ -1,0 +1,4871 @@
+{
+  "schema_version": "task-observer-f1-surface-inventory-v1",
+  "status": "READ_ONLY_EVIDENCE_NOT_SPEC",
+  "generated_at": "2026-08-24T17:17:46.924Z",
+  "root": "/Users/joshweiss/code/cortextos",
+  "discovery": {
+    "file_command": "rg --files -uu orgs templates community",
+    "link_command": "find orgs templates community -type l -print",
+    "covered_skills": [
+      "task-observer",
+      "agent-management",
+      "agent-browser",
+      "activity-channel",
+      "audit-pipeline",
+      "audit-assemble-master",
+      "source-collection",
+      "morning-review",
+      "clearpath-content-pipeline"
+    ],
+    "required_flags": [
+      "-uu"
+    ],
+    "invalid_alternatives": [
+      "rg --files",
+      "rg --files --hidden"
+    ],
+    "fail_closed_rule": "missing -uu, unknown surface, duplicate path, dangling link, missing tree byte, or count mismatch => INVALID_INPUT"
+  },
+  "modal_skill_sha256": {
+    "task-observer": "76418b3fd600d80450d5305051185aff018e3ee3a280a4b6e4c685130a7a048e",
+    "agent-management": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+    "agent-browser": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+    "activity-channel": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+    "audit-pipeline": "2750fd73ec149a6185065ea748a3ec29f9d97200c0acbd1845c3c3245206447a",
+    "audit-assemble-master": "106cb877c50abe02b3954651878e8733856f1d31bd9b89f0a809c6f2045a7d89",
+    "source-collection": "9ff32c42fdd3d0bd9af91e0d766ce1178458979df215c6da5f2bd8a1eb5f2663",
+    "morning-review": "93bac1074bcba0361868e2d095fbefd2afaabd0db7eacde9bd77a345f72e99bb",
+    "clearpath-content-pipeline": "35f5799497a1f09d39785d6be434a1fabe96461aafc334ca01d15a210a78a555"
+  },
+  "summary": {
+    "surface_rows": 117,
+    "expected_surface_rows": 117,
+    "symlink_rows": 16,
+    "expected_symlink_rows": 16,
+    "skill_counts": {
+      "activity-channel": 37,
+      "agent-browser": 28,
+      "agent-management": 32,
+      "source-collection": 3,
+      "morning-review": 9,
+      "task-observer": 1,
+      "audit-assemble-master": 3,
+      "audit-pipeline": 3,
+      "clearpath-content-pipeline": 1
+    },
+    "classification_counts": {
+      "template": 23,
+      "canonical_source": 4,
+      "archive": 4,
+      "disabled_evidence": 18,
+      "enabled_blocked_target": 24,
+      "enabled_target": 37,
+      "snapshot": 6,
+      "forbidden_legacy": 1
+    },
+    "symlink_role_counts": {
+      "task_observer_activation": 13,
+      "disabled_opencode_compatibility": 3
+    },
+    "recursive_tree_rows": 147,
+    "unknown_classifications": 0,
+    "dangling_links": 0
+  },
+  "runtime_inventory": {
+    "captured_at": "2026-08-24T17:17:46.923Z",
+    "command": "cortextos bus list-agents",
+    "raw_sha256": "d804c567725747a2c415bd800d106ce37c04afa0816f07b85828056c342311e3",
+    "raw_row_count": 30,
+    "invalid_identity_deny_values": [
+      ".DS_Store",
+      "_archive"
+    ],
+    "invalid_rows": [
+      {
+        "name": "_archive",
+        "org": "clearworksai",
+        "role": "",
+        "enabled": true,
+        "running": true,
+        "last_heartbeat": "",
+        "current_task": "",
+        "mode": ""
+      },
+      {
+        "name": ".DS_Store",
+        "org": "personal",
+        "role": "",
+        "enabled": true,
+        "running": false,
+        "last_heartbeat": "",
+        "current_task": "",
+        "mode": ""
+      }
+    ],
+    "valid_rows": [
+      {
+        "name": "frank2",
+        "org": "clearworksai",
+        "enabled": false,
+        "running": false,
+        "mode": "night"
+      },
+      {
+        "name": "larry",
+        "org": "clearworksai",
+        "enabled": false,
+        "running": false,
+        "mode": "night"
+      },
+      {
+        "name": "maven",
+        "org": "clearworksai",
+        "enabled": true,
+        "running": true,
+        "mode": "day"
+      },
+      {
+        "name": "muse",
+        "org": "clearworksai",
+        "enabled": true,
+        "running": true,
+        "mode": "day"
+      },
+      {
+        "name": "sage",
+        "org": "clearworksai",
+        "enabled": false,
+        "running": false,
+        "mode": "night"
+      },
+      {
+        "name": "sre",
+        "org": "clearworksai",
+        "enabled": false,
+        "running": false,
+        "mode": "day"
+      },
+      {
+        "name": "academy",
+        "org": "clearworksai",
+        "enabled": false,
+        "running": false,
+        "mode": "day"
+      },
+      {
+        "name": "scout",
+        "org": "clearworksai",
+        "enabled": false,
+        "running": false,
+        "mode": "night"
+      },
+      {
+        "name": "ophir",
+        "org": "personal",
+        "enabled": false,
+        "running": false,
+        "mode": "night"
+      },
+      {
+        "name": "codexer",
+        "org": "clearworksai",
+        "enabled": true,
+        "running": true,
+        "mode": "day"
+      },
+      {
+        "name": "crm",
+        "org": "clearworksai",
+        "enabled": false,
+        "running": false,
+        "mode": "day"
+      },
+      {
+        "name": "auditmaster",
+        "org": "clearworksai",
+        "enabled": false,
+        "running": false,
+        "mode": "day"
+      },
+      {
+        "name": "automator",
+        "org": "clearworksai",
+        "enabled": false,
+        "running": false,
+        "mode": "day"
+      },
+      {
+        "name": "opencode",
+        "org": "clearworksai",
+        "enabled": false,
+        "running": false,
+        "mode": "night"
+      },
+      {
+        "name": "pa",
+        "org": "clearworksai",
+        "enabled": false,
+        "running": false,
+        "mode": "night"
+      },
+      {
+        "name": "knox",
+        "org": "clearworksai",
+        "enabled": false,
+        "running": false,
+        "mode": "day"
+      },
+      {
+        "name": "cortextos",
+        "org": "clearworksai",
+        "enabled": false,
+        "running": false,
+        "mode": "day"
+      },
+      {
+        "name": "frank2-codex",
+        "org": "clearworksai",
+        "enabled": true,
+        "running": true,
+        "mode": "day"
+      },
+      {
+        "name": "larry-codex",
+        "org": "clearworksai",
+        "enabled": true,
+        "running": true,
+        "mode": "day"
+      },
+      {
+        "name": "auditmaster-codex",
+        "org": "clearworksai",
+        "enabled": true,
+        "running": true,
+        "mode": "day"
+      },
+      {
+        "name": "knox-codex",
+        "org": "clearworksai",
+        "enabled": true,
+        "running": true,
+        "mode": "day"
+      },
+      {
+        "name": "pa-codex",
+        "org": "clearworksai",
+        "enabled": true,
+        "running": true,
+        "mode": "day"
+      },
+      {
+        "name": "crm-codex",
+        "org": "clearworksai",
+        "enabled": true,
+        "running": true,
+        "mode": "day"
+      },
+      {
+        "name": "maven-codex",
+        "org": "clearworksai",
+        "enabled": true,
+        "running": true,
+        "mode": "day"
+      },
+      {
+        "name": "sage-codex",
+        "org": "clearworksai",
+        "enabled": true,
+        "running": true,
+        "mode": "day"
+      },
+      {
+        "name": "scout-codex",
+        "org": "clearworksai",
+        "enabled": true,
+        "running": true,
+        "mode": "day"
+      },
+      {
+        "name": "ophir-codex",
+        "org": "personal",
+        "enabled": true,
+        "running": true,
+        "mode": "day"
+      },
+      {
+        "name": "auditos2",
+        "org": "clearworksai",
+        "enabled": false,
+        "running": false,
+        "mode": ""
+      }
+    ]
+  },
+  "surfaces": [
+    {
+      "row": 1,
+      "path": "/Users/joshweiss/code/cortextos/community/agents/research-agent/.claude/skills/activity-channel/SKILL.md",
+      "relative_path": "community/agents/research-agent/.claude/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "template",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2483,
+        "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/community/agents/research-agent/.claude/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "5cb73b0d0a32a241b47b2e176b59f4417386dfde130b841fa65bacd0f9c22244",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2483,
+            "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9"
+          }
+        ]
+      }
+    },
+    {
+      "row": 2,
+      "path": "/Users/joshweiss/code/cortextos/community/agents/research-agent/.claude/skills/agent-browser/SKILL.md",
+      "relative_path": "community/agents/research-agent/.claude/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "template",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2477,
+        "sha256": "eb4d564a7cd9f299acb0d59007ab94d121b559e143e8723203900c54654b1afe",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/community/agents/research-agent/.claude/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "bf5f7ef28f067403009e91783948d9d7f83aefe9eb99af0106dcb04490a8e603",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2477,
+            "sha256": "eb4d564a7cd9f299acb0d59007ab94d121b559e143e8723203900c54654b1afe"
+          }
+        ]
+      }
+    },
+    {
+      "row": 3,
+      "path": "/Users/joshweiss/code/cortextos/community/agents/research-agent/.claude/skills/agent-management/SKILL.md",
+      "relative_path": "community/agents/research-agent/.claude/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "template",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 15746,
+        "sha256": "b55389021972ded8af0d84f8d3306e68154659f9ac0349d480b45f8c1c4eeeb3",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/community/agents/research-agent/.claude/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "8b6041b7c318b97da8ad25a75eb9ad1987c1e82e735db204f6fe708a5d2433ba",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 15746,
+            "sha256": "b55389021972ded8af0d84f8d3306e68154659f9ac0349d480b45f8c1c4eeeb3"
+          }
+        ]
+      }
+    },
+    {
+      "row": 4,
+      "path": "/Users/joshweiss/code/cortextos/community/agents/research-agent/.claude/skills/source-collection/SKILL.md",
+      "relative_path": "community/agents/research-agent/.claude/skills/source-collection/SKILL.md",
+      "skill": "source-collection",
+      "classification": "template",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 14932,
+        "sha256": "9ff32c42fdd3d0bd9af91e0d766ce1178458979df215c6da5f2bd8a1eb5f2663",
+        "modal_sha256": "9ff32c42fdd3d0bd9af91e0d766ce1178458979df215c6da5f2bd8a1eb5f2663",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/community/agents/research-agent/.claude/skills/source-collection",
+        "row_count": 1,
+        "canonical_json_sha256": "1ea04fff7288c5266faeef026359f38b9232a7f1a47b2750ecae1627ab419d69",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 14932,
+            "sha256": "9ff32c42fdd3d0bd9af91e0d766ce1178458979df215c6da5f2bd8a1eb5f2663"
+          }
+        ]
+      }
+    },
+    {
+      "row": 5,
+      "path": "/Users/joshweiss/code/cortextos/community/agents/security/.claude/skills/activity-channel/SKILL.md",
+      "relative_path": "community/agents/security/.claude/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "template",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2483,
+        "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/community/agents/security/.claude/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "5cb73b0d0a32a241b47b2e176b59f4417386dfde130b841fa65bacd0f9c22244",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2483,
+            "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9"
+          }
+        ]
+      }
+    },
+    {
+      "row": 6,
+      "path": "/Users/joshweiss/code/cortextos/community/agents/security/.claude/skills/agent-browser/SKILL.md",
+      "relative_path": "community/agents/security/.claude/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "template",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2477,
+        "sha256": "eb4d564a7cd9f299acb0d59007ab94d121b559e143e8723203900c54654b1afe",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/community/agents/security/.claude/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "bf5f7ef28f067403009e91783948d9d7f83aefe9eb99af0106dcb04490a8e603",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2477,
+            "sha256": "eb4d564a7cd9f299acb0d59007ab94d121b559e143e8723203900c54654b1afe"
+          }
+        ]
+      }
+    },
+    {
+      "row": 7,
+      "path": "/Users/joshweiss/code/cortextos/community/agents/security/.claude/skills/agent-management/SKILL.md",
+      "relative_path": "community/agents/security/.claude/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "template",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 15486,
+        "sha256": "d866fc77273b60c8123f787b622d7a660fa71fbbf6b7215a2d4046a861e50ff4",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/community/agents/security/.claude/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "78b355fc03d751a6db02e2ed15d284430674b9b55da6b9ea483517ce4f9385b5",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 15486,
+            "sha256": "d866fc77273b60c8123f787b622d7a660fa71fbbf6b7215a2d4046a861e50ff4"
+          }
+        ]
+      }
+    },
+    {
+      "row": 8,
+      "path": "/Users/joshweiss/code/cortextos/community/skills/activity-channel/SKILL.md",
+      "relative_path": "community/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "canonical_source",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2502,
+        "sha256": "dafc73c8bb1440ca9e21414119cc49f788b5e015a565c5498af47ed16246ac36",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/community/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "43ef672a32a5e3bdc55e2dba394c7aafcb254c232626b5fec83e7fd3061d9c6a",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2502,
+            "sha256": "dafc73c8bb1440ca9e21414119cc49f788b5e015a565c5498af47ed16246ac36"
+          }
+        ]
+      }
+    },
+    {
+      "row": 9,
+      "path": "/Users/joshweiss/code/cortextos/community/skills/agent-management/SKILL.md",
+      "relative_path": "community/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "canonical_source",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 15880,
+        "sha256": "749389ba01b100a76e7e8ea0c620909201173d4e51bf8d4e5f94e744a1719bd4",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/community/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "bb26296d21ff09cf1f94f335b3b901f392d42bcae19967ef205ea4a6fdeeeae3",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 15880,
+            "sha256": "749389ba01b100a76e7e8ea0c620909201173d4e51bf8d4e5f94e744a1719bd4"
+          }
+        ]
+      }
+    },
+    {
+      "row": 10,
+      "path": "/Users/joshweiss/code/cortextos/community/skills/morning-review/SKILL.md",
+      "relative_path": "community/skills/morning-review/SKILL.md",
+      "skill": "morning-review",
+      "classification": "canonical_source",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 9033,
+        "sha256": "49258852fd5de4cdeb55f8d228be683e010ffcc7d1f3e44e0aecb1fabe890107",
+        "modal_sha256": "93bac1074bcba0361868e2d095fbefd2afaabd0db7eacde9bd77a345f72e99bb",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/community/skills/morning-review",
+        "row_count": 1,
+        "canonical_json_sha256": "47b3067e72f6b07426d9d0e47ac39773727ccf6f4efdcc7198483a3a4c1feea7",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 9033,
+            "sha256": "49258852fd5de4cdeb55f8d228be683e010ffcc7d1f3e44e0aecb1fabe890107"
+          }
+        ]
+      }
+    },
+    {
+      "row": 11,
+      "path": "/Users/joshweiss/code/cortextos/community/skills/task-observer/SKILL.md",
+      "relative_path": "community/skills/task-observer/SKILL.md",
+      "skill": "task-observer",
+      "classification": "canonical_source",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 24717,
+        "sha256": "76418b3fd600d80450d5305051185aff018e3ee3a280a4b6e4c685130a7a048e",
+        "modal_sha256": "76418b3fd600d80450d5305051185aff018e3ee3a280a4b6e4c685130a7a048e",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+        "row_count": 19,
+        "canonical_json_sha256": "d57047ead4bde9f4969120c9ed7cdb3dc8244b4f79827b0440c4794148dd3f20",
+        "rows": [
+          {
+            "relative_path": ".github",
+            "type": "directory",
+            "mode": "0700",
+            "bytes": null,
+            "sha256": null
+          },
+          {
+            "relative_path": ".github/workflows",
+            "type": "directory",
+            "mode": "0700",
+            "bytes": null,
+            "sha256": null
+          },
+          {
+            "relative_path": ".github/workflows/release-bundle.yml",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 705,
+            "sha256": "1622ccab86cf7bbc726598efd8c56235de03d232210bf75cef641c522b8172cf"
+          },
+          {
+            "relative_path": ".github/workflows/tessl-publish.yml",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 326,
+            "sha256": "088613a1b83f6bd82438e375414af673ca5f09ac808dd534333a4b7b31f67b7d"
+          },
+          {
+            "relative_path": ".tessl-plugin",
+            "type": "directory",
+            "mode": "0700",
+            "bytes": null,
+            "sha256": null
+          },
+          {
+            "relative_path": ".tessl-plugin/plugin.json",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 1113,
+            "sha256": "e9fa4893a15f77a7d3c55ca90ecdb3d855e26d2e21e16dfd6728badad944b503"
+          },
+          {
+            "relative_path": "LICENSE.txt",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 18652,
+            "sha256": "50bfbf25300f4b6c06f5c286bc9f63b2fe43a548233d633a6798a78a785bdb98"
+          },
+          {
+            "relative_path": "README.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 13665,
+            "sha256": "f3c0aae9363c9558d114c7627e25331946e341a78df47ac38c632df2dc5edc75"
+          },
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 24717,
+            "sha256": "76418b3fd600d80450d5305051185aff018e3ee3a280a4b6e4c685130a7a048e"
+          },
+          {
+            "relative_path": "USER-GUIDE.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 11768,
+            "sha256": "13c49787335e0bbe6697bc9667d16bb6a270b463583b3c1c8193177b7886cf52"
+          },
+          {
+            "relative_path": "one-skill-to-rule-them-all-white-background.png",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 1637108,
+            "sha256": "45cf757186835a910e6f858962cc6887621a64bb99f83288352ce988e7058067"
+          },
+          {
+            "relative_path": "one-skill-to-rule-them-all.png",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 1538885,
+            "sha256": "4338823f41e507280664a47c629a94dd8c7e390f329130fa5ccd2abc4ef9f90a"
+          },
+          {
+            "relative_path": "references",
+            "type": "directory",
+            "mode": "0700",
+            "bytes": null,
+            "sha256": null
+          },
+          {
+            "relative_path": "references/cortextos-fleet.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 1601,
+            "sha256": "988193114d8ff8c9ea8da64d474d743d81f9f9655b043472f4f32b253410a192"
+          },
+          {
+            "relative_path": "references/environments.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 4950,
+            "sha256": "0e4274047c6628e8438c3f444b998db0169c72a6416c656c75bcd60d8db21ee9"
+          },
+          {
+            "relative_path": "references/skill-authoring.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 12185,
+            "sha256": "15fc47365fdfc89c7fd16fe7f9c59183940b13bcb51380acadad418c187b47ff"
+          },
+          {
+            "relative_path": "references/weekly-review.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 10520,
+            "sha256": "247e7bfcd4aecc71a2bbb142584a78a9e1c70b01961e208416b1ba65c98329bf"
+          },
+          {
+            "relative_path": "scripts",
+            "type": "directory",
+            "mode": "0700",
+            "bytes": null,
+            "sha256": null
+          },
+          {
+            "relative_path": "scripts/cortextos_observe.py",
+            "type": "file",
+            "mode": "0700",
+            "bytes": 4300,
+            "sha256": "858b3a2c5f3b8a3ef8f3bbf9bdc1fd956dcaa0f04bbde46f84c4d0392dbd11c6"
+          }
+        ]
+      }
+    },
+    {
+      "row": 12,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/_archive/hunter-20260822T1715PDT/.claude/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/_archive/hunter-20260822T1715PDT/.claude/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "archive",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "_archive",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/_archive/config.json",
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2502,
+        "sha256": "dafc73c8bb1440ca9e21414119cc49f788b5e015a565c5498af47ed16246ac36",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/_archive/hunter-20260822T1715PDT/.claude/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "43ef672a32a5e3bdc55e2dba394c7aafcb254c232626b5fec83e7fd3061d9c6a",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2502,
+            "sha256": "dafc73c8bb1440ca9e21414119cc49f788b5e015a565c5498af47ed16246ac36"
+          }
+        ]
+      }
+    },
+    {
+      "row": 13,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/_archive/hunter-20260822T1715PDT/.claude/skills/morning-review/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/_archive/hunter-20260822T1715PDT/.claude/skills/morning-review/SKILL.md",
+      "skill": "morning-review",
+      "classification": "archive",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "_archive",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/_archive/config.json",
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 7194,
+        "sha256": "93bac1074bcba0361868e2d095fbefd2afaabd0db7eacde9bd77a345f72e99bb",
+        "modal_sha256": "93bac1074bcba0361868e2d095fbefd2afaabd0db7eacde9bd77a345f72e99bb",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/_archive/hunter-20260822T1715PDT/.claude/skills/morning-review",
+        "row_count": 1,
+        "canonical_json_sha256": "b56d453ee25b6a2514b9bf24f750e69e0d075fce7c0824cb34ef5f528fc69a4a",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 7194,
+            "sha256": "93bac1074bcba0361868e2d095fbefd2afaabd0db7eacde9bd77a345f72e99bb"
+          }
+        ]
+      }
+    },
+    {
+      "row": 14,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/academy/.claude/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/academy/.claude/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "disabled_evidence",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "academy",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/academy/config.json",
+        "config_present": true,
+        "enabled": false
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2502,
+        "sha256": "dafc73c8bb1440ca9e21414119cc49f788b5e015a565c5498af47ed16246ac36",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/academy/.claude/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "43ef672a32a5e3bdc55e2dba394c7aafcb254c232626b5fec83e7fd3061d9c6a",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2502,
+            "sha256": "dafc73c8bb1440ca9e21414119cc49f788b5e015a565c5498af47ed16246ac36"
+          }
+        ]
+      }
+    },
+    {
+      "row": 15,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/academy/.claude/skills/morning-review/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/academy/.claude/skills/morning-review/SKILL.md",
+      "skill": "morning-review",
+      "classification": "disabled_evidence",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "academy",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/academy/config.json",
+        "config_present": true,
+        "enabled": false
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 7194,
+        "sha256": "93bac1074bcba0361868e2d095fbefd2afaabd0db7eacde9bd77a345f72e99bb",
+        "modal_sha256": "93bac1074bcba0361868e2d095fbefd2afaabd0db7eacde9bd77a345f72e99bb",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/academy/.claude/skills/morning-review",
+        "row_count": 1,
+        "canonical_json_sha256": "b56d453ee25b6a2514b9bf24f750e69e0d075fce7c0824cb34ef5f528fc69a4a",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 7194,
+            "sha256": "93bac1074bcba0361868e2d095fbefd2afaabd0db7eacde9bd77a345f72e99bb"
+          }
+        ]
+      }
+    },
+    {
+      "row": 16,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/deliverables/audit-assembly-skills-2026-08-10/audit-assemble-master/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/auditmaster-codex/deliverables/audit-assembly-skills-2026-08-10/audit-assemble-master/SKILL.md",
+      "skill": "audit-assemble-master",
+      "classification": "archive",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "auditmaster-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 10215,
+        "sha256": "cc374a43c8edf4a340f0c49960d4c2385febe96c6713ff99b058655a14563634",
+        "modal_sha256": "106cb877c50abe02b3954651878e8733856f1d31bd9b89f0a809c6f2045a7d89",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/deliverables/audit-assembly-skills-2026-08-10/audit-assemble-master",
+        "row_count": 3,
+        "canonical_json_sha256": "16b485f5d5a12a0b7a14f0e9d7938feedf6a8bd5b6e4bc01d79582a6ad964ef7",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 10215,
+            "sha256": "cc374a43c8edf4a340f0c49960d4c2385febe96c6713ff99b058655a14563634"
+          },
+          {
+            "relative_path": "scripts",
+            "type": "directory",
+            "mode": "0700",
+            "bytes": null,
+            "sha256": null
+          },
+          {
+            "relative_path": "scripts/assembly-check.py",
+            "type": "file",
+            "mode": "0700",
+            "bytes": 17137,
+            "sha256": "b32f82404c927a61cf51684a58b1176acb9ad60bc8b9b47fbf0e8f731e1cfb3d"
+          }
+        ]
+      }
+    },
+    {
+      "row": 17,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/deliverables/audit-assembly-skills-2026-08-10/audit-pipeline/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/auditmaster-codex/deliverables/audit-assembly-skills-2026-08-10/audit-pipeline/SKILL.md",
+      "skill": "audit-pipeline",
+      "classification": "archive",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "auditmaster-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 4917,
+        "sha256": "df17b34785d7d345c8be771713a98a003939546352078a81b6b4c3c81cd2078d",
+        "modal_sha256": "2750fd73ec149a6185065ea748a3ec29f9d97200c0acbd1845c3c3245206447a",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/deliverables/audit-assembly-skills-2026-08-10/audit-pipeline",
+        "row_count": 3,
+        "canonical_json_sha256": "a3eb748e53e553267a03a2dff062efad32db22dfd6f154f8d954a66b37bcfd33",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 4917,
+            "sha256": "df17b34785d7d345c8be771713a98a003939546352078a81b6b4c3c81cd2078d"
+          },
+          {
+            "relative_path": "references",
+            "type": "directory",
+            "mode": "0700",
+            "bytes": null,
+            "sha256": null
+          },
+          {
+            "relative_path": "references/aec-ai-lifecycle.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 5158,
+            "sha256": "3bde0dd85dd3abbc59b74a6a038fb70ae5cf1ab0a73e062e96acf204af201a02"
+          }
+        ]
+      }
+    },
+    {
+      "row": 18,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/auditmaster-codex/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "auditmaster-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 2175,
+        "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/plugins/cortextos-agent-skills/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "6271645e0726ce420ef35c9fdea4885cebe7204db79fa5063cab6414c8b84fff",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 2175,
+            "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0"
+          }
+        ]
+      }
+    },
+    {
+      "row": 19,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/auditmaster-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "auditmaster-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 3974,
+        "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/plugins/cortextos-agent-skills/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "b3d615101e5773b0c3c3c232b8b12cf2148b3513e11abf3faa6add0047ed0355",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 3974,
+            "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1"
+          }
+        ]
+      }
+    },
+    {
+      "row": 20,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/auditmaster-codex/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "auditmaster-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 15342,
+        "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/plugins/cortextos-agent-skills/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "ba7203e0fca6618cd8ca7ce125dac07b9300d1cfc1ad68691d5f0312ec6159d5",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 15342,
+            "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a"
+          }
+        ]
+      }
+    },
+    {
+      "row": 21,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/plugins/cortextos-agent-skills/skills/audit-assemble-master/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/auditmaster-codex/plugins/cortextos-agent-skills/skills/audit-assemble-master/SKILL.md",
+      "skill": "audit-assemble-master",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "auditmaster-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 8454,
+        "sha256": "106cb877c50abe02b3954651878e8733856f1d31bd9b89f0a809c6f2045a7d89",
+        "modal_sha256": "106cb877c50abe02b3954651878e8733856f1d31bd9b89f0a809c6f2045a7d89",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/plugins/cortextos-agent-skills/skills/audit-assemble-master",
+        "row_count": 3,
+        "canonical_json_sha256": "f53093a0514ffe8f1f76fbeb37aa2d832a0c651ceb1f0b360317e5cce24f6912",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 8454,
+            "sha256": "106cb877c50abe02b3954651878e8733856f1d31bd9b89f0a809c6f2045a7d89"
+          },
+          {
+            "relative_path": "scripts",
+            "type": "directory",
+            "mode": "0700",
+            "bytes": null,
+            "sha256": null
+          },
+          {
+            "relative_path": "scripts/assembly-check.py",
+            "type": "file",
+            "mode": "0700",
+            "bytes": 6722,
+            "sha256": "137906026c1166e4f2df61e71d075545526c1f7bf39d14f1d45d9d709512a610"
+          }
+        ]
+      }
+    },
+    {
+      "row": 22,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/plugins/cortextos-agent-skills/skills/audit-pipeline/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/auditmaster-codex/plugins/cortextos-agent-skills/skills/audit-pipeline/SKILL.md",
+      "skill": "audit-pipeline",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "auditmaster-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 4805,
+        "sha256": "2750fd73ec149a6185065ea748a3ec29f9d97200c0acbd1845c3c3245206447a",
+        "modal_sha256": "2750fd73ec149a6185065ea748a3ec29f9d97200c0acbd1845c3c3245206447a",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/plugins/cortextos-agent-skills/skills/audit-pipeline",
+        "row_count": 3,
+        "canonical_json_sha256": "caa4527e2b38cf16f35ca46b0a19af41736a2f430b4e9d90f4b339a7d1574620",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 4805,
+            "sha256": "2750fd73ec149a6185065ea748a3ec29f9d97200c0acbd1845c3c3245206447a"
+          },
+          {
+            "relative_path": "references",
+            "type": "directory",
+            "mode": "0700",
+            "bytes": null,
+            "sha256": null
+          },
+          {
+            "relative_path": "references/aec-ai-lifecycle.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 5143,
+            "sha256": "14d3c24fca31119fd4abf5b8e072a1393f2ba7cfdd93bd3028553893e19acf0e"
+          }
+        ]
+      }
+    },
+    {
+      "row": 23,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster/.claude/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/auditmaster/.claude/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "disabled_evidence",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "auditmaster",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster/config.json",
+        "config_present": true,
+        "enabled": false
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2483,
+        "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster/.claude/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "5cb73b0d0a32a241b47b2e176b59f4417386dfde130b841fa65bacd0f9c22244",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2483,
+            "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9"
+          }
+        ]
+      }
+    },
+    {
+      "row": 24,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster/.claude/skills/agent-browser/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/auditmaster/.claude/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "disabled_evidence",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "auditmaster",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster/config.json",
+        "config_present": true,
+        "enabled": false
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 3974,
+        "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster/.claude/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "6b336839d96a56c89b18a67958e1ecd44462c03a23d80505ebb0a577907cc56a",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 3974,
+            "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1"
+          }
+        ]
+      }
+    },
+    {
+      "row": 25,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster/.claude/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/auditmaster/.claude/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "disabled_evidence",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "auditmaster",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster/config.json",
+        "config_present": true,
+        "enabled": false
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 15787,
+        "sha256": "e3feef5326282a3c0d9402e4cccd6304b85b73c030c5ea57e4897f845433fb01",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster/.claude/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "54a0195ff5d9e6cb126f68135d7032c3ed7d7ad3b519c0af1ec82080691b8a6a",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 15787,
+            "sha256": "e3feef5326282a3c0d9402e4cccd6304b85b73c030c5ea57e4897f845433fb01"
+          }
+        ]
+      }
+    },
+    {
+      "row": 26,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster/.claude/skills/audit-assemble-master/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/auditmaster/.claude/skills/audit-assemble-master/SKILL.md",
+      "skill": "audit-assemble-master",
+      "classification": "disabled_evidence",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "auditmaster",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster/config.json",
+        "config_present": true,
+        "enabled": false
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 8431,
+        "sha256": "c1ab9d46bdb58241cbb04fc3c57cbb0e7d4f26db939746978e9d43d95292dc0d",
+        "modal_sha256": "106cb877c50abe02b3954651878e8733856f1d31bd9b89f0a809c6f2045a7d89",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster/.claude/skills/audit-assemble-master",
+        "row_count": 3,
+        "canonical_json_sha256": "d2701730253476e7645daa5b05d5edbe0cb25d249220378bc80b6229f5f2a6ee",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 8431,
+            "sha256": "c1ab9d46bdb58241cbb04fc3c57cbb0e7d4f26db939746978e9d43d95292dc0d"
+          },
+          {
+            "relative_path": "scripts",
+            "type": "directory",
+            "mode": "0700",
+            "bytes": null,
+            "sha256": null
+          },
+          {
+            "relative_path": "scripts/assembly-check.py",
+            "type": "file",
+            "mode": "0700",
+            "bytes": 6722,
+            "sha256": "137906026c1166e4f2df61e71d075545526c1f7bf39d14f1d45d9d709512a610"
+          }
+        ]
+      }
+    },
+    {
+      "row": 27,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster/.claude/skills/audit-pipeline/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/auditmaster/.claude/skills/audit-pipeline/SKILL.md",
+      "skill": "audit-pipeline",
+      "classification": "disabled_evidence",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "auditmaster",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster/config.json",
+        "config_present": true,
+        "enabled": false
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 4805,
+        "sha256": "2750fd73ec149a6185065ea748a3ec29f9d97200c0acbd1845c3c3245206447a",
+        "modal_sha256": "2750fd73ec149a6185065ea748a3ec29f9d97200c0acbd1845c3c3245206447a",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster/.claude/skills/audit-pipeline",
+        "row_count": 3,
+        "canonical_json_sha256": "caa4527e2b38cf16f35ca46b0a19af41736a2f430b4e9d90f4b339a7d1574620",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 4805,
+            "sha256": "2750fd73ec149a6185065ea748a3ec29f9d97200c0acbd1845c3c3245206447a"
+          },
+          {
+            "relative_path": "references",
+            "type": "directory",
+            "mode": "0700",
+            "bytes": null,
+            "sha256": null
+          },
+          {
+            "relative_path": "references/aec-ai-lifecycle.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 5143,
+            "sha256": "14d3c24fca31119fd4abf5b8e072a1393f2ba7cfdd93bd3028553893e19acf0e"
+          }
+        ]
+      }
+    },
+    {
+      "row": 28,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/automator/.claude/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/automator/.claude/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "disabled_evidence",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "automator",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/automator/config.json",
+        "config_present": true,
+        "enabled": false
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2483,
+        "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/automator/.claude/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "5cb73b0d0a32a241b47b2e176b59f4417386dfde130b841fa65bacd0f9c22244",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2483,
+            "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9"
+          }
+        ]
+      }
+    },
+    {
+      "row": 29,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/automator/.claude/skills/agent-browser/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/automator/.claude/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "disabled_evidence",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "automator",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/automator/config.json",
+        "config_present": true,
+        "enabled": false
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 3974,
+        "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/automator/.claude/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "6b336839d96a56c89b18a67958e1ecd44462c03a23d80505ebb0a577907cc56a",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 3974,
+            "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1"
+          }
+        ]
+      }
+    },
+    {
+      "row": 30,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/automator/.claude/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/automator/.claude/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "disabled_evidence",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "automator",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/automator/config.json",
+        "config_present": true,
+        "enabled": false
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 15787,
+        "sha256": "e3feef5326282a3c0d9402e4cccd6304b85b73c030c5ea57e4897f845433fb01",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/automator/.claude/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "54a0195ff5d9e6cb126f68135d7032c3ed7d7ad3b519c0af1ec82080691b8a6a",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 15787,
+            "sha256": "e3feef5326282a3c0d9402e4cccd6304b85b73c030c5ea57e4897f845433fb01"
+          }
+        ]
+      }
+    },
+    {
+      "row": 31,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm-codex/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/crm-codex/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "crm-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 2175,
+        "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm-codex/plugins/cortextos-agent-skills/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "6271645e0726ce420ef35c9fdea4885cebe7204db79fa5063cab6414c8b84fff",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 2175,
+            "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0"
+          }
+        ]
+      }
+    },
+    {
+      "row": 32,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/crm-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "crm-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 3974,
+        "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm-codex/plugins/cortextos-agent-skills/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "b3d615101e5773b0c3c3c232b8b12cf2148b3513e11abf3faa6add0047ed0355",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 3974,
+            "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1"
+          }
+        ]
+      }
+    },
+    {
+      "row": 33,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm-codex/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/crm-codex/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "crm-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 15342,
+        "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm-codex/plugins/cortextos-agent-skills/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "ba7203e0fca6618cd8ca7ce125dac07b9300d1cfc1ad68691d5f0312ec6159d5",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 15342,
+            "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a"
+          }
+        ]
+      }
+    },
+    {
+      "row": 34,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2-codex/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/frank2-codex/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "frank2-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 2175,
+        "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2-codex/plugins/cortextos-agent-skills/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "6271645e0726ce420ef35c9fdea4885cebe7204db79fa5063cab6414c8b84fff",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 2175,
+            "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0"
+          }
+        ]
+      }
+    },
+    {
+      "row": 35,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/frank2-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "frank2-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 3974,
+        "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2-codex/plugins/cortextos-agent-skills/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "b3d615101e5773b0c3c3c232b8b12cf2148b3513e11abf3faa6add0047ed0355",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 3974,
+            "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1"
+          }
+        ]
+      }
+    },
+    {
+      "row": 36,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2-codex/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/frank2-codex/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "frank2-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 15342,
+        "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2-codex/plugins/cortextos-agent-skills/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "ba7203e0fca6618cd8ca7ce125dac07b9300d1cfc1ad68691d5f0312ec6159d5",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 15342,
+            "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a"
+          }
+        ]
+      }
+    },
+    {
+      "row": 37,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2-codex/plugins/cortextos-agent-skills/skills/morning-review/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/frank2-codex/plugins/cortextos-agent-skills/skills/morning-review/SKILL.md",
+      "skill": "morning-review",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "frank2-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 7198,
+        "sha256": "13891dfac155e384de06a3b2b9e6327774f0e26064d25a93bdcad81a3668df31",
+        "modal_sha256": "93bac1074bcba0361868e2d095fbefd2afaabd0db7eacde9bd77a345f72e99bb",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2-codex/plugins/cortextos-agent-skills/skills/morning-review",
+        "row_count": 1,
+        "canonical_json_sha256": "768b02f9cfc925d04f73fb444539e234eaa870e8ad9c120ea6253a18b9cc9773",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 7198,
+            "sha256": "13891dfac155e384de06a3b2b9e6327774f0e26064d25a93bdcad81a3668df31"
+          }
+        ]
+      }
+    },
+    {
+      "row": 38,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/.claude/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/frank2/.claude/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "frank2",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2483,
+        "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/.claude/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "5cb73b0d0a32a241b47b2e176b59f4417386dfde130b841fa65bacd0f9c22244",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2483,
+            "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9"
+          }
+        ]
+      }
+    },
+    {
+      "row": 39,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/.claude/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/frank2/.claude/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "frank2",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 13413,
+        "sha256": "0791860d8c70f4e41f5c9d7bd919b55c02af7ea3b698e370be87a9cf5d6fdaf9",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/.claude/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "47e2a61c9f88b65ac19fc84727ffea25a7fc0c791348eeb02916df8b24c5a88d",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 13413,
+            "sha256": "0791860d8c70f4e41f5c9d7bd919b55c02af7ea3b698e370be87a9cf5d6fdaf9"
+          }
+        ]
+      }
+    },
+    {
+      "row": 40,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/.claude/skills/morning-review/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/frank2/.claude/skills/morning-review/SKILL.md",
+      "skill": "morning-review",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "frank2",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 7175,
+        "sha256": "36eac3e25719e5b74686a5d3edd26fb3d384142d5738a251bc8d4e1cc7213da5",
+        "modal_sha256": "93bac1074bcba0361868e2d095fbefd2afaabd0db7eacde9bd77a345f72e99bb",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2/.claude/skills/morning-review",
+        "row_count": 1,
+        "canonical_json_sha256": "afcd0b7a15bc947c1b578aef5681e840a6d2aa5659a914d520634e3da2e219f1",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 7175,
+            "sha256": "36eac3e25719e5b74686a5d3edd26fb3d384142d5738a251bc8d4e1cc7213da5"
+          }
+        ]
+      }
+    },
+    {
+      "row": 41,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox-codex/.claude/skills/source-collection/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/knox-codex/.claude/skills/source-collection/SKILL.md",
+      "skill": "source-collection",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "knox-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 14932,
+        "sha256": "9ff32c42fdd3d0bd9af91e0d766ce1178458979df215c6da5f2bd8a1eb5f2663",
+        "modal_sha256": "9ff32c42fdd3d0bd9af91e0d766ce1178458979df215c6da5f2bd8a1eb5f2663",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox-codex/.claude/skills/source-collection",
+        "row_count": 1,
+        "canonical_json_sha256": "1040a78315a76519ab9e01bfc6b6a79f86115103aa328ae7636da2799774b1df",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 14932,
+            "sha256": "9ff32c42fdd3d0bd9af91e0d766ce1178458979df215c6da5f2bd8a1eb5f2663"
+          }
+        ]
+      }
+    },
+    {
+      "row": 42,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox-codex/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/knox-codex/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "knox-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 2175,
+        "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox-codex/plugins/cortextos-agent-skills/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "6271645e0726ce420ef35c9fdea4885cebe7204db79fa5063cab6414c8b84fff",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 2175,
+            "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0"
+          }
+        ]
+      }
+    },
+    {
+      "row": 43,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/knox-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "knox-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 3974,
+        "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox-codex/plugins/cortextos-agent-skills/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "b3d615101e5773b0c3c3c232b8b12cf2148b3513e11abf3faa6add0047ed0355",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 3974,
+            "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1"
+          }
+        ]
+      }
+    },
+    {
+      "row": 44,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox-codex/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/knox-codex/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "knox-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 15342,
+        "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox-codex/plugins/cortextos-agent-skills/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "ba7203e0fca6618cd8ca7ce125dac07b9300d1cfc1ad68691d5f0312ec6159d5",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 15342,
+            "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a"
+          }
+        ]
+      }
+    },
+    {
+      "row": 45,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox/.claude/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/knox/.claude/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "disabled_evidence",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "knox",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox/config.json",
+        "config_present": true,
+        "enabled": false
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 2483,
+        "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox/.claude/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "3c03fc000421b4fdae76fcd51b96f7490f15d988bc5baffe39dabe41da328d50",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 2483,
+            "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9"
+          }
+        ]
+      }
+    },
+    {
+      "row": 46,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox/.claude/skills/agent-browser/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/knox/.claude/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "disabled_evidence",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "knox",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox/config.json",
+        "config_present": true,
+        "enabled": false
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 3974,
+        "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox/.claude/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "b3d615101e5773b0c3c3c232b8b12cf2148b3513e11abf3faa6add0047ed0355",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 3974,
+            "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1"
+          }
+        ]
+      }
+    },
+    {
+      "row": 47,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox/.claude/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/knox/.claude/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "disabled_evidence",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "knox",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox/config.json",
+        "config_present": true,
+        "enabled": false
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 15787,
+        "sha256": "e3feef5326282a3c0d9402e4cccd6304b85b73c030c5ea57e4897f845433fb01",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox/.claude/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "97caece83d0b57fa2d0453c23055ff4aef53cc36a5c94cea9374491305ec36a2",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 15787,
+            "sha256": "e3feef5326282a3c0d9402e4cccd6304b85b73c030c5ea57e4897f845433fb01"
+          }
+        ]
+      }
+    },
+    {
+      "row": 48,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox/.claude/skills/source-collection/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/knox/.claude/skills/source-collection/SKILL.md",
+      "skill": "source-collection",
+      "classification": "disabled_evidence",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "knox",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox/config.json",
+        "config_present": true,
+        "enabled": false
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 14932,
+        "sha256": "9ff32c42fdd3d0bd9af91e0d766ce1178458979df215c6da5f2bd8a1eb5f2663",
+        "modal_sha256": "9ff32c42fdd3d0bd9af91e0d766ce1178458979df215c6da5f2bd8a1eb5f2663",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox/.claude/skills/source-collection",
+        "row_count": 1,
+        "canonical_json_sha256": "1040a78315a76519ab9e01bfc6b6a79f86115103aa328ae7636da2799774b1df",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 14932,
+            "sha256": "9ff32c42fdd3d0bd9af91e0d766ce1178458979df215c6da5f2bd8a1eb5f2663"
+          }
+        ]
+      }
+    },
+    {
+      "row": 49,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/larry-codex/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "larry-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 2175,
+        "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/plugins/cortextos-agent-skills/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "6271645e0726ce420ef35c9fdea4885cebe7204db79fa5063cab6414c8b84fff",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 2175,
+            "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0"
+          }
+        ]
+      }
+    },
+    {
+      "row": 50,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/larry-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "larry-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 3974,
+        "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/plugins/cortextos-agent-skills/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "b3d615101e5773b0c3c3c232b8b12cf2148b3513e11abf3faa6add0047ed0355",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 3974,
+            "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1"
+          }
+        ]
+      }
+    },
+    {
+      "row": 51,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/larry-codex/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "larry-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 15342,
+        "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/plugins/cortextos-agent-skills/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "ba7203e0fca6618cd8ca7ce125dac07b9300d1cfc1ad68691d5f0312ec6159d5",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 15342,
+            "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a"
+          }
+        ]
+      }
+    },
+    {
+      "row": 52,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/state/cutover-snapshots/ophir-2026-08-06T17-43-00Z/ophir-agent/.claude/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/larry-codex/state/cutover-snapshots/ophir-2026-08-06T17-43-00Z/ophir-agent/.claude/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "snapshot",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "larry-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2483,
+        "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/state/cutover-snapshots/ophir-2026-08-06T17-43-00Z/ophir-agent/.claude/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "5cb73b0d0a32a241b47b2e176b59f4417386dfde130b841fa65bacd0f9c22244",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2483,
+            "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9"
+          }
+        ]
+      }
+    },
+    {
+      "row": 53,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/state/cutover-snapshots/ophir-2026-08-06T17-43-00Z/ophir-agent/.claude/skills/agent-browser/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/larry-codex/state/cutover-snapshots/ophir-2026-08-06T17-43-00Z/ophir-agent/.claude/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "snapshot",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "larry-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2477,
+        "sha256": "eb4d564a7cd9f299acb0d59007ab94d121b559e143e8723203900c54654b1afe",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/state/cutover-snapshots/ophir-2026-08-06T17-43-00Z/ophir-agent/.claude/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "bf5f7ef28f067403009e91783948d9d7f83aefe9eb99af0106dcb04490a8e603",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2477,
+            "sha256": "eb4d564a7cd9f299acb0d59007ab94d121b559e143e8723203900c54654b1afe"
+          }
+        ]
+      }
+    },
+    {
+      "row": 54,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/state/cutover-snapshots/ophir-2026-08-06T17-43-00Z/ophir-agent/.claude/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/larry-codex/state/cutover-snapshots/ophir-2026-08-06T17-43-00Z/ophir-agent/.claude/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "snapshot",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "larry-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 15787,
+        "sha256": "e3feef5326282a3c0d9402e4cccd6304b85b73c030c5ea57e4897f845433fb01",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/state/cutover-snapshots/ophir-2026-08-06T17-43-00Z/ophir-agent/.claude/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "54a0195ff5d9e6cb126f68135d7032c3ed7d7ad3b519c0af1ec82080691b8a6a",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 15787,
+            "sha256": "e3feef5326282a3c0d9402e4cccd6304b85b73c030c5ea57e4897f845433fb01"
+          }
+        ]
+      }
+    },
+    {
+      "row": 55,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/state/cutover-snapshots/scout-2026-08-06T17-40-00Z/scout-agent/.claude/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/larry-codex/state/cutover-snapshots/scout-2026-08-06T17-40-00Z/scout-agent/.claude/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "snapshot",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "larry-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2483,
+        "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/state/cutover-snapshots/scout-2026-08-06T17-40-00Z/scout-agent/.claude/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "5cb73b0d0a32a241b47b2e176b59f4417386dfde130b841fa65bacd0f9c22244",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2483,
+            "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9"
+          }
+        ]
+      }
+    },
+    {
+      "row": 56,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/state/cutover-snapshots/scout-2026-08-06T17-40-00Z/scout-agent/.claude/skills/agent-browser/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/larry-codex/state/cutover-snapshots/scout-2026-08-06T17-40-00Z/scout-agent/.claude/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "snapshot",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "larry-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2477,
+        "sha256": "eb4d564a7cd9f299acb0d59007ab94d121b559e143e8723203900c54654b1afe",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/state/cutover-snapshots/scout-2026-08-06T17-40-00Z/scout-agent/.claude/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "bf5f7ef28f067403009e91783948d9d7f83aefe9eb99af0106dcb04490a8e603",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2477,
+            "sha256": "eb4d564a7cd9f299acb0d59007ab94d121b559e143e8723203900c54654b1afe"
+          }
+        ]
+      }
+    },
+    {
+      "row": 57,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/state/cutover-snapshots/scout-2026-08-06T17-40-00Z/scout-agent/.claude/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/larry-codex/state/cutover-snapshots/scout-2026-08-06T17-40-00Z/scout-agent/.claude/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "snapshot",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "larry-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 12381,
+        "sha256": "05a35534a45fe778323ff9426fc39b534eaf3889243bbd0fba61080d79803f3f",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/state/cutover-snapshots/scout-2026-08-06T17-40-00Z/scout-agent/.claude/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "5e610b603ed098dc4e571c05bf169659531e86a687dff4ee665d5eecf50a745b",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 12381,
+            "sha256": "05a35534a45fe778323ff9426fc39b534eaf3889243bbd0fba61080d79803f3f"
+          }
+        ]
+      }
+    },
+    {
+      "row": 58,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry/.claude/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/larry/.claude/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "larry",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2502,
+        "sha256": "dafc73c8bb1440ca9e21414119cc49f788b5e015a565c5498af47ed16246ac36",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry/.claude/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "43ef672a32a5e3bdc55e2dba394c7aafcb254c232626b5fec83e7fd3061d9c6a",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2502,
+            "sha256": "dafc73c8bb1440ca9e21414119cc49f788b5e015a565c5498af47ed16246ac36"
+          }
+        ]
+      }
+    },
+    {
+      "row": 59,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven-codex/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/maven-codex/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "maven-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 2175,
+        "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven-codex/plugins/cortextos-agent-skills/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "6271645e0726ce420ef35c9fdea4885cebe7204db79fa5063cab6414c8b84fff",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 2175,
+            "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0"
+          }
+        ]
+      }
+    },
+    {
+      "row": 60,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/maven-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "maven-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 3974,
+        "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven-codex/plugins/cortextos-agent-skills/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "b3d615101e5773b0c3c3c232b8b12cf2148b3513e11abf3faa6add0047ed0355",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 3974,
+            "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1"
+          }
+        ]
+      }
+    },
+    {
+      "row": 61,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven-codex/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/maven-codex/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "maven-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 15342,
+        "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven-codex/plugins/cortextos-agent-skills/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "ba7203e0fca6618cd8ca7ce125dac07b9300d1cfc1ad68691d5f0312ec6159d5",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 15342,
+            "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a"
+          }
+        ]
+      }
+    },
+    {
+      "row": 62,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven/.claude/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/maven/.claude/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "maven",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2483,
+        "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven/.claude/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "5cb73b0d0a32a241b47b2e176b59f4417386dfde130b841fa65bacd0f9c22244",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2483,
+            "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9"
+          }
+        ]
+      }
+    },
+    {
+      "row": 63,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven/.claude/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/maven/.claude/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "maven",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 12743,
+        "sha256": "fe88caa4a9d5b2c3670e244c87dd6718031f8919bdc5c3f9f00202b1452a0c70",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven/.claude/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "2fddd465682470249f6d672b3e5274d7ac70548261268e1c3cb0af070a622f54",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 12743,
+            "sha256": "fe88caa4a9d5b2c3670e244c87dd6718031f8919bdc5c3f9f00202b1452a0c70"
+          }
+        ]
+      }
+    },
+    {
+      "row": 64,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/muse/.claude/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "muse",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2502,
+        "sha256": "dafc73c8bb1440ca9e21414119cc49f788b5e015a565c5498af47ed16246ac36",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "43ef672a32a5e3bdc55e2dba394c7aafcb254c232626b5fec83e7fd3061d9c6a",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2502,
+            "sha256": "dafc73c8bb1440ca9e21414119cc49f788b5e015a565c5498af47ed16246ac36"
+          }
+        ]
+      }
+    },
+    {
+      "row": 65,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/clearpath-content-pipeline/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/muse/.claude/skills/clearpath-content-pipeline/SKILL.md",
+      "skill": "clearpath-content-pipeline",
+      "classification": "forbidden_legacy",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "muse",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 3772,
+        "sha256": "35f5799497a1f09d39785d6be434a1fabe96461aafc334ca01d15a210a78a555",
+        "modal_sha256": "35f5799497a1f09d39785d6be434a1fabe96461aafc334ca01d15a210a78a555",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/clearpath-content-pipeline",
+        "row_count": 1,
+        "canonical_json_sha256": "a911f7cf54a05a1dcb25a7b2ab0e077b9f5c4d3a251b4aa0c3fda3d390f4b61b",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 3772,
+            "sha256": "35f5799497a1f09d39785d6be434a1fabe96461aafc334ca01d15a210a78a555"
+          }
+        ]
+      }
+    },
+    {
+      "row": 66,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/morning-review/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/muse/.claude/skills/morning-review/SKILL.md",
+      "skill": "morning-review",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "muse",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 7194,
+        "sha256": "93bac1074bcba0361868e2d095fbefd2afaabd0db7eacde9bd77a345f72e99bb",
+        "modal_sha256": "93bac1074bcba0361868e2d095fbefd2afaabd0db7eacde9bd77a345f72e99bb",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/morning-review",
+        "row_count": 1,
+        "canonical_json_sha256": "b56d453ee25b6a2514b9bf24f750e69e0d075fce7c0824cb34ef5f528fc69a4a",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 7194,
+            "sha256": "93bac1074bcba0361868e2d095fbefd2afaabd0db7eacde9bd77a345f72e99bb"
+          }
+        ]
+      }
+    },
+    {
+      "row": 67,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/opencode/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/opencode/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "disabled_evidence",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "opencode",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/opencode/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 2175,
+        "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/opencode/plugins/cortextos-agent-skills/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "6271645e0726ce420ef35c9fdea4885cebe7204db79fa5063cab6414c8b84fff",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 2175,
+            "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0"
+          }
+        ]
+      }
+    },
+    {
+      "row": 68,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/opencode/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/opencode/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "disabled_evidence",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "opencode",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/opencode/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 3974,
+        "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/opencode/plugins/cortextos-agent-skills/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "b3d615101e5773b0c3c3c232b8b12cf2148b3513e11abf3faa6add0047ed0355",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 3974,
+            "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1"
+          }
+        ]
+      }
+    },
+    {
+      "row": 69,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/opencode/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/opencode/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "disabled_evidence",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "opencode",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/opencode/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 15342,
+        "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/opencode/plugins/cortextos-agent-skills/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "ba7203e0fca6618cd8ca7ce125dac07b9300d1cfc1ad68691d5f0312ec6159d5",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 15342,
+            "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a"
+          }
+        ]
+      }
+    },
+    {
+      "row": 70,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa-codex/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/pa-codex/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "pa-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 2175,
+        "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa-codex/plugins/cortextos-agent-skills/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "6271645e0726ce420ef35c9fdea4885cebe7204db79fa5063cab6414c8b84fff",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 2175,
+            "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0"
+          }
+        ]
+      }
+    },
+    {
+      "row": 71,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/pa-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "pa-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 3974,
+        "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa-codex/plugins/cortextos-agent-skills/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "b3d615101e5773b0c3c3c232b8b12cf2148b3513e11abf3faa6add0047ed0355",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 3974,
+            "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1"
+          }
+        ]
+      }
+    },
+    {
+      "row": 72,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa-codex/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/pa-codex/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "pa-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 15342,
+        "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa-codex/plugins/cortextos-agent-skills/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "ba7203e0fca6618cd8ca7ce125dac07b9300d1cfc1ad68691d5f0312ec6159d5",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 15342,
+            "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a"
+          }
+        ]
+      }
+    },
+    {
+      "row": 73,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa-codex/plugins/cortextos-agent-skills/skills/morning-review/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/pa-codex/plugins/cortextos-agent-skills/skills/morning-review/SKILL.md",
+      "skill": "morning-review",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "pa-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 7198,
+        "sha256": "13891dfac155e384de06a3b2b9e6327774f0e26064d25a93bdcad81a3668df31",
+        "modal_sha256": "93bac1074bcba0361868e2d095fbefd2afaabd0db7eacde9bd77a345f72e99bb",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa-codex/plugins/cortextos-agent-skills/skills/morning-review",
+        "row_count": 1,
+        "canonical_json_sha256": "34dc0a3978736adde93817160530a2dbda04b088c48d52d99ec4f413bfb0c19f",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 7198,
+            "sha256": "13891dfac155e384de06a3b2b9e6327774f0e26064d25a93bdcad81a3668df31"
+          }
+        ]
+      }
+    },
+    {
+      "row": 74,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/.claude/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/pa/.claude/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "pa",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 2483,
+        "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/.claude/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "3c03fc000421b4fdae76fcd51b96f7490f15d988bc5baffe39dabe41da328d50",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 2483,
+            "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9"
+          }
+        ]
+      }
+    },
+    {
+      "row": 75,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/.claude/skills/agent-browser/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/pa/.claude/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "pa",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 3974,
+        "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/.claude/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "b3d615101e5773b0c3c3c232b8b12cf2148b3513e11abf3faa6add0047ed0355",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 3974,
+            "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1"
+          }
+        ]
+      }
+    },
+    {
+      "row": 76,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/.claude/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/pa/.claude/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "pa",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 15787,
+        "sha256": "e3feef5326282a3c0d9402e4cccd6304b85b73c030c5ea57e4897f845433fb01",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/.claude/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "97caece83d0b57fa2d0453c23055ff4aef53cc36a5c94cea9374491305ec36a2",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 15787,
+            "sha256": "e3feef5326282a3c0d9402e4cccd6304b85b73c030c5ea57e4897f845433fb01"
+          }
+        ]
+      }
+    },
+    {
+      "row": 77,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/.claude/skills/morning-review/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/pa/.claude/skills/morning-review/SKILL.md",
+      "skill": "morning-review",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "pa",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 7175,
+        "sha256": "36eac3e25719e5b74686a5d3edd26fb3d384142d5738a251bc8d4e1cc7213da5",
+        "modal_sha256": "93bac1074bcba0361868e2d095fbefd2afaabd0db7eacde9bd77a345f72e99bb",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa/.claude/skills/morning-review",
+        "row_count": 1,
+        "canonical_json_sha256": "eac0110cd27963e7b84f4351bf3dffd18755307ef9c08a308cf09224e125d00a",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 7175,
+            "sha256": "36eac3e25719e5b74686a5d3edd26fb3d384142d5738a251bc8d4e1cc7213da5"
+          }
+        ]
+      }
+    },
+    {
+      "row": 78,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage-codex/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/sage-codex/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "sage-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 2175,
+        "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage-codex/plugins/cortextos-agent-skills/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "6271645e0726ce420ef35c9fdea4885cebe7204db79fa5063cab6414c8b84fff",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 2175,
+            "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0"
+          }
+        ]
+      }
+    },
+    {
+      "row": 79,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/sage-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "sage-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 3974,
+        "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage-codex/plugins/cortextos-agent-skills/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "b3d615101e5773b0c3c3c232b8b12cf2148b3513e11abf3faa6add0047ed0355",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 3974,
+            "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1"
+          }
+        ]
+      }
+    },
+    {
+      "row": 80,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage-codex/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/sage-codex/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "sage-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 15342,
+        "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage-codex/plugins/cortextos-agent-skills/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "ba7203e0fca6618cd8ca7ce125dac07b9300d1cfc1ad68691d5f0312ec6159d5",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 15342,
+            "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a"
+          }
+        ]
+      }
+    },
+    {
+      "row": 81,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage/.claude/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/sage/.claude/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "sage",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2483,
+        "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage/.claude/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "5cb73b0d0a32a241b47b2e176b59f4417386dfde130b841fa65bacd0f9c22244",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2483,
+            "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9"
+          }
+        ]
+      }
+    },
+    {
+      "row": 82,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage/.claude/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/sage/.claude/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "sage",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 12696,
+        "sha256": "cdde73750d0cdf469128e7d12cecc256e12d9d1c152484c257dd7c01b4c5ecbf",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage/.claude/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "cc9fbc36c9d532ea6a9e5c8097b4da70adc749667e392b0cec22073fa92db0e0",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 12696,
+            "sha256": "cdde73750d0cdf469128e7d12cecc256e12d9d1c152484c257dd7c01b4c5ecbf"
+          }
+        ]
+      }
+    },
+    {
+      "row": 83,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout-codex/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/scout-codex/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "scout-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 2175,
+        "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout-codex/plugins/cortextos-agent-skills/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "6271645e0726ce420ef35c9fdea4885cebe7204db79fa5063cab6414c8b84fff",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 2175,
+            "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0"
+          }
+        ]
+      }
+    },
+    {
+      "row": 84,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/scout-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "scout-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 3974,
+        "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout-codex/plugins/cortextos-agent-skills/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "b3d615101e5773b0c3c3c232b8b12cf2148b3513e11abf3faa6add0047ed0355",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 3974,
+            "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1"
+          }
+        ]
+      }
+    },
+    {
+      "row": 85,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout-codex/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/scout-codex/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "scout-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 15342,
+        "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout-codex/plugins/cortextos-agent-skills/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "ba7203e0fca6618cd8ca7ce125dac07b9300d1cfc1ad68691d5f0312ec6159d5",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 15342,
+            "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a"
+          }
+        ]
+      }
+    },
+    {
+      "row": 86,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout/.claude/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/scout/.claude/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "scout",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2483,
+        "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout/.claude/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "5cb73b0d0a32a241b47b2e176b59f4417386dfde130b841fa65bacd0f9c22244",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2483,
+            "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9"
+          }
+        ]
+      }
+    },
+    {
+      "row": 87,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout/.claude/skills/agent-browser/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/scout/.claude/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "scout",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 3974,
+        "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout/.claude/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "6b336839d96a56c89b18a67958e1ecd44462c03a23d80505ebb0a577907cc56a",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 3974,
+            "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1"
+          }
+        ]
+      }
+    },
+    {
+      "row": 88,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout/.claude/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/scout/.claude/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "scout",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 12381,
+        "sha256": "05a35534a45fe778323ff9426fc39b534eaf3889243bbd0fba61080d79803f3f",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout/.claude/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "5e610b603ed098dc4e571c05bf169659531e86a687dff4ee665d5eecf50a745b",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 12381,
+            "sha256": "05a35534a45fe778323ff9426fc39b534eaf3889243bbd0fba61080d79803f3f"
+          }
+        ]
+      }
+    },
+    {
+      "row": 89,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sre/.claude/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/clearworksai/agents/sre/.claude/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "disabled_evidence",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "sre",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sre/config.json",
+        "config_present": true,
+        "enabled": false
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2502,
+        "sha256": "dafc73c8bb1440ca9e21414119cc49f788b5e015a565c5498af47ed16246ac36",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sre/.claude/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "43ef672a32a5e3bdc55e2dba394c7aafcb254c232626b5fec83e7fd3061d9c6a",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2502,
+            "sha256": "dafc73c8bb1440ca9e21414119cc49f788b5e015a565c5498af47ed16246ac36"
+          }
+        ]
+      }
+    },
+    {
+      "row": 90,
+      "path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/maven/.claude/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/personal/agents/maven/.claude/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "personal",
+        "agent": "maven",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/maven/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2483,
+        "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/personal/agents/maven/.claude/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "5cb73b0d0a32a241b47b2e176b59f4417386dfde130b841fa65bacd0f9c22244",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2483,
+            "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9"
+          }
+        ]
+      }
+    },
+    {
+      "row": 91,
+      "path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/maven/.claude/skills/agent-browser/SKILL.md",
+      "relative_path": "orgs/personal/agents/maven/.claude/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "personal",
+        "agent": "maven",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/maven/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 3974,
+        "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/personal/agents/maven/.claude/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "6b336839d96a56c89b18a67958e1ecd44462c03a23d80505ebb0a577907cc56a",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 3974,
+            "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1"
+          }
+        ]
+      }
+    },
+    {
+      "row": 92,
+      "path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/maven/.claude/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/personal/agents/maven/.claude/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "personal",
+        "agent": "maven",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/maven/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 12680,
+        "sha256": "02acec32cfb85ec00245705d49ec47162e7ddb8236a5acd486de0a11f4f8ac43",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/personal/agents/maven/.claude/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "d36f2643ef9d9af2a67e9923ba905ea214db08793d2f9aa43959b4609014bc8d",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 12680,
+            "sha256": "02acec32cfb85ec00245705d49ec47162e7ddb8236a5acd486de0a11f4f8ac43"
+          }
+        ]
+      }
+    },
+    {
+      "row": 93,
+      "path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir-codex/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/personal/agents/ophir-codex/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "personal",
+        "agent": "ophir-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 2175,
+        "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir-codex/plugins/cortextos-agent-skills/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "6271645e0726ce420ef35c9fdea4885cebe7204db79fa5063cab6414c8b84fff",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 2175,
+            "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0"
+          }
+        ]
+      }
+    },
+    {
+      "row": 94,
+      "path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "relative_path": "orgs/personal/agents/ophir-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "personal",
+        "agent": "ophir-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 3974,
+        "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir-codex/plugins/cortextos-agent-skills/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "b3d615101e5773b0c3c3c232b8b12cf2148b3513e11abf3faa6add0047ed0355",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 3974,
+            "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1"
+          }
+        ]
+      }
+    },
+    {
+      "row": 95,
+      "path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir-codex/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/personal/agents/ophir-codex/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "personal",
+        "agent": "ophir-codex",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir-codex/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0600",
+        "bytes": 15342,
+        "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir-codex/plugins/cortextos-agent-skills/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "ba7203e0fca6618cd8ca7ce125dac07b9300d1cfc1ad68691d5f0312ec6159d5",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0600",
+            "bytes": 15342,
+            "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a"
+          }
+        ]
+      }
+    },
+    {
+      "row": 96,
+      "path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir/.claude/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/personal/agents/ophir/.claude/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "personal",
+        "agent": "ophir",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2483,
+        "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir/.claude/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "5cb73b0d0a32a241b47b2e176b59f4417386dfde130b841fa65bacd0f9c22244",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2483,
+            "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9"
+          }
+        ]
+      }
+    },
+    {
+      "row": 97,
+      "path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir/.claude/skills/agent-browser/SKILL.md",
+      "relative_path": "orgs/personal/agents/ophir/.claude/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "personal",
+        "agent": "ophir",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 3974,
+        "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir/.claude/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "6b336839d96a56c89b18a67958e1ecd44462c03a23d80505ebb0a577907cc56a",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 3974,
+            "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1"
+          }
+        ]
+      }
+    },
+    {
+      "row": 98,
+      "path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir/.claude/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/personal/agents/ophir/.claude/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "personal",
+        "agent": "ophir",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 15787,
+        "sha256": "e3feef5326282a3c0d9402e4cccd6304b85b73c030c5ea57e4897f845433fb01",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir/.claude/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "54a0195ff5d9e6cb126f68135d7032c3ed7d7ad3b519c0af1ec82080691b8a6a",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 15787,
+            "sha256": "e3feef5326282a3c0d9402e4cccd6304b85b73c030c5ea57e4897f845433fb01"
+          }
+        ]
+      }
+    },
+    {
+      "row": 99,
+      "path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/scout/.claude/skills/activity-channel/SKILL.md",
+      "relative_path": "orgs/personal/agents/scout/.claude/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "personal",
+        "agent": "scout",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/scout/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2483,
+        "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/personal/agents/scout/.claude/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "5cb73b0d0a32a241b47b2e176b59f4417386dfde130b841fa65bacd0f9c22244",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2483,
+            "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9"
+          }
+        ]
+      }
+    },
+    {
+      "row": 100,
+      "path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/scout/.claude/skills/agent-browser/SKILL.md",
+      "relative_path": "orgs/personal/agents/scout/.claude/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "enabled_target",
+      "runtime": {
+        "org": "personal",
+        "agent": "scout",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/scout/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 3974,
+        "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/personal/agents/scout/.claude/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "6b336839d96a56c89b18a67958e1ecd44462c03a23d80505ebb0a577907cc56a",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 3974,
+            "sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1"
+          }
+        ]
+      }
+    },
+    {
+      "row": 101,
+      "path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/scout/.claude/skills/agent-management/SKILL.md",
+      "relative_path": "orgs/personal/agents/scout/.claude/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "enabled_blocked_target",
+      "runtime": {
+        "org": "personal",
+        "agent": "scout",
+        "config_path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/scout/config.json",
+        "config_present": true,
+        "enabled": true
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 12381,
+        "sha256": "05a35534a45fe778323ff9426fc39b534eaf3889243bbd0fba61080d79803f3f",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/orgs/personal/agents/scout/.claude/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "5e610b603ed098dc4e571c05bf169659531e86a687dff4ee665d5eecf50a745b",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 12381,
+            "sha256": "05a35534a45fe778323ff9426fc39b534eaf3889243bbd0fba61080d79803f3f"
+          }
+        ]
+      }
+    },
+    {
+      "row": 102,
+      "path": "/Users/joshweiss/code/cortextos/templates/agent-codex/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "relative_path": "templates/agent-codex/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "template",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2175,
+        "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/templates/agent-codex/plugins/cortextos-agent-skills/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "bb1443ca1698c11a774cdae7f0869c7074843d132f69bf713c5562c0ae15293b",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2175,
+            "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0"
+          }
+        ]
+      }
+    },
+    {
+      "row": 103,
+      "path": "/Users/joshweiss/code/cortextos/templates/agent-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "relative_path": "templates/agent-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "template",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2477,
+        "sha256": "eb4d564a7cd9f299acb0d59007ab94d121b559e143e8723203900c54654b1afe",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/templates/agent-codex/plugins/cortextos-agent-skills/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "bf5f7ef28f067403009e91783948d9d7f83aefe9eb99af0106dcb04490a8e603",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2477,
+            "sha256": "eb4d564a7cd9f299acb0d59007ab94d121b559e143e8723203900c54654b1afe"
+          }
+        ]
+      }
+    },
+    {
+      "row": 104,
+      "path": "/Users/joshweiss/code/cortextos/templates/agent-codex/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "relative_path": "templates/agent-codex/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "template",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 15342,
+        "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/templates/agent-codex/plugins/cortextos-agent-skills/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "a6e73fecca571788e4af9681edd8ac859129433c4769f224db2a2371374542ba",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 15342,
+            "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a"
+          }
+        ]
+      }
+    },
+    {
+      "row": 105,
+      "path": "/Users/joshweiss/code/cortextos/templates/agent-opencode/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "relative_path": "templates/agent-opencode/plugins/cortextos-agent-skills/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "template",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2175,
+        "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/templates/agent-opencode/plugins/cortextos-agent-skills/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "bb1443ca1698c11a774cdae7f0869c7074843d132f69bf713c5562c0ae15293b",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2175,
+            "sha256": "befd342ca9c913ccb1703651ea2bfb5d99f08066a76e10c1ddbac301d66f29f0"
+          }
+        ]
+      }
+    },
+    {
+      "row": 106,
+      "path": "/Users/joshweiss/code/cortextos/templates/agent-opencode/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "relative_path": "templates/agent-opencode/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "template",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2477,
+        "sha256": "eb4d564a7cd9f299acb0d59007ab94d121b559e143e8723203900c54654b1afe",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/templates/agent-opencode/plugins/cortextos-agent-skills/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "bf5f7ef28f067403009e91783948d9d7f83aefe9eb99af0106dcb04490a8e603",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2477,
+            "sha256": "eb4d564a7cd9f299acb0d59007ab94d121b559e143e8723203900c54654b1afe"
+          }
+        ]
+      }
+    },
+    {
+      "row": 107,
+      "path": "/Users/joshweiss/code/cortextos/templates/agent-opencode/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "relative_path": "templates/agent-opencode/plugins/cortextos-agent-skills/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "template",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 15342,
+        "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/templates/agent-opencode/plugins/cortextos-agent-skills/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "a6e73fecca571788e4af9681edd8ac859129433c4769f224db2a2371374542ba",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 15342,
+            "sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a"
+          }
+        ]
+      }
+    },
+    {
+      "row": 108,
+      "path": "/Users/joshweiss/code/cortextos/templates/agent/.claude/skills/activity-channel/SKILL.md",
+      "relative_path": "templates/agent/.claude/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "template",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2483,
+        "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/templates/agent/.claude/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "5cb73b0d0a32a241b47b2e176b59f4417386dfde130b841fa65bacd0f9c22244",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2483,
+            "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9"
+          }
+        ]
+      }
+    },
+    {
+      "row": 109,
+      "path": "/Users/joshweiss/code/cortextos/templates/agent/.claude/skills/agent-browser/SKILL.md",
+      "relative_path": "templates/agent/.claude/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "template",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2477,
+        "sha256": "eb4d564a7cd9f299acb0d59007ab94d121b559e143e8723203900c54654b1afe",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/templates/agent/.claude/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "bf5f7ef28f067403009e91783948d9d7f83aefe9eb99af0106dcb04490a8e603",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2477,
+            "sha256": "eb4d564a7cd9f299acb0d59007ab94d121b559e143e8723203900c54654b1afe"
+          }
+        ]
+      }
+    },
+    {
+      "row": 110,
+      "path": "/Users/joshweiss/code/cortextos/templates/agent/.claude/skills/agent-management/SKILL.md",
+      "relative_path": "templates/agent/.claude/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "template",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 15787,
+        "sha256": "e3feef5326282a3c0d9402e4cccd6304b85b73c030c5ea57e4897f845433fb01",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/templates/agent/.claude/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "54a0195ff5d9e6cb126f68135d7032c3ed7d7ad3b519c0af1ec82080691b8a6a",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 15787,
+            "sha256": "e3feef5326282a3c0d9402e4cccd6304b85b73c030c5ea57e4897f845433fb01"
+          }
+        ]
+      }
+    },
+    {
+      "row": 111,
+      "path": "/Users/joshweiss/code/cortextos/templates/analyst/.claude/skills/activity-channel/SKILL.md",
+      "relative_path": "templates/analyst/.claude/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "template",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2483,
+        "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/templates/analyst/.claude/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "5cb73b0d0a32a241b47b2e176b59f4417386dfde130b841fa65bacd0f9c22244",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2483,
+            "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9"
+          }
+        ]
+      }
+    },
+    {
+      "row": 112,
+      "path": "/Users/joshweiss/code/cortextos/templates/analyst/.claude/skills/agent-browser/SKILL.md",
+      "relative_path": "templates/analyst/.claude/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "template",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2477,
+        "sha256": "eb4d564a7cd9f299acb0d59007ab94d121b559e143e8723203900c54654b1afe",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/templates/analyst/.claude/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "bf5f7ef28f067403009e91783948d9d7f83aefe9eb99af0106dcb04490a8e603",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2477,
+            "sha256": "eb4d564a7cd9f299acb0d59007ab94d121b559e143e8723203900c54654b1afe"
+          }
+        ]
+      }
+    },
+    {
+      "row": 113,
+      "path": "/Users/joshweiss/code/cortextos/templates/analyst/.claude/skills/agent-management/SKILL.md",
+      "relative_path": "templates/analyst/.claude/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "template",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 15779,
+        "sha256": "8d66b124cfc3f96ee0578a7cd721add15b9d338bddad537a1636dc5d03b531f7",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/templates/analyst/.claude/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "42fd2b5e03bcb4a8fe84618b5337cf51aae483c42b0bb6abfeccdaa22140e72c",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 15779,
+            "sha256": "8d66b124cfc3f96ee0578a7cd721add15b9d338bddad537a1636dc5d03b531f7"
+          }
+        ]
+      }
+    },
+    {
+      "row": 114,
+      "path": "/Users/joshweiss/code/cortextos/templates/orchestrator/.claude/skills/activity-channel/SKILL.md",
+      "relative_path": "templates/orchestrator/.claude/skills/activity-channel/SKILL.md",
+      "skill": "activity-channel",
+      "classification": "template",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2483,
+        "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "modal_sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9",
+        "matches_modal": true
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/templates/orchestrator/.claude/skills/activity-channel",
+        "row_count": 1,
+        "canonical_json_sha256": "5cb73b0d0a32a241b47b2e176b59f4417386dfde130b841fa65bacd0f9c22244",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2483,
+            "sha256": "fd3d302802be1d89ecb0ce22a7230af97ac2bf2e6c21ed820fb0a2453ba9f4d9"
+          }
+        ]
+      }
+    },
+    {
+      "row": 115,
+      "path": "/Users/joshweiss/code/cortextos/templates/orchestrator/.claude/skills/agent-browser/SKILL.md",
+      "relative_path": "templates/orchestrator/.claude/skills/agent-browser/SKILL.md",
+      "skill": "agent-browser",
+      "classification": "template",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 2477,
+        "sha256": "eb4d564a7cd9f299acb0d59007ab94d121b559e143e8723203900c54654b1afe",
+        "modal_sha256": "24ec83eb77d392d752bd9b3518253d19b772b8314d438e827b3faec3fbf81be1",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/templates/orchestrator/.claude/skills/agent-browser",
+        "row_count": 1,
+        "canonical_json_sha256": "bf5f7ef28f067403009e91783948d9d7f83aefe9eb99af0106dcb04490a8e603",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 2477,
+            "sha256": "eb4d564a7cd9f299acb0d59007ab94d121b559e143e8723203900c54654b1afe"
+          }
+        ]
+      }
+    },
+    {
+      "row": 116,
+      "path": "/Users/joshweiss/code/cortextos/templates/orchestrator/.claude/skills/agent-management/SKILL.md",
+      "relative_path": "templates/orchestrator/.claude/skills/agent-management/SKILL.md",
+      "skill": "agent-management",
+      "classification": "template",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 16457,
+        "sha256": "572a7115899b8b78d4ebc14e7f2e28b0ee3af0cb5e61cc953d80e098dc485709",
+        "modal_sha256": "fee1620d2e340dae7530f5f50d8957743f568d1cc815792e90ed8e972af9f56a",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/templates/orchestrator/.claude/skills/agent-management",
+        "row_count": 1,
+        "canonical_json_sha256": "c575d9e5389fc30d96fcb9a856d026a148093ec1ba0c912878f44e8801e6b262",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 16457,
+            "sha256": "572a7115899b8b78d4ebc14e7f2e28b0ee3af0cb5e61cc953d80e098dc485709"
+          }
+        ]
+      }
+    },
+    {
+      "row": 117,
+      "path": "/Users/joshweiss/code/cortextos/templates/orchestrator/.claude/skills/morning-review/SKILL.md",
+      "relative_path": "templates/orchestrator/.claude/skills/morning-review/SKILL.md",
+      "skill": "morning-review",
+      "classification": "template",
+      "runtime": {
+        "org": null,
+        "agent": null,
+        "config_path": null,
+        "config_present": false,
+        "enabled": null
+      },
+      "skill_file": {
+        "mode": "0644",
+        "bytes": 8775,
+        "sha256": "08858973095016bed8b5d3670f88511d4687f4b9810f2ed0101e8590fadfe583",
+        "modal_sha256": "93bac1074bcba0361868e2d095fbefd2afaabd0db7eacde9bd77a345f72e99bb",
+        "matches_modal": false
+      },
+      "recursive_tree": {
+        "root": "/Users/joshweiss/code/cortextos/templates/orchestrator/.claude/skills/morning-review",
+        "row_count": 1,
+        "canonical_json_sha256": "551a196e6995d6b54d1012d240595f8e9c63d7569036beb56f9819e87020eb4f",
+        "rows": [
+          {
+            "relative_path": "SKILL.md",
+            "type": "file",
+            "mode": "0644",
+            "bytes": 8775,
+            "sha256": "08858973095016bed8b5d3670f88511d4687f4b9810f2ed0101e8590fadfe583"
+          }
+        ]
+      }
+    }
+  ],
+  "symlinks": [
+    {
+      "row": 1,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/.agents/skills/task-observer",
+      "relative_path": "orgs/clearworksai/agents/auditmaster-codex/.agents/skills/task-observer",
+      "skill": "task-observer",
+      "literal_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "resolved_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "dangling": false,
+      "role": "task_observer_activation",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "auditmaster-codex",
+        "enabled": true
+      },
+      "classification": "enabled_target"
+    },
+    {
+      "row": 2,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/codexer/.agents/skills/task-observer",
+      "relative_path": "orgs/clearworksai/agents/codexer/.agents/skills/task-observer",
+      "skill": "task-observer",
+      "literal_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "resolved_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "dangling": false,
+      "role": "task_observer_activation",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "codexer",
+        "enabled": true
+      },
+      "classification": "enabled_target"
+    },
+    {
+      "row": 3,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm-codex/.agents/skills/task-observer",
+      "relative_path": "orgs/clearworksai/agents/crm-codex/.agents/skills/task-observer",
+      "skill": "task-observer",
+      "literal_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "resolved_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "dangling": false,
+      "role": "task_observer_activation",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "crm-codex",
+        "enabled": true
+      },
+      "classification": "enabled_target"
+    },
+    {
+      "row": 4,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2-codex/.agents/skills/task-observer",
+      "relative_path": "orgs/clearworksai/agents/frank2-codex/.agents/skills/task-observer",
+      "skill": "task-observer",
+      "literal_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "resolved_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "dangling": false,
+      "role": "task_observer_activation",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "frank2-codex",
+        "enabled": true
+      },
+      "classification": "enabled_target"
+    },
+    {
+      "row": 5,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox-codex/.agents/skills/task-observer",
+      "relative_path": "orgs/clearworksai/agents/knox-codex/.agents/skills/task-observer",
+      "skill": "task-observer",
+      "literal_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "resolved_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "dangling": false,
+      "role": "task_observer_activation",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "knox-codex",
+        "enabled": true
+      },
+      "classification": "enabled_target"
+    },
+    {
+      "row": 6,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/.agents/skills/task-observer",
+      "relative_path": "orgs/clearworksai/agents/larry-codex/.agents/skills/task-observer",
+      "skill": "task-observer",
+      "literal_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "resolved_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "dangling": false,
+      "role": "task_observer_activation",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "larry-codex",
+        "enabled": true
+      },
+      "classification": "enabled_target"
+    },
+    {
+      "row": 7,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven-codex/.agents/skills/task-observer",
+      "relative_path": "orgs/clearworksai/agents/maven-codex/.agents/skills/task-observer",
+      "skill": "task-observer",
+      "literal_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "resolved_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "dangling": false,
+      "role": "task_observer_activation",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "maven-codex",
+        "enabled": true
+      },
+      "classification": "enabled_target"
+    },
+    {
+      "row": 8,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven/.claude/skills/task-observer",
+      "relative_path": "orgs/clearworksai/agents/maven/.claude/skills/task-observer",
+      "skill": "task-observer",
+      "literal_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "resolved_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "dangling": false,
+      "role": "task_observer_activation",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "maven",
+        "enabled": true
+      },
+      "classification": "enabled_target"
+    },
+    {
+      "row": 9,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/task-observer",
+      "relative_path": "orgs/clearworksai/agents/muse/.claude/skills/task-observer",
+      "skill": "task-observer",
+      "literal_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "resolved_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "dangling": false,
+      "role": "task_observer_activation",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "muse",
+        "enabled": true
+      },
+      "classification": "enabled_target"
+    },
+    {
+      "row": 10,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/opencode/.opencode/skills/activity-channel",
+      "relative_path": "orgs/clearworksai/agents/opencode/.opencode/skills/activity-channel",
+      "skill": "activity-channel",
+      "literal_target": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/opencode/plugins/cortextos-agent-skills/skills/activity-channel",
+      "resolved_target": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/opencode/plugins/cortextos-agent-skills/skills/activity-channel",
+      "dangling": false,
+      "role": "disabled_opencode_compatibility",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "opencode",
+        "enabled": true
+      },
+      "classification": "disabled_evidence"
+    },
+    {
+      "row": 11,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/opencode/.opencode/skills/agent-browser",
+      "relative_path": "orgs/clearworksai/agents/opencode/.opencode/skills/agent-browser",
+      "skill": "agent-browser",
+      "literal_target": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/opencode/plugins/cortextos-agent-skills/skills/agent-browser",
+      "resolved_target": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/opencode/plugins/cortextos-agent-skills/skills/agent-browser",
+      "dangling": false,
+      "role": "disabled_opencode_compatibility",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "opencode",
+        "enabled": true
+      },
+      "classification": "disabled_evidence"
+    },
+    {
+      "row": 12,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/opencode/.opencode/skills/agent-management",
+      "relative_path": "orgs/clearworksai/agents/opencode/.opencode/skills/agent-management",
+      "skill": "agent-management",
+      "literal_target": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/opencode/plugins/cortextos-agent-skills/skills/agent-management",
+      "resolved_target": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/opencode/plugins/cortextos-agent-skills/skills/agent-management",
+      "dangling": false,
+      "role": "disabled_opencode_compatibility",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "opencode",
+        "enabled": true
+      },
+      "classification": "disabled_evidence"
+    },
+    {
+      "row": 13,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa-codex/.agents/skills/task-observer",
+      "relative_path": "orgs/clearworksai/agents/pa-codex/.agents/skills/task-observer",
+      "skill": "task-observer",
+      "literal_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "resolved_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "dangling": false,
+      "role": "task_observer_activation",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "pa-codex",
+        "enabled": true
+      },
+      "classification": "enabled_target"
+    },
+    {
+      "row": 14,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage-codex/.agents/skills/task-observer",
+      "relative_path": "orgs/clearworksai/agents/sage-codex/.agents/skills/task-observer",
+      "skill": "task-observer",
+      "literal_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "resolved_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "dangling": false,
+      "role": "task_observer_activation",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "sage-codex",
+        "enabled": true
+      },
+      "classification": "enabled_target"
+    },
+    {
+      "row": 15,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout-codex/.agents/skills/task-observer",
+      "relative_path": "orgs/clearworksai/agents/scout-codex/.agents/skills/task-observer",
+      "skill": "task-observer",
+      "literal_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "resolved_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "dangling": false,
+      "role": "task_observer_activation",
+      "runtime": {
+        "org": "clearworksai",
+        "agent": "scout-codex",
+        "enabled": true
+      },
+      "classification": "enabled_target"
+    },
+    {
+      "row": 16,
+      "path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir-codex/.agents/skills/task-observer",
+      "relative_path": "orgs/personal/agents/ophir-codex/.agents/skills/task-observer",
+      "skill": "task-observer",
+      "literal_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "resolved_target": "/Users/joshweiss/code/cortextos/community/skills/task-observer",
+      "dangling": false,
+      "role": "task_observer_activation",
+      "runtime": {
+        "org": "personal",
+        "agent": "ophir-codex",
+        "enabled": true
+      },
+      "classification": "enabled_target"
+    }
+  ],
+  "canonical_payload_sha256": "a3c41a64e834b4572f68595c4d613c24d3fd3d265f52229c3b2111291f3417e0"
+}
+

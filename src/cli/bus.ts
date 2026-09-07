@@ -909,17 +909,28 @@ busCommand
  * cut every 27-char id to 26 with no delimiter before the assignee, which
  * produced plausible-but-wrong ids when copied.)
  */
-export function formatTaskTable(tasks: Task[]): string {
+export function formatTaskTable(tasks: Array<Task & { class?: TaskClass }>): string {
   const PRIORITY_ICON: Record<string, string> = { urgent: '🔴', high: '🟠', normal: '🔵', low: '⚪' };
-  const STATUS_ICON: Record<string, string> = { pending: '○', in_progress: '●', blocked: '◑', completed: '✓', done: '✓', cancelled: '✗' };
+  const STATUS_ICON: Record<string, string> = { pending: '○', in_progress: '●', waiting: '⏸', blocked: '◑', completed: '✓', done: '✓', cancelled: '✗', someday: '◌' };
   const TITLE_MAX = 50;
 
   const idW = Math.max(2, ...tasks.map(t => t.id.length));
   const assigneeW = Math.max(8, ...tasks.map(t => (t.assigned_to || '-').length));
+  // Leading `[class]` column only when the caller decorated rows with a
+  // computed class (list-tasks does); bare Task[] callers get the plain table.
+  const hasClass = tasks.some(t => t.class !== undefined);
+  const classW = hasClass ? Math.max(5, ...tasks.map(t => `[${t.class ?? '-'}]`.length)) : 0;
+  const classCol = (label: string): string => (hasClass ? `${label.padEnd(classW)}  ` : '');
+  // Project column only when at least one row carries a project, so bare
+  // Task[] callers keep the compact table. Project names are copy targets
+  // for --project, so they are not truncated either.
+  const hasProject = tasks.some(t => !!t.project);
+  const projectW = hasProject ? Math.max(7, ...tasks.map(t => (t.project || '-').length)) : 0;
+  const projectCol = (label: string): string => (hasProject ? `${label.padEnd(projectW)}  ` : '');
 
   const lines: string[] = [];
   lines.push(`\n  Tasks (${tasks.length})\n`);
-  const header = `  Status  Pri  ${'ID'.padEnd(idW)}  ${'Assignee'.padEnd(assigneeW)}  Title`;
+  const header = `  ${classCol('Class')}Status  Pri  ${'ID'.padEnd(idW)}  ${projectCol('Project')}${'Assignee'.padEnd(assigneeW)}  Title`;
   lines.push(header);
   lines.push('  ' + '-'.repeat(header.length - 2));
   for (const t of tasks) {
@@ -928,7 +939,7 @@ export function formatTaskTable(tasks: Task[]): string {
     const id = t.id.padEnd(idW);
     const assignee = (t.assigned_to || '-').padEnd(assigneeW);
     const title = t.title.length > TITLE_MAX ? t.title.substring(0, TITLE_MAX - 1) + '…' : t.title;
-    lines.push(`  ${statusIcon}${priIcon}${id}  ${assignee}  ${title}`);
+    lines.push(`  ${classCol(`[${t.class ?? '-'}]`)}${statusIcon}${priIcon}${id}  ${projectCol(t.project || '-')}${assignee}  ${title}`);
   }
   lines.push('');
   return lines.join('\n');
@@ -2588,6 +2599,16 @@ busCommand
         instanceId: env.instanceId,
       },
     );
+
+    if (result.result === 'STORE_QUARANTINED' || result.result === 'INVALID_CONFIG') {
+      console.error(`[kb] ${result.result}: live native query refused hold_mode=${result.hold_mode || '-'}`);
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(`[kb] ${result.result}`);
+      }
+      process.exit(3);
+    }
 
     if (opts.json) {
       console.log(JSON.stringify(result, null, 2));

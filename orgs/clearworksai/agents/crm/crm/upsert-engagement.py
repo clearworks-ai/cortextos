@@ -23,6 +23,8 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+from deal_identity import assert_stage_transition, engagement_record_id, ensure_record_ids
+
 
 CRM_DIR = Path(__file__).resolve().parent
 PIPELINE_PATH = Path(os.environ.get("CRM_PIPELINE_PATH", CRM_DIR / "pipeline.json"))
@@ -42,6 +44,7 @@ def main() -> int:
     selector = parser.add_mutually_exclusive_group(required=True)
     selector.add_argument("--clearpath-id", type=int)
     selector.add_argument("--engagement-name", help="Match a locally-created engagement by exact name when clearpath_id is null")
+    selector.add_argument("--record-id", help="Stable opportunity/deal ID (preferred selector)")
     parser.add_argument("--stage", choices=sorted(KNOWN_STAGES))
     parser.add_argument("--status")
     parser.add_argument("--last-signal-at")
@@ -61,7 +64,10 @@ def main() -> int:
 
     data = json.loads(PIPELINE_PATH.read_text())
     engs = data.get("engagements", [])
-    if args.clearpath_id is not None:
+    ensure_record_ids(engs)
+    if args.record_id is not None:
+        eng = next((e for e in engs if engagement_record_id(e) == args.record_id), None)
+    elif args.clearpath_id is not None:
         eng = next((e for e in engs if e.get("clearpath_id") == args.clearpath_id), None)
     else:
         matches = [e for e in engs if e.get("name") == args.engagement_name]
@@ -74,6 +80,7 @@ def main() -> int:
 
     if args.stage and args.stage != eng.get("stage"):
         from_stage = eng.get("stage")
+        assert_stage_transition(from_stage, args.stage)
         eng.setdefault("stage_history", []).append({
             "from": from_stage,
             "to": args.stage,
@@ -126,11 +133,11 @@ def main() -> int:
         changes.append("_misclassified:true")
 
     if not changes:
-        print(json.dumps({"clearpath_id": eng.get("clearpath_id"), "name": eng.get("name"), "changes": [], "noop": True}))
+        print(json.dumps({"record_id": engagement_record_id(eng), "clearpath_id": eng.get("clearpath_id"), "name": eng.get("name"), "changes": [], "noop": True}))
         return 0
 
     PIPELINE_PATH.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
-    print(json.dumps({"clearpath_id": eng.get("clearpath_id"), "name": eng.get("name"), "changes": changes}))
+    print(json.dumps({"record_id": engagement_record_id(eng), "clearpath_id": eng.get("clearpath_id"), "name": eng.get("name"), "changes": changes}))
     return 0
 
 

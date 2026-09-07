@@ -7,7 +7,7 @@ import argparse
 import json
 import re
 import subprocess
-from datetime import datetime, timezone
+import sys
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -19,8 +19,30 @@ DEFAULT_VOICE_PATH = ORG_DIR / "knowledge" / "voice.md"
 DEFAULT_VIP_PATH = ORG_DIR / "knowledge" / "vip-clients.txt"
 CLEARWORKS_DOMAINS = {"clearworks.ai"}
 SUPPRESSED_NAMES = ("marcos santa ana",)
+DEFAULT_TO = "josh@clearworks.ai"
 RunResult = subprocess.CompletedProcess[str]
 Runner = Callable[[Sequence[str]], RunResult]
+
+# S-3/S-4 (reviewify-standards.json): reach scripts/brain the same way
+# meeting_writeback.py does (sys.path shim), so append_ledger can reuse the
+# repo's one sanctioned atomic-write helper instead of a hand-rolled
+# temp+os.replace, and ledger_key can delegate to writeback_render's
+# _source_key instead of re-implementing the same derivation.
+_BRAIN_DIR = Path(__file__).resolve().parents[5] / "scripts" / "brain"
+if str(_BRAIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_BRAIN_DIR))
+from atomic import atomic_write  # noqa: E402
+from writeback_render import _source_key  # noqa: E402
+
+# P1 (review 2026-09-05): reuse meeting_writeback.py's FR-008 per-file
+# fcntl.flock helper for the recap ledger too, instead of a lock-free
+# read-modify-write — see append_ledger below. meeting_writeback.py lives in
+# this same scripts/ directory, so no extra sys.path shim is needed beyond
+# what's already set up for this file's own module resolution.
+_PA_SCRIPTS_DIR = SCRIPT_PATH.parent
+if str(_PA_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_PA_SCRIPTS_DIR))
+from meeting_writeback import client_file_lock  # noqa: E402
 
 
 def normalize_space(value: str) -> str:
@@ -47,10 +69,69 @@ def load_ledger(path: Path) -> set[str]:
     return seen
 
 
-def append_ledger(path: Path, meeting_id: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(f"{meeting_id} {int(datetime.now(timezone.utc).timestamp())}\n")
+def _append_ledger_locked(path: Path, key: str, subject: str = "") -> None:
+    """Append a ledger row assuming the caller already holds
+    ``client_file_lock(path)``. Split out from `append_ledger` so callers that
+    must hold the lock across a larger critical section (e.g.
+    `process_meetings`'s check -> gws-draft -> append sequence, P2-followup
+    below) can append without re-acquiring the lock and deadlocking on it."""
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    if existing and not existing.endswith("\n"):
+        existing += "\n"
+    row = f"{key}\t{subject}\n" if subject else f"{key}\n"
+    atomic_write(path, (existing + row).encode("utf-8"))
+
+
+def append_ledger(path: Path, key: str, subject: str = "") -> None:
+    """S-3: temp + os.replace via the repo's one sanctioned atomic_write helper
+    (scripts/brain/atomic.py) instead of a hand-rolled tmp/os.replace sequence —
+    picks up atomic_write's fsync-before-replace, fixed 0o644 dest mode, and
+    cleanup-of-tmp-on-exception for free.
+
+    The row also carries the draft subject after the key, tab-separated
+    (`<key>\\t<subject>`), so a resuming orchestrator can recover which subject
+    was filed for a given key. `load_ledger`'s dedup (first whitespace token)
+    and `load_ledger_subjects` below both stay backward-compatible with legacy
+    rows that carry no tab (pre-this-change: `<key> <timestamp>`).
+
+    P1 (review 2026-09-05): the read-modify-write below was not serialized, so
+    two concurrent recap workers could both read the same "existing" snapshot
+    and the later `atomic_write` would drop the earlier one's row (a lost
+    dedup key -> a duplicate Gmail draft later). Reuse meeting_writeback.py's
+    FR-008 `client_file_lock` (fcntl.flock on a sibling `<ledger>.lock`) the
+    same way it guards meeting_writeback's own ledger append, so concurrent
+    appenders serialize here instead of racing."""
+    with client_file_lock(path):
+        _append_ledger_locked(path, key, subject)
+
+
+def load_ledger_subjects(path: Path) -> dict[str, str]:
+    """S-3: read back `<key>\\t<subject>` rows so a resuming caller (e.g. the
+    meeting orchestrator) can recover which draft subject was filed for a
+    given key. Legacy rows with no tab (pre-this-change: `<key> <timestamp>`)
+    still parse — they simply carry no recoverable subject (empty string)."""
+    subjects: dict[str, str] = {}
+    if not path.exists():
+        return subjects
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip("\n")
+        if not line.strip():
+            continue
+        if "\t" in line:
+            key, _, subject = line.partition("\t")
+            subjects[key.strip()] = subject
+        else:
+            key = line.split()[0]
+            subjects[key] = ""
+    return subjects
+
+
+def ledger_key(meeting: dict[str, Any]) -> str:
+    """S-4 (reviewify-standards.json): single source of truth — delegate to
+    writeback_render._source_key so the recap ledger dedupes on the exact same
+    source-agnostic `<kind>:<id>` key as writeback/CRM, instead of maintaining
+    a byte-identical duplicate here that could silently drift from it."""
+    return _source_key(meeting)
 
 
 def load_voice_guidance(path: Path) -> str:
@@ -189,6 +270,17 @@ def build_next_steps(meeting: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def build_open_questions(meeting: dict[str, Any]) -> str:
+    items = meeting.get("open_questions") or []
+    texts = [normalize_space(str(q)) for q in items if str(q).strip()]
+    if not texts:
+        return ""
+    lines = ["Open questions:"]
+    for idx, text in enumerate(texts, start=1):
+        lines.append(f"{idx}. {text}")
+    return "\n".join(lines)
+
+
 def build_body(meeting: dict[str, Any], voice_guidance: str) -> str:
     parts: list[str] = []
     client_context = normalize_space(str(meeting.get("client_context") or ""))
@@ -197,6 +289,9 @@ def build_body(meeting: dict[str, Any], voice_guidance: str) -> str:
         parts.append(f"Relationship context: {client_context}")
     parts.append(build_summary_paragraph(meeting, voice_guidance))
     parts.append(build_next_steps(meeting))
+    open_questions = build_open_questions(meeting)
+    if open_questions:
+        parts.append(open_questions)
     parts.append(f"— drafted automatically from the Fireflies transcript ({source_ref}); review before sending.")
     return "\n\n".join(parts)
 
@@ -208,7 +303,7 @@ def run_gmail_draft(subject: str, body: str, runner: Runner) -> RunResult:
             "gmail",
             "+draft",
             "--to",
-            "josh@clearworks.ai",
+            DEFAULT_TO,
             "--subject",
             subject,
             "--body",
@@ -228,6 +323,7 @@ def process_meetings(
     voice_guidance: str,
     vip_list: set[str],
     runner: Runner = default_runner,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     ledger_ids = load_ledger(ledger_path)
     summary: dict[str, Any] = {
@@ -243,7 +339,8 @@ def process_meetings(
         meeting_id = normalize_space(str(meeting.get("id") or ""))
         if not meeting_id:
             continue
-        if meeting_id in ledger_ids:
+        key = ledger_key(meeting)
+        if key in ledger_ids:
             summary["skipped_ledger"] += 1
             continue
         if is_suppressed_meeting(meeting):
@@ -263,25 +360,51 @@ def process_meetings(
             }
         )
 
-        if tier == "L2":
-            append_ledger(ledger_path, meeting_id)
-            summary["auto_filed"] += 1
-            ledger_ids.add(meeting_id)
+        if dry_run:
+            recipients = {"to": [DEFAULT_TO], "cc": []}
+            print(f"to: {', '.join(recipients['to'])}")
+            print(f"cc: {', '.join(recipients['cc']) or '(none)'}")
+            attendees = [normalize_space(str(a)) for a in (meeting.get("attendees") or []) if normalize_space(str(a))]
+            print(f"attendees: {', '.join(attendees) or '(none)'}")
+            print(f"subject: {subject}")
+            print(body)
             continue
 
-        result = run_gmail_draft(subject, body, runner)
-        if result.returncode == 0:
-            append_ledger(ledger_path, meeting_id)
-            summary["drafts_created"] += 1
-            ledger_ids.add(meeting_id)
-            continue
-        summary["draft_failures"].append(
-            {
-                "meeting_id": meeting_id,
-                "returncode": result.returncode,
-                "stderr": normalize_space(result.stderr or ""),
-            }
-        )
+        # P2-followup (review 2026-09-05): the key-check above is a fast,
+        # unlocked pre-filter against this process's own `ledger_ids`
+        # snapshot. Two recap processes racing on the SAME absent key could
+        # both pass that check, both call gws +draft, and both append ->
+        # duplicate external Gmail drafts. Hold the same per-ledger
+        # client_file_lock append_ledger uses across the whole
+        # re-check -> draft -> append sequence for this meeting, and
+        # re-verify the key from the file itself (not the in-memory
+        # `ledger_ids`, which a concurrent worker's append cannot update)
+        # immediately before drafting.
+        with client_file_lock(ledger_path):
+            if key in load_ledger(ledger_path):
+                summary["skipped_ledger"] += 1
+                ledger_ids.add(key)
+                continue
+
+            if tier == "L2":
+                _append_ledger_locked(ledger_path, key, subject)
+                summary["auto_filed"] += 1
+                ledger_ids.add(key)
+                continue
+
+            result = run_gmail_draft(subject, body, runner)
+            if result.returncode == 0:
+                _append_ledger_locked(ledger_path, key, subject)
+                summary["drafts_created"] += 1
+                ledger_ids.add(key)
+                continue
+            summary["draft_failures"].append(
+                {
+                    "meeting_id": meeting_id,
+                    "returncode": result.returncode,
+                    "stderr": normalize_space(result.stderr or ""),
+                }
+            )
 
     return summary
 
@@ -292,6 +415,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--ledger", required=True)
     parser.add_argument("--voice", default=str(DEFAULT_VOICE_PATH))
     parser.add_argument("--vip-list", default=str(DEFAULT_VIP_PATH))
+    parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -308,6 +432,7 @@ def main(argv: list[str] | None = None) -> int:
         ledger_path=Path(args.ledger),
         voice_guidance=load_voice_guidance(Path(args.voice)),
         vip_list=load_vip_list(Path(args.vip_list)),
+        dry_run=args.dry_run,
     )
     print(json.dumps(summary))
     return 0

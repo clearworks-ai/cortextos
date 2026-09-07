@@ -491,6 +491,9 @@ def upsert_contacts(
     source_ref: str,
     last_meaningful_contact: str = "",
 ) -> list[dict[str, str]]:
+    from contact_identity import load_contact_aliases, resolve_contact_id
+
+    aliases = load_contact_aliases(CRM_DIR / "contact-aliases.json")
     contacts: list[dict[str, str]] = []
     seen_ids: set[str] = set()
     for attendee in attendees:
@@ -504,13 +507,14 @@ def upsert_contacts(
             "--source-ref",
             source_ref,
         ]
+        proposed_id = resolve_contact_id(slugify(attendee["name"]), aliases)
         if attendee.get("email"):
             args.extend(["--email", attendee["email"], "--match-email"])
         else:
-            args.extend(["--id", slugify(attendee["name"])])
+            args.extend(["--id", proposed_id])
         if last_meaningful_contact:
             args.extend(["--last-meaningful-contact", last_meaningful_contact])
-        contact_id = collapse_ws(run_helper("upsert-contact.py", args))
+        contact_id = resolve_contact_id(collapse_ws(run_helper("upsert-contact.py", args)), aliases)
         if not contact_id or contact_id in seen_ids:
             continue
         seen_ids.add(contact_id)

@@ -48,6 +48,7 @@ ${APPDATA}/
 
 # Knowledge base
 knowledge-base/venv/
+knowledge-base/.venv-recovery-*/
 knowledge-base/__pycache__/
 knowledge-base/scripts/__pycache__/
 knowledge-base/scripts/_test_clients/__pycache__/

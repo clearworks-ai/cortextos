@@ -1,0 +1,618 @@
+{
+  "generated_at": "2026-08-25T12:30:12",
+  "manifest": "/Users/joshweiss/.cortextos/cortextos1/config/enabled-agents.json",
+  "source_commits": [
+    "52c2f53baf203088d942ef272cc6feca5f9d184c",
+    "60742aaf61a0fc4d34f60a47d5ceb5027a78f599"
+  ],
+  "canonical_wrapper_sha256": "60ae2968821c4600c5b2d34a4225e09fc6a6918728f1b460ee1a9ae69da8f1cf",
+  "canonical_agent_browser_skill_sha256": "ec699a4f41b68fe9c09bc29a88428309d43a15b87f48f98a9fda09e7733f167c",
+  "cua_driver_version": "0.21.0",
+  "cua_driver_global_links": {
+    "agents": {
+      "path": "/Users/joshweiss/.agents/skills/cua-driver",
+      "exists": true,
+      "symlink": true,
+      "target": "/Users/joshweiss/.cua-driver/skills/cua-driver",
+      "altered": false
+    },
+    "claude": {
+      "path": "/Users/joshweiss/.claude/skills/cua-driver",
+      "exists": true,
+      "symlink": true,
+      "target": "/Users/joshweiss/.cua-driver/skills/cua-driver",
+      "altered": false
+    },
+    "opencode": {
+      "path": "/Users/joshweiss/.config/opencode/skills/cua-driver",
+      "exists": true,
+      "symlink": true,
+      "target": "/Users/joshweiss/.cua-driver/skills/cua-driver",
+      "altered": false
+    },
+    "hermes": {
+      "path": "/Users/joshweiss/.hermes/skills/cua-driver",
+      "exists": true,
+      "symlink": true,
+      "target": "/Users/joshweiss/.cua-driver/skills/cua-driver",
+      "altered": false
+    }
+  },
+  "restart_performed": false,
+  "verify_failures": [],
+  "daemon_enabled_count": 14,
+  "coverage": [
+    {
+      "agent": "maven",
+      "org": "clearworksai",
+      "runtime": "claude-code",
+      "agent_dir": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven",
+      "config_enabled": true,
+      "files_updated": [
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven/TOOLS.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven/.claude/skills/agent-browser/SKILL.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven/.claude/skills/computer-browser-control"
+      ],
+      "hashes": {
+        "TOOLS.md": "83ee1441dbb52a70a89520365ed184b1234f9b3baed89e8cef66cde4a3f872d1",
+        "agent-browser_SKILL.md": "ec699a4f41b68fe9c09bc29a88428309d43a15b87f48f98a9fda09e7733f167c",
+        "wrapper_SKILL.md": "60ae2968821c4600c5b2d34a4225e09fc6a6918728f1b460ee1a9ae69da8f1cf"
+      },
+      "wrapper_discovery": "ok",
+      "wrapper_target": "/Users/joshweiss/code/cortextos/community/skills/computer-browser-control",
+      "cua_driver": "ok:~/.cua-driver/skills/cua-driver/SKILL.md@0.21.0",
+      "runtime_native_route": "ok-codex-computer-use-distinct-from-cdp",
+      "host_link": "n/a-claude-local-wrapper",
+      "host_link_ok": true,
+      "verify": {
+        "tools_ok": true,
+        "skill_ok": true,
+        "wrapper_ok": true,
+        "native_ok": true,
+        "host_ok": true,
+        "passed": true
+      },
+      "restart_required": true,
+      "reason": "fleet-live session caches TOOLS.md/skills at boot; disk updated, no restart performed"
+    },
+    {
+      "agent": "muse",
+      "org": "clearworksai",
+      "runtime": "claude-code",
+      "agent_dir": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse",
+      "config_enabled": true,
+      "files_updated": [
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/TOOLS.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/agent-browser/SKILL.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/muse/.claude/skills/computer-browser-control"
+      ],
+      "hashes": {
+        "TOOLS.md": "2975034735ff2ff74b8275907fc67d0e431b5ac5dcc59cfa4b03546ade899204",
+        "agent-browser_SKILL.md": "ec699a4f41b68fe9c09bc29a88428309d43a15b87f48f98a9fda09e7733f167c",
+        "wrapper_SKILL.md": "60ae2968821c4600c5b2d34a4225e09fc6a6918728f1b460ee1a9ae69da8f1cf"
+      },
+      "wrapper_discovery": "ok",
+      "wrapper_target": "/Users/joshweiss/code/cortextos/community/skills/computer-browser-control",
+      "cua_driver": "ok:~/.cua-driver/skills/cua-driver/SKILL.md@0.21.0",
+      "runtime_native_route": "ok-codex-computer-use-distinct-from-cdp",
+      "host_link": "n/a-claude-local-wrapper",
+      "host_link_ok": true,
+      "verify": {
+        "tools_ok": true,
+        "skill_ok": true,
+        "wrapper_ok": true,
+        "native_ok": true,
+        "host_ok": true,
+        "passed": true
+      },
+      "restart_required": true,
+      "reason": "fleet-live session caches TOOLS.md/skills at boot; disk updated, no restart performed"
+    },
+    {
+      "agent": "codexer",
+      "org": "clearworksai",
+      "runtime": "codex-app-server",
+      "agent_dir": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/codexer",
+      "config_enabled": true,
+      "files_updated": [
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/codexer/TOOLS.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/codexer/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/codexer/plugins/cortextos-agent-skills/skills/computer-browser-control",
+        "/Users/joshweiss/.codex/skills/codexer__computer-browser-control"
+      ],
+      "hashes": {
+        "TOOLS.md": "9f1593c661b6ca8f46dd504b8b130a5af79d1d4817e8f3eea37c58d00ebaa078",
+        "agent-browser_SKILL.md": "ec699a4f41b68fe9c09bc29a88428309d43a15b87f48f98a9fda09e7733f167c",
+        "wrapper_SKILL.md": "60ae2968821c4600c5b2d34a4225e09fc6a6918728f1b460ee1a9ae69da8f1cf"
+      },
+      "wrapper_discovery": "ok",
+      "wrapper_target": "/Users/joshweiss/code/cortextos/community/skills/computer-browser-control",
+      "cua_driver": "ok:~/.cua-driver/skills/cua-driver/SKILL.md@0.21.0",
+      "runtime_native_route": "ok-codex-computer-use-distinct-from-cdp",
+      "host_link": "/Users/joshweiss/.codex/skills/codexer__computer-browser-control",
+      "host_link_ok": true,
+      "verify": {
+        "tools_ok": true,
+        "skill_ok": true,
+        "wrapper_ok": true,
+        "native_ok": true,
+        "host_ok": true,
+        "passed": true
+      },
+      "restart_required": true,
+      "reason": "fleet-live session caches TOOLS.md/skills at boot; disk updated, no restart performed"
+    },
+    {
+      "agent": "frank2-codex",
+      "org": "clearworksai",
+      "runtime": "codex-app-server",
+      "agent_dir": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2-codex",
+      "config_enabled": true,
+      "files_updated": [
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2-codex/TOOLS.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2-codex/plugins/cortextos-agent-skills/skills/computer-browser-control",
+        "/Users/joshweiss/.codex/skills/frank2-codex__computer-browser-control"
+      ],
+      "hashes": {
+        "TOOLS.md": "c3f104b89884c824260797b1e9b947b2f4ecf9cc21e8fa62f86b8b37406d553e",
+        "agent-browser_SKILL.md": "ec699a4f41b68fe9c09bc29a88428309d43a15b87f48f98a9fda09e7733f167c",
+        "wrapper_SKILL.md": "60ae2968821c4600c5b2d34a4225e09fc6a6918728f1b460ee1a9ae69da8f1cf"
+      },
+      "wrapper_discovery": "ok",
+      "wrapper_target": "/Users/joshweiss/code/cortextos/community/skills/computer-browser-control",
+      "cua_driver": "ok:~/.cua-driver/skills/cua-driver/SKILL.md@0.21.0",
+      "runtime_native_route": "ok-codex-computer-use-distinct-from-cdp",
+      "host_link": "/Users/joshweiss/.codex/skills/frank2-codex__computer-browser-control",
+      "host_link_ok": true,
+      "verify": {
+        "tools_ok": true,
+        "skill_ok": true,
+        "wrapper_ok": true,
+        "native_ok": true,
+        "host_ok": true,
+        "passed": true
+      },
+      "restart_required": true,
+      "reason": "fleet-live session caches TOOLS.md/skills at boot; disk updated, no restart performed"
+    },
+    {
+      "agent": "larry-codex",
+      "org": "clearworksai",
+      "runtime": "codex-app-server",
+      "agent_dir": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex",
+      "config_enabled": true,
+      "files_updated": [
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/TOOLS.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex/plugins/cortextos-agent-skills/skills/computer-browser-control",
+        "/Users/joshweiss/.codex/skills/larry-codex__computer-browser-control"
+      ],
+      "hashes": {
+        "TOOLS.md": "a8e94e6c53bdb58e4e4dd4b6d1486b334bf230965c8dd93ad4ee73866120ccd8",
+        "agent-browser_SKILL.md": "ec699a4f41b68fe9c09bc29a88428309d43a15b87f48f98a9fda09e7733f167c",
+        "wrapper_SKILL.md": "60ae2968821c4600c5b2d34a4225e09fc6a6918728f1b460ee1a9ae69da8f1cf"
+      },
+      "wrapper_discovery": "ok",
+      "wrapper_target": "/Users/joshweiss/code/cortextos/community/skills/computer-browser-control",
+      "cua_driver": "ok:~/.cua-driver/skills/cua-driver/SKILL.md@0.21.0",
+      "runtime_native_route": "ok-codex-computer-use-distinct-from-cdp",
+      "host_link": "/Users/joshweiss/.codex/skills/larry-codex__computer-browser-control",
+      "host_link_ok": true,
+      "verify": {
+        "tools_ok": true,
+        "skill_ok": true,
+        "wrapper_ok": true,
+        "native_ok": true,
+        "host_ok": true,
+        "passed": true
+      },
+      "restart_required": true,
+      "reason": "fleet-live session caches TOOLS.md/skills at boot; disk updated, no restart performed"
+    },
+    {
+      "agent": "auditmaster-codex",
+      "org": "clearworksai",
+      "runtime": "codex-app-server",
+      "agent_dir": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex",
+      "config_enabled": true,
+      "files_updated": [
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/TOOLS.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex/plugins/cortextos-agent-skills/skills/computer-browser-control",
+        "/Users/joshweiss/.codex/skills/auditmaster-codex__computer-browser-control"
+      ],
+      "hashes": {
+        "TOOLS.md": "5dbec172ece0b43777f10d190cbef203380f20b2bd9e858f1dadac6fcee0ec69",
+        "agent-browser_SKILL.md": "ec699a4f41b68fe9c09bc29a88428309d43a15b87f48f98a9fda09e7733f167c",
+        "wrapper_SKILL.md": "60ae2968821c4600c5b2d34a4225e09fc6a6918728f1b460ee1a9ae69da8f1cf"
+      },
+      "wrapper_discovery": "ok",
+      "wrapper_target": "/Users/joshweiss/code/cortextos/community/skills/computer-browser-control",
+      "cua_driver": "ok:~/.cua-driver/skills/cua-driver/SKILL.md@0.21.0",
+      "runtime_native_route": "ok-codex-computer-use-distinct-from-cdp",
+      "host_link": "/Users/joshweiss/.codex/skills/auditmaster-codex__computer-browser-control",
+      "host_link_ok": true,
+      "verify": {
+        "tools_ok": true,
+        "skill_ok": true,
+        "wrapper_ok": true,
+        "native_ok": true,
+        "host_ok": true,
+        "passed": true
+      },
+      "restart_required": true,
+      "reason": "fleet-live session caches TOOLS.md/skills at boot; disk updated, no restart performed"
+    },
+    {
+      "agent": "knox-codex",
+      "org": "clearworksai",
+      "runtime": "codex-app-server",
+      "agent_dir": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox-codex",
+      "config_enabled": true,
+      "files_updated": [
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox-codex/TOOLS.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox-codex/plugins/cortextos-agent-skills/skills/computer-browser-control",
+        "/Users/joshweiss/.codex/skills/knox-codex__computer-browser-control"
+      ],
+      "hashes": {
+        "TOOLS.md": "2975034735ff2ff74b8275907fc67d0e431b5ac5dcc59cfa4b03546ade899204",
+        "agent-browser_SKILL.md": "ec699a4f41b68fe9c09bc29a88428309d43a15b87f48f98a9fda09e7733f167c",
+        "wrapper_SKILL.md": "60ae2968821c4600c5b2d34a4225e09fc6a6918728f1b460ee1a9ae69da8f1cf"
+      },
+      "wrapper_discovery": "ok",
+      "wrapper_target": "/Users/joshweiss/code/cortextos/community/skills/computer-browser-control",
+      "cua_driver": "ok:~/.cua-driver/skills/cua-driver/SKILL.md@0.21.0",
+      "runtime_native_route": "ok-codex-computer-use-distinct-from-cdp",
+      "host_link": "/Users/joshweiss/.codex/skills/knox-codex__computer-browser-control",
+      "host_link_ok": true,
+      "verify": {
+        "tools_ok": true,
+        "skill_ok": true,
+        "wrapper_ok": true,
+        "native_ok": true,
+        "host_ok": true,
+        "passed": true
+      },
+      "restart_required": true,
+      "reason": "fleet-live session caches TOOLS.md/skills at boot; disk updated, no restart performed"
+    },
+    {
+      "agent": "pa-codex",
+      "org": "clearworksai",
+      "runtime": "codex-app-server",
+      "agent_dir": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa-codex",
+      "config_enabled": true,
+      "files_updated": [
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa-codex/TOOLS.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa-codex/plugins/cortextos-agent-skills/skills/computer-browser-control",
+        "/Users/joshweiss/.codex/skills/pa-codex__computer-browser-control"
+      ],
+      "hashes": {
+        "TOOLS.md": "2412985f8aec2f1d5da5278a939570b5083fda7af59b69ec3dd85fd9359460fa",
+        "agent-browser_SKILL.md": "ec699a4f41b68fe9c09bc29a88428309d43a15b87f48f98a9fda09e7733f167c",
+        "wrapper_SKILL.md": "60ae2968821c4600c5b2d34a4225e09fc6a6918728f1b460ee1a9ae69da8f1cf"
+      },
+      "wrapper_discovery": "ok",
+      "wrapper_target": "/Users/joshweiss/code/cortextos/community/skills/computer-browser-control",
+      "cua_driver": "ok:~/.cua-driver/skills/cua-driver/SKILL.md@0.21.0",
+      "runtime_native_route": "ok-codex-computer-use-distinct-from-cdp",
+      "host_link": "/Users/joshweiss/.codex/skills/pa-codex__computer-browser-control",
+      "host_link_ok": true,
+      "verify": {
+        "tools_ok": true,
+        "skill_ok": true,
+        "wrapper_ok": true,
+        "native_ok": true,
+        "host_ok": true,
+        "passed": true
+      },
+      "restart_required": true,
+      "reason": "fleet-live session caches TOOLS.md/skills at boot; disk updated, no restart performed"
+    },
+    {
+      "agent": "crm-codex",
+      "org": "clearworksai",
+      "runtime": "codex-app-server",
+      "agent_dir": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm-codex",
+      "config_enabled": true,
+      "files_updated": [
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm-codex/TOOLS.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm-codex/plugins/cortextos-agent-skills/skills/computer-browser-control",
+        "/Users/joshweiss/.codex/skills/crm-codex__computer-browser-control"
+      ],
+      "hashes": {
+        "TOOLS.md": "c6c9a8d5b4b92e0be434aac897c55d74851d10626ced48135823eb1592dadd99",
+        "agent-browser_SKILL.md": "ec699a4f41b68fe9c09bc29a88428309d43a15b87f48f98a9fda09e7733f167c",
+        "wrapper_SKILL.md": "60ae2968821c4600c5b2d34a4225e09fc6a6918728f1b460ee1a9ae69da8f1cf"
+      },
+      "wrapper_discovery": "ok",
+      "wrapper_target": "/Users/joshweiss/code/cortextos/community/skills/computer-browser-control",
+      "cua_driver": "ok:~/.cua-driver/skills/cua-driver/SKILL.md@0.21.0",
+      "runtime_native_route": "ok-codex-computer-use-distinct-from-cdp",
+      "host_link": "/Users/joshweiss/.codex/skills/crm-codex__computer-browser-control",
+      "host_link_ok": true,
+      "verify": {
+        "tools_ok": true,
+        "skill_ok": true,
+        "wrapper_ok": true,
+        "native_ok": true,
+        "host_ok": true,
+        "passed": true
+      },
+      "restart_required": true,
+      "reason": "fleet-live session caches TOOLS.md/skills at boot; disk updated, no restart performed"
+    },
+    {
+      "agent": "maven-codex",
+      "org": "clearworksai",
+      "runtime": "codex-app-server",
+      "agent_dir": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven-codex",
+      "config_enabled": true,
+      "files_updated": [
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven-codex/TOOLS.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven-codex/plugins/cortextos-agent-skills/skills/computer-browser-control",
+        "/Users/joshweiss/.codex/skills/maven-codex__computer-browser-control"
+      ],
+      "hashes": {
+        "TOOLS.md": "83ee1441dbb52a70a89520365ed184b1234f9b3baed89e8cef66cde4a3f872d1",
+        "agent-browser_SKILL.md": "ec699a4f41b68fe9c09bc29a88428309d43a15b87f48f98a9fda09e7733f167c",
+        "wrapper_SKILL.md": "60ae2968821c4600c5b2d34a4225e09fc6a6918728f1b460ee1a9ae69da8f1cf"
+      },
+      "wrapper_discovery": "ok",
+      "wrapper_target": "/Users/joshweiss/code/cortextos/community/skills/computer-browser-control",
+      "cua_driver": "ok:~/.cua-driver/skills/cua-driver/SKILL.md@0.21.0",
+      "runtime_native_route": "ok-codex-computer-use-distinct-from-cdp",
+      "host_link": "/Users/joshweiss/.codex/skills/maven-codex__computer-browser-control",
+      "host_link_ok": true,
+      "verify": {
+        "tools_ok": true,
+        "skill_ok": true,
+        "wrapper_ok": true,
+        "native_ok": true,
+        "host_ok": true,
+        "passed": true
+      },
+      "restart_required": true,
+      "reason": "fleet-live session caches TOOLS.md/skills at boot; disk updated, no restart performed"
+    },
+    {
+      "agent": "sage-codex",
+      "org": "clearworksai",
+      "runtime": "codex-app-server",
+      "agent_dir": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage-codex",
+      "config_enabled": true,
+      "files_updated": [
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage-codex/TOOLS.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage-codex/plugins/cortextos-agent-skills/skills/computer-browser-control",
+        "/Users/joshweiss/.codex/skills/sage-codex__computer-browser-control"
+      ],
+      "hashes": {
+        "TOOLS.md": "83ee1441dbb52a70a89520365ed184b1234f9b3baed89e8cef66cde4a3f872d1",
+        "agent-browser_SKILL.md": "ec699a4f41b68fe9c09bc29a88428309d43a15b87f48f98a9fda09e7733f167c",
+        "wrapper_SKILL.md": "60ae2968821c4600c5b2d34a4225e09fc6a6918728f1b460ee1a9ae69da8f1cf"
+      },
+      "wrapper_discovery": "ok",
+      "wrapper_target": "/Users/joshweiss/code/cortextos/community/skills/computer-browser-control",
+      "cua_driver": "ok:~/.cua-driver/skills/cua-driver/SKILL.md@0.21.0",
+      "runtime_native_route": "ok-codex-computer-use-distinct-from-cdp",
+      "host_link": "/Users/joshweiss/.codex/skills/sage-codex__computer-browser-control",
+      "host_link_ok": true,
+      "verify": {
+        "tools_ok": true,
+        "skill_ok": true,
+        "wrapper_ok": true,
+        "native_ok": true,
+        "host_ok": true,
+        "passed": true
+      },
+      "restart_required": true,
+      "reason": "fleet-live session caches TOOLS.md/skills at boot; disk updated, no restart performed"
+    },
+    {
+      "agent": "scout-codex",
+      "org": "clearworksai",
+      "runtime": "codex-app-server",
+      "agent_dir": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout-codex",
+      "config_enabled": true,
+      "files_updated": [
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout-codex/TOOLS.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout-codex/plugins/cortextos-agent-skills/skills/computer-browser-control",
+        "/Users/joshweiss/.codex/skills/scout-codex__computer-browser-control"
+      ],
+      "hashes": {
+        "TOOLS.md": "2975034735ff2ff74b8275907fc67d0e431b5ac5dcc59cfa4b03546ade899204",
+        "agent-browser_SKILL.md": "ec699a4f41b68fe9c09bc29a88428309d43a15b87f48f98a9fda09e7733f167c",
+        "wrapper_SKILL.md": "60ae2968821c4600c5b2d34a4225e09fc6a6918728f1b460ee1a9ae69da8f1cf"
+      },
+      "wrapper_discovery": "ok",
+      "wrapper_target": "/Users/joshweiss/code/cortextos/community/skills/computer-browser-control",
+      "cua_driver": "ok:~/.cua-driver/skills/cua-driver/SKILL.md@0.21.0",
+      "runtime_native_route": "ok-codex-computer-use-distinct-from-cdp",
+      "host_link": "/Users/joshweiss/.codex/skills/scout-codex__computer-browser-control",
+      "host_link_ok": true,
+      "verify": {
+        "tools_ok": true,
+        "skill_ok": true,
+        "wrapper_ok": true,
+        "native_ok": true,
+        "host_ok": true,
+        "passed": true
+      },
+      "restart_required": true,
+      "reason": "fleet-live session caches TOOLS.md/skills at boot; disk updated, no restart performed"
+    },
+    {
+      "agent": "ophir-codex",
+      "org": "personal",
+      "runtime": "codex-app-server",
+      "agent_dir": "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir-codex",
+      "config_enabled": true,
+      "files_updated": [
+        "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir-codex/TOOLS.md",
+        "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+        "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir-codex/plugins/cortextos-agent-skills/skills/computer-browser-control",
+        "/Users/joshweiss/.codex/skills/ophir-codex__computer-browser-control"
+      ],
+      "hashes": {
+        "TOOLS.md": "2975034735ff2ff74b8275907fc67d0e431b5ac5dcc59cfa4b03546ade899204",
+        "agent-browser_SKILL.md": "ec699a4f41b68fe9c09bc29a88428309d43a15b87f48f98a9fda09e7733f167c",
+        "wrapper_SKILL.md": "60ae2968821c4600c5b2d34a4225e09fc6a6918728f1b460ee1a9ae69da8f1cf"
+      },
+      "wrapper_discovery": "ok",
+      "wrapper_target": "/Users/joshweiss/code/cortextos/community/skills/computer-browser-control",
+      "cua_driver": "ok:~/.cua-driver/skills/cua-driver/SKILL.md@0.21.0",
+      "runtime_native_route": "ok-codex-computer-use-distinct-from-cdp",
+      "host_link": "/Users/joshweiss/.codex/skills/ophir-codex__computer-browser-control",
+      "host_link_ok": true,
+      "verify": {
+        "tools_ok": true,
+        "skill_ok": true,
+        "wrapper_ok": true,
+        "native_ok": true,
+        "host_ok": true,
+        "passed": true
+      },
+      "restart_required": true,
+      "reason": "fleet-live session caches TOOLS.md/skills at boot; disk updated, no restart performed"
+    },
+    {
+      "agent": "builddifferentprod-codex",
+      "org": "clearworksai",
+      "runtime": "codex-app-server",
+      "agent_dir": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/builddifferentprod-codex",
+      "config_enabled": true,
+      "files_updated": [
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/builddifferentprod-codex/TOOLS.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/builddifferentprod-codex/plugins/cortextos-agent-skills/skills/agent-browser/SKILL.md",
+        "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/builddifferentprod-codex/plugins/cortextos-agent-skills/skills/computer-browser-control",
+        "/Users/joshweiss/.codex/skills/builddifferentprod-codex__computer-browser-control"
+      ],
+      "hashes": {
+        "TOOLS.md": "c7d2614c1f13909249f7e2640762a94d3abe74141a2bb466286bd9376525c286",
+        "agent-browser_SKILL.md": "ec699a4f41b68fe9c09bc29a88428309d43a15b87f48f98a9fda09e7733f167c",
+        "wrapper_SKILL.md": "60ae2968821c4600c5b2d34a4225e09fc6a6918728f1b460ee1a9ae69da8f1cf"
+      },
+      "wrapper_discovery": "ok",
+      "wrapper_target": "/Users/joshweiss/code/cortextos/community/skills/computer-browser-control",
+      "cua_driver": "ok:~/.cua-driver/skills/cua-driver/SKILL.md@0.21.0",
+      "runtime_native_route": "ok-codex-computer-use-distinct-from-cdp",
+      "host_link": "/Users/joshweiss/.codex/skills/builddifferentprod-codex__computer-browser-control",
+      "host_link_ok": true,
+      "verify": {
+        "tools_ok": true,
+        "skill_ok": true,
+        "wrapper_ok": true,
+        "native_ok": true,
+        "host_ok": true,
+        "passed": true
+      },
+      "restart_required": true,
+      "reason": "fleet-live session caches TOOLS.md/skills at boot; disk updated, no restart performed"
+    }
+  ],
+  "config_enabled_extras": [
+    {
+      "agent": "crm",
+      "org": "clearworksai",
+      "runtime": "claude-code",
+      "config_enabled": true,
+      "daemon_enabled": false,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm"
+    },
+    {
+      "agent": "frank2",
+      "org": "clearworksai",
+      "runtime": "claude-code",
+      "config_enabled": true,
+      "daemon_enabled": false,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2"
+    },
+    {
+      "agent": "larry",
+      "org": "clearworksai",
+      "runtime": "claude-code",
+      "config_enabled": true,
+      "daemon_enabled": false,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry"
+    },
+    {
+      "agent": "opencode",
+      "org": "clearworksai",
+      "runtime": "opencode",
+      "config_enabled": true,
+      "daemon_enabled": false,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/opencode"
+    },
+    {
+      "agent": "pa",
+      "org": "clearworksai",
+      "runtime": "claude-code",
+      "config_enabled": true,
+      "daemon_enabled": false,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa"
+    },
+    {
+      "agent": "sage",
+      "org": "clearworksai",
+      "runtime": "claude-code",
+      "config_enabled": true,
+      "daemon_enabled": false,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage"
+    },
+    {
+      "agent": "scout",
+      "org": "clearworksai",
+      "runtime": "claude-code",
+      "config_enabled": true,
+      "daemon_enabled": false,
+      "path": "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout"
+    },
+    {
+      "agent": "maven",
+      "org": "personal",
+      "runtime": "claude-code",
+      "config_enabled": true,
+      "daemon_enabled": false,
+      "path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/maven"
+    },
+    {
+      "agent": "ophir",
+      "org": "personal",
+      "runtime": "claude-code",
+      "config_enabled": true,
+      "daemon_enabled": false,
+      "path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/ophir"
+    },
+    {
+      "agent": "scout",
+      "org": "personal",
+      "runtime": "claude-code",
+      "config_enabled": true,
+      "daemon_enabled": false,
+      "path": "/Users/joshweiss/code/cortextos/orgs/personal/agents/scout"
+    }
+  ],
+  "restart_set": [
+    "clearworksai/maven",
+    "clearworksai/muse",
+    "clearworksai/codexer",
+    "clearworksai/frank2-codex",
+    "clearworksai/larry-codex",
+    "clearworksai/auditmaster-codex",
+    "clearworksai/knox-codex",
+    "clearworksai/pa-codex",
+    "clearworksai/crm-codex",
+    "clearworksai/maven-codex",
+    "clearworksai/sage-codex",
+    "clearworksai/scout-codex",
+    "personal/ophir-codex",
+    "clearworksai/builddifferentprod-codex"
+  ]
+}

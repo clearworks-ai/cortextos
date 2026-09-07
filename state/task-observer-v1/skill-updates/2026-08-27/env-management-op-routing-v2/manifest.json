@@ -1,0 +1,12 @@
+{
+  "schema_version": 2,
+  "proposal_version": "env-management-op-routing-v2",
+  "source_task": "task_1787795145060_35195417",
+  "supersedes_failed_bundle_sha256": "d66935cb60101d28b3e67f29874716ecd0f540bde57eb79ab78af7d0a805d111",
+  "cold_review_sha256": "e26a2deaba9c8f03a00c76f0d40a63e453bf7a526a6d4d52677dcde9691f5341",
+  "status": "staged_for_fresh_review",
+  "installed": false,
+  "runtime_or_config_mutated": false,
+  "receipts_opaque_by_default": true,
+  "sha_ledger_valid_json_required": true
+}

@@ -1,0 +1,261 @@
+"""FR-016 drain and FR-004 fixture backup mechanics.
+
+Temp fixtures only. Never lsof, open, or snapshot the live Chroma store.
+Never SIGKILL. Live ~/.cortextos KB roots are blocked until human L0.
+"""
+
+from __future__ import annotations
+
+import fcntl
+import hashlib
+import json
+import os
+import stat
+import tarfile
+import threading
+from pathlib import Path
+
+import pytest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PARENT = os.path.dirname(HERE)
+import sys
+if PARENT not in sys.path:
+    sys.path.insert(0, PARENT)
+
+import mmrag_recovery
+
+LIVE_ROOT = Path.home() / ".cortextos"
+LIVE_KB = LIVE_ROOT / "cortextos1" / "orgs" / "clearworksai" / "knowledge-base"
+
+
+def _assert_isolated(path):
+    resolved = Path(path).resolve()
+    assert LIVE_ROOT not in resolved.parents, f"test path leaked onto live tree: {resolved}"
+
+
+def _seed_kb(tmp_path):
+    _assert_isolated(tmp_path)
+    kb = tmp_path / "knowledge-base"
+    chromadb = kb / "chromadb"
+    chromadb.mkdir(parents=True)
+    sqlite = chromadb / "chroma.sqlite3"
+    sqlite.write_bytes(b"fake-chroma-sqlite")
+    (chromadb / "segment-dir").mkdir()
+    (chromadb / "segment-dir" / "data.bin").write_bytes(b"hnsw-bytes")
+    (kb / "config.json").write_text('{"default_collection":"shared"}\n', encoding="utf-8")
+    (kb / "embedding-cache.sqlite").write_bytes(b"fake-embed-cache")
+    (kb / "media").mkdir()
+    (kb / "media" / "skip-me.bin").write_bytes(b"not-in-backup")
+    return kb
+
+
+def test_live_kb_root_is_blocked_without_opening_sqlite():
+    with pytest.raises(mmrag_recovery.LiveEpochBlocked) as exc_info:
+        mmrag_recovery.drain_chroma_openers(LIVE_KB / "chromadb" / "chroma.sqlite3")
+    assert exc_info.value.result == "LIVE_EPOCH_BLOCKED"
+
+
+def test_live_kb_backup_is_blocked_without_snapshot():
+    with pytest.raises(mmrag_recovery.LiveEpochBlocked) as exc_info:
+        mmrag_recovery.snapshot_kb_surfaces(LIVE_KB, LIVE_KB.parent / "should-not-exist")
+    assert exc_info.value.result == "LIVE_EPOCH_BLOCKED"
+
+
+def test_live_epoch_env_still_refuses_wrong_instance(monkeypatch, tmp_path):
+    monkeypatch.setenv("MMRAG_RECOVERY_ALLOW_LIVE", "1")
+    monkeypatch.setenv("CTX_INSTANCE_ID", "default")
+    with pytest.raises(mmrag_recovery.LiveEpochBlocked):
+        mmrag_recovery.snapshot_kb_surfaces(LIVE_KB, tmp_path / "backup")
+
+
+def test_dummy_open_handle_fails_drain(tmp_path):
+    kb = _seed_kb(tmp_path)
+    sqlite = kb / "chromadb" / "chroma.sqlite3"
+    fd = os.open(sqlite, os.O_RDWR)
+    try:
+        receipt = mmrag_recovery.drain_chroma_openers(sqlite, timeout_s=0.2, poll_s=0.05)
+        assert receipt["result"] == "DRAIN_FAIL"
+        assert any(int(opener["pid"]) == os.getpid() for opener in receipt["openers"])
+        assert str(sqlite) in receipt["checked_paths"]
+    finally:
+        os.close(fd)
+
+
+def test_drain_pass_when_no_openers(tmp_path):
+    kb = _seed_kb(tmp_path)
+    sqlite = kb / "chromadb" / "chroma.sqlite3"
+    receipt = mmrag_recovery.drain_chroma_openers(sqlite, timeout_s=0.2, poll_s=0.05)
+    assert receipt["result"] == "DRAIN_PASS"
+    assert receipt["openers"] == []
+
+
+def test_backup_refuses_when_drain_fails(tmp_path):
+    kb = _seed_kb(tmp_path)
+    dest = tmp_path / "backup"
+    sqlite = kb / "chromadb" / "chroma.sqlite3"
+    fd = os.open(sqlite, os.O_RDWR)
+    try:
+        with pytest.raises(mmrag_recovery.DrainFailed) as exc_info:
+            mmrag_recovery.snapshot_kb_surfaces(kb, dest, drain_timeout_s=0.2)
+        assert exc_info.value.receipt["result"] == "DRAIN_FAIL"
+        assert not dest.exists() or not any(dest.iterdir())
+    finally:
+        os.close(fd)
+    # Fixture bytes unchanged after refused backup.
+    assert (kb / "chromadb" / "chroma.sqlite3").read_bytes() == b"fake-chroma-sqlite"
+
+
+def test_backup_after_drain_includes_required_surfaces_and_is_write_once(tmp_path):
+    kb = _seed_kb(tmp_path)
+    dest = tmp_path / "backup"
+    receipt = mmrag_recovery.snapshot_kb_surfaces(kb, dest, drain_timeout_s=1)
+
+    assert receipt["result"] == "BACKUP_OK"
+    assert receipt["drain"]["result"] == "DRAIN_PASS"
+    archive = Path(receipt["archive_path"])
+    assert archive.is_file()
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    assert receipt["archive_sha256"] == digest
+    assert receipt["drain"]["result"] == "DRAIN_PASS"
+
+    with tarfile.open(archive, "r:*") as tar:
+        names = tar.getnames()
+    assert any(name == "chromadb" or name.startswith("chromadb/") for name in names)
+    assert "config.json" in names
+    assert "embedding-cache.sqlite" in names
+    assert not any("media/" in name or name == "media" for name in names)
+
+    mode = stat.S_IMODE(archive.stat().st_mode)
+    assert mode & 0o222 == 0, f"archive must be write-once, mode={oct(mode)}"
+
+    # Source fixture untouched.
+    assert (kb / "config.json").read_text(encoding="utf-8") == '{"default_collection":"shared"}\n'
+    assert (kb / "embedding-cache.sqlite").read_bytes() == b"fake-embed-cache"
+
+
+def test_drain_and_backup_never_force_kill():
+    source = Path(mmrag_recovery.__file__).read_text(encoding="utf-8")
+    drain_fn = source.split("def drain_chroma_openers", 1)[1].split("def ", 1)[0]
+    snapshot_fn = source.split("def snapshot_kb_surfaces", 1)[1].split("def ", 1)[0]
+    list_fn = source.split("def list_sqlite_openers", 1)[1].split("def ", 1)[0]
+    for body in (drain_fn, snapshot_fn, list_fn):
+        assert "SIGKILL" not in body
+        assert "kill -9" not in body
+        assert "os.kill(" not in body
+        assert "os.killpg(" not in body
+        assert "proc.kill(" not in body
+
+
+def test_wal_and_shm_are_included_in_opener_scan(tmp_path):
+    kb = _seed_kb(tmp_path)
+    sqlite = kb / "chromadb" / "chroma.sqlite3"
+    wal = Path(str(sqlite) + "-wal")
+    shm = Path(str(sqlite) + "-shm")
+    wal.write_bytes(b"wal")
+    shm.write_bytes(b"shm")
+    fd = os.open(wal, os.O_RDWR)
+    try:
+        receipt = mmrag_recovery.drain_chroma_openers(sqlite, timeout_s=0.2, poll_s=0.05)
+        assert receipt["result"] == "DRAIN_FAIL"
+        assert str(wal) in receipt["checked_paths"]
+        assert str(shm) in receipt["checked_paths"]
+    finally:
+        os.close(fd)
+
+
+def test_backup_records_drain_receipt_as_sha_predecessor(tmp_path):
+    kb = _seed_kb(tmp_path)
+    dest = tmp_path / "backup"
+    receipt = mmrag_recovery.snapshot_kb_surfaces(kb, dest, drain_timeout_s=1)
+    assert receipt["drain"]["result"] == "DRAIN_PASS"
+    assert receipt["drain_sha256"]
+    drain_canonical = json.dumps(receipt["drain"], sort_keys=True, separators=(",", ":"))
+    assert receipt["drain_sha256"] == hashlib.sha256(drain_canonical.encode("utf-8")).hexdigest()
+    assert receipt["archive_sha256"] != receipt["drain_sha256"]
+
+
+def test_materialize_work_tree_does_not_mutate_backup_or_source(tmp_path):
+    kb = _seed_kb(tmp_path)
+    dest = tmp_path / "backup"
+    receipt = mmrag_recovery.snapshot_kb_surfaces(kb, dest, drain_timeout_s=1)
+    archive = Path(receipt["archive_path"])
+    before_sha = archive.read_bytes()
+    work = tmp_path / "work-tree"
+
+    copied = mmrag_recovery.materialize_backup_work_tree(archive, work)
+    assert (copied / "config.json").read_text(encoding="utf-8") == '{"default_collection":"shared"}\n'
+    (copied / "config.json").write_text('{"default_collection":"mutated"}\n', encoding="utf-8")
+
+    assert archive.read_bytes() == before_sha
+    assert receipt["archive_sha256"] == hashlib.sha256(archive.read_bytes()).hexdigest()
+    assert (kb / "config.json").read_text(encoding="utf-8") == '{"default_collection":"shared"}\n'
+    mode = stat.S_IMODE(archive.stat().st_mode)
+    assert mode & 0o222 == 0
+
+
+def test_materialize_refuses_live_destination():
+    with pytest.raises(mmrag_recovery.LiveEpochBlocked):
+        mmrag_recovery.materialize_backup_work_tree(
+            LIVE_KB / "not-used.tar.gz",
+            LIVE_KB / "work",
+        )
+
+
+def test_drain_passes_after_flock_holder_releases(tmp_path):
+    kb = _seed_kb(tmp_path)
+    sqlite = kb / "chromadb" / "chroma.sqlite3"
+    opened = threading.Event()
+    release = threading.Event()
+
+    def hold():
+        fd = os.open(sqlite, os.O_RDWR)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            opened.set()
+            release.wait(timeout=5)
+        finally:
+            os.close(fd)
+
+    holder = threading.Thread(target=hold)
+    holder.start()
+    assert opened.wait(timeout=2)
+    threading.Timer(0.2, release.set).start()
+    receipt = mmrag_recovery.drain_chroma_openers(sqlite, timeout_s=2, poll_s=0.05)
+    holder.join(timeout=3)
+    assert receipt["result"] == "DRAIN_PASS"
+    assert receipt["openers"] == []
+
+
+def test_backup_refuses_missing_embedding_cache_surface(tmp_path):
+    kb = _seed_kb(tmp_path)
+    (kb / "embedding-cache.sqlite").unlink()
+    dest = tmp_path / "backup"
+    with pytest.raises(mmrag_recovery.BackupRefused):
+        mmrag_recovery.snapshot_kb_surfaces(kb, dest, drain_timeout_s=1)
+    assert not dest.exists()
+
+
+def test_archive_without_embedding_cache_is_insufficient(tmp_path):
+    kb = _seed_kb(tmp_path)
+    dest = tmp_path / "backup"
+    receipt = mmrag_recovery.snapshot_kb_surfaces(kb, dest, drain_timeout_s=1)
+    mmrag_recovery.assert_recovery_archive_sufficient(receipt["archive_path"])
+
+    thin = tmp_path / "fleet-style.tar.gz"
+    with tarfile.open(thin, "w:gz") as tar:
+        tar.add(kb / "chromadb", arcname="chromadb")
+        tar.add(kb / "config.json", arcname="config.json")
+    with pytest.raises(mmrag_recovery.BackupRefused) as exc_info:
+        mmrag_recovery.assert_recovery_archive_sufficient(thin)
+    assert "embedding-cache" in str(exc_info.value).lower()
+
+
+def test_materialize_refuses_writable_archive(tmp_path):
+    kb = _seed_kb(tmp_path)
+    dest = tmp_path / "backup"
+    receipt = mmrag_recovery.snapshot_kb_surfaces(kb, dest, drain_timeout_s=1)
+    archive = Path(receipt["archive_path"])
+    os.chmod(archive, 0o644)
+    with pytest.raises(mmrag_recovery.BackupRefused):
+        mmrag_recovery.materialize_backup_work_tree(archive, tmp_path / "work-tree")

@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from deal_identity import assert_stage_transition, engagement_record_id, ensure_record_ids
+
 
 LOGGER = logging.getLogger(__name__)
 CRM_DIR = Path(__file__).resolve().parent
@@ -35,9 +37,7 @@ def slugify(text: str) -> str:
 
 
 def engagement_board_id(engagement: JsonObject) -> str:
-    org = str(engagement.get("client_org") or "")
-    name = str(engagement.get("name") or "")
-    return slugify(f"{org}-{name}")
+    return engagement_record_id(engagement)
 
 
 def load_pipeline(path: Path) -> JsonObject:
@@ -105,6 +105,8 @@ def reconcile_engagements(
         if isinstance(deal_id, str) and deal_id:
             board_by_id[deal_id] = deal
 
+    ensure_record_ids(engagements)
+
     updated: list[JsonObject] = []
     changed = 0
     events: list[JsonObject] = []
@@ -120,6 +122,7 @@ def reconcile_engagements(
                 board_stage = board.get("stage")
                 current_stage = next_engagement.get("stage")
                 if isinstance(board_stage, str) and board_stage and board_stage != current_stage:
+                    assert_stage_transition(current_stage, board_stage)
                     next_engagement["stage"] = board_stage
                     next_engagement["stage_changed_at"] = changed_at
                     changed += 1

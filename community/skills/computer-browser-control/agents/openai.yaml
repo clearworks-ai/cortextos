@@ -1,0 +1,4 @@
+interface:
+  display_name: "Computer & Browser Control"
+  short_description: "Route authorized desktop and browser work across every available control surface."
+  default_prompt: "Use the fleet computer/browser control hierarchy, exhaust applicable authorized routes, and return a verified outcome receipt."

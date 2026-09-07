@@ -395,6 +395,27 @@ describe('FastChecker', () => {
     });
   });
 
+  describe('formatSlackTextMessage', () => {
+    it('formats a Slack inbound with the agent-identity reply command', () => {
+      const result = FastChecker.formatSlackTextMessage(
+        'Josh',
+        'C0BSHQ1SZN0',
+        'hello from slack',
+        'builddifferentprod-codex',
+      );
+
+      expect(result).toContain('=== SLACK from [USER: Josh] (channel:C0BSHQ1SZN0) ===');
+      expect(result).toContain('hello from slack');
+      expect(result).toContain("cortextos slack send C0BSHQ1SZN0 '<your reply>' --as builddifferentprod-codex");
+    });
+
+    it('does not wrap slash commands in a fence', () => {
+      const result = FastChecker.formatSlackTextMessage('Josh', 'C1', '/status', 'agent-a');
+      expect(result).toContain('/status');
+      expect(result).not.toMatch(/```\n\/status/);
+    });
+  });
+
   describe('readLastSent', () => {
     it('reads last-sent file content', () => {
       const filePath = join(paths.stateDir, 'last-telegram-12345.txt');
@@ -1151,6 +1172,49 @@ describe('FastChecker pending Telegram queue persistence', () => {
     expect(queue).toHaveLength(1);
     expect(queue[0].formatted).toContain('survived-restart');
   });
+});
+
+describe('FastChecker Slack queue isolation', () => {
+  let testDir: string;
+  let paths: BusPaths;
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join(tmpdir(), 'cortextos-fastchecker-slack-'));
+    paths = createTestPaths(testDir);
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('injects queued Slack messages without advancing the Telegram typing timestamp', async () => {
+    const agent = createMockAgent();
+    const checker = new FastChecker(agent, paths, '/tmp/framework');
+    (checker as any).lastMessageInjectedAt = 0;
+
+    checker.queueSlackMessage('=== SLACK from [USER: Josh] (channel:C1) ===\nhello\n');
+    await (checker as any).pollCycle();
+
+    expect(agent.injectMessage).toHaveBeenCalledTimes(1);
+    expect(agent.injectMessage.mock.calls[0][0]).toContain('=== SLACK from [USER: Josh]');
+    expect((checker as any).lastMessageInjectedAt).toBe(0);
+    expect((checker as any).slackMessages).toHaveLength(0);
+  }, 12000);
+
+  it('retains Slack messages when injection fails and delivers them on retry', async () => {
+    const agent = createMockAgent();
+    agent.injectMessage.mockReturnValue(false);
+    const checker = new FastChecker(agent, paths, '/tmp/framework');
+
+    checker.queueSlackMessage('=== SLACK A ===\n');
+    await (checker as any).pollCycle();
+    expect((checker as any).slackMessages).toHaveLength(1);
+
+    agent.injectMessage.mockReturnValue(true);
+    await (checker as any).pollCycle();
+    expect((checker as any).slackMessages).toHaveLength(0);
+    expect(agent.injectMessage.mock.calls.at(-1)?.[0]).toContain('=== SLACK A ===');
+  }, 12000);
 });
 
 describe('FastChecker wedge watchdog — default opt-in (wedge-watchdog-default-opt-in)', () => {

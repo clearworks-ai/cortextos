@@ -5,6 +5,13 @@
 
 import { existsSync, readFileSync } from 'fs';
 import { basename } from 'path';
+import { setDefaultResultOrder } from 'dns';
+
+// Telegram's IPv6 endpoint is intermittently unreachable on some macOS
+// networks while IPv4 remains healthy. Node prefers the resolver's ordering,
+// which can leave every bot poller alive but unable to receive or send. Prefer
+// IPv4 first for this process; IPv6 remains available as the fallback.
+setDefaultResultOrder('ipv4first');
 
 /**
  * Result of TelegramAPI.validateCredentials. Tagged union so callers can

@@ -183,9 +183,17 @@ export function kbQuery(prompt: string, org: string): string {
     return execFileSync(
       'cortextos',
       ['bus', 'kb-query', query, '--org', org, '--top-k', '5', '--threshold', '0.45'],
-      { encoding: 'utf8', timeout: 12000, stdio: ['ignore', 'pipe', 'ignore'] },
+      { encoding: 'utf8', timeout: 12000, stdio: ['ignore', 'pipe', 'pipe'] },
     ).trim();
-  } catch {
+  } catch (err) {
+    const execErr = err && typeof err === 'object'
+      ? err as { stdout?: string; stderr?: string; message?: string }
+      : {};
+    const text = `${execErr.stdout || ''}\n${execErr.stderr || ''}\n${execErr.message || ''}`;
+    if (text.includes('STORE_QUARANTINED') || text.includes('INVALID_CONFIG')) {
+      const result = text.includes('INVALID_CONFIG') ? 'INVALID_CONFIG' : 'STORE_QUARANTINED';
+      return `[kb] ${result}`;
+    }
     return '';
   }
 }

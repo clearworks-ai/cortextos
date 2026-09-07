@@ -1,0 +1,9 @@
+{
+  "schema_version":1,
+  "forensic_archive":{"path":"/Users/joshweiss/.cortextos/cortextos1/state/task-observer-v1/skill-updates/2026-08-23/clearpath-content-pipeline.skill","mode":"0600","bytes":2851,"sha256":"063beaf57e361a1f2ea462b5d15b39158b28295effe6c2af113b8b5087368ca7","disposition":"SUPERSEDED/DO-NOT-APPLY"},
+  "scope":["future_candidate_sources","dependency_closure","candidate_archives","bundle_manifests","installer_inputs"],
+  "evidence_exemptions":["governing_specs","review_receipts","forensic_ledgers","denylist_fixtures"],
+  "match_kinds":["exact_product_name","exact_domain_or_host","exact_endpoint","exact_org_or_account_id","exact_credential_key","exact_legacy_path","exact_archive_hash"],
+  "false_positive_rule":"generic protocol tokens are not forbidden unless paired with a pinned legacy value",
+  "required_fixtures":["positive_blank_product_neutral_bundle","negative_legacy_archive_hash","negative_legacy_path","negative_renamed_dependency_with_legacy_endpoint","false_positive_generic_header_without_legacy_value"]
+}

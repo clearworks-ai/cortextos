@@ -61,7 +61,7 @@ cortextos bus create-experiment "<metric_name>" "<your hypothesis>" --surface <p
 If `approval_required` is true in `experiments/config.json`, you must manually create an approval before proceeding:
 ```bash
 APPR_ID=$(cortextos bus create-approval "Run experiment: <hypothesis>" experiments "Cycle: <cycle_name>, Metric: <metric_name>, Surface: <surface>")
-cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID "Approval needed to run experiment for <metric_name> — check dashboard"
+cortextos bus send-telegram $CTX_TELEGRAM_CHAT_ID "Approval needed to run experiment for <metric_name> — reply here in Telegram"
 # Block until approved, then continue to Step 5
 ```
 

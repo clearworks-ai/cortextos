@@ -1,0 +1,249 @@
+{
+  "schema_version": "meeting-intelligence-s0-adoption-v2",
+  "status": "PROPOSED_BLOCKED_PENDING_OPHIR_ACCEPTANCE",
+  "source_edit_authorized": false,
+  "promotion_authority": false,
+  "task_id": "task_1787580203472_46528481",
+  "authorities": {
+    "goalify": "0ffa24ad2f80c8976c806e00f59f7c08f2f5b625ab61e301996337872f5d30bf",
+    "specify": "d31613b239bca37e34ee01d14dba780bfe2f1dd89f3fea451e0d2a783dbee530",
+    "specify_acceptance": "8e52d073ec5060543371759606bff305a900ec82933a439f753266a4bb13cb72",
+    "briefs_bundle": "sha256:55a4896cc95858e6413c8823a2ea1846b2ca5f1ae131147a93770a878228ced2"
+  },
+  "repos": {
+    "cortextos": {
+      "root": "/Users/joshweiss/code/cortextos",
+      "base": "15defb1307df39f2df77522e70737c46dac52079",
+      "worktree": "/Users/joshweiss/code/cortextos-worktrees/meeting-intelligence-s0-20260824",
+      "branch": "s0/meeting-intelligence-contract-foundation",
+      "clean": true,
+      "staged_empty": true,
+      "index_lock_absent": true,
+      "index_holders": []
+    },
+    "briefs": {
+      "root": "/Users/joshweiss/code/briefs",
+      "base": "5b521f2e4f0ec8655643b16641f41202705d7d6b",
+      "worktree": "/Users/joshweiss/code/briefs-worktrees/meeting-intelligence-s0-20260824",
+      "branch": "s0/meeting-intelligence-contract-foundation",
+      "clean": true,
+      "staged_empty": true,
+      "index_lock_absent": true,
+      "index_holders": []
+    }
+  },
+  "writer": {
+    "count": 1,
+    "workspace": "wK",
+    "tab": "wK:t1",
+    "pane": "wK:p1",
+    "name": "s0_contract_adopter",
+    "visible_title": "Adopt S0 Contract Foundation (Codex)",
+    "kind": "codex",
+    "session": "01a03417-32a6-7c20-88e3-aff303139b97",
+    "lease": "meeting-intelligence-s0-single-writer",
+    "descendants_allowed": false,
+    "observed_descendants": 0,
+    "adoption_status": "done"
+  },
+  "ledger_formats": {
+    "contract": "source_relative|sha256|bytes|mode|briefs_vendor_relative",
+    "product": "bundle_relative|briefs_target_relative|sha256|bytes|mode"
+  },
+  "contract_allowlist": [
+    "state/specs/contracts/briefs-projection-readback-v1.golden.json|242399ee09b08a73befe4f88ac2602bf4a3f1c9434201c096a27fb5310b7cb29|800|0600|contracts/meeting-intelligence/v1/briefs-projection-readback-v1.golden.json",
+    "state/specs/contracts/briefs-projection-readback-v1.schema.json|ef2e00cf9ad64b8ca94513b35bb8429450c77b60a23f766d904632c561375446|1369|0600|contracts/meeting-intelligence/v1/briefs-projection-readback-v1.schema.json",
+    "state/specs/contracts/briefs-meeting-intelligence-output-v1.golden.json|759b2c22af4fae2ae2562336afb85377e49f4f37b7d89d97f698add6fc62e0c8|7083|0600|contracts/meeting-intelligence/v1/briefs-meeting-intelligence-output-v1.golden.json",
+    "state/specs/contracts/briefs-meeting-intelligence-output-v1.schema.json|113e4c6898ff14f76bb05a64dd96f52810dd4cb460c9d40ebd9ce05eb970f943|6969|0600|contracts/meeting-intelligence/v1/briefs-meeting-intelligence-output-v1.schema.json",
+    "state/specs/contracts/coverage-clock-authority-v1.golden.json|edb1e0b2772c1110890f1b99c5367724fdbfaeda25646b89e385b1ec974f573f|423|0600|contracts/meeting-intelligence/v1/coverage-clock-authority-v1.golden.json",
+    "state/specs/contracts/coverage-clock-authority-v1.schema.json|a6574de6f81dbe0c1ded7a26804e9481ee0c8f2979f67285663657bff44f429a|1133|0600|contracts/meeting-intelligence/v1/coverage-clock-authority-v1.schema.json",
+    "state/specs/contracts/coverage-clock-authority-pin-v1.json|8e923ea347031a0079333ee288b382c945ebf9b18427be6f456c430e4668a1f5|182|0600|contracts/meeting-intelligence/v1/coverage-clock-authority-pin-v1.json",
+    "state/specs/contracts/coverage-clock-authority-v1.test-secrets.json|8f3aa0a9929673b7fa16389832afd83dff03ab96b09af40ad8ff5bfa54ec143e|169|0600|contracts/meeting-intelligence/v1/coverage-clock-authority-v1.test-secrets.json",
+    "state/specs/contracts/coverage-evaluation-clock-v1.golden.json|aa7fb925881fb2e4ee1cf0dd8f60e9cdd292aaaacc5611f13acde2a81b2f6def|657|0600|contracts/meeting-intelligence/v1/coverage-evaluation-clock-v1.golden.json",
+    "state/specs/contracts/coverage-evaluation-clock-v1.schema.json|7b60f08437c23e80a1e28ca73a91ccc764e5897cad42890adf8018702eb2750e|1401|0600|contracts/meeting-intelligence/v1/coverage-evaluation-clock-v1.schema.json",
+    "state/specs/contracts/semantic-evaluation-dataset-v1.golden.json|e9952318c3d639e5e557b6e50904538379e5715916d7c003e6c055c2ae08289e|41084|0600|contracts/meeting-intelligence/v1/semantic-evaluation-dataset-v1.golden.json",
+    "state/specs/contracts/semantic-evaluation-dataset-v1.schema.json|1ff74358289782e3a9f7d037187b9726e1e93a283b0cb577ce3201b2f07ee0e8|1551|0600|contracts/meeting-intelligence/v1/semantic-evaluation-dataset-v1.schema.json",
+    "state/specs/contracts/semantic-evaluation-v1.golden.json|de949bddac0cf3a85625863fa841c09abdbdea19bd6847a956f785267d03b118|10659|0600|contracts/meeting-intelligence/v1/semantic-evaluation-v1.golden.json",
+    "state/specs/contracts/semantic-evaluation-v1.schema.json|ecb28653e98bb6936c26f4dedf1fed5b00501132d48551b4a6f3a6bf32bf21ab|5083|0600|contracts/meeting-intelligence/v1/semantic-evaluation-v1.schema.json",
+    "state/specs/contracts/claim-authority-registry-v1.golden.json|b6b83977cb442d5f2e362c8c42e4f204fb6063ae1f4f3e01df0aaa8f3818baad|3460|0600|contracts/meeting-intelligence/v1/claim-authority-registry-v1.golden.json",
+    "state/specs/contracts/claim-authority-registry-v1.schema.json|dd621f633f97eb853330ef66bca6fbc33ef8f819d4e906c182eebde1c58c6a81|3613|0600|contracts/meeting-intelligence/v1/claim-authority-registry-v1.schema.json",
+    "state/specs/contracts/claim-disposition-set-v1.golden.json|03a3dd67d2b7229dbdc706d13621cbe25179f199eb17fa7d9c03b27257f4b01f|9554|0600|contracts/meeting-intelligence/v1/claim-disposition-set-v1.golden.json",
+    "state/specs/contracts/claim-disposition-set-v1.schema.json|955ddb667d09d5233eed44d1f8c23f14b4b6892ec9d6c512858f4d1ddcbcf947|4277|0600|contracts/meeting-intelligence/v1/claim-disposition-set-v1.schema.json",
+    "state/specs/contracts/coverage-snapshot-v1.golden.json|3db66ced0ac6210e5b0f247c6ca45d1b17279f64b7f9f510f3e7431b0feb92c9|1583|0600|contracts/meeting-intelligence/v1/coverage-snapshot-v1.golden.json",
+    "state/specs/contracts/coverage-snapshot-v1.schema.json|3c590270e4eb734483eea32324bf8338d79051ac96655e4f61f0a677cea35acd|5886|0600|contracts/meeting-intelligence/v1/coverage-snapshot-v1.schema.json",
+    "state/specs/contracts/crm-projection-snapshot-v1.base.golden.json|a4bb5133595c1aa9ae7c92f02e76387ba3318fa83b5d8ecd38e6024fd6aaa6b9|1813|0600|contracts/meeting-intelligence/v1/crm-projection-snapshot-v1.base.golden.json",
+    "state/specs/contracts/crm-projection-snapshot-v1.golden.json|0049525f3b964b45aae4a96701176e0b09a9e1198fbc7b592da358d600048c39|3654|0600|contracts/meeting-intelligence/v1/crm-projection-snapshot-v1.golden.json",
+    "state/specs/contracts/crm-projection-snapshot-v1.schema.json|6c4f7b5f642e4f8dbb427fa2b60640d42b695f55962116d1bab5164ee0d737cc|6267|0600|contracts/meeting-intelligence/v1/crm-projection-snapshot-v1.schema.json",
+    "state/specs/contracts/crm-write-intent-request-v1.golden.json|6491adf89c85926f208c708b4785452d61bf28b363f73df62ca2f65d133ce8da|1521|0600|contracts/meeting-intelligence/v1/crm-write-intent-request-v1.golden.json",
+    "state/specs/contracts/crm-write-intent-request-v1.schema.json|85cfd6e23323f346d72734a4ff7743bf2e9e37d8283cbddcca8e372e37bc98e0|15090|0600|contracts/meeting-intelligence/v1/crm-write-intent-request-v1.schema.json",
+    "state/specs/contracts/crm-write-intent-v1.golden.json|8c1e5a5d36fb679f33c131c5b64664aed23d90c80905e286fc44c039d99c5a9d|2061|0600|contracts/meeting-intelligence/v1/crm-write-intent-v1.golden.json",
+    "state/specs/contracts/crm-write-intent-v1.pending.golden.json|22d8d50f438c08fd0b0282bba29f8ab842ea36ec5778003605c5f2d5c9baa344|1941|0600|contracts/meeting-intelligence/v1/crm-write-intent-v1.pending.golden.json",
+    "state/specs/contracts/crm-write-intent-v1.schema.json|5443188e3d2f0fd86582c7b1269098089c439b377e8ff001329f118811eb61a5|20143|0600|contracts/meeting-intelligence/v1/crm-write-intent-v1.schema.json",
+    "state/specs/contracts/crm-write-set-artifacts-v1.golden.json|944c49c23abf99eb5013067db4f0ac28cdb92b589add60e71ee7bc6a26f8bf94|19205|0600|contracts/meeting-intelligence/v1/crm-write-set-artifacts-v1.golden.json",
+    "state/specs/contracts/crm-write-set-artifacts-v1.schema.json|3b37f93348dafd336a7d35821bdc1a15261226e0da512cbb65c0b4d05d4636ea|1155|0600|contracts/meeting-intelligence/v1/crm-write-set-artifacts-v1.schema.json",
+    "state/specs/contracts/crm-write-set-v1.golden.json|60bc2a2d633b7f95e31ffda5881e88a7ce62206954db54645d6266263b97d42e|4584|0600|contracts/meeting-intelligence/v1/crm-write-set-v1.golden.json",
+    "state/specs/contracts/crm-write-set-v1.schema.json|40e1f9a50c3023893e6d09fdddf8a880296a437b088f45f39392d97bba9d84a3|2879|0600|contracts/meeting-intelligence/v1/crm-write-set-v1.schema.json",
+    "state/specs/contracts/fireflies-verification-config-pin-v1.json|f0c1a691c01e1ea6b5f5d8bf49f9e5b30103081774fd8d4838f41163e3db8be2|190|0600|contracts/meeting-intelligence/v1/fireflies-verification-config-pin-v1.json",
+    "state/specs/contracts/fireflies-verification-config-v1.golden.json|47844072a17cb95cbfe4e3893f5a08003c645c2ee6ab5b1123c206543092182a|938|0600|contracts/meeting-intelligence/v1/fireflies-verification-config-v1.golden.json",
+    "state/specs/contracts/fireflies-verification-config-v1.schema.json|d6ed9fa6e01fbc17e30f62e5990ed374701949fc186e01a1368dd55ea6f04c29|2456|0600|contracts/meeting-intelligence/v1/fireflies-verification-config-v1.schema.json",
+    "state/specs/contracts/fireflies-webhook-v2-test-vectors.json|c5920e9c1ba5e686953b393aac029a44f5d3d688695640ebaf2b24eeceb08b7d|3657|0600|contracts/meeting-intelligence/v1/fireflies-webhook-v2-test-vectors.json",
+    "state/specs/contracts/fireflies-webhook-v2.test-secrets.json|d37e1b9b606e32653a9bb0a86faf3a8c178dbd4fb2b9805a281cf1e205cbce57|170|0600|contracts/meeting-intelligence/v1/fireflies-webhook-v2.test-secrets.json",
+    "state/specs/contracts/pre-record-ingress-failure-v1.golden.json|eccfcc1a8e2eb07dcded332577a9487c72b6cd19745ae997df114afe929734fe|1784|0600|contracts/meeting-intelligence/v1/pre-record-ingress-failure-v1.golden.json",
+    "state/specs/contracts/pre-record-ingress-failure-v1.schema.json|296e64dc96b20fd75fa039cf438a1c03f573bb21d940496ef0b0af7d14eec2bf|4793|0600|contracts/meeting-intelligence/v1/pre-record-ingress-failure-v1.schema.json",
+    "state/specs/contracts/relay-auth-v1.test-secrets.json|aa2760a628e68ce7ca105c32535f319473155a78cee3bbaaaf609165c67e91f8|214|0600|contracts/meeting-intelligence/v1/relay-auth-v1.test-secrets.json",
+    "state/specs/contracts/identity-override-v1.golden.json|eb7b3cc29b7032e700f30b1e2886a5f87c8d1cb8994e7930272a8f3a0b77562e|801|0600|contracts/meeting-intelligence/v1/identity-override-v1.golden.json",
+    "state/specs/contracts/identity-override-v1.schema.json|5d7240c44d1794f4f60c198800a9ab29becb30abf44da81c62638b2ce7bd449e|1966|0600|contracts/meeting-intelligence/v1/identity-override-v1.schema.json",
+    "state/specs/contracts/json-schema-subset-validator.mjs|61a75bd71299d8003459f1e16a69a63875ef33478e3bff595f2207318bcc3e46|4905|0600|contracts/meeting-intelligence/v1/json-schema-subset-validator.mjs",
+    "state/specs/contracts/meeting-authority-root-pin-v1.json|af6e173fde6d40607291ee7fc8a0ba73067d7eba2ef95e36a8a489c59aca8294|380|0600|contracts/meeting-intelligence/v1/meeting-authority-root-pin-v1.json",
+    "state/specs/contracts/meeting-authority-root-v1.golden.json|454a5dddb567fd6c4b5f44bdc4f16bdf6601a09f68643a423a49eeb486440171|1635|0600|contracts/meeting-intelligence/v1/meeting-authority-root-v1.golden.json",
+    "state/specs/contracts/meeting-authority-root-v1.schema.json|27209e1cea646b78737f7e023a1ff9cf8bfe4e4cda5d13c0c861f1994db82ec1|2562|0600|contracts/meeting-intelligence/v1/meeting-authority-root-v1.schema.json",
+    "state/specs/contracts/meeting-contract-negative-cases.json|5f2d89822a34686b28cf6f39f87bdea18522f6a2903bfed23126761bb38668e1|9783|0600|contracts/meeting-intelligence/v1/meeting-contract-negative-cases.json",
+    "state/specs/contracts/meeting-delivery-envelope-v1.golden.json|de69be6e8a5ad0e052e9e84b64fface81f64d668d5115210718f2d1464068225|12691|0600|contracts/meeting-intelligence/v1/meeting-delivery-envelope-v1.golden.json",
+    "state/specs/contracts/meeting-delivery-envelope-v1.schema.json|72a63893eb2b188e9e669d1f61a506c59a218612bbdb5d6f048b6b1fb0201dab|34528|0600|contracts/meeting-intelligence/v1/meeting-delivery-envelope-v1.schema.json",
+    "state/specs/contracts/meeting-observation-v1.golden.json|1dc590f246990a5ed13cdb73c7808a59cb3a748ac4420c21ecaab29233873e75|3003|0600|contracts/meeting-intelligence/v1/meeting-observation-v1.golden.json",
+    "state/specs/contracts/meeting-observation-v1.schema.json|f5c5e62166c2e4e0fbced33fd8fb1bdcad99bfda3a37feda91571776630bc738|8893|0600|contracts/meeting-intelligence/v1/meeting-observation-v1.schema.json",
+    "state/specs/contracts/meeting-processing-failure-v1.golden.json|33ceeadc34f7e92baecb4cc770ce05f3417a9f8680c857d02a835123cb7f8dc0|1108|0600|contracts/meeting-intelligence/v1/meeting-processing-failure-v1.golden.json",
+    "state/specs/contracts/meeting-processing-failure-v1.schema.json|0ed8a8f07e57070b4d4afc6bc5f3c11c020257ba123f3e6dacb1532fd35ac464|2274|0600|contracts/meeting-intelligence/v1/meeting-processing-failure-v1.schema.json",
+    "state/specs/contracts/meeting-record-v1.golden.json|ae7083c0dcb626f0f104ba1ab6f7c4d44569a222f29bd4e6c9ca9075a45ef5c1|32194|0600|contracts/meeting-intelligence/v1/meeting-record-v1.golden.json",
+    "state/specs/contracts/meeting-record-v1.schema.json|b394529865aa8beda536fc4352f7eb139afca16c3252db11af9656c2d4305241|32686|0600|contracts/meeting-intelligence/v1/meeting-record-v1.schema.json",
+    "state/specs/contracts/projection-replication-ack-v1.golden.json|15b5876ecb74e12e0c39e8d52f0121229d0bc3f39f879423c25616fbfc7a79eb|795|0600|contracts/meeting-intelligence/v1/projection-replication-ack-v1.golden.json",
+    "state/specs/contracts/projection-replication-ack-v1.schema.json|ee9208132158eb2df3b2b3f94914c9ad8331ad0bd03ce7d981a05d90b455b030|3075|0600|contracts/meeting-intelligence/v1/projection-replication-ack-v1.schema.json",
+    "state/specs/contracts/rehash-meeting-compatibility-manifest.mjs|1294221696b0ab36b6600b740dcdc02c85a2dbbc5da981a6f85e307152998274|1175|0600|contracts/meeting-intelligence/v1/rehash-meeting-compatibility-manifest.mjs",
+    "state/specs/contracts/rebuild-g1-authority-fixtures.mjs|e885b6a730788862f6877ebb18786b648ea96c7594462a1da69c90de19d01646|32406|0600|contracts/meeting-intelligence/v1/rebuild-g1-authority-fixtures.mjs",
+    "state/specs/contracts/validate-meeting-contracts.mjs|9035cf78405f0606ee47ebe95fd16458b54af7f0e9f0e5cb3d8fb2a3863b4351|252525|0600|contracts/meeting-intelligence/v1/validate-meeting-contracts.mjs",
+    "state/specs/contracts/meeting-intelligence-compatibility-manifest.json|d31613b239bca37e34ee01d14dba780bfe2f1dd89f3fea451e0d2a783dbee530|37893|0400|contracts/meeting-intelligence/v1/meeting-intelligence-compatibility-manifest.json"
+  ],
+  "product_allowlist": [
+    "files/docs/specs/meeting-intelligence-crm-surface-standard-2026-08-24.md|docs/specs/meeting-intelligence-crm-surface-standard-2026-08-24.md|4160cb59071b67333821d60162ea3e8ec50e724044ee41f532637bc2352696ee|12020|0600",
+    "files/docs/superpowers/specs/mockups/crm-interaction-intelligence.html|docs/superpowers/specs/mockups/crm-interaction-intelligence.html|00c34dccdbb64346862fd71ed8c23403b26232e6100a889e4bcd57ec53ee3991|4259|0600",
+    "files/docs/superpowers/specs/mockups/crm-interaction-intelligence.html.approved.json|docs/superpowers/specs/mockups/crm-interaction-intelligence.html.approved.json|cad4a1e3a288ffd542c69c724cf8ea221160a9e96119e9853f9afa005937335b|341|0600",
+    "files/docs/superpowers/prototypes/meeting-intelligence-layout/ANSWER.md|docs/superpowers/prototypes/meeting-intelligence-layout/ANSWER.md|aba03f4a8d786f6197d476180912514a7f0f9f191925915007bffe5973298c48|1270|0600",
+    "files/docs/superpowers/prototypes/meeting-intelligence-layout/approval-manifest.json|docs/superpowers/prototypes/meeting-intelligence-layout/approval-manifest.json|e756b6416b1f0aef3b02af447020a37e4c8739ab4592ddcf19dada209a1a5022|1977|0600",
+    "files/docs/superpowers/prototypes/meeting-intelligence-layout/index.html|docs/superpowers/prototypes/meeting-intelligence-layout/index.html|c4ff59287bdbfbad73c3c6b677f4d5ac60dc359db4e9371884ec6f8f2f879232|3076|0600",
+    "files/docs/superpowers/prototypes/meeting-intelligence-layout/styles.css|docs/superpowers/prototypes/meeting-intelligence-layout/styles.css|2aa5535bcb579917d0b2204452d7079e08d2412331b761f7481ad2e47f4bb15f|10266|0600",
+    "files/docs/superpowers/prototypes/meeting-intelligence-layout/states.html|docs/superpowers/prototypes/meeting-intelligence-layout/states.html|e22cf60a15c7a9ee6e606e2a28b4ad8bc48dd2713dcc026c2deb197e5f79b2ee|7496|0600",
+    "files/docs/superpowers/prototypes/meeting-intelligence-layout/variants/b.html|docs/superpowers/prototypes/meeting-intelligence-layout/variants/b.html|c53664c72f343f43426fbf50623d396dc9bf3e55379fcb31dd4d7c71fcdd6d9f|13874|0600",
+    "files/docs/superpowers/prototypes/meeting-intelligence-layout/variants/c.html|docs/superpowers/prototypes/meeting-intelligence-layout/variants/c.html|621e495dc3f850a243400f6cc81fd161426a380075ae8a050bf50e4fe420f612|15558|0600"
+  ],
+  "tooling_allowlist": {
+    "cortextos": [
+      "CREATE scripts/validate-meeting-intelligence-draft-2020-12.mjs",
+      "CREATE scripts/verify-meeting-intelligence-cross-repo.mjs",
+      "CREATE tests/unit/contracts/meeting-intelligence-contracts.test.ts",
+      "CREATE state/receipts/meeting-intelligence-s0-adoption.json",
+      "MODIFY package.json",
+      "MODIFY package-lock.json"
+    ],
+    "briefs": [
+      "CREATE scripts/validate-meeting-intelligence-draft-2020-12.mjs",
+      "CREATE scripts/verify-meeting-intelligence-vendor-equality.mjs",
+      "CREATE tests/meeting-intelligence-contracts.test.ts",
+      "CREATE docs/receipts/meeting-intelligence-s0-adoption.json",
+      "MODIFY package.json",
+      "MODIFY package-lock.json"
+    ]
+  },
+  "tests": {
+    "briefs_consumer_first": [
+      "node scripts/validate-meeting-intelligence-draft-2020-12.mjs",
+      "npm run build",
+      "node --test --test-reporter=tap dist/tests/meeting-intelligence-contracts.test.js",
+      "npm test",
+      "git diff --check",
+      "git status --porcelain=v1"
+    ],
+    "cortextos_producer_second": [
+      "node scripts/validate-meeting-intelligence-draft-2020-12.mjs",
+      "npx vitest run tests/unit/contracts/meeting-intelligence-contracts.test.ts",
+      "npm run typecheck",
+      "npm run build",
+      "npm test",
+      "git diff --check",
+      "git status --porcelain=v1"
+    ],
+    "equality": [
+      "node scripts/verify-meeting-intelligence-cross-repo.mjs /Users/joshweiss/code/briefs-worktrees/meeting-intelligence-s0-20260824",
+      "node scripts/verify-meeting-intelligence-vendor-equality.mjs /Users/joshweiss/code/cortextos-worktrees/meeting-intelligence-s0-20260824"
+    ]
+  },
+  "assertions": [
+    "real Draft 2020-12 metaschema",
+    "all schemas compile",
+    "all golden/current fixtures validate",
+    "53 negatives fail",
+    "N reader accepts v1",
+    "N producer emits v1 only",
+    "N-1 passes",
+    "promotion_authority=false",
+    "61 source/vendor bytes equal",
+    "10 product bytes equal",
+    "consumer-first ordering",
+    "test secrets test-only",
+    "pair receipt binds both commits/trees"
+  ],
+  "ownership": {
+    "contract": "cortextos",
+    "consumer": "briefs",
+    "writer": "s0_contract_adopter",
+    "acceptance": "ophir-codex"
+  },
+  "rollback": {
+    "mode": "atomic_pair",
+    "steps": [
+      "revert Briefs S0 commit and S0-only bytes",
+      "revert Cortext S0 commit and S0-only bytes",
+      "rerun both pre-S0 suites",
+      "invalidate pair receipt",
+      "never leave producer without consumer"
+    ],
+    "dirty_destructive_forbidden": true
+  },
+  "exclusions": [
+    "no edits before Ophir acceptance",
+    "no S1-S7",
+    "no provider/capture/CRM/email/external effects",
+    "no stage/commit/push/merge/deploy/promotion",
+    "no recovery/retirement/production",
+    "no authority byte rewrite",
+    "no promotion change",
+    "no descendants"
+  ],
+  "supersedes": {
+    "path": "/Users/joshweiss/code/cortextos/state/task-observer-v1/programs/2026-08-24-task-observer-foundations/S0-ADOPTION-MANIFEST.json",
+    "sha256": "04fdc2e667fefe81c603ed330702f057ab35daacfc9becaa70d8842e720677f0",
+    "disposition": "immutable_superseded_preflight_evidence"
+  },
+  "source_roots": {
+    "contract_source_root": {
+      "path": "/Users/joshweiss/code/cortextos-worktrees/specify-meeting-intelligence-20260823",
+      "read_only": true,
+      "authority_binding": {
+        "kind": "accepted_compatibility_manifest",
+        "sha256": "d31613b239bca37e34ee01d14dba780bfe2f1dd89f3fea451e0d2a783dbee530",
+        "relative_path": "state/specs/contracts/meeting-intelligence-compatibility-manifest.json"
+      },
+      "governed_relative_prefix": "state/specs/contracts/"
+    },
+    "product_bundle_root": {
+      "path": "/Users/joshweiss/code/cortextos-worktrees/specify-meeting-intelligence-20260823/state/specs/evidence/briefs-review-bundle/55a4896cc95858e6413c8823a2ea1846b2ca5f1ae131147a93770a878228ced2",
+      "read_only": true,
+      "authority_binding": {
+        "kind": "content_addressed_bundle",
+        "bundle_id": "sha256:55a4896cc95858e6413c8823a2ea1846b2ca5f1ae131147a93770a878228ced2",
+        "bundle_manifest_sha256": "0cb252c0374e3dbf29d306d5eb54362ee7ec66b58f1ac5613d886363760d70a4"
+      },
+      "governed_relative_prefix": "files/"
+    }
+  },
+  "source_root_containment_assertion": {
+    "decision": "required_fail_closed",
+    "normalization": "realpath_each_root_and_source_before_read",
+    "rules": [
+      "every contract_allowlist source_relative resolves strictly beneath contract_source_root",
+      "every product_allowlist bundle_relative resolves strictly beneath product_bundle_root",
+      "reject absolute ledger entries, dot-dot traversal, missing paths, symlink escape, root equality, duplicate resolved source, or authority-root drift",
+      "rehash resolved source SHA256 bytes and mode against its ledger row before any copy"
+    ],
+    "invalid_decision": "INVALID_INPUT_NO_SOURCE_EDIT"
+  }
+}

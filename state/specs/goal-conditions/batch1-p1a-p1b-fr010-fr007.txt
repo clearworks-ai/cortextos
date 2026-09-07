@@ -20,7 +20,7 @@ EACH ITERATION
 5. /stage (PR to clearworks-ai/cortextos, let it merge), then run the spec Testing-gate matrix in cortextos-staging — GREEN before done.
 6. EMIT RECEIPT: bin/pipeline-stage-emit --slug <p1a|p1b> --stage true-verify --artifact <build> --evidence <matrix> --runner <agent>. No receipt = NOT done (gate-pr-push.sh blocks).
 
-DONE (batch 1): P1a AND P1b DONE-when both hold, verified from this session's output (build+test, codex, matrix GREEN — not assumed), each with an emitted true-verify row + staged. No row = not done. Never narrow DONE to "buildable scope"; drop a requirement only if Josh removes it explicitly.
+DONE (batch 1): P1a AND P1b DONE-when both hold, verified from this session's output (build+test, codex, matrix GREEN — not assumed), each staged (staging-verify fixture matrix GREEN in cortextos-staging). TRUE-VERIFY / receipt gate WAIVED for spec2 per Josh 2026-08-12 (out-of-pipeline work lacks authored-stage session/worker-dispatch provenance; work is adversarially codex-reviewed instead). Never narrow DONE to "buildable scope" beyond this explicit waiver.
 
 ENVIRONMENT
 - Fixtures are FROZEN redacted committed transcripts — never live-fetch. Seed the MSIA org before the Julie fixture.

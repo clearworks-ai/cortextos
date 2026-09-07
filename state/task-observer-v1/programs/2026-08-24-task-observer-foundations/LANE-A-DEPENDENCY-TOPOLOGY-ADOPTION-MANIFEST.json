@@ -1,0 +1,94 @@
+{
+  "schema_version": "cortext-baseline-repair-adoption-v1",
+  "lane": "A-dependency-topology",
+  "status": "awaiting_ophir_acceptance",
+  "source_edit_authorized": false,
+  "task_id": "task_1787582596940_25257324",
+  "governing_diagnosis": {
+    "path": "/Users/joshweiss/code/cortextos/state/task-observer-v1/reviews/task_1787580203472_46528481/cortext-baseline-test-root-cause-proposal-2026-08-24.md",
+    "sha256": "c8a2bed53710c71d390f0abf2544100f7afb098a1cde04e5c5943f2b90b30869",
+    "bytes": 4088,
+    "mode": "0600"
+  },
+  "repository": {
+    "root": "/Users/joshweiss/code/cortextos-worktrees/dependency-topology-adoption-20260824",
+    "base": "15defb1307df39f2df77522e70737c46dac52079",
+    "head": "15defb1307df39f2df77522e70737c46dac52079",
+    "branch": "repair/dependency-topology-adoption-20260824",
+    "branch_worktree_count": 1,
+    "index_clean": true,
+    "worktree_clean": true,
+    "index_lock_count": 0
+  },
+  "writer_lease": {
+    "count": 1,
+    "name": "dependency_topology_adopter",
+    "kind": "codex-yolo",
+    "session": "01a0343a-71eb-7391-8b65-eb2edb949e31",
+    "workspace": "wM",
+    "tab": "wM:t1",
+    "pane": "wM:p1",
+    "visible_title": "Adopt Dependency Topology (Codex)",
+    "lease_scope": "adoption_read_only_until_ophir_acceptance",
+    "descendants_allowed": false,
+    "descendants_observed": 0,
+    "other_branch_holders": 0,
+    "source_edit_lease": false
+  },
+  "allowlist": [
+    {
+      "operation": "MODIFY",
+      "path": "package.json",
+      "pre_edit_sha256": "445fdb947bd7614e3ca9bb3703fe9add38ddaee72ee877c2dc0e4a28c90d1426",
+      "bytes": 1865,
+      "filesystem_mode": "0600",
+      "git_mode": "100644"
+    },
+    {
+      "operation": "MODIFY",
+      "path": "package-lock.json",
+      "pre_edit_sha256": "d02496cc048beb14fa25cf39490c620f8d925153a8afd2272ef9a989d4eb771e",
+      "bytes": 115417,
+      "filesystem_mode": "0600",
+      "git_mode": "100644",
+      "lockfile_version": 3
+    }
+  ],
+  "proposed_change": [
+    "Add top-level package.json workspaces=[\"dashboard\"] without changing the existing test command or duplicating dashboard dependencies at root.",
+    "Regenerate only root package-lock.json with pinned Node v22.22.3 and npm 10.9.8 so it owns the dashboard workspace dependency graph."
+  ],
+  "validation_commands": [
+    "npm ci",
+    "node -e \"for (const id of ['next/server','react','react-dom/server','better-sqlite3']) console.log(id, require.resolve(id))\"",
+    "npm run build",
+    "npx vitest run tests/integration/phase4-dashboard-backtest.test.ts tests/integration/phase4-performance.test.ts tests/integration/phase5-user-journeys.test.ts dashboard/src/lib/__tests__/clients.test.ts dashboard/src/lib/__tests__/cost-parser-codex.test.ts dashboard/src/lib/__tests__/cost-parser.test.ts dashboard/src/lib/__tests__/sync.test.ts dashboard/src/components/tasks/__tests__/kanban-board.test.ts dashboard/src/app/api/comms/__tests__/routes.test.ts dashboard/src/app/api/workflows/health/__tests__/health-route.test.ts 'dashboard/src/app/api/tasks/[id]/__tests__/route.test.ts' dashboard/src/app/api/workflows/crons/__tests__/executions-export.test.ts dashboard/src/app/api/workflows/crons/__tests__/fire-route.test.ts tests/integration/phase5-e2e-simulation.test.ts",
+    "npm test",
+    "npm --prefix dashboard test",
+    "shasum -a 256 package-lock.json dashboard/package-lock.json",
+    "npm ci",
+    "shasum -a 256 package-lock.json dashboard/package-lock.json",
+    "git diff --exit-code -- package-lock.json dashboard/package-lock.json",
+    "git status --porcelain=v1"
+  ],
+  "test_acceptance": [
+    "All focused dependency-affected suites pass.",
+    "Root npm test reaches npm run test:node; both stages exit 0 and exact totals are recorded.",
+    "Dashboard-owned suite passes.",
+    "Second npm ci changes neither lockfile nor index."
+  ],
+  "rollback": {
+    "targets": ["package.json", "package-lock.json"],
+    "restore_base": "15defb1307df39f2df77522e70737c46dac52079",
+    "post_restore_requirements": ["pre-edit hashes exact", "clean index", "clean worktree"]
+  },
+  "exclusions": [
+    "dashboard/package-lock.json unless a fail-closed npm experiment proves it unavoidable and Ophir separately authorizes it",
+    "all source and test files",
+    "Lane B files",
+    "all S0 candidate paths",
+    "receipts, staging, commit, push, merge, deploy, promotion, downstream action",
+    "dependency duplication into root devDependencies",
+    "descendants or additional writers"
+  ]
+}

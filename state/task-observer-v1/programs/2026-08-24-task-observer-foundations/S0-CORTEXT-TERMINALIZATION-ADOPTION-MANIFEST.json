@@ -1,0 +1,51 @@
+{
+  "schema_version": "meeting-intelligence-s0-terminalization-adoption-v1",
+  "created_at": "2026-08-24T16:48:38Z",
+  "status": "PRE_EDIT_BLOCKED_PENDING_OPHIR_ACCEPTANCE",
+  "authority_message": "1787589499735-ophir-codex-6dnsx",
+  "task_id": "task_1787590145599_00864292",
+  "parent_task_id": "task_1787446957155_21072782",
+  "repository": "cortextos",
+  "root": "/Users/joshweiss/code/cortextos",
+  "worktree": "/Users/joshweiss/code/cortextos-worktrees/meeting-intelligence-s0-20260824",
+  "branch": "s0/meeting-intelligence-contract-foundation",
+  "head": "15defb1307df39f2df77522e70737c46dac52079",
+  "candidate": {
+    "file_count": 66,
+    "total_bytes": 807094,
+    "canonical_ledger_sha256": "dfa2e5674306cff041a5c3e456ae32659316e319abc5d12f01a724f141860ec6",
+    "porcelain_status_sha256": "8eef5d68eae31d92f1e2f8e0b76f59aaa3bc501d64e8d984599cf7b4e4c503a8",
+    "ledger_algorithm": "LC_ALL=C sorted union of git diff --name-only and git ls-files --others --exclude-standard; each regular file encoded path|sha256|bytes|mode with newline",
+    "expected_allowlist_count": 67,
+    "outside_allowlist": [],
+    "absent_allowlisted_paths": [
+      "state/receipts/meeting-intelligence-s0-adoption.json"
+    ],
+    "staged_paths": [],
+    "index_lock_absent": true,
+    "index_holders": []
+  },
+  "allowlist_authority": {
+    "path": "/Users/joshweiss/code/cortextos/state/task-observer-v1/programs/2026-08-24-task-observer-foundations/S0-ADOPTION-MANIFEST-v2.json",
+    "sha256": "75185b1681ff78cd80abb5e79a322eb9ecf68057fa62995653ab238c1303671d",
+    "mode": "0600",
+    "bytes": 22492
+  },
+  "terminalization_agent": {
+    "workspace": "wK",
+    "tab": "wK:t2",
+    "pane": "wK:p2",
+    "name": "s0_cortext_terminalization",
+    "visible_title": "Terminalize S0 Cortext Contract (Codex)",
+    "kind": "codex",
+    "session": "01a034aa-e93e-7d63-bc04-3d10411999ca",
+    "descendants_allowed": false,
+    "observed_descendants": 0
+  },
+  "post_acceptance_change_allowlist": [
+    "CREATE state/receipts/meeting-intelligence-s0-adoption.json"
+  ],
+  "candidate_mutation_authorized": false,
+  "baseline_repair_authorized": false,
+  "fable_authorized": false
+}

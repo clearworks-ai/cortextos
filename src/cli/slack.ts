@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { SlackAPI, loadSlackIdentity, type PostMessageRequest } from '../slack/index.js';
-import { resolveEnv } from '../utils/env.js';
+import { resolveEnv, loadEnvFileInto } from '../utils/env.js';
+import { join } from 'path';
 
 export interface TestSendOptions {
   frameworkRoot: string;
@@ -24,7 +25,14 @@ export async function runTestSend(opts: TestSendOptions, api: SlackAPI): Promise
 }
 
 function requireToken(): string {
-  const token = process.env.SLACK_BOT_TOKEN;
+  const env = resolveEnv();
+  const frameworkRoot =
+    process.env.CTX_FRAMEWORK_ROOT || process.env.CTX_PROJECT_ROOT || env.frameworkRoot || process.cwd();
+  const orgSecrets: Record<string, string> = {};
+  if (env.org) {
+    loadEnvFileInto(join(frameworkRoot, 'orgs', env.org, 'secrets.env'), orgSecrets);
+  }
+  const token = process.env.SLACK_BOT_TOKEN || orgSecrets.SLACK_BOT_TOKEN;
   if (!token) {
     console.error('SLACK_BOT_TOKEN not set. See docs/runbook/slack-adapter-setup.md.');
     process.exit(1);

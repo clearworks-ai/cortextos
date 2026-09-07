@@ -2,8 +2,8 @@
  * pty-host-reaper.test.ts — RW-6 orphan reaper unit tests.
  *
  * All process-table reads and kills are injected, so these tests exercise the
- * full tier logic (dead-daemon, surviving-pty-child, registry-unowned with
- * two-sweep persistence, stray ppid-1 scan, grace period, pid-recycling
+ * full tier logic (dead-daemon, surviving-pty-child, non-destructive
+ * registry-unowned diagnostics, stray ppid-1 scan, grace period, pid-recycling
  * guards) without touching any real process.
  */
 
@@ -146,7 +146,7 @@ describe('PtyHostReaper ledger tiers', () => {
     expect(readPtyHostLedger(ledgerPath)).toEqual([]);
   });
 
-  it('tier 3: registry-unowned host needs TWO consecutive sweeps before the kill', () => {
+  it('preserves a live tracked host even when registry ownership is absent', () => {
     recordPtyHost(ledgerPath, entry());
     const ps: PsEntry[] = [
       { pid: 500, ppid: process.pid, command: HOST_CMD },
@@ -154,18 +154,19 @@ describe('PtyHostReaper ledger tiers', () => {
     ];
     const reaper = makeReaper({ ps, live: [500], owned: [] });
 
-    reaper.sweep(); // first sweep: flag only
+    reaper.sweep();
     expect(kills).toEqual([]);
     expect(readPtyHostLedger(ledgerPath)).toHaveLength(1);
 
-    reaper.sweep(); // second sweep: condition persisted → reap
-    expect(killedPids()).toEqual([-600, 600, -500, 500]);
-    expect(readPtyHostLedger(ledgerPath)).toEqual([]);
+    reaper.sweep(); // persistence still is not proof that the live host is orphaned
+    expect(kills).toEqual([]);
+    expect(readPtyHostLedger(ledgerPath)).toHaveLength(1);
   });
 
-  it('tier 3: flag clears if the registry re-owns the host between sweeps', () => {
+  it('reports registry-unowned state again after ownership returns and is lost', () => {
     recordPtyHost(ledgerPath, entry());
     const owned = new Set<number>();
+    const logs: string[] = [];
     const reaper = new PtyHostReaper(ctxRoot, {
       graceMs: 10 * 60 * 1000,
       psList: () => [{ pid: 500, ppid: process.pid, command: HOST_CMD }],
@@ -173,16 +174,17 @@ describe('PtyHostReaper ledger tiers', () => {
       getLiveHosts: () => new Set([500]),
       getOwnedHostPids: () => owned,
       isPidAliveFn: () => false,
-      log: () => { /* silent */ },
+      log: (message) => logs.push(message),
     });
 
-    reaper.sweep();      // unowned → flagged
+    reaper.sweep();      // unowned → reported
     owned.add(500);
-    reaper.sweep();      // re-owned → no kill, pending flag cleared
+    reaper.sweep();      // re-owned → report state clears
     owned.delete(500);
-    reaper.sweep();      // unowned again → flagged only (fresh two-sweep cycle)
+    reaper.sweep();      // unowned again → reported again
     expect(kills).toEqual([]);
     expect(readPtyHostLedger(ledgerPath)).toHaveLength(1);
+    expect(logs.filter((line) => line.includes('preserving registry-unowned'))).toHaveLength(2);
   });
 
   it('live + registry-owned host is never touched', () => {

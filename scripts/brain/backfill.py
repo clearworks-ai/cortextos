@@ -717,18 +717,12 @@ def commit_post_batch(vault: Path, pathspec: list[str], message: str) -> tuple[s
     every per-meeting FR-014 commit, so they need their own commit (G0a2-2) — never
     left to the vault auto-sync cron.
 
-    Pre-checks the pathspec's own git status via progress.pathspec_dirty (M1,
-    task-10-review — reuses the identical logic already in progress.py rather than
-    a hand-rolled duplicate) before delegating: on a real vault (untracked
-    scratch/notes elsewhere are the norm, not the exception), a clean,
-    already-committed pathspec makes `git commit -- <pathspec>` print "nothing added
-    to commit but untracked files present" rather than "nothing to commit" —
-    progress.vault_commit's substring match doesn't recognize that wording and would
-    SystemExit(10) on a true no-op. Filed here, not in progress.py (Task 9, out of
-    scope): when the pathspec itself has nothing to add, return (None, False)
-    directly; any real change still goes through progress.vault_commit unchanged."""
-    if not progress.pathspec_dirty(vault, pathspec):
-        return None, False
+    F5 (CARRY-5): delegates straight to progress.vault_commit with no separate
+    pathspec_dirty pre-check — progress.vault_commit itself (F4) now recognizes
+    every real git no-op wording ("nothing to commit", "nothing added to commit",
+    "no changes added to commit"), so the hand-rolled pre-check here is redundant
+    and only duplicated logic that already lives in one place. A real git failure
+    still raises SystemExit(10) for the caller's commit_error containment."""
     return progress.vault_commit(vault, pathspec, message)
 
 
@@ -772,6 +766,38 @@ def _post_batch_committed(prog: dict[str, Any]) -> bool:
     return isinstance(commit, dict) and "committed" in commit
 
 
+def _post_batch_effects_ok(prog: dict[str, Any]) -> bool:
+    """F17 (CH-12): a committed (or legitimately no-op) post_batch must NOT read
+    as fully closed while rollup --all or any derived status pair is still
+    outstanding — otherwise a real (or no-op) commit of whatever DID succeed
+    would permanently close the batch with required FR-007/FR-011 artifacts
+    still missing. True only when rollup_all recorded a verified 0 AND every
+    status pair recorded a verified 0."""
+    post = prog.get("post_batch")
+    if not isinstance(post, dict):
+        return False
+    if post.get("rollup_all") != 0:
+        return False
+    return all(p.get("exit") == 0 for p in post.get("status_pairs") or [])
+
+
+def _normalize_post_batch(post: Any, today: str) -> dict[str, Any]:
+    """F16 (CH-10): an all-non-exit-0 batch's `{"skipped": ...}` checkpoint (or any
+    other incomplete shape) must never survive into a LATER apply once the
+    authorized set has grown — rebuild the working shape here rather than let
+    `post["status_pairs"]` raise KeyError below. Any real progress already
+    recorded (rollup_all/rollup_all_ids/status_pairs/commit/commit_error) is
+    preserved verbatim."""
+    if isinstance(post, dict) and "status_pairs" in post and "started_at" in post:
+        return post
+    rebuilt: dict[str, Any] = {"today": today, "started_at": _now(), "status_pairs": []}
+    if isinstance(post, dict):
+        for key in ("rollup_all", "rollup_all_ids", "rollup_all_last_exit", "status_pairs", "commit", "commit_error"):
+            if key in post:
+                rebuilt[key] = post[key]
+    return rebuilt
+
+
 def cmd_apply(args: argparse.Namespace) -> int:
     vault, repo, kind = Path(args.vault), Path(args.repo_root), args.source
     loaded = _load_batch(vault, args.batch)
@@ -782,6 +808,20 @@ def cmd_apply(args: argparse.Namespace) -> int:
     if manifest.get("kind") != kind:  # never apply one kind's ids against another's batch
         print(f"batch {args.batch} kind {manifest.get('kind')!r} != --source {kind!r}", file=sys.stderr)
         return 64
+    # F12 (CH-4): hold the batch lock for the whole apply loop, including every
+    # preflight check below — two concurrent `apply` invocations must never both
+    # load-process-checkpoint the same whole-file batch-progress.json.
+    lock_rc = _acquire_batch_lock(bd)
+    if lock_rc:
+        return lock_rc
+    try:
+        return _cmd_apply_locked(args, vault, repo, kind, bd, manifest, prog)
+    finally:
+        _release_batch_lock(bd)
+
+
+def _cmd_apply_locked(args: argparse.Namespace, vault: Path, repo: Path, kind: str, bd: Path,
+                       manifest: dict[str, Any], prog: dict[str, Any]) -> int:
     signed = _read_json(bd / "batch-signed.json", None)
     sidecar = (bd / "digest.sha256").read_text(encoding="utf-8").strip() if (bd / "digest.sha256").is_file() else ""
     actual = hashlib.sha256((bd / "digest.md").read_bytes()).hexdigest() if (bd / "digest.md").is_file() else ""
@@ -807,6 +847,41 @@ def cmd_apply(args: argparse.Namespace) -> int:
     if signed.get("manifest_sha256") != manifest_sha or sorted(signed.get("signed_ids") or []) != authorized:
         print(f"refuse apply: manifest or the exit-0 set changed since signing (signed {len(signed.get('signed_ids') or [])} ids, now {len(authorized)}) — re-run dry-run + sign_batch.py", file=sys.stderr)
         return 15
+    # F2 addendum (CH-6): the batch_id chain — manifest, batch-progress, batch-signed,
+    # and the operator's own --batch — must all agree before any row is touched. A
+    # complete signed batch copied into a different batch dir must never be applied
+    # and reported/committed under the wrong id.
+    chain = {"manifest": manifest.get("batch_id"), "progress": prog.get("batch_id"),
+             "signed": signed.get("batch_id"), "--batch": args.batch}
+    if len(set(chain.values())) != 1:
+        print(f"refuse apply: batch_id mismatch across manifest/progress/signed/--batch: {chain} — re-run dry-run + sign_batch.py", file=sys.stderr)
+        return 15
+    # F2 addendum (CH-5): sign_batch.py's marker fan-out must have finished — a
+    # crash partway through fan-out (batch-signed.json written, some markers
+    # missing) must never let apply proceed on the strength of the digest checks
+    # above alone.
+    if signed.get("fanout_complete") is not True:
+        print(f"refuse apply: batch-signed.json fanout_complete is not true (sign_batch.py may have failed partway through marker fan-out) — re-run sign_batch.py", file=sys.stderr)
+        return 15
+    # F2 (G2a P1-2 / CH-5): every authorized meeting's own D-09 marker must exist
+    # and be bound to THIS signed batch before the first subprocess runs — a
+    # missing, unreadable, or foreign-batch marker refuses the WHOLE batch (15,
+    # nothing written), never a per-row skip discovered mid-run inside a
+    # subprocess. Named by the FIRST offending id.
+    for mid in authorized:
+        marker = sign_marker.marker_path(vault, kind, mid)
+        if not marker.is_file():
+            print(f"refuse apply: marker missing for {kind}:{mid} ({marker}) — re-run sign_batch.py", file=sys.stderr)
+            return 15
+        try:
+            marker_doc = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            print(f"refuse apply: marker unreadable for {kind}:{mid} ({marker}): {exc} — re-run sign_batch.py", file=sys.stderr)
+            return 15
+        if (not isinstance(marker_doc, dict) or marker_doc.get("batch_id") != signed.get("batch_id")
+                or marker_doc.get("digest_sha256") != signed.get("digest_sha256")):
+            print(f"refuse apply: marker batch binding mismatch for {kind}:{mid} ({marker}) — re-run sign_batch.py", file=sys.stderr)
+            return 15
     started_at = prog.get("apply_started_at") or _now()
     prog["apply_started_at"] = started_at
     today = started_at[:10]
@@ -836,8 +911,12 @@ def cmd_apply(args: argparse.Namespace) -> int:
             skipped += 1  # already applied by an earlier run: a repeat is a no-op
             continue
         if post_closed:
+            # F20 (CH-19): a row still un-applied once post-batch has already run
+            # is a genuine failure, not a benign skip — it stays permanently
+            # un-applied (a new batch is required), so the summary/exit code
+            # must say so rather than read as a clean 0-failed repeat.
             closed_failed_ids.append(mid)
-            skipped += 1
+            failed += 1
             continue
         t0 = time.monotonic()
         rc = run_apply_subprocess(mid, vault, repo)
@@ -852,6 +931,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
     if closed_failed_ids:
         print(f"post-batch already ran for {args.batch}; failed ids {sorted(closed_failed_ids)} need a new batch "
               f"(they are not applied; list will re-include them)", file=sys.stderr)
+        print(f"closed (post-batch already ran; new batch required): {sorted(closed_failed_ids)}", file=sys.stderr)
 
     # FR-015 / D-19: FR-007 once (state + every client region, G-114) and FR-011 once
     # per distinct (client, engagement) — EXACTLY once per batch, after the LAST meeting:
@@ -875,19 +955,47 @@ def cmd_apply(args: argparse.Namespace) -> int:
         apply_of = lambda mid: ((prog["rows"].get(f"{kind}:{mid}") or {}).get("apply") or {})
         all_ok_ids = [mid for mid in authorized if apply_of(mid).get("exit") == 0]
         attempted = sorted(mid for mid in authorized if apply_of(mid).get("exit") is not None)
-        if attempted == authorized and not _post_batch_committed(prog):
-            post: dict[str, Any] = prog.get("post_batch") or {"today": today, "started_at": _now(), "status_pairs": []}
+        # F17 (CH-12): re-enter whenever the stage isn't BOTH committed and fully
+        # effective — a committed (or no-op) commit alongside an outstanding
+        # rollup/status failure must still retry those effects, not read as done.
+        if attempted == authorized and not (_post_batch_committed(prog) and _post_batch_effects_ok(prog)):
+            # F16 (CH-10): normalize BEFORE touching post["status_pairs"] below — an
+            # earlier all-non-exit-0 batch's `{"skipped": ...}` checkpoint must never
+            # KeyError once the authorized set has grown.
+            post = _normalize_post_batch(prog.get("post_batch"), today)
             post["failed_ids"] = sorted(set(authorized) - set(all_ok_ids))
             prog["post_batch"] = post
             _save_batch(bd, prog)                                   # checkpoint: started
-            if "rollup_all" not in post:
-                post["rollup_all"] = run_rollup_all(vault, today)
+            # F17 (CH-12) + F6 (CARRY-6): rollup --all is checkpointed ONLY on a
+            # verified rc == 0 — a nonzero exit records `rollup_all_last_exit` and
+            # is retried next entry, never treated as done by key presence alone.
+            # It is ALSO re-run (even after a prior rc == 0) whenever the ok-id
+            # coverage has grown since the last successful rollup — a batch that
+            # closes a previously-failed row must still see it reflected.
+            if post.get("rollup_all") != 0 or sorted(all_ok_ids) != post.get("rollup_all_ids"):
+                rollup_rc = run_rollup_all(vault, today)
+                if rollup_rc == 0:
+                    post["rollup_all"] = 0
+                    post["rollup_all_ids"] = sorted(all_ok_ids)
+                    post.pop("rollup_all_last_exit", None)
+                else:
+                    post["rollup_all_last_exit"] = rollup_rc
                 _save_batch(bd, prog)                               # checkpoint: rollup done
             pairs = derive_pairs(vault, kind, all_ok_ids)
-            done_pairs = {(p["client"], p["engagement"]) for p in post["status_pairs"] if p.get("exit") is not None}
+            # F17 (CH-12): a pair is "done" only on a verified exit == 0 — a failed
+            # pair (nonzero exit) is retried on the next entry instead of being
+            # treated as complete by mere presence in status_pairs. Its stale
+            # record moves to status_pairs_history so status_pairs never carries
+            # two rows for the same pair.
+            history = post.setdefault("status_pairs_history", [])
+            current_by_pair = {(p["client"], p["engagement"]): p for p in post["status_pairs"]}
             for client, eng in pairs:
-                if (client, eng) in done_pairs:
+                prior = current_by_pair.get((client, eng))
+                if prior is not None and prior.get("exit") == 0:
                     continue
+                if prior is not None:
+                    history.append(prior)
+                    post["status_pairs"] = [p for p in post["status_pairs"] if (p["client"], p["engagement"]) != (client, eng)]
                 rc, rel = run_status_plan(client, eng, today, vault)
                 post["status_pairs"].append({"client": client, "engagement": eng, "exit": rc, "relPath": rel})
                 _save_batch(bd, prog)                               # checkpoint: each pair

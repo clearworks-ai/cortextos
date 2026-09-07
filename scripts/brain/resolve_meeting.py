@@ -309,6 +309,14 @@ def resolve(
                 )
 
     externals = _external_participants(source)
+    # F5 (round 2): cls / cls_label / slug_for_cls are shared by the rule-9
+    # override AND the _pick tie-break below — compute them once, up front,
+    # instead of inside rule 9 (previous location).
+    cls = classification if isinstance(classification, dict) else {}
+    cls_domain = str(cls.get("domain") or "").strip().lower()
+    cls_org_name = str(cls.get("org_name") or "").strip()
+    cls_label = registrable_label(cls_domain) if cls_domain else None
+    slug_for_cls = slugify(cls_org_name) if cls_org_name else cls_label
     client_cands: set[str] = set()
     org_cands: set[str] = set()
     unknown_labels: dict[str, tuple[str, str]] = {}
@@ -365,10 +373,15 @@ def resolve(
 
     def _pick(cands: set[str]) -> str:
         counts = _counts(cands)
+        # F5 (round 2, brief A): ties -> prefer the candidate matching
+        # classification.org_name/domain, then most open engagement nodes,
+        # then alphabetical.
+        cls_match = {v for v in (cls_label, slug_for_cls) if v}
         return min(
             cands,
             key=lambda s: (
                 -counts.get(s, 0),
+                -(1 if s in cls_match else 0),
                 -sum(
                     1
                     for n in nodes.values()
@@ -387,10 +400,50 @@ def resolve(
     def _resolve_company_slug(company: Any) -> str | None:
         if not company:
             return None
-        slug = _company_slug(str(company), aliases)
+        company_str = str(company)
+        slug = _company_slug(company_str, aliases)
         if slug in clients or slug in closed["orgs"]:
             return slug
-        alt = closed["org_name_to_slug"].get(_norm_title(str(company)))
+        # F2 (round 2): org-aliases values are display names, not slugs, so
+        # a contact's company rarely slugifies straight to a real page. Find
+        # a domain-like alias KEY whose VALUE normalizes to this company, and
+        # resolve THAT domain's registrable label through domain_to_slug /
+        # clients / orgs (e.g. "msia.org" -> "Movement of Spiritual
+        # Awareness" -> label "msia" -> clients/msia.md). The "CRM org
+        # name:" page-line path below stays as a secondary fallback.
+        if isinstance(aliases, dict):
+            # N4 (round 3): canonicalize the company string through the alias
+            # table BEFORE normalizing, so a contact whose company is an
+            # alias KEY (e.g. "Movement of Spiritual Awareness Internationale
+            # (MSIA)") resolves exactly like one whose company is already the
+            # alias VALUE ("Movement of Spiritual Awareness") — otherwise the
+            # reverse lookup below compares the raw key string against alias
+            # VALUES and never matches.
+            canonical = aliases.get(company_str, company_str)
+            target = _norm_title(str(canonical))
+            for k, v in aliases.items():
+                if _norm_title(str(v)) != target:
+                    continue
+                if "." not in k or " " in k:
+                    continue
+                lab = registrable_label(k)
+                # N7 (round 3): try the pristine, page-frontmatter-only
+                # domain map (closed["domain_to_slug"], immune to a later
+                # contact row's company-name slugification clobbering an
+                # already-correct page mapping for this label — see F3)
+                # before the local, contacts-overlaid map.
+                mapped = (
+                    closed["domain_to_slug"].get(lab)
+                    or closed["domain_to_slug"].get(k.lower())
+                    or domain_to_slug.get(lab)
+                    or domain_to_slug.get(k.lower())
+                    or ""
+                )
+                if mapped in clients or mapped in closed["orgs"]:
+                    return mapped
+                if lab in clients or lab in closed["orgs"]:
+                    return lab
+        alt = closed["org_name_to_slug"].get(_norm_title(company_str))
         if alt:
             return alt
         return None
@@ -405,10 +458,29 @@ def resolve(
         pname = _norm_title(str(p.get("name") or ""))
         if not pname:
             return None
-        for row in contact_rows:
-            if pname and _norm_title(str(row.get("name") or "")) == pname:
-                return row
-        return None
+        matches = [row for row in contact_rows if _norm_title(str(row.get("name") or "")) == pname]
+        if not matches:
+            return None
+        if len(matches) == 1:
+            return matches[0]
+        # F4 (round 2): real contacts.json has normalized-name collisions,
+        # including true two-company collisions (e.g. one person's name
+        # shared by two different real companies on file). Picking the
+        # first row on file order is silent and file-order-dependent. If the
+        # colliding rows resolve to DIFFERENT company slugs, treat this as
+        # no match at all rather than guessing.
+        slugs = {s for s in (_resolve_company_slug(m.get("company")) for m in matches) if s}
+        if len(slugs) > 1:
+            return None
+        # N6 (round 3): when every match "agrees" (0 or 1 distinct resolved
+        # slug), don't just hand back matches[0] on file order — that can be
+        # a row whose OWN company fails to resolve even though a sibling row
+        # (same name) resolves fine, silently discarding a usable identity.
+        # Prefer a match whose company actually resolves; fall back to
+        # matches[0] only when none of them do.
+        if slugs:
+            return next(m for m in matches if _resolve_company_slug(m.get("company")))
+        return matches[0]
 
     rule4: set[str] = set()
     name_only_rule4: set[str] = set()
@@ -419,14 +491,23 @@ def resolve(
         slug = _resolve_company_slug(row.get("company"))
         if not slug:
             continue
+        p_email = str(p.get("email") or "").strip().lower()
+        has_email = "@" in p_email
+        # N5 (round 3): org_cands must require the participant's email to
+        # have ACTUALLY matched this contact row's emails, not merely "the
+        # participant has some email" — a participant can carry an unrelated
+        # (non-contact) email while still being identified by NAME, and that
+        # must not silently route the meeting to the identified org via
+        # rule 6 (F7's DECISION was "email-matched contacts", not "any
+        # contact match on an emailed participant").
+        email_matched = has_email and p_email in {str(e).lower() for e in (row.get("emails") or [])}
         if slug in clients:
             rule4.add(slug)
-            if "@" not in str(p.get("email") or ""):
+            if not has_email:
                 name_only_rule4.add(slug)
-        if slug in closed["orgs"]:
+        if slug in closed["orgs"] and email_matched:
             org_cands.add(slug)
 
-    cls = classification if isinstance(classification, dict) else {}
     # (1) node id in title
     for nid, node in nodes.items():
         if re.search(r"(?<![a-z0-9])" + re.escape(nid.casefold()) + r"(?![a-z0-9])", ntitle):
@@ -446,6 +527,61 @@ def resolve(
         no_ext = not externals
         if client in client_cands or no_ext:
             return _hit(node, nid, rule=2, clients=clients, client_cands=client_cands, corroborated=True)
+    # (10) community / teaching sessions: no external participant has an
+    # email at all (nothing for rule 3/4/5/6 to see) and the classifier calls
+    # it a colleague/personal community context with a named org — home is
+    # that community's org page, never a person page carved from an attendee.
+    # F1 (round 2): this MUST run before the B override / rule 3-4 default /
+    # rule 6, otherwise a name-only attendee whose company happens to have a
+    # page (contacts.json) pre-empts the community predicate and routes the
+    # meeting to that attendee's own org/client instead of the community org.
+    no_external_emails = not any("@" in str(p.get("email") or "") for p in externals)
+    if externals and no_external_emails and cls.get("relationship") in {"colleague", "personal"} and cls.get("org_name"):
+        slug = _community_org_slug(str(cls.get("org_name")))
+        if slug:
+            # N2 (round 3): don't create a duplicate orgs/<slug>.md beside an
+            # existing clients/<slug>.md for the same normalized org name —
+            # reuse the client page instead (same class of bug as F3/rule 9).
+            if slug in clients:
+                hit = _client_hit(slug, nodes, clients, rule=10)
+                hit["also_present"] = []
+                return hit
+            # Also honour a page-declared org name (a client/org page whose
+            # "- CRM org name:" line normalizes to classification.org_name,
+            # even when its file slug differs from _community_org_slug's
+            # computed value) before falling back to create-or-reuse-by-slug.
+            existing_org_slug = closed["org_name_to_slug"].get(_norm_title(str(cls.get("org_name"))))
+            if existing_org_slug and existing_org_slug in closed["orgs"]:
+                page_rel = _relationship_from_text(
+                    closed["orgs"][existing_org_slug].read_text(encoding="utf-8")
+                )
+                rel = page_rel if page_rel in RELATIONSHIPS else str(cls.get("relationship"))
+                return {
+                    "counterparty_slug": existing_org_slug,
+                    "kind": "org",
+                    "relationship": rel,
+                    "home_path": f"orgs/{existing_org_slug}.md",
+                    "node": "none",
+                    "created": None,
+                    "confidence": float(cls.get("confidence") or 0),
+                    "rule": 10,
+                    "corroborated": False,
+                    "also_present": [],
+                }
+            exists = slug in closed["orgs"]
+            rel = str(cls.get("relationship"))
+            return {
+                "counterparty_slug": slug,
+                "kind": "org",
+                "relationship": rel,
+                "home_path": f"orgs/{slug}.md",
+                "node": "none",
+                "created": None if exists else {"kind": "org", "slug": slug, "relationship": rel},
+                "confidence": float(cls.get("confidence") or 0),
+                "rule": 10,
+                "corroborated": False,
+                "also_present": [],
+            }
     # (B, folded into rule 4) contacts.json identifies a person by name that a
     # bare email-domain guess cannot see at all (no email on that participant
     # object). When that identity resolves to a different client than the
@@ -475,11 +611,7 @@ def resolve(
     # recognized client candidate at all — that stays rule 6/unknown-label
     # territory), and only when the classified org actually outnumbers it.
     if default_pick is not None:
-        cls_domain = str(cls.get("domain") or "").strip().lower()
-        cls_org_name = str(cls.get("org_name") or "").strip()
         cls_conf = float(cls.get("confidence") or 0)
-        cls_label = registrable_label(cls_domain) if cls_domain else None
-        slug_for_cls = slugify(cls_org_name) if cls_org_name else cls_label
         already_matches = default_pick in {cls_label, slug_for_cls}
         if cls_conf >= 0.8 and slug_for_cls and not already_matches:
             cls_count = all_label_counts.get(cls_label, 0) if cls_label else 0
@@ -496,6 +628,35 @@ def resolve(
                     hit = _client_hit(cls_label, nodes, clients, rule=9)
                     hit["also_present"] = _also(cls_label)
                     return hit
+                # F3 (round 2): before creating a new org page, check whether
+                # this classified domain is already declared on an EXISTING
+                # page (from page frontmatter via closed["domain_to_slug"],
+                # not the contacts-overlaid local `domain_to_slug` — a
+                # contact row's company can slugify to something that
+                # doesn't match the page's own slug and silently mask it).
+                existing_page_slug = closed["domain_to_slug"].get(cls_label) if cls_label else None
+                if existing_page_slug and existing_page_slug in clients:
+                    hit = _client_hit(existing_page_slug, nodes, clients, rule=9)
+                    hit["also_present"] = _also(existing_page_slug)
+                    return hit
+                if existing_page_slug and existing_page_slug in closed["orgs"]:
+                    page_rel = _relationship_from_text(
+                        closed["orgs"][existing_page_slug].read_text(encoding="utf-8")
+                    )
+                    if page_rel in RELATIONSHIPS:
+                        rel = page_rel
+                    return {
+                        "counterparty_slug": existing_page_slug,
+                        "kind": "org",
+                        "relationship": rel,
+                        "home_path": f"orgs/{existing_page_slug}.md",
+                        "node": "none",
+                        "created": None,
+                        "confidence": cls_conf,
+                        "rule": 9,
+                        "corroborated": False,
+                        "also_present": _also(existing_page_slug),
+                    }
                 org_slug = slug_for_cls if slug_for_cls in closed["orgs"] else (
                     cls_label if cls_label and cls_label in closed["orgs"] else slug_for_cls
                 )
@@ -598,28 +759,6 @@ def resolve(
             "corroborated": False,
             "also_present": _also(slug),
         }
-    # (10) community / teaching sessions: no external participant has an
-    # email at all (nothing for rule 3/4/5/6 to see) and the classifier calls
-    # it a colleague/personal community context with a named org — home is
-    # that community's org page, never a person page carved from an attendee.
-    no_external_emails = not any("@" in str(p.get("email") or "") for p in externals)
-    if externals and no_external_emails and cls.get("relationship") in {"colleague", "personal"} and cls.get("org_name"):
-        slug = _community_org_slug(str(cls.get("org_name")))
-        if slug:
-            exists = slug in closed["orgs"]
-            rel = str(cls.get("relationship"))
-            return {
-                "counterparty_slug": slug,
-                "kind": "org",
-                "relationship": rel,
-                "home_path": f"orgs/{slug}.md",
-                "node": "none",
-                "created": None if exists else {"kind": "org", "slug": slug, "relationship": rel},
-                "confidence": float(cls.get("confidence") or 0),
-                "rule": 10,
-                "corroborated": False,
-                "also_present": [],
-            }
     # (7) only free-mail or email-less external participants
     hard_domain = False
     for p in externals:

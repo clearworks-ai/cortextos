@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -11,6 +12,8 @@ import pytest
 BRAIN = Path(__file__).resolve().parents[1]
 if str(BRAIN) not in sys.path:
     sys.path.insert(0, str(BRAIN))
+
+FIXTURES_CRM = Path(__file__).resolve().parent / "fixtures" / "crm"
 
 
 def _node_page(client: str, nid: str, aliases: str) -> str:
@@ -922,16 +925,30 @@ def test_f7_contact_company_alias_first_not_slugify(tmp_path) -> None:
 
 
 # --- R4 resolver-fix (2026-09-06 brain-backfill-r4 D-20 review): 5/15 wrong
-# homes from batch fireflies-20260907T173226Z. These tests use the REAL,
-# read-only CRM closed sets (contacts.json/org-aliases.json have 521 real
-# rows and messy real-world alias/company data that a hand-rolled stub can't
-# reproduce) — see .pipeline/sdd/2026-09-06-brain-backfill-r4/resolver-fix-brief.md.
+# homes from batch fireflies-20260907T173226Z. These tests use SELF-CONTAINED
+# CRM fixtures (scripts/brain/tests/fixtures/crm/{contacts,org-aliases}.json)
+# holding only the real rows the R1-R5/control/F-cases below need — copied
+# verbatim from the real contacts.json/org-aliases.json (messy real-world
+# alias/company data that a hand-rolled stub can't reproduce) so the tests
+# never depend on a path outside this repo (round-2 fable review F6) — see
+# .pipeline/sdd/2026-09-06-brain-backfill-r4/resolver-fix-round2-brief.md.
 # Fixtures below carry ONLY participants + classification copied from the real
 # envelopes (never transcript text).
-REAL_REPO_ROOT = Path("/Users/joshweiss/code/cortextos")
 
 
-def _seed_r4_vault(tmp_path: Path) -> Path:
+def _r4_repo_root(tmp_path: Path) -> Path:
+    """F6 (round 2): copy the fixture CRM rows to the exact relative path
+    resolve() reads (orgs/clearworksai/agents/crm-codex/crm/) under a fresh
+    tmp repo root, so every R4 test is self-contained."""
+    repo = tmp_path / "repo"
+    crm_dir = repo / "orgs/clearworksai/agents/crm-codex/crm"
+    crm_dir.mkdir(parents=True)
+    shutil.copy(FIXTURES_CRM / "contacts.json", crm_dir / "contacts.json")
+    shutil.copy(FIXTURES_CRM / "org-aliases.json", crm_dir / "org-aliases.json")
+    return repo
+
+
+def _seed_r4_vault(tmp_path: Path) -> tuple[Path, Path]:
     vault = tmp_path / "vault"
     brain = vault / "raw/areas/clearworks/org-brain"
     (brain / "clients").mkdir(parents=True)
@@ -953,19 +970,12 @@ def _seed_r4_vault(tmp_path: Path) -> Path:
     (brain / "clients" / "alloi.md").write_text(
         "# Client: Alloi\n\n## Contacts\n\ndomains: alloi.us\n", encoding="utf-8"
     )
-    return vault
+    repo = _r4_repo_root(tmp_path)
+    return vault, repo
 
 
-def test_r1_aia_office_hours_creates_community_org_not_person(tmp_path) -> None:
-    """D-20: internal AIA LA teaching session — home is the community org page,
-    never a person page carved from an attendee (was rule 7 -> orgs/douglas-teiger.md,
-    01KYGEE6TGNCNZ1YMYHQMZH9KC)."""
-    from resolve_meeting import main
-
-    vault = _seed_r4_vault(tmp_path)
-    src = tmp_path / "env"
-    src.mkdir()
-    participants = [
+def _r1_participants() -> list[dict]:
+    return [
         {"name": None, "email": "josh@clearworks.ai", "side": "ours", "spoke": False, "notetaker": False},
         {"name": "Josh Weiss", "email": None, "side": "ours", "spoke": True, "notetaker": False},
         {"name": "Douglas Teiger", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
@@ -980,6 +990,18 @@ def test_r1_aia_office_hours_creates_community_org_not_person(tmp_path) -> None:
         {"name": "Melvin Williams", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
         {"name": "Thesla Collier", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
     ]
+
+
+def test_r1_aia_office_hours_creates_community_org_not_person(tmp_path) -> None:
+    """D-20: internal AIA LA teaching session — home is the community org page,
+    never a person page carved from an attendee (was rule 7 -> orgs/douglas-teiger.md,
+    01KYGEE6TGNCNZ1YMYHQMZH9KC)."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_r4_vault(tmp_path)
+    src = tmp_path / "env"
+    src.mkdir()
+    participants = _r1_participants()
     _write_source(
         src,
         title="AI Office Hours (AIA LA TAP Committee)",
@@ -991,7 +1013,7 @@ def test_r1_aia_office_hours_creates_community_org_not_person(tmp_path) -> None:
         meeting_type="other",
         fireflies_id="01KYGEE6TGNCNZ1YMYHQMZH9KC",
     )
-    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(REAL_REPO_ROOT)])
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
     assert rc == 0
     res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
     assert res["home_path"] == "orgs/aia-la.md"
@@ -1006,7 +1028,7 @@ def test_r2_aia_office_hours_number_2_same_community_org(tmp_path) -> None:
     (01KZ4G1SY192WQRSQD5SGCR171, was rule 7 -> orgs/thesla-collier.md)."""
     from resolve_meeting import main
 
-    vault = _seed_r4_vault(tmp_path)
+    vault, repo = _seed_r4_vault(tmp_path)
     src = tmp_path / "env"
     src.mkdir()
     participants = [
@@ -1034,25 +1056,124 @@ def test_r2_aia_office_hours_number_2_same_community_org(tmp_path) -> None:
         meeting_type="other",
         fireflies_id="01KZ4G1SY192WQRSQD5SGCR171",
     )
-    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(REAL_REPO_ROOT)])
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
     assert rc == 0
     res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
     assert res["home_path"] == "orgs/aia-la.md"
     assert res["rule"] == 10
     assert res["counterparty_slug"] == "aia-la"
+    # F10 (round 2): same created-org shape as R1 — same community page, not
+    # a second created page and not None (this attendee set didn't create it
+    # first; R1's identical fixture-per-test tmp vault means this test run
+    # creates aia-la itself, exactly like R1).
+    assert res["created"] == {"kind": "org", "relationship": "colleague", "slug": "aia-la"}
 
 
-def test_r3_russian_riverkeeper_classification_over_minority_client(tmp_path) -> None:
-    """D-20: 4 Russian Riverkeeper participants outnumber the 1 logictcg
-    participant; no client/org page exists for Russian Riverkeeper yet, so
-    the high-confidence classification creates one (was rule 3 ->
-    clients/logictcg.md, 01KYGEE6SHKHM67BFY8B0DK1FP)."""
+def test_f1_community_rule_wins_even_when_attendee_org_page_exists(tmp_path) -> None:
+    """F1 (round 2, Critical): seeding one attendee's own org page (Thesla
+    Collier -> HNTB Corporation) must NOT pre-empt the community predicate —
+    rule 10 must still fire before rules 4/6 get a candidate to look at.
+
+    N9 (round 3, Minor): this test alone does NOT isolate the rule-10 hoist —
+    with the F7 email-match gate in place, a name-only HNTB match can no
+    longer reach org_cands at all, so this test stays green even if only the
+    hoist (not F7) is reverted. It is a paired control with
+    test_f1_community_rule_wins_even_when_attendee_client_page_exists, which
+    (via the B-override/rule-4 client path, unaffected by F7) is the one that
+    actually proves the hoist."""
     from resolve_meeting import main
 
-    vault = _seed_r4_vault(tmp_path)
+    vault, repo = _seed_r4_vault(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "orgs" / "hntb-corporation.md").write_text(
+        "# HNTB Corporation\n\nrelationship: colleague\n", encoding="utf-8"
+    )
     src = tmp_path / "env"
     src.mkdir()
-    participants = [
+    _write_source(
+        src,
+        title="AI Office Hours (AIA LA TAP Committee)",
+        participants=_r1_participants(),
+        org_name="AIA LA (Office Hours community)",
+        domain=None,
+        relationship="colleague",
+        confidence=0.55,
+        meeting_type="other",
+        fireflies_id="01KYGEE6TGNCNZ1YMYHQMZH9KC",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "orgs/aia-la.md"
+    assert res["rule"] == 10
+    assert res["created"] == {"kind": "org", "relationship": "colleague", "slug": "aia-la"}
+
+
+def test_f1_community_rule_wins_even_when_attendee_client_page_exists(tmp_path) -> None:
+    """F1 (round 2, Critical): seeding one attendee's own CLIENT page (Melvin
+    Williams -> HKS Inc.) must NOT pre-empt the community predicate either —
+    rule 10 must still fire before the B override / rule 3-4 default."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_r4_vault(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients" / "hks-inc.md").write_text("# Client: HKS Inc.\n\n## Contacts\n", encoding="utf-8")
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="AI Office Hours (AIA LA TAP Committee)",
+        participants=_r1_participants(),
+        org_name="AIA LA (Office Hours community)",
+        domain=None,
+        relationship="colleague",
+        confidence=0.55,
+        meeting_type="other",
+        fireflies_id="01KYGEE6TGNCNZ1YMYHQMZH9KC",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "orgs/aia-la.md"
+    assert res["rule"] == 10
+    assert res["created"] == {"kind": "org", "relationship": "colleague", "slug": "aia-la"}
+
+
+def test_n2_rule10_reuses_existing_client_page_named_by_org_name(tmp_path) -> None:
+    """N2 (round 3, Important): the hoisted rule-10 predicate must not create
+    a duplicate orgs/<slug>.md beside an existing clients/<slug>.md for the
+    same normalized org name — reuse the client page instead (round-2 review
+    N2 repro: a colleague/personal-labelled, email-less session whose
+    org_name normalizes to an existing CLIENT slug used to create
+    orgs/hks-inc.md beside clients/hks-inc.md)."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_r4_vault(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients" / "hks-inc.md").write_text("# Client: HKS Inc.\n\n## Contacts\n", encoding="utf-8")
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="AI Office Hours (AIA LA TAP Committee)",
+        participants=_r1_participants(),
+        org_name="HKS Inc.",
+        domain=None,
+        relationship="colleague",
+        confidence=0.55,
+        meeting_type="other",
+        fireflies_id="01KYGEE6TGNCNZ1YMYHQMZH9KC",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "clients/hks-inc.md"
+    assert res["rule"] == 10
+    assert res["created"] is None
+
+
+def _r3_participants() -> list[dict]:
+    return [
         {"name": None, "email": "yohanr@logictcg.com", "side": "theirs", "spoke": False, "notetaker": False},
         {"name": None, "email": "markj@jensen-architects.com", "side": "theirs", "spoke": False, "notetaker": False},
         {"name": None, "email": "jaime@russianriverkeeper.org", "side": "theirs", "spoke": False, "notetaker": False},
@@ -1070,10 +1191,22 @@ def test_r3_russian_riverkeeper_classification_over_minority_client(tmp_path) ->
             "notetaker": False,
         },
     ]
+
+
+def test_r3_russian_riverkeeper_classification_over_minority_client(tmp_path) -> None:
+    """D-20: 4 Russian Riverkeeper participants outnumber the 1 logictcg
+    participant; no client/org page exists for Russian Riverkeeper yet, so
+    the high-confidence classification creates one (was rule 3 ->
+    clients/logictcg.md, 01KYGEE6SHKHM67BFY8B0DK1FP)."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_r4_vault(tmp_path)
+    src = tmp_path / "env"
+    src.mkdir()
     _write_source(
         src,
         title="Tech Committee Meeting #4",
-        participants=participants,
+        participants=_r3_participants(),
         org_name="Russian Riverkeeper",
         domain="russianriverkeeper.org",
         relationship="client",
@@ -1082,7 +1215,7 @@ def test_r3_russian_riverkeeper_classification_over_minority_client(tmp_path) ->
         deal_state="won",
         fireflies_id="01KYGEE6SHKHM67BFY8B0DK1FP",
     )
-    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(REAL_REPO_ROOT)])
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
     assert rc == 0
     res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
     assert res["home_path"] == "orgs/russian-riverkeeper.md"
@@ -1091,13 +1224,225 @@ def test_r3_russian_riverkeeper_classification_over_minority_client(tmp_path) ->
     assert res["created"] == {"kind": "org", "relationship": "client", "slug": "russian-riverkeeper"}
 
 
+def test_f3_rule9_reuses_existing_org_page_declaring_the_domain(tmp_path) -> None:
+    """F3 (round 2, Important): when a page ALREADY declares the classified
+    domain (orgs/rrk.md: domains: russianriverkeeper.org), rule 9 must home
+    to that existing page (created None) instead of creating a duplicate
+    orgs/russian-riverkeeper.md under a different slug."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_r4_vault(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "orgs" / "rrk.md").write_text(
+        "# Russian Riverkeeper\n\nrelationship: client\ndomains: russianriverkeeper.org\n",
+        encoding="utf-8",
+    )
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Tech Committee Meeting #4",
+        participants=_r3_participants(),
+        org_name="Russian Riverkeeper",
+        domain="russianriverkeeper.org",
+        relationship="client",
+        confidence=0.85,
+        meeting_type="delivery",
+        deal_state="won",
+        fireflies_id="01KYGEE6SHKHM67BFY8B0DK1FP",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "orgs/rrk.md"
+    assert res["rule"] == 9
+    assert res["counterparty_slug"] == "rrk"
+    assert res["created"] is None
+
+
+def test_n3_reverse_alias_resolves_msia_without_crm_org_name_line(tmp_path) -> None:
+    """N3 (round 3, Important): the reverse-alias lookup in
+    _resolve_company_slug must resolve clients/msia.md via org-aliases.json
+    ("msia.org" -> "Movement of Spiritual Awareness") WITHOUT depending on a
+    "- CRM org name:" page line at all. Round-2 review N3: the round-2 test
+    suite never proved this independently of the org_name_to_slug fallback —
+    deleting the reverse-alias block left R5 green via that fallback because
+    _seed_r4_vault's msia.md always carried the CRM-org-name line."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_r4_vault(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients" / "msia.md").write_text("# Client: MSIA\n\n## Contacts\n", encoding="utf-8")
+    src = tmp_path / "env"
+    src.mkdir()
+    participants = [
+        {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours", "spoke": True, "notetaker": False},
+        {"name": None, "email": "julie@pts.org", "side": "theirs", "spoke": False, "notetaker": False},
+        {"name": "julie lurie", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
+    ]
+    _write_source(
+        src,
+        title="Julie Lurie and Josh Weiss",
+        participants=participants,
+        org_name="PTS",
+        domain="pts.org",
+        relationship="client",
+        confidence=0.85,
+        meeting_type="delivery",
+        deal_state="none",
+        fireflies_id="01KZF06155XKMBF7Y0YXD5KB5F",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "clients/msia.md"
+    assert res["rule"] == 4
+    assert res["counterparty_slug"] == "msia"
+    assert res["created"] is None
+
+
+def test_n4_reverse_alias_canonicalizes_alias_key_company(tmp_path) -> None:
+    """N4 (round 3, Important): _resolve_company_slug must canonicalize the
+    contact row's company through the alias table BEFORE the reverse-alias
+    lookup, so a contact whose company is the alias KEY (the raw legal name
+    "Movement of Spiritual Awareness Internationale (MSIA)") resolves exactly
+    like one whose company is already the alias VALUE. Uses a per-test
+    contacts.json override (mirrors test_f7_contact_company_alias_first_not_slugify)."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_r4_vault(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients" / "msia.md").write_text("# Client: MSIA\n\n## Contacts\n", encoding="utf-8")
+    (repo / "orgs/clearworksai/agents/crm-codex/crm/contacts.json").write_text(
+        json.dumps(
+            {
+                "contacts": [
+                    {
+                        "id": "fixture-julie",
+                        "name": "julie lurie",
+                        "company": "Movement of Spiritual Awareness Internationale (MSIA)",
+                        "emails": [],
+                        "aliases": [],
+                        "type": "person",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    src = tmp_path / "env"
+    src.mkdir()
+    participants = [
+        {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours", "spoke": True, "notetaker": False},
+        {"name": None, "email": "julie@pts.org", "side": "theirs", "spoke": False, "notetaker": False},
+        {"name": "julie lurie", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
+    ]
+    _write_source(
+        src,
+        title="Julie Lurie and Josh Weiss",
+        participants=participants,
+        org_name="PTS",
+        domain="pts.org",
+        relationship="client",
+        confidence=0.85,
+        meeting_type="delivery",
+        deal_state="none",
+        fireflies_id="01KZF06155XKMBF7Y0YXD5KB5F",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "clients/msia.md"
+    assert res["rule"] == 4
+    assert res["counterparty_slug"] == "msia"
+    assert res["created"] is None
+
+
+def test_n7_reverse_alias_uses_pristine_domain_map_over_contacts_overlay(tmp_path) -> None:
+    """N7 (round 3, Minor): the reverse-alias lookup must try the pristine,
+    page-frontmatter-only domain map (closed["domain_to_slug"]) BEFORE the
+    local map that a later contact row's company-name slugification can
+    clobber — mirrors F3's same fix for rule 9. "Clobber Contact"'s company
+    slugifies to the same label as "Target Contact"'s declared domain and
+    overwrites the local overlaid map for that label with a non-page value;
+    only the pristine map still points at the real client page."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_r4_vault(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients" / "foo-page.md").write_text(
+        "# Client: Foo\n\n## Contacts\n\ndomains: somefoo.org\n", encoding="utf-8"
+    )
+    (repo / "orgs/clearworksai/agents/crm-codex/crm/org-aliases.json").write_text(
+        json.dumps({"somefoo.org": "Some Foo Org"}), encoding="utf-8"
+    )
+    (repo / "orgs/clearworksai/agents/crm-codex/crm/contacts.json").write_text(
+        json.dumps(
+            {
+                "contacts": [
+                    {
+                        "id": "clobber",
+                        "name": "Clobber Contact",
+                        "company": "SomeFoo",
+                        "emails": ["x@somefoo.example"],
+                        "aliases": [],
+                        "type": "person",
+                    },
+                    {
+                        "id": "target",
+                        "name": "Target Contact",
+                        "company": "Some Foo Org",
+                        "emails": [],
+                        "aliases": [],
+                        "type": "person",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Foo catchup",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Target Contact",
+                "email": None,
+                "side": "unknown",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        org_name="Some Foo Org",
+        domain=None,
+        relationship="vendor",
+        confidence=0.4,
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "clients/foo-page.md"
+    assert res["rule"] == 4
+
+
 def test_r4_calasia_vs_allsafe_participant_count_weighting(tmp_path) -> None:
     """D-20: 3 CalAsia participants vs 1 AllSafe IT participant — pick by
     participant count (was rule 3 -> clients/allsafeit.md, alphabetical
     fallback, 01KZCM9K0PQJTS5S6BP1P2VKY9)."""
     from resolve_meeting import main
 
-    vault = _seed_r4_vault(tmp_path)
+    vault, repo = _seed_r4_vault(tmp_path)
     src = tmp_path / "env"
     src.mkdir()
     participants = [
@@ -1134,7 +1479,7 @@ def test_r4_calasia_vs_allsafe_participant_count_weighting(tmp_path) -> None:
         deal_state="proposal",
         fireflies_id="01KZCM9K0PQJTS5S6BP1P2VKY9",
     )
-    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(REAL_REPO_ROOT)])
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
     assert rc == 0
     res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
     assert res["home_path"] == "clients/calasiaconstruction.md"
@@ -1150,7 +1495,7 @@ def test_r5_contacts_beats_domain_julie_lurie_msia_not_pts(tmp_path) -> None:
     the classification LLM also said PTS here and was wrong)."""
     from resolve_meeting import main
 
-    vault = _seed_r4_vault(tmp_path)
+    vault, repo = _seed_r4_vault(tmp_path)
     src = tmp_path / "env"
     src.mkdir()
     participants = [
@@ -1170,7 +1515,7 @@ def test_r5_contacts_beats_domain_julie_lurie_msia_not_pts(tmp_path) -> None:
         deal_state="none",
         fireflies_id="01KZF06155XKMBF7Y0YXD5KB5F",
     )
-    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(REAL_REPO_ROOT)])
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
     assert rc == 0
     res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
     assert res["home_path"] == "clients/msia.md"
@@ -1179,13 +1524,124 @@ def test_r5_contacts_beats_domain_julie_lurie_msia_not_pts(tmp_path) -> None:
     assert res["created"] is None
 
 
+def test_f4_contact_name_collision_across_companies_is_no_match(tmp_path) -> None:
+    """F4 (round 2, Important): real contacts.json has a true two-company
+    name collision (Brian Skowvron -> Gruen Associates AND AC Martin). A
+    name-only speaker with that name must not silently pick the first row on
+    file order and override the real kadre.org domain pick — it must count
+    as no contact match at all."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_r4_vault(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients" / "gruen-associates.md").write_text(
+        "# Client: Gruen Associates\n\n## Contacts\n", encoding="utf-8"
+    )
+    (brain / "clients" / "ac-martin.md").write_text("# Client: AC Martin\n\n## Contacts\n", encoding="utf-8")
+    src = tmp_path / "env"
+    src.mkdir()
+    participants = [
+        {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours", "spoke": True, "notetaker": False},
+        {"name": None, "email": "nerin@kadre.org", "side": "theirs", "spoke": False, "notetaker": False},
+        {"name": "Brian Skowvron", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
+    ]
+    _write_source(
+        src,
+        title="Kadre intro",
+        participants=participants,
+        org_name="Kadre",
+        domain="kadre.org",
+        relationship="client",
+        confidence=0.6,
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "clients/kadre.md"
+    assert res["rule"] == 3
+    assert res["counterparty_slug"] == "kadre"
+    assert res["created"] is None
+
+
+def test_n6_collision_guard_skips_unresolvable_row_first_in_file_order(tmp_path) -> None:
+    """N6 (round 3, Minor): when duplicate-name rows all "agree" (0 or 1
+    distinct resolved company slug), the collision guard must not just hand
+    back matches[0] on file order — if that row's OWN company fails to
+    resolve while a sibling row (same name) resolves fine, the identity must
+    still be usable. "Pat Dual"'s first contacts.json row (an unresolvable
+    company) sits before the row that resolves to the existing kadre client
+    page."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_r4_vault(tmp_path)
+    (repo / "orgs/clearworksai/agents/crm-codex/crm/contacts.json").write_text(
+        json.dumps(
+            {
+                "contacts": [
+                    {
+                        "id": "dup1",
+                        "name": "Pat Dual",
+                        "company": "Some Unresolvable Co",
+                        "emails": [],
+                        "aliases": [],
+                        "type": "person",
+                    },
+                    {
+                        "id": "dup2",
+                        "name": "Pat Dual",
+                        "company": "Kadre",
+                        "emails": [],
+                        "aliases": [],
+                        "type": "person",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Kadre catchup",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Pat Dual",
+                "email": None,
+                "side": "unknown",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        org_name="Kadre",
+        domain=None,
+        relationship="client",
+        confidence=0.5,
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "clients/kadre.md"
+    assert res["rule"] == 4
+    assert res["counterparty_slug"] == "kadre"
+
+
 def test_control_kadre_low_confidence_classification_stays_rule3(tmp_path) -> None:
     """Control: 01KYZASJY2ZTWC9F4ET3QZ5RFZ. classification.confidence=0.6 is
     below the 0.8 rule-9 threshold, so the single-domain rule-3 pick is
     untouched (kadre)."""
     from resolve_meeting import main
 
-    vault = _seed_r4_vault(tmp_path)
+    vault, repo = _seed_r4_vault(tmp_path)
     src = tmp_path / "env"
     src.mkdir()
     participants = [
@@ -1205,12 +1661,13 @@ def test_control_kadre_low_confidence_classification_stays_rule3(tmp_path) -> No
         deal_state="proposal",
         fireflies_id="01KYZASJY2ZTWC9F4ET3QZ5RFZ",
     )
-    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(REAL_REPO_ROOT)])
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
     assert rc == 0
     res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
     assert res["home_path"] == "clients/kadre.md"
     assert res["rule"] == 3
     assert res["counterparty_slug"] == "kadre"
+    assert res["created"] is None
 
 
 def test_control_alloi_single_domain_candidate_stays_rule3(tmp_path) -> None:
@@ -1219,7 +1676,7 @@ def test_control_alloi_single_domain_candidate_stays_rule3(tmp_path) -> None:
     (alloi)."""
     from resolve_meeting import main
 
-    vault = _seed_r4_vault(tmp_path)
+    vault, repo = _seed_r4_vault(tmp_path)
     src = tmp_path / "env"
     src.mkdir()
     participants = [
@@ -1246,9 +1703,150 @@ def test_control_alloi_single_domain_candidate_stays_rule3(tmp_path) -> None:
         deal_state="won",
         fireflies_id="01KZF3MM897VEM5FDQN5R7HASA",
     )
-    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(REAL_REPO_ROOT)])
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
     assert rc == 0
     res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
     assert res["home_path"] == "clients/alloi.md"
     assert res["rule"] == 3
     assert res["counterparty_slug"] == "alloi"
+    assert res["created"] is None
+
+
+def test_f5_tie_break_prefers_classification_named_party_over_alphabetical(tmp_path) -> None:
+    """F5 (round 2, Important): a 1-vs-1 participant-count tie between two
+    client candidates must resolve to the one the classifier named, not the
+    alphabetically-first one."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_r4_vault(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients" / "aaafirst.md").write_text(
+        "# Client: AAA First\n\n## Contacts\n\ndomains: aaafirst.com\n", encoding="utf-8"
+    )
+    (brain / "clients" / "zzzlast.md").write_text(
+        "# Client: ZZZ Last\n\n## Contacts\n\ndomains: zzzlast.com\n", encoding="utf-8"
+    )
+    src = tmp_path / "env"
+    src.mkdir()
+    participants = [
+        {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours", "spoke": True, "notetaker": False},
+        {"name": None, "email": "pat@aaafirst.com", "side": "theirs", "spoke": False, "notetaker": False},
+        {"name": None, "email": "sam@zzzlast.com", "side": "theirs", "spoke": False, "notetaker": False},
+    ]
+    _write_source(
+        src,
+        title="Intro call",
+        participants=participants,
+        org_name="ZZZ Last",
+        domain="zzzlast.com",
+        relationship="prospect",
+        confidence=0.55,
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "clients/zzzlast.md"
+    assert res["rule"] == 3
+    assert res["counterparty_slug"] == "zzzlast"
+    assert res["created"] is None
+
+
+def test_f7_name_only_contact_match_to_org_page_does_not_feed_rule6(tmp_path) -> None:
+    """F7 (round 2, Important): restore the pre-47ff343b rule-6 candidate
+    behavior — org_cands only comes from domain labels and EMAIL-matched
+    contacts. A name-only speaker whose contacts.json company happens to be
+    an existing orgs/ page must fall through to rule 7/8 as before, never
+    rule 6."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "orgs" / "vendor-org.md").write_text("# Vendor Org\n\nrelationship: vendor\n", encoding="utf-8")
+    (repo / "orgs/clearworksai/agents/crm-codex/crm/contacts.json").write_text(
+        json.dumps({"contacts": [{"id": "pat", "name": "Pat Vendor", "company": "Vendor Org", "emails": []}]}),
+        encoding="utf-8",
+    )
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Random catchup",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Pat Vendor",
+                "email": None,
+                "side": "unknown",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        org_name="Unrelated",
+        domain=None,
+        relationship="prospect",
+        confidence=0.3,
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 7
+    assert res["home_path"] == "orgs/pat-vendor.md"
+    assert res["kind"] == "person"
+
+
+def test_n5_org_cands_requires_email_match_not_just_has_email(tmp_path) -> None:
+    """N5 (round 3, Minor): F7's gate was "participant has an email", not
+    "matched BY email" (round-2 review N5, check-4 repro). A participant
+    whose OWN email is unrelated to any contact row, but whose NAME matches a
+    contact known at an existing org page, must not feed org_cands via that
+    unrelated email — it must not route the meeting to that org via rule 6."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_r4_vault(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "orgs" / "hntb-corporation.md").write_text(
+        "# HNTB Corporation\n\nrelationship: colleague\n", encoding="utf-8"
+    )
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Random catchup",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Thesla Collier",
+                "email": "thesla@someunknownco.com",
+                "side": "theirs",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        org_name="Unrelated",
+        domain=None,
+        relationship="prospect",
+        confidence=0.3,
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] != "orgs/hntb-corporation.md"
+    assert res["counterparty_slug"] != "hntb-corporation"
+    assert res["home_path"] == "orgs/someunknownco.md"
+    assert res["rule"] == 6

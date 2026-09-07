@@ -1,0 +1,190 @@
+{
+  "contacts": [
+    {
+      "id": "fixture-01",
+      "name": "Douglas Teiger",
+      "company": "Teiger Consulting",
+      "emails": ["contact01@douglasteiger.com"],
+      "aliases": [],
+      "type": "person"
+    },
+    {
+      "id": "fixture-02",
+      "name": "Thesla Collier",
+      "company": "HNTB Corporation",
+      "emails": ["contact02@hntb.com"],
+      "aliases": [],
+      "type": "person"
+    },
+    {
+      "id": "fixture-03",
+      "name": "Melvin Williams",
+      "company": "HKS Inc.",
+      "emails": ["contact03@hksinc.com"],
+      "aliases": [],
+      "type": "person"
+    },
+    {
+      "id": "fixture-04",
+      "name": "julie lurie",
+      "company": "Movement of Spiritual Awareness",
+      "emails": [],
+      "aliases": [],
+      "type": "person"
+    },
+    {
+      "id": "fixture-05",
+      "name": "Russian Riverkeeper Contact 05",
+      "company": "Russian Riverkeeper",
+      "emails": ["contact05@russianriverkeeper.org"],
+      "aliases": [],
+      "type": "person"
+    },
+    {
+      "id": "fixture-06",
+      "name": "Jaime Neary",
+      "company": "Russian Riverkeeper",
+      "emails": ["contact06@russianriverkeeper.org"],
+      "aliases": [],
+      "type": "person"
+    },
+    {
+      "id": "fixture-07",
+      "name": "Rob Schwenker (he, him)",
+      "company": "Russian Riverkeeper",
+      "emails": ["contact07@russianriverkeeper.org"],
+      "aliases": [],
+      "type": "person"
+    },
+    {
+      "id": "fixture-08",
+      "name": "Russian Riverkeeper Contact 08",
+      "company": "Russian Riverkeeper",
+      "emails": [],
+      "aliases": [],
+      "type": "person"
+    },
+    {
+      "id": "fixture-09",
+      "name": "Russian Riverkeeper Contact 09",
+      "company": "Russian Riverkeeper",
+      "emails": [],
+      "aliases": [],
+      "type": "person"
+    },
+    {
+      "id": "fixture-10",
+      "name": "Russian Riverkeeper Contact 10",
+      "company": "Russian Riverkeeper",
+      "emails": [],
+      "aliases": [],
+      "type": "person"
+    },
+    {
+      "id": "fixture-11",
+      "name": "johnmurawski",
+      "company": "CalAsia Construction, Inc.",
+      "emails": ["contact11@calasiaconstruction.com"],
+      "aliases": [],
+      "type": "person"
+    },
+    {
+      "id": "fixture-12",
+      "name": "CalAsia Construction, Inc. Contact 12",
+      "company": "CalAsia Construction, Inc.",
+      "emails": ["contact12@calasiaconstruction.com"],
+      "aliases": [],
+      "type": "person"
+    },
+    {
+      "id": "fixture-13",
+      "name": "CalAsia Construction, Inc. Contact 13",
+      "company": "CalAsia Construction, Inc.",
+      "emails": ["contact13@calasiaconstruction.com"],
+      "aliases": [],
+      "type": "person"
+    },
+    {
+      "id": "fixture-14",
+      "name": "abbey",
+      "company": "CalAsia Construction, Inc.",
+      "emails": ["contact14@calasiaconstruction.com"],
+      "aliases": [],
+      "type": "person"
+    },
+    {
+      "id": "fixture-15",
+      "name": "chrisocampo",
+      "company": "calasiaconstruction.com",
+      "emails": ["contact15@calasiaconstruction.com"],
+      "aliases": [],
+      "type": "person"
+    },
+    {
+      "id": "fixture-16",
+      "name": "calasiaconstruction.com Contact 16",
+      "company": "calasiaconstruction.com",
+      "emails": ["contact16@calasiaconstruction.com"],
+      "aliases": [],
+      "type": "person"
+    },
+    {
+      "id": "fixture-17",
+      "name": "CalAsia Construction, Inc. Contact 17",
+      "company": "CalAsia Construction, Inc.",
+      "emails": ["contact17@calasiaconstruction.com"],
+      "aliases": [],
+      "type": "person"
+    },
+    {
+      "id": "fixture-18",
+      "name": "calasiaconstruction.com Contact 18",
+      "company": "calasiaconstruction.com",
+      "emails": ["contact18@calasiaconstruction.com"],
+      "aliases": [],
+      "type": "person"
+    },
+    {
+      "id": "fixture-19",
+      "name": "CalAsia Construction, Inc. Contact 19",
+      "company": "CalAsia Construction, Inc.",
+      "emails": ["contact19@calasiaconstruction.com"],
+      "aliases": [],
+      "type": "person"
+    },
+    {
+      "id": "fixture-20",
+      "name": "CalAsia Construction, Inc. Contact 20",
+      "company": "CalAsia Construction, Inc.",
+      "emails": ["contact20@gmail.com"],
+      "aliases": [],
+      "type": "person"
+    },
+    {
+      "id": "fixture-21",
+      "name": "CalAsia Construction, Inc. Contact 21",
+      "company": "CalAsia Construction, Inc.",
+      "emails": ["contact21@calasiaconstruction.com"],
+      "aliases": [],
+      "type": "person"
+    },
+    {
+      "id": "fixture-22",
+      "name": "Brian Skowvron",
+      "company": "Gruen Associates",
+      "emails": ["contact22@gmail.com"],
+      "aliases": [],
+      "type": "person"
+    },
+    {
+      "id": "fixture-23",
+      "name": "Brian Skowvron",
+      "company": "AC Martin",
+      "emails": ["contact23@acmartin.com"],
+      "aliases": [],
+      "type": "person"
+    }
+  ],
+  "source": "anonymized-test-fixture",
+  "version": "1.0.0"
+}

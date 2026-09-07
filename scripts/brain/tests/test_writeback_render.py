@@ -146,6 +146,43 @@ def test_render_page_open_items_existing_header_not_duplicated() -> None:
     assert new.count("| Item | Owner | Deadline | Source | Status |") == 1
 
 
+def test_dry_run_on_already_applied_pages_prints_explicit_zero_hunk_diff_headers(tmp_path: Path) -> None:
+    """A re-run dry-run after --apply (the phase-3 re-sign case) has no hunks to
+    show, but sign_dry_run.py still requires FR-012's page-diff noun ("--- a/"),
+    so the capture must name each unchanged page explicitly instead of
+    printing nothing."""
+    import writeback_render as WR
+
+    org = tmp_path / "org"
+    home = org / "raw/areas/clearworks/org-brain/projects/alloi-03.md"
+    home.parent.mkdir(parents=True)
+    home.write_text(
+        "# Client: Alloi — Tactical Reports\n\n## History (dated, newest first)\n\n- old\n",
+        encoding="utf-8",
+    )
+    meeting = _payload()["meetings"][0]
+    for path, _old, new in WR.planned_files(org, meeting):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(new, encoding="utf-8")
+    payload_path = tmp_path / "payload.json"
+    payload_path.write_text(json.dumps(_payload()), encoding="utf-8")
+    ledger = tmp_path / "ledger.txt"
+    ledger.write_text("", encoding="utf-8")
+    out = io.StringIO()
+    with pytest.MonkeyPatch.context() as mp:
+        for k, v in {"ORG_ROOT": str(org), "LEDGER_FILE": str(ledger), "CTX_TMP": str(tmp_path)}.items():
+            mp.setenv(k, v)
+        with redirect_stdout(out), redirect_stderr(io.StringIO()):
+            rc = WB.main(["--payload", str(payload_path), "--dry-run"])
+    assert rc == 0
+    text = out.getvalue()
+    assert text.count("(no change: page already carries this meeting)") == 2
+    assert "--- a/" in text and "alloi-03.md" in text and "meetings/" in text
+    assert "@@" not in text  # genuinely no hunks
+    # the page itself was not touched by the dry-run
+    assert home.read_text(encoding="utf-8") == [n for p, _o, n in WR.planned_files(org, meeting) if p == home][0]
+
+
 def test_dry_run_prints_all_diffs_and_reason_writes_nothing(tmp_path: Path) -> None:
     org = tmp_path / "org"
     home = org / "raw/areas/clearworks/org-brain/projects/alloi-03.md"

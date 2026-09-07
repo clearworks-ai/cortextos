@@ -7,6 +7,8 @@ import hashlib
 import json
 import os
 import sys
+import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -45,6 +47,20 @@ query Transcript($id: String!) {
   }
 }
 """
+
+# FR-015 lister (spec G-81/G-82): `date` is epoch-ms, `duration` is float
+# MINUTES, `participants` is a list of email strings; `limit` max 50.
+LIST_QUERY = """query Transcripts($limit: Int!, $skip: Int!) {
+  transcripts(limit: $limit, skip: $skip) { id title date duration participants }
+}"""
+LIST_PAGE_SIZE = 50
+# FR-015: 429 / 5xx → wait 1 s, 2 s, 4 s (max 3 retries) before giving up.
+RETRY_DELAYS_S = (1, 2, 4)
+_sleep = time.sleep  # test seam
+
+
+class FirefliesListError(RuntimeError):
+    """The transcripts list query returned a GraphQL `errors` payload."""
 
 
 def _canonical_bytes(obj: dict[str, Any]) -> bytes:
@@ -197,8 +213,12 @@ def envelope_from_transcript(tr: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _post_graphql(api_key: str, meeting_id: str) -> dict[str, Any]:
-    body = json.dumps({"query": QUERY, "variables": {"id": meeting_id}}).encode()
+def _retryable(exc: BaseException) -> bool:
+    return isinstance(exc, urllib.error.HTTPError) and (exc.code == 429 or exc.code >= 500)
+
+
+def _post_query(api_key: str, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+    body = json.dumps({"query": query, "variables": variables}).encode()
     req = urllib.request.Request(
         GRAPHQL_URL,
         data=body,
@@ -208,9 +228,40 @@ def _post_graphql(api_key: str, meeting_id: str) -> dict[str, Any]:
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        raw = resp.read()
-    return json.loads(raw.decode())
+    for attempt in range(len(RETRY_DELAYS_S) + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                raw = resp.read()
+            return json.loads(raw.decode())
+        except urllib.error.HTTPError as exc:
+            if not _retryable(exc) or attempt == len(RETRY_DELAYS_S):
+                raise
+            _sleep(RETRY_DELAYS_S[attempt])
+    raise AssertionError("unreachable")
+
+
+def _post_graphql(api_key: str, meeting_id: str) -> dict[str, Any]:
+    return _post_query(api_key, QUERY, {"id": meeting_id})
+
+
+def list_transcripts(api_key: str, *, page_size: int = LIST_PAGE_SIZE, throttle_s: float = 2.0) -> list[dict[str, Any]]:
+    """Page `transcripts(limit, skip)` until a short page; returns raw rows in
+    API order. Sleeps `throttle_s` between pages (A-08 default 1 req / 2 s)."""
+    rows: list[dict[str, Any]] = []
+    skip = 0
+    while True:
+        payload = _post_query(api_key, LIST_QUERY, {"limit": page_size, "skip": skip})
+        errors = payload.get("errors") or []
+        if errors:
+            first = errors[0]
+            raise FirefliesListError(first.get("message") if isinstance(first, dict) else str(first))
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        page = data.get("transcripts") or []
+        rows.extend(r for r in page if isinstance(r, dict) and r.get("id"))
+        if len(page) < page_size:
+            return rows
+        skip += page_size
+        _sleep(throttle_s)
 
 
 def main(argv: list[str] | None = None) -> int:

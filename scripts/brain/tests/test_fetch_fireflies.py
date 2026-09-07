@@ -313,3 +313,109 @@ def test_path_traversal_meeting_id_rejected_exit_64(
     assert rc == 64
     assert "invalid meeting id" in capsys.readouterr().err
     assert not vault.exists() or not any(vault.rglob("source.json"))
+
+
+# --- R4 (FR-015): list query + backoff -------------------------------------
+import io as _io
+import json as _json
+import urllib.error as _uerr
+import urllib.request as _ureq
+
+
+class _RawResp:  # the file already defines a _Resp that wraps {'data': {'transcript': …}}; this one dumps the payload raw
+    def __init__(self, payload):
+        self._raw = _json.dumps(payload).encode()
+
+    def read(self):
+        return self._raw
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _page(ids):
+    return {"data": {"transcripts": [
+        {"id": i, "title": f"T {i}", "date": 1756684800000 + n, "duration": 12.5, "participants": ["a@x.io"]}
+        for n, i in enumerate(ids)]}}
+
+
+def test_list_transcripts_pages_until_short_page_and_throttles(monkeypatch):
+    import fetch_fireflies as ff
+
+    calls = []
+    pages = [_page([f"id{n}" for n in range(50)]), _page([f"id{n}" for n in range(50, 100)]), _page(["id100"])]
+
+    def fake_urlopen(req, timeout=0):
+        body = _json.loads(req.data.decode())
+        calls.append(body["variables"])
+        return _RawResp(pages[len(calls) - 1])
+
+    slept = []
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(ff, "_sleep", lambda s: slept.append(s))
+    rows = ff.list_transcripts("key", throttle_s=2.0)
+    assert [r["id"] for r in rows][:3] == ["id0", "id1", "id2"] and len(rows) == 101
+    assert calls == [{"limit": 50, "skip": 0}, {"limit": 50, "skip": 50}, {"limit": 50, "skip": 100}]
+    assert slept == [2.0, 2.0]  # throttle between pages, not after the last
+
+
+def test_post_query_backs_off_on_429_then_succeeds(monkeypatch):
+    import fetch_fireflies as ff
+
+    attempts = []
+
+    def fake_urlopen(req, timeout=0):
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise _uerr.HTTPError(ff.GRAPHQL_URL, 429, "Too Many Requests", {}, _io.BytesIO(b""))
+        return _RawResp({"data": {"transcript": {"id": "X"}}})
+
+    slept = []
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(ff, "_sleep", lambda s: slept.append(s))
+    payload = ff._post_query("key", ff.QUERY, {"id": "X"})
+    assert payload["data"]["transcript"]["id"] == "X"
+    assert slept == [1, 2]
+
+
+def test_post_query_gives_up_after_three_retries_on_5xx(monkeypatch):
+    import fetch_fireflies as ff
+    import pytest
+
+    def fake_urlopen(req, timeout=0):
+        raise _uerr.HTTPError(ff.GRAPHQL_URL, 503, "Service Unavailable", {}, _io.BytesIO(b""))
+
+    slept = []
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(ff, "_sleep", lambda s: slept.append(s))
+    with pytest.raises(_uerr.HTTPError) as exc:
+        ff._post_query("key", ff.QUERY, {"id": "X"})
+    assert exc.value.code == 503 and slept == [1, 2, 4]
+
+
+def test_post_query_does_not_retry_401(monkeypatch):
+    import fetch_fireflies as ff
+    import pytest
+
+    def fake_urlopen(req, timeout=0):
+        raise _uerr.HTTPError(ff.GRAPHQL_URL, 401, "Unauthorized", {}, _io.BytesIO(b""))
+
+    slept = []
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(ff, "_sleep", lambda s: slept.append(s))
+    with pytest.raises(_uerr.HTTPError):
+        ff._post_query("key", ff.QUERY, {"id": "X"})
+    assert slept == []
+
+
+def test_list_transcripts_raises_on_graphql_errors(monkeypatch):
+    import fetch_fireflies as ff
+    import pytest
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=0: _RawResp({"errors": [{"message": "Unauthorized"}]}))
+    with pytest.raises(ff.FirefliesListError) as exc:
+        ff.list_transcripts("key")
+    assert "Unauthorized" in str(exc.value)

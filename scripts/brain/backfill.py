@@ -258,23 +258,33 @@ def _progress_path(bd: Path) -> Path:
     return bd / "batch-progress.json"
 
 
-def _manifest_is_canonical(rows: list[Any]) -> bool:
-    """F15 (CH-9): every manifest row must be a dict with a unique string `id`,
-    and the rows must already be sorted by (occurred_at, id) — the same order
-    `build_manifest` produces and the digest/apply loops assume. A reordered or
-    duplicated manifest hides drift from the human digest review and would
-    violate oldest-to-newest apply execution."""
-    keys: list[tuple[Any, str]] = []
+def _manifest_is_canonical(rows: list[Any]) -> str | None:
+    """F15 (CH-9) + N2 (fold-1 re-review, F14 backfill half): every manifest row
+    must be a dict with a unique string `id` that round-trips through
+    `safe_meeting_id` (never a traversal-shaped or otherwise unsafe id — the
+    same rule sign_batch.py enforces on its own side, checked here BEFORE any
+    `_state`/envelope path is ever built from one of these ids), and the rows
+    must already be sorted by (occurred_at, id) — the same order
+    `build_manifest` produces and the digest/apply loops assume. `occurred_at`
+    is coerced via `str(... or "")` exactly like sign_batch.py's own check
+    (M5): a `null`/non-string value must refuse cleanly, never raise
+    `TypeError` out of `sorted()`. Returns None when canonical, or a
+    diagnostic string to print otherwise."""
+    keys: list[tuple[str, str]] = []
     seen: set[str] = set()
     for r in rows:
         if not isinstance(r, dict):
-            return False
+            return "manifest not canonical; re-run list"
         rid = r.get("id")
         if not isinstance(rid, str) or rid in seen:
-            return False
+            return "manifest not canonical; re-run list"
+        if safe_meeting_id(rid) != rid:
+            return f"manifest not canonical (unsafe id {rid!r}); re-run list"
         seen.add(rid)
-        keys.append((r.get("occurred_at"), rid))
-    return keys == sorted(keys)
+        keys.append((str(r.get("occurred_at") or ""), rid))
+    if keys != sorted(keys):
+        return "manifest not canonical; re-run list"
+    return None
 
 
 def _load_batch(vault: Path, batch_id: str) -> tuple[Path, dict[str, Any], dict[str, Any]] | None:
@@ -284,8 +294,9 @@ def _load_batch(vault: Path, batch_id: str) -> tuple[Path, dict[str, Any], dict[
     manifest = _read_json(bd / "manifest.json", None)
     if not isinstance(manifest, dict) or not isinstance(manifest.get("rows"), list):
         return None
-    if not _manifest_is_canonical(manifest["rows"]):
-        print(f"manifest not canonical; re-run list ({bd / 'manifest.json'})", file=sys.stderr)
+    canonical_error = _manifest_is_canonical(manifest["rows"])
+    if canonical_error:
+        print(f"{canonical_error} ({bd / 'manifest.json'})", file=sys.stderr)
         return None
     prog = _read_json(_progress_path(bd), {})
     if not isinstance(prog, dict):
@@ -318,10 +329,11 @@ def _acquire_batch_lock(bd: Path) -> int:
     never both load-process-checkpoint the same whole-file batch-progress.json.
     Returns 0 once the lock is held (release with `_release_batch_lock`), or 64
     when a live process already holds it. A lock left by a dead pid is broken
-    automatically (crash-safe, single retry)."""
+    automatically (crash-safe, bounded retries — M3: a stale-lock break can
+    lose a race and need another pass)."""
     bd.mkdir(parents=True, exist_ok=True)
     lock_path = bd / ".lock"
-    for _ in range(2):  # one stale-lock break, then one retry
+    for _ in range(5):  # a handful of stale-lock-break/re-acquire passes
         try:
             fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
         except FileExistsError:
@@ -333,9 +345,20 @@ def _acquire_batch_lock(bd: Path) -> int:
             if held_pid is not None and _pid_alive(held_pid):
                 print(f"batch {bd.name} locked by pid {held_pid}", file=sys.stderr)
                 return 64
+            # M3 (fold-1 re-review): rename-aside rather than a blind unlink —
+            # os.rename is atomic, so only ONE racing waiter can win the
+            # rename of THIS specific stale lock file. A loser sees
+            # FileNotFoundError (the file was already renamed by another
+            # waiter, or replaced by a fresh holder in between) and retries
+            # from scratch instead of unlinking a lock it no longer owns.
+            stale_aside = lock_path.with_name(f".lock.stale-{os.getpid()}")
+            try:
+                os.rename(str(lock_path), str(stale_aside))
+            except FileNotFoundError:
+                continue
             print(f"batch {bd.name}: breaking stale lock (pid {held_pid})", file=sys.stderr)
             try:
-                lock_path.unlink()
+                stale_aside.unlink()
             except OSError:
                 pass
             continue
@@ -558,19 +581,24 @@ def _finish_digest(vault: Path, bd: Path, manifest: dict[str, Any], prog: dict[s
 
 def cmd_dry_run(args: argparse.Namespace) -> int:
     vault, repo, kind = Path(args.vault), Path(args.repo_root), args.source
-    loaded = _load_batch(vault, args.batch)
-    if loaded is None:  # review I4: refuse like every other bad-input path, never raise
-        print(f"manifest.json missing or invalid for batch {args.batch}", file=sys.stderr)
-        return 64
-    bd, manifest, prog = loaded
-    if manifest.get("kind") != kind:  # review M8: never dry-run one kind's ids against another's batch
-        print(f"batch {args.batch} kind {manifest.get('kind')!r} != --source {kind!r}", file=sys.stderr)
-        return 64
-    # F12 (CH-4): hold the batch lock for the whole dry-run loop.
+    # N1 (fold-1 re-review, F12 TOCTOU): acquire the lock BEFORE _load_batch —
+    # the batch id is already BATCH_ID_RE-validated by main(), so the path is
+    # safe to build here. Loading batch-progress.json before the lock let a
+    # loser read a stale snapshot and overwrite the holder's final checkpoint
+    # at its own first _save_batch.
+    bd = batch_dir(vault, args.batch)
     lock_rc = _acquire_batch_lock(bd)
     if lock_rc:
         return lock_rc
     try:
+        loaded = _load_batch(vault, args.batch)
+        if loaded is None:  # review I4: refuse like every other bad-input path, never raise
+            print(f"manifest.json missing or invalid for batch {args.batch}", file=sys.stderr)
+            return 64
+        bd, manifest, prog = loaded
+        if manifest.get("kind") != kind:  # review M8: never dry-run one kind's ids against another's batch
+            print(f"batch {args.batch} kind {manifest.get('kind')!r} != --source {kind!r}", file=sys.stderr)
+            return 64
         return _cmd_dry_run_locked(args, vault, repo, kind, bd, manifest, prog)
     finally:
         _release_batch_lock(bd)
@@ -800,21 +828,22 @@ def _normalize_post_batch(post: Any, today: str) -> dict[str, Any]:
 
 def cmd_apply(args: argparse.Namespace) -> int:
     vault, repo, kind = Path(args.vault), Path(args.repo_root), args.source
-    loaded = _load_batch(vault, args.batch)
-    if loaded is None:  # review I4: refuse like every other bad-input path, never raise
-        print(f"manifest.json missing or invalid for batch {args.batch}", file=sys.stderr)
-        return 64
-    bd, manifest, prog = loaded
-    if manifest.get("kind") != kind:  # never apply one kind's ids against another's batch
-        print(f"batch {args.batch} kind {manifest.get('kind')!r} != --source {kind!r}", file=sys.stderr)
-        return 64
-    # F12 (CH-4): hold the batch lock for the whole apply loop, including every
-    # preflight check below — two concurrent `apply` invocations must never both
-    # load-process-checkpoint the same whole-file batch-progress.json.
+    # N1 (fold-1 re-review, F12 TOCTOU): acquire the lock BEFORE _load_batch,
+    # for the same reason as cmd_dry_run above — every preflight check and the
+    # first _save_batch must happen only once the lock is actually held.
+    bd = batch_dir(vault, args.batch)
     lock_rc = _acquire_batch_lock(bd)
     if lock_rc:
         return lock_rc
     try:
+        loaded = _load_batch(vault, args.batch)
+        if loaded is None:  # review I4: refuse like every other bad-input path, never raise
+            print(f"manifest.json missing or invalid for batch {args.batch}", file=sys.stderr)
+            return 64
+        bd, manifest, prog = loaded
+        if manifest.get("kind") != kind:  # never apply one kind's ids against another's batch
+            print(f"batch {args.batch} kind {manifest.get('kind')!r} != --source {kind!r}", file=sys.stderr)
+            return 64
         return _cmd_apply_locked(args, vault, repo, kind, bd, manifest, prog)
     finally:
         _release_batch_lock(bd)

@@ -1298,3 +1298,99 @@ def test_apply_skipped_post_batch_stays_untouched_when_still_nothing_authorized(
     assert rc2 == 0
     assert _bp(bd)["post_batch"] == {"skipped": "no-authorized-rows"}
     assert "post-batch: nothing authorized, skipped" not in capsys.readouterr().err   # idempotent: not reprinted
+
+
+# --- Fold round 2 (fold-1-review.md) -----------------------------------------------
+# N1 (F12 TOCTOU): the batch lock must be acquired BEFORE _load_batch reads
+# batch-progress.json, so a loser that already loaded a stale snapshot can never
+# overwrite the holder's final checkpoint at its own first _save_batch.
+def test_dry_run_lock_toctou_never_calls_load_batch_when_locked(tmp_path, monkeypatch):
+    import backfill
+    import os as _os
+    vault, bd = _seed_batch(tmp_path)
+    (bd / "batch-progress.json").write_text('{"batch_id": "x", "kind": "fireflies", "rows": {}}', encoding="utf-8")
+    before = (bd / "batch-progress.json").read_bytes()
+    (bd / ".lock").write_text(str(_os.getpid()), encoding="utf-8")
+    calls: list[str] = []
+    real_load = backfill._load_batch
+
+    def spy(vault_, batch_id):
+        calls.append(batch_id)
+        return real_load(vault_, batch_id)
+    monkeypatch.setattr(backfill, "_load_batch", spy)
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"])
+    assert rc == 64
+    assert calls == []   # never read — lock lost BEFORE any load attempt
+    assert (bd / "batch-progress.json").read_bytes() == before
+
+
+def test_apply_lock_toctou_never_calls_load_batch_when_locked(tmp_path, monkeypatch):
+    import backfill
+    import os as _os
+    vault, bd = _seed_signed(tmp_path)
+    before = (bd / "batch-progress.json").read_bytes()
+    (bd / ".lock").write_text(str(_os.getpid()), encoding="utf-8")
+    calls: list[str] = []
+    real_load = backfill._load_batch
+
+    def spy(vault_, batch_id):
+        calls.append(batch_id)
+        return real_load(vault_, batch_id)
+    monkeypatch.setattr(backfill, "_load_batch", spy)
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"])
+    assert rc == 64
+    assert calls == []
+    assert (bd / "batch-progress.json").read_bytes() == before
+
+
+# N2 (F14 backfill half): _manifest_is_canonical also refuses an unsafe id before
+# any _state path is built.
+def test_load_batch_refuses_unsafe_id_before_any_state_dir(tmp_path, capsys):
+    import backfill
+    vault, bd = _seed_batch(tmp_path, ids=("A",))
+    m = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
+    m["rows"][0]["id"] = "../x"
+    (bd / "manifest.json").write_text(json.dumps(m), encoding="utf-8")
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"])
+    assert rc == 64
+    assert "manifest not canonical (unsafe id" in capsys.readouterr().err
+    assert not (vault / "raw/media/transcripts/_state").exists()
+
+
+# M5: a mixed null/str occurred_at must refuse 64, never raise TypeError on sort.
+def test_load_batch_refuses_manifest_with_null_occurred_at_instead_of_crashing(tmp_path, capsys):
+    import backfill
+    vault, bd = _seed_batch(tmp_path, ids=("A", "B"))
+    m = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
+    m["rows"][1]["occurred_at"] = None   # later row nulled -> genuinely out of canonical order once coerced to ""
+    (bd / "manifest.json").write_text(json.dumps(m), encoding="utf-8")
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"])
+    assert rc == 64
+    assert "manifest not canonical" in capsys.readouterr().err
+
+
+# M3: stale-lock break races — a loser whose os.rename hits FileNotFoundError
+# (another waiter/holder already replaced the lock) must retry cleanly rather
+# than unlink a lock it no longer owns. A true concurrent-process race is
+# expensive/flaky to simulate in this suite; this exercises the retry path
+# deterministically via one forced FileNotFoundError, and the manual-reasoning
+# note in fold-1A-report.md covers the atomicity argument for the real race.
+def test_dry_run_stale_lock_rename_aside_retries_when_rename_loses_race(tmp_path, monkeypatch):
+    import backfill
+    import os as _os
+    vault, bd = _seed_batch(tmp_path, ids=("A",))
+    (bd / ".lock").write_text("999999", encoding="utf-8")  # not a live pid
+    real_rename = _os.rename
+    calls = {"n": 0}
+
+    def flaky_rename(src, dst):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise FileNotFoundError()
+        return real_rename(src, dst)
+    monkeypatch.setattr(backfill.os, "rename", flaky_rename)
+    monkeypatch.setattr(backfill, "run_meeting_main", _fake_run_meeting(vault))
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"])
+    assert rc == 0
+    assert calls["n"] >= 2   # the forced loss, then the real break
+    assert not (bd / ".lock").exists()

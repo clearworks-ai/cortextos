@@ -62,7 +62,7 @@ describe('AgentManager occupied-slot recovery', () => {
     rmSync(testDir, { recursive: true, force: true });
   });
 
-  it('reconciles a dead occupied slot before starting, without pendingRestarts noise', async () => {
+  it('evicts a dead occupied slot before starting, without pendingRestarts noise', async () => {
     const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
     const fakeEntry = {
       process: {
@@ -104,5 +104,6 @@ describe('AgentManager occupied-slot recovery', () => {
 
     expect(stopSpy).not.toHaveBeenCalled();
     expect((am as unknown as { pendingRestarts: Map<string, unknown> }).pendingRestarts.has('alice')).toBe(false);
+    expect((am as unknown as { agents: Map<string, unknown> }).agents.has('alice')).toBe(true);
   });
 });

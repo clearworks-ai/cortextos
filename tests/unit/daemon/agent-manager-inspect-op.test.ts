@@ -53,7 +53,7 @@ describe('AgentManager.inspectAgentOp — issue #346 (DEDUPED vs NOT_FOUND)', ()
     // reconciliation keeps it (a phantom/dead entry would be reaped, turning
     // this into a legitimate NOT_FOUND — a different case).
     (am as unknown as { agents: Map<string, unknown> }).agents.set('alice', {
-      process: { getStatus: () => ({ pid: 1234 }) },
+      process: { getStatus: () => ({ status: 'running', pid: 1234 }) },
       checker: { stop() {} },
     } as unknown);
     vi.spyOn(process, 'kill').mockImplementation(() => undefined as unknown as true);

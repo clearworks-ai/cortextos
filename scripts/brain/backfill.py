@@ -17,6 +17,7 @@ import contextlib
 import hashlib
 import io
 import json
+import math
 import os
 import random
 import re
@@ -25,6 +26,7 @@ import subprocess
 import sys
 import time
 import traceback
+import urllib.error
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -32,7 +34,9 @@ from typing import Any
 import brain_rollup
 import progress
 import run_meeting
+import sign_marker
 from atomic import atomic_write
+from fetch_fireflies import FirefliesListError
 from fetch_fireflies import _load_api_key as load_api_key
 from fetch_fireflies import fetch_error_path
 from fetch_fireflies import list_transcripts  # module attribute: test seam
@@ -147,12 +151,26 @@ def cmd_list(args: argparse.Namespace) -> int:
     if not api_key:
         print("missing FIREFLIES_API_KEY", file=sys.stderr)
         return 2
-    rows = list_transcripts(api_key, throttle_s=args.rate)
+    # M1 (Spec M-1): a Fireflies API failure (bad key, network, transport) must
+    # refuse cleanly — never an uncaught traceback, never a half-written batch.
+    try:
+        rows = list_transcripts(api_key, throttle_s=args.rate)
+    except (FirefliesListError, urllib.error.URLError, OSError) as exc:
+        print(f"list failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
     manifest_rows = build_manifest(rows, vault=vault, kind=args.source, since=args.since, until=args.until)
     batch_id = _batch_id(args.source)
+    bd = batch_dir(vault, batch_id)
+    # F19 (CH-18): create the batch dir EXCLUSIVELY — two `list` invocations in the
+    # same UTC second must never let the second silently clobber the first's manifest.
+    try:
+        bd.mkdir(parents=True, exist_ok=False)
+    except FileExistsError:
+        print(f"batch {batch_id} already exists; retry in 1 s", file=sys.stderr)
+        return 64
     doc = {"batch_id": batch_id, "kind": args.source, "created_at": _now(),
            "since": args.since, "until": args.until, "rows": manifest_rows}
-    _write_json(batch_dir(vault, batch_id) / "manifest.json", doc)
+    _write_json(bd / "manifest.json", doc)
     applied = sum(1 for r in manifest_rows if r["already_applied"])
     print(f"manifest: {len(manifest_rows)} total, {applied} already applied, {len(manifest_rows) - applied} pending")
     if getattr(build_manifest, "invalid", 0):
@@ -186,6 +204,19 @@ def _date_arg(value: str) -> str:
     return value
 
 
+def _max_usd_arg(value: str) -> float:
+    """argparse `type=` for --max-usd (F13/CH-7): NaN/inf/negative must never
+    reach the budget ledger — NaN comparisons are always False and a negative
+    cap would corrupt the `spent > args.max_usd` guard."""
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"invalid --max-usd {value!r} (expected a finite number >= 0)") from exc
+    if not math.isfinite(parsed) or parsed < 0:
+        raise argparse.ArgumentTypeError(f"invalid --max-usd {value!r} (expected a finite number >= 0)")
+    return parsed
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="FR-015 backfill lister + batch runner")
     p.add_argument("--source", default="fireflies")
@@ -198,7 +229,7 @@ def main(argv: list[str] | None = None) -> int:
     s_list.add_argument("--since", type=_date_arg)
     s_list.add_argument("--until", type=_date_arg)
     s_dry = sub.add_parser("dry-run")
-    s_dry.add_argument("--max-usd", type=float, default=DEFAULT_MAX_USD)
+    s_dry.add_argument("--max-usd", type=_max_usd_arg, default=DEFAULT_MAX_USD)
     sub.add_parser("apply")
     args = p.parse_args(argv)
 
@@ -227,12 +258,34 @@ def _progress_path(bd: Path) -> Path:
     return bd / "batch-progress.json"
 
 
+def _manifest_is_canonical(rows: list[Any]) -> bool:
+    """F15 (CH-9): every manifest row must be a dict with a unique string `id`,
+    and the rows must already be sorted by (occurred_at, id) — the same order
+    `build_manifest` produces and the digest/apply loops assume. A reordered or
+    duplicated manifest hides drift from the human digest review and would
+    violate oldest-to-newest apply execution."""
+    keys: list[tuple[Any, str]] = []
+    seen: set[str] = set()
+    for r in rows:
+        if not isinstance(r, dict):
+            return False
+        rid = r.get("id")
+        if not isinstance(rid, str) or rid in seen:
+            return False
+        seen.add(rid)
+        keys.append((r.get("occurred_at"), rid))
+    return keys == sorted(keys)
+
+
 def _load_batch(vault: Path, batch_id: str) -> tuple[Path, dict[str, Any], dict[str, Any]] | None:
     """Returns None (never raises) when manifest.json is missing/invalid — callers
     print + return 64, consistent with every other refusal in this module (review I4)."""
     bd = batch_dir(vault, batch_id)
     manifest = _read_json(bd / "manifest.json", None)
     if not isinstance(manifest, dict) or not isinstance(manifest.get("rows"), list):
+        return None
+    if not _manifest_is_canonical(manifest["rows"]):
+        print(f"manifest not canonical; re-run list ({bd / 'manifest.json'})", file=sys.stderr)
         return None
     prog = _read_json(_progress_path(bd), {})
     if not isinstance(prog, dict):
@@ -245,6 +298,59 @@ def _load_batch(vault: Path, batch_id: str) -> tuple[Path, dict[str, Any], dict[
 
 def _save_batch(bd: Path, prog: dict[str, Any]) -> None:
     _write_json(_progress_path(bd), prog)
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        # Any other errno (e.g. EPERM) means the pid exists but we cannot signal
+        # it — treat conservatively as alive rather than break a live lock.
+        return True
+    return True
+
+
+def _acquire_batch_lock(bd: Path) -> int:
+    """F12 (CH-4): an exclusive `bd/.lock` held for the duration of cmd_dry_run
+    and cmd_apply — two concurrent invocations against the same batch must
+    never both load-process-checkpoint the same whole-file batch-progress.json.
+    Returns 0 once the lock is held (release with `_release_batch_lock`), or 64
+    when a live process already holds it. A lock left by a dead pid is broken
+    automatically (crash-safe, single retry)."""
+    bd.mkdir(parents=True, exist_ok=True)
+    lock_path = bd / ".lock"
+    for _ in range(2):  # one stale-lock break, then one retry
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            held_pid: int | None = None
+            try:
+                held_pid = int(lock_path.read_text(encoding="utf-8").strip())
+            except (OSError, ValueError):
+                held_pid = None
+            if held_pid is not None and _pid_alive(held_pid):
+                print(f"batch {bd.name} locked by pid {held_pid}", file=sys.stderr)
+                return 64
+            print(f"batch {bd.name}: breaking stale lock (pid {held_pid})", file=sys.stderr)
+            try:
+                lock_path.unlink()
+            except OSError:
+                pass
+            continue
+        with os.fdopen(fd, "w") as f:
+            f.write(str(os.getpid()))
+        return 0
+    print(f"batch {bd.name}: could not acquire lock", file=sys.stderr)
+    return 64
+
+
+def _release_batch_lock(bd: Path) -> None:
+    try:
+        (bd / ".lock").unlink()
+    except OSError:
+        pass
 
 
 def _row(prog: dict[str, Any], kind: str, meeting_id: str) -> dict[str, Any]:
@@ -276,7 +382,17 @@ def _dry_run_record(vault: Path, kind: str, meeting_id: str, rc: int, capture: s
     validated = _read_json(env / "validated.json", {}) if rc == 0 else {}
     extraction = _read_json(env / "extraction.json", {})
     kept = {k: len(validated.get(k) or []) for k in ("decisions", "commitments", "open_questions")}
-    cost = float(extraction.get("cost_usd") or 0.0) if isinstance(extraction, dict) else 0.0
+    cost_raw = extraction.get("cost_usd") if isinstance(extraction, dict) else None
+    try:
+        cost = float(cost_raw) if cost_raw is not None else 0.0
+    except (TypeError, ValueError):
+        cost = 0.0
+    if not math.isfinite(cost) or cost < 0:
+        # F13 (CH-7): a corrupt/negative measured cost must never DECREASE the
+        # ledger — ignore it (charge 0 for this attempt) rather than let a bad
+        # extraction.json weaken or disable the --max-usd budget halt.
+        print(f"bad cost_usd ignored: {cost_raw!r} for {kind}:{meeting_id}", file=sys.stderr)
+        cost = 0.0
     extracted_at = str(extraction.get("extracted_at") or "") if isinstance(extraction, dict) else ""
     # Charge only when THIS attempt produced the extraction (G0b-5): a retry after a
     # later-stage failure finds extract_meeting's inputSha short-circuit — no new spend.
@@ -450,6 +566,18 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
     if manifest.get("kind") != kind:  # review M8: never dry-run one kind's ids against another's batch
         print(f"batch {args.batch} kind {manifest.get('kind')!r} != --source {kind!r}", file=sys.stderr)
         return 64
+    # F12 (CH-4): hold the batch lock for the whole dry-run loop.
+    lock_rc = _acquire_batch_lock(bd)
+    if lock_rc:
+        return lock_rc
+    try:
+        return _cmd_dry_run_locked(args, vault, repo, kind, bd, manifest, prog)
+    finally:
+        _release_batch_lock(bd)
+
+
+def _cmd_dry_run_locked(args: argparse.Namespace, vault: Path, repo: Path, kind: str, bd: Path,
+                         manifest: dict[str, Any], prog: dict[str, Any]) -> int:
     started_at = prog.get("dry_run_started_at") or _now()
     prog["dry_run_started_at"] = started_at
 
@@ -480,7 +608,18 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
         prior_dry = prior_entry.get("dry_run") or {}
         prior_cost = float(prior_dry.get("cost_usd") or 0.0)
         prior_attempts = int(prior_dry.get("attempts") or 0)
-        stamp_before = _extraction_stamp(vault, kind, mid)
+        # F11 (CH-2): a crash between a paid extraction.json write and this row's
+        # own checkpoint below must not read as "reused" on resume — persist the
+        # pre-attempt stamp BEFORE launching and trust the persisted value (never
+        # a freshly re-read extraction.json, which may already reflect the
+        # crashed attempt's own paid write) whenever one survived a crash.
+        pending = entry.get("dry_run_pending")
+        if isinstance(pending, dict) and "stamp_before" in pending:
+            stamp_before = pending.get("stamp_before") or ""
+        else:
+            stamp_before = _extraction_stamp(vault, kind, mid)
+            entry["dry_run_pending"] = {"stamp_before": stamp_before, "attempt": prior_attempts + 1, "at": _now()}
+            _save_batch(bd, prog)
         t0 = time.monotonic()
         rc, capture, stderr = _run_dry_capture(mid, vault, repo)
         elapsed = time.monotonic() - t0
@@ -492,6 +631,7 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
         rec = _dry_run_record(vault, kind, mid, rc, capture, stamp_before, elapsed,
                                prior_cost=prior_cost, attempts=prior_attempts + 1)
         entry["dry_run"] = rec
+        entry.pop("dry_run_pending", None)
         spent = _spent()
         _save_batch(bd, prog)  # checkpoint after every meeting (resumable)
         if rc == 0:

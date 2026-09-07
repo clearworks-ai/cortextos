@@ -123,7 +123,10 @@ def test_cmd_list_refuses_unknown_source_and_missing_key(tmp_path, monkeypatch, 
 def _seed_batch(tmp_path: Path, ids=("A", "B", "C"), applied=()):
     import backfill
     vault = tmp_path / "vault"
-    rows = [{"kind": "fireflies", "id": i, "title": f"T{i}", "occurred_at": f"2025-09-0{n+1}T00:00:00+00:00",
+    # F15: occurred_at must be zero-padded so rows stay canonically sorted by
+    # (occurred_at, id) for batches larger than 9 rows (e.g. the 14-row digest
+    # test) -- "2025-09-9" would otherwise lexically outrank "2025-09-10".
+    rows = [{"kind": "fireflies", "id": i, "title": f"T{i}", "occurred_at": f"2025-09-{n+1:02d}T00:00:00+00:00",
              "duration_s": 600, "participant_count": 1, "already_applied": i in applied} for n, i in enumerate(ids)]
     bd = backfill.batch_dir(vault, "fireflies-20260906T000000Z")
     bd.mkdir(parents=True)

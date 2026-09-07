@@ -3,7 +3,13 @@ import { execFileSync } from 'child_process';
 import { mkdirSync, mkdtempSync, readFileSync as readFile, rmSync, writeFileSync as writeFile } from 'fs';
 import { tmpdir } from 'os';
 import { join as pathJoin } from 'path';
-import { composeSyntheticMarkdown, resolveEngagementId, setLastUpdate } from '../../../scripts/brain/status_plan';
+import {
+  composeSyntheticMarkdown,
+  deriveStatusMaterial,
+  resolveContactDisplay,
+  resolveEngagementId,
+  setLastUpdate,
+} from '../../../scripts/brain/status_plan';
 
 const ENGAGEMENT_MD = `# Client: Alloi — Managed Services
 
@@ -46,15 +52,93 @@ last_update:
 ## History (dated, newest first)
 
 - 2026-09-04 — Alloi Tacticals Troubleshooting (meeting: meetings/x.md) [source: fireflies:01M1MW2G]
-  - Outcomes: Installed skill v4.
-  - Decisions: Reports land Monday EOD.
+  - Outcomes: Installed skill v4 and resolved the version mismatch. Weekly runs now post to Slack job channels. A third sentence that also ships.
+  - Decisions: Reports land Monday EOD. ; Use the Alloi skill config. ; A third decision that also ships.
 
 ## Open Items
 
 | Item | Owner | Deadline | Source | Status |
 |---|---|---|---|---|
 | Run tactical reports | Ivette Ramos | — | commitment:b | open |
+| Send the updated skill and calendar codes. | Josh Weiss | — | commitment:c | open |
+| Already closed item | Josh Weiss | — | commitment:d | done |
 `;
+
+const CLIENT_PAGE_MD = `# Client: Alloi
+
+## Contacts
+
+domains: alloi.us
+
+- Marcos Santa Ana — Ops/IT Lead — marcos@alloi.us
+
+## Current state
+
+- Deal stage: won
+`;
+
+describe('deriveStatusMaterial (Josh 2026-09-06: the draft must carry real meeting content)', () => {
+  const children = [
+    { node: { id: 'alloi-03', kind: 'project', client: 'alloi', parent: 'alloi-01', title: 'Tactical Reports', path: '' }, md: CHILD_MD },
+  ];
+
+  it('turns every Outcomes sentence and every Decision into completedTasks, no cap, newest first', () => {
+    const { completedTasks } = deriveStatusMaterial(ENGAGEMENT_MD, children, '2026-09-10');
+    expect(completedTasks.map((t) => t.title)).toEqual([
+      'Installed skill v4 and resolved the version mismatch',
+      'Weekly runs now post to Slack job channels',
+      'A third sentence that also ships',
+      'Decided: Reports land Monday EOD',
+      'Decided: Use the Alloi skill config',
+      'Decided: A third decision that also ships',
+    ]);
+    expect(completedTasks.every((t) => t.completedAt === '2026-09-04')).toBe(true);
+  });
+
+  it('turns only OPEN our-side open items into in_progress issues', () => {
+    const { issues } = deriveStatusMaterial(ENGAGEMENT_MD, children, '2026-09-10');
+    expect(issues).toEqual([{ title: 'Send the updated skill and calendar codes', status: 'in_progress', updated_at: '2026-09-10' }]);
+  });
+
+  it('FINAL F-1: the R2 writer\'s "none" placeholders never become bullets', () => {
+    const md = CHILD_MD.replace(/  - Outcomes:[^\n]*\n  - Decisions:[^\n]*/, '  - Outcomes: none\n  - Decisions: none');
+    const { completedTasks } = deriveStatusMaterial(ENGAGEMENT_MD, [{ ...children[0], md }], '2026-09-10');
+    expect(completedTasks).toEqual([]);
+  });
+
+  it('FINAL F-2: an escaped pipe inside an Open Items cell does not shift columns or drop the row', () => {
+    const md = CHILD_MD.replace(
+      '| Send the updated skill and calendar codes. | Josh Weiss |',
+      '| Send the skill \\| calendar codes \\\\ instructions. | Josh Weiss |',
+    );
+    const { issues } = deriveStatusMaterial(ENGAGEMENT_MD, [{ ...children[0], md }], '2026-09-10');
+    expect(issues.map((i) => i.title)).toEqual(['Send the skill | calendar codes \\ instructions']);
+  });
+
+  it('FINAL F-4: escaped pipes and backslashes inside a Decision are unescaped', () => {
+    const md = CHILD_MD.replace('Use the Alloi skill config.', 'Use the Alloi \\| landscape config.');
+    const { completedTasks } = deriveStatusMaterial(ENGAGEMENT_MD, [{ ...children[0], md }], '2026-09-10');
+    expect(completedTasks.map((t) => t.title)).toContain('Decided: Use the Alloi | landscape config');
+  });
+
+  it('yields nothing from a History entry without sub-bullets', () => {
+    const bare = CHILD_MD.replace(/\n  - Outcomes:[^\n]*\n  - Decisions:[^\n]*/, '');
+    const { completedTasks } = deriveStatusMaterial(ENGAGEMENT_MD, [{ ...children[0], md: bare }], '2026-09-10');
+    expect(completedTasks).toEqual([]);
+  });
+});
+
+describe('resolveContactDisplay', () => {
+  it('replaces a bare Reporting email with the client page contact name', () => {
+    expect(resolveContactDisplay('marcos@alloi.us', CLIENT_PAGE_MD)).toBe('Marcos Santa Ana <marcos@alloi.us>');
+  });
+
+  it('leaves a named contact or an unknown email untouched', () => {
+    expect(resolveContactDisplay('Marcos Santa Ana <marcos@alloi.us>', CLIENT_PAGE_MD)).toBe('Marcos Santa Ana <marcos@alloi.us>');
+    expect(resolveContactDisplay('nobody@alloi.us', CLIENT_PAGE_MD)).toBe('nobody@alloi.us');
+    expect(resolveContactDisplay('marcos@alloi.us', '')).toBe('marcos@alloi.us');
+  });
+});
 
 describe('composeSyntheticMarkdown', () => {
   it('builds a # Client: header, merges Reporting/History/Open Items newest-first', () => {
@@ -65,6 +149,17 @@ describe('composeSyntheticMarkdown', () => {
     expect(md).toContain('cadence: weekly');
     expect(md).toContain('- 2026-09-04 — Alloi Tacticals Troubleshooting');
     expect(md).toContain('| Run tactical reports | Ivette Ramos |');
+  });
+
+  it('FINAL F-3: the milestone fallback lists only OPEN child projects', () => {
+    const eng = { id: 'alloi-01', kind: 'engagement', client: 'alloi', parent: '', title: 'Managed Services', path: '' };
+    const open = { node: { id: 'alloi-03', kind: 'project', client: 'alloi', parent: 'alloi-01', title: 'Tactical Reports', path: '', delivery_state: 'active' }, md: CHILD_MD };
+    const closed = { node: { id: 'alloi-04', kind: 'project', client: 'alloi', parent: 'alloi-01', title: 'Old Migration', path: '', delivery_state: 'closed' }, md: CHILD_MD };
+    const md = composeSyntheticMarkdown('Alloi', eng, ENGAGEMENT_MD, [closed, open]);
+    expect(md).toContain('milestones: Tactical Reports');
+    expect(md).not.toContain('Old Migration');
+    const none = composeSyntheticMarkdown('Alloi', eng, ENGAGEMENT_MD, [closed]);
+    expect(none).not.toContain('milestones:');
   });
 });
 
@@ -148,6 +243,9 @@ function seedVault(): string {
   mkdirSync(proj, { recursive: true });
   writeFile(pathJoin(proj, 'alloi-01.md'), ENGAGEMENT_MD);
   writeFile(pathJoin(proj, 'alloi-03.md'), CHILD_MD);
+  const clients = pathJoin(vault, 'raw/areas/clearworks/org-brain/clients');
+  mkdirSync(clients, { recursive: true });
+  writeFile(pathJoin(clients, 'alloi.md'), CLIENT_PAGE_MD);
   return vault;
 }
 
@@ -182,6 +280,29 @@ function seedVaultBrief(): string {
   writeFile(pathJoin(proj, 'alloi-01.md'), ENGAGEMENT_MD_BAD);
   return vault;
 }
+
+describe('status_plan.ts CLI (draft content — Josh 2026-09-06 changes requested)', () => {
+  it('the client draft names the contact, leads with the meeting outcome, lists decisions and our open commitment, and never says "Steady progress"', () => {
+    const vault = seedVault();
+    const tsxBin = require.resolve('tsx/cli');
+    const scriptPath = pathJoin(__dirname, '../../../scripts/brain/status_plan.ts');
+    const preview = execFileSync('node', [tsxBin, scriptPath, '--client', 'alloi', '--node', 'alloi-01', '--today', '2026-09-10', '--vault', vault], { encoding: 'utf8' });
+    const previewJson = JSON.parse(preview.trim().split('\n').pop() as string);
+    expect(previewJson.action).toBe('draft');
+    const body = String(previewJson.fileContent);
+    expect(body).toContain('Hi Marcos');
+    expect(body).not.toContain('marcos@alloi.us —');
+    expect(body).toContain('*Installed skill v4 and resolved the version mismatch.*');
+    expect(body).toContain('• Weekly runs now post to Slack job channels');
+    expect(body).toContain('• Decided: Reports land Monday EOD');
+    expect(body).toContain('• Decided: A third decision that also ships'); // no cap
+    expect(body).toContain('• Send the updated skill and calendar codes');
+    expect(body).toContain('Next up: Tactical Reports.');
+    expect(body).not.toContain('Steady progress');
+    expect(body).not.toContain('the next milestone');
+    rmSync(vault, { recursive: true, force: true });
+  });
+});
 
 describe('status_plan.ts CLI (--write parity)', () => {
   it('G2-P1-2: a private brief (BAD/MIXED) is persisted but last_update stays untouched', () => {

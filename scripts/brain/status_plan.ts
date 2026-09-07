@@ -5,7 +5,12 @@
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
-import { buildStatusReportPlan, type StatusReportPlan } from '../../src/bus/delivery-status';
+import {
+  buildStatusReportPlan,
+  type GatherIssue,
+  type GatherTask,
+  type StatusReportPlan,
+} from '../../src/bus/delivery-status';
 
 export interface NodeMeta {
   id: string;
@@ -14,6 +19,7 @@ export interface NodeMeta {
   parent: string;
   title: string;
   path: string;
+  delivery_state?: string;
 }
 
 export function parseNodeBlock(text: string, path: string): NodeMeta {
@@ -36,6 +42,7 @@ export function parseNodeBlock(text: string, path: string): NodeMeta {
     parent: out.parent || '',
     title: out.title || '',
     path,
+    delivery_state: out.delivery_state || '',
   };
 }
 
@@ -130,13 +137,176 @@ function openItemRows(md: string): string[] {
     .filter((line) => line.trim().startsWith('|') && !/^\|\s*-+/.test(line.trim()));
 }
 
+const SENTENCE_SPLIT_RE = /(?<=[.!?])\s+(?=[A-Z"'(])/;
+const OUR_SIDE_OWNER_RE = /\b(josh|clearworks)\b/i;
+
+function singleLine(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function stripTrailingPeriod(text: string): string {
+  return text.replace(/\.$/, '');
+}
+
+/** The R2 writer's literal placeholder for an empty list (FINAL F-1). */
+function isPlaceholder(text: string): boolean {
+  return /^(none|n\/a|-|—)$/i.test(text.trim());
+}
+
+/** Undo the renderer's table escaping (`\|` → `|`, `\\` → `\`) (FINAL F-2/F-4). */
+function unescapeCell(text: string): string {
+  return text.replace(/\\([\\|])/g, '$1');
+}
+
+/** Split a table row on unescaped pipes only — a pipe preceded by an odd run of backslashes is content (FINAL F-2). */
+function splitUnescapedPipes(row: string): string[] {
+  const cells: string[] = [];
+  let cur = '';
+  let backslashes = 0;
+  for (const ch of row) {
+    if (ch === '\\') {
+      backslashes += 1;
+      cur += ch;
+      continue;
+    }
+    if (ch === '|' && backslashes % 2 === 0) {
+      cells.push(cur);
+      cur = '';
+    } else {
+      cur += ch;
+    }
+    backslashes = 0;
+  }
+  cells.push(cur);
+  return cells;
+}
+
+const CLOSED_STATE_RE = /^(closed|done|complete|completed|archived|cancelled|canceled)$/i;
+
+function isOpenNode(node: NodeMeta): boolean {
+  return !CLOSED_STATE_RE.test((node.delivery_state || '').trim());
+}
+
+/** Nested `  - Outcomes:` / `  - Decisions:` sub-bullets under one dated History entry. */
+function historySubBullets(entryText: string): { outcomes: string[]; decisions: string[] } {
+  const outcomes: string[] = [];
+  const decisions: string[] = [];
+  for (const line of entryText.split('\n')) {
+    const m = /^\s+-\s*(Outcomes|Decisions)\s*:\s*(.*)$/.exec(line);
+    if (!m) continue;
+    const body = singleLine(m[2]);
+    if (!body || isPlaceholder(body)) continue;
+    if (m[1] === 'Outcomes') {
+      for (const s of body.split(SENTENCE_SPLIT_RE)) {
+        const t = stripTrailingPeriod(singleLine(s));
+        if (t && !isPlaceholder(t)) outcomes.push(t);
+      }
+    } else {
+      for (const d of body.split(/\s*;\s*/)) {
+        const t = unescapeCell(stripTrailingPeriod(singleLine(d)));
+        if (t && !isPlaceholder(t)) decisions.push(t);
+      }
+    }
+  }
+  return { outcomes, decisions };
+}
+
+/** `| Item | Owner | Deadline | Source | Status |` row → cells (no leading/trailing empties). */
+function openItemCells(row: string): string[] {
+  const cells = splitUnescapedPipes(row.trim()).map((c) => unescapeCell(c.trim()));
+  return cells.slice(1, cells.length - 1);
+}
+
+export interface StatusMaterial {
+  completedTasks: GatherTask[];
+  issues: GatherIssue[];
+}
+
+/**
+ * Josh 2026-09-06 (D-09 changes requested): the engine's own History parser
+ * keeps only the top-level `- DATE — title` line, so the meeting's Outcomes
+ * and Decisions sub-bullets (written by R2) never reached the draft and the
+ * client got "Steady progress … the next milestone". The engine stays
+ * (render-only change aside); this feeds the same facts through its
+ * existing `completedTasks` (done bullets, newest meeting first) and
+ * `issues` in_progress (our-side open commitments) channels.
+ *
+ * No caps (Josh 2026-09-06: "as long as it reasonably needs to be") —
+ * every outcome sentence, every decision, every our-side open commitment.
+ */
+export function deriveStatusMaterial(
+  engagementMd: string,
+  children: { node: NodeMeta; md: string }[],
+  today: string,
+): StatusMaterial {
+  const allDocs = [engagementMd, ...children.map((c) => c.md)];
+  const merged = allDocs.flatMap(historyEntries).sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  const completedTasks: GatherTask[] = [];
+  for (const entry of merged) {
+    const { outcomes, decisions } = historySubBullets(entry.text);
+    for (const o of outcomes) completedTasks.push({ title: o, completedAt: entry.date });
+    for (const d of decisions) completedTasks.push({ title: `Decided: ${d}`, completedAt: entry.date });
+  }
+  const issues: GatherIssue[] = [];
+  for (const row of allDocs.flatMap(openItemRows)) {
+    const [item, owner, , , status] = openItemCells(row);
+    if (!item || /^item$/i.test(item)) continue;
+    if (status && !/^open$/i.test(status)) continue;
+    if (!OUR_SIDE_OWNER_RE.test(owner || '')) continue;
+    issues.push({ title: stripTrailingPeriod(singleLine(item)), status: 'in_progress', updated_at: today });
+  }
+  return { completedTasks, issues };
+}
+
+/** `- Name — role — email` lines under the client page's `## Contacts`. */
+export function resolveContactDisplay(reportingContact: string, clientPageMd: string): string {
+  const contact = reportingContact.trim();
+  if (!/^[^\s<>@]+@[^\s<>@]+$/.test(contact)) return contact;
+  const email = contact.toLowerCase();
+  for (const line of extractSection(clientPageMd, 'Contacts').split('\n')) {
+    const m = /^-\s*(.+?)\s+—\s+(?:.+?\s+—\s+)?(\S+@\S+)\s*$/.exec(line.trim());
+    if (m && m[2].toLowerCase() === email) return `${m[1].trim()} <${contact}>`;
+  }
+  return contact;
+}
+
+function reportingWithDefaults(
+  reporting: string,
+  clientPageMd: string,
+  children: { node: NodeMeta; md: string }[],
+): string {
+  const lines = reporting.split('\n');
+  let hasMilestones = false;
+  const out = lines.map((line) => {
+    const m = /^([ \t]*-?[ \t]*)(contact|milestones)([ \t]*:)[ \t]*(.*)$/.exec(line);
+    if (!m) return line;
+    if (m[2] === 'milestones') {
+      hasMilestones = m[4].trim() !== '';
+      return line;
+    }
+    return `${m[1]}${m[2]}${m[3]} ${resolveContactDisplay(m[4], clientPageMd)}`.replace(/\s+$/, '');
+  });
+  if (!hasMilestones) {
+    // FINAL F-3: only OPEN child projects are a plausible "next up".
+    const titles = children.filter((c) => isOpenNode(c.node)).map((c) => c.node.title).filter(Boolean);
+    if (titles.length > 0) {
+      const idx = out.findIndex((l) => /^[ \t]*-?[ \t]*milestones[ \t]*:/.test(l));
+      const line = `milestones: ${titles.join('; ')}`;
+      if (idx >= 0) out[idx] = line;
+      else out.push(line);
+    }
+  }
+  return out.join('\n');
+}
+
 export function composeSyntheticMarkdown(
   clientTitle: string,
   engagement: NodeMeta,
   engagementMd: string,
   children: { node: NodeMeta; md: string }[],
+  clientPageMd = '',
 ): string {
-  const reporting = extractSection(engagementMd, 'Reporting').trim();
+  const reporting = reportingWithDefaults(extractSection(engagementMd, 'Reporting').trim(), clientPageMd, children);
   const allDocs = [engagementMd, ...children.map((c) => c.md)];
   const merged = allDocs.flatMap(historyEntries).sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
   const openRows = allDocs.flatMap(openItemRows);
@@ -224,8 +394,17 @@ export function main(argv: string[]): number {
     .filter((n) => n.kind === 'project' && n.parent === engagement.id)
     .map((n) => ({ node: n, md: readFileSync(n.path, 'utf8') }));
   const clientTitle = clientSlug.charAt(0).toUpperCase() + clientSlug.slice(1);
-  const synthetic = composeSyntheticMarkdown(clientTitle, engagement, engagementMd, children);
-  const plan = buildStatusReportPlan({ slug: clientSlug, clientFileMarkdown: synthetic, today });
+  const clientPagePath = join(vault, 'raw/areas/clearworks/org-brain/clients', `${clientSlug}.md`);
+  const clientPageMd = existsSync(clientPagePath) ? readFileSync(clientPagePath, 'utf8') : '';
+  const synthetic = composeSyntheticMarkdown(clientTitle, engagement, engagementMd, children, clientPageMd);
+  const material = deriveStatusMaterial(engagementMd, children, today);
+  const plan = buildStatusReportPlan({
+    slug: clientSlug,
+    clientFileMarkdown: synthetic,
+    today,
+    completedTasks: material.completedTasks,
+    issues: material.issues,
+  });
 
   if (plan.action === 'skip') {
     process.stdout.write(`skip: ${plan.skipReason || 'skip'}\n`);

@@ -362,6 +362,13 @@ def print_dry_run(org_root: Path, payload: dict[str, Any]) -> None:
             diff = unified_diff(path, old, new)
             if diff:
                 print(diff, end="" if diff.endswith("\n") else "\n")
+            else:
+                # A page that already carries this meeting (re-run after
+                # --apply, e.g. a phase-3 re-sign) has no hunks, but FR-012's
+                # "page diff" noun still needs to name the page the reviewer
+                # is being asked to trust as unchanged — so print an explicit
+                # zero-hunk header instead of nothing.
+                print(f"--- a/{path}\n+++ b/{path}\n(no change: page already carries this meeting)")
         home = planned[0][0] if planned else org_root
         print(reason_line(meeting, home))
 

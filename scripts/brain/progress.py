@@ -511,6 +511,24 @@ def reconstruct_task_map_from_bus(meeting_id: str, commitments: dict[str, str]) 
     return recovered
 
 
+def pathspec_dirty(vault: Path, pathspec: list[str]) -> bool:
+    """True when `git status --porcelain -- <pathspec>` reports anything
+    (modified or untracked) for the FR-014 pathspec. Used by the commit step
+    so a run whose `commit` progress key is already done (an R2-applied
+    meeting re-run with --force after phase-3 writers landed) still commits
+    what those later steps wrote instead of leaving the vault dirty."""
+    existing = [p for p in pathspec if (Path(vault) / p).exists()]
+    if not existing:
+        return False
+    res = subprocess.run(
+        ["git", "-C", str(vault), "status", "--porcelain", "--", *existing],
+        capture_output=True, text=True, timeout=60,
+    )
+    if res.returncode != 0:
+        return False
+    return bool(res.stdout.strip())
+
+
 def resolve_vault_sha_from_history(vault: Path, pathspec: list[str]) -> str | None:
     """CH-7: a crash between `git commit` succeeding and `progress.commit` /
     `receipt.json` being written leaves `vault_commit`'s next call correctly

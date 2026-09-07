@@ -421,6 +421,10 @@ def test_sign_dry_run_sets_phase3_hash_from_real_run_dry_capture(tmp_path: Path)
     (env_dir / "source.json").write_bytes(raw)
     sha = hashlib.sha256(raw).hexdigest()
     (env_dir / "source.sha256").write_text(sha + "\n", encoding="utf-8")
+    # F18 (CH-17): coherent envelope required by the already-fetched short-circuit
+    (env_dir / "meta.json").write_text(
+        json.dumps({"fetched_at": "2026-09-04T17:00:00Z", "fetcher": "fetch_fireflies/1"}), encoding="utf-8",
+    )
     extraction = {
         "schema": "brain.extraction/1", "inputSha": sha, "promptSha": "p", "model": "sonnet",
         "cost_usd": 0, "extracted_at": "2026-09-05T00:00:00Z",

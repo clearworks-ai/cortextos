@@ -100,6 +100,27 @@ describe('deriveStatusMaterial (Josh 2026-09-06: the draft must carry real meeti
     expect(issues).toEqual([{ title: 'Send the updated skill and calendar codes', status: 'in_progress', updated_at: '2026-09-10' }]);
   });
 
+  it('FINAL F-1: the R2 writer\'s "none" placeholders never become bullets', () => {
+    const md = CHILD_MD.replace(/  - Outcomes:[^\n]*\n  - Decisions:[^\n]*/, '  - Outcomes: none\n  - Decisions: none');
+    const { completedTasks } = deriveStatusMaterial(ENGAGEMENT_MD, [{ ...children[0], md }], '2026-09-10');
+    expect(completedTasks).toEqual([]);
+  });
+
+  it('FINAL F-2: an escaped pipe inside an Open Items cell does not shift columns or drop the row', () => {
+    const md = CHILD_MD.replace(
+      '| Send the updated skill and calendar codes. | Josh Weiss |',
+      '| Send the skill \\| calendar codes \\\\ instructions. | Josh Weiss |',
+    );
+    const { issues } = deriveStatusMaterial(ENGAGEMENT_MD, [{ ...children[0], md }], '2026-09-10');
+    expect(issues.map((i) => i.title)).toEqual(['Send the skill | calendar codes \\ instructions']);
+  });
+
+  it('FINAL F-4: escaped pipes and backslashes inside a Decision are unescaped', () => {
+    const md = CHILD_MD.replace('Use the Alloi skill config.', 'Use the Alloi \\| landscape config.');
+    const { completedTasks } = deriveStatusMaterial(ENGAGEMENT_MD, [{ ...children[0], md }], '2026-09-10');
+    expect(completedTasks.map((t) => t.title)).toContain('Decided: Use the Alloi | landscape config');
+  });
+
   it('yields nothing from a History entry without sub-bullets', () => {
     const bare = CHILD_MD.replace(/\n  - Outcomes:[^\n]*\n  - Decisions:[^\n]*/, '');
     const { completedTasks } = deriveStatusMaterial(ENGAGEMENT_MD, [{ ...children[0], md: bare }], '2026-09-10');
@@ -128,6 +149,17 @@ describe('composeSyntheticMarkdown', () => {
     expect(md).toContain('cadence: weekly');
     expect(md).toContain('- 2026-09-04 — Alloi Tacticals Troubleshooting');
     expect(md).toContain('| Run tactical reports | Ivette Ramos |');
+  });
+
+  it('FINAL F-3: the milestone fallback lists only OPEN child projects', () => {
+    const eng = { id: 'alloi-01', kind: 'engagement', client: 'alloi', parent: '', title: 'Managed Services', path: '' };
+    const open = { node: { id: 'alloi-03', kind: 'project', client: 'alloi', parent: 'alloi-01', title: 'Tactical Reports', path: '', delivery_state: 'active' }, md: CHILD_MD };
+    const closed = { node: { id: 'alloi-04', kind: 'project', client: 'alloi', parent: 'alloi-01', title: 'Old Migration', path: '', delivery_state: 'closed' }, md: CHILD_MD };
+    const md = composeSyntheticMarkdown('Alloi', eng, ENGAGEMENT_MD, [closed, open]);
+    expect(md).toContain('milestones: Tactical Reports');
+    expect(md).not.toContain('Old Migration');
+    const none = composeSyntheticMarkdown('Alloi', eng, ENGAGEMENT_MD, [closed]);
+    expect(none).not.toContain('milestones:');
   });
 });
 

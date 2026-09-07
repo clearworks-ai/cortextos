@@ -19,6 +19,7 @@ export interface NodeMeta {
   parent: string;
   title: string;
   path: string;
+  delivery_state?: string;
 }
 
 export function parseNodeBlock(text: string, path: string): NodeMeta {
@@ -41,6 +42,7 @@ export function parseNodeBlock(text: string, path: string): NodeMeta {
     parent: out.parent || '',
     title: out.title || '',
     path,
+    delivery_state: out.delivery_state || '',
   };
 }
 
@@ -146,6 +148,45 @@ function stripTrailingPeriod(text: string): string {
   return text.replace(/\.$/, '');
 }
 
+/** The R2 writer's literal placeholder for an empty list (FINAL F-1). */
+function isPlaceholder(text: string): boolean {
+  return /^(none|n\/a|-|—)$/i.test(text.trim());
+}
+
+/** Undo the renderer's table escaping (`\|` → `|`, `\\` → `\`) (FINAL F-2/F-4). */
+function unescapeCell(text: string): string {
+  return text.replace(/\\([\\|])/g, '$1');
+}
+
+/** Split a table row on unescaped pipes only — a pipe preceded by an odd run of backslashes is content (FINAL F-2). */
+function splitUnescapedPipes(row: string): string[] {
+  const cells: string[] = [];
+  let cur = '';
+  let backslashes = 0;
+  for (const ch of row) {
+    if (ch === '\\') {
+      backslashes += 1;
+      cur += ch;
+      continue;
+    }
+    if (ch === '|' && backslashes % 2 === 0) {
+      cells.push(cur);
+      cur = '';
+    } else {
+      cur += ch;
+    }
+    backslashes = 0;
+  }
+  cells.push(cur);
+  return cells;
+}
+
+const CLOSED_STATE_RE = /^(closed|done|complete|completed|archived|cancelled|canceled)$/i;
+
+function isOpenNode(node: NodeMeta): boolean {
+  return !CLOSED_STATE_RE.test((node.delivery_state || '').trim());
+}
+
 /** Nested `  - Outcomes:` / `  - Decisions:` sub-bullets under one dated History entry. */
 function historySubBullets(entryText: string): { outcomes: string[]; decisions: string[] } {
   const outcomes: string[] = [];
@@ -154,16 +195,16 @@ function historySubBullets(entryText: string): { outcomes: string[]; decisions: 
     const m = /^\s+-\s*(Outcomes|Decisions)\s*:\s*(.*)$/.exec(line);
     if (!m) continue;
     const body = singleLine(m[2]);
-    if (!body) continue;
+    if (!body || isPlaceholder(body)) continue;
     if (m[1] === 'Outcomes') {
       for (const s of body.split(SENTENCE_SPLIT_RE)) {
         const t = stripTrailingPeriod(singleLine(s));
-        if (t) outcomes.push(t);
+        if (t && !isPlaceholder(t)) outcomes.push(t);
       }
     } else {
       for (const d of body.split(/\s*;\s*/)) {
-        const t = stripTrailingPeriod(singleLine(d));
-        if (t) decisions.push(t);
+        const t = unescapeCell(stripTrailingPeriod(singleLine(d)));
+        if (t && !isPlaceholder(t)) decisions.push(t);
       }
     }
   }
@@ -172,7 +213,7 @@ function historySubBullets(entryText: string): { outcomes: string[]; decisions: 
 
 /** `| Item | Owner | Deadline | Source | Status |` row → cells (no leading/trailing empties). */
 function openItemCells(row: string): string[] {
-  const cells = row.trim().split('|').map((c) => c.trim());
+  const cells = splitUnescapedPipes(row.trim()).map((c) => unescapeCell(c.trim()));
   return cells.slice(1, cells.length - 1);
 }
 
@@ -246,7 +287,8 @@ function reportingWithDefaults(
     return `${m[1]}${m[2]}${m[3]} ${resolveContactDisplay(m[4], clientPageMd)}`.replace(/\s+$/, '');
   });
   if (!hasMilestones) {
-    const titles = children.map((c) => c.node.title).filter(Boolean);
+    // FINAL F-3: only OPEN child projects are a plausible "next up".
+    const titles = children.filter((c) => isOpenNode(c.node)).map((c) => c.node.title).filter(Boolean);
     if (titles.length > 0) {
       const idx = out.findIndex((l) => /^[ \t]*-?[ \t]*milestones[ \t]*:/.test(l));
       const line = `milestones: ${titles.join('; ')}`;

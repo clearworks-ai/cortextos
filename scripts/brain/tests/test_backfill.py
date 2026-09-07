@@ -376,3 +376,31 @@ def test_dry_run_max_usd_zero_still_runs_the_first_unattempted_meeting(tmp_path,
     assert calls == ["A"]
     rows = _bp(bd)["rows"]
     assert len(rows) == 1 and rows["fireflies:A"]["dry_run"]["cost_usd"] == 0.1
+
+
+# --- digest + sample --------------------------------------------------------------
+def test_dry_run_writes_digest_sha_and_deterministic_sample(tmp_path, monkeypatch, capsys):
+    import backfill, hashlib, os, random
+    ids = tuple(f"M{n:02d}" for n in range(14))
+    vault, bd = _seed_batch(tmp_path, ids=ids)
+    monkeypatch.setattr(backfill, "run_meeting_main", _fake_run_meeting(vault, rc_for={"M03": 6}))
+    assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"]) == 0
+    digest = (bd / "digest.md").read_bytes()
+    assert (bd / "digest.sha256").read_text(encoding="utf-8").strip() == hashlib.sha256(digest).hexdigest()
+    text = digest.decode("utf-8")
+    assert "| M03 |" in text and "| 6 |" in text and "| M00 |" in text and "clients/m00.md (rule 2)" in text
+    sample = sorted(p.stem for p in (bd / "sample").glob("*.txt"))
+    assert (bd / "sample").is_symlink() and os.readlink(bd / "sample") == f"sample-{hashlib.sha256(digest).hexdigest()[:12]}"
+    assert len(sample) == 10 and "M03" not in sample            # exit-0 meetings only
+    expected = sorted(random.Random(bd.name).sample([i for i in ids if i != "M03"], 10))
+    assert sample == expected                                    # seeded by batch_id → reproducible
+    out = capsys.readouterr().out
+    assert f"digest: {bd / 'digest.md'} sha256 {hashlib.sha256(digest).hexdigest()} sample 10" in out
+
+
+def test_digest_sample_takes_all_when_fewer_than_ten(tmp_path, monkeypatch):
+    import backfill
+    vault, bd = _seed_batch(tmp_path, ids=("A", "B"))
+    monkeypatch.setattr(backfill, "run_meeting_main", _fake_run_meeting(vault))
+    assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"]) == 0
+    assert sorted(p.stem for p in (bd / "sample").glob("*.txt")) == ["A", "B"]

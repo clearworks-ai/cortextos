@@ -17,7 +17,10 @@ import contextlib
 import hashlib
 import io
 import json
+import os
+import random
 import re
+import shutil
 import sys
 import time
 import traceback
@@ -302,6 +305,106 @@ def _dry_run_record(vault: Path, kind: str, meeting_id: str, rc: int, capture: s
     return rec
 
 
+SAMPLE_SIZE = 10
+
+
+def _md_cell(value: Any) -> str:
+    return str("" if value is None else value).replace("|", "\\|").replace("\n", " ")
+
+
+def write_digest(vault: Path, bd: Path, manifest: dict[str, Any], prog: dict[str, Any]) -> tuple[Path, str, list[str]]:
+    """D-20 human review surface: `digest.md` (one row per meeting), `digest.sha256`
+    (hex sha256 of digest.md bytes), and a seeded `sample/` of up to SAMPLE_SIZE
+    exit-0 dry-run captures for spot-checking before sign-off. `vault` is passed
+    explicitly rather than derived from `bd` (`bd.parents[1]` would land in
+    `<vault>/raw/media/transcripts`, not the vault root)."""
+    kind = str(manifest.get("kind") or prog.get("kind") or "fireflies")
+    by_id = {str(r["id"]): r for r in manifest["rows"]}
+    lines = [f"# Backfill digest — {prog['batch_id']}", ""]
+    rows_out: list[str] = []
+    ok = failed = 0
+    spent = 0.0
+    for key in sorted(prog["rows"], key=lambda k: (by_id.get(k.split(":", 1)[1], {}).get("occurred_at") or "", k)):
+        dr_raw = prog["rows"][key].get("dry_run")
+        if not isinstance(dr_raw, dict):
+            # _row() (cmd_dry_run) setdefaults an empty {} entry for the NEXT meeting as a
+            # side effect before the pre-launch budget check can halt the loop — a halted/
+            # resumed batch must not render that untouched placeholder as a fake "failed" row.
+            continue
+        mid = key.split(":", 1)[1]
+        dr = dr_raw
+        m = by_id.get(mid, {})
+        kept = dr.get("kept") or {}
+        dropped = dr.get("dropped") or {}
+        created = dr.get("created")
+        created_cell = created.get("slug") if isinstance(created, dict) else (created or "")
+        home_cell = f"{dr.get('home')} (rule {dr.get('rule')})" if dr.get("home") else ""
+        kd = f"kept d{kept.get('decisions', 0)}/c{kept.get('commitments', 0)}/q{kept.get('open_questions', 0)} · dropped d{(dropped or {}).get('decisions', 0)}/c{(dropped or {}).get('commitments', 0)}/q{(dropped or {}).get('open_questions', 0)}"
+        rows_out.append("| " + " | ".join(_md_cell(v) for v in (
+            mid, (m.get("occurred_at") or "")[:10], m.get("title"), home_cell, created_cell, kd,
+            dr.get("classification"), dr.get("exit"))) + " |")
+        spent += float(dr.get("cost_usd") or 0.0)
+        if dr.get("exit") == 0:
+            ok += 1
+        else:
+            failed += 1
+    lines += [f"kind: {kind} · meetings: {ok + failed} · ok: {ok} · failed: {failed} · cost_usd: {spent:.2f}", "",
+              "| id | date | title | home | created org | kept/dropped | classification | exit |",
+              "|---|---|---|---|---|---|---|---|", *rows_out, ""]
+    digest_path = bd / "digest.md"
+    data = "\n".join(lines).encode("utf-8")
+    sha = hashlib.sha256(data).hexdigest()
+
+    eligible = sorted(k.split(":", 1)[1] for k, v in prog["rows"].items() if (v.get("dry_run") or {}).get("exit") == 0)
+    picked = sorted(random.Random(prog["batch_id"]).sample(eligible, min(SAMPLE_SIZE, len(eligible)))) if eligible else []
+    # Review surface = a fully written, digest-versioned directory `sample-<sha12>/`
+    # made visible by ONE atomic rename of a symlink `sample -> sample-<sha12>`
+    # (G0b-12/15, G0a-9): there is never a moment with a digest but no complete
+    # sample/, and sign_batch binds the symlink target to the digest sha.
+    versioned = bd / f"sample-{sha[:12]}"
+    link = bd / "sample"
+    # Build in a temp sibling and rename INTO place; never delete a directory the
+    # published symlink may point at (G0b r3): an unchanged digest reuses its dir.
+    if not versioned.exists():
+        build = bd / f"sample-{sha[:12]}.tmp-{os.getpid()}"
+        if build.exists():
+            shutil.rmtree(build)
+        build.mkdir(parents=True)
+        for mid in picked:
+            src = progress._state_dir(vault, kind, mid) / "dry-run.txt"
+            if src.is_file():
+                atomic_write(build / f"{mid}.txt", src.read_bytes())
+        os.replace(build, versioned)
+    if link.exists() and not link.is_symlink():  # pre-versioning layout: move it aside, then remove
+        legacy = bd / f"sample.legacy-{os.getpid()}"
+        os.replace(link, legacy)
+        shutil.rmtree(legacy)
+    tmp_link = bd / f"sample.link-{os.getpid()}"
+    if tmp_link.is_symlink() or tmp_link.exists():
+        tmp_link.unlink()
+    os.symlink(versioned.name, tmp_link)
+    os.replace(tmp_link, link)  # atomic symlink swap
+    for old in bd.glob("sample-*"):
+        if old.is_dir() and old.name != versioned.name and ".tmp-" not in old.name:
+            shutil.rmtree(old)
+    # digest.md + digest.sha256 are written LAST: a matching sidecar implies the versioned sample dir it names is complete.
+    atomic_write(digest_path, data)
+    atomic_write(bd / "digest.sha256", (sha + "\n").encode("utf-8"))
+    return digest_path, sha, picked
+
+
+def _finish_digest(vault: Path, bd: Path, manifest: dict[str, Any], prog: dict[str, Any]) -> tuple[Path, str, list[str]]:
+    """Called on every cmd_dry_run exit path (0, 2, 12) so a partial batch — halted
+    on an auth error or a budget cap — still leaves a reviewable digest + sample
+    behind, not just a batch-progress.json."""
+    digest_path, sha, picked = write_digest(vault, bd, manifest, prog)
+    prog["digest_sha256"] = sha
+    prog["sample_ids"] = picked
+    _save_batch(bd, prog)
+    print(f"digest: {digest_path} sha256 {sha} sample {len(picked)}")
+    return digest_path, sha, picked
+
+
 def cmd_dry_run(args: argparse.Namespace) -> int:
     vault, repo, kind = Path(args.vault), Path(args.repo_root), args.source
     loaded = _load_batch(vault, args.batch)
@@ -332,6 +435,7 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
         # after a 12 (or a --max-usd already below recorded spend) must make zero new attempts.
         if spent > args.max_usd:
             print(f"budget: spent ${spent:.2f} > --max-usd {args.max_usd:.2f} before {kind}:{mid}", file=sys.stderr)
+            _finish_digest(vault, bd, manifest, prog)
             return 12
         prior_dry = entry.get("dry_run") or {}
         prior_cost = float(prior_dry.get("cost_usd") or 0.0)
@@ -356,11 +460,14 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
             failed += 1
             if (rec.get("fetch_error") or {}).get("class") == "auth":
                 print(f"stopped: auth ({kind}:{mid}) — fix credentials and re-run --batch {args.batch} dry-run", file=sys.stderr)
+                _finish_digest(vault, bd, manifest, prog)
                 return 2
         if spent > args.max_usd:
             print(f"budget: spent ${spent:.2f} > --max-usd {args.max_usd:.2f} after {kind}:{mid}", file=sys.stderr)
+            _finish_digest(vault, bd, manifest, prog)
             return 12
     _save_batch(bd, prog)  # review M7: checkpoint exists even when no row ran (empty/all-skipped batch)
+    _finish_digest(vault, bd, manifest, prog)
     print(f"dry-run: {ok} ok, {failed} failed, ${spent:.2f} spent")
     return 0
 

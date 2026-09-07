@@ -217,23 +217,61 @@ def validate_sign_marker(path: Path, envelope: Path | None = None) -> str | None
     return None
 
 
-def validate_batch_marker(path: Path) -> str | None:
-    """G2-F1: under `--backfill`, the D-09 marker at `path` must be batch-bound
-    — written by `sign_batch.py`'s D-20 fan-out (which stamps `batch_id` and
+def _batch_signed_path(vault: Path, batch_id: str) -> Path:
+    """G2b r2 CH2-2/CH-1: the literal path to a batch's signed record.
+    progress.py must NOT import backfill.py (backfill.py already imports
+    progress — a cycle), so this is a standalone literal mirroring
+    backfill.batch_dir(vault, batch_id) / 'batch-signed.json'."""
+    return Path(vault) / "raw/media/transcripts/_backfill" / batch_id / "batch-signed.json"
+
+
+def validate_batch_marker(vault: Path, path: Path, meeting_id: str) -> str | None:
+    """G2-F1 / G2b r2 CH2-2 (CH-1 upgraded from PARTIAL): under `--backfill`,
+    the D-09 marker at `path` must be batch-bound — written by
+    `sign_batch.py`'s D-20 fan-out (which stamps `batch_id` and
     `digest_sha256` onto every per-meeting marker via `sign_marker.write_marker`'s
     `extra=` kwarg), never a per-meeting `sign_dry_run.py` marker. The latter
     proves only that a human reviewed ONE meeting's dry-run, not that a batch
-    digest covering it was ever reviewed and signed (D-20). Call this ONLY
-    after `validate_sign_marker` has already returned None for the same path
-    — this assumes the marker is well-formed JSON. Returns None when the
-    marker carries both keys, else the exact refusal string `_run_apply`
-    prints to stderr before exiting 15."""
+    digest covering it was ever reviewed and signed (D-20).
+
+    G2b round-2 review CH2-2 (Critical): carrying `batch_id`/`digest_sha256`
+    on the marker alone is not proof the referenced batch was ever actually
+    signed, still exists, or still authorizes THIS meeting — an orphaned
+    marker (its batch dir since deleted/renamed), a marker whose
+    digest_sha256 was hand-edited to no longer match the real
+    batch-signed.json, a meeting dropped from `signed_ids` (never a
+    candidate, or removed by a later re-sign), or a batch whose fan-out
+    never finished (`fanout_complete` still false, F2 addendum) must all be
+    refused exactly as a bare per-meeting marker is. Resolves and re-reads
+    `<vault>/raw/media/transcripts/_backfill/<marker.batch_id>/batch-signed.json`
+    and checks every binding sign_batch.py itself established.
+
+    Call this ONLY after `validate_sign_marker` has already returned None
+    for the same path — this assumes the marker is well-formed JSON.
+    Returns None when every binding holds, else the exact refusal string
+    `_run_apply` prints to stderr before exiting 15."""
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         doc = None
     if not isinstance(doc, dict) or not doc.get("batch_id") or not doc.get("digest_sha256"):
         return "backfill apply requires a batch-signed marker (sign_batch.py); per-meeting marker found"
+    batch_id = str(doc["batch_id"])
+    signed_path = _batch_signed_path(Path(vault), batch_id)
+    try:
+        signed = json.loads(signed_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return f"batch-signed.json missing or unreadable for batch {batch_id} (orphaned marker; re-run sign_batch.py)"
+    if not isinstance(signed, dict):
+        return f"batch-signed.json for batch {batch_id} is not a JSON object"
+    if signed.get("batch_id") != batch_id:
+        return f"batch-signed.json batch_id {signed.get('batch_id')!r} != marker batch_id {batch_id!r}"
+    if signed.get("digest_sha256") != doc.get("digest_sha256"):
+        return f"batch-signed.json digest_sha256 does not match marker digest_sha256 for batch {batch_id}"
+    if meeting_id not in (signed.get("signed_ids") or []):
+        return f"meeting {meeting_id!r} not in batch {batch_id} signed_ids"
+    if signed.get("fanout_complete") is not True:
+        return f"batch {batch_id} fanout_complete is not true (sign_batch.py fan-out incomplete)"
     return None
 
 

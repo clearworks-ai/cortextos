@@ -332,11 +332,30 @@ def main(argv: list[str] | None = None) -> int:
     # (each written atomically but not as one transaction) must fall through
     # to a fresh fetch, which rewrites all three, rather than short-circuit
     # on a partial envelope forever.
+    #
+    # B5 (G2b r2 CH-17, "not fixed" by the existence-only version above):
+    # existence of all three files is STILL not coherence — a stale
+    # source.sha256 sidecar (left over from a --refetch that rewrote
+    # source.json's bytes but crashed before the sidecar wrote, or any
+    # hand-edit) must also fall through. Verify the sidecar's content
+    # actually equals sha256(source.json's real bytes) — one hash of one
+    # file — and that meta.json parses as real JSON, not just that it
+    # exists.
     if source_path.exists() and sha_path.exists() and meta_path.exists() and not args.refetch:
         raw = source_path.read_bytes()
-        clear_fetch_error(vault, "fireflies", meeting_id)
-        print(hashlib.sha256(raw).hexdigest())
-        return 0
+        actual_sha = hashlib.sha256(raw).hexdigest()
+        recorded_sha = sha_path.read_text(encoding="utf-8").strip()
+        meta_ok = False
+        if recorded_sha == actual_sha:
+            try:
+                json.loads(meta_path.read_text(encoding="utf-8"))
+                meta_ok = True
+            except (OSError, ValueError):
+                meta_ok = False
+        if recorded_sha == actual_sha and meta_ok:
+            clear_fetch_error(vault, "fireflies", meeting_id)
+            print(actual_sha)
+            return 0
 
     def _fail(cls: str, message: str, status: int | None = None) -> int:
         print(message, file=sys.stderr)

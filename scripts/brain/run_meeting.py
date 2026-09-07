@@ -467,7 +467,7 @@ def _run_apply(meeting_id, vault, repo, source_dir, *, force, backfill=False) ->
     # reviewed and signed (D-20) — --backfill must refuse a marker that
     # sign_batch.py did not fan out.
     if backfill:
-        batch_failure = progress.validate_batch_marker(marker)
+        batch_failure = progress.validate_batch_marker(vault, marker, meeting_id)
         if batch_failure:
             print(batch_failure, file=sys.stderr)
             return 15
@@ -518,7 +518,7 @@ def _run_apply(meeting_id, vault, repo, source_dir, *, force, backfill=False) ->
     # the same envelope-bound re-check point as the line above, and the
     # requirement is unconditional for the rest of this run.
     if backfill:
-        post_fetch_batch_failure = progress.validate_batch_marker(marker)
+        post_fetch_batch_failure = progress.validate_batch_marker(vault, marker, meeting_id)
         if post_fetch_batch_failure:
             print(post_fetch_batch_failure, file=sys.stderr)
             return 15

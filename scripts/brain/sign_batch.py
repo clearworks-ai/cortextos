@@ -104,6 +104,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"batch-progress.json batch_id {prog.get('batch_id')!r} != --batch {args.batch!r}", file=sys.stderr)
         return 1
 
+    # B3 (G2b r2 CH2-5): --batch's own id prefix (the kind token before the
+    # first '-', e.g. "fireflies" in "fireflies-20260906T000000Z") must
+    # match both manifest.kind and batch-progress.json's own "kind" field —
+    # matching batch_id alone (checked above) does not prove the batch id
+    # was ever actually MINTED for this kind.
+    batch_kind_prefix = args.batch.split("-", 1)[0]
+    if batch_kind_prefix != kind:
+        print(f"--batch {args.batch!r} kind prefix {batch_kind_prefix!r} != manifest kind {kind!r}", file=sys.stderr)
+        return 1
+    if batch_kind_prefix != str(prog.get("kind") or ""):
+        print(f"--batch {args.batch!r} kind prefix {batch_kind_prefix!r} != batch-progress.json kind {prog.get('kind')!r}", file=sys.stderr)
+        return 1
+
     # F14/M4: every manifest row must be a real object with an id that
     # round-trips through safe_meeting_id (path-traversal-shaped ids, or ids
     # carrying a 'fireflies:' prefix, must never reach a path builder) —
@@ -120,6 +133,25 @@ def main(argv: list[str] | None = None) -> int:
         rid = row["id"]
         if safe_meeting_id(rid) != rid:
             print(f"manifest.rows[{i}] id not filesystem-safe: {rid!r}", file=sys.stderr)
+            return 1
+
+    # B4 (G2b r2 CH2-6): every row needs a non-empty, RFC3339-parseable
+    # occurred_at and a kind matching the manifest's own kind — a row
+    # missing either is not safely sortable/attributable, and the
+    # canonical-order check right below would silently treat a missing
+    # occurred_at as "" (sorts first) rather than refusing outright.
+    for i, row in enumerate(raw_rows):
+        occurred_at = row.get("occurred_at")
+        if not isinstance(occurred_at, str) or not occurred_at.strip():
+            print(f"manifest.rows[{i}] occurred_at missing or empty", file=sys.stderr)
+            return 1
+        try:
+            datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
+        except ValueError:
+            print(f"manifest.rows[{i}] occurred_at is not RFC3339: {occurred_at!r}", file=sys.stderr)
+            return 1
+        if row.get("kind") != kind:
+            print(f"manifest.rows[{i}] kind {row.get('kind')!r} != manifest kind {kind!r}", file=sys.stderr)
             return 1
 
     # F15 (CH-9): the manifest must be canonical — sorted by (occurred_at,

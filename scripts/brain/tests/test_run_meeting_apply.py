@@ -975,6 +975,22 @@ def _sign_for_restart_test(vault: Path, mid: str, tmp_path: Path, env: dict, rep
     assert sign.returncode == 0, sign.stderr
 
 
+def _write_batch_signed(vault: Path, batch_id: str, digest_sha256: str, meeting_ids: list[str]) -> None:
+    """B1 (G2b r2 CH2-2): validate_batch_marker now re-resolves and re-reads
+    `_backfill/<batch_id>/batch-signed.json` (batch_id/digest_sha256 must
+    match, meeting_id must be in signed_ids, fanout_complete must be true)
+    — a marker carrying batch_id/digest_sha256 alone is no longer enough.
+    Tests that hand-write a batch-bound marker via sign_marker.write_marker
+    directly (rather than driving the real sign_batch.py) must also write
+    this companion file so the marker isn't orphaned."""
+    bd = vault / "raw/media/transcripts/_backfill" / batch_id
+    bd.mkdir(parents=True, exist_ok=True)
+    (bd / "batch-signed.json").write_text(json.dumps({
+        "batch_id": batch_id, "digest_sha256": digest_sha256, "signed_ids": list(meeting_ids),
+        "fanout_complete": True,
+    }), encoding="utf-8")
+
+
 def test_apply_rejects_marker_missing_source_binding_fields(tmp_path):
     # D-09 review finding 1: a legacy marker (signed before this fix, or —
     # as here — hand-seeded the way _seed_signed_marker does, with no
@@ -1403,6 +1419,7 @@ def test_backfill_apply_skips_tasks_draft_status_with_done_false_and_still_commi
         extra={"batch_id": "fireflies-20260906T000000Z", "digest_sha256": "0" * 64},
     )
     assert marker_rc == 0
+    _write_batch_signed(vault, "fireflies-20260906T000000Z", "0" * 64, [mid])
     # Spy shims: log argv, then exec the _install_fakes shim of the same name.
     spy = tmp_path / "spy"; spy.mkdir()
     for name in ("cortextos", "gws"):
@@ -1495,6 +1512,75 @@ def test_backfill_apply_refuses_per_meeting_marker_no_batch_binding(tmp_path):
     assert not (state / "progress.json").exists()
 
 
+def test_backfill_apply_refuses_orphaned_batch_marker(tmp_path):
+    """B1 (G2b r2 CH2-2, Critical): a marker carrying batch_id/digest_sha256
+    is not proof the referenced batch still exists — if its
+    `_backfill/<batch_id>/batch-signed.json` is missing (deleted, renamed,
+    or simply never signed for real), --backfill must refuse exactly as a
+    bare per-meeting marker does, not trust the marker's own claim."""
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    from sign_marker import write_marker
+    capture = _write_phase3_capture(tmp_path, vault, repo, mid, env)
+    marker_rc, _marker_path, _marker_msg = write_marker(
+        vault, "fireflies", mid, capture, signed_by="Josh", signed_at="2026-09-05T00:00:00Z",
+        extra={"batch_id": "fireflies-20260908T000000Z", "digest_sha256": "4" * 64},
+    )
+    assert marker_rc == 0
+    # No _write_batch_signed call: the referenced batch dir never existed.
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--backfill"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 15, result.stderr + result.stdout
+    assert "batch-signed.json missing or unreadable" in result.stderr
+
+    state = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}"
+    assert not (state / "receipt.json").exists()
+    assert not (state / "progress.json").exists()
+
+
+def test_backfill_apply_refuses_marker_not_in_signed_ids(tmp_path):
+    """B1 (G2b r2 CH2-2): the batch exists and its digest_sha256 matches,
+    but this meeting id is not (or no longer) in signed_ids — a real batch
+    signature must not silently authorize a meeting it never actually
+    covered."""
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    from sign_marker import write_marker
+    capture = _write_phase3_capture(tmp_path, vault, repo, mid, env)
+    batch_id = "fireflies-20260908T000001Z"
+    marker_rc, _marker_path, _marker_msg = write_marker(
+        vault, "fireflies", mid, capture, signed_by="Josh", signed_at="2026-09-05T00:00:00Z",
+        extra={"batch_id": batch_id, "digest_sha256": "5" * 64},
+    )
+    assert marker_rc == 0
+    # batch-signed.json is real, digest matches, but signed_ids never named this meeting.
+    _write_batch_signed(vault, batch_id, "5" * 64, ["some-other-meeting-id"])
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--backfill"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 15, result.stderr + result.stdout
+    assert "not in batch" in result.stderr and "signed_ids" in result.stderr
+
+    state = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}"
+    assert not (state / "receipt.json").exists()
+    assert not (state / "progress.json").exists()
+
+
 def test_backfill_prior_done_snapshot_survives_later_live_force(tmp_path):
     """F3 (G2 P2): backfill_prior_done is a ONE-TIME snapshot taken the
     instant backfill_run first flips true — progress.compose_receipt must
@@ -1517,6 +1603,7 @@ def test_backfill_prior_done_snapshot_survives_later_live_force(tmp_path):
         extra={"batch_id": "fireflies-20260907T000000Z", "digest_sha256": "1" * 64},
     )
     assert marker_rc == 0
+    _write_batch_signed(vault, "fireflies-20260907T000000Z", "1" * 64, [mid])
 
     state = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}"
     state.mkdir(parents=True, exist_ok=True)
@@ -1572,6 +1659,7 @@ def test_live_force_after_backfill_apply_performs_tasks_draft_status(tmp_path):
         extra={"batch_id": "fireflies-20260907T000001Z", "digest_sha256": "2" * 64},
     )
     assert marker_rc == 0
+    _write_batch_signed(vault, "fireflies-20260907T000001Z", "2" * 64, [mid])
     spy = tmp_path / "spy2"; spy.mkdir()
     for name in ("cortextos", "gws"):
         (spy / name).write_text(f"#!/bin/sh\necho \"{name} $*\" >> {spy / 'calls.log'}\nexec {bindir / name} \"$@\"\n", encoding="utf-8")
@@ -1629,6 +1717,7 @@ def test_backfill_apply_does_not_enforce_acceptance_minimums(tmp_path):
         extra={"batch_id": "fireflies-20260907T000002Z", "digest_sha256": "3" * 64},
     )
     assert marker_rc == 0
+    _write_batch_signed(vault, "fireflies-20260907T000002Z", "3" * 64, [mid])
 
     result = subprocess.run(
         [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,

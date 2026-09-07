@@ -527,6 +527,56 @@ def test_incoherent_envelope_falls_through_to_fresh_fetch(tmp_path, monkeypatch)
     assert (env / "source.sha256").is_file() and (env / "meta.json").is_file()
 
 
+def test_stale_sha_sidecar_falls_through_to_fresh_fetch(tmp_path, monkeypatch):
+    """B5 (G2b r2 CH-17, "not fixed" by existence-only coherence): all three
+    files exist, but source.sha256 does not actually match sha256(source.json)
+    — e.g. a --refetch that rewrote source.json's bytes but crashed before
+    the sidecar was rewritten, or a hand-edit. Existence alone must not
+    short-circuit; the mismatch must fall through to a fresh fetch, which
+    rewrites the sidecar to match."""
+    import fetch_fireflies as ff
+
+    monkeypatch.setenv("FIREFLIES_API_KEY", "k")
+    vault = tmp_path / "vault"
+    env = vault / "raw/media/transcripts/fireflies/STALE"; env.mkdir(parents=True)
+    (env / "source.json").write_bytes(b"{}")
+    (env / "source.sha256").write_text("f" * 64 + "\n", encoding="utf-8")  # wrong on purpose
+    (env / "meta.json").write_text(json.dumps({"fetched_at": "x", "fetcher": "y"}), encoding="utf-8")
+    ok = {"data": {"transcript": {"id": "STALE", "title": "t", "date": 1756684800000, "duration": 12.0,
+                                  "organizer_email": "josh@clearworks.ai", "participants": ["a@x.io"],
+                                  "meeting_attendees": [{"displayName": "A", "email": "a@x.io"}],
+                                  "sentences": [{"index": i, "speaker_name": "A", "text": f"s{i}", "start_time": i} for i in range(25)],
+                                  "summary": {"overview": "o"}}}}
+    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=0: _RawResp(ok))
+    rc = ff.main(["--meeting-id", "STALE", "--vault", str(vault), "--repo-root", str(tmp_path)])
+    assert rc == 0
+    new_raw = (env / "source.json").read_bytes()
+    assert (env / "source.sha256").read_text(encoding="utf-8").strip() == hashlib.sha256(new_raw).hexdigest()
+
+
+def test_unparseable_meta_json_falls_through_to_fresh_fetch(tmp_path, monkeypatch):
+    """B5 (G2b r2 CH-17): meta.json existing but not parsing as JSON must
+    also fall through — existence of the file is not proof it's coherent."""
+    import fetch_fireflies as ff
+
+    monkeypatch.setenv("FIREFLIES_API_KEY", "k")
+    vault = tmp_path / "vault"
+    env = vault / "raw/media/transcripts/fireflies/BADMETA"; env.mkdir(parents=True)
+    raw = b"{}"
+    (env / "source.json").write_bytes(raw)
+    (env / "source.sha256").write_text(hashlib.sha256(raw).hexdigest() + "\n", encoding="utf-8")
+    (env / "meta.json").write_text("not json{{{", encoding="utf-8")
+    ok = {"data": {"transcript": {"id": "BADMETA", "title": "t", "date": 1756684800000, "duration": 12.0,
+                                  "organizer_email": "josh@clearworks.ai", "participants": ["a@x.io"],
+                                  "meeting_attendees": [{"displayName": "A", "email": "a@x.io"}],
+                                  "sentences": [{"index": i, "speaker_name": "A", "text": f"s{i}", "start_time": i} for i in range(25)],
+                                  "summary": {"overview": "o"}}}}
+    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=0: _RawResp(ok))
+    rc = ff.main(["--meeting-id", "BADMETA", "--vault", str(vault), "--repo-root", str(tmp_path)])
+    assert rc == 0
+    assert json.loads((env / "meta.json").read_text(encoding="utf-8"))["fetcher"] == ff.FETCHER_VERSION
+
+
 def test_fetch_success_clears_stale_fetch_error(tmp_path, monkeypatch):
     import fetch_fireflies as ff
 

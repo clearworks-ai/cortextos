@@ -23,6 +23,16 @@ def _digest_bytes(status: str = "complete") -> bytes:
     return f"# digest\nstatus: {status}\n".encode("utf-8")
 
 
+def _occurred_at_for(mid: str) -> str:
+    # B4 (G2b r2 CH2-6): every manifest row needs a real, RFC3339-parseable
+    # occurred_at. Single-uppercase-letter test ids map onto an ordinal day
+    # in September 2026 so alphabetical id order == chronological order ==
+    # canonical (occurred_at, id) order, exactly like every fixture in this
+    # file already assumes.
+    day = ord(mid[0].upper()) - ord("A") + 1
+    return f"2026-09-{day:02d}T00:00:00Z"
+
+
 def _seed(tmp_path: Path, ids=("A", "B", "C"), bad=(), failed=(), extra_progress_ids=(), unattempted=(),
           digest_status="complete"):
     import backfill, progress
@@ -32,7 +42,7 @@ def _seed(tmp_path: Path, ids=("A", "B", "C"), bad=(), failed=(), extra_progress
     rows = {f"fireflies:{i}": {"dry_run": {"exit": 0 if i not in failed else 3}} for i in (*ids, *extra_progress_ids)}
     # `unattempted`: manifest ids with NO progress row at all — simulates a
     # dry-run halted early (budget/auth) before ever reaching them (G2 r2 P1).
-    manifest_rows = [{"id": i, "kind": "fireflies"} for i in (*ids, *unattempted)]
+    manifest_rows = [{"id": i, "kind": "fireflies", "occurred_at": _occurred_at_for(i)} for i in (*ids, *unattempted)]
     (bd / "manifest.json").write_text(json.dumps({"batch_id": bid, "kind": "fireflies", "rows": manifest_rows}), encoding="utf-8")
     (bd / "batch-progress.json").write_text(json.dumps({"batch_id": bid, "kind": "fireflies", "rows": rows, "sample_ids": [i for i in ids if i not in failed]}), encoding="utf-8")
     digest_bytes = _digest_bytes(digest_status)
@@ -216,8 +226,8 @@ def test_sign_batch_ignores_phantom_progress_rows(tmp_path):
     # — so this fixture's own manifest stays canonical; only the base ids
     # (A, B, C) plus these two phantoms are under test here, not ordering.
     manifest = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
-    manifest["rows"].append({"id": "Y", "kind": "fireflies"})
-    manifest["rows"].append({"id": "Z", "kind": "fireflies"})
+    manifest["rows"].append({"id": "Y", "kind": "fireflies", "occurred_at": _occurred_at_for("Y")})
+    manifest["rows"].append({"id": "Z", "kind": "fireflies", "occurred_at": _occurred_at_for("Z")})
     (bd / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     prog = json.loads((bd / "batch-progress.json").read_text(encoding="utf-8"))
     prog["rows"]["fireflies:Z"] = {}
@@ -397,7 +407,7 @@ def test_sign_batch_refuses_duplicate_manifest_ids(tmp_path, capsys):
     import sign_batch
     vault, bd, bid = _seed(tmp_path)
     manifest = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
-    manifest["rows"].append({"id": "C", "kind": "fireflies"})  # duplicate of the existing C row
+    manifest["rows"].append({"id": "C", "kind": "fireflies", "occurred_at": _occurred_at_for("C")})  # duplicate of the existing C row
     (bd / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     assert sign_batch.main(_args(vault, bd, bid)) == 1
     assert "manifest not canonical; re-run list" in capsys.readouterr().err
@@ -415,5 +425,106 @@ def test_sign_batch_refuses_batch_id_mismatch(tmp_path, capsys):
     manifest["batch_id"] = "fireflies-19700101T000000Z"
     (bd / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     assert sign_batch.main(_args(vault, bd, bid)) == 1
+    assert not (bd / "batch-signed.json").exists()
+    assert not any(marker_path(vault, "fireflies", i).exists() for i in ("A", "B", "C"))
+
+
+def test_sign_batch_refuses_manifest_kind_outside_sources_via_prefix_check(tmp_path, capsys):
+    """B3 (G2b r2 CH2-5) / F14 interaction: manifest.kind disagreeing with
+    the batch id's own prefix is caught by the earlier F14 SOURCES check
+    when the bogus kind isn't a real source at all — proves manifest.kind
+    is actually read before B3's prefix comparison ever runs."""
+    import sign_batch
+    vault, bd, bid = _seed(tmp_path)
+    manifest = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
+    manifest["kind"] = "slack"
+    (bd / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert sign_batch.main(_args(vault, bd, bid)) == 1
+    assert "unknown kind" in capsys.readouterr().err
+    assert not (bd / "batch-signed.json").exists()
+
+
+def test_sign_batch_refuses_batch_id_kind_prefix_mismatch(tmp_path, capsys):
+    """B3 (G2b r2 CH2-5): a kind that IS a real source (backfill.SOURCES)
+    but disagrees with the --batch id's own prefix must still refuse —
+    matching batch_id alone (checked earlier) does not prove the id was
+    ever minted for this kind."""
+    import shutil
+    import sign_batch
+    vault, bd, bid = _seed(tmp_path)
+    # Rename the batch dir + rewrite batch_id fields so --batch's prefix
+    # ("otherkind") disagrees with the real kind ("fireflies") while every
+    # earlier check (BATCH_ID_RE, manifest/progress batch_id equality,
+    # F14 kind-in-SOURCES) still passes — isolating B3 as the one that fires.
+    bad_bid = "otherkind-20260906T000000Z"
+    manifest = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
+    manifest["batch_id"] = bad_bid
+    (bd / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    prog = json.loads((bd / "batch-progress.json").read_text(encoding="utf-8"))
+    prog["batch_id"] = bad_bid
+    (bd / "batch-progress.json").write_text(json.dumps(prog), encoding="utf-8")
+    new_bd = bd.parent / bad_bid
+    shutil.move(str(bd), str(new_bd))
+    assert sign_batch.main(_args(vault, new_bd, bad_bid)) == 1
+    assert "kind prefix" in capsys.readouterr().err
+    assert not (new_bd / "batch-signed.json").exists()
+
+
+def test_sign_batch_refuses_row_missing_occurred_at(tmp_path, capsys):
+    """B4 (G2b r2 CH2-6): a row missing (or with an empty) occurred_at must
+    refuse before the canonical-order check would otherwise silently treat
+    it as sorting first."""
+    import sign_batch
+    from sign_marker import marker_path
+    vault, bd, bid = _seed(tmp_path)
+    manifest = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
+    del manifest["rows"][0]["occurred_at"]
+    (bd / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert sign_batch.main(_args(vault, bd, bid)) == 1
+    assert "occurred_at missing or empty" in capsys.readouterr().err
+    assert not (bd / "batch-signed.json").exists()
+    assert not any(marker_path(vault, "fireflies", i).exists() for i in ("A", "B", "C"))
+
+
+def test_sign_batch_refuses_row_occurred_at_not_rfc3339(tmp_path, capsys):
+    """B4 (G2b r2 CH2-6): an occurred_at that datetime.fromisoformat can't
+    parse must refuse — the same acceptance rule progress.validate_sign_marker
+    mirrors elsewhere in this codebase for signed_at."""
+    import sign_batch
+    vault, bd, bid = _seed(tmp_path)
+    manifest = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
+    manifest["rows"][0]["occurred_at"] = "not-a-time"
+    (bd / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert sign_batch.main(_args(vault, bd, bid)) == 1
+    assert "occurred_at is not RFC3339" in capsys.readouterr().err
+    assert not (bd / "batch-signed.json").exists()
+
+
+def test_sign_batch_refuses_row_kind_mismatch(tmp_path, capsys):
+    """B4 (G2b r2 CH2-6): a row whose own kind disagrees with manifest.kind
+    must refuse — a mixed-kind manifest is ledger corruption."""
+    import sign_batch
+    vault, bd, bid = _seed(tmp_path)
+    manifest = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
+    manifest["rows"][0]["kind"] = "slack"
+    (bd / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert sign_batch.main(_args(vault, bd, bid)) == 1
+    assert "kind" in capsys.readouterr().err
+    assert not (bd / "batch-signed.json").exists()
+
+
+def test_sign_batch_refuses_empty_string_manifest_id(tmp_path, capsys):
+    """B4 (fold-2 re-review empty-id sentinel): an explicit id == "" must
+    refuse the same way a missing id does — already enforced by the
+    existing `not row["id"]` check; this test proves it, since none of the
+    other fixtures exercise a present-but-empty id."""
+    import sign_batch
+    from sign_marker import marker_path
+    vault, bd, bid = _seed(tmp_path)
+    manifest = json.loads((bd / "manifest.json").read_text(encoding="utf-8"))
+    manifest["rows"][0]["id"] = ""
+    (bd / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert sign_batch.main(_args(vault, bd, bid)) == 1
+    assert "corrupt (missing id)" in capsys.readouterr().err
     assert not (bd / "batch-signed.json").exists()
     assert not any(marker_path(vault, "fireflies", i).exists() for i in ("A", "B", "C"))

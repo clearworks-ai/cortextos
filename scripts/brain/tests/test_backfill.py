@@ -531,6 +531,8 @@ def _seed_signed(tmp_path: Path, ids=("A", "B", "C"), dry_exit=None, nodes=None)
 def test_apply_refuses_without_matching_signature(tmp_path, monkeypatch, capsys):
     import backfill
     vault, bd = _seed_signed(tmp_path)
+    calls: list[str] = []
+    monkeypatch.setattr(backfill, "run_apply_subprocess", lambda mid, v, repo: (calls.append(mid), 0)[1])
     (bd / "digest.md").write_text("# changed\n", encoding="utf-8")
     import hashlib
     (bd / "digest.sha256").write_text(hashlib.sha256(b"# changed\n").hexdigest() + "\n", encoding="utf-8")
@@ -538,6 +540,11 @@ def test_apply_refuses_without_matching_signature(tmp_path, monkeypatch, capsys)
     assert "batch-signed.json" in capsys.readouterr().err
     (bd / "batch-signed.json").unlink()
     assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"]) == 15
+    # M2 (task-10-review): refuse-15 must make zero apply attempts and write nothing.
+    assert calls == []
+    prog = _bp(bd)
+    assert "apply_started_at" not in prog
+    assert all("apply" not in row for row in prog["rows"].values())
 
 
 def test_apply_runs_exit0_rows_in_order_then_rollup_all_and_status_per_pair(tmp_path, monkeypatch, capsys):
@@ -699,14 +706,27 @@ def test_apply_exit_is_zero_when_no_meeting_failed_even_if_post_batch_rollup_fai
 def test_apply_refuses_when_manifest_or_exit0_set_changed_after_signing(tmp_path, monkeypatch):
     import backfill
     vault, bd = _seed_signed(tmp_path)
-    monkeypatch.setattr(backfill, "run_apply_subprocess", lambda *a: 0)
+    calls: list[str] = []
+    monkeypatch.setattr(backfill, "run_apply_subprocess", lambda mid, v, repo: (calls.append(mid), 0)[1])
     m = json.loads((bd / "manifest.json").read_text(encoding="utf-8")); m["rows"] = m["rows"][:2]
     (bd / "manifest.json").write_text(json.dumps(m), encoding="utf-8")   # a row removed after signing
     assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"]) == 15
+    # M2 (task-10-review): refuse-15 must make zero apply attempts and write nothing.
+    assert calls == []
+    prog = _bp(bd)
+    assert "apply_started_at" not in prog
+    assert all("apply" not in row for row in prog["rows"].values())
+
     vault, bd = _seed_signed(tmp_path / "second", dry_exit={"C": 3})
+    calls2: list[str] = []
+    monkeypatch.setattr(backfill, "run_apply_subprocess", lambda mid, v, repo: (calls2.append(mid), 0)[1])
     p = _bp(bd); p["rows"]["fireflies:C"]["dry_run"]["exit"] = 0          # C passed a later dry-run but was never signed
     (bd / "batch-progress.json").write_text(json.dumps(p), encoding="utf-8")
     assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"]) == 15
+    assert calls2 == []
+    prog2 = _bp(bd)
+    assert "apply_started_at" not in prog2
+    assert all("apply" not in row for row in prog2["rows"].values())
 
 
 def test_apply_refuses_when_digest_md_edited_even_if_sidecar_updated(tmp_path, monkeypatch):
@@ -716,6 +736,95 @@ def test_apply_refuses_when_digest_md_edited_even_if_sidecar_updated(tmp_path, m
     (bd / "digest.sha256").write_text(hashlib.sha256(b"# edited\n").hexdigest() + "\n", encoding="utf-8")   # sidecar "fixed" too
     monkeypatch.setattr(backfill, "run_apply_subprocess", lambda *a: 0)
     assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"]) == 15
+
+
+# --- task-10-review fix round 1 ----------------------------------------------------
+def test_apply_closes_failed_rows_after_post_batch_instead_of_silently_retrying(tmp_path, monkeypatch, capsys):
+    # I1: a row that failed (e.g. exit 124) before post-batch closed the batch must
+    # NOT be re-run on a later invocation — it would only get run_meeting's per-meeting
+    # state-only rollup and never its client-region rebuild or (client, engagement)
+    # status update, since those only happen once, in the post-batch block that has
+    # already run. It stays un-applied (a future batch's `list` will re-include it).
+    import backfill
+    vault, bd = _seed_signed(tmp_path)
+    calls: list[str] = []
+
+    def fake_apply(mid, v, repo):
+        calls.append(mid)
+        if mid == "B":
+            return 124
+        _receipt(vault, mid, f"s-{mid}")
+        return 0
+    monkeypatch.setattr(backfill, "run_apply_subprocess", fake_apply)
+    monkeypatch.setattr(backfill, "run_rollup_all", lambda v, today: 0)
+    monkeypatch.setattr(backfill, "run_status_plan", lambda *a: (0, None))
+    monkeypatch.setattr(backfill, "commit_post_batch", lambda v, ps, m: ("sha1", True))
+    base = ["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"]
+    rc = backfill.main(base)
+    assert rc == 1
+    assert calls == ["A", "B", "C"]
+    assert "commit" in _bp(bd)["post_batch"]
+    capsys.readouterr()
+
+    calls.clear()
+    rc2 = backfill.main(base)
+    assert rc2 == 0
+    assert calls == []  # B was never re-run
+    out = capsys.readouterr()
+    assert "applied: 0 ok, 0 failed, 3 skipped" in out.out
+    assert "need a new batch" in out.err and "B" in out.err
+    assert _bp(bd)["rows"]["fireflies:B"]["apply"]["exit"] == 124  # unchanged
+
+
+def test_commit_post_batch_failure_is_contained_and_recorded(tmp_path, monkeypatch, capsys):
+    # M5: a real git failure in commit_post_batch (progress.vault_commit raises
+    # SystemExit(10)) must not preempt the FR-015 `applied:` line / exit contract.
+    import backfill
+    vault, bd = _seed_signed(tmp_path)
+    monkeypatch.setattr(backfill, "run_apply_subprocess", lambda mid, v, repo: (_receipt(vault, mid, "s"), 0)[1])
+    monkeypatch.setattr(backfill, "run_rollup_all", lambda v, today: 0)
+    monkeypatch.setattr(backfill, "run_status_plan", lambda *a: (0, None))
+
+    def boom(v, ps, m):
+        raise SystemExit(10)
+    monkeypatch.setattr(backfill, "commit_post_batch", boom)
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"])
+    assert rc == 0  # FR-015 exit contract: failed == 0 → 0, regardless of the commit failure
+    out = capsys.readouterr()
+    assert "applied: 3 ok, 0 failed, 0 skipped" in out.out
+    assert _bp(bd)["post_batch"]["commit"] == {"error": "10"}
+
+
+def test_apply_skips_post_batch_block_when_nothing_authorized(tmp_path, monkeypatch, capsys):
+    # M6: an all-non-exit-0 batch has an empty authorized/signed_ids set — post-batch
+    # must not run rollup --all / a commit for a batch that applied nothing.
+    import backfill
+    vault, bd = _seed_signed(tmp_path, dry_exit={"A": 3, "B": 3, "C": 3})
+    rollups: list[str] = []
+    commits: list[str] = []
+    monkeypatch.setattr(backfill, "run_apply_subprocess", lambda *a: 0)
+    monkeypatch.setattr(backfill, "run_rollup_all", lambda v, today: (rollups.append(today), 0)[1])
+    monkeypatch.setattr(backfill, "commit_post_batch", lambda v, ps, m: (commits.append(ps), (None, False))[1])
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "apply"])
+    assert rc == 0
+    assert rollups == [] and commits == []
+    assert _bp(bd)["post_batch"] == {"skipped": "no-authorized-rows"}
+    assert "post-batch: nothing authorized, skipped" in capsys.readouterr().err
+
+
+def test_commit_post_batch_reuses_progress_pathspec_dirty(tmp_path):
+    # M1: commit_post_batch delegates its "nothing to add" pre-check to
+    # progress.pathspec_dirty rather than a hand-rolled duplicate.
+    import backfill, subprocess as sp
+    vault = tmp_path / "vault"
+    (vault / "sub").mkdir(parents=True)
+    (vault / "sub" / "a.md").write_text("# a\n", encoding="utf-8")
+    sp.run(["git", "-C", str(vault), "init", "-q"], check=True)
+    sp.run(["git", "-C", str(vault), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"], check=True)
+    sha, committed = backfill.commit_post_batch(vault, ["sub/a.md"], "first")
+    assert committed and sha
+    sha2, committed2 = backfill.commit_post_batch(vault, ["sub/a.md"], "second")
+    assert (sha2, committed2) == (None, False)
 
 
 # --- CARRY-3 (Task 10): dry-run over an empty/all-already-applied manifest must still

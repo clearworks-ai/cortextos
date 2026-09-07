@@ -577,20 +577,18 @@ def commit_post_batch(vault: Path, pathspec: list[str], message: str) -> tuple[s
     every per-meeting FR-014 commit, so they need their own commit (G0a2-2) — never
     left to the vault auto-sync cron.
 
-    Pre-checks the pathspec's own `git status` before delegating: on a real vault
-    (untracked scratch/notes elsewhere are the norm, not the exception), a clean,
+    Pre-checks the pathspec's own git status via progress.pathspec_dirty (M1,
+    task-10-review — reuses the identical logic already in progress.py rather than
+    a hand-rolled duplicate) before delegating: on a real vault (untracked
+    scratch/notes elsewhere are the norm, not the exception), a clean,
     already-committed pathspec makes `git commit -- <pathspec>` print "nothing added
     to commit but untracked files present" rather than "nothing to commit" —
     progress.vault_commit's substring match doesn't recognize that wording and would
     SystemExit(10) on a true no-op. Filed here, not in progress.py (Task 9, out of
     scope): when the pathspec itself has nothing to add, return (None, False)
     directly; any real change still goes through progress.vault_commit unchanged."""
-    existing = [p for p in pathspec if (Path(vault) / p).exists()]
-    if existing:
-        status = subprocess.run(["git", "-C", str(vault), "status", "--porcelain", "--", *existing],
-                                 capture_output=True, text=True, timeout=60)
-        if status.returncode == 0 and not status.stdout.strip():
-            return None, False
+    if not progress.pathspec_dirty(vault, pathspec):
+        return None, False
     return progress.vault_commit(vault, pathspec, message)
 
 
@@ -663,6 +661,15 @@ def cmd_apply(args: argparse.Namespace) -> int:
     today = started_at[:10]
     _save_batch(bd, prog)
 
+    # I1 (task-10-review): once post-batch has already committed, a still-failed row
+    # (e.g. exit 124) must NOT be silently re-run — a late success here would get only
+    # run_meeting's per-meeting state-only rollup and never its client-region rebuild
+    # or its (client, engagement) status update (those happen ONCE, in the post-batch
+    # block below, which is gated off as soon as post_batch.commit exists). Close it
+    # instead: count it as skipped and name it in one stderr line. It stays un-applied,
+    # so a future `list`/batch will re-include it.
+    post_closed = bool((prog.get("post_batch") or {}).get("commit"))
+    closed_failed_ids: list[str] = []
     ok = failed = skipped = 0
     for row in manifest["rows"]:
         if row.get("already_applied"):
@@ -675,6 +682,10 @@ def cmd_apply(args: argparse.Namespace) -> int:
         if (entry.get("apply") or {}).get("exit") == 0:
             skipped += 1  # already applied by an earlier run: a repeat is a no-op
             continue
+        if post_closed:
+            closed_failed_ids.append(mid)
+            skipped += 1
+            continue
         t0 = time.monotonic()
         rc = run_apply_subprocess(mid, vault, repo)
         receipt = _read_json(progress.receipt_path(vault, kind, mid), {})
@@ -685,6 +696,9 @@ def cmd_apply(args: argparse.Namespace) -> int:
             ok += 1
         else:
             failed += 1
+    if closed_failed_ids:
+        print(f"post-batch already ran for {args.batch}; failed ids {sorted(closed_failed_ids)} need a new batch "
+              f"(they are not applied; list will re-include them)", file=sys.stderr)
 
     # FR-015 / D-19: FR-007 once (state + every client region, G-114) and FR-011 once
     # per distinct (client, engagement) — EXACTLY once per batch, after the LAST meeting:
@@ -696,33 +710,49 @@ def cmd_apply(args: argparse.Namespace) -> int:
     # pairs come from the meetings that did apply; failed ids are recorded for evidence 5/6.
     # Exactly-once is a PROGRESSIVE checkpoint (G0b r3 N5): post_batch is saved before the first
     # effect and after each one, and a resume performs only the steps not yet recorded.
-    apply_of = lambda mid: ((prog["rows"].get(f"{kind}:{mid}") or {}).get("apply") or {})
-    all_ok_ids = [mid for mid in authorized if apply_of(mid).get("exit") == 0]
-    attempted = sorted(mid for mid in authorized if apply_of(mid).get("exit") is not None)
-    if attempted == authorized and not (prog.get("post_batch") or {}).get("commit"):
-        post: dict[str, Any] = prog.get("post_batch") or {"today": today, "started_at": _now(), "status_pairs": []}
-        post["failed_ids"] = sorted(set(authorized) - set(all_ok_ids))
-        prog["post_batch"] = post
-        _save_batch(bd, prog)                                   # checkpoint: started
-        if "rollup_all" not in post:
-            post["rollup_all"] = run_rollup_all(vault, today)
-            _save_batch(bd, prog)                               # checkpoint: rollup done
-        pairs = derive_pairs(vault, kind, all_ok_ids)
-        done_pairs = {(p["client"], p["engagement"]) for p in post["status_pairs"] if p.get("exit") is not None}
-        for client, eng in pairs:
-            if (client, eng) in done_pairs:
-                continue
-            rc, rel = run_status_plan(client, eng, today, vault)
-            post["status_pairs"].append({"client": client, "engagement": eng, "exit": rc, "relPath": rel})
-            _save_batch(bd, prog)                               # checkpoint: each pair
-        # G0a2-2: commit the post-batch writes (STATE.md, every client region, touched
-        # projects/<eng>.md last_update, each status artifact) — their own FR-014-style commit.
-        pathspec = post_batch_pathspec(vault, pairs, [p["relPath"] for p in post["status_pairs"] if p.get("relPath")])
-        sha, committed = commit_post_batch(vault, pathspec, f"brain: backfill {args.batch} post-batch rollup + status ({len(pairs)} pairs)")
-        post["commit"] = {"pathspec": pathspec, "vault_sha": sha, "committed": committed}
-        _save_batch(bd, prog)                                   # checkpoint: complete
-    elif attempted != authorized:
-        print(f"post-batch: deferred ({len(authorized) - len(attempted)} authorized meetings not yet attempted) — re-run apply; rollup/status run once after the last meeting", file=sys.stderr)
+    if not authorized:
+        # M6 (task-10-review): zero authorized meetings (e.g. every dry-run row
+        # non-exit-0) must not still trigger a vault-wide rollup --all + commit with
+        # nothing behind it.
+        if not (prog.get("post_batch") or {}).get("skipped"):
+            print("post-batch: nothing authorized, skipped", file=sys.stderr)
+            prog["post_batch"] = {"skipped": "no-authorized-rows"}
+            _save_batch(bd, prog)
+    else:
+        apply_of = lambda mid: ((prog["rows"].get(f"{kind}:{mid}") or {}).get("apply") or {})
+        all_ok_ids = [mid for mid in authorized if apply_of(mid).get("exit") == 0]
+        attempted = sorted(mid for mid in authorized if apply_of(mid).get("exit") is not None)
+        if attempted == authorized and not (prog.get("post_batch") or {}).get("commit"):
+            post: dict[str, Any] = prog.get("post_batch") or {"today": today, "started_at": _now(), "status_pairs": []}
+            post["failed_ids"] = sorted(set(authorized) - set(all_ok_ids))
+            prog["post_batch"] = post
+            _save_batch(bd, prog)                                   # checkpoint: started
+            if "rollup_all" not in post:
+                post["rollup_all"] = run_rollup_all(vault, today)
+                _save_batch(bd, prog)                               # checkpoint: rollup done
+            pairs = derive_pairs(vault, kind, all_ok_ids)
+            done_pairs = {(p["client"], p["engagement"]) for p in post["status_pairs"] if p.get("exit") is not None}
+            for client, eng in pairs:
+                if (client, eng) in done_pairs:
+                    continue
+                rc, rel = run_status_plan(client, eng, today, vault)
+                post["status_pairs"].append({"client": client, "engagement": eng, "exit": rc, "relPath": rel})
+                _save_batch(bd, prog)                               # checkpoint: each pair
+            # G0a2-2: commit the post-batch writes (STATE.md, every client region, touched
+            # projects/<eng>.md last_update, each status artifact) — their own FR-014-style commit.
+            pathspec = post_batch_pathspec(vault, pairs, [p["relPath"] for p in post["status_pairs"] if p.get("relPath")])
+            # M5 (task-10-review): a real git failure (progress.vault_commit raises
+            # SystemExit(10)) must not preempt the FR-015 exit contract / `applied:` line
+            # — contain it, record it, and fall through.
+            try:
+                sha, committed = commit_post_batch(vault, pathspec, f"brain: backfill {args.batch} post-batch rollup + status ({len(pairs)} pairs)")
+                post["commit"] = {"pathspec": pathspec, "vault_sha": sha, "committed": committed}
+            except SystemExit as exc:
+                post["commit"] = {"error": str(exc.code)}
+                print(f"post-batch commit failed: {exc.code}", file=sys.stderr)
+            _save_batch(bd, prog)                                   # checkpoint: complete
+        elif attempted != authorized:
+            print(f"post-batch: deferred ({len(authorized) - len(attempted)} authorized meetings not yet attempted) — re-run apply; rollup/status run once after the last meeting", file=sys.stderr)
     print(f"applied: {ok} ok, {failed} failed, {skipped} skipped")
     # FR-015 exit contract: 0 when failed = 0, else 1. Post-batch rollup/status outcomes are
     # recorded in prog["post_batch"] and gated separately by G4 (6_rollup_all_ran_exactly_once_ok / 6_status_pairs_ok).

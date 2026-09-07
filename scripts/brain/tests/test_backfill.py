@@ -1754,3 +1754,81 @@ def test_cmd_list_returns_2_on_json_decode_error_from_list_transcripts(tmp_path,
     rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "list"])
     assert rc == 2
     assert "list failed: ValueError" in capsys.readouterr().err
+
+
+# --- Micro-fold 5 (fold-5-brief.md) — CH-3 (G2b r1 Critical): nominal charge
+# for a paid extraction attempt that fails before writing extraction.json.
+def test_dry_run_charges_nominal_for_failed_extraction_with_no_new_extraction_json(tmp_path, monkeypatch):
+    import backfill
+    vault, bd = _seed_batch(tmp_path, ids=("A",))
+
+    def fake(argv):
+        return 3   # extraction wrapper failure: no extraction.json, no fetch-error.json
+    monkeypatch.setattr(backfill, "run_meeting_main", fake)
+    assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"]) == 0
+    row = _bp(bd)["rows"]["fireflies:A"]["dry_run"]
+    assert row["exit"] == 3
+    assert row["cost_usd"] == backfill.FAILED_EXTRACTION_NOMINAL_USD
+    assert row["cost_nominal"] is True
+
+
+def test_dry_run_nominal_charge_accumulates_across_repeated_failed_attempts(tmp_path, monkeypatch):
+    import backfill
+    vault, bd = _seed_batch(tmp_path, ids=("A",))
+
+    def fake(argv):
+        return 3
+    monkeypatch.setattr(backfill, "run_meeting_main", fake)
+    base = ["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"]
+    assert backfill.main(base) == 0
+    assert backfill.main(base) == 0   # resume: still exit != 0 -> retried
+    row = _bp(bd)["rows"]["fireflies:A"]["dry_run"]
+    assert row["cost_usd"] == pytest.approx(2 * backfill.FAILED_EXTRACTION_NOMINAL_USD)
+    assert row["cost_nominal"] is True
+    assert row["attempts"] == 2
+
+
+def test_dry_run_no_nominal_charge_when_failure_is_at_fetch(tmp_path, monkeypatch):
+    import backfill
+    import fetch_fireflies
+    vault, bd = _seed_batch(tmp_path, ids=("A",))
+
+    def fake(argv):
+        mid = argv[argv.index("--meeting-id") + 1]
+        fetch_fireflies.write_fetch_error(vault, "fireflies", mid, "server", status=500, message="boom")
+        return 2
+    monkeypatch.setattr(backfill, "run_meeting_main", fake)
+    assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"]) == 0
+    row = _bp(bd)["rows"]["fireflies:A"]["dry_run"]
+    assert row["cost_usd"] == 0.0
+    assert row["cost_nominal"] is False
+    assert row["fetch_error"]["class"] == "server"
+
+
+def test_dry_run_nominal_charges_count_toward_budget_halt(tmp_path, monkeypatch, capsys):
+    import backfill
+    vault, bd = _seed_batch(tmp_path, ids=("A", "B"))
+
+    def fake(argv):
+        return 3
+    monkeypatch.setattr(backfill, "run_meeting_main", fake)
+    cap = 2 * backfill.FAILED_EXTRACTION_NOMINAL_USD - 0.01
+    rc = backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name,
+                         "dry-run", "--max-usd", str(cap)])
+    assert rc == 12   # halts after B: A alone (1x nominal) is under cap, A+B (2x nominal) crosses it
+    rows = _bp(bd)["rows"]
+    assert rows["fireflies:A"]["dry_run"]["cost_nominal"] is True
+    assert rows["fireflies:B"]["dry_run"]["cost_nominal"] is True
+    assert "budget" in capsys.readouterr().err
+
+
+def test_dry_run_digest_header_cost_usd_includes_nominal_charges(tmp_path, monkeypatch):
+    import backfill
+    vault, bd = _seed_batch(tmp_path, ids=("A",))
+
+    def fake(argv):
+        return 3
+    monkeypatch.setattr(backfill, "run_meeting_main", fake)
+    assert backfill.main(["--source", "fireflies", "--vault", str(vault), "--repo-root", str(tmp_path), "--batch", bd.name, "dry-run"]) == 0
+    text = (bd / "digest.md").read_text(encoding="utf-8")
+    assert f"cost_usd: {backfill.FAILED_EXTRACTION_NOMINAL_USD:.2f}" in text

@@ -49,6 +49,15 @@ SOURCES = ("fireflies",)  # R5 (FR-017) generalizes to fetch_<kind>.py dispatch
 # Batch ids are produced by _batch_id(); anything else is refused before it touches a path (G0b-11).
 BATCH_ID_RE = re.compile(r"^[a-z][a-z0-9]{0,15}-\d{8}T\d{6}Z$")
 DEFAULT_MAX_USD = 150.0
+# CH-3 (G2b r1, Critical): the ONE measured extraction cost sample in the
+# spec (G-97/A-12: `cost_usd 0.3603328`, model sonnet, acceptance meeting's
+# extraction.json meta) — used as a conservative nominal charge when a paid
+# `claude -p` extraction attempt is billed but exits before writing
+# extraction.json (wrapper failure / invalid JSON / schema failure), so
+# repeated failures can never silently cost $0 in the ledger. Per-attempt
+# cost receipts from extract_meeting.py itself are out of scope this
+# release (carried A-13).
+FAILED_EXTRACTION_NOMINAL_USD = 0.3603328
 
 
 def batch_root(vault: Path) -> Path:
@@ -504,6 +513,29 @@ def _dry_run_record(vault: Path, kind: str, meeting_id: str, rc: int, capture: s
     # Charge only when THIS attempt produced the extraction (G0b-5): a retry after a
     # later-stage failure finds extract_meeting's inputSha short-circuit — no new spend.
     reused = bool(extracted_at) and extracted_at == stamp_before
+    # CH-3 (G2b r1, Critical): a paid `claude -p` extraction call can be
+    # billed by the provider and still exit non-zero BEFORE writing
+    # extraction.json (wrapper failure, invalid JSON, schema failure) —
+    # `no_new_extraction` (the stamp is unchanged from before this attempt,
+    # whether that stamp is a real prior timestamp or the empty string for
+    # "never extracted") is true in exactly that case as well as the
+    # already-handled `reused` case. Fetch-stage failures (a real
+    # fetch-error.json, or a synthesized `usage` exit-2) never reached
+    # extraction at all and must NOT be charged — only a failure that got
+    # PAST fetch, still failed, and produced no new extraction.json is
+    # billed nominally.
+    fe = _read_json(fetch_error_path(vault, kind, meeting_id), None)
+    has_real_fetch_error = rc != 0 and isinstance(fe, dict)
+    is_synthesized_usage = rc == 2 and not has_real_fetch_error
+    got_past_fetch = not has_real_fetch_error and not is_synthesized_usage
+    no_new_extraction = extracted_at == stamp_before
+    cost_nominal = rc != 0 and no_new_extraction and got_past_fetch
+    if cost_nominal:
+        added_cost = FAILED_EXTRACTION_NOMINAL_USD
+    elif reused:
+        added_cost = 0.0
+    else:
+        added_cost = cost
     m = CLASSIFICATION_RE.search(capture or "")
     rec: dict[str, Any] = {
         "exit": rc,
@@ -515,17 +547,18 @@ def _dry_run_record(vault: Path, kind: str, meeting_id: str, rc: int, capture: s
         "classification": m.group(1) if m else None,
         "capture_sha256": hashlib.sha256(capture.encode("utf-8")).hexdigest() if capture else None,
         # review C1: "retry adds, never replaces" — this attempt's ledger contribution
-        # accumulates onto whatever was already recorded for this row, it never resets.
-        "cost_usd": prior_cost + (0.0 if reused else cost),
+        # accumulates onto whatever was already recorded for this row, it never resets;
+        # spend only ever increases (measured, reused-zero, or nominal).
+        "cost_usd": prior_cost + added_cost,
         "cost_reused": reused,
+        "cost_nominal": cost_nominal,
         "attempts": attempts,
         "elapsed_s": round(elapsed, 3),
         "at": _now(),
     }
-    fe = _read_json(fetch_error_path(vault, kind, meeting_id), None)
-    if rc != 0 and isinstance(fe, dict):
+    if has_real_fetch_error:
         rec["fetch_error"] = fe
-    elif rc == 2:
+    elif is_synthesized_usage:
         # FR-017 (G-125): argparse/usage exits are 2 with no file — never auth, never a batch stop.
         rec["fetch_error"] = {"class": "usage", "synthesized": True, "message": "exit 2 without fetch-error.json"}
     return rec

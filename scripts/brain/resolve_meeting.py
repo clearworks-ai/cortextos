@@ -51,6 +51,27 @@ FORWARD = {
 }
 ALIASES_REL = Path("orgs/clearworksai/agents/crm-codex/crm/org-aliases.json")
 CONTACTS_REL = Path("orgs/clearworksai/agents/crm-codex/crm/contacts.json")
+# Plan v2 (R4b Phase 1, 2026-09-08): P-1 internal roster and P-4 date-aware
+# employer history. Both gitignored data files, never committed real names
+# to the (public) repo (see the README in that directory) -- absent files
+# load as empty and are a no-op, never an error.
+INTERNAL_ROSTER_REL = Path("orgs/clearworksai/agents/crm-codex/crm/internal-roster.json")
+EMPLOYER_HISTORY_REL = Path("orgs/clearworksai/agents/crm-codex/crm/employer-history.json")
+
+# Plan v2 (R4b Phase 1) coordinator correction 2026-09-08: resolve() has no
+# applied-state/receipt input (it takes only source, closed sets, repo_root,
+# classification), so "already applied to production" cannot be inferred --
+# it must be an explicit id allow-list passed in by the caller. These are
+# the two AIA LA office-hours meetings R4 already applied to
+# orgs/aia-la.md rule 10; Phase 2 migrates them under the staging-first
+# protocol, so P-1/P-2/P-3/P-4 must all be no-ops for these ids (enforced
+# as a full-resolution invariant in resolve(), not just a P-3 skip).
+PROTECTED_MEETING_IDS: frozenset[str] = frozenset(
+    {
+        "01KYGEE6TGNCNZ1YMYHQMZH9KC",
+        "01KZ4G1SY192WQRSQD5SGCR171",
+    }
+)
 
 # P1' (R4b plan v3, G0a-v3 approved): placeholder/device/email-as-name
 # participant-name shapes. Anchored and casefolded (re.IGNORECASE). Applied
@@ -64,7 +85,13 @@ _PLACEHOLDER_PARTICIPANT_NAME_RE = re.compile(
     r"|^user\s*\d+$"
     r"|^\s*[^\s@]+@[^\s@]+\.[A-Za-z]{2,}\s*$"
     r"|['’]s\s+(?:iphone|ipad)\b"
-    r"|^\s*(?:iphone|ipad)\b",
+    r"|^\s*(?:iphone|ipad)\b"
+    # G0a I-1 (R4b plan v2 Phase 1): a redacted/partial phone number is a
+    # device-dial placeholder, not a name -- required BEFORE P-1 ships, so
+    # removing a roster member (e.g. Mrin) from a two-participant meeting
+    # never promotes a phone number to candidates[0] and mints a junk
+    # orgs/1-310-00.md-shaped page.
+    r"|^\s*\+?\d[\d\s().*–-]{5,}\s*$",
     re.IGNORECASE,
 )
 
@@ -313,12 +340,42 @@ def _word_boundary_has(haystack: str, needle: str) -> bool:
     return re.search(r"(?<![a-z0-9])" + re.escape(n) + r"(?![a-z0-9])", haystack) is not None
 
 
-def _external_participants(source: dict[str, Any]) -> list[dict[str, Any]]:
+def _meeting_id(source: dict[str, Any]) -> str:
+    src = source.get("source")
+    if not isinstance(src, dict):
+        return ""
+    return str(src.get("id") or "")
+
+
+def _load_roster_names(repo_root: Path) -> set[str]:
+    """P-1 (plan v2 Phase 1): roster is a DATA file, not code -- Josh Weiss
+    and Mrin/Mrinmayi Sawant ONLY (Josh 2026-09-08). Normalized-name
+    aliases, matched by name regardless of Fireflies side/spoke (G0a I-2:
+    the roster must include short-form variants like "Mrin S." that appear
+    in the live batch). Absent file -> empty roster, never an error."""
+    data = _load_json(repo_root / INTERNAL_ROSTER_REL, {"names": []})
+    names = data.get("names") if isinstance(data, dict) else None
+    if not isinstance(names, list):
+        names = []
+    return {_norm_title(str(n)) for n in names if str(n).strip()}
+
+
+def _external_participants(source: dict[str, Any], roster: set[str] | None = None) -> list[dict[str, Any]]:
+    roster = roster or set()
     out = []
     for p in source.get("participants") or []:
         if not isinstance(p, dict):
             continue
         if p.get("notetaker"):
+            continue
+        # P-1: a roster member is "ours" by normalized NAME regardless of
+        # the stored side/spoke -- filtered out of the external-participant
+        # view every rule reads, never by mutating the stored envelope
+        # (participants[] stays byte-identical; only this in-memory view
+        # changes). A meeting whose only participants are roster members
+        # therefore falls through to the existing "no externals" rule.
+        pname = _norm_title(str(p.get("name") or ""))
+        if pname and pname in roster:
             continue
         side = p.get("side")
         spoke = bool(p.get("spoke"))
@@ -327,14 +384,138 @@ def _external_participants(source: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+_TRAILING_PAREN_QUALIFIER_RE = re.compile(r"\s*\(([^()]*)\)\s*$")
+_TRAILING_ORG_QUALIFIER_RE = re.compile(r",\s*[^,]+$")
+
+
+def _strip_name_qualifiers(name: Any) -> str:
+    """P-2 (plan v2 Phase 1): strip ONE trailing parenthetical and a
+    trailing ', <Org>' qualifier before contact matching -- e.g. 'Jay
+    Owens, CCA Systems (HeHim)' -> 'Jay Owens'.
+
+    Guards (G0a-measured traps, do not re-introduce):
+    - Never strip a trailing parenthetical whose content is the only
+      identity evidence in the slot: an email address. 'Erin Morris
+      (erin@erinmorris.com)' is returned unchanged.
+    - A name with neither shape is returned unchanged: 'Kevin Collins -
+      CTO @ Turazo' has no trailing parenthetical and no comma, so nothing
+      strips.
+    """
+    text = str(name or "").strip()
+    if not text:
+        return text
+    m = _TRAILING_PAREN_QUALIFIER_RE.search(text)
+    if m and "@" not in m.group(1):
+        text = text[: m.start()].rstrip()
+    m2 = _TRAILING_ORG_QUALIFIER_RE.search(text)
+    if m2:
+        text = text[: m2.start()].rstrip()
+    return text
+
+
+_OFFICE_HOURS_TITLE_RE = re.compile(r"(?<![a-z0-9])office\s+hours?(?![a-z0-9])", re.IGNORECASE)
+
+
+def _is_office_hours_title(ntitle: str) -> bool:
+    """P-3 (plan v2 Phase 1): TITLE-ANCHORED only -- checks the meeting
+    title, never a substring match anywhere in the transcript body or the
+    classifier's org_name/evidence text."""
+    return bool(_OFFICE_HOURS_TITLE_RE.search(ntitle))
+
+
+def _office_hours_home(closed: dict[str, Any]) -> dict[str, Any]:
+    """P-3: office-hours sessions are Clearworks-internal teaching, never
+    the attendee's org (Josh 2026-09-08: "the office hours just make them
+    clearworks internal"). Same clearworks-internal payload shape as rule
+    8, kept under a distinct rule number so a P-3 hit is distinguishable
+    from "no external participants" in resolution.json."""
+    exists = "clearworks-internal" in closed["orgs"]
+    return {
+        "counterparty_slug": "clearworks-internal",
+        "kind": "org",
+        "relationship": "internal",
+        "home_path": "orgs/clearworks-internal.md",
+        "node": "none",
+        "created": None
+        if exists
+        else {"kind": "org", "slug": "clearworks-internal", "relationship": "internal"},
+        "confidence": 1.0,
+        "rule": 11,
+        "corroborated": False,
+        "also_present": [],
+    }
+
+
+def _load_employer_history(repo_root: Path) -> dict[str, list[dict[str, Any]]]:
+    """P-4 (plan v2 Phase 1): person -> [{date_from, date_to, slug}, ...],
+    keyed by contact id (falls back to normalized contact name). Absent
+    file -> empty map, never an error."""
+    data = _load_json(repo_root / EMPLOYER_HISTORY_REL, {})
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, list[dict[str, Any]]] = {}
+    for key, entries in data.items():
+        if isinstance(entries, list):
+            out[_norm_title(str(key))] = [e for e in entries if isinstance(e, dict)]
+    return out
+
+
+def _employer_slug_at(
+    row: dict[str, Any], occurred_at: Any, history: dict[str, list[dict[str, Any]]]
+) -> str | None:
+    """P-4: employer AT MEETING TIME, never current employer. Consulted
+    BEFORE the CRM-company resolution so a person whose contacts.json
+    company reflects today's employer still routes historical meetings to
+    the employer they had when the meeting happened (G0a-measured trap:
+    a contact's 12 batch meetings predate a later employer switch and
+    must not follow the current company to the wrong client). Silent
+    no-op when there is no entry or no date overlap -- callers fall back
+    to the ordinary company resolution."""
+    if not history:
+        return None
+    keys = []
+    cid = _norm_title(str(row.get("id") or ""))
+    if cid:
+        keys.append(cid)
+    pname = _norm_title(str(row.get("name") or ""))
+    if pname:
+        keys.append(pname)
+    entries: list[dict[str, Any]] = []
+    for k in keys:
+        entries = history.get(k) or []
+        if entries:
+            break
+    if not entries:
+        return None
+    date_part = str(occurred_at or "")[:10]
+    if not date_part:
+        return None
+    for entry in entries:
+        slug = entry.get("slug")
+        if not slug:
+            continue
+        date_from = str(entry.get("date_from") or "0000-00-00")
+        date_to = str(entry.get("date_to") or "9999-99-99")
+        if date_from <= date_part <= date_to:
+            return str(slug)
+    return None
+
+
 def resolve(
     source: dict[str, Any],
     closed: dict[str, Any],
     repo_root: Path,
     classification: dict[str, Any] | None = None,
+    protected_ids: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     if not (source.get("participants") or []) and not (source.get("text_units") or []):
         raise SystemExit(5)
+    # Plan v2 (R4b Phase 1) coordinator correction 2026-09-08: protection is
+    # an explicit id allow-list (resolve() has no applied-state input), and
+    # it is a FULL-RESOLUTION invariant -- a protected meeting id disables
+    # P-1/P-2/P-3/P-4 entirely and reproduces the exact unmodified rule
+    # ladder, not just a P-3 skip.
+    is_protected = _meeting_id(source) in protected_ids
     title = str(source.get("title") or "")
     ntitle = _norm_title(title)
     clients: dict[str, Path] = closed["clients"]
@@ -362,7 +543,9 @@ def resolve(
                     registrable_label(str(em).split("@", 1)[1]), ""
                 )
 
-    externals = _external_participants(source)
+    roster = set() if is_protected else _load_roster_names(repo_root)
+    employer_history = {} if is_protected else _load_employer_history(repo_root)
+    externals = _external_participants(source, roster)
     # F5 (round 2): cls / cls_label / slug_for_cls are shared by the rule-9
     # override AND the _pick tie-break below — compute them once, up front,
     # instead of inside rule 9 (previous location).
@@ -502,6 +685,19 @@ def resolve(
             return alt
         return None
 
+    def _rows_matching_name(name_norm: str) -> list[dict[str, Any]]:
+        if len(name_norm.split()) < 2:
+            # R3-1 (round 4, Critical): a bare first name is not an identity
+            # (mirrors rule 7's len(tokens) >= 2) — matching it against a
+            # contacts.json row let the B override (rule 4) silently re-home
+            # a meeting onto that row's company over the real email-domain
+            # pick (production repro: "Michelle" -> clients/alloi.md rule 4,
+            # over the correct clients/oakrootsaccounting.md rule 3). This
+            # guard applies to every name candidate tried below, raw or
+            # P-2-stripped.
+            return []
+        return [row for row in contact_rows if _norm_title(str(row.get("name") or "")) == name_norm]
+
     def _match_contact(p: dict[str, Any]) -> dict[str, Any] | None:
         email = str(p.get("email") or "").strip().lower()
         if email:
@@ -509,18 +705,20 @@ def resolve(
                 emails = [str(e).lower() for e in (row.get("emails") or [])]
                 if email in emails:
                     return row
-        pname = _norm_title(str(p.get("name") or ""))
+        raw_name = str(p.get("name") or "")
+        pname = _norm_title(raw_name)
         if not pname:
             return None
-        if len(pname.split()) < 2:
-            # R3-1 (round 4, Critical): a bare first name is not an identity
-            # (mirrors rule 7's len(tokens) >= 2) — matching it against a
-            # contacts.json row let the B override (rule 4) silently re-home
-            # a meeting onto that row's company over the real email-domain
-            # pick (production repro: "Michelle" -> clients/alloi.md rule 4,
-            # over the correct clients/oakrootsaccounting.md rule 3).
-            return None
-        matches = [row for row in contact_rows if _norm_title(str(row.get("name") or "")) == pname]
+        matches = _rows_matching_name(pname)
+        if not matches and not is_protected:
+            # P-2: strip ONE trailing parenthetical and a trailing
+            # ", <Org>" qualifier and retry — ONLY as a fallback when the
+            # raw name found nothing, so an exact raw match (e.g. a contact
+            # row whose own stored name carries the identical qualifier)
+            # is never disturbed.
+            stripped_norm = _norm_title(_strip_name_qualifiers(raw_name))
+            if stripped_norm and stripped_norm != pname:
+                matches = _rows_matching_name(stripped_norm)
         if not matches:
             return None
         if len(matches) == 1:
@@ -550,7 +748,13 @@ def resolve(
         row = _match_contact(p)
         if not row:
             continue
-        slug = _resolve_company_slug(row.get("company"))
+        # P-4: employer AT MEETING TIME wins over the CRM row's (possibly
+        # current-day) company when a date-ranged override exists for this
+        # meeting's occurred_at; otherwise fall back to the ordinary
+        # company resolution, byte-identical to before P-4.
+        slug = _employer_slug_at(row, source.get("occurred_at"), employer_history) or _resolve_company_slug(
+            row.get("company")
+        )
         if not slug:
             continue
         p_email = str(p.get("email") or "").strip().lower()
@@ -589,6 +793,19 @@ def resolve(
         no_ext = not externals
         if client in client_cands or no_ext:
             return _hit(node, nid, rule=2, clients=clients, client_cands=client_cands, corroborated=True)
+    # P-3 (plan v2 Phase 1): office-hours sessions are Clearworks-internal,
+    # never the attendee's org or a community org page — a categorical Josh
+    # ruling inserted after rules 1-2 and before rule 10 (coordinator
+    # correction 2026-09-08: the plan's ladder is not a literal executable
+    # order; P-1/P-2/P-4 transform inputs to the unchanged rule ladder, only
+    # this is a new branch, and it must sit here — before rule 10's
+    # community-org door AND before the rules 3/4/9 email/domain path below
+    # — so a real client email present on an office-hours meeting (e.g. the
+    # 7 meetings a ReThink Media attendee's email otherwise wins) does not
+    # pre-empt it). Protected ids (already-applied production homes) are a
+    # full-resolution no-op, never reaching this branch.
+    if not is_protected and _is_office_hours_title(ntitle):
+        return _office_hours_home(closed)
     # (10) community / teaching sessions: no external participant has an
     # email at all (nothing for rule 3/4/5/6 to see) and the classifier calls
     # it a colleague/personal community context with a named org — home is
@@ -1029,7 +1246,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         closed = load_closed_sets(Path(args.vault))
         validated = quote_gate(extraction, source)
-        resolution = resolve(source, closed, Path(args.repo_root), extraction.get("classification") if isinstance(extraction.get("classification"), dict) else None)
+        resolution = resolve(
+            source,
+            closed,
+            Path(args.repo_root),
+            extraction.get("classification") if isinstance(extraction.get("classification"), dict) else None,
+            protected_ids=PROTECTED_MEETING_IDS,
+        )
         if not resolution:
             print("unresolved-technical", file=sys.stderr)
             return 5

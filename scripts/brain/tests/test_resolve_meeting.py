@@ -272,12 +272,13 @@ def _write_source(
     meeting_type: str = "internal",
     deal_state: str | None = "none",
     fireflies_id: str = "01RULE8",
+    occurred_at: str = "2026-09-04T17:00:00Z",
 ) -> None:
     source = {
         "schema": "brain.source/1",
         "source": {"kind": "fireflies", "id": fireflies_id},
         "title": title,
-        "occurred_at": "2026-09-04T17:00:00Z",
+        "occurred_at": occurred_at,
         "duration_s": 12,
         "participants": participants,
         "text_units": [{"i": 0, "speaker": "Josh", "text": text, "ts": 0}],
@@ -2504,7 +2505,14 @@ def test_p3_description_shaped_org_name_alone_rule10_falls_through_to_rule7(tmp_
     participants = _r1_participants()
     _write_source(
         src,
-        title="AI Office Hours (AIA LA TAP Committee)",
+        # R4b plan v2 Phase 1: title changed from "AI Office Hours (AIA LA
+        # TAP Committee)" to avoid an incidental collision with the new P-3
+        # office-hours branch (inserted before rule 10) -- this test's
+        # actual subject is the P3' description-shaped org_name guard on
+        # rule 10, unrelated to office-hours titling; the synthetic id
+        # (01P3RULE10SYN) was never one of the real production aia-la
+        # meetings, so no production behavior is affected by this rename.
+        title="AIA LA TAP Committee Meeting",
         participants=participants,
         org_name="Client (name not stated)",
         domain=None,
@@ -2567,4 +2575,802 @@ def test_p2_deferred_org_name_equals_participant_name_unchanged(tmp_path) -> Non
     assert res["rule"] == 7
     assert res["kind"] == "person"
     assert res["home_path"] == "orgs/kimie-aryai.md"
-    assert res["created"] == {"kind": "person", "slug": "kimie-aryai", "relationship": "personal"}
+
+
+# --- R4b plan v2 Phase 1 (docs/pipeline/plans/2026-09-08-r4b-identity-
+# enrichment.md, P-1..P-4), corrected 2026-09-08 by the coordinator's
+# post-review message: P-1 (roster), P-2 (qualifier stripping) and P-4
+# (date-aware employer) transform inputs to the UNCHANGED rule ladder;
+# only P-3 (office hours) is a new branch, inserted after rules 1-2 and
+# before rule 10. Protection for the two already-applied aia-la meetings
+# is an explicit id allow-list (PROTECTED_MEETING_IDS) enforced as a
+# full-resolution invariant. ---
+
+
+def _write_roster(repo: Path, names: list[str]) -> None:
+    crm_dir = repo / "orgs/clearworksai/agents/crm-codex/crm"
+    crm_dir.mkdir(parents=True, exist_ok=True)
+    (crm_dir / "internal-roster.json").write_text(json.dumps({"names": names}), encoding="utf-8")
+
+
+def _write_employer_history(repo: Path, data: dict) -> None:
+    crm_dir = repo / "orgs/clearworksai/agents/crm-codex/crm"
+    crm_dir.mkdir(parents=True, exist_ok=True)
+    (crm_dir / "employer-history.json").write_text(json.dumps(data), encoding="utf-8")
+
+
+# --- P-1: internal roster ---
+
+
+def test_p1_roster_josh_and_mrin_sole_participants_resolves_internal(tmp_path) -> None:
+    """P-1: a meeting whose only participants are roster members (Josh
+    Weiss, Mrin Sawant) resolves internal -- Mrin is filtered out of the
+    external-participant view by NAME regardless of her stored Fireflies
+    side/spoke (G0a C-2: her fetch-time side is "unknown"/spoke:true
+    today, since OURS_NAMES at fetch time doesn't know her). RED before
+    P-1: rc==0, res["rule"]==7, res["home_path"]=="orgs/mrin-sawant.md"."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    _write_roster(repo, ["Josh Weiss", "Mrin Sawant"])
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Josh / Mrin",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Mrin Sawant",
+                "email": None,
+                "side": "unknown",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        fireflies_id="01P1ROSTERSOLE",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 8
+    assert res["home_path"] == "orgs/clearworks-internal.md"
+    assert res["kind"] == "org"
+
+
+def test_p1_roster_recognizes_short_form_name_variants(tmp_path) -> None:
+    """G0a I-2: the roster must be a normalized alias list including
+    short-form live variants ("Mrin", "Mrin S.") -- not just the full
+    "Mrin Sawant"/"Mrinmayi Sawant" forms. RED before P-1 (or before the
+    roster file lists these variants): each case resolves rule 7 to
+    orgs/mrin-*.md instead of falling to rule 8."""
+    from resolve_meeting import main
+
+    for idx, variant in enumerate(["Mrin", "Mrinmayi Sawant", "Mrin S."]):
+        case_root = tmp_path / f"case{idx}"
+        vault, repo = _seed_brain(case_root)
+        _write_roster(repo, ["Josh Weiss", "Mrin Sawant", "Mrinmayi Sawant", "Mrin", "Mrin S."])
+        src = case_root / "env"
+        src.mkdir(parents=True)
+        _write_source(
+            src,
+            title="Josh / Mrin catchup",
+            participants=[
+                {
+                    "name": "Josh Weiss",
+                    "email": "josh@clearworks.ai",
+                    "side": "ours",
+                    "spoke": True,
+                    "notetaker": False,
+                    "handle": None,
+                },
+                {"name": variant, "email": None, "side": "unknown", "spoke": True, "notetaker": False, "handle": None},
+            ],
+            fireflies_id=f"01P1VARIANT{idx}",
+        )
+        rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+        assert rc == 0, variant
+        res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+        assert res["rule"] == 8, variant
+        assert res["home_path"] == "orgs/clearworks-internal.md", variant
+
+
+def test_p1_roster_presence_never_decides_home_rule7_person_page(tmp_path) -> None:
+    """Ground truth (Josh 2026-09-08): "her presence must NEVER decide a
+    meeting's home -- she is on OUR side, like Josh. The meeting belongs
+    to the CLIENT being interviewed." Ordered BEFORE a real named
+    attendee in participants[], an unfiltered Mrin would win rule 7's
+    `candidates[0]` and mint the wrong person page. RED before P-1:
+    res["home_path"] == "orgs/mrin-sawant.md"."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    _write_roster(repo, ["Josh Weiss", "Mrin Sawant"])
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Assessment Interview (Casey Nguyen)",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Mrin Sawant",
+                "email": None,
+                "side": "unknown",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Casey Nguyen",
+                "email": None,
+                "side": "unknown",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        org_name="Casey Nguyen",
+        domain=None,
+        relationship="prospect",
+        fireflies_id="01P1ROSTERWINS",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 7
+    assert res["kind"] == "person"
+    assert res["home_path"] == "orgs/casey-nguyen.md"
+
+
+def test_p1_roster_name_matching_normalizes_case_and_whitespace(tmp_path) -> None:
+    """Roster matching normalizes case/whitespace the same way the rest of
+    the resolver does (_norm_title) -- a roster entry "josh weiss" matches
+    a participant name "JOSH WEISS", and "MRIN   SAWANT" matches
+    "Mrin  Sawant"."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    _write_roster(repo, ["josh weiss", "MRIN   SAWANT"])
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Josh / Mrin",
+        participants=[
+            {
+                "name": "JOSH WEISS",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Mrin  Sawant",
+                "email": None,
+                "side": "unknown",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        fireflies_id="01P1NORMCASE",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 8
+    assert res["home_path"] == "orgs/clearworks-internal.md"
+
+
+def test_p1_roster_preserves_calasia_control_with_short_form_variant_present(tmp_path) -> None:
+    """G0a I-2 regression control: 01KZVZVSMRNR6N5A5NFXEW5P23
+    (calasiaconstruction rule 3, one of R4's five corrected homes) carries
+    a "Mrin S." participant in the live batch. Both before and after P-1
+    this control is unaffected (she is email-less and was never counted
+    toward client_cands either way) -- labeled honestly as a regression
+    control, not a red-first test, per the assignment's method note."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_r4_vault(tmp_path)
+    _write_roster(repo, ["Josh Weiss", "Mrin Sawant", "Mrin S."])
+    src = tmp_path / "env"
+    src.mkdir()
+    participants = [
+        {
+            "name": None,
+            "email": "myrnamurawski@calasiaconstruction.com",
+            "side": "theirs",
+            "spoke": False,
+            "notetaker": False,
+        },
+        {
+            "name": None,
+            "email": "johnmurawski@calasiaconstruction.com",
+            "side": "theirs",
+            "spoke": False,
+            "notetaker": False,
+        },
+        {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours", "spoke": False, "notetaker": False},
+        {"name": None, "email": "abbey@calasiaconstruction.com", "side": "theirs", "spoke": False, "notetaker": False},
+        {"name": "Nathan Phinney", "email": "nphinney@allsafeit.com", "side": "theirs", "spoke": True, "notetaker": False},
+        {"name": "John Murawski", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
+        {"name": "Abbey Ocampo", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
+        {"name": "Chris", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
+        {"name": "Mrin S.", "email": None, "side": "unknown", "spoke": True, "notetaker": False},
+    ]
+    _write_source(
+        src,
+        title="AllSafe IT <> CalAsia Construction: Introductory Call",
+        participants=participants,
+        org_name="CalAsia Construction",
+        domain="calasiaconstruction.com",
+        relationship="prospect",
+        confidence=0.8,
+        meeting_type="sales",
+        deal_state="proposal",
+        fireflies_id="01KZVZVSMRNR6N5A5NFXEW5P23",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "clients/calasiaconstruction.md"
+    assert res["rule"] == 3
+
+
+def test_p1_roster_removal_leaves_phone_placeholder_falls_to_rule8(tmp_path) -> None:
+    """G0a I-1 (required amendment before P-1 ships): removing a roster
+    member from externals must not promote a redacted phone number to
+    rule 7's candidates[0] and mint a junk orgs/1-310-00.md-shaped page --
+    the placeholder regex now recognizes phone shapes, so this falls
+    through to the existing "every candidate is a placeholder" rule-8
+    fallback. RED before the phone-shape regex extension:
+    res["rule"] == 7, res["home_path"].startswith("orgs/1")."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    _write_roster(repo, ["Josh Weiss", "Mrin Sawant"])
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Weekly check-in",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Mrin Sawant",
+                "email": None,
+                "side": "unknown",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "+1 310-***-**00",
+                "email": None,
+                "side": "unknown",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        fireflies_id="01P1PHONEJUNK",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 8
+    assert res["home_path"] == "orgs/clearworks-internal.md"
+
+
+# --- P-2: qualifier stripping ---
+
+
+def test_p2_guard_preserves_email_shaped_parenthetical() -> None:
+    """P-2 trap (must not mangle): a trailing parenthetical whose content
+    is an email address is the only identity evidence in the slot and
+    must never be stripped."""
+    from resolve_meeting import _strip_name_qualifiers
+
+    assert _strip_name_qualifiers("Erin Morris (erin@erinmorris.com)") == "Erin Morris (erin@erinmorris.com)"
+
+
+def test_p2_guard_preserves_dash_at_qualifier_shape() -> None:
+    """P-2 trap (must not mangle): no trailing parenthetical and no comma
+    -- nothing strips."""
+    from resolve_meeting import _strip_name_qualifiers
+
+    assert _strip_name_qualifiers("Kevin Collins - CTO @ Turazo") == "Kevin Collins - CTO @ Turazo"
+
+
+def test_p2_strips_trailing_paren_then_trailing_org_qualifier() -> None:
+    """P-2: strip ONE trailing parenthetical, then a trailing ', <Org>'
+    qualifier."""
+    from resolve_meeting import _strip_name_qualifiers
+
+    assert _strip_name_qualifiers("Jay Owens, CCA Systems (HeHim)") == "Jay Owens"
+
+
+def test_p2_strip_trailing_paren_and_org_qualifier_unlocks_contact_match(tmp_path) -> None:
+    """P-2 end-to-end: 'Jay Owens, Fixture Consulting (HeHim)' has no raw
+    match against a contacts.json row named 'Jay Owens', but the
+    P-2-stripped name does, unlocking the existing client page via rule 4
+    (the "reach a client page" ceiling this task is scoped to -- reaching
+    an ORG page via a name-only match remains Phase 2's lever per
+    resolve_meeting.py:566-571, not attempted here). RED before P-2:
+    res["rule"] == 7, res["home_path"] starts with
+    "orgs/jay-owens-fixture-consulting"."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients" / "fixture-consulting.md").write_text(
+        "# Client: Fixture Consulting\n\n## Contacts\n", encoding="utf-8"
+    )
+    (repo / "orgs/clearworksai/agents/crm-codex/crm/contacts.json").write_text(
+        json.dumps(
+            {
+                "contacts": [
+                    {"id": "fx-01", "name": "Jay Owens", "company": "Fixture Consulting", "emails": []},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Intro call",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Jay Owens, Fixture Consulting (HeHim)",
+                "email": None,
+                "side": "theirs",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        org_name="Fixture Consulting",
+        domain=None,
+        relationship="prospect",
+        fireflies_id="01P2STRIP",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "clients/fixture-consulting.md"
+    assert res["rule"] == 4
+
+
+# --- P-3: office hours ---
+
+
+def test_p3_office_hours_title_routes_internal_over_client_email(tmp_path) -> None:
+    """P-3: an office-hours-titled session resolves to
+    orgs/clearworks-internal.md even when an attendee's email would
+    otherwise win a client home via rule 3 (G0a-measured: 7 of the 12 real
+    office-hours meetings currently land on clients/rethink-media.md only
+    because one attendee's email happens to be present). RED before P-3:
+    res["rule"] == 3, res["home_path"] == "clients/rethinkmedia-fixture.md"."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients" / "rethinkmedia-fixture.md").write_text(
+        "# Client: ReThink Media Fixture\n\n## Contacts\n\ndomains: rethinkmedia-fixture.test\n",
+        encoding="utf-8",
+    )
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="AI Office Hours (Weekly)",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Pat",
+                "email": "pat@rethinkmedia-fixture.test",
+                "side": "theirs",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        org_name="ReThink Media Fixture",
+        domain="rethinkmedia-fixture.test",
+        relationship="client",
+        fireflies_id="01P3OFFICEHOURS",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 11
+    assert res["home_path"] == "orgs/clearworks-internal.md"
+
+
+def test_p3_title_anchor_ignores_office_hours_mentioned_only_in_body(tmp_path) -> None:
+    """P-3 is TITLE-ANCHORED only, never a substring match anywhere in the
+    body -- "office hours" appearing in the transcript text AND in the
+    classifier's org_name, but NOT in the title, must not trigger it."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Weekly Sync",
+        text="We should set up office hours for the team sometime.",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Sam",
+                "email": "sam@newco-fixture2.test",
+                "side": "theirs",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        org_name="office hours mentioned but irrelevant",
+        domain="newco-fixture2.test",
+        relationship="prospect",
+        fireflies_id="01P3BODYONLY",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 6
+    assert res["home_path"] == "orgs/newco-fixture2.md"
+
+
+def test_p3_wins_over_rule10_community_org_ordering(tmp_path) -> None:
+    """Coordinator correction 2026-09-08: P-3 must run BEFORE rule 10's
+    community-org door (inserted after rules 1-2, before rule 10) -- an
+    office-hours-titled, no-external-email, colleague-relationship meeting
+    that WOULD otherwise qualify for rule 10's community-org creation
+    instead resolves to orgs/clearworks-internal.md via P-3. RED before
+    P-3, or if P-3 were placed AFTER rule 10: res["rule"] == 10,
+    res["home_path"] == "orgs/new-prospect-community.md"."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="AI Office Hours (New Prospect Community)",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {"name": "Pat Doe", "email": None, "side": "unknown", "spoke": True, "notetaker": False, "handle": None},
+            {"name": "Sam Roe", "email": None, "side": "unknown", "spoke": True, "notetaker": False, "handle": None},
+        ],
+        org_name="New Prospect Community",
+        domain=None,
+        relationship="colleague",
+        confidence=0.55,
+        meeting_type="other",
+        fireflies_id="01P3WINSOVERR10",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 11
+    assert res["home_path"] == "orgs/clearworks-internal.md"
+
+
+def test_p3_neighbor_rule2_alias_wins_over_office_hours_title(tmp_path) -> None:
+    """Coordinator correction 2026-09-08: P-3 sits AFTER rules 1-2, not
+    before -- a title matching both a project alias AND "office hours"
+    still resolves via rule 2, never P-3. RED if P-3 were placed before
+    rules 1-2: res["rule"] == 11, res["node"] == "none"."""
+    from resolve_meeting import main
+
+    vault = tmp_path / "vault"
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients").mkdir(parents=True)
+    (brain / "projects").mkdir()
+    (brain / "orgs").mkdir()
+    (brain / "clients" / "alloi.md").write_text(
+        "# Client: Alloi\n\n## Contacts\n\ndomains: alloi.us\n",
+        encoding="utf-8",
+    )
+    (brain / "projects" / "alloi-03.md").write_text(
+        _node_page("alloi", "alloi-03", "tacticals, tactical report, arch tactical"),
+        encoding="utf-8",
+    )
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_env(src, "Weekly tacticals office hours review")
+    repo = tmp_path / "repo"
+    (repo / "orgs/clearworksai/agents/crm-codex/crm").mkdir(parents=True)
+    (repo / "orgs/clearworksai/agents/crm-codex/crm/org-aliases.json").write_text("{}", encoding="utf-8")
+    (repo / "orgs/clearworksai/agents/crm-codex/crm/contacts.json").write_text(
+        '{"contacts":[]}', encoding="utf-8"
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 2
+    assert res["node"] == "alloi-03"
+
+
+def test_p3_protected_aia_la_ids_unchanged_with_all_four_rules_active(tmp_path) -> None:
+    """Coordinator correction 2026-09-08 (Correction 2): protection is a
+    FULL-RESOLUTION invariant, not just a P-3 skip. Both already-applied
+    AIA LA office-hours meetings must keep their exact R4 home+rule
+    (orgs/aia-la.md rule 10) even when a roster member (Mrin) and a P-2
+    qualifier-laden name are ALSO present in the same meeting -- proving
+    protected ids bypass P-1, P-2, P-3 and P-4 together, not one
+    mechanism at a time. RED without the protected_ids mechanism (or with
+    it applied only to P-3): res["rule"] == 11,
+    res["home_path"] == "orgs/clearworks-internal.md"."""
+    from resolve_meeting import PROTECTED_MEETING_IDS, main
+
+    for protected_id in sorted(PROTECTED_MEETING_IDS):
+        case_root = tmp_path / protected_id
+        vault, repo = _seed_r4_vault(case_root)
+        _write_roster(repo, ["Josh Weiss", "Mrin Sawant"])
+        src = case_root / "env"
+        src.mkdir(parents=True)
+        participants = _r1_participants() + [
+            {
+                "name": "Mrin Sawant",
+                "email": None,
+                "side": "unknown",
+                "spoke": True,
+                "notetaker": False,
+            },
+            {
+                "name": "Priya Shah, New Prospect Co (HeHim)",
+                "email": None,
+                "side": "unknown",
+                "spoke": True,
+                "notetaker": False,
+            },
+        ]
+        _write_source(
+            src,
+            title="AI Office Hours (AIA LA TAP Committee)",
+            participants=participants,
+            org_name="AIA LA (Office Hours community)",
+            domain=None,
+            relationship="colleague",
+            confidence=0.55,
+            meeting_type="other",
+            fireflies_id=protected_id,
+        )
+        rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+        assert rc == 0, protected_id
+        res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+        assert res["home_path"] == "orgs/aia-la.md", protected_id
+        assert res["rule"] == 10, protected_id
+        assert res["counterparty_slug"] == "aia-la", protected_id
+
+
+# --- P-4: date-aware employer ---
+
+
+def test_p4_employer_history_routes_by_meeting_date_not_current_company(tmp_path) -> None:
+    """P-4: employer AT MEETING TIME wins over the CRM row's current
+    company for a date inside the historical window (G0a-measured trap,
+    modeled here on a synthetic contact/company pair, not the real
+    production names: a contact's legacy-window meetings must not follow
+    her CURRENT employer to the wrong client). RED before P-4:
+    res["home_path"] == "clients/current-employer-fixture.md"."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients" / "current-employer-fixture.md").write_text(
+        "# Client: Current Employer Fixture\n\n## Contacts\n", encoding="utf-8"
+    )
+    (brain / "clients" / "legacy-employer-fixture.md").write_text(
+        "# Client: Legacy Employer Fixture\n\n## Contacts\n", encoding="utf-8"
+    )
+    (repo / "orgs/clearworksai/agents/crm-codex/crm/contacts.json").write_text(
+        json.dumps(
+            {
+                "contacts": [
+                    {"id": "fx-p4-01", "name": "Pat Doe", "company": "Current Employer Fixture", "emails": []},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_employer_history(
+        repo,
+        {"fx-p4-01": [{"date_from": "2025-10-01", "date_to": "2026-04-30", "slug": "legacy-employer-fixture"}]},
+    )
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Audit interview",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {"name": "Pat Doe", "email": None, "side": "unknown", "spoke": True, "notetaker": False, "handle": None},
+        ],
+        org_name="Current Employer Fixture",
+        domain=None,
+        relationship="client",
+        occurred_at="2026-01-15T17:00:00Z",
+        fireflies_id="01P4DATEWINDOW",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "clients/legacy-employer-fixture.md"
+    assert res["rule"] == 4
+
+
+def test_p4_employer_history_falls_back_to_current_company_outside_range(tmp_path) -> None:
+    """P-4 fallback guard (regression control, not a red-first test — the
+    outcome here matches pre-P-4 behavior either way): a meeting dated
+    AFTER the historical window's date_to falls back to the ordinary
+    (current) company resolution."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients" / "current-employer-fixture.md").write_text(
+        "# Client: Current Employer Fixture\n\n## Contacts\n", encoding="utf-8"
+    )
+    (brain / "clients" / "legacy-employer-fixture.md").write_text(
+        "# Client: Legacy Employer Fixture\n\n## Contacts\n", encoding="utf-8"
+    )
+    (repo / "orgs/clearworksai/agents/crm-codex/crm/contacts.json").write_text(
+        json.dumps(
+            {
+                "contacts": [
+                    {"id": "fx-p4-01", "name": "Pat Doe", "company": "Current Employer Fixture", "emails": []},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_employer_history(
+        repo,
+        {"fx-p4-01": [{"date_from": "2025-10-01", "date_to": "2026-04-30", "slug": "legacy-employer-fixture"}]},
+    )
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Audit interview",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {"name": "Pat Doe", "email": None, "side": "unknown", "spoke": True, "notetaker": False, "handle": None},
+        ],
+        org_name="Current Employer Fixture",
+        domain=None,
+        relationship="client",
+        occurred_at="2026-08-01T17:00:00Z",
+        fireflies_id="01P4OUTSIDERANGE",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "clients/current-employer-fixture.md"
+    assert res["rule"] == 4
+
+
+def test_p4_missing_employer_history_file_is_noop(tmp_path) -> None:
+    """Absent employer-history.json -> empty map, never an error."""
+    from resolve_meeting import _load_employer_history
+
+    repo = tmp_path / "repo"
+    (repo / "orgs/clearworksai/agents/crm-codex/crm").mkdir(parents=True)
+    assert _load_employer_history(repo) == {}
+
+
+# --- Named G0a M-2 control (not in the batch, no pre-existing test) ---
+
+
+def test_r4b_control_juan_202608_bare_single_token_name_rule7_unaffected(tmp_path) -> None:
+    """G0a M-2 control (juan-202608, 01KZCYHQGQ6GPW7SB0QQBAG68M): a bare
+    single-token external name's rule-7 person-page fallback (slugified
+    with the occurred_at YYYYMM suffix) must be unaffected by P-1..P-4 --
+    not a roster member, no qualifier to strip, no office-hours title, no
+    employer-history.json entry. Regression control, not a red-first
+    test: this outcome is unchanged before and after Phase 1."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    _write_roster(repo, ["Josh Weiss", "Mrin Sawant"])
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Quick sync",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {"name": "Juan", "email": None, "side": "unknown", "spoke": True, "notetaker": False, "handle": None},
+        ],
+        org_name="Juan",
+        domain=None,
+        relationship="prospect",
+        occurred_at="2026-08-12T17:00:00Z",
+        fireflies_id="01KZCYHQGQ6GPW7SB0QQBAG68M",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 7
+    assert res["kind"] == "person"
+    assert res["home_path"] == "orgs/juan-202608.md"

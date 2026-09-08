@@ -2281,6 +2281,129 @@ def test_p1_mixed_placeholder_and_real_external_real_one_wins_rule7(tmp_path) ->
     assert res["created"] == {"kind": "person", "slug": "jesus-manzo", "relationship": "personal"}
 
 
+def test_p1_null_name_placeholder_sole_external_homes_rule8(tmp_path) -> None:
+    """Judge review I-2 (r4b-v3-implement-review.md): a NULL/empty/
+    whitespace-only participant name is the DOMINANT placeholder shape in
+    the live batch — 191 external participants carry name: null, 4.5x more
+    common than "Speaker N" (42) — and drives 4 of the 19 rows this build
+    actually changes (plan v3 §4a), yet it had zero tests before this one.
+    Pin all three shapes (None, empty string, whitespace-only): a sole such
+    external must not fabricate a person page and must take the rule-8
+    home, asserting the full payload exactly as the other P1' placeholder
+    tests do."""
+    from resolve_meeting import main
+
+    for shape_id, raw_name in (("none", None), ("empty", ""), ("whitespace", "   ")):
+        case_root = tmp_path / shape_id
+        vault, repo = _seed_brain(case_root)
+        src = case_root / "env"
+        src.mkdir(parents=True)
+        _write_source(
+            src,
+            title="Gmail intro",
+            participants=[
+                {
+                    "name": "Josh Weiss",
+                    "email": "josh@clearworks.ai",
+                    "side": "ours",
+                    "spoke": True,
+                    "notetaker": False,
+                    "handle": None,
+                },
+                {
+                    "name": raw_name,
+                    "email": None,
+                    "side": "theirs",
+                    "spoke": True,
+                    "notetaker": False,
+                    "handle": None,
+                },
+            ],
+            org_name="AI Exchange",
+            domain=None,
+            relationship="vendor",
+            confidence=0.70,
+            meeting_type="other",
+            fireflies_id=f"01P1NULLNAME{shape_id.upper()}",
+        )
+        rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+        assert rc == 0, shape_id
+        res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+        assert res["rule"] == 8, shape_id
+        assert res["home_path"] == "orgs/clearworks-internal.md", shape_id
+        assert res["kind"] == "org", shape_id
+        assert res["relationship"] == "internal", shape_id
+        assert res["counterparty_slug"] == "clearworks-internal", shape_id
+        assert res["confidence"] == 1.0, shape_id
+        assert res["corroborated"] is False, shape_id
+        assert res["also_present"] == [], shape_id
+        assert res["created"] == {
+            "kind": "org",
+            "slug": "clearworks-internal",
+            "relationship": "internal",
+        }, shape_id
+
+
+def test_p3_pick_tiebreak_still_reads_raw_org_name(tmp_path) -> None:
+    """G0a-v3 amendment 1 / judge review I-3: P3' sanitizes cls_org_name
+    ONLY at the rule-9 and rule-10 call sites (resolve_meeting.py:612,
+    :712) — the module-level slug_for_cls (:373) that feeds _pick's
+    tie-break for rules 3/4/5/6 must keep reading the RAW classification
+    name. Today that boundary was proven only by a code comment. This
+    constructs a 1-vs-1 client-candidate tie where a description-shaped
+    org_name slugifies onto one candidate's exact slug: with cls_domain
+    empty (so cls_label cannot supply a competing match), the RAW org_name
+    must still decide the tie. If a future change hoisted P3' sanitization
+    into slug_for_cls's own definition, cls_match would go empty and the
+    tie would fall through to alphabetical order, picking "aaafirst"
+    instead (proven red against a scratch copy with that regression
+    applied — see r4b-v3-implement-report.md)."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients" / "aaafirst.md").write_text(
+        "# Client: AAA First\n\n## Contacts\n\ndomains: aaafirst.com\n", encoding="utf-8"
+    )
+    (brain / "clients" / "nerin-s-architecture-design-firm.md").write_text(
+        "# Client: Nerin's Architecture/Design Firm\n\n## Contacts\n\n"
+        "domains: nerin-s-architecture-design-firm.io\n",
+        encoding="utf-8",
+    )
+    src = tmp_path / "env"
+    src.mkdir()
+    participants = [
+        {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours", "spoke": True, "notetaker": False},
+        {"name": None, "email": "pat@aaafirst.com", "side": "theirs", "spoke": False, "notetaker": False},
+        {
+            "name": None,
+            "email": "sam@nerin-s-architecture-design-firm.io",
+            "side": "theirs",
+            "spoke": False,
+            "notetaker": False,
+        },
+    ]
+    _write_source(
+        src,
+        title="Intro call",
+        participants=participants,
+        org_name="Nerin's architecture/design firm",
+        domain=None,
+        relationship="prospect",
+        confidence=0.55,
+        meeting_type="other",
+        fireflies_id="01P3PICKTIE",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 3
+    assert res["counterparty_slug"] == "nerin-s-architecture-design-firm"
+    assert res["home_path"] == "clients/nerin-s-architecture-design-firm.md"
+    assert res["created"] is None
+    assert res["also_present"] == ["aaafirst"]
+
+
 def test_p3_description_shaped_org_name_with_valid_domain_still_resolves_rule9_by_domain(tmp_path) -> None:
     """P3' synthetic (G0a-v3 §3.4: 0/292 live rule-9/10 meetings pair a
     description-shaped org_name with a valid cls_domain — no live witness).
@@ -2314,6 +2437,56 @@ def test_p3_description_shaped_org_name_with_valid_domain_still_resolves_rule9_b
     assert res["counterparty_slug"] == "russianriverkeeper"
     assert res["home_path"] == "orgs/russianriverkeeper.md"
     assert res["created"] == {"kind": "org", "slug": "russianriverkeeper", "relationship": "client"}
+
+
+def test_p3_rule9_domain_slug_collides_with_existing_hyphenated_org_page(tmp_path) -> None:
+    """G0a-v3 amendment 2 / judge review I-4: the test above seeds an EMPTY
+    orgs/ dir, which hides the V2-2 duplicate-slug hazard G0a-v3 flagged and
+    v3 does not retire — when a description-shaped org_name is sanitized
+    away, rule 9 falls back to the DOMAIN-derived slug ("russianriverkeeper",
+    no hyphen), which is a DIFFERENT slug from the real, already-existing
+    page ("orgs/russian-riverkeeper.md", from the org-name-derived
+    slugify()). Seed that real page here (no "domains:" line, matching the
+    live vault page per G0a-v3 §1.2) so the collision is fixture-visible:
+    per the review's exact fix option (a), assert the outcome that actually
+    occurs — a SECOND, differently-hyphenated org page is created beside the
+    existing one, not a reuse of it. F3's page-declared-domain reuse path
+    (test_f3_rule9_reuses_existing_org_page_declaring_the_domain) only fires
+    when the existing page itself declares a "domains:" line; this fixture
+    deliberately omits it because the real vault page predates that
+    convention. V2-2 (unretired by v3): R5/P2' owns fixing this hazard
+    class, not this build."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_r4_vault(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "orgs" / "russian-riverkeeper.md").write_text(
+        "# Org: Russian Riverkeeper\n\nrelationship: client\n", encoding="utf-8"
+    )
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Tech Committee Meeting #4",
+        participants=_r3_participants(),
+        org_name="Nonprofit organization (name not stated)",
+        domain="russianriverkeeper.org",
+        relationship="client",
+        confidence=0.85,
+        meeting_type="delivery",
+        deal_state="won",
+        fireflies_id="01P3RULE9DUP",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    # The pre-existing "orgs/russian-riverkeeper.md" is NOT reused — the
+    # resolver creates a second page under the domain-derived slug instead.
+    assert res["rule"] == 9
+    assert res["counterparty_slug"] == "russianriverkeeper"
+    assert res["home_path"] == "orgs/russianriverkeeper.md"
+    assert res["created"] == {"kind": "org", "slug": "russianriverkeeper", "relationship": "client"}
+    assert res["home_path"] != "orgs/russian-riverkeeper.md"
 
 
 def test_p3_description_shaped_org_name_alone_rule10_falls_through_to_rule7(tmp_path) -> None:

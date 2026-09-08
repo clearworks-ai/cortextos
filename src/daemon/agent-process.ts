@@ -16,6 +16,7 @@ import { logEvent } from '../bus/event.js';
 import { loadBuffer } from './conversation-buffer.js';
 import { ensureMissionAnchorFromBuffer } from './restart-context.js';
 import { readEnabledAgentsMap } from '../bus/enabled-agents-io.js';
+import { snapshotDescendants, killSnapshotSurvivors } from '../utils/process-tree.js';
 
 type LogFn = (msg: string) => void;
 
@@ -475,6 +476,17 @@ export class AgentProcess {
       // is unreliable afterward — we need the pid to confirm death below.
       const childPid = pty.getPid();
 
+      // knox-codex 2026-09-08: record this child's descendants WHILE IT IS STILL
+      // ALIVE. The runtime spawns its own inner child beneath the PTY child
+      // (codex-app-server most visibly), and signalling only the PTY child leaves
+      // that grandchild running — reparented to launchd, still writing this
+      // agent's heartbeat/thread/inbox and still emitting billable turns, so the
+      // next start lands on top of a live previous session.
+      // ORDERING IS LOAD-BEARING: after the parent dies the kernel reparents its
+      // children to pid 1, so a descendant walk rooted here would return an EMPTY
+      // set exactly when there is an orphan to find. Snapshot now, sweep below.
+      const descendantsBeforeStop = childPid ? snapshotDescendants([childPid]) : [];
+
       // BUG-032 follow-up: only kill the PTY if the process is still alive.
       // After /exit + 5s wait, the child has usually exited cleanly. Calling
       // pty.kill() on an already-exited PTY tears down the file descriptor,
@@ -523,6 +535,17 @@ export class AgentProcess {
         if (isChildAlive(childPid)) {
           this.log(`WARNING: pid ${childPid} still alive 5s after SIGKILL — proceeding anyway`);
         }
+      }
+
+      // Sweep any descendant that outlived the child. This runs UNCONDITIONALLY —
+      // deliberately NOT inside the escalation branch above, which is guarded by
+      // isChildAlive(childPid) and therefore skipped on a clean child exit. The
+      // clean exit is the normal case, and it is the one that leaked: SIGHUP
+      // takes the PTY child, its inner child survives, nothing looks for it.
+      // killSnapshotSurvivors() re-checks liveness AND command identity, so a
+      // pid recycled during the graceful window is never signalled.
+      if (descendantsBeforeStop.length > 0) {
+        killSnapshotSurvivors(descendantsBeforeStop, { log: (msg) => this.log(msg) });
       }
     }
 

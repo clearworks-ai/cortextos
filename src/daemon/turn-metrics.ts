@@ -27,14 +27,27 @@ export interface TurnRow {
   sessionId: string;
   /** CUMULATIVE input tokens for the session, as written to the log. */
   inputTokens: number;
+  /** CUMULATIVE cache-read tokens for the session. */
+  cacheReadTokens: number;
 }
 
 export interface WindowMetrics {
   turns: number;
   /** Input tokens actually spent in the window (deltas, not cumulatives). */
   inputTokens: number;
+  /** Of those, tokens served from cache. */
+  cacheReadTokens: number;
+  /**
+   * Input that was NOT served from cache — the number that tracks cost.
+   *
+   * Measured across the real fleet, 83-98.6% of input tokens are cache reads, so
+   * raw input overstates spend by up to ~50x. One 58-turn burst spent 11,853,518
+   * input tokens of which 11,798,656 were cache reads.
+   */
+  uncachedInputTokens: number;
   turnsPerHour: number;
   inputTokensPerHour: number;
+  uncachedInputTokensPerHour: number;
 }
 
 /**
@@ -47,29 +60,38 @@ export function computeWindowMetrics(rows: TurnRow[], nowMs: number, windowMs: n
 
   // Walk in order, tracking each session's previous cumulative value so a delta
   // is only ever taken between consecutive rows of the SAME session.
-  const prevBySession = new Map<string, number>();
+  const prevBySession = new Map<string, { input: number; cache: number }>();
   let turns = 0;
   let inputTokens = 0;
+  let cacheReadTokens = 0;
 
   for (const row of sorted) {
     const prev = prevBySession.get(row.sessionId);
-    prevBySession.set(row.sessionId, row.inputTokens);
+    prevBySession.set(row.sessionId, { input: row.inputTokens, cache: row.cacheReadTokens ?? 0 });
     if (row.atMs < cutoff) continue;
     turns += 1;
     // No previous row for this session inside our data = this is the session's
     // first observed turn; its cumulative value is not a delta we can attribute,
     // so it contributes no spend rather than its whole running total.
     if (prev === undefined) continue;
-    const delta = row.inputTokens - prev;
+    const delta = row.inputTokens - prev.input;
     if (delta > 0) inputTokens += delta; // negative = session reset; ignore
+    const cacheDelta = (row.cacheReadTokens ?? 0) - prev.cache;
+    if (cacheDelta > 0) cacheReadTokens += cacheDelta;
   }
 
   const hours = windowMs / 3_600_000;
+  // The two counters are reported independently by the runtime and can drift, so
+  // clamp rather than emitting a negative "uncached" figure.
+  const uncachedInputTokens = Math.max(0, inputTokens - cacheReadTokens);
   return {
     turns,
     inputTokens,
+    cacheReadTokens,
+    uncachedInputTokens,
     turnsPerHour: hours > 0 ? turns / hours : 0,
     inputTokensPerHour: hours > 0 ? inputTokens / hours : 0,
+    uncachedInputTokensPerHour: hours > 0 ? uncachedInputTokens / hours : 0,
   };
 }
 

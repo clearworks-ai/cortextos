@@ -38,7 +38,12 @@ const HOUR = 3_600_000;
 const NOW = 1_800_000_000_000;
 
 const rows = (specs: Array<[number, string, number]>): TurnRow[] =>
-  specs.map(([atMs, sessionId, inputTokens]) => ({ atMs, sessionId, inputTokens }));
+  specs.map(([atMs, sessionId, inputTokens]) => ({ atMs, sessionId, inputTokens, cacheReadTokens: 0 }));
+
+/** Rows carrying cumulative cache-read alongside cumulative input. */
+const cachedRows = (specs: Array<[number, string, number, number]>): TurnRow[] =>
+  specs.map(([atMs, sessionId, inputTokens, cacheReadTokens]) =>
+    ({ atMs, sessionId, inputTokens, cacheReadTokens }));
 
 describe('computeWindowMetrics', () => {
   it('counts turns inside the window and ignores older ones', () => {
@@ -131,5 +136,43 @@ describe('detectBurnAnomaly', () => {
   it('still flags a genuine spike from a quiet baseline', () => {
     expect(detectBurnAnomaly({ recentTurnsPerHour: 300, baselineTurnsPerHour: 0, factor: 3 }).anomalous)
       .toBe(true);
+  });
+});
+
+describe('computeWindowMetrics — cached vs uncached input', () => {
+  it('separates cache reads from genuinely new input', () => {
+    // Measured on the real fleet: 83-98.6% of input tokens are cache reads.
+    // Reporting raw input as a cost proxy overstates spend by up to ~50x — the
+    // builddifferentprod burst spent 11,853,518 input tokens of which
+    // 11,798,656 were cache reads (99.5%).
+    const m = computeWindowMetrics(cachedRows([
+      [NOW - 30 * 60_000, 's1', 1_000_000, 990_000],
+      [NOW - 20 * 60_000, 's1', 1_200_000, 1_188_000],
+    ]), NOW, HOUR);
+
+    expect(m.inputTokens).toBe(200_000);
+    expect(m.cacheReadTokens).toBe(198_000);
+    expect(m.uncachedInputTokens).toBe(2_000);
+  });
+
+  it('never reports negative uncached input when cache exceeds the input delta', () => {
+    // The two counters are reported independently by the runtime and can drift.
+    const m = computeWindowMetrics(cachedRows([
+      [NOW - 30 * 60_000, 's1', 1_000, 1_000],
+      [NOW - 20 * 60_000, 's1', 2_000, 5_000],
+    ]), NOW, HOUR);
+
+    expect(m.uncachedInputTokens).toBe(0);
+  });
+
+  it('resets cache deltas at a session boundary too', () => {
+    const m = computeWindowMetrics(cachedRows([
+      [NOW - 30 * 60_000, 's_old', 689_000_000, 680_000_000],
+      [NOW - 20 * 60_000, 's_new', 200_000, 190_000],
+      [NOW - 10 * 60_000, 's_new', 400_000, 380_000],
+    ]), NOW, HOUR);
+
+    expect(m.inputTokens).toBe(200_000);
+    expect(m.cacheReadTokens).toBe(190_000);
   });
 });

@@ -21,6 +21,11 @@ import {
  * Each agent is judged against ITS OWN trailing baseline. A fleet-wide average
  * would alert constantly on the busy agents (larry legitimately runs 50-180/hr)
  * and never on the quiet ones.
+ *
+ * `new-tok/hr` is input NOT served from cache, which is what tracks cost.
+ * Measured across this fleet 83-98.6% of input tokens are cache reads, so the
+ * raw input figure overstates spend by up to ~50x and must not be read as one.
+ * The anomaly verdict keys off turn RATE, which is unaffected by caching.
  */
 
 const HOUR = 3_600_000;
@@ -44,6 +49,7 @@ function readTurnRows(path: string): TurnRow[] {
         atMs,
         sessionId: String(row.session_id ?? ''),
         inputTokens: Number(row.input_tokens ?? 0),
+        cacheReadTokens: Number(row.cache_read_tokens ?? 0),
       });
     } catch { /* truncated or interleaved write — skip */ }
   }
@@ -114,8 +120,8 @@ export const fleetBurnCommand = new Command('fleet-burn')
         : '  No agent turn activity found.');
     } else {
       console.log(`\n  Turn rate — last ${options.window}h vs own ${options.baseline}h baseline\n`);
-      console.log(`  ${'AGENT'.padEnd(26)} ${'turns/hr'.padStart(9)} ${'base'.padStart(8)} ${'ratio'.padStart(7)} ${'in-tok/hr'.padStart(10)}`);
-      console.log(`  ${'-'.repeat(26)} ${'-'.repeat(9)} ${'-'.repeat(8)} ${'-'.repeat(7)} ${'-'.repeat(10)}`);
+      console.log(`  ${'AGENT'.padEnd(26)} ${'turns/hr'.padStart(9)} ${'base'.padStart(8)} ${'ratio'.padStart(7)} ${'new-tok/hr'.padStart(11)} ${'cached/hr'.padStart(10)}`);
+      console.log(`  ${'-'.repeat(26)} ${'-'.repeat(9)} ${'-'.repeat(8)} ${'-'.repeat(7)} ${'-'.repeat(11)} ${'-'.repeat(10)}`);
       for (const r of shown) {
         const ratio = Number.isFinite(r.ratio) ? `${r.ratio.toFixed(1)}x` : 'new';
         console.log(
@@ -123,7 +129,8 @@ export const fleetBurnCommand = new Command('fleet-burn')
           + `${r.recent.turnsPerHour.toFixed(0).padStart(9)} `
           + `${r.baseline.turnsPerHour.toFixed(0).padStart(8)} `
           + `${ratio.padStart(7)} `
-          + `${fmt(r.recent.inputTokensPerHour).padStart(10)}`,
+          + `${fmt(r.recent.uncachedInputTokensPerHour).padStart(11)} `
+          + `${fmt(r.recent.inputTokensPerHour - r.recent.uncachedInputTokensPerHour).padStart(10)}`,
         );
       }
       const flagged = shown.filter(r => r.anomalous);

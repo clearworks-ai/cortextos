@@ -11,6 +11,7 @@ import type { TelegramAPI } from '../telegram/api.js';
 import { KEYS } from '../pty/inject.js';
 import { stripControlChars, sanitizeForPtyInjection, wrapFenceSafe } from '../utils/validate.js';
 import { agentHoldsContextHandoffLease, releaseContextHandoffLease, requestContextHandoffLease } from './context-handoff-lease.js';
+import { readCurrentSessionId, readLastTurnAtMs } from './turn-activity.js';
 import {
   detectWedge,
   DEFAULT_WEDGE_HEARTBEAT_FRESH_MS,
@@ -419,10 +420,23 @@ export class FastChecker {
     const bufferMtime = this.mtimeMsOrNull(join(this.paths.stateDir, 'conversation-buffer.jsonl'));
     const heartbeatMtime = this.mtimeMsOrNull(join(this.paths.stateDir, 'heartbeat.json'));
 
+    // Prefer COMPLETED TURNS over the conversation buffer as the activity clock.
+    // The buffer is touched only on outbound Telegram sends, so a silently
+    // working agent read as wedged — this watchdog force-restarted the fleet 229
+    // times in one daemon log on that signal (frank2 at 3412min "stale", larry at
+    // 2099min, both mid-work). Filtering the token log to the CURRENT session is
+    // mandatory: a leaked previous-session process keeps appending to it, and its
+    // turns would otherwise vouch for a dead agent.
+    const sessionId = readCurrentSessionId(this.paths.stateDir);
+    const lastTurnAtMs = sessionId
+      ? readLastTurnAtMs(join(this.paths.logDir, 'codex-tokens.jsonl'), sessionId)
+      : null;
+
     const decision = detectWedge({
       nowMs: now,
       conversationBufferMtimeMs: bufferMtime,
       heartbeatMtimeMs: heartbeatMtime,
+      lastTurnAtMs,
       hasPendingWork: this.hasPendingInboxWork(),
       agentRunning: this.agent.isRunning(),
       restartInFlight: this.agent.isRestartInFlight(),
@@ -433,8 +447,9 @@ export class FastChecker {
     });
 
     if (decision.wedged) {
-      this.forceWedgeRestart(
-        `conversation buffer stale ${Math.round(decision.bufferAgeMs / 60_000)}min `
+      const clock = decision.reason.startsWith('stale-turns') ? 'no completed turn' : 'conversation buffer stale';
+      this.reportWedge(
+        `${clock} for ${Math.round(decision.activityAgeMs / 60_000)}min `
         + `(heartbeat fresh ${Math.round(decision.heartbeatAgeMs / 1000)}s ago) with pending inbox work`,
       );
     }
@@ -486,26 +501,31 @@ export class FastChecker {
    *     single-flight guard, so it can never spawn a duplicate PTY. detectWedge
    *     also refuses when a restart is already in flight, a second guard layer.
    */
-  private forceWedgeRestart(reason: string): void {
-    const now = Date.now();
-    // Stamp BEFORE kicking the restart so the storm guard is armed even if the
-    // restart itself is slow — the next poll cycle sees the cooldown immediately.
-    this.wedgeLastRestartAt = now;
-    this.log(`WEDGE detected — force restarting (recovery, not counted as crash): ${reason}`);
-
-    // Pre-arm a fresh session: a wedged REPL's --continue history is suspect, and
-    // a clean fresh boot is the reliable recovery. hardRestart writes the planned
-    // markers so the crash-alert hook classifies this as a planned restart, not a
-    // crash (no false crash ping, no crash-count increment).
-    hardRestart(this.paths, this.agent.name, `WEDGE-FORCE-RESTART: ${reason}`);
-    try {
-      writeFileSync(join(this.paths.stateDir, '.force-fresh'), '');
-    } catch { /* non-fatal — restart still recovers, just may --continue */ }
-
-    // sessionRefresh() does stop() + start(); .force-fresh makes shouldContinue()
-    // false for a clean fresh session. start()'s single-flight guard ensures no
-    // duplicate spawn even if another trigger races this.
-    this.agent.sessionRefresh().catch(err => this.log(`Wedge restart failed: ${err}`));
+  /**
+   * Report a wedge. ALERT ONLY — deliberately does not restart.
+   *
+   * This used to force a fresh restart, and did so 229 times across the fleet in
+   * a single daemon log: frank2 at 3412min "stale" (~57h), larry at 2099min —
+   * agents mid-work, restarted for not having spoken to Josh, because the signal
+   * was outbound-Telegram mtime rather than completed turns.
+   *
+   * The signal is now turn-based (see checkWedgeInner), which removes that false
+   * positive class. Recovery is still a human decision by explicit instruction:
+   * an automatic restart acting on a stall verdict is what produced the
+   * restart/orphan loop, and a legitimately long turn (browser automation, deep
+   * research) must not be executed for taking its time. The alert names the agent
+   * so a human or the chief-of-staff agent can decide.
+   */
+  private reportWedge(reason: string): void {
+    // Stamp immediately so the storm guard suppresses repeat alerts for the same
+    // stall on every subsequent poll cycle.
+    this.wedgeLastRestartAt = Date.now();
+    const msg = `WEDGE suspected for ${this.agent.name} — ALERT ONLY, no automatic restart: ${reason}. `
+      + `Recover with: cortextos restart ${this.agent.name}`;
+    this.log(msg);
+    if (this.telegramApi && this.chatId) {
+      this.telegramApi.sendMessage(this.chatId, msg).catch(() => {});
+    }
   }
 
   /**

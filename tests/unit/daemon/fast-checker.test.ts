@@ -1284,16 +1284,25 @@ describe('FastChecker wedge watchdog — default opt-in (wedge-watchdog-default-
     expect(sessionRefresh).not.toHaveBeenCalled();
   });
 
-  it('DOES wedge-restart when wedge_restart_min is an explicit positive value (opt-in intact)', () => {
+  it('ALERTS but does NOT restart when wedge_restart_min is an explicit positive value', () => {
     // 5min threshold; buffer 20min stale, heartbeat fresh, pending work → WEDGED.
+    //
+    // CONTRACT CHANGE (2026-09-08, knox incident): a wedge verdict now alerts and
+    // stops. It used to force a fresh restart, and did so 229 times across the
+    // fleet in one daemon log — frank2 at 3412min "stale" (~57h), larry at
+    // 2099min — because the staleness clock was outbound-Telegram mtime, not
+    // completed turns. Detection is still asserted here; the restart is not,
+    // because recovery is now a human decision.
     const { agent, sessionRefresh } = createWedgeAgent({ wedge_restart_min: 5 });
     writeWedgeFixtures(20);
-    const checker = new FastChecker(agent, paths, '/tmp/framework');
+    const logs: string[] = [];
+    const checker = new FastChecker(agent, paths, '/tmp/framework', { log: (m: string) => logs.push(m) });
 
     (checker as any).checkWedgeInner();
 
-    expect(hardRestart).toHaveBeenCalledTimes(1);
-    expect(sessionRefresh).toHaveBeenCalledTimes(1);
+    expect(logs.some(l => l.includes('WEDGE suspected'))).toBe(true);
+    expect(hardRestart).not.toHaveBeenCalled();
+    expect(sessionRefresh).not.toHaveBeenCalled();
   });
 });
 
@@ -1441,15 +1450,19 @@ describe('FastChecker wedge default armed for codex runtime (attempt-7 Fix B)', 
     writeFileSync(join(paths.inbox, 'msg-1.json'), '{"id":"m1"}', 'utf-8');
   }
 
-  it('codex-app-server with UNSET wedge_restart_min wedge-restarts at the 20min default', () => {
+  it('codex-app-server with UNSET wedge_restart_min ALERTS at the 20min default (no restart)', () => {
+    // The runtime-keyed default arming is unchanged; only the ACTION changed —
+    // alert, never an automatic restart. See the contract-change note above.
     const { agent, sessionRefresh } = createAgent({ runtime: 'codex-app-server' });
     writeWedgeFixtures(25); // 25min stale > 20min default → wedged
-    const checker = new FastChecker(agent, paths, '/tmp/framework');
+    const logs: string[] = [];
+    const checker = new FastChecker(agent, paths, '/tmp/framework', { log: (m: string) => logs.push(m) });
 
     (checker as any).checkWedgeInner();
 
-    expect(hardRestart).toHaveBeenCalledTimes(1);
-    expect(sessionRefresh).toHaveBeenCalledTimes(1);
+    expect(logs.some(l => l.includes('WEDGE suspected'))).toBe(true);
+    expect(hardRestart).not.toHaveBeenCalled();
+    expect(sessionRefresh).not.toHaveBeenCalled();
   });
 
   it('codex-app-server default does NOT fire below the 20min default', () => {

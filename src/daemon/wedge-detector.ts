@@ -65,8 +65,25 @@ export interface WedgeDetectorInput {
    */
   lastWedgeRestartAtMs: number;
   /**
-   * Buffer-staleness threshold in ms. Derived from config.wedge_restart_min
-   * (default 15min). The conversation buffer must be older than this to qualify.
+   * Epoch-ms of the last COMPLETED TURN for the agent's CURRENT session, or null
+   * when that signal is unavailable (a session that has completed no turn yet, or
+   * a runtime that writes no token log).
+   *
+   * When present this REPLACES the conversation-buffer clock. The buffer is
+   * touched only on outbound Telegram sends, so it cannot tell "working quietly"
+   * from "wedged" — that conflation force-restarted the fleet 229 times in one
+   * daemon log (frank2 at 3412min "stale", larry at 2099min, both while working).
+   * Completed turns are the real liveness signal.
+   *
+   * The caller MUST filter the token log to the current session: a leaked
+   * previous-session process keeps appending to the same file, and counting its
+   * turns would report a dead agent as alive.
+   */
+  lastTurnAtMs?: number | null;
+  /**
+   * Staleness threshold in ms. Derived from config.wedge_restart_min
+   * (default 15min). The activity clock — turns when available, otherwise the
+   * conversation buffer — must be older than this to qualify.
    */
   bufferStaleThresholdMs: number;
   /**
@@ -84,7 +101,15 @@ export interface WedgeDetectorInput {
 
 export type WedgeDecision =
   | { wedged: false; reason: string }
-  | { wedged: true; reason: string; bufferAgeMs: number; heartbeatAgeMs: number };
+  | {
+      wedged: true;
+      reason: string;
+      /** Age of whichever clock was used (turns if available, else buffer). */
+      activityAgeMs: number;
+      /** @deprecated Retained for existing callers; equals activityAgeMs. */
+      bufferAgeMs: number;
+      heartbeatAgeMs: number;
+    };
 
 export const DEFAULT_WEDGE_RESTART_MIN = 15;
 export const DEFAULT_WEDGE_BUFFER_STALE_MS = DEFAULT_WEDGE_RESTART_MIN * 60_000; // 15min
@@ -111,6 +136,7 @@ export function detectWedge(input: WedgeDetectorInput): WedgeDecision {
     bufferStaleThresholdMs,
     heartbeatFreshThresholdMs,
     restartCooldownMs,
+    lastTurnAtMs,
   } = input;
 
   // Disabled (wedge_restart_min <= 0) — the caller passes a non-positive
@@ -151,12 +177,19 @@ export function detectWedge(input: WedgeDetectorInput): WedgeDecision {
     return { wedged: false, reason: 'no-heartbeat' };
   }
 
-  const bufferAgeMs = nowMs - conversationBufferMtimeMs;
   const heartbeatAgeMs = nowMs - heartbeatMtimeMs;
 
-  // Buffer must be STALE (older than threshold).
-  if (bufferAgeMs < bufferStaleThresholdMs) {
-    return { wedged: false, reason: 'buffer-fresh' };
+  // Pick the activity clock. A completed turn is direct evidence the REPL is
+  // processing; an outbound Telegram send is only evidence it had something to
+  // say. Prefer the former whenever it exists.
+  const usingTurns = lastTurnAtMs !== null && lastTurnAtMs !== undefined;
+  const activityAgeMs = usingTurns
+    ? nowMs - (lastTurnAtMs as number)
+    : nowMs - conversationBufferMtimeMs;
+
+  // Activity must be STALE (older than threshold).
+  if (activityAgeMs < bufferStaleThresholdMs) {
+    return { wedged: false, reason: usingTurns ? 'turns-recent' : 'buffer-fresh' };
   }
 
   // Heartbeat must be FRESH (younger than threshold). A stale heartbeat means
@@ -169,8 +202,11 @@ export function detectWedge(input: WedgeDetectorInput): WedgeDecision {
   // running + no restart in flight + past cooldown = WEDGED.
   return {
     wedged: true,
-    reason: 'stale-conversation-fresh-heartbeat-pending-work',
-    bufferAgeMs,
+    reason: usingTurns
+      ? 'stale-turns-fresh-heartbeat-pending-work'
+      : 'stale-conversation-fresh-heartbeat-pending-work',
+    activityAgeMs,
+    bufferAgeMs: activityAgeMs,
     heartbeatAgeMs,
   };
 }

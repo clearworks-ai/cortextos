@@ -1984,3 +1984,414 @@ def test_rule10_page_declared_name_reuses_client_page_by_org_name(tmp_path) -> N
     assert res["home_path"] == "clients/msia.md"
     assert res["rule"] == 10
     assert res["created"] is None
+
+
+# --- R4b plan v3 (P1' placeholder guard + P3' description-shaped org_name
+# guard). Test names/behaviors are the explicit list in
+# docs/pipeline/plans/2026-09-07-r4b-resolver-personpage-fix.md §3, as
+# approved (with 4 amendments) by docs/pipeline/run-artifacts/
+# brain-backfill-r4b/G0a-v3-review.md. ---
+
+
+def test_p1_speaker_placeholder_sole_external_homes_rule8(tmp_path) -> None:
+    """P1' (G0a-v3 13-meeting class): a sole external whose only name is a
+    transcription placeholder ("Speaker 1") must not fabricate a person
+    page — every rule-7 candidate is filtered, so the meeting takes the
+    existing rule-8 home (byte-identical payload — extracted as
+    _rule8_home so the two paths cannot drift)."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="AI Exchange intro",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Speaker 1",
+                "email": None,
+                "side": "theirs",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        org_name="AI Exchange",
+        domain=None,
+        relationship="vendor",
+        confidence=0.70,
+        meeting_type="other",
+        fireflies_id="01P1SPEAKER1",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 8
+    assert res["home_path"] == "orgs/clearworks-internal.md"
+    assert res["kind"] == "org"
+    assert res["relationship"] == "internal"
+    assert res["counterparty_slug"] == "clearworks-internal"
+    assert res["confidence"] == 1.0
+    assert res["corroborated"] is False
+    assert res["also_present"] == []
+    assert res["created"] == {"kind": "org", "slug": "clearworks-internal", "relationship": "internal"}
+
+
+def test_p1_iphone_placeholder_sole_external_homes_rule8(tmp_path) -> None:
+    """P1': a device-recording label ("Dalton's iPhone (2)") is not a
+    person; filtered from rule 7's candidate list, falls to the rule-8
+    home."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Quick call",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Dalton's iPhone (2)",
+                "email": None,
+                "side": "theirs",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        org_name="Independent Dating Coaching Practice",
+        domain=None,
+        relationship="vendor",
+        confidence=0.70,
+        meeting_type="other",
+        fireflies_id="01P1IPHONE",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 8
+    assert res["home_path"] == "orgs/clearworks-internal.md"
+    assert res["created"] == {"kind": "org", "slug": "clearworks-internal", "relationship": "internal"}
+
+
+def test_p1_email_as_name_sole_external_homes_rule8(tmp_path) -> None:
+    """P1' C-5: a participant whose NAME field is itself an email address
+    (the anchored full-string shape, NOT merely "contains @") is a
+    placeholder, filtered from rule 7's candidate list."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Design review",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "jose@jsrarchitects.com",
+                "email": None,
+                "side": "theirs",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        org_name="JSR Architects",
+        domain=None,
+        relationship="prospect",
+        confidence=0.6,
+        meeting_type="other",
+        fireflies_id="01P1EMAILNAME",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 8
+    assert res["home_path"] == "orgs/clearworks-internal.md"
+    assert res["created"] == {"kind": "org", "slug": "clearworks-internal", "relationship": "internal"}
+
+
+def test_p1_kevin_collins_title_and_at_sign_not_suppressed_rule7(tmp_path) -> None:
+    """P1' C-5 must not over-fire: a real person's name that merely
+    CONTAINS "@" (a title/company suffix, not the anchored email-only
+    shape) is not a placeholder — resolves normally to a rule-7 person
+    page, as today."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Turazo intro",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Kevin Collins - CTO @ Turazo",
+                "email": None,
+                "side": "theirs",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        org_name="Turazo",
+        domain=None,
+        relationship="prospect",
+        confidence=0.6,
+        meeting_type="other",
+        fireflies_id="01P1KEVIN",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 7
+    assert res["kind"] == "person"
+    assert res["home_path"] == "orgs/kevin-collins-cto-turazo.md"
+
+
+def test_p1_anjali_iyer_parenthetical_email_not_suppressed_rule7(tmp_path) -> None:
+    """P1' C-5 must not over-fire: a real person's name with a parenthetical
+    email is not the anchored email-only shape — resolves normally to a
+    rule-7 person page, as today."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Feldman intro",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Anjali Iyer (AIyer@feldmanarch.com)",
+                "email": None,
+                "side": "theirs",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        org_name="Feldman Architecture",
+        domain=None,
+        relationship="prospect",
+        confidence=0.6,
+        meeting_type="other",
+        fireflies_id="01P1ANJALI",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 7
+    assert res["kind"] == "person"
+    assert res["home_path"] == "orgs/anjali-iyer-aiyer-feldmanarch-com.md"
+
+
+def test_p1_mixed_placeholder_and_real_external_real_one_wins_rule7(tmp_path) -> None:
+    """P1': when the rule-7 candidate list has both a placeholder and a
+    real named person, rule 7 must pick the first REAL candidate — not
+    externals[0] unfiltered ("Speaker 1" ahead of "Jesus Manzo")."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Design walkthrough",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Speaker 1",
+                "email": None,
+                "side": "theirs",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Jesus Manzo",
+                "email": None,
+                "side": "theirs",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        org_name="Manzo Construction",
+        domain=None,
+        relationship="prospect",
+        confidence=0.6,
+        meeting_type="other",
+        fireflies_id="01P1MIXED",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 7
+    assert res["kind"] == "person"
+    assert res["home_path"] == "orgs/jesus-manzo.md"
+    assert res["created"] == {"kind": "person", "slug": "jesus-manzo", "relationship": "personal"}
+
+
+def test_p3_description_shaped_org_name_with_valid_domain_still_resolves_rule9_by_domain(tmp_path) -> None:
+    """P3' synthetic (G0a-v3 §3.4: 0/292 live rule-9/10 meetings pair a
+    description-shaped org_name with a valid cls_domain — no live witness).
+    A description-shaped org_name must be treated as ABSENT for rule 9's
+    page-creation door and must NOT shadow a valid cls_domain: rule 9
+    falls back to the domain-derived slug (cls_label = "russianriverkeeper",
+    no hyphen), proven here because it differs from what slugify() would do
+    to the raw garbage name (which would fabricate
+    orgs/nonprofit-organization-name-not-stated.md)."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_r4_vault(tmp_path)
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Tech Committee Meeting #4",
+        participants=_r3_participants(),
+        org_name="Nonprofit organization (name not stated)",
+        domain="russianriverkeeper.org",
+        relationship="client",
+        confidence=0.85,
+        meeting_type="delivery",
+        deal_state="won",
+        fireflies_id="01P3RULE9SYN",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 9
+    assert res["counterparty_slug"] == "russianriverkeeper"
+    assert res["home_path"] == "orgs/russianriverkeeper.md"
+    assert res["created"] == {"kind": "org", "slug": "russianriverkeeper", "relationship": "client"}
+
+
+def test_p3_description_shaped_org_name_alone_rule10_falls_through_to_rule7(tmp_path) -> None:
+    """P3' synthetic, required amendment (G0a-v3 V3-3): a description-shaped
+    org_name must be treated as ABSENT for rule 10's community-org door.
+    Asserts the POSITIVE outcome the meeting actually takes (rule 7, the
+    exact person-page home for the first non-placeholder attendee) —
+    never merely "no org page created", which a silent r10->r7 drop would
+    also satisfy without proving anything happened (G0a-v3 A-2)."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_r4_vault(tmp_path)
+    src = tmp_path / "env"
+    src.mkdir()
+    participants = _r1_participants()
+    _write_source(
+        src,
+        title="AI Office Hours (AIA LA TAP Committee)",
+        participants=participants,
+        org_name="Client (name not stated)",
+        domain=None,
+        relationship="colleague",
+        confidence=0.55,
+        meeting_type="other",
+        fireflies_id="01P3RULE10SYN",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 7
+    assert res["kind"] == "person"
+    assert res["home_path"] == "orgs/douglas-teiger.md"
+    assert res["created"] == {"kind": "person", "slug": "douglas-teiger", "relationship": "personal"}
+
+
+def test_p2_deferred_org_name_equals_participant_name_unchanged(tmp_path) -> None:
+    """01KB0SNHC7Q7 class (org_name "Kimie Aryai" == the sole participant's
+    own name): P2' re-homing onto existing pages is deferred to R5 (plan v3
+    §4). Neither P1' nor P3' touches this meeting — "Kimie Aryai" is a real
+    name, not a placeholder participant shape, and not a description-shaped
+    org_name — so it resolves exactly as base does, unchanged, via rule 7."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Intro call",
+        participants=[
+            {
+                "name": "Josh Weiss",
+                "email": "josh@clearworks.ai",
+                "side": "ours",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+            {
+                "name": "Kimie Aryai",
+                "email": None,
+                "side": "theirs",
+                "spoke": True,
+                "notetaker": False,
+                "handle": None,
+            },
+        ],
+        org_name="Kimie Aryai",
+        domain=None,
+        relationship="prospect",
+        confidence=0.6,
+        meeting_type="other",
+        fireflies_id="01KB0SNHC7Q7",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["rule"] == 7
+    assert res["kind"] == "person"
+    assert res["home_path"] == "orgs/kimie-aryai.md"
+    assert res["created"] == {"kind": "person", "slug": "kimie-aryai", "relationship": "personal"}

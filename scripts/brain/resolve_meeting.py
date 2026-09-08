@@ -52,6 +52,60 @@ FORWARD = {
 ALIASES_REL = Path("orgs/clearworksai/agents/crm-codex/crm/org-aliases.json")
 CONTACTS_REL = Path("orgs/clearworksai/agents/crm-codex/crm/contacts.json")
 
+# P1' (R4b plan v3, G0a-v3 approved): placeholder/device/email-as-name
+# participant-name shapes. Anchored and casefolded (re.IGNORECASE). Applied
+# ONLY to the candidate list rule 7 picks `first` from — never to the shared
+# `externals` list read by rules 3/5/6/9/10 (G0a C-4: a global filter
+# returns {} -> exit 5 for 17 currently-ok meetings).
+_PLACEHOLDER_PARTICIPANT_NAME_RE = re.compile(
+    r"^speaker\s*\d+$"
+    r"|^guest$"
+    r"|^unknown$"
+    r"|^user\s*\d+$"
+    r"|^\s*[^\s@]+@[^\s@]+\.[A-Za-z]{2,}\s*$"
+    r"|['’]s\s+(?:iphone|ipad)\b"
+    r"|^\s*(?:iphone|ipad)\b",
+    re.IGNORECASE,
+)
+
+# P3' (R4b plan v3, G0a-v3 approved): description-shaped classification
+# org_name — a placeholder-for-a-real-name the classifier emits when it
+# could not identify the counterparty (e.g. "Client (name not stated)").
+# Applied ONLY at the rule-9 and rule-10 call sites (G0a-v3 A-1: the shared
+# `slug_for_cls` at :319 also feeds `_pick`'s tie-break at :379, which
+# drives rules 3/4/5/6 — those rules keep the RAW org_name).
+_DESCRIPTION_SHAPED_ORG_NAME_RE = re.compile(
+    r"\(\s*name\s+not\b"
+    r"|\bnot\s+(?:stated|mentioned|specified|given|provided)\b"
+    r"|\bunspecified\b"
+    r"|\bunnamed\b"
+    r"|\bundisclosed\b"
+    r"|^\s*unknown\b"
+    r"|^\s*client\s*[\(:]"
+    r"|^\s*client\s+organization\b"
+    r"|^\s*nonprofit\s+(?:organization|client|foundation)\b"
+    r"|^\s*not\s+specified\b"
+    r"|^\s*union\s*\("
+    r"|\b[\w.&/-]+['’]s?\s+(?:[\w.&/-]+\s+){0,3}"
+    r"(?:organization|organisation|company|nonprofit|non-profit|foundation|firm|business|practice|team|agency|shop)\b"
+    r"|^\s*[\w.&/ -]{0,40}\b(?:conservation|advocacy)?\s*nonprofit\s*\(",
+    re.IGNORECASE,
+)
+
+
+def _is_placeholder_participant_name(name: Any) -> bool:
+    text = str(name or "").strip()
+    if not text:
+        return True
+    return bool(_PLACEHOLDER_PARTICIPANT_NAME_RE.search(text))
+
+
+def _is_description_shaped_org_name(name: Any) -> bool:
+    text = str(name or "").strip()
+    if not text:
+        return False
+    return bool(_DESCRIPTION_SHAPED_ORG_NAME_RE.search(text))
+
 
 def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -551,14 +605,19 @@ def resolve(
     # Burns" -> WRONGLY created orgs/core-boards.md; D-20 accepted the
     # existing orgs/steven-burns-faia.md person page). R1/R2 (5 externals)
     # are unaffected.
+    # P3' (R4b plan v3): a description-shaped org_name is treated as ABSENT
+    # for rule 10's page-creation door — sanitized HERE, at the rule-10 call
+    # site only. cls_org_name (raw) still feeds slug_for_cls / _pick's
+    # tie-break for rules 3/4/5/6 above, untouched.
+    cls_org_name_10 = "" if _is_description_shaped_org_name(cls_org_name) else cls_org_name
     if (
         externals
         and len(externals) >= 2
         and no_external_emails
         and cls.get("relationship") in {"colleague", "personal"}
-        and cls.get("org_name")
+        and cls_org_name_10
     ):
-        slug = _community_org_slug(str(cls.get("org_name")))
+        slug = _community_org_slug(cls_org_name_10)
         if slug:
             # N2 (round 3): don't create a duplicate orgs/<slug>.md beside an
             # existing clients/<slug>.md for the same normalized org name —
@@ -571,7 +630,7 @@ def resolve(
             # "- CRM org name:" line normalizes to classification.org_name,
             # even when its file slug differs from _community_org_slug's
             # computed value) before falling back to create-or-reuse-by-slug.
-            existing_org_slug = closed["org_name_to_slug"].get(_norm_title(str(cls.get("org_name"))))
+            existing_org_slug = closed["org_name_to_slug"].get(_norm_title(cls_org_name_10))
             # R3-3 (round 4, Minor): org_name_to_slug is built from BOTH
             # clients/ and orgs/ pages (load_closed_sets), so a
             # page-declared name that resolves to an existing CLIENT page
@@ -643,17 +702,26 @@ def resolve(
     # territory), and only when the classified org actually outnumbers it.
     if default_pick is not None:
         cls_conf = float(cls.get("confidence") or 0)
-        already_matches = default_pick in {cls_label, slug_for_cls}
-        if cls_conf >= 0.8 and slug_for_cls and not already_matches:
+        # P3' (R4b plan v3): a description-shaped org_name is treated as
+        # ABSENT for rule 9's page-creation door, sanitized HERE at the
+        # rule-9 call site only — this falls back to the same cls_label
+        # (domain-derived) slug the code already uses when org_name is
+        # empty, so rule 9 still resolves by domain (never shadowed by a
+        # garbage name). The module-level slug_for_cls (raw) is untouched
+        # and still feeds _pick's tie-break for rules 3/4/5/6 above.
+        sanitized_cls_org_name = "" if _is_description_shaped_org_name(cls_org_name) else cls_org_name
+        slug_for_cls_9 = slugify(sanitized_cls_org_name) if sanitized_cls_org_name else cls_label
+        already_matches = default_pick in {cls_label, slug_for_cls_9}
+        if cls_conf >= 0.8 and slug_for_cls_9 and not already_matches:
             cls_count = all_label_counts.get(cls_label, 0) if cls_label else 0
             default_count = _counts({default_pick}).get(default_pick, 0)
             if cls_count > default_count:
                 rel = str(cls.get("relationship") or "")
                 if rel not in RELATIONSHIPS:
                     rel = "prospect"
-                if slug_for_cls in clients:
-                    hit = _client_hit(slug_for_cls, nodes, clients, rule=9)
-                    hit["also_present"] = _also(slug_for_cls)
+                if slug_for_cls_9 in clients:
+                    hit = _client_hit(slug_for_cls_9, nodes, clients, rule=9)
+                    hit["also_present"] = _also(slug_for_cls_9)
                     return hit
                 if cls_label and cls_label in clients:
                     hit = _client_hit(cls_label, nodes, clients, rule=9)
@@ -688,8 +756,8 @@ def resolve(
                         "corroborated": False,
                         "also_present": _also(existing_page_slug),
                     }
-                org_slug = slug_for_cls if slug_for_cls in closed["orgs"] else (
-                    cls_label if cls_label and cls_label in closed["orgs"] else slug_for_cls
+                org_slug = slug_for_cls_9 if slug_for_cls_9 in closed["orgs"] else (
+                    cls_label if cls_label and cls_label in closed["orgs"] else slug_for_cls_9
                 )
                 exists = org_slug in closed["orgs"]
                 if exists:
@@ -798,7 +866,17 @@ def resolve(
             hard_domain = True
             break
     if externals and not hard_domain:
-        first = externals[0]
+        # P1' (R4b plan v3): filter placeholder/device/email-as-name shapes
+        # OUT OF THE CANDIDATE LIST rule 7 picks `first` from ONLY — this
+        # `candidates` list is local to rule 7 and must never replace the
+        # shared `externals` list rules 3/5/6/9/10 read above.
+        candidates = [p for p in externals if not _is_placeholder_participant_name(p.get("name"))]
+        if not candidates:
+            # Fallback (G0a C-4 / G0b AR-001): every rule-7 candidate was a
+            # placeholder — take the existing rule-8 home rather than
+            # fabricate a person page from a classifier artefact.
+            return _rule8_home(closed)
+        first = candidates[0]
         name = str(first.get("name") or "").strip()
         tokens = [t for t in re.split(r"\s+", name) if t]
         if len(tokens) >= 2:
@@ -822,22 +900,29 @@ def resolve(
         }
     # (8) no external participants
     if not externals:
-        exists = "clearworks-internal" in closed["orgs"]
-        return {
-            "counterparty_slug": "clearworks-internal",
-            "kind": "org",
-            "relationship": "internal",
-            "home_path": "orgs/clearworks-internal.md",
-            "node": "none",
-            "created": None
-            if exists
-            else {"kind": "org", "slug": "clearworks-internal", "relationship": "internal"},
-            "confidence": 1.0,
-            "rule": 8,
-            "corroborated": False,
-            "also_present": [],
-        }
+        return _rule8_home(closed)
     return {}
+
+
+def _rule8_home(closed: dict[str, Any]) -> dict[str, Any]:
+    """The rule-8 payload — shared by the real "no external participants"
+    branch and rule 7's P1' all-placeholders fallback so the two paths can
+    never drift (exact literal per :824-839 as of 3e98d519)."""
+    exists = "clearworks-internal" in closed["orgs"]
+    return {
+        "counterparty_slug": "clearworks-internal",
+        "kind": "org",
+        "relationship": "internal",
+        "home_path": "orgs/clearworks-internal.md",
+        "node": "none",
+        "created": None
+        if exists
+        else {"kind": "org", "slug": "clearworks-internal", "relationship": "internal"},
+        "confidence": 1.0,
+        "rule": 8,
+        "corroborated": False,
+        "also_present": [],
+    }
 
 
 def _hit(

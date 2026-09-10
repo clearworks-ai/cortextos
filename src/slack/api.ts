@@ -17,6 +17,8 @@ export interface PostMessageRequest {
   thread_ts?: string;
   /** Block Kit blocks; SP3c uses these for interactive approvals. */
   blocks?: unknown[];
+  /** Stable idempotency key reused across a bounded retry. */
+  client_msg_id?: string;
 }
 
 export interface PostMessageResponse {
@@ -39,30 +41,97 @@ export interface SlackUserInfo {
   real_name?: string;
 }
 
+export interface SlackAPIOptions {
+  /** Per-attempt network deadline. Defaults to 15 seconds. */
+  timeoutMs?: number;
+}
+
+const DEFAULT_TIMEOUT_MS = 15_000;
+
+class RetryableSlackError extends Error {}
+
 export class SlackAPI {
-  constructor(private readonly token: string) {
+  private readonly timeoutMs: number;
+
+  constructor(private readonly token: string, options: SlackAPIOptions = {}) {
     if (!token) throw new Error('SlackAPI: token is required');
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    if (!Number.isFinite(this.timeoutMs) || this.timeoutMs <= 0) {
+      throw new Error('SlackAPI: timeoutMs must be a positive finite number');
+    }
   }
 
   /** Generic Slack API call helper — handles auth, JSON, and ok=false errors. */
-  private async call<T>(method: string, body: Record<string, unknown>): Promise<T> {
-    const res = await fetch(`https://slack.com/api/${method}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        'Content-Type': 'application/json; charset=utf-8',
-      },
-      body: JSON.stringify(body),
-    });
-    const json = (await res.json()) as { ok: boolean; error?: string } & T;
-    if (!json.ok) {
-      throw new Error(`slack ${method}: ${json.error ?? 'unknown error'}`);
+  private async call<T>(
+    method: string,
+    body: Record<string, unknown>,
+    maxAttempts = 1,
+  ): Promise<T> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+      timer.unref?.();
+      try {
+        const res = await fetch(`https://slack.com/api/${method}`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${this.token}`,
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+        if (res.status === 429 || res.status >= 500) {
+          throw new RetryableSlackError(`HTTP ${res.status}`);
+        }
+        const json = (await res.json()) as { ok: boolean; error?: string } & T;
+        if (!json.ok) {
+          if (json.error === 'ratelimited' || json.error === 'internal_error') {
+            throw new RetryableSlackError(json.error);
+          }
+          throw new Error(`slack ${method}: ${json.error ?? 'unknown error'}`);
+        }
+        return json;
+      } catch (err) {
+        lastError = err;
+        const timedOut = controller.signal.aborted;
+        const retryable = timedOut || err instanceof RetryableSlackError || err instanceof TypeError;
+        if (!retryable || attempt === maxAttempts) {
+          if (timedOut) {
+            throw new Error(
+              `slack ${method} timed out after ${attempt} attempt${attempt === 1 ? '' : 's'} ` +
+              `(${this.timeoutMs}ms each)`,
+            );
+          }
+          if (retryable && maxAttempts > 1) {
+            throw new Error(
+              `slack ${method} failed after ${attempt} attempts: ${(err as Error).message}`,
+            );
+          }
+          throw err;
+        }
+      } finally {
+        clearTimeout(timer);
+      }
     }
-    return json;
+    throw lastError;
   }
 
   async postMessage(req: PostMessageRequest): Promise<PostMessageResponse> {
-    return this.call<PostMessageResponse>('chat.postMessage', req as unknown as Record<string, unknown>);
+    const body: PostMessageRequest = {
+      ...req,
+      client_msg_id: req.client_msg_id ?? crypto.randomUUID(),
+    };
+    const response = await this.call<PostMessageResponse>(
+      'chat.postMessage',
+      body as unknown as Record<string, unknown>,
+      2,
+    );
+    if (!response.channel || !response.ts) {
+      throw new Error('slack chat.postMessage: missing delivery receipt (channel/ts)');
+    }
+    return response;
   }
 
   /** Used by SP3b's dispatcher to resolve a display name for the injected header. */

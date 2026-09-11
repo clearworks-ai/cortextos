@@ -1,0 +1,67 @@
+## WRONG LEDGER ROWS
+
+[HIGH] (confidence: 10/10) scripts/brain/progress.py:180 — G-67 overstates validation: `datetime.fromisoformat` accepts date-only and timezone-less values, so `signed_at` is not strictly RFC3339. Its evidence also cites obsolete line numbers; capture containment is now at lines 196–203.
+
+[MEDIUM] (confidence: 10/10) scripts/brain/brain_rollup.py:387 — G-71 incorrectly describes the CLI. `--vault` has a default; neither `--client` nor `--all` is required or mutually exclusive. Only `--today` is required.
+
+[MEDIUM] (confidence: 10/10) scripts/brain/writeback_render.py:50 — G-73 says fallback occurs only when `source` is absent. It also falls back to `fireflies:<id>` when `source` is non-dict, or `kind`/`id` is null or empty.
+
+[HIGH] (confidence: 10/10) orgs/clearworksai/agents/crm/crm/meeting-crm-sync.py:289 — G-80’s supposedly complete Fireflies-literal inventory omits runtime literals including the `fireflies-attendee` tag and Fireflies summary text at line 436, plus help/docs. Its proposed zero-hit grep cannot pass from the enumerated changes.
+
+[HIGH] (confidence: 10/10) src/slack/api.ts:68 — G-91 is false: the repository Slack client already implements `getUserInfo()` through `users.info`. Only history/replies methods are absent.
+
+[MEDIUM] (confidence: 10/10) state/specs/brain-source-to-state-2026-09-04-spec.md:637 — G-97’s cited repository ledger is only 44 lines and contains none of the claimed `cost_usd`, `$0.34`, or `$0.36` evidence. The external envelope evidence is not re-runnable here.
+
+[LOW] (confidence: 10/10) scripts/brain/paths.py:32 — G-65 cites line 32 as `envelope_dir`; the definition is currently line 33. The claim itself is otherwise correct.
+
+## UNRECORDED ASSUMPTIONS
+
+[HIGH] (confidence: 10/10) scripts/brain/paths.py:16 — FR-017/020/021 expose raw IDs that current `safe_meeting_id` rejects: Slack IDs contain `:`/`.`, while GitHub IDs contain `/`/`#`. The implementation needs a reversible storage-key encoding rather than relaxing traversal protection.
+
+[HIGH] (confidence: 10/10) scripts/brain/paths.py:33 — `envelope_dir` accepts an unvalidated `kind` path component. Adding `--source-kind` requires an allowlist or safe-kind validator before filesystem resolution.
+
+[HIGH] (confidence: 10/10) scripts/brain/resolve_meeting.py:133 — Slack/GitHub alias resolution does not exist. Client/org pages parse only `domains`; aliases are loaded only from project pages, comma-split, and matched against the meeting title at lines 341–359. The resolver currently never reads channel or repository owner from `source`.
+
+[HIGH] (confidence: 10/10) scripts/brain/resolve_meeting.py:235 — FR-018’s Omi resolution picture is wrong. `side: unknown, spoke: true` speakers are treated as external; email-less externals then take rule 7 and create a `kind: person` page at lines 466–495, not a channel/conversation-derived org.
+
+[HIGH] (confidence: 10/10) scripts/brain/fetch_fireflies.py:191 — Fireflies `duration` is recorded directly as `duration_s`, while G-82 says the API value is minutes. FR-015/017 silently assume a minutes-to-seconds conversion that existing code does not perform.
+
+[MEDIUM] (confidence: 10/10) scripts/brain/run_meeting.py:129 — Every non-usage fetch failure collapses to exit 2. FR-015 cannot distinguish “authentication error, stop batch” from not-ready/429/5xx using the exit code alone; it must preserve structured failure data or parse stderr.
+
+[MEDIUM] (confidence: 10/10) scripts/brain/progress.py:48 — No batch-progress format exists. `merge_progress` only writes `doc[key] = outcome`; FR-015 never defines the per-meeting key or how dry-run and apply outcomes coexist without overwriting one another.
+
+[MEDIUM] (confidence: 10/10) scripts/brain/progress.py:64 — A backfill marker `{"done":true,"skipped":"backfill"}` permanently satisfies `step_done`. `--force` only bypasses the receipt short-circuit and does not clear these keys, so later live runs remain skipped.
+
+[HIGH] (confidence: 10/10) scripts/brain/sign_dry_run.py:78 — `sign_dry_run.py` exposes only a CLI-style `main`, constructs its marker locally, hard-codes Fireflies, and has no way to add `batch_id`/`digest_sha256`. FR-016 requires a shared writer refactor or a separate atomic marker implementation.
+
+[HIGH] (confidence: 10/10) scripts/brain/tests/test_sign_dry_run.py:492 — `test_sign_dry_run_rejects_unknown_signer` actually pins `sign_dry_run.main()` returning 0 for “Mallory”; rejection happens only later in `validate_sign_marker`. `sign_batch.py` must validate the signer before writing `batch-signed.json`.
+
+[MEDIUM] (confidence: 10/10) orgs/clearworksai/agents/crm/crm/meeting-crm-sync.py:112 — The fallback event reader strips characters and hard-caps IDs at 40 characters. Non-Fireflies operation depends on continuing to pass explicit `--event-file` and `--full-file`; omitting `--full-file` invokes `ff-extractor`.
+
+[HIGH] (confidence: 10/10) scripts/brain/brain_rollup.py:408 — `brain_rollup.py --today …` updates only `STATE.md`; per-client regions require `--all` or `--client`. FR-015’s final command omits `--all`, while its per-meeting backfill rule says state-only, leaving client rollups unregenerated.
+
+[MEDIUM] (confidence: 10/10) scripts/brain/status_plan.ts:358 — `status_plan.ts` has no batch/all-engagement mode and does not require `client`, `node`, or `today`. Backfill must independently derive and deduplicate touched `(client, engagement)` pairs and pass all three explicitly.
+
+[MEDIUM] (confidence: 10/10) state/specs/brain-source-to-state-2026-09-04-spec.md:68 — Load-bearing citations are crossed: D-22 and FR-015 cost cite G-91 instead of G-97; FR-015 retry handling cites Slack G-92; FR-021 GitHub endpoints cite Gmail G-88 instead of G-94.
+
+[HIGH] (confidence: 10/10) orgs/clearworksai/agents/pa/scripts/test_meeting_recap_draft.py:396 — CASUALTY: `test_legacy_no_source_falls_back_to_fireflies_prefixed_id` pins the Fireflies fallback that FR-017’s zero-literal rule says to remove. The spec must either exempt this compatibility fallback or change the test and behavior.
+
+[LOW] (confidence: 10/10) scripts/brain/tests/test_fetch_fireflies.py:300 — CONTROL: `test_path_traversal_meeting_id_rejected_exit_64` must remain green when source-specific raw IDs are introduced.
+
+[LOW] (confidence: 10/10) orgs/clearworksai/agents/crm/crm/test_meeting_crm_sync.py:196 — CONTROL: `test_contact_and_single_interaction_idempotent` pins the unchanged default `fireflies:<id>` behavior when `--source-ref` is omitted.
+
+[LOW] (confidence: 10/10) scripts/brain/tests/test_run_meeting_apply.py:1163 — CONTROL: `test_apply_runs_phase3_rollup_status_filed_before_commit` pins live apply ordering; backfill branching must not alter the non-backfill path.
+
+## BUCKET CORRECTIONS
+
+[HIGH] (confidence: 10/10) scripts/brain/resolve_meeting.py:235 — FR-018 should be B, not C. Omi provides the required source data; the blocker is work in existing resolver/path code because unknown-side, email-less speakers currently resolve as people. The shared envelope schema is already introduced by FR-017.
+
+## VERIFIED-CORRECT
+
+[LOW] (confidence: 9/10) state/specs/brain-source-to-state-2026-09-04-spec.md:603 — G-63–66, G-68–70, G-72, G-74–79, and G-99–103 match the inspected repository code, except the rows identified above.
+
+[LOW] (confidence: 8/10) state/specs/brain-source-to-state-2026-09-04-spec.md:617 — G-77 matches HEAD `d24d4019` and the two TypeScript files contain 33 tests. Execution was not possible because the read-only environment provides no writable temporary directory.
+
+[LOW] (confidence: 7/10) state/specs/brain-source-to-state-2026-09-04-spec.md:621 — G-81–90, G-92–96, and G-98 external portions are not re-runnable here. Their in-scope code citations are consistent except G-91 and G-97 as reported.
+
+[LOW] (confidence: 9/10) state/specs/brain-source-to-state-2026-09-04-spec.md:652 — Buckets B for FR-015/016/017/019/020/021 are consistent with the current seams and missing files.

@@ -104,6 +104,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--apply", action="store_true")
     p.add_argument("--force", action="store_true")
+    p.add_argument("--backfill", action="store_true")
+    # B3 (G2 r3 CH3-4): optional — only meaningful with --backfill.
+    # backfill.py's run_apply_subprocess (Agent A) passes this through so
+    # validate_batch_marker can require the marker's own batch_id to equal
+    # THIS invocation's batch, not just some real, fully-signed batch.
+    p.add_argument("--batch", default=None)
     p.add_argument("--repo-root", default=str(DEFAULT_REPO_ROOT))
     p.add_argument("--vault", default=str(DEFAULT_VAULT))
     args = p.parse_args(argv)
@@ -115,13 +121,19 @@ def main(argv: list[str] | None = None) -> int:
     if not args.dry_run and not args.apply:
         print("need --dry-run or --apply", file=sys.stderr)
         return 64
+    if args.backfill and not args.apply:
+        print("--backfill requires --apply", file=sys.stderr)
+        return 64
 
     vault = Path(args.vault)
     repo = Path(args.repo_root)
     source_dir = envelope_dir(vault, "fireflies", meeting_id)
 
     if args.apply:
-        return _run_apply(meeting_id, vault, repo, source_dir, force=args.force)
+        return _run_apply(
+            meeting_id, vault, repo, source_dir, force=args.force, backfill=args.backfill,
+            expected_batch_id=args.batch,
+        )
     return _run_dry(meeting_id, vault, repo, source_dir)
 
 
@@ -337,16 +349,7 @@ def _run_dry(meeting_id: str, vault: Path, repo: Path, source_dir: Path) -> int:
         # nothing to do" apart from "capture truncated before this writer".
         print("would-touch: (none)")
 
-    eng_id = ""
-    node_id = resolution.get("node")
-    if node_id and node_id != "none":
-        node = nodes.get(node_id)
-        if node and node.get("kind") == "engagement":
-            eng_id = node_id
-        elif node and node.get("kind") == "project" and node.get("parent"):
-            parent = nodes.get(node["parent"])
-            if parent and parent.get("kind") == "engagement":
-                eng_id = node["parent"]
+    eng_id, _ = resolve_engagement(resolution, nodes)
     if eng_id:
         try:
             st = subprocess.run(
@@ -458,7 +461,7 @@ def _check_crm_scripts_support_full_file() -> int:
     return 0
 
 
-def _run_apply(meeting_id, vault, repo, source_dir, *, force) -> int:
+def _run_apply(meeting_id, vault, repo, source_dir, *, force, backfill=False, expected_batch_id=None) -> int:
     # G0b C2-3: unconditional — no --skip-sign-check bypass exists.
     # CH-1/S-2: existence alone is not proof of a real sign-off — validate
     # signed_by/signed_at/capture_sha256 (progress.validate_sign_marker).
@@ -467,6 +470,15 @@ def _run_apply(meeting_id, vault, repo, source_dir, *, force) -> int:
     if sign_failure:
         print(f"FAILED at sign-check: {sign_failure}", file=sys.stderr)
         return 15
+    # F1 (G2 P1-1): a per-meeting sign_dry_run.py marker proves a human
+    # reviewed only THIS meeting, never that a batch digest covering it was
+    # reviewed and signed (D-20) — --backfill must refuse a marker that
+    # sign_batch.py did not fan out.
+    if backfill:
+        batch_failure = progress.validate_batch_marker(marker, vault, meeting_id, expected_batch_id=expected_batch_id)
+        if batch_failure:
+            print(batch_failure, file=sys.stderr)
+            return 15
 
     guard_rc = _worker_guard(meeting_id)
     if guard_rc != 0:
@@ -510,6 +522,14 @@ def _run_apply(meeting_id, vault, repo, source_dir, *, force) -> int:
     if post_fetch_sign_failure:
         print(f"FAILED at sign-check: {post_fetch_sign_failure}", file=sys.stderr)
         return 15
+    # F1: re-checked here too — fetch never rewrites the marker, but this is
+    # the same envelope-bound re-check point as the line above, and the
+    # requirement is unconditional for the rest of this run.
+    if backfill:
+        post_fetch_batch_failure = progress.validate_batch_marker(marker, vault, meeting_id, expected_batch_id=expected_batch_id)
+        if post_fetch_batch_failure:
+            print(post_fetch_batch_failure, file=sys.stderr)
+            return 15
 
     extract_rc = extract_main(["--source", str(source_dir), "--vault", str(vault)])
     if extract_rc != 0:
@@ -524,7 +544,7 @@ def _run_apply(meeting_id, vault, repo, source_dir, *, force) -> int:
         print(f"FAILED at adapt: rc={adapt_rc}", file=sys.stderr)
         return 12
 
-    return _apply_writes(meeting_id, vault, repo, source_dir, prior_receipt=prior_receipt)
+    return _apply_writes(meeting_id, vault, repo, source_dir, prior_receipt=prior_receipt, backfill=backfill)
 
 
 def _writeback_env(vault: Path) -> dict[str, str]:
@@ -542,8 +562,30 @@ def _home_slug(resolution: dict) -> str:
     return f"{slug}/{node}" if node and node != "none" else slug
 
 
+def resolve_engagement(resolution: dict, nodes: dict) -> tuple[str, str]:
+    """FR-011 engagement derivation (spec G-120/G-124). Returns
+    (engagement_id, skip_reason): the node itself when `kind: engagement`;
+    its `parent` only when the node is `kind: project` AND that parent exists
+    in this vault AND is itself `kind: engagement` (G0a F-6 — node.parent is
+    copied verbatim from the child's own ## Node block, never cross-checked);
+    otherwise ("", "no-engagement"). Shared by the per-meeting status step and
+    backfill.py's once-per-pair post-batch status run."""
+    eng_id, eng_skip = ("", "no-engagement")
+    node_id = resolution.get("node")
+    if node_id and node_id != "none":
+        node = nodes.get(node_id)
+        if node and node.get("kind") == "engagement":
+            eng_id, eng_skip = node_id, ""
+        elif node and node.get("kind") == "project" and node.get("parent"):
+            parent = nodes.get(node["parent"])
+            if parent and parent.get("kind") == "engagement":
+                eng_id, eng_skip = node["parent"], ""
+    return eng_id, eng_skip
+
+
 def _apply_writes(
-    meeting_id: str, vault: Path, repo: Path, source_dir: Path, *, prior_receipt: dict | None
+    meeting_id: str, vault: Path, repo: Path, source_dir: Path, *, prior_receipt: dict | None,
+    backfill: bool = False,
 ) -> int:
     # R2-F-1 (fold, rev3): CRM_SYNC/FANOUT_SCRIPT are fixed CODE_ROOT
     # constants (defined alongside WRITEBACK/RECAP) — the shared checkout's
@@ -564,6 +606,34 @@ def _apply_writes(
     receipt_p = progress.receipt_path(vault, "fireflies", meeting_id)
     pending_path = progress.fanout_pending_path(vault, "fireflies", meeting_id)
     doc = progress.load_progress(prog_path)
+
+    if backfill and doc.get("backfill_run") is not True:
+        # F3 (G2 P2): snapshot which of the three backfill-skipped steps were
+        # ALREADY done:true at this exact moment — the only moment this can
+        # ever be computed correctly, since the very next lines below are
+        # about to mark them skipped instead. Stored once, read verbatim by
+        # progress.compose_receipt from here on (never re-derived), so a
+        # later live `--apply --force` performing draft/status_update never
+        # gets misreported as having been done before this backfill run.
+        prior_done_names = sorted(
+            name for key, name in progress.BACKFILL_STEP_DISPLAY_NAMES.items() if progress.step_done(doc, key)
+        )
+        doc = progress.merge_progress(prog_path, "backfill_run", True)  # lets compose_receipt report prior-done steps
+        doc = progress.merge_progress(prog_path, "backfill_prior_done", prior_done_names)
+
+    def _backfill_skip(step: str) -> None:
+        nonlocal doc
+        # D-19 / G-110: `done` stays False — step_done() must not treat a
+        # skipped step as performed, and --force never clears keys. Never
+        # DOWNGRADE either (G0b r2): a step that already ran live keeps its
+        # done:true checkpoint so FR-014's later-run skip still holds.
+        existing = doc.get(step)
+        if isinstance(existing, dict) and (existing.get("done") is True or existing.get("skipped") == "backfill"):
+            return
+        doc = progress.merge_progress(prog_path, step, {
+            "done": False, "skipped": "backfill", "at": progress._now_iso(),
+        })
+        print(f"{step}: skip: backfill")
 
     # CH-9: `progress.writeback.done: true` alone is not proof the write
     # actually happened — verify the home page carries meeting_writeback's
@@ -634,7 +704,9 @@ def _apply_writes(
             "interactions": len(crm_out.get("interactions") or []),
         })
 
-    if not progress.step_done(doc, "tasks"):
+    if backfill:
+        _backfill_skip("tasks")
+    elif not progress.step_done(doc, "tasks"):
         existing_created = list((doc.get("tasks") or {}).get("created") or [])
         pending_ids = progress.read_fanout_pending(pending_path)
         fanout_cmd = [
@@ -720,7 +792,9 @@ def _apply_writes(
             "created_ids": [p.get("commitmentId") for p in created_pairs], "pending": [],
         })
 
-    if not progress.step_done(doc, "draft"):
+    if backfill:
+        _backfill_skip("draft")
+    elif not progress.step_done(doc, "draft"):
         env = _writeback_env(vault)
         ledger_path = vault / "raw/media/transcripts/_recap-ledger.txt"
         try:
@@ -806,7 +880,9 @@ def _apply_writes(
         # --client is passed only when we have one, for the per-client
         # rollup region.
         argv = [sys.executable, str(BRAIN_ROLLUP), "--vault", str(vault), "--today", today]
-        if client_slug:
+        # D-19: a backfill apply regenerates STATE.md only; the per-client
+        # regions are rebuilt once after the batch (backfill.py, --all).
+        if client_slug and not backfill:
             argv += ["--client", client_slug]
         try:
             roll = subprocess.run(argv, capture_output=True, text=True, timeout=CHILD_TIMEOUT_S)
@@ -819,29 +895,17 @@ def _apply_writes(
             print(f"FAILED at rollup: rc={roll.returncode}", file=sys.stderr)
             return 6
         outcome = {"done": True}
-        if not client_slug:
+        if backfill:
+            outcome["state_only"] = True
+        elif not client_slug:
             outcome["skipped"] = "no-client"
         doc = progress.merge_progress(prog_path, "rollup", outcome)
 
-    eng_id, eng_skip = ("", "no-engagement")
-    node_id = resolution.get("node")
-    if node_id and node_id != "none":
-        node = nodes.get(node_id)
-        if node and node.get("kind") == "engagement":
-            eng_id, eng_skip = node_id, ""
-        elif node and node.get("kind") == "project" and node.get("parent"):
-            # G0a F-6: only trust the parent id when it actually exists in
-            # this vault AND is itself kind: engagement — resolution.json's
-            # node.parent is copied verbatim from the child's own ## Node
-            # block (FR-006) and was never cross-checked against the real
-            # node set. Every pre-existing R2 fixture seeds only the child
-            # (alloi-03), never alloi-01, so this must resolve to a clean
-            # skip, not a subprocess call.
-            parent = nodes.get(node["parent"])
-            if parent and parent.get("kind") == "engagement":
-                eng_id, eng_skip = node["parent"], ""
+    eng_id, eng_skip = resolve_engagement(resolution, nodes)
 
-    if not progress.step_done(doc, "status_update"):
+    if backfill:
+        _backfill_skip("status_update")
+    elif not progress.step_done(doc, "status_update"):
         if eng_skip:
             print(f"status: skip: {eng_skip}")
             doc = progress.merge_progress(prog_path, "status_update", {
@@ -895,7 +959,7 @@ def _apply_writes(
     # G2-P1-1: only the acceptance meeting id(s) actually gate on shortfalls
     # (exit 9, no commit); every other meeting still gets minimums computed
     # into the receipt for visibility but is never blocked by them.
-    enforced = meeting_id in _acceptance_meeting_ids()
+    enforced = (meeting_id in _acceptance_meeting_ids()) and not backfill
     if enforced and shortfalls:
         receipt["minimums"] = {"ok": False, "missing": shortfalls, "enforced": True}
         atomic_write(receipt_p, (json.dumps(receipt, sort_keys=True, indent=2) + "\n").encode("utf-8"))

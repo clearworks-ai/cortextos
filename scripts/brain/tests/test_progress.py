@@ -43,6 +43,29 @@ def test_vault_commit_nothing_to_commit_keeps_prior_sha(tmp_path):
     assert sha2 is None
 
 
+def test_vault_commit_noop_wording_nothing_added_with_untracked_file_elsewhere(tmp_path):
+    """F4 (Std CARRY-1): git's own no-op wording depends on what else is on
+    disk outside the pathspec — an untracked file sitting elsewhere in the
+    vault (never `git add`-ed, not part of this pathspec) makes `git commit
+    -- <pathspec>` exit 1 with "nothing added to commit but untracked files
+    present", a DIFFERENT string than the plain "nothing to commit" the
+    sibling test above covers. Both are the same (None, False) no-op."""
+    from progress import vault_commit
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    subprocess.run(["git", "init", "-q", str(vault)], check=True)
+    subprocess.run(["git", "-C", str(vault), "config", "user.email", "b@b"], check=True)
+    subprocess.run(["git", "-C", str(vault), "config", "user.name", "b"], check=True)
+    (vault / "f.txt").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "-C", str(vault), "add", "f.txt"], check=True)
+    subprocess.run(["git", "-C", str(vault), "commit", "-q", "-m", "seed"], check=True)
+    (vault / "untracked.txt").write_text("y", encoding="utf-8")  # outside the pathspec, never staged
+    sha, committed = vault_commit(vault, ["f.txt"], "no-op run")
+    assert committed is False
+    assert sha is None
+
+
 def test_compose_receipt_preserves_first_applied_at(tmp_path):
     from progress import compose_receipt
 

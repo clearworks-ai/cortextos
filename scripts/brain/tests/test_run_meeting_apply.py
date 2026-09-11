@@ -235,6 +235,14 @@ def _seed_apply_vault(tmp_path: Path) -> tuple[Path, Path, str]:
     (env_dir / "source.json").write_bytes(raw)
     sha = hashlib.sha256(raw).hexdigest()
     (env_dir / "source.sha256").write_text(sha + "\n", encoding="utf-8")
+    # F18 (CH-17): fetch_fireflies.py's already-fetched short-circuit now
+    # requires source.json + source.sha256 + meta.json (a coherent
+    # envelope) — without this, every test built on this fixture would fall
+    # through to a REAL fetch attempt (no FIREFLIES_API_KEY, no network
+    # mock) and fail at the fetch step instead of exercising --apply.
+    (env_dir / "meta.json").write_text(
+        json.dumps({"fetched_at": "2026-09-04T17:00:00Z", "fetcher": "fetch_fireflies/1"}), encoding="utf-8",
+    )
     # G0a F-5: without a seeded extraction.json whose inputSha matches
     # source.json's own recomputed sha256, extract_meeting.py's main() falls
     # through its idempotency check and shells the real `claude -p` binary —
@@ -967,6 +975,43 @@ def _sign_for_restart_test(vault: Path, mid: str, tmp_path: Path, env: dict, rep
     assert sign.returncode == 0, sign.stderr
 
 
+def _write_batch_signed(
+    vault: Path, batch_id: str, meeting_ids: list[str], *, signed_by: str = "Josh",
+    signed_at: str = "2026-09-05T00:00:00Z", fanout_complete: bool = True,
+) -> str:
+    """B1 (G2b r2 CH2-2) / B2 (G2 r3 CH3-2, Critical — supersedes the B1
+    version): validate_batch_marker now re-resolves `_backfill/<batch_id>/`
+    and re-HASHES digest.md/manifest.json ON DISK (never trusting
+    batch-signed.json's own recollection of what they hashed to), and
+    cross-checks marker.signed_by/signed_at against batch-signed.json's own
+    recorded values too. A minimal batch-signed.json with an arbitrary
+    digest_sha256 is no longer enough — per the coordinator's key rule for
+    this fold, the fixture is upgraded to a FULLY CONSISTENT batch dir
+    (real digest.md + digest.sha256 sidecar + manifest.json, genuinely
+    hashed) rather than weakening validate_batch_marker to fit it. Returns
+    the real digest_sha256 so the caller stamps the SAME value onto the
+    marker via sign_marker.write_marker's `extra=`."""
+    bd = vault / "raw/media/transcripts/_backfill" / batch_id
+    bd.mkdir(parents=True, exist_ok=True)
+    digest_bytes = b"# digest\nstatus: complete\n"
+    (bd / "digest.md").write_bytes(digest_bytes)
+    digest_sha256 = hashlib.sha256(digest_bytes).hexdigest()
+    (bd / "digest.sha256").write_text(digest_sha256 + "\n", encoding="utf-8")
+    manifest = {
+        "batch_id": batch_id, "kind": "fireflies",
+        "rows": [{"id": mid, "kind": "fireflies", "occurred_at": "2026-09-01T00:00:00Z"} for mid in meeting_ids],
+    }
+    manifest_bytes = json.dumps(manifest).encode("utf-8")
+    (bd / "manifest.json").write_bytes(manifest_bytes)
+    manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+    (bd / "batch-signed.json").write_text(json.dumps({
+        "batch_id": batch_id, "digest_sha256": digest_sha256, "manifest_sha256": manifest_sha256,
+        "signed_ids": list(meeting_ids), "signed_by": signed_by, "signed_at": signed_at,
+        "fanout_complete": fanout_complete,
+    }), encoding="utf-8")
+    return digest_sha256
+
+
 def test_apply_rejects_marker_missing_source_binding_fields(tmp_path):
     # D-09 review finding 1: a legacy marker (signed before this fix, or —
     # as here — hand-seeded the way _seed_signed_marker does, with no
@@ -1344,3 +1389,667 @@ def test_existing_r2_fixtures_skip_status_update_no_engagement_no_subprocess(tmp
     assert "status: skip: no-engagement" in r.stdout
     npx_trap_log = tmp_path / "npx-tsx-trap.log"
     assert not npx_trap_log.exists() or npx_trap_log.read_text(encoding="utf-8").strip() == ""
+
+
+# --- R4 (G-120/G-124): resolve_engagement extracted, three branches pinned ----
+def test_resolve_engagement_three_branches():
+    import run_meeting
+
+    nodes = {
+        "eng-1": {"id": "eng-1", "kind": "engagement", "client": "acme"},
+        "proj-ok": {"id": "proj-ok", "kind": "project", "client": "acme", "parent": "eng-1"},
+        "proj-orphan": {"id": "proj-orphan", "kind": "project", "client": "acme", "parent": "eng-missing"},
+        "proj-badparent": {"id": "proj-badparent", "kind": "project", "client": "acme", "parent": "proj-ok"},
+        "no-kind-node": {"id": "no-kind-node", "client": "acme"},
+        "proj-emptyparent": {"id": "proj-emptyparent", "kind": "project", "client": "acme", "parent": ""},
+    }
+    assert run_meeting.resolve_engagement({"node": "eng-1"}, nodes) == ("eng-1", "")
+    assert run_meeting.resolve_engagement({"node": "proj-ok"}, nodes) == ("eng-1", "")
+    assert run_meeting.resolve_engagement({"node": "proj-orphan"}, nodes) == ("", "no-engagement")
+    assert run_meeting.resolve_engagement({"node": "proj-badparent"}, nodes) == ("", "no-engagement")
+    assert run_meeting.resolve_engagement({"node": "none"}, nodes) == ("", "no-engagement")
+    assert run_meeting.resolve_engagement({}, nodes) == ("", "no-engagement")
+    # Task 4 review (folded, Josh-approved): fallthrough edge cases.
+    assert run_meeting.resolve_engagement({"node": "not-in-graph"}, nodes) == ("", "no-engagement")
+    assert run_meeting.resolve_engagement({"node": "no-kind-node"}, nodes) == ("", "no-engagement")
+    assert run_meeting.resolve_engagement({"node": "proj-emptyparent"}, nodes) == ("", "no-engagement")
+
+
+# --- R4 (FR-015 D-19, G-110): --apply --backfill -------------------------------
+def test_backfill_flag_requires_apply(tmp_path):
+    from run_meeting import main
+    assert main(["--meeting-id", "x", "--backfill", "--dry-run"]) == 64
+    assert main(["--meeting-id", "x", "--backfill"]) == 64
+
+
+def test_backfill_apply_skips_tasks_draft_status_with_done_false_and_still_commits(tmp_path):
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    # F1 (G2 P1-1): --apply --backfill now refuses a per-meeting
+    # sign_dry_run.py marker outright — sign a batch-bound one directly
+    # through the shared sign_marker writer (the same seam sign_batch.py's
+    # fan-out uses), rather than _sign_for_restart_test's per-meeting shape.
+    from sign_marker import write_marker
+    capture = _write_phase3_capture(tmp_path, vault, repo, mid, env)
+    batch_id = "fireflies-20260906T000000Z"
+    digest_sha256 = _write_batch_signed(vault, batch_id, [mid])
+    marker_rc, _marker_path, _marker_msg = write_marker(
+        vault, "fireflies", mid, capture, signed_by="Josh", signed_at="2026-09-05T00:00:00Z",
+        extra={"batch_id": batch_id, "digest_sha256": digest_sha256},
+    )
+    assert marker_rc == 0
+    # Spy shims: log argv, then exec the _install_fakes shim of the same name.
+    spy = tmp_path / "spy"; spy.mkdir()
+    for name in ("cortextos", "gws"):
+        (spy / name).write_text(f"#!/bin/sh\necho \"{name} $*\" >> {spy / 'calls.log'}\nexec {bindir / name} \"$@\"\n", encoding="utf-8")
+        (spy / name).chmod(0o755)
+    env["PATH"] = f"{spy}:{env['PATH']}"
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--backfill"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    state = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}"
+    prog = json.loads((state / "progress.json").read_text(encoding="utf-8"))
+    for step in ("tasks", "draft", "status_update"):
+        assert prog[step]["done"] is False and prog[step]["skipped"] == "backfill" and prog[step]["at"], step
+    assert prog["writeback"]["done"] is True and prog["crm"]["done"] is True
+    assert prog["rollup"] == {"done": True, "state_only": True}
+    assert prog["filed"]["done"] is True and prog["commit"]["done"] is True
+
+    receipt = json.loads((state / "receipt.json").read_text(encoding="utf-8"))
+    assert receipt["backfill_skipped"] == ["recap", "status", "tasks"]
+    assert receipt["tasks"] == [] and receipt["draft"] is None
+    assert receipt["vault_sha"]
+    # no bus task, no draft: the spy shims (installed below, ahead of the fakes) log every argv
+    text = (tmp_path / "spy" / "calls.log").read_text(encoding="utf-8") if (tmp_path / "spy" / "calls.log").exists() else ""
+    assert "create-task" not in text and "+draft" not in text
+    assert "list-workers" in text  # proves the spy actually saw cortextos calls (non-vacuous)
+    # the per-client rollup region was NOT rewritten (state-only), STATE.md was
+    assert "<!-- generated: state -->" in (vault / "raw/areas/clearworks/org-brain/STATE.md").read_text(encoding="utf-8")
+    assert "engagements-rollup" not in (vault / "raw/areas/clearworks/org-brain/clients/alloi.md").read_text(encoding="utf-8")
+
+    # a step that already ran live must NOT be downgraded by a later backfill --force run (G0b r2 N1)
+    prog_path = state / "progress.json"
+    prog = json.loads(prog_path.read_text(encoding="utf-8"))
+    prog["tasks"] = {"done": True, "created": [], "created_ids": [], "pending": []}
+    prog_path.write_text(json.dumps(prog, sort_keys=True, indent=2), encoding="utf-8")
+    forced = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--backfill", "--force"],
+        capture_output=True, text=True, env=env,
+    )
+    assert forced.returncode == 0, forced.stderr + forced.stdout
+    assert json.loads(prog_path.read_text(encoding="utf-8"))["tasks"]["done"] is True
+    receipt2 = json.loads((state / "receipt.json").read_text(encoding="utf-8"))
+    assert receipt2["backfill_skipped"] == ["recap", "status"]
+    # F3 (G2 P2): backfill_prior_done is a ONE-TIME snapshot taken the
+    # instant backfill_run first flipped true (in run 1 above, before this
+    # hand-edit) — nothing was done yet at that moment, so the snapshot is
+    # empty and the key stays absent, even though `tasks` is done:true NOW.
+    # See test_backfill_prior_done_snapshot_survives_later_live_force for
+    # the case where a step really was done BEFORE backfill_run first set.
+    assert "backfill_prior_done" not in receipt2
+
+    # repeat --apply --backfill: short-circuits (already applied), no new writes
+    again = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--backfill"],
+        capture_output=True, text=True, env=env,
+    )
+    assert again.returncode == 0
+    assert "already applied" in (again.stdout + again.stderr).lower()
+
+
+def test_backfill_apply_refuses_per_meeting_marker_no_batch_binding(tmp_path):
+    """F1 (G2 P1-1) negative leg: a per-meeting sign_dry_run.py marker (no
+    batch_id/digest_sha256) must be refused under --backfill even though it
+    would pass a live (non-backfill) apply — sign_batch.py's D-20 batch
+    sign-off is a DIFFERENT gate than the per-meeting D-09 review, and
+    --backfill requires the former."""
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    _sign_for_restart_test(vault, mid, tmp_path, env, repo)  # per-meeting marker, no batch_id/digest_sha256
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--backfill"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 15, result.stderr + result.stdout
+    assert "backfill apply requires a batch-signed marker (sign_batch.py); per-meeting marker found" in result.stderr
+
+    state = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}"
+    assert not (state / "receipt.json").exists()
+    assert not (state / "progress.json").exists()
+
+
+def test_backfill_apply_refuses_orphaned_batch_marker(tmp_path):
+    """B1 (G2b r2 CH2-2, Critical): a marker carrying batch_id/digest_sha256
+    is not proof the referenced batch still exists — if its
+    `_backfill/<batch_id>/batch-signed.json` is missing (deleted, renamed,
+    or simply never signed for real), --backfill must refuse exactly as a
+    bare per-meeting marker does, not trust the marker's own claim."""
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    from sign_marker import write_marker
+    capture = _write_phase3_capture(tmp_path, vault, repo, mid, env)
+    marker_rc, _marker_path, _marker_msg = write_marker(
+        vault, "fireflies", mid, capture, signed_by="Josh", signed_at="2026-09-05T00:00:00Z",
+        extra={"batch_id": "fireflies-20260908T000000Z", "digest_sha256": "4" * 64},
+    )
+    assert marker_rc == 0
+    # No _write_batch_signed call: the referenced batch dir never existed.
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--backfill"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 15, result.stderr + result.stdout
+    assert "batch-signed.json missing or unreadable" in result.stderr
+
+    state = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}"
+    assert not (state / "receipt.json").exists()
+    assert not (state / "progress.json").exists()
+
+
+def test_backfill_apply_refuses_marker_not_in_signed_ids(tmp_path):
+    """B1 (G2b r2 CH2-2): the batch exists and its digest_sha256 matches,
+    but this meeting id is not (or no longer) in signed_ids — a real batch
+    signature must not silently authorize a meeting it never actually
+    covered."""
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    from sign_marker import write_marker
+    capture = _write_phase3_capture(tmp_path, vault, repo, mid, env)
+    batch_id = "fireflies-20260908T000001Z"
+    # batch-signed.json is real, digest/manifest hashes real, signer/date
+    # match — but signed_ids never named this meeting.
+    digest_sha256 = _write_batch_signed(vault, batch_id, ["some-other-meeting-id"])
+    marker_rc, _marker_path, _marker_msg = write_marker(
+        vault, "fireflies", mid, capture, signed_by="Josh", signed_at="2026-09-05T00:00:00Z",
+        extra={"batch_id": batch_id, "digest_sha256": digest_sha256},
+    )
+    assert marker_rc == 0
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--backfill"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 15, result.stderr + result.stdout
+    assert "not in batch" in result.stderr and "signed_ids" in result.stderr
+
+    state = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}"
+    assert not (state / "receipt.json").exists()
+    assert not (state / "progress.json").exists()
+
+
+def _sign_batch_marker(tmp_path, vault, repo, mid, env, batch_id):
+    from sign_marker import write_marker
+    capture = _write_phase3_capture(tmp_path, vault, repo, mid, env)
+    digest_sha256 = _write_batch_signed(vault, batch_id, [mid])
+    marker_rc, _marker_path, _marker_msg = write_marker(
+        vault, "fireflies", mid, capture, signed_by="Josh", signed_at="2026-09-05T00:00:00Z",
+        extra={"batch_id": batch_id, "digest_sha256": digest_sha256},
+    )
+    assert marker_rc == 0
+
+
+def test_backfill_apply_refuses_drifted_digest(tmp_path):
+    """B2 (G2 r3 CH3-2, Critical): batch-signed.json's own digest_sha256
+    still matches the marker, but the REAL digest.md bytes on disk have
+    since drifted (hand-edited, or a stale sidecar) — validate_batch_marker
+    must re-hash digest.md itself, not just trust batch-signed.json's
+    recollection."""
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    batch_id = "fireflies-20260909T000000Z"
+    _sign_batch_marker(tmp_path, vault, repo, mid, env, batch_id)
+    bd = vault / "raw/media/transcripts/_backfill" / batch_id
+    (bd / "digest.md").write_bytes(b"# digest\nstatus: complete\ntampered\n")  # sidecar/batch-signed.json left stale
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--backfill"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 15, result.stderr + result.stdout
+    assert "digest_sha256" in result.stderr
+
+
+def test_backfill_apply_refuses_manifest_sha_mismatch(tmp_path):
+    """B2 (G2 r3 CH3-2, Critical): manifest.json's real bytes no longer
+    hash to batch-signed.json's own manifest_sha256 — the manifest
+    reviewed at sign time is not the manifest on disk now."""
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    batch_id = "fireflies-20260909T000001Z"
+    _sign_batch_marker(tmp_path, vault, repo, mid, env, batch_id)
+    bd = vault / "raw/media/transcripts/_backfill" / batch_id
+    (bd / "manifest.json").write_bytes(b'{"batch_id": "tampered"}')
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--backfill"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 15, result.stderr + result.stdout
+    assert "manifest_sha256" in result.stderr
+
+
+def test_backfill_apply_refuses_signer_mismatch(tmp_path):
+    """B2 (G2 r3 CH3-2, Critical): the marker's own signed_by disagrees
+    with batch-signed.json's recorded signed_by — a hand-edited marker
+    signer must be refused even though every other binding holds."""
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    # BRAIN_SIGNERS override so "SomeoneElse" passes validate_sign_marker's
+    # OWN allowlist check (which runs before validate_batch_marker) —
+    # otherwise this would (mis)test that earlier, pre-existing gate
+    # instead of isolating B2's NEW signed_by-vs-batch-signed.json check.
+    env["BRAIN_SIGNERS"] = "Josh,SomeoneElse"
+    from sign_marker import write_marker
+    capture = _write_phase3_capture(tmp_path, vault, repo, mid, env)
+    batch_id = "fireflies-20260909T000002Z"
+    digest_sha256 = _write_batch_signed(vault, batch_id, [mid], signed_by="Josh")
+    marker_rc, _marker_path, _marker_msg = write_marker(
+        vault, "fireflies", mid, capture, signed_by="SomeoneElse", signed_at="2026-09-05T00:00:00Z",
+        extra={"batch_id": batch_id, "digest_sha256": digest_sha256},
+    )
+    assert marker_rc == 0
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--backfill"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 15, result.stderr + result.stdout
+    assert "signed_by" in result.stderr
+
+
+def test_backfill_apply_refuses_batch_flag_mismatch(tmp_path):
+    """B3 (G2 r3 CH3-4, run_meeting half): --batch <id> is optional and
+    only meaningful with --backfill — when given, the marker's own
+    batch_id must equal it exactly, even when the marker is otherwise
+    fully valid for a DIFFERENT real, fully-signed batch."""
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    batch_id = "fireflies-20260909T000003Z"
+    _sign_batch_marker(tmp_path, vault, repo, mid, env, batch_id)
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--backfill",
+         "--batch", "fireflies-20260909T999999Z"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 15, result.stderr + result.stdout
+    assert "!= --batch" in result.stderr
+
+    # Sanity: the SAME marker with the CORRECT --batch still authorizes normally.
+    matching = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--backfill",
+         "--batch", batch_id],
+        capture_output=True, text=True, env=env,
+    )
+    assert matching.returncode == 0, matching.stderr + matching.stdout
+
+
+def test_backfill_prior_done_snapshot_survives_later_live_force(tmp_path):
+    """F3 (G2 P2): backfill_prior_done is a ONE-TIME snapshot taken the
+    instant backfill_run first flips true — progress.compose_receipt must
+    read that stored list verbatim, never re-derive it from current step
+    state. Seed "tasks" as already done BEFORE the first backfill apply
+    (simulating a step that ran live in an earlier, non-backfill session);
+    after a later live --force performs the still-skipped draft/status
+    steps for real, the snapshot must still report ["tasks"] only — not
+    grow to include draft/status just because they are now also done."""
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    from sign_marker import write_marker
+    capture = _write_phase3_capture(tmp_path, vault, repo, mid, env)
+    batch_id = "fireflies-20260907T000000Z"
+    digest_sha256 = _write_batch_signed(vault, batch_id, [mid])
+    marker_rc, _marker_path, _marker_msg = write_marker(
+        vault, "fireflies", mid, capture, signed_by="Josh", signed_at="2026-09-05T00:00:00Z",
+        extra={"batch_id": batch_id, "digest_sha256": digest_sha256},
+    )
+    assert marker_rc == 0
+
+    state = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}"
+    state.mkdir(parents=True, exist_ok=True)
+    # `created` non-empty: the acceptance meeting's minimums (>=1 OURS task)
+    # ARE enforced on the live --force leg below (backfill=False there), so
+    # an empty `created` would spuriously block that commit at exit 9 —
+    # unrelated to what this test is actually proving.
+    (state / "progress.json").write_text(
+        json.dumps({"tasks": {"done": True, "created": [{"commitmentId": "c1", "taskId": "task-1"}],
+                               "created_ids": ["c1"], "pending": []}}), encoding="utf-8",
+    )
+
+    backfilled = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--backfill"],
+        capture_output=True, text=True, env=env,
+    )
+    assert backfilled.returncode == 0, backfilled.stderr + backfilled.stdout
+    receipt = json.loads((state / "receipt.json").read_text(encoding="utf-8"))
+    assert receipt["backfill_prior_done"] == ["tasks"]
+    assert receipt["backfill_skipped"] == ["recap", "status"]  # tasks already done, never re-marked skipped
+
+    forced = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--force"],
+        capture_output=True, text=True, env=env,
+    )
+    assert forced.returncode == 0, forced.stderr + forced.stdout
+    prog = json.loads((state / "progress.json").read_text(encoding="utf-8"))
+    assert prog["draft"]["done"] is True and prog["status_update"]["done"] is True
+
+    receipt2 = json.loads((state / "receipt.json").read_text(encoding="utf-8"))
+    assert receipt2["backfill_prior_done"] == ["tasks"]
+    assert "backfill_skipped" not in receipt2
+
+
+def test_live_force_after_backfill_apply_performs_tasks_draft_status(tmp_path):
+    """M3 (Spec M-2): a plain live --apply --force (no --backfill), run
+    after a backfill apply skipped tasks/draft/status with nothing
+    pre-done, actually performs all three for real — proven via the spy
+    shim's own argv log (create-task, +draft), not just progress.json's
+    done:true flags."""
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    from sign_marker import write_marker
+    capture = _write_phase3_capture(tmp_path, vault, repo, mid, env)
+    batch_id = "fireflies-20260907T000001Z"
+    digest_sha256 = _write_batch_signed(vault, batch_id, [mid])
+    marker_rc, _marker_path, _marker_msg = write_marker(
+        vault, "fireflies", mid, capture, signed_by="Josh", signed_at="2026-09-05T00:00:00Z",
+        extra={"batch_id": batch_id, "digest_sha256": digest_sha256},
+    )
+    assert marker_rc == 0
+    spy = tmp_path / "spy2"; spy.mkdir()
+    for name in ("cortextos", "gws"):
+        (spy / name).write_text(f"#!/bin/sh\necho \"{name} $*\" >> {spy / 'calls.log'}\nexec {bindir / name} \"$@\"\n", encoding="utf-8")
+        (spy / name).chmod(0o755)
+    env["PATH"] = f"{spy}:{env['PATH']}"
+
+    backfilled = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--backfill"],
+        capture_output=True, text=True, env=env,
+    )
+    assert backfilled.returncode == 0, backfilled.stderr + backfilled.stdout
+
+    forced = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--force"],
+        capture_output=True, text=True, env=env,
+    )
+    assert forced.returncode == 0, forced.stderr + forced.stdout
+    state = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}"
+    prog = json.loads((state / "progress.json").read_text(encoding="utf-8"))
+    assert prog["tasks"]["done"] is True
+    assert prog["draft"]["done"] is True
+    assert prog["status_update"]["done"] is True
+    text = (spy / "calls.log").read_text(encoding="utf-8") if (spy / "calls.log").exists() else ""
+    assert "create-task" in text
+    assert "+draft" in text
+
+
+def test_backfill_apply_does_not_enforce_acceptance_minimums(tmp_path):
+    """F7 (Spec I-2): FR-012's acceptance minimums (exit 9) are never
+    enforced under --backfill, even for the designated acceptance meeting
+    id and even when a real shortfall exists (zero decisions here) — the
+    receipt still records minimums.enforced: false and the run never exits 9."""
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    extraction_path = vault / "raw/media/transcripts/fireflies" / mid / "extraction.json"
+    extraction = json.loads(extraction_path.read_text(encoding="utf-8"))
+    extraction["decisions"] = []
+    extraction_path.write_text(json.dumps(extraction), encoding="utf-8")
+
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    # mid == the default acceptance meeting id (MID) — no env override — so
+    # this genuinely exercises the --backfill exemption, not merely "this
+    # meeting was never gated".
+    from run_meeting import _acceptance_meeting_ids
+    assert mid in _acceptance_meeting_ids()
+    from sign_marker import write_marker
+    capture = _write_phase3_capture(tmp_path, vault, repo, mid, env)
+    batch_id = "fireflies-20260907T000002Z"
+    digest_sha256 = _write_batch_signed(vault, batch_id, [mid])
+    marker_rc, _marker_path, _marker_msg = write_marker(
+        vault, "fireflies", mid, capture, signed_by="Josh", signed_at="2026-09-05T00:00:00Z",
+        extra={"batch_id": batch_id, "digest_sha256": digest_sha256},
+    )
+    assert marker_rc == 0
+
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--backfill"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "FAILED at minimums" not in result.stderr
+
+    state = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}"
+    receipt = json.loads((state / "receipt.json").read_text(encoding="utf-8"))
+    assert receipt["vault_sha"]
+    assert receipt["minimums"]["enforced"] is False
+    assert receipt["minimums"]["ok"] is False
+    assert "decisions_kept=0 < 1" in receipt["minimums"]["missing"]
+
+
+def test_backfill_apply_real_path_records_15_when_capture_edited_after_batch_sign(tmp_path):
+    # G0b-8: sign a one-meeting batch through sign_batch.py, tamper the signed capture, run the REAL
+    # `backfill.py apply` → run_meeting's validate_sign_marker refuses (15), the batch records it and exits 1.
+    import hashlib
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    capture = _write_phase3_capture(tmp_path, vault, repo, mid, env)
+    state = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}"
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "dry-run.txt").write_bytes(capture.read_bytes())
+    bid = "fireflies-20260906T000000Z"
+    bd = vault / "raw/media/transcripts/_backfill" / bid
+    bd.mkdir(parents=True)
+    (bd / "manifest.json").write_text(json.dumps({"batch_id": bid, "kind": "fireflies", "rows": [
+        {"id": mid, "kind": "fireflies", "occurred_at": "2026-09-01T00:00:00+00:00", "already_applied": False}]}), encoding="utf-8")
+    (bd / "batch-progress.json").write_text(json.dumps({"batch_id": bid, "kind": "fireflies",
+        "rows": {f"fireflies:{mid}": {"dry_run": {"exit": 0}}}, "sample_ids": [mid]}), encoding="utf-8")
+    # B1/B6 (G2 r3 CH3-1/fold-3 minors): sign_batch.py now requires the
+    # digest's own table to name exactly the attempted progress ids, plus a
+    # real status/unattempted header — a bare "# d\n" digest (pre-fold-4)
+    # no longer round-trips through the real sign_batch.py this test drives.
+    digest = (
+        "# digest\n\n"
+        "kind: fireflies · manifest: 1 · applied: 0 · meetings: 1 · ok: 1 · failed: 0 · unattempted: 0 · cost_usd: 0.00\n"
+        "status: complete\n\n"
+        "| id | date | title | home | created org | kept/dropped | classification | exit |\n"
+        "|---|---|---|---|---|---|---|---|\n"
+        f"| {mid} | 2026-09-01 | t | h |  |  |  | 0 |\n\n"
+    ).encode("utf-8")
+    sha = hashlib.sha256(digest).hexdigest()
+    (bd / "digest.md").write_bytes(digest); (bd / "digest.sha256").write_text(sha + "\n", encoding="utf-8")
+    versioned = bd / f"sample-{sha[:12]}"; versioned.mkdir()
+    (versioned / f"{mid}.txt").write_bytes(capture.read_bytes())
+    os.symlink(versioned.name, bd / "sample")
+    sign = subprocess.run([sys.executable, str(BRAIN / "sign_batch.py"), "--batch", bid, "--vault", str(vault),
+                           "--signed-by", "Josh", "--signed-at", "2026-09-06T20:00:00Z", "--digest", str(bd / "digest.md")],
+                          capture_output=True, text=True, env=env)
+    assert sign.returncode == 0, sign.stderr
+    (state / "dry-run.txt").write_text((state / "dry-run.txt").read_text(encoding="utf-8") + "\n# edited after sign-off\n", encoding="utf-8")
+    res = subprocess.run([sys.executable, str(BRAIN / "backfill.py"), "--source", "fireflies", "--vault", str(vault),
+                          "--repo-root", str(repo), "--batch", bid, "apply"], capture_output=True, text=True, env=env)
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "applied: 0 ok, 1 failed, 0 skipped" in res.stdout
+    bp = json.loads((bd / "batch-progress.json").read_text(encoding="utf-8"))
+    assert bp["rows"][f"fireflies:{mid}"]["apply"]["exit"] == 15
+    assert not (state / "receipt.json").exists()
+
+
+def test_backfill_apply_real_path_happy_path_applies_signed_meeting(tmp_path):
+    # G0a3-4: the POSITIVE leg — a batch-signed marker must AUTHORIZE the real backfill apply.
+    # If this cannot pass, the batch-marker binding is defective: HALT before any D-20 signature.
+    import hashlib
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    capture = _write_phase3_capture(tmp_path, vault, repo, mid, env)
+    state = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}"
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "dry-run.txt").write_bytes(capture.read_bytes())
+    bid = "fireflies-20260906T000001Z"
+    bd = vault / "raw/media/transcripts/_backfill" / bid
+    bd.mkdir(parents=True)
+    (bd / "manifest.json").write_text(json.dumps({"batch_id": bid, "kind": "fireflies", "rows": [
+        {"id": mid, "kind": "fireflies", "occurred_at": "2026-09-01T00:00:00+00:00", "already_applied": False}]}), encoding="utf-8")
+    (bd / "batch-progress.json").write_text(json.dumps({"batch_id": bid, "kind": "fireflies",
+        "rows": {f"fireflies:{mid}": {"dry_run": {"exit": 0}}}, "sample_ids": [mid]}), encoding="utf-8")
+    # B1/B6 (G2 r3 CH3-1/fold-3 minors): sign_batch.py now requires the
+    # digest's own table to name exactly the attempted progress ids, plus a
+    # real status/unattempted header — a bare "# d\n" digest (pre-fold-4)
+    # no longer round-trips through the real sign_batch.py this test drives.
+    digest = (
+        "# digest\n\n"
+        "kind: fireflies · manifest: 1 · applied: 0 · meetings: 1 · ok: 1 · failed: 0 · unattempted: 0 · cost_usd: 0.00\n"
+        "status: complete\n\n"
+        "| id | date | title | home | created org | kept/dropped | classification | exit |\n"
+        "|---|---|---|---|---|---|---|---|\n"
+        f"| {mid} | 2026-09-01 | t | h |  |  |  | 0 |\n\n"
+    ).encode("utf-8")
+    sha = hashlib.sha256(digest).hexdigest()
+    (bd / "digest.md").write_bytes(digest); (bd / "digest.sha256").write_text(sha + "\n", encoding="utf-8")
+    versioned = bd / f"sample-{sha[:12]}"; versioned.mkdir()
+    (versioned / f"{mid}.txt").write_bytes(capture.read_bytes())
+    os.symlink(versioned.name, bd / "sample")
+    sign = subprocess.run([sys.executable, str(BRAIN / "sign_batch.py"), "--batch", bid, "--vault", str(vault),
+                           "--signed-by", "Josh", "--signed-at", "2026-09-06T20:00:00Z", "--digest", str(bd / "digest.md")],
+                          capture_output=True, text=True, env=env)
+    assert sign.returncode == 0, sign.stderr
+    res = subprocess.run([sys.executable, str(BRAIN / "backfill.py"), "--source", "fireflies", "--vault", str(vault),
+                          "--repo-root", str(repo), "--batch", bid, "apply"], capture_output=True, text=True, env=env)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "applied: 1 ok, 0 failed, 0 skipped" in res.stdout
+    bp = json.loads((bd / "batch-progress.json").read_text(encoding="utf-8"))
+    assert bp["rows"][f"fireflies:{mid}"]["apply"]["exit"] == 0 and "commit" in bp["post_batch"]
+    receipt = json.loads((state / "receipt.json").read_text(encoding="utf-8"))
+    assert receipt["backfill_skipped"] == ["recap", "status", "tasks"] and receipt["vault_sha"]
+
+
+def test_backfill_dry_run_real_path_then_sign_batch_accepts_it(tmp_path):
+    """F8 (Spec I-3): a REAL `backfill.py dry-run` subprocess (not a
+    hand-built batch-progress.json) against the tmp vault, then
+    `sign_batch.py` accepting the digest+sample it produced. Agent A's
+    concurrent backfill.py work requires a canonical manifest built up
+    front (occurred_at, id order) and the batch dir pre-existing before
+    dry-run — real `backfill.py list` can't be driven from a subprocess
+    fixture here, so the manifest is hand-written in that same canonical
+    shape `list` itself would produce."""
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+
+    bid = "fireflies-20260907T000000Z"
+    bd = vault / "raw/media/transcripts/_backfill" / bid
+    bd.mkdir(parents=True)
+    (bd / "manifest.json").write_text(json.dumps({
+        "batch_id": bid, "kind": "fireflies",
+        "rows": [{"id": mid, "kind": "fireflies", "occurred_at": "2026-09-04T17:00:00Z",
+                  "title": "Weekly tacticals review", "duration_s": 900, "participant_count": 6,
+                  "already_applied": False}],
+    }), encoding="utf-8")
+
+    dry = subprocess.run(
+        [sys.executable, str(BRAIN / "backfill.py"), "--source", "fireflies", "--vault", str(vault),
+         "--repo-root", str(repo), "--batch", bid, "dry-run", "--max-usd", "5"],
+        capture_output=True, text=True, env=env,
+    )
+    assert dry.returncode == 0, dry.stdout + dry.stderr
+
+    bp = json.loads((bd / "batch-progress.json").read_text(encoding="utf-8"))
+    row = bp["rows"][f"fireflies:{mid}"]["dry_run"]
+    assert row["exit"] == 0
+    assert row["home"] == "projects/alloi-03.md"
+    assert row["rule"] is not None
+    extraction = json.loads(
+        (vault / "raw/media/transcripts/fireflies" / mid / "extraction.json").read_text(encoding="utf-8")
+    )
+    assert row["cost_usd"] == float(extraction.get("cost_usd") or 0.0)
+
+    assert (bd / "digest.md").is_file() and (bd / "digest.sha256").is_file()
+    sign = subprocess.run(
+        [sys.executable, str(BRAIN / "sign_batch.py"), "--batch", bid, "--vault", str(vault),
+         "--signed-by", "Josh", "--signed-at", "2026-09-07T20:00:00Z", "--digest", str(bd / "digest.md")],
+        capture_output=True, text=True, env=env,
+    )
+    assert sign.returncode == 0, sign.stdout + sign.stderr
+
+
+def test_compose_receipt_omits_backfill_skipped_when_nothing_skipped():
+    import progress
+    doc = {"writeback": {"done": True}, "tasks": {"done": True, "created": []}, "draft": {"done": True, "subject": "S"}}
+    receipt = progress.compose_receipt(doc, meeting_id="M", source="fireflies:M", vault_sha="s", prior=None)
+    assert "backfill_skipped" not in receipt
+    doc["tasks"] = {"done": False, "skipped": "backfill", "at": "2026-09-06T00:00:00Z"}
+    receipt = progress.compose_receipt(doc, meeting_id="M", source="fireflies:M", vault_sha="s", prior=None)
+    assert receipt["backfill_skipped"] == ["tasks"]

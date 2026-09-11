@@ -1,0 +1,41 @@
+## WRONG LEDGER ROWS
+
+[HIGH] (confidence: 10/10) scripts/brain/adapt_meeting.py:21 — G-80 omits the executable fallback definition `_iso_from_fireflies_date`, so its supposedly complete parameterization inventory still misses a scan-boundary hit.
+
+[MEDIUM] (confidence: 10/10) state/specs/brain-source-to-state-2026-09-04-spec.md:625 — G-80’s evidence command never scans `adapt_meeting.py`, `preview.py`, `progress.py`, `make_variant.py`, or either PA script cited in the extended verdict.
+
+[MEDIUM] (confidence: 10/10) state/specs/brain-source-to-state-2026-09-04-spec.md:649 — G-104’s evidence probes only `paths.py` and therefore does not support its added claim that `run_meeting.py` has one ID argument forwarded at lines 103/129.
+
+[MEDIUM] (confidence: 10/10) state/specs/brain-source-to-state-2026-09-04-spec.md:663 — G-118’s evidence checks only that the test function exists and does not establish which source-ref, tag, suffix, or idempotency assertions it contains.
+
+[MEDIUM] (confidence: 9/10) scripts/brain/resolve_meeting.py:215 — G-120 inaccurately characterizes `validated.json` as participants/sides when it is a copy of the full extraction augmented with quote-gated decisions, commitments, questions, promotion, and dropped state.
+
+## UNRECORDED ASSUMPTIONS
+
+[HIGH] (confidence: 10/10) scripts/brain/fetch_fireflies.py:223 — FR-017 still assumes argparse usage failures exit 64, but the existing required-argument parser raises `SystemExit(2)` before an ID or state directory exists.
+
+[HIGH] (confidence: 9/10) scripts/brain/fetch_fireflies.py:264 — `--allow-short` currently permits a transcript whose raw duration is absent, after which line 193 emits `duration_s: null`, leaving unspecified whether the new optional-integer schema must omit the field or reject behavior previously allowed.
+
+[CRITICAL] (confidence: 10/10) scripts/brain/fetch_fireflies.py:159 — FR-017’s email-less-org condition also captures Fireflies meetings containing only email-less sentence speakers, contradicting its claim that existing Fireflies resolution remains untouched and replacing current rule-7 person resolution.
+
+[HIGH] (confidence: 10/10) state/specs/brain-source-to-state-2026-09-04-spec.md:510 — FR-021 populates public GitHub emails while FR-017 and FR-021 assume every unmatched GitHub envelope qualifies for the no-email org branch.
+
+[HIGH] (confidence: 10/10) state/specs/brain-source-to-state-2026-09-04-spec.md:512 — FR-021 requires unmatched GitHub resolution to create `<owner-slug>`, whereas FR-017 line 439 requires slugifying the complete binding key `<owner>/<repo>`.
+
+[HIGH] (confidence: 9/10) scripts/brain/writeback_render.py:235 — The email-less branch assumes a created org’s alias will reach the page, but the existing creation renderer consumes only `slug`, `kind`, and `relationship` and never reads or renders `aliases`.
+
+[HIGH] (confidence: 10/10) state/specs/brain-source-to-state-2026-09-04-spec.md:437 — The literal invariant’s permitted classes omit the required kind allowlist, dispatch-table keys, and each new adapter’s required `source.kind` value, making the fixed-boundary allowlist criterion internally unsatisfiable as written.
+
+[HIGH] (confidence: 10/10) scripts/brain/sign_dry_run.py:80 — The scan includes `sign_dry_run.py`, whose two Fireflies paths have no kind input, but FR-017 neither parameterizes this CLI nor permits its compatibility default; making the flag required would also break existing calls such as `test_sign_dry_run.py:26`.
+
+[HIGH] (confidence: 10/10) scripts/brain/tests/test_run_meeting_dry.py:140 — Replacing `run_meeting.fetch_main` with the prescribed dispatch table removes the monkeypatch seam used here and at five additional green tests unless backward compatibility is explicitly required.
+
+[HIGH] (confidence: 9/10) scripts/brain/tests/test_run_meeting_apply.py:1313 — FR-015’s “else its parent” summary omits the current requirement that the node be a project and its parent exist with `kind: engagement`, which this green no-engagement/no-subprocess test pins.
+
+## BUCKET CORRECTIONS
+
+none
+
+## VERIFIED-CORRECT
+
+G-121; the core code facts behind G-104, G-118, and G-120; FR-015’s manifest `duration_s: null` rule; FR-017’s Slack/GitHub-only one-way storage-key design and CRM default-preservation intent; FR-020’s email-less-org reference; §4a’s optional wording; FR-017 bucket B; and §12’s R5 line are otherwise grounded.

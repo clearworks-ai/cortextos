@@ -74,6 +74,11 @@ def _seed_source_vault(tmp_path: Path) -> tuple[Path, Path]:
     (env_dir / "source.json").write_bytes(raw)
     sha = hashlib.sha256(raw).hexdigest()
     (env_dir / "source.sha256").write_text(sha + "\n", encoding="utf-8")
+    # F18 (CH-17): the already-fetched short-circuit requires a coherent envelope
+    # (source.json + source.sha256 + meta.json); make_variant copies the tree as-is.
+    (env_dir / "meta.json").write_text(
+        json.dumps({"fetched_at": "2026-09-04T17:00:00Z", "fetcher": "fetch_fireflies/1"}), encoding="utf-8",
+    )
     extraction = {
         "schema": "brain.extraction/1", "inputSha": sha, "promptSha": "p", "model": "sonnet",
         "cost_usd": 0, "extracted_at": "2026-09-05T00:00:00Z",

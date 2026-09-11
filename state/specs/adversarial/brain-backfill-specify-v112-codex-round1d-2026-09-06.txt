@@ -1,0 +1,57 @@
+## WRONG LEDGER ROWS
+
+[MEDIUM] (confidence: 9/10) state/specs/brain-source-to-state-2026-09-04-spec.md:684 — G-120’s probe shows the two files being read and written but never inspects lines 215–220, so it does not support the claimed composition of `validated.json`.
+
+[MEDIUM] (confidence: 10/10) state/specs/brain-source-to-state-2026-09-04-spec.md:686 — G-122’s `sed -n 229,245p` stops eleven lines before `render_created_page` returns, so it cannot support the negative claim that the function never renders aliases.
+
+[MEDIUM] (confidence: 9/10) state/specs/brain-source-to-state-2026-09-04-spec.md:688 — G-124’s named CONTROL test exercises only the missing-parent clean-skip branch, not the claimed engagement-node and valid-engagement-parent branches.
+
+[LOW] (confidence: 9/10) state/specs/brain-source-to-state-2026-09-04-spec.md:689 — G-125’s probe proves the required argument and argparse exit 2 but does not show the cited `parse_args` ordering or the subsequent `safe_meeting_id` exit-64 path.
+
+[LOW] (confidence: 9/10) state/specs/brain-source-to-state-2026-09-04-spec.md:690 — G-126’s probe shows the `--allow-short` condition but does not inspect line 193, whose `duration_s` write is required to establish the asserted null result.
+
+## UNRECORDED ASSUMPTIONS
+
+[HIGH] (confidence: 10/10) scripts/brain/run_meeting.py:128 — `test_kind_sink.py` is not a satisfiable non-vacuous criterion as specified because `_run_dry` creates no sign marker or progress/receipt state and never invokes the CRM subprocess, while the test is required to assert all three.
+
+[HIGH] (confidence: 10/10) scripts/brain/resolve_meeting.py:496 — FR-022 inserts its non-Fireflies fall-through after rules 0–6 and therefore also intercepts the existing rule-8 no-external-participants path, an unrecorded behavior change for internal-only Slack, Gmail, or GitHub sources.
+
+[HIGH] (confidence: 10/10) state/specs/brain-source-to-state-2026-09-04-spec.md:460 — FR-018’s statement that the fall-through fires only when every participant is unknown-side and email-less contradicts FR-022’s kind-only gate and the scoped Slack/GitHub fall-throughs.
+
+[MEDIUM] (confidence: 10/10) scripts/brain/sign_dry_run.py:78 — FR-017’s `sign_marker.write_marker` bullet depends on FR-016/G-111 because no `sign_marker.py` or `write_marker` currently exists, but neither dependency appears in FR-017’s Depends list.
+
+[MEDIUM] (confidence: 10/10) state/specs/brain-source-to-state-2026-09-04-spec.md:514 — FR-021 inaccurately describes the second rule-0 lookup as part of `source.binding.key`; the envelope defines that value separately as `source.binding.org_key`.
+
+[LOW] (confidence: 10/10) state/specs/brain-source-to-state-2026-09-04-spec.md:446 — FR-017’s bucket rationale still says six additional files carry kind-bearing literals although G-80 and the repository enumerate at least eleven outside `run_meeting.py`.
+
+## BUCKET CORRECTIONS
+
+none
+
+## VERIFIED-CORRECT
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:394 — FR-015’s `(client, engagement)` derivation matches `resolution.counterparty_slug` plus the engagement/project-parent checks at `run_meeting.py:789` and `:826-842`.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:434 — FR-017’s fetch-error usage/exit-2 distinction matches argparse and the orchestrator’s fetch-return collapse.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:438 — Preserving `run_meeting.fetch_main` as a call-time Fireflies seam correctly protects all six existing monkeypatch tests.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:439 — Optional `sign_dry_run.py --source-kind` with a Fireflies default preserves existing callers once the missing FR-016 dependency is honored.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:440 — Optional nullable integer `duration_s` and the minutes-to-seconds conversion correctly describe current Fireflies behavior and its required fix.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:441 — The rule-0 binding requirement correctly records that current client/org loading ignores aliases and current resolution never reads `source.binding`.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:529 — FR-022’s kind gate correctly avoids changing Fireflies rule-7 resolution, and its created-page alias requirement is grounded in the renderer’s current omission.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:644 — G-80’s current literal inventory and open-set verdict match the repository.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:668 — G-104’s regex, one-way-storage-key premise, and single forwarded meeting-ID evidence match the repository.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:682 — G-118 correctly states what the existing CRM idempotency test does and does not pin.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:687 — G-123 correctly counts the six `fetch_main` monkeypatch sites.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:699 — Section 8 correctly assigns both FR-017 and FR-022 to bucket B.
+
+state/specs/brain-source-to-state-2026-09-04-spec.md:752 — Section 12’s R5 composition is grounded except for the unsatisfiable `test_kind_sink.py` coverage claim identified above, and no additional existing GREEN casualty was found beyond the listed controls.

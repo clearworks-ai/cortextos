@@ -6,7 +6,10 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
+import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +25,7 @@ from paths import (
     safe_meeting_id,
     secrets_path,
 )
+from progress import _state_dir
 
 FETCHER_VERSION = "fetch_fireflies/1"
 GRAPHQL_URL = "https://api.fireflies.ai/graphql"
@@ -45,6 +49,61 @@ query Transcript($id: String!) {
   }
 }
 """
+
+# FR-015 lister (spec G-81/G-82): `date` is epoch-ms, `duration` is float
+# MINUTES, `participants` is a list of email strings; `limit` max 50.
+LIST_QUERY = """query Transcripts($limit: Int!, $skip: Int!) {
+  transcripts(limit: $limit, skip: $skip) { id title date duration participants }
+}"""
+LIST_PAGE_SIZE = 50
+# FR-015: 429 / 5xx → wait 1 s, 2 s, 4 s (max 3 retries) before giving up.
+RETRY_DELAYS_S = (1, 2, 4)
+_sleep = time.sleep  # test seam
+
+
+class FirefliesListError(RuntimeError):
+    """The transcripts list query returned a GraphQL `errors` payload."""
+
+
+FETCH_ERROR_CLASSES = ("auth", "rate_limit", "not_ready", "server", "network")
+_AUTH_WORDS = re.compile(r"auth|token|unauthori|forbidden|api key", re.IGNORECASE)
+
+
+def fetch_error_path(vault: Path, kind: str, meeting_id: str) -> Path:
+    return _state_dir(Path(vault), kind, meeting_id) / "fetch-error.json"
+
+
+def write_fetch_error(vault: Path, kind: str, meeting_id: str, cls: str, *, status: int | None = None, message: str = "") -> Path:
+    """FR-017 adapter contract (G-109): every exit-2 path leaves a classified
+    error so backfill.py can stop a batch on `auth` without parsing stderr."""
+    assert cls in FETCH_ERROR_CLASSES, cls
+    path = fetch_error_path(vault, kind, meeting_id)
+    doc = {"class": cls, "status": status, "message": message[:500],
+           "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    atomic_write(path, (json.dumps(doc, sort_keys=True, indent=2) + "\n").encode("utf-8"))
+    return path
+
+
+def clear_fetch_error(vault: Path, kind: str, meeting_id: str) -> None:
+    path = fetch_error_path(vault, kind, meeting_id)
+    if path.exists():
+        path.unlink()
+
+
+def classify_exception(exc: BaseException) -> tuple[str, int | None]:
+    if isinstance(exc, urllib.error.HTTPError):
+        if exc.code in (401, 403):
+            return "auth", exc.code
+        if exc.code == 429:
+            return "rate_limit", exc.code
+        return "server", exc.code
+    if isinstance(exc, (urllib.error.URLError, TimeoutError, ConnectionError, OSError)):
+        return "network", None
+    return "server", None
+
+
+def classify_graphql_message(message: str) -> str:
+    return "auth" if _AUTH_WORDS.search(message or "") else "server"
 
 
 def _canonical_bytes(obj: dict[str, Any]) -> bytes:
@@ -197,8 +256,12 @@ def envelope_from_transcript(tr: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _post_graphql(api_key: str, meeting_id: str) -> dict[str, Any]:
-    body = json.dumps({"query": QUERY, "variables": {"id": meeting_id}}).encode()
+def _retryable(exc: BaseException) -> bool:
+    return isinstance(exc, urllib.error.HTTPError) and (exc.code == 429 or exc.code >= 500)
+
+
+def _post_query(api_key: str, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+    body = json.dumps({"query": query, "variables": variables}).encode()
     req = urllib.request.Request(
         GRAPHQL_URL,
         data=body,
@@ -208,9 +271,40 @@ def _post_graphql(api_key: str, meeting_id: str) -> dict[str, Any]:
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        raw = resp.read()
-    return json.loads(raw.decode())
+    for attempt in range(len(RETRY_DELAYS_S) + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                raw = resp.read()
+            return json.loads(raw.decode())
+        except urllib.error.HTTPError as exc:
+            if not _retryable(exc) or attempt == len(RETRY_DELAYS_S):
+                raise
+            _sleep(RETRY_DELAYS_S[attempt])
+    raise AssertionError("unreachable")
+
+
+def _post_graphql(api_key: str, meeting_id: str) -> dict[str, Any]:
+    return _post_query(api_key, QUERY, {"id": meeting_id})
+
+
+def list_transcripts(api_key: str, *, page_size: int = LIST_PAGE_SIZE, throttle_s: float = 2.0) -> list[dict[str, Any]]:
+    """Page `transcripts(limit, skip)` until a short page; returns raw rows in
+    API order. Sleeps `throttle_s` between pages (A-08 default 1 req / 2 s)."""
+    rows: list[dict[str, Any]] = []
+    skip = 0
+    while True:
+        payload = _post_query(api_key, LIST_QUERY, {"limit": page_size, "skip": skip})
+        errors = payload.get("errors") or []
+        if errors:
+            first = errors[0]
+            raise FirefliesListError(first.get("message") if isinstance(first, dict) else str(first))
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        page = data.get("transcripts") or []
+        rows.extend(r for r in page if isinstance(r, dict) and r.get("id"))
+        if len(page) < page_size:
+            return rows
+        skip += page_size
+        _sleep(throttle_s)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -233,37 +327,65 @@ def main(argv: list[str] | None = None) -> int:
     sha_path = dest_dir / "source.sha256"
     meta_path = dest_dir / "meta.json"
 
-    if source_path.exists() and not args.refetch:
+    # F18 (CH-17): existence of source.json alone is not proof of a coherent
+    # envelope — a crash between writing source.json and meta.json/source.sha256
+    # (each written atomically but not as one transaction) must fall through
+    # to a fresh fetch, which rewrites all three, rather than short-circuit
+    # on a partial envelope forever.
+    #
+    # B5 (G2b r2 CH-17, "not fixed" by the existence-only version above):
+    # existence of all three files is STILL not coherence — a stale
+    # source.sha256 sidecar (left over from a --refetch that rewrote
+    # source.json's bytes but crashed before the sidecar wrote, or any
+    # hand-edit) must also fall through. Verify the sidecar's content
+    # actually equals sha256(source.json's real bytes) — one hash of one
+    # file — and that meta.json parses as real JSON, not just that it
+    # exists.
+    if source_path.exists() and sha_path.exists() and meta_path.exists() and not args.refetch:
         raw = source_path.read_bytes()
-        print(hashlib.sha256(raw).hexdigest())
-        return 0
+        actual_sha = hashlib.sha256(raw).hexdigest()
+        recorded_sha = sha_path.read_text(encoding="utf-8").strip()
+        meta_ok = False
+        if recorded_sha == actual_sha:
+            try:
+                json.loads(meta_path.read_text(encoding="utf-8"))
+                meta_ok = True
+            except (OSError, ValueError):
+                meta_ok = False
+        if recorded_sha == actual_sha and meta_ok:
+            clear_fetch_error(vault, "fireflies", meeting_id)
+            print(actual_sha)
+            return 0
+
+    def _fail(cls: str, message: str, status: int | None = None) -> int:
+        print(message, file=sys.stderr)
+        write_fetch_error(vault, "fireflies", meeting_id, cls, status=status, message=message)
+        return 2
 
     api_key = _load_api_key(Path(args.repo_root))
     if not api_key:
-        print("missing FIREFLIES_API_KEY", file=sys.stderr)
-        return 2
+        return _fail("auth", "missing FIREFLIES_API_KEY")
 
     try:
         payload = _post_graphql(api_key, meeting_id)
-    except Exception as exc:
-        print(f"fetch failed: {exc}", file=sys.stderr)
-        return 2
+    except Exception as exc:  # classified below; never re-raised (exit 2 contract)
+        cls, status = classify_exception(exc)
+        return _fail(cls, f"fetch failed: {exc}", status)
 
     errors = payload.get("errors") or []
     if errors:
         msg = errors[0].get("message") if isinstance(errors[0], dict) else str(errors[0])
-        print(msg or "graphql error", file=sys.stderr)
-        return 2
+        return _fail(classify_graphql_message(msg or ""), msg or "graphql error")
     tr = (payload.get("data") or {}).get("transcript") if isinstance(payload.get("data"), dict) else None
     if not isinstance(tr, dict):
-        print("no transcript", file=sys.stderr)
-        return 2
+        return _fail("not_ready", "no transcript")
 
     sentences = tr.get("sentences") or []
     n = len(sentences) if isinstance(sentences, list) else 0
     if (n < 20 or tr.get("duration") is None) and not args.allow_short:
-        print(f"not-ready: sentences={n}", file=sys.stderr)
-        return 2
+        return _fail("not_ready", f"not-ready: sentences={n}")
+
+    clear_fetch_error(vault, "fireflies", meeting_id)
 
     envelope = envelope_from_transcript(tr)
     raw = _canonical_bytes(envelope)

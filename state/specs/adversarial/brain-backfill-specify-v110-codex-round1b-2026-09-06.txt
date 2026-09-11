@@ -1,0 +1,33 @@
+## WRONG LEDGER ROWS
+
+[HIGH] (confidence: 10/10) state/specs/brain-source-to-state-2026-09-04-spec.md:649 — G-104 calls `storage_id` reversible, but the specified sanitize/truncate/hash formula is one-way and its cited evidence proves only that native Slack/GitHub IDs fail `SAFE_MEETING_ID`.
+
+[MEDIUM] (confidence: 10/10) orgs/clearworksai/agents/crm/crm/test_meeting_crm_sync.py:196 — G-118 overstates its CONTROL: the test pins default `source_ref` and idempotency but never asserts the `fireflies-attendee` tag or `(fireflies:<id>)` summary suffix.
+
+## UNRECORDED ASSUMPTIONS
+
+[HIGH] (confidence: 10/10) scripts/brain/run_meeting.py:103 — FR-017 assumes `--meeting-id` can be the encoded storage ID while the fetch adapter receives the native ID, but the current orchestrator has one ID argument and forwards that same sanitized value to fetch at line 129, while the proposed encoding cannot recover the native value.
+
+[HIGH] (confidence: 10/10) scripts/brain/run_meeting.py:556 — FR-015 says `(client, engagement)` pairs come from `validated.json.home`, but home/node data live in `resolution.json`, and the existing status path derives engagement through `resolution.node` plus the node graph.
+
+[HIGH] (confidence: 10/10) scripts/brain/fetch_fireflies.py:218 — “Every adapter non-zero exit writes `_state/<kind>-<storage-id>/fetch-error.json`” is impossible for usage failures such as a missing required ID, because argument parsing exits before either an ID or writable state path exists.
+
+[HIGH] (confidence: 10/10) scripts/brain/resolve_meeting.py:470 — FR-020/FR-021 assume a failed binding match creates a channel/owner organization, but FR-017 preserves the existing rules 1–7 fall-through, whose email-less external rule creates a person; a generic binding-to-org fallback remains unspecified.
+
+[HIGH] (confidence: 10/10) scripts/brain/adapt_meeting.py:18 — FR-017’s literal invariant and “no adapter-specific downstream branch” omit existing runtime Fireflies dependencies here and at line 128, plus unexempted runtime literals in `make_variant.py:201`, `meeting_recap_draft.py:295`, and `meeting_writeback.py:432`, so `test_kind_literals.py` lacks a grounded scan boundary or complete allowlist.
+
+[HIGH] (confidence: 10/10) state/specs/brain-source-to-state-2026-09-04-spec.md:112 — Section 4a makes `duration_s` appear required, while D-16 marks it optional and FR-017’s schema-required list omits it; Slack, Gmail, and GitHub define no duration value.
+
+[MEDIUM] (confidence: 9/10) scripts/brain/tests/test_run_meeting_dry.py:23 — CONTROL omission: applying FR-017’s encoding rule to every invalid native ID would turn this existing traversal-rejection test red unless encoding is explicitly restricted to recognized Slack/GitHub ID formats.
+
+## BUCKET CORRECTIONS
+
+none
+
+## VERIFIED-CORRECT
+
+G-65, G-67, G-71, G-73, G-80, the static Slack-client portion of G-91, and G-105–G-117/G-119 otherwise match the inspected code; the FR-015 batch-progress, `done:false` skip, rollup/status, signer, CRM seam, and seconds-unit corrections are grounded except as noted above.
+
+FR-016, FR-017, and FR-018 are correctly bucketed B; FR-018’s move from C to B is supported by the existing local Omi seam and required resolver work.
+
+D-22’s G-97 citation, FR-021’s G-94 citation, A-12, the section 8 table, and the R4/R5 handoff lines are correctly restated. G-97’s vault cost sample and the live credentials/API facts behind the adapter rows were not re-runnable in this repository-only review.

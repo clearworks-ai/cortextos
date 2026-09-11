@@ -7,6 +7,7 @@ import hashlib
 import json
 import re
 import sys
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -146,8 +147,41 @@ def normalize_quote(text: str) -> str:
     return t
 
 
+def _deaccent(text: str) -> str:
+    """NFKD-fold and drop combining marks so accented letters survive slugging.
+    Without this `Verónica Zárate` slugs to `ver-nica-z-rate` (R4b, 2026-09-11)."""
+    return "".join(c for c in unicodedata.normalize("NFKD", str(text)) if not unicodedata.combining(c))
+
+
 def slugify(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    folded = re.sub(r"[^a-z0-9]+", "-", _deaccent(text).lower()).strip("-")
+    if folded:
+        return folded
+    # All-accent / non-latin input: keep the pre-fold behaviour rather than
+    # returning an empty slug (which would collide across meetings).
+    return re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-")
+
+
+def _norm_entity(text: Any) -> str:
+    return re.sub(r"[^a-z0-9]", "", _deaccent(str(text or "")).lower())
+
+
+def _existing_page_for_org_name(org_name: Any, clients: dict[str, Any], closed: dict[str, Any]) -> tuple[str, str] | None:
+    """(kind, slug) of an EXISTING client/org page the classification names, else None.
+    Exact or prefix match in either direction on normalized names, both sides >= 4
+    chars. Deliberately NOT substring: "OU" would otherwise match genesisgoldgroup."""
+    n = _norm_entity(org_name)
+    if len(n) < 4:
+        return None
+    pages: list[tuple[str, str]] = [("clients", c) for c in clients] + [("orgs", o) for o in closed.get("orgs", {})]
+    for kind, slug in pages:
+        if _norm_entity(slug) == n:
+            return (kind, slug)
+    for kind, slug in pages:
+        pn = _norm_entity(slug)
+        if len(pn) >= 4 and (n.startswith(pn) or pn.startswith(n)):
+            return (kind, slug)
+    return None
 
 
 def registrable_label(domain: str) -> str:
@@ -1087,6 +1121,32 @@ def resolve(
         # OUT OF THE CANDIDATE LIST rule 7 picks `first` from ONLY — this
         # `candidates` list is local to rule 7 and must never replace the
         # shared `externals` list rules 3/5/6/9/10 read above.
+        # F2 (2026-09-11): before minting a person page, if the sanitized
+        # classification names an org that ALREADY has a page, file the
+        # meeting there. Exact or prefix match on both sides, minimum 4
+        # normalized chars, never arbitrary substring — measured: substring
+        # sends "OU" to clients/genesisgoldgroup because "ou" occurs inside
+        # "genesisgold-grou-p". Creates nothing.
+        _cls_name_7 = "" if _is_description_shaped_org_name(cls_org_name) else cls_org_name
+        _cls_page = _existing_page_for_org_name(_cls_name_7, clients, closed)
+        if _cls_page is not None:
+            _kind, _slug = _cls_page
+            if _kind == "clients":
+                _cls_hit = _client_hit(_slug, nodes, clients, rule=7)
+                _cls_hit["also_present"] = []
+                return _cls_hit
+            return {
+                "counterparty_slug": _slug,
+                "kind": "org",
+                "relationship": str(cls.get("relationship") or "client"),
+                "home_path": f"orgs/{_slug}.md",
+                "node": "none",
+                "created": None,
+                "confidence": float(cls.get("confidence") or 0),
+                "rule": 7,
+                "corroborated": False,
+                "also_present": [],
+            }
         candidates = [p for p in externals if not _is_placeholder_participant_name(p.get("name"))]
         if not candidates:
             # Fallback (G0a C-4 / G0b AR-001): every rule-7 candidate was a

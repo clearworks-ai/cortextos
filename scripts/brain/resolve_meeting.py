@@ -162,6 +162,25 @@ def slugify(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-")
 
 
+def _candidate_tier(slug: str, clients: dict[str, Any], closed: dict[str, Any]) -> int:
+    """0 = client-tier, 1 = everything else. Josh 2026-09-11: "with a client the
+    client always wins" — a meeting holding both a client and a vendor belongs to
+    the CLIENT regardless of participant count (Russian Riverkeeper + 4 Upcode
+    attendees is a Russian Riverkeeper meeting). Clearworks + a vendor alone is
+    fine as the vendor."""
+    if slug in clients:
+        return 0
+    page = (closed.get("orgs") or {}).get(slug)
+    if page is not None:
+        try:
+            rel = _relationship_from_text(Path(page).read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            rel = None
+        if rel == "client":
+            return 0
+    return 1
+
+
 def _norm_entity(text: Any) -> str:
     return re.sub(r"[^a-z0-9]", "", _deaccent(str(text or "")).lower())
 
@@ -651,6 +670,7 @@ def resolve(
         return min(
             cands,
             key=lambda s: (
+                _candidate_tier(s, clients, closed),
                 -counts.get(s, 0),
                 -(1 if s in cls_match else 0),
                 -sum(

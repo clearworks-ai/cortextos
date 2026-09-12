@@ -3374,3 +3374,48 @@ def test_r4b_control_juan_202608_bare_single_token_name_rule7_unaffected(tmp_pat
     assert res["rule"] == 7
     assert res["kind"] == "person"
     assert res["home_path"] == "orgs/juan-202608.md"
+
+
+def test_client_beats_vendor_regardless_of_participant_count(tmp_path) -> None:
+    """Josh 2026-09-11: "with a client the client always wins". One client-side
+    attendee versus FOUR vendor-side attendees still belongs to the client.
+    Regression fixture: Russian Riverkeeper + Upcode RE: Salesforce Use
+    (01KWFT9JDNE3), which flipped to the vendor once Upcode got its own page."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_r4_vault(tmp_path)
+    ob = vault / "raw/areas/clearworks/org-brain"
+    # Real topology (01KWFT9JDNE3): BOTH sides are org pages; the client-side one
+    # is an org page carrying `relationship: client`, which is what must win.
+    (ob / "orgs" / "riverkeeper.md").write_text(
+        "# Riverkeeper\n\nkind: org\nrelationship: client\ndomains: riverkeeper.org\n\n## Contacts\n",
+        encoding="utf-8",
+    )
+    (ob / "orgs" / "vendorco.md").write_text(
+        "# VendorCo\n\nkind: org\nrelationship: vendor\ndomains: vendorco.com\n\n## Contacts\n",
+        encoding="utf-8",
+    )
+    src = tmp_path / "cbv"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Riverkeeper + VendorCo RE: Salesforce",
+        org_name="Riverkeeper",
+        domain="riverkeeper.org",
+        relationship="client",
+        confidence=0.7,
+        meeting_type="other",
+        fireflies_id="01CBVCLIENTBEATSVENDOR",
+        participants=[
+            {"name": None, "email": "a@vendorco.com", "side": "theirs", "spoke": True},
+            {"name": None, "email": "b@vendorco.com", "side": "theirs", "spoke": True},
+            {"name": None, "email": "c@vendorco.com", "side": "theirs", "spoke": True},
+            {"name": None, "email": "d@vendorco.com", "side": "theirs", "spoke": True},
+            {"name": None, "email": "e@riverkeeper.org", "side": "theirs", "spoke": True},
+            {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours", "spoke": True},
+        ],
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "orgs/riverkeeper.md", res

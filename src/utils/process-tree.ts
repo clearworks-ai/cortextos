@@ -157,3 +157,106 @@ export function killProcessTree(
   }
   return killed;
 }
+
+/**
+ * A recorded process: identity (`command`) alongside the pid, so a sweep can
+ * tell "the process I meant" from "whatever holds that pid now".
+ */
+export interface ProcessSnapshotEntry {
+  pid: number;
+  ppid: number;
+  command: string;
+}
+
+/**
+ * Snapshot the live process table WITH command lines.
+ * Returns [] on any failure (unsupported platform, ps error).
+ */
+export function readProcessSnapshot(): ProcessSnapshotEntry[] {
+  if (process.platform === 'win32') return [];
+  let out: string;
+  try {
+    out = execSync('ps -axo pid=,ppid=,command=', { encoding: 'utf-8', timeout: 5000 });
+  } catch {
+    return [];
+  }
+  const entries: ProcessSnapshotEntry[] = [];
+  for (const line of out.split('\n')) {
+    const m = line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/);
+    if (m) entries.push({ pid: Number(m[1]), ppid: Number(m[2]), command: m[3] });
+  }
+  return entries;
+}
+
+/**
+ * Record the descendant set of `rootPids` — pids AND their command lines —
+ * WHILE THE ROOTS ARE STILL ALIVE. Roots themselves are not included.
+ *
+ * This exists because of the ordering trap that caused the knox-codex incident
+ * (2026-09-08): once a parent dies, the kernel reparents its children to pid 1,
+ * so `listDescendantPids([deadParent])` returns an EMPTY set — the walk finds
+ * nothing precisely when there is an orphan to find. Take this snapshot before
+ * signalling anything, then hand it to killSnapshotSurvivors() afterwards.
+ */
+export function snapshotDescendants(
+  rootPids: number[],
+  table: ProcessSnapshotEntry[] = readProcessSnapshot(),
+): ProcessSnapshotEntry[] {
+  const byPid = new Map(table.map((e) => [e.pid, e]));
+  const descendantPids = listDescendantPids(
+    rootPids,
+    table.map(({ pid, ppid }) => ({ pid, ppid })),
+  );
+  const out: ProcessSnapshotEntry[] = [];
+  for (const pid of descendantPids) {
+    const entry = byPid.get(pid);
+    if (entry) out.push(entry);
+  }
+  return out;
+}
+
+/**
+ * SIGKILL every entry from a prior snapshotDescendants() that is STILL ALIVE and
+ * STILL THE SAME PROGRAM. Returns the pids actually signalled.
+ *
+ * Safety rails:
+ * - pid-recycling guard: a pid is killed only if its CURRENT command still
+ *   matches what the snapshot recorded. Up to ~21s can pass between snapshot
+ *   and sweep (the graceful-stop window), which is ample time for the OS to
+ *   hand that pid to something else. Liveness alone is not identity.
+ * - pid <= 1 and this process are never signalled.
+ * - ESRCH/EPERM are swallowed; the sweep never throws.
+ */
+export function killSnapshotSurvivors(
+  snapshot: ProcessSnapshotEntry[],
+  opts: {
+    table?: ProcessSnapshotEntry[];
+    killFn?: (pid: number, signal: NodeJS.Signals) => void;
+    log?: (msg: string) => void;
+  } = {},
+): number[] {
+  if (snapshot.length === 0) return [];
+  const killFn = opts.killFn ?? ((pid, signal) => process.kill(pid, signal));
+  const table = opts.table ?? readProcessSnapshot();
+  const current = new Map(table.map((e) => [e.pid, e.command]));
+
+  const killed: number[] = [];
+  for (const entry of snapshot) {
+    const { pid, command } = entry;
+    if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) continue;
+    const nowCommand = current.get(pid);
+    if (nowCommand === undefined) continue;      // exited cleanly — nothing to do
+    if (nowCommand !== command) continue;        // pid recycled — NOT ours to kill
+    try {
+      killFn(pid, 'SIGKILL');
+      killed.push(pid);
+    } catch { /* ESRCH: died between check and kill; EPERM: not ours */ }
+  }
+
+  if (killed.length > 0 && opts.log) {
+    opts.log(
+      `killSnapshotSurvivors: SIGKILLed ${killed.length} orphaned descendant(s): ${killed.join(', ')}`,
+    );
+  }
+  return killed;
+}

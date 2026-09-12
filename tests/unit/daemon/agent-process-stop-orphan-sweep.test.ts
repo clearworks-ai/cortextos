@@ -34,9 +34,19 @@ const snapshotDescendants = vi.fn((_roots: number[]) => {
   calls.push('snapshot');
   return [{ pid: 4242, ppid: 4241, command: 'codex app-server (inner)' }];
 });
+// Task 2.6: killSnapshotSurvivors' contract upgraded from a bare `number[]`
+// ("signal sent") to a structured result distinguishing confirmed-absent
+// from unresolved. This mock reports the swept pid as confirmed-absent —
+// these tests only assert call order/wiring, not the retirement result.
 const killSnapshotSurvivors = vi.fn(() => {
   calls.push('sweep');
-  return [4242];
+  return {
+    signalled: [4242],
+    confirmedAbsent: [{ pid: 4242, ppid: 4241, command: 'codex app-server (inner)' }],
+    unresolved: [],
+    alreadyGone: [],
+    recycled: [],
+  };
 });
 
 vi.mock('../../../src/utils/process-tree.js', async (importOriginal) => {
@@ -44,7 +54,7 @@ vi.mock('../../../src/utils/process-tree.js', async (importOriginal) => {
   return {
     ...actual,
     snapshotDescendants: (...args: Parameters<typeof snapshotDescendants>) => snapshotDescendants(...args),
-    killSnapshotSurvivors: (...args: unknown[]) => (killSnapshotSurvivors as (...a: unknown[]) => number[])(...args),
+    killSnapshotSurvivors: (...args: unknown[]) => (killSnapshotSurvivors as (...a: unknown[]) => ReturnType<typeof killSnapshotSurvivors>)(...args),
   };
 });
 

@@ -17,6 +17,7 @@ import { loadBuffer } from './conversation-buffer.js';
 import { ensureMissionAnchorFromBuffer } from './restart-context.js';
 import { readEnabledAgentsMap } from '../bus/enabled-agents-io.js';
 import { snapshotDescendants, killSnapshotSurvivors } from '../utils/process-tree.js';
+import type { ProcessSnapshotEntry, UnresolvedSurvivor } from '../utils/process-tree.js';
 import { randomUUID } from 'crypto';
 import {
   importFreshRequest,
@@ -42,6 +43,55 @@ import type { ExitObservation, RecoveryBudgetEntry } from './lifecycle/recovery-
 export interface LifecycleRequestOwner {
   request(req: LifecycleRequest): Promise<RequestReceipt>;
 }
+
+/**
+ * Task 2.6: structured outcome of `runStop()`'s teardown — what
+ * `AgentProcess` itself (which has no concept of `GenerationToken`/
+ * `OwnedResource` ownership) can honestly report about the OS-level process
+ * identities it tried to retire. `src/daemon/lifecycle/agent-runtime.ts`'s
+ * `AgentProcessRuntimeAdapter.retireGeneration()` is what translates this
+ * into the owner-facing `RetirementResult` (Task 1.1's `types.ts`), tagging
+ * each identity with the real `GenerationToken` it already tracks.
+ *
+ * `attempted: false` means NOTHING was checked this call (there was no live
+ * PTY handle at entry) — this must never be read as "clean". The two
+ * concrete cases: (1) a second concurrent `stop()` joins an already-running
+ * teardown via `stopInFlight` and gets that ORIGINAL call's real report,
+ * never a fresh empty one (so `attempted: false` should not actually surface
+ * on that path); (2) `runStop()` ran with no PTY to inspect — e.g. called on
+ * an already-stopped process — in which case there was genuinely nothing to
+ * verify, and the caller must not silently assume everything it thought it
+ * owned is gone.
+ */
+export interface ProcessTeardownReport {
+  attempted: boolean;
+  /** The OS pid of the runtime child this call tried to confirm dead, or
+   * null when there was none to check (no real pid on the PTY, or
+   * `attempted` is false). */
+  runtimePid: number | null;
+  /** True only when this call positively verified the runtime pid is gone,
+   * or there was never a real pid to check. False means it survived the
+   * graceful+SIGKILL escalation (including the EPERM-as-alive case — see
+   * `isChildAlive()`), or `attempted` was false — either way, never treat
+   * this as proof of a clean stop. */
+  runtimeConfirmedAbsent: boolean;
+  /** Descendants (grandchildren etc.) confirmed absent or already gone
+   * before this call touched them — safe to report as released. */
+  descendantsConfirmedAbsent: ProcessSnapshotEntry[];
+  /** Descendants whose fate this call could not positively confirm —
+   * signalled but still present, a kill that failed with something other
+   * than ESRCH, or an unreliable verification read. Never promoted to
+   * confirmed-absent by a caller. */
+  descendantsUnresolved: UnresolvedSurvivor[];
+}
+
+const UNVERIFIED_TEARDOWN_REPORT: ProcessTeardownReport = {
+  attempted: false,
+  runtimePid: null,
+  runtimeConfirmedAbsent: false,
+  descendantsConfirmedAbsent: [],
+  descendantsUnresolved: [],
+};
 
 type LogFn = (msg: string) => void;
 
@@ -172,7 +222,7 @@ export class AgentProcess {
   // manager's eviction path (`await stale.process.stop()`), which must block
   // until the real, death-confirmed teardown completes rather than racing a
   // fresh spawn against a still-alive predecessor (the duplicate-PTY defect).
-  private stopInFlight: Promise<void> | null = null;
+  private stopInFlight: Promise<ProcessTeardownReport> | null = null;
   // BUG-040 fix: persists across stop() return until handleExit clears it.
   // Required because BUG-032's CRLF + 5s wait can cause graceful shutdown to
   // exceed the 5s Promise.race timeout in stop(), which would otherwise reset
@@ -503,21 +553,28 @@ export class AgentProcess {
    * (`await stale.process.stop()`), which WANTS to block until the predecessor
    * is truly dead before spawning fresh — the previous no-op let it return
    * immediately and spawn a second live PTY alongside the still-alive first one.
+   *
+   * Task 2.6: return type upgraded `void` -> `ProcessTeardownReport`. A
+   * joining re-entrant call returns the ORIGINAL call's real report (never a
+   * fresh/fabricated one) — see `ProcessTeardownReport`'s doc comment.
    */
-  async stop(): Promise<void> {
+  async stop(): Promise<ProcessTeardownReport> {
     if (this.stopping) {
-      if (this.stopInFlight) await this.stopInFlight;
-      return;
+      if (this.stopInFlight) return this.stopInFlight;
+      // `stopping` and `stopInFlight` are always set together by the branch
+      // below — this should be unreachable, but never fabricate a clean
+      // result if it somehow is.
+      return UNVERIFIED_TEARDOWN_REPORT;
     }
     this.stopInFlight = this.runStop();
     try {
-      await this.stopInFlight;
+      return await this.stopInFlight;
     } finally {
       this.stopInFlight = null;
     }
   }
 
-  private async runStop(): Promise<void> {
+  private async runStop(): Promise<ProcessTeardownReport> {
     this.stopping = true;
     // BUG-040 fix: stopRequested persists ACROSS stop()'s return until
     // handleExit clears it. This is the safety net for the case where the
@@ -534,7 +591,24 @@ export class AgentProcess {
     // pty.kill() to guarantee the exit handler has run before stopping=false.
     const exitPromise = this.exitPromise;
 
-    if (pty) {
+    // Task 2.6: no live PTY handle at entry means nothing can be checked THIS
+    // call — e.g. a sequential stop() on an already-stopped process. Report
+    // it honestly (`attempted: false`) rather than silently claiming a clean
+    // teardown for identities this call never actually looked at.
+    if (!pty) {
+      this.stopping = false;
+      this.status = 'stopped';
+      this.notifyStatusChange();
+      this.log('Stopped');
+      return UNVERIFIED_TEARDOWN_REPORT;
+    }
+
+    let runtimePid: number | null = null;
+    let runtimeConfirmedAbsent = true; // vacuously true unless proven otherwise below
+    let descendantsConfirmedAbsent: ProcessSnapshotEntry[] = [];
+    let descendantsUnresolved: UnresolvedSurvivor[] = [];
+
+    {
       try {
         if (this.config.runtime === 'hermes') {
           // Hermes REPL exit: Ctrl+D is the clean exit signal.
@@ -577,6 +651,7 @@ export class AgentProcess {
       // pty.kill(). node-pty's kill() can invalidate the handle, so getPid()
       // is unreliable afterward — we need the pid to confirm death below.
       const childPid = pty.getPid();
+      runtimePid = childPid ?? null;
 
       // knox-codex 2026-09-08: record this child's descendants WHILE IT IS STILL
       // ALIVE. The runtime spawns its own inner child beneath the PTY child
@@ -636,6 +711,11 @@ export class AgentProcess {
         }
         if (isChildAlive(childPid)) {
           this.log(`WARNING: pid ${childPid} still alive 5s after SIGKILL — proceeding anyway`);
+          // Task 2.6: survived the graceful window AND the SIGKILL escalation
+          // (including the EPERM-as-alive case inside isChildAlive()) — this
+          // is exactly the ambiguity the acceptance criteria forbid reporting
+          // as a clean stop.
+          runtimeConfirmedAbsent = false;
         }
       }
 
@@ -647,7 +727,13 @@ export class AgentProcess {
       // killSnapshotSurvivors() re-checks liveness AND command identity, so a
       // pid recycled during the graceful window is never signalled.
       if (descendantsBeforeStop.length > 0) {
-        killSnapshotSurvivors(descendantsBeforeStop, { log: (msg) => this.log(msg) });
+        const sweep = killSnapshotSurvivors(descendantsBeforeStop, { log: (msg) => this.log(msg) });
+        // Task 2.6: "already gone before this call" is clean, not an orphan —
+        // folded into confirmed-absent alongside pids this call itself
+        // signalled and then verified gone. `recycled` entries are explicitly
+        // NOT ours (per the comment above) and are dropped, not reported.
+        descendantsConfirmedAbsent = [...sweep.confirmedAbsent, ...sweep.alreadyGone];
+        descendantsUnresolved = sweep.unresolved;
       }
     }
 
@@ -658,6 +744,14 @@ export class AgentProcess {
     this.status = 'stopped';
     this.notifyStatusChange();
     this.log('Stopped');
+
+    return {
+      attempted: true,
+      runtimePid,
+      runtimeConfirmedAbsent,
+      descendantsConfirmedAbsent,
+      descendantsUnresolved,
+    };
   }
 
   /**
@@ -667,11 +761,13 @@ export class AgentProcess {
    *
    * ONLY `src/daemon/lifecycle/agent-runtime.ts`'s `AgentProcessRuntimeAdapter`
    * may call this. `runStop()`'s teardown sequence (graceful shutdown,
-   * descendant snapshot/sweep) is unchanged by this task — Task 2.6 is what
-   * upgrades it to return a structured `RetirementResult` instead of `void`.
+   * descendant snapshot/sweep) is unchanged by Task 2.6 — that task upgraded
+   * only what this returns, to the structured `ProcessTeardownReport` the
+   * adapter's `retireGeneration()` translates into the owner-facing
+   * `RetirementResult` (Task 1.1's `types.ts`).
    * Do not add any other production caller.
    */
-  async runStopFenced(): Promise<void> {
+  async runStopFenced(): Promise<ProcessTeardownReport> {
     return this.runStop();
   }
 

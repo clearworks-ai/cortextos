@@ -5,6 +5,7 @@ import type { AgentConfig, CtxEnv } from '../../types/index.js';
 import type { RuntimeAdapter } from './supervisor.js';
 import type { LifecycleStateStore } from './state-store.js';
 import { getProcessBirthEvidence } from './state-store.js';
+import type { ProcessSnapshotEntry } from '../../utils/process-tree.js';
 import type {
   DispatchResult,
   EffectToken,
@@ -92,16 +93,66 @@ export class AgentProcessRuntimeAdapter implements RuntimeAdapter {
   }
 
   /**
-   * Step 2 wiring: reachable only through this adapter. Task 2.6 upgrades
-   * this to interpret `runStop()`'s actual descendant-sweep outcome into a
-   * real `'blocked'`/`unresolved` result — this task only makes the teardown
-   * reachable and returns the resources it was handed as `'retired'`, since
-   * `runStop()` itself still returns `void` and gives no structured signal
-   * yet to distinguish "confirmed gone" from "signalled, unconfirmed".
+   * Task 2.6: interprets `runStop()`'s (via `runStopFenced()`) real
+   * `ProcessTeardownReport` — verified process-identity absence, never
+   * "signal sent" or "timeout elapsed" — into the owner-facing
+   * `RetirementResult`.
+   *
+   * `runtime` and `descendant` are the only resource kinds this call can
+   * actually verify (they are the only ones `ProcessTeardownReport` reports
+   * on): `runtime` is released only when the report confirms the PTY child
+   * pid is gone (or there was never a real pid to check); `descendant`'s
+   * single `'reserved'` placeholder from `buildAcquiredBundle()` is dropped
+   * and replaced with one real resource per pid the sweep actually found
+   * (released for confirmed-absent/already-gone, `state: 'unknown'` for
+   * anything the sweep could not positively confirm — EPERM, still present
+   * after SIGKILL, or an unreliable verification read all land here, never
+   * silently promoted to released). Every other kind (`pty-host`, `session`,
+   * `socket`, `checker`, `poller`, `scheduler`, `dispatch`, `handoff-lease`)
+   * is passed through as released unchanged — this task adds no
+   * verification mechanism for them; that is out of scope here.
+   *
+   * `attempted: false` (no live PTY handle at `runStop()` entry, so nothing
+   * could be checked this call) is treated the same as "still present" for
+   * any `runtime`/`descendant` resource this bundle claims to own — an
+   * uncertain "nothing to check" is never silently promoted to "confirmed
+   * gone" just because the caller happened to have no evidence either way.
    */
-  async retireGeneration(_token: GenerationToken, resources: OwnedResource[]): Promise<RetirementResult> {
-    await this.process.runStopFenced();
-    return { status: 'retired', released: resources };
+  async retireGeneration(token: GenerationToken, resources: OwnedResource[]): Promise<RetirementResult> {
+    const report = await this.process.runStopFenced();
+
+    const released: OwnedResource[] = [];
+    const unresolved: OwnedResource[] = [];
+
+    for (const resource of resources) {
+      if (resource.kind === 'descendant') continue; // replaced below by real per-pid entries
+      if (resource.kind === 'runtime') {
+        if (report.attempted && report.runtimeConfirmedAbsent) {
+          released.push({ ...resource, state: 'released' });
+        } else {
+          unresolved.push({ ...resource, state: 'unknown' });
+        }
+        continue;
+      }
+      released.push({ ...resource, state: 'released' });
+    }
+
+    for (const entry of report.descendantsConfirmedAbsent) {
+      released.push(descendantResource(token, entry, 'released'));
+    }
+    for (const { entry, reason } of report.descendantsUnresolved) {
+      unresolved.push(descendantResource(token, entry, 'unknown', reason));
+    }
+
+    if (unresolved.length === 0) {
+      return { status: 'retired', released };
+    }
+    return {
+      status: 'blocked',
+      released,
+      unresolved,
+      reason: `retirement could not verify absence of ${unresolved.length} process identit${unresolved.length === 1 ? 'y' : 'ies'}`,
+    };
   }
 
   /**
@@ -293,4 +344,30 @@ function mintReservedBundle(owner: GenerationToken): OwnedResource[] {
     processBirth: null,
     location: null,
   }));
+}
+
+/**
+ * Task 2.6: one real `descendant` `OwnedResource` per pid the retirement
+ * sweep actually found, replacing `buildAcquiredBundle()`'s single
+ * `'reserved'` placeholder (which is never populated at acquisition time —
+ * per that method's own doc comment, real descendants are only discovered
+ * during retirement). `resourceId` is keyed by pid (not just kind/generation,
+ * unlike every other resource kind) since a generation can own more than one
+ * descendant.
+ */
+function descendantResource(
+  owner: GenerationToken,
+  entry: ProcessSnapshotEntry,
+  state: 'released' | 'unknown',
+  reason?: string,
+): OwnedResource {
+  return {
+    resourceId: `${resourceId(owner, 'descendant')}#${entry.pid}`,
+    owner,
+    kind: 'descendant',
+    state,
+    pid: entry.pid,
+    processBirth: null,
+    location: reason ? `${entry.command} (${reason})` : entry.command,
+  };
 }

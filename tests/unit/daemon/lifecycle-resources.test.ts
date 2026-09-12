@@ -360,7 +360,7 @@ describe('AgentProcessRuntimeAdapter.startGeneration — captured resource bundl
 });
 
 describe('AgentProcessRuntimeAdapter.retireGeneration — reachable teardown', () => {
-  it('invokes the real runStop() teardown and returns the resources as retired', async () => {
+  it('invokes the real runStop() teardown and returns the resources as retired, verified absent', async () => {
     const { adapter } = buildAdapter();
     const effect = makeEffect({ generation: 1 });
     const started = await adapter.startGeneration(effect, 'fresh');
@@ -374,7 +374,18 @@ describe('AgentProcessRuntimeAdapter.retireGeneration — reachable teardown', (
 
     expect(retireResult.status).toBe('retired');
     if (retireResult.status === 'retired') {
-      expect(retireResult.released).toEqual(started.resources);
+      // Task 2.6: every resource this call can actually account for comes
+      // back `state: 'released'` (never carrying forward its stale
+      // 'reserved'/'acquired' state). The `descendant` placeholder is
+      // dropped rather than trivially released — the mocked PTY's pid
+      // (31001) has no real descendants in this process's real `ps` table,
+      // so the sweep genuinely finds nothing to report, and this task's
+      // contract never fabricates a released resource it did not verify.
+      expect(retireResult.released).toEqual(
+        started.resources
+          .filter((r) => r.kind !== 'descendant')
+          .map((r) => ({ ...r, state: 'released' })),
+      );
     }
     expect(mockPty.kill).toHaveBeenCalled();
   });

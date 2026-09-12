@@ -249,13 +249,24 @@ def _relationship_from_text(text: str) -> str | None:
 
 
 def _org_name_from_text(text: str) -> str | None:
-    """Parse a '- CRM org name: X' (or bare 'CRM org name: X') line from a client/org page."""
+    """First '- CRM org name: X' line. Kept for callers wanting a single value."""
+    names = _org_names_from_text(text)
+    return names[0] if names else None
+
+
+def _org_names_from_text(text: str) -> list[str]:
+    """ALL '- CRM org name: X' lines on a page. A page legitimately carries several
+    spellings the classifier emits ("Logic", "Logic TCG", "Logic Technology
+    Consulting Group"); reading only the first silently dropped the rest
+    (codex NEW-3, 2026-09-08)."""
+    out: list[str] = []
     for line in text.splitlines():
         m = re.match(r"^\s*-?\s*CRM org name\s*:\s*(.+)$", line, re.I)
         if m:
             val = m.group(1).strip()
-            return val or None
-    return None
+            if val and val not in out:
+                out.append(val)
+    return out
 
 
 def _community_org_slug(org_name: str) -> str:
@@ -299,9 +310,21 @@ def load_closed_sets(vault: Path) -> dict[str, Any]:
             for dom in _domains_from_text(text):
                 domain_to_slug[registrable_label(dom)] = path.stem
                 domain_to_slug[dom] = path.stem
-            oname = _org_name_from_text(text)
-            if oname:
-                org_name_to_slug[_norm_title(oname)] = path.stem
+            for oname in _org_names_from_text(text):
+                key = _norm_title(oname)
+                prior = org_name_to_slug.get(key)
+                if prior is not None and prior != path.stem:
+                    # Fail closed on a duplicate CRM org name across pages rather
+                    # than letting directory order decide (codex NEW-3).
+                    print(
+                        f"warn: CRM org name {oname!r} claimed by both {prior!r} and {path.stem!r}; ignoring both",
+                        file=sys.stderr,
+                    )
+                    org_name_to_slug[key] = ""
+                    continue
+                if prior == "":
+                    continue
+                org_name_to_slug[key] = path.stem
     proj = brain / "projects"
     if proj.is_dir():
         for path in proj.glob("*.md"):

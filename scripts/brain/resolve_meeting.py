@@ -1207,8 +1207,19 @@ def resolve(
         # normalized chars, never arbitrary substring — measured: substring
         # sends "OU" to clients/genesisgoldgroup because "ou" occurs inside
         # "genesisgold-grou-p". Creates nothing.
-        _cls_name_7 = "" if _is_description_shaped_org_name(cls_org_name) else cls_org_name
-        _cls_page = _existing_page_for_org_name(_cls_name_7, clients, closed)
+        # A description-shaped org_name is normally treated as absent, but if a
+        # human has EXPLICITLY declared that exact string as a '- CRM org name:'
+        # on a page, that declaration wins: the guard exists to stop a
+        # description CREATING a page, not to stop it MATCHING a declared alias
+        # ("Ben Botti's company (SaaS & network management platform vendor)"
+        # is declared on the Auvik page by Josh's adjudication).
+        _declared = closed["org_name_to_slug"].get(_norm_title(cls_org_name))
+        if _declared:
+            _dk = "clients" if _declared in clients else ("orgs" if _declared in closed["orgs"] else None)
+            _cls_page = (_dk, _declared) if _dk else None
+        else:
+            _cls_name_7 = "" if _is_description_shaped_org_name(cls_org_name) else cls_org_name
+            _cls_page = _existing_page_for_org_name(_cls_name_7, clients, closed)
         if _cls_page is not None:
             _kind, _slug = _cls_page
             if _kind == "clients":

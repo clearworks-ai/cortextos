@@ -12,9 +12,12 @@ import type {
   RequestReceipt,
   RetirementResult,
   StartMode,
+  WorkRecord,
 } from './types.js';
 import { CAUSE_SEVERITY } from './types.js';
 import type { LifecycleStateStore, CommitResult } from './state-store.js';
+import { SCHEMA_VERSION as LIFECYCLE_SCHEMA_VERSION } from './state-store.js';
+import { accept as ledgerAccept, archiveTerminal as ledgerArchiveTerminal, outstandingWork as ledgerOutstandingWork } from './work-ledger.js';
 
 /**
  * Task 1.5: Supervisor transition core.
@@ -76,6 +79,36 @@ function allOf(entries: PendingEntry[]): string[] {
 
 function otherIds(entries: PendingEntry[], self: string): string[] {
   return entries.filter((e) => e.req.requestId !== self).map((e) => e.req.requestId);
+}
+
+/**
+ * Task 3.2: bounds how many TERMINAL (`completed`/`failed`/`cancelled`)
+ * `WorkRecord`s a snapshot retains (`work-ledger.ts`'s `archiveTerminal`
+ * always keeps every non-terminal and `needs-review` record regardless of
+ * this count -- archival never expires unresolved work). 500 is a
+ * documented, arbitrary-but-reasonable default; not derived from any
+ * measured workload.
+ */
+const MAX_RETAINED_TERMINAL_WORK_RECORDS = 500;
+
+/**
+ * Task 3.2 Step 4: internal signal thrown from inside `acceptBatch`'s
+ * `commitWithRetry` mutate callback to abort the WHOLE in-progress batch
+ * when one input conflicts (same `sourceKey`, different `payloadDigest`) --
+ * mirroring Task 3.1's "same sourceKey with a different payloadDigest is a
+ * conflict, never silently overwritten" rule at the batch layer. Caught
+ * immediately around the `commitWithRetry` call in `acceptBatch` and never
+ * allowed to escape it.
+ */
+class AcceptBatchConflictError extends Error {
+  constructor(
+    public readonly sourceKey: string,
+    public readonly existingWorkId: string,
+  ) {
+    super(
+      `acceptBatch: sourceKey '${sourceKey}' was already accepted with a different payloadDigest (existing workId ${existingWorkId})`,
+    );
+  }
 }
 
 export class AgentLifecycleSupervisor {
@@ -185,7 +218,7 @@ export class AgentLifecycleSupervisor {
     if ('corrupt' in loaded) {
       return {
         agentId: this.agentId,
-        schemaVersion: 1,
+        schemaVersion: LIFECYCLE_SCHEMA_VERSION,
         revision: 0,
         supervisorEpoch: 0,
         desiredState: 'stopped',
@@ -211,6 +244,135 @@ export class AgentLifecycleSupervisor {
     const rec = this.operations.get(operationId);
     if (!rec) return null;
     return { ...rec, coalescedWith: [...rec.coalescedWith] };
+  }
+
+  /**
+   * Task 3.2: the wiring layer between Task 3.1's pure `work-ledger.ts`
+   * transitions and the real durable store. This is the direct mechanical
+   * requirement behind Scenario A's closure (PRD.md S2.5): `acceptBatch`
+   * persists every input's payload AND its `WorkRecord` durably before it
+   * ever resolves -- Task 3.3's rewired `FastChecker.pollCycle()` calls this
+   * at the exact seam BEFORE it splices the peeked Telegram/Slack prefix or
+   * calls `ackInbox()`, so a bus/inbox ack only ever happens after this
+   * method has already returned `ok: true`.
+   *
+   * Durability ordering (Step 3/4): every input's payload is written to its
+   * own immutable ref FIRST, synchronously, before the single snapshot
+   * `commit()` below -- if ANY one payload write fails, the whole batch
+   * aborts here and nothing is committed (no 2-of-3 partial acceptance). A
+   * batch-level conflict (same `sourceKey`, different `payloadDigest` than
+   * an already-accepted record) aborts the whole batch the same way, via
+   * `AcceptBatchConflictError` thrown from inside the mutate callback and
+   * caught immediately below -- never a partially-applied batch.
+   *
+   * Reuses `commitWithRetry` (not a bare `store.commit()` call) for the same
+   * reason every other mutation path in this class does: a `STALE_REVISION`
+   * race against this supervisor's OWN other in-flight commits (e.g. a
+   * concurrent stop/start decided by the mailbox) is a transient,
+   * same-process retry case, not a business-logic conflict -- the mutate
+   * callback recomputes the whole batch from the freshly reloaded draft on
+   * each attempt, so a retry is still exactly one atomic snapshot
+   * transition, never two partial ones layered on top of each other.
+   */
+  async acceptBatch(
+    inputs: Array<{ sourceKey: string; payload: string; payloadDigest: string }>,
+  ): Promise<{ ok: true; workIds: string[]; batchId: string } | { ok: false; reason: string }> {
+    const batchId = `batch-${randomUUID()}`;
+
+    if (inputs.length === 0) {
+      return { ok: true, workIds: [], batchId };
+    }
+
+    // Step 3: every payload written durably BEFORE the snapshot commit that
+    // will reference it. Abort the whole batch on the first failure.
+    const prepared: Array<{ sourceKey: string; payloadDigest: string; payloadRef: string; workId: string }> = [];
+    for (const input of inputs) {
+      const workId = `work-${randomUUID()}`;
+      const written = this.store.writeWorkPayload(workId, input.payload);
+      if (!written.ok) {
+        return {
+          ok: false,
+          reason: `payload write failed for sourceKey '${input.sourceKey}': ${written.reason}`,
+        };
+      }
+      prepared.push({ sourceKey: input.sourceKey, payloadDigest: input.payloadDigest, payloadRef: written.ref, workId });
+    }
+
+    const nowMs = this.clock();
+    const resultWorkIds: string[] = [];
+
+    let result: CommitResult;
+    try {
+      result = this.commitWithRetry((draft) => {
+        // A retried attempt (STALE_REVISION) re-runs this whole callback
+        // against a freshly reloaded draft -- reset the accumulator so a
+        // retry never double-counts a prior attempt's workIds.
+        resultWorkIds.length = 0;
+
+        const owner: GenerationToken = {
+          agentId: this.agentId,
+          supervisorEpoch: draft.supervisorEpoch,
+          // Work can be accepted before any generation is running yet; 0 is
+          // a sentinel meaning "no live generation at acceptance time" --
+          // real generations start at 1 (state-store.ts's
+          // buildInitialSnapshot initializes nextGeneration to 1), mirroring
+          // that same file's `supervisorEpoch: 0` "not yet established"
+          // sentinel convention.
+          generation: draft.currentGeneration ?? 0,
+        };
+
+        let runningSnapshot: LifecycleSnapshot = draft;
+        for (const item of prepared) {
+          const outcome = ledgerAccept(
+            runningSnapshot,
+            { sourceKey: item.sourceKey, payloadDigest: item.payloadDigest, payloadRef: item.payloadRef, batchId },
+            owner,
+            item.workId,
+            nowMs,
+          );
+          if ('conflict' in outcome) {
+            throw new AcceptBatchConflictError(item.sourceKey, outcome.existing.workId);
+          }
+          // A duplicate resubmission (existing record, same payloadDigest)
+          // still contributes its EXISTING workId to the batch's receipt --
+          // a duplicate is a receipt for existing work, not an exclusion.
+          runningSnapshot = outcome.snapshot;
+          resultWorkIds.push(outcome.record.workId);
+        }
+
+        // Step 6: bound terminal history on every accept-batch commit too;
+        // future tasks (3.3-3.8) are what actually populate terminal
+        // phases, but the archival call belongs here from the start.
+        draft.outstandingWork = ledgerArchiveTerminal(runningSnapshot, MAX_RETAINED_TERMINAL_WORK_RECORDS);
+      });
+    } catch (err) {
+      if (err instanceof AcceptBatchConflictError) {
+        return { ok: false, reason: err.message };
+      }
+      throw err;
+    }
+
+    if (!result.ok) {
+      // Step 8 (mirrored here for work acceptance): fail closed. The caller
+      // (Task 3.3's pollCycle) must not ACK the bus/telegram/inbox source.
+      return { ok: false, reason: `${result.code}: ${result.message}` };
+    }
+
+    return { ok: true, workIds: resultWorkIds, batchId };
+  }
+
+  /**
+   * Task 3.2 Step 5: work that is not yet resolved (see
+   * `work-ledger.ts`'s `outstandingWork` doc comment -- `needs-review`
+   * counts as outstanding). Deliberately built on top of the public
+   * `snapshot()` getter rather than a raw `store.load()` so a corrupt/
+   * not-yet-adopted store is surfaced the exact same way `snapshot()`
+   * already surfaces it elsewhere (a non-persisted placeholder with
+   * `blockedReason` set, `outstandingWork: []`) -- never silently hiding
+   * unresolved work behind a bare empty array with no visible signal.
+   */
+  outstandingWork(): WorkRecord[] {
+    return ledgerOutstandingWork(this.snapshot());
   }
 
   // --- Mailbox plumbing ----------------------------------------------------

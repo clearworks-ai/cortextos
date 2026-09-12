@@ -31,9 +31,31 @@ import { atomicWriteDurableSync } from '../../utils/atomic.js';
  * Corruption, persist failure, or an agent-identity mismatch on `load()`
  * NEVER trigger a silent repair or a `.bak` restore -- the caller (Task
  * 1.5's supervisor) is expected to surface these as a blocked owner.
+ *
+ * SCHEMA UPGRADE PATH (Task 3.2 Step 2): schemaVersion 1 (Phase 1: ownership
+ * only, `outstandingWork` always empty because nothing populated it yet) ->
+ * schemaVersion 2 (Phase 3: `outstandingWork` populated by
+ * `AgentLifecycleSupervisor.acceptBatch`). `load()` upgrades a structurally
+ * valid schemaVersion-1 record in place -- normalizing a missing/absent
+ * `outstandingWork` to `[]` before the standard shape check runs -- rather
+ * than rejecting it as corrupt. This is a one-way, no-op-on-Phase-1-data
+ * upgrade (Phase 1 never wrote any work records, so there is nothing to
+ * migrate besides the version tag itself); it does NOT apply to a genuinely
+ * CORRUPT record (unreadable JSON, invalid shape once normalized, etc.),
+ * which still fails closed exactly as before. The upgraded shape is only
+ * held in memory until the next successful `commit()`, which persists
+ * `schemaVersion: SCHEMA_VERSION` (2) as part of its normal deep-cloned
+ * write -- there is no separate migration write.
  */
 
-const SCHEMA_VERSION = 1;
+/** The pre-Phase-3 schema version: ownership state only, `outstandingWork`
+ * always empty. Records at this version are upgraded in place by `load()`
+ * (see the SCHEMA UPGRADE PATH note above), never rejected as corrupt. */
+const PHASE_1_SCHEMA_VERSION = 1;
+
+/** Current schema version (Task 3.2): `outstandingWork` is populated by
+ * `AgentLifecycleSupervisor.acceptBatch`. */
+export const SCHEMA_VERSION = 2;
 
 export interface StoreCommitExpectation {
   supervisorEpoch: number;
@@ -100,6 +122,34 @@ function buildInitialSnapshot(
   };
 }
 
+/**
+ * Task 3.2 Step 3: durably persist one work item's payload to its own
+ * immutable ref, BEFORE any snapshot commit references it. Written via
+ * `atomicWriteDurableSync` (Task 1.3) so the write itself is crash-durable.
+ * Returns `{ ok: false, reason }` on any thrown error (disk full,
+ * permission, etc.) instead of throwing -- callers (`acceptBatch`) must be
+ * able to abort a whole batch cleanly on a payload-write failure without a
+ * partial commit ever being attempted.
+ *
+ * A crash between this write and the snapshot commit that would reference
+ * it leaves an orphaned payload file under `<stateDir>/lifecycle/payloads/`
+ * -- harmless, cleaned up later by a separate process; this module never
+ * reads that directory back to reconcile it.
+ */
+export function writePayloadDurably(
+  stateDir: string,
+  workId: string,
+  payload: string,
+): { ok: true; ref: string } | { ok: false; reason: string } {
+  const ref = join(stateDir, 'lifecycle', 'payloads', `${workId}.json`);
+  try {
+    atomicWriteDurableSync(ref, payload);
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+  return { ok: true, ref };
+}
+
 export class LifecycleStateStore {
   constructor(
     private readonly paths: BusPaths,
@@ -112,6 +162,13 @@ export class LifecycleStateStore {
 
   private recordPath(): string {
     return join(this.lockRoot(), 'supervisor.json');
+  }
+
+  /** Task 3.2 Step 3: thin instance-scoped wrapper over `writePayloadDurably`
+   * so callers (`AgentLifecycleSupervisor.acceptBatch`) never need to know
+   * this store's `stateDir` directly. */
+  writeWorkPayload(workId: string, payload: string): { ok: true; ref: string } | { ok: false; reason: string } {
+    return writePayloadDurably(this.paths.stateDir, workId, payload);
   }
 
   /**
@@ -151,10 +208,19 @@ export class LifecycleStateStore {
     const candidate = parsed as Record<string, unknown>;
 
     if (candidate.schemaVersion !== SCHEMA_VERSION) {
-      return {
-        corrupt: true,
-        reason: `schema-version-mismatch: expected ${SCHEMA_VERSION}, found ${String(candidate.schemaVersion)}`,
-      };
+      if (candidate.schemaVersion !== PHASE_1_SCHEMA_VERSION) {
+        return {
+          corrupt: true,
+          reason: `schema-version-mismatch: expected ${SCHEMA_VERSION} (or upgradable ${PHASE_1_SCHEMA_VERSION}), found ${String(candidate.schemaVersion)}`,
+        };
+      }
+      // Upgrade path: a Phase-1-shaped record. Normalize BEFORE the shape
+      // check below runs, so a hand-constructed fixture with `outstandingWork`
+      // missing entirely (not just `[]`) upgrades cleanly too.
+      candidate.schemaVersion = SCHEMA_VERSION;
+      if (!Array.isArray(candidate.outstandingWork)) {
+        candidate.outstandingWork = [];
+      }
     }
 
     if (!isValidSnapshotShape(candidate)) {

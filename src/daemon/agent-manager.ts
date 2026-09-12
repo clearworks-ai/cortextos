@@ -2337,6 +2337,24 @@ export class AgentManager {
   }
 
   /**
+   * Task 2.7: the current lifecycle owner for a named agent, IF that agent
+   * is actually on the supervised cutover path -- returns `undefined` for an
+   * unknown agent name AND for a known-but-not-`supervised` agent, even
+   * though a `supervisor` object exists for every agent per Task 2.5's
+   * lazy-adoption-on-first-touch design (a durable record exists ahead of
+   * cutover, but nothing routes through it, so its snapshot would show a
+   * default/inert `desiredState` that is NOT a truthful "current owner"
+   * answer for an unsupervised agent). Wired into `PtyHostReaper`'s Tier 3
+   * sweep (`daemon/index.ts`) so a resolvable owner gets real candidate
+   * visibility instead of only this coarse pid-registry check.
+   */
+  getSupervisorForAgent(name: string): AgentLifecycleSupervisor | undefined {
+    const entry = this.agents.get(name);
+    if (!entry || entry.supervised !== true) return undefined;
+    return entry.supervisor;
+  }
+
+  /**
    * Return the CronScheduler for a given agent (for testing / introspection).
    * Returns undefined if no scheduler is running for that agent.
    */

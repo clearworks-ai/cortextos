@@ -358,6 +358,24 @@ export async function hostSpawn(
   const ledgerPath = hostPid > 0 && ctxRoot ? ledgerPathFor(ctxRoot) : null;
   if (hostPid > 0) liveHostPids.add(hostPid);
   if (ledgerPath) {
+    // Task 2.7: best-effort owning-identity carriage (see PtyHostLedgerEntry's
+    // doc comment — this is a compatibility projection, not authoritative).
+    // `agentId` reuses the exact three env vars already flowing through every
+    // spawn (CTX_INSTANCE_ID/CTX_ORG/CTX_AGENT_NAME), in the same
+    // `${instanceId}/${org}/${name}` shape `canonicalAgentId()` produces, so
+    // no new plumbing is required to populate it. `supervisorEpoch`/
+    // `generation` are read ONLY if a future task sets them in the spawn
+    // env (CTX_LIFECYCLE_SUPERVISOR_EPOCH/CTX_LIFECYCLE_GENERATION) — absent
+    // today, so these two stay undefined until that separate wiring lands.
+    const instanceId = options.env?.['CTX_INSTANCE_ID'];
+    const org = options.env?.['CTX_ORG'];
+    const agentName = options.env?.['CTX_AGENT_NAME'];
+    const agentId = instanceId && org && agentName ? `${instanceId}/${org}/${agentName}` : undefined;
+    const supervisorEpochRaw = options.env?.['CTX_LIFECYCLE_SUPERVISOR_EPOCH'];
+    const generationRaw = options.env?.['CTX_LIFECYCLE_GENERATION'];
+    const supervisorEpoch = supervisorEpochRaw !== undefined ? Number(supervisorEpochRaw) : undefined;
+    const generation = generationRaw !== undefined ? Number(generationRaw) : undefined;
+
     recordPtyHost(ledgerPath, {
       hostPid,
       ptyPid: 0,
@@ -365,6 +383,9 @@ export async function hostSpawn(
       agent: options.env?.['CTX_AGENT_NAME'] ?? '',
       daemonPid: process.pid,
       startedAt: Date.now(),
+      ...(agentId ? { agentId } : {}),
+      ...(supervisorEpoch !== undefined && Number.isFinite(supervisorEpoch) ? { supervisorEpoch } : {}),
+      ...(generation !== undefined && Number.isFinite(generation) ? { generation } : {}),
     });
   }
   child.on('exit', () => {

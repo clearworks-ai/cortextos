@@ -84,6 +84,8 @@ export class AgentLifecycleSupervisor {
   private flushScheduled = false;
   private seqCounter = 0;
   private readonly operations = new Map<string, OperationStatus>();
+  /** Task 2.7: see `handlePtyHostCleanupCandidate`/`lastPtyHostCleanupCandidate`. */
+  private lastPtyHostCandidate: { hostPid: number; stillClaimed: boolean; atMs: number } | null = null;
 
   constructor(
     private readonly agentId: AgentId,
@@ -115,15 +117,57 @@ export class AgentLifecycleSupervisor {
   }
 
   /**
-   * Phase 1 scope: observation ingestion has no behavior yet. Phase 2 tasks
+   * Phase 1 scope: observation ingestion had no behavior yet. Phase 2 tasks
    * (2.1 real RuntimeAdapter, 2.3 pure recovery policy) are what turn a
    * `runtime-exited`/`stall-detected` observation into an actual `request()`
-   * call with a real cause. Recorded here as a documented no-op so the
-   * public surface matches the Task 1.5 contract exactly (no extra public
-   * methods beyond `request`/`observe`/`snapshot`/`operation`).
+   * call with a real cause -- still a documented no-op here for those kinds.
+   *
+   * Task 2.7 is the first kind this method actually handles:
+   * `'pty-host-cleanup-candidate'`, submitted by the PTY-host reaper's Tier 3
+   * sweep instead of the reaper deciding to kill unilaterally. This keeps the
+   * public surface additive rather than reworked -- still just
+   * `request`/`observe`/`snapshot`/`operation`, with `observe()` growing one
+   * more recognized `kind` at a time, exactly as Task 1.5's own doc comment
+   * anticipated.
    */
-  observe(_event: LifecycleObservation): void {
-    // intentionally a no-op in Phase 1 -- see doc comment above.
+  observe(event: LifecycleObservation): void {
+    if (event.kind === 'pty-host-cleanup-candidate') {
+      this.handlePtyHostCleanupCandidate(event);
+      return;
+    }
+    // Every other kind remains a documented no-op -- see doc comment above.
+  }
+
+  /**
+   * Task 2.7: confirm or refute a PTY-host reaper Tier 3 candidate against
+   * THIS owner's own authoritative resource bundle, rather than the
+   * reaper's coarse single-current-host registry view. Deliberately
+   * READ-ONLY against the reaper's own decision: Task 2.7's acceptance
+   * criteria require the reaper's existing preserve+log conservatism
+   * (5499f344) to be RETAINED, not replaced, so no retire/kill is triggered
+   * from this observation -- `stillClaimed` is recorded for introspection
+   * (`lastPtyHostCleanupCandidate()`) so a later task has the confirm/refute
+   * check already in place rather than needing to design it from scratch.
+   */
+  private handlePtyHostCleanupCandidate(event: LifecycleObservation): void {
+    const hostPid = event.evidence['hostPid'];
+    if (typeof hostPid !== 'number') return;
+    const snapshot = this.snapshot();
+    const stillClaimed = [...snapshot.resources, ...snapshot.retiringResources].some(
+      (r) => r.kind === 'pty-host' && r.pid === hostPid,
+    );
+    this.lastPtyHostCandidate = { hostPid, stillClaimed, atMs: event.atMs };
+  }
+
+  /**
+   * Task 2.7 introspection: the most recent PTY-host cleanup candidate this
+   * owner was asked to evaluate via `observe()`, and whether its own
+   * resource bundle still claimed that host pid as of that check. Read-only
+   * -- see `handlePtyHostCleanupCandidate`'s doc comment for why no action
+   * is taken from it in this task's scope.
+   */
+  lastPtyHostCleanupCandidate(): { hostPid: number; stillClaimed: boolean; atMs: number } | null {
+    return this.lastPtyHostCandidate;
   }
 
   /**

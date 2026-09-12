@@ -47,6 +47,14 @@ import {
   type PtyHostLedgerEntry,
 } from '../pty/pty-host-ledger.js';
 import { getLiveHostPids } from '../pty/pty-host-client.js';
+// Task 2.7: type-only import of the lifecycle owner. This specifier is
+// `./lifecycle/supervisor.js` (this file already lives under `src/daemon/`),
+// which never matches the Task 1.6 isolation gate's `daemon/lifecycle`
+// substring regex — see that gate's own doc comment (it explicitly notes
+// `agent-manager.ts` already relies on this exact same relative-path
+// shortcut for the identical reason). `import type` is fully erased at
+// compile time regardless.
+import type { AgentLifecycleSupervisor } from './lifecycle/supervisor.js';
 
 export interface PsEntry {
   pid: number;
@@ -73,6 +81,20 @@ export interface PtyHostReaperOptions {
   getLiveHosts?: () => ReadonlySet<number>;
   /** Injectable pid-liveness probe (tests). Default: signal-0. */
   isPidAliveFn?: (pid: number) => boolean;
+  /**
+   * Task 2.7: given an agent name (from the ledger entry's `agent` field),
+   * return that agent's `AgentLifecycleSupervisor` -- the current lifecycle
+   * owner -- if (and only if) that agent is on the supervised cutover path.
+   * Returns undefined for an unknown, removed, or not-yet-supervised agent;
+   * in that case Tier 3 behaves EXACTLY as it did before this task (preserve
+   * + log only, per 5499f344 — no owner exists to submit a candidate to).
+   * When an owner IS resolvable, the reaper's OWN decision does not change
+   * (Tier 3 still never kills) but the candidate is additionally reported to
+   * that owner via `observe()`, so the authoritative resource bundle -- not
+   * only this reaper's coarse single-current-host registry view -- gets a
+   * say in whether the host is still wanted.
+   */
+  getSupervisorForAgent?: (agentName: string) => AgentLifecycleSupervisor | undefined;
   log?: (msg: string) => void;
 }
 
@@ -113,12 +135,15 @@ export class PtyHostReaper {
   private readonly killFn: (pid: number, signal: NodeJS.Signals) => void;
   private readonly getLiveHosts: () => ReadonlySet<number>;
   private readonly isPidAliveFn: (pid: number) => boolean;
+  private readonly getSupervisorForAgent?: (agentName: string) => AgentLifecycleSupervisor | undefined;
   private readonly log: (msg: string) => void;
 
   private initialTimer: NodeJS.Timeout | null = null;
   private timer: NodeJS.Timeout | null = null;
-  /** Registry-unowned hosts already reported while they remain live/tracked. */
-  private reportedRegistryUnowned = new Set<number>();
+  /** Registry-unowned hosts already reported while they remain live/tracked,
+   * mapped to their consecutive-sweep count (Task 2.7: this count is also
+   * what gets reported to the owner as `evidence.sweepCount`). */
+  private reportedRegistryUnowned = new Map<number, number>();
 
   constructor(ctxRoot: string, opts: PtyHostReaperOptions = {}) {
     this.ledgerPath = ledgerPathFor(ctxRoot);
@@ -130,6 +155,7 @@ export class PtyHostReaper {
     this.killFn = opts.killFn ?? ((pid, sig) => process.kill(pid, sig));
     this.getLiveHosts = opts.getLiveHosts ?? getLiveHostPids;
     this.isPidAliveFn = opts.isPidAliveFn ?? isPidAlive;
+    this.getSupervisorForAgent = opts.getSupervisorForAgent;
     this.log = opts.log ?? ((msg) => console.log(`[pty-reaper] ${msg}`));
   }
 
@@ -183,7 +209,7 @@ export class PtyHostReaper {
     const live = this.getLiveHosts();
     const owned = this.getOwnedHostPids ? this.getOwnedHostPids() : null;
     const now = Date.now();
-    const nextReported = new Set<number>();
+    const nextReported = new Map<number, number>();
 
     for (const entry of entries) {
       const hostPs = byPid.get(entry.hostPid);
@@ -225,12 +251,51 @@ export class PtyHostReaper {
         // from that set. Absence is therefore not proof of orphanhood and
         // must never be a destructive condition. Tier 2 remains the safe
         // cleanup gate once the PTY client itself stops tracking the host.
-        nextReported.add(entry.hostPid);
-        if (!this.reportedRegistryUnowned.has(entry.hostPid)) {
+        const priorSweeps = this.reportedRegistryUnowned.get(entry.hostPid) ?? 0;
+        const sweepCount = priorSweeps + 1;
+        nextReported.set(entry.hostPid, sweepCount);
+        if (priorSweeps === 0) {
           this.log(
             `preserving registry-unowned live pty-host ${entry.hostPid} ` +
             `(agent=${entry.agent || '?'}, file=${entry.file})`,
           );
+        }
+
+        // Task 2.7: submit the exact candidate to the current owner instead
+        // of this reaper deciding unilaterally. The reaper's own action
+        // above (preserve + log, never kill) is UNCHANGED either way --
+        // this only gives an owner that can be reached (a supervised agent)
+        // visibility via its authoritative resource bundle, in place of this
+        // reaper's coarse single-pid registry view. An unresolvable owner
+        // (unknown/legacy/unsupervised agent) means nothing is submitted and
+        // behavior is identical to before this task.
+        const owner = entry.agent ? this.getSupervisorForAgent?.(entry.agent) : undefined;
+        if (owner) {
+          try {
+            owner.observe({
+              kind: 'pty-host-cleanup-candidate',
+              token: {
+                agentId: entry.agentId ?? entry.agent,
+                supervisorEpoch: entry.supervisorEpoch ?? 0,
+                generation: entry.generation ?? 0,
+              },
+              atMs: now,
+              evidence: {
+                hostPid: entry.hostPid,
+                ptyPid: entry.ptyPid,
+                file: entry.file,
+                sweepCount,
+              },
+            });
+          } catch (err) {
+            // Owner consultation is diagnostic/visibility-only -- it must
+            // never affect the sweep (same best-effort discipline as every
+            // other reaper action).
+            this.log(
+              `pty-host-cleanup-candidate submission failed (ignored): ` +
+              `${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
         }
       }
 

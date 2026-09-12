@@ -3,11 +3,41 @@ import { readdirSync, readFileSync, statSync } from 'fs';
 import { join, relative } from 'path';
 
 // Phase 1 goal statement (PHASES.md): "The phase branch must be independently
-// mergeable and must not change any existing runtime behavior." This suite is
-// the mechanical proof of that claim. It is pure source-text assertion — it
-// has no production contract of its own. If any scan below fails, the fix is
-// to go back and correct the leaking Phase 1 task (1.1-1.5), never to loosen
-// these assertions.
+// mergeable and must not change any existing runtime behavior." Scan 1 below
+// was the mechanical proof of that claim FOR PHASE 1 (Tasks 1.1-1.5): zero
+// wiring into any existing call site. Phase 1's own regression (Task 1.R)
+// froze that as "no file under src/ outside src/daemon/lifecycle/ imports
+// src/daemon/lifecycle/*", full stop.
+//
+// Phase 2's explicit mandate (PHASES.md Task 2.2) is the opposite of Phase
+// 1's: "make the existing mechanisms submit observations or requests to it."
+// Task 2.2 wires `src/daemon/agent-process.ts` and `src/bus/system.ts` to
+// `src/daemon/lifecycle/legacy-compat.ts` on purpose — that is the task's
+// entire contract (fresh-start intent as an identified request, replacing
+// the old read-then-unlink `.force-fresh` handling). A bare "zero imports,
+// ever" gate would make Phase 2 impossible to pass, not a regression to fix
+// backward.
+//
+// So scan 1 now allowlists ONLY the exact {file, module} pairs Task 2.2
+// deliberately introduced, and still fails on anything else — including a
+// DIFFERENT module under `daemon/lifecycle/*` (e.g. `supervisor.ts` or
+// `state-store.ts` directly) reaching one of these two files, which remains
+// unauthorized until a later task's contract says otherwise. This keeps the
+// gate meaningful as a "no undocumented/accidental leak" proof rather than
+// retiring it outright.
+//
+// NOTE: `src/daemon/agent-process.ts` also now imports from
+// `./lifecycle/legacy-compat.js` and `./lifecycle/types.js` (Task 2.2), but
+// those specifiers never match this scan's regex at all — the regex looks
+// for the literal substring `daemon/lifecycle`, and a file already inside
+// `src/daemon/` reaches its sibling `lifecycle/` directory via the shorter
+// relative specifier `./lifecycle/...`, which contains no `daemon/` segment.
+// Only `src/bus/system.ts` (outside `src/daemon/`) needs an explicit
+// allowlist entry below, since its relative specifier is
+// `../daemon/lifecycle/legacy-compat.js`.
+const PHASE_2_APPROVED_WIRING: ReadonlyArray<{ file: string; moduleSuffix: string }> = [
+  { file: join('src', 'bus', 'system.ts'), moduleSuffix: 'daemon/lifecycle/legacy-compat.js' },
+];
 
 const REPO_ROOT = join(__dirname, '..', '..', '..');
 const SRC_ROOT = join(REPO_ROOT, 'src');
@@ -28,8 +58,8 @@ function collectSourceFiles(dir: string): string[] {
   return out;
 }
 
-describe('Task 1.6: lifecycle isolation gate', () => {
-  it('scan 1: no file under src/ outside src/daemon/lifecycle/ imports src/daemon/lifecycle/*', () => {
+describe('Task 1.6 / 2.2: lifecycle isolation gate', () => {
+  it('scan 1: no file under src/ outside src/daemon/lifecycle/ imports src/daemon/lifecycle/*, except the Task 2.2-approved wiring', () => {
     const allSrcFiles = collectSourceFiles(SRC_ROOT);
 
     const candidateFiles = allSrcFiles.filter((f) => {
@@ -49,18 +79,24 @@ describe('Task 1.6: lifecycle isolation gate', () => {
 
     const offenders: string[] = [];
     for (const file of candidateFiles) {
+      const relFile = relative(REPO_ROOT, file);
       const text = readFileSync(file, 'utf-8');
       let match: RegExpExecArray | null;
       importRegex.lastIndex = 0;
       while ((match = importRegex.exec(text)) !== null) {
+        const spec = match[1];
+        const isApproved = PHASE_2_APPROVED_WIRING.some(
+          (entry) => entry.file === relFile && spec.endsWith(entry.moduleSuffix),
+        );
+        if (isApproved) continue;
         const lineNumber = text.slice(0, match.index).split('\n').length;
-        offenders.push(`${relative(REPO_ROOT, file)}:${lineNumber} -> "${match[1]}"`);
+        offenders.push(`${relFile}:${lineNumber} -> "${spec}"`);
       }
     }
 
     expect(
       offenders,
-      `Found import(s) of src/daemon/lifecycle/* outside the allowed tree:\n${offenders.join('\n')}`,
+      `Found import(s) of src/daemon/lifecycle/* outside the allowed tree (or beyond the Task 2.2-approved wiring):\n${offenders.join('\n')}`,
     ).toEqual([]);
   });
 

@@ -17,6 +17,15 @@ import { loadBuffer } from './conversation-buffer.js';
 import { ensureMissionAnchorFromBuffer } from './restart-context.js';
 import { readEnabledAgentsMap } from '../bus/enabled-agents-io.js';
 import { snapshotDescendants, killSnapshotSurvivors } from '../utils/process-tree.js';
+import {
+  importFreshRequest,
+  consumeFreshRequest,
+  restoreFreshRequest,
+  projectSessionRefreshMarker,
+  type ImportedFreshRequest,
+} from './lifecycle/legacy-compat.js';
+import { canonicalAgentId } from './lifecycle/types.js';
+import type { GenerationToken } from './lifecycle/types.js';
 
 type LogFn = (msg: string) => void;
 
@@ -289,8 +298,12 @@ export class AgentProcess {
       writeCortextosEnv(this.env.agentDir, this.env);
     }
 
-    // Determine start mode
-    const mode = this.shouldContinue() ? 'continue' : 'fresh';
+    // Determine start mode. Task 2.2: `shouldContinue()` also IMPORTS
+    // (reserves-by-rename) any pending `.force-fresh` request; `freshRequest`
+    // is threaded through to the spawn's success/failure outcome below so a
+    // failed spawn restores it instead of losing the fresh-boot intent.
+    const { continueSession, freshRequest } = this.shouldContinue();
+    const mode = continueSession ? 'continue' : 'fresh';
     // D4 mission-anchor restore: on a FRESH (crash) restart the --continue
     // conversation history is gone, so recover the live mission from the
     // conversation buffer into state/current-mission.txt (best-effort, no-op
@@ -387,11 +400,22 @@ export class AgentProcess {
       // or call getPid() on null in that window.
       if (!this.pty) {
         this.log('PTY exited during spawn — handleExit will recover');
+        // The spawn itself did not throw — mode was honored (a fresh process
+        // really was started with the fresh prompt) even though it exited
+        // immediately after. Consume: whatever recovery handleExit schedules
+        // next (e.g. its own armForceFresh() re-arm) is a separate, later
+        // request this consume never touches.
+        if (freshRequest) consumeFreshRequest(freshRequest);
         return;
       }
       this.status = 'running';
       this.sessionStart = new Date();
       this.log(`Running (pid: ${this.pty.getPid()})`);
+
+      // Task 2.2: consume the imported fresh request ONLY now that the spawn
+      // has succeeded — a spawn failure below (in the catch) restores it
+      // instead, so the fresh-boot intent survives a failed attempt.
+      if (freshRequest) consumeFreshRequest(freshRequest);
 
       this.maybeSendRuntimeLifecycleNotification();
 
@@ -402,6 +426,10 @@ export class AgentProcess {
     } catch (err) {
       this.log(`Failed to start: ${err}`);
       this.status = 'crashed';
+      // Task 2.2: the spawn failed — restore the imported fresh request so
+      // the next attempt still starts fresh instead of silently reverting to
+      // `--continue` (the exact defect upstream `31af138b` fixed).
+      if (freshRequest) restoreFreshRequest(freshRequest);
       this.notifyStatusChange();
     }
   }
@@ -626,11 +654,22 @@ export class AgentProcess {
     // crashes.log file.
     try {
       const paths = resolvePaths(this.name, this.env.instanceId, this.env.org);
-      writeFileSync(
-        join(paths.stateDir, '.session-refresh'),
-        'session-time-cap rollover\n',
-        'utf-8',
-      );
+      // Task 2.2: route the write through `projectSessionRefreshMarker` so it
+      // is keyed to an identified transition (a `GenerationToken`) rather than
+      // an ownerless `writeFileSync`. The on-disk content is byte-for-byte
+      // unchanged — the hook that reads it (`hook-crash-alert.ts`) checks only
+      // presence, never content — this only fixes the call site ahead of Task
+      // 2.4's rewire of `sessionRefresh()` into a real supervisor request.
+      const token: GenerationToken = {
+        agentId: canonicalAgentId({ instanceId: this.env.instanceId, org: this.env.org, name: this.name }),
+        // Legacy/unsupervised path: no real per-agent supervisor epoch exists
+        // yet at this call site (Task 2.5 wires the real one). 0 is a
+        // documented sentinel, not a load-bearing value — nothing reads this
+        // token back today.
+        supervisorEpoch: 0,
+        generation: this.lifecycleGeneration,
+      };
+      projectSessionRefreshMarker(paths.stateDir, token);
     } catch (err) {
       this.log(`Failed to write .session-refresh marker: ${err}`);
     }
@@ -1199,21 +1238,42 @@ export class AgentProcess {
     }, backoff);
   }
 
-  private shouldContinue(): boolean {
+  /**
+   * Task 2.2: decides continue-vs-fresh AND imports (reserves-by-rename) any
+   * pending `.force-fresh` request in the same pass — but the import is a
+   * PURE reservation, never a consume. `startImpl()` threads the returned
+   * `freshRequest` through to the spawn's success/failure outcome, so a
+   * failed spawn can restore it (see `legacy-compat.ts`'s
+   * `restoreFreshRequest`) instead of silently losing the fresh-boot intent.
+   *
+   * The `importFreshRequest` call is deliberately ABOVE the Hermes
+   * early-return (moved there relative to the pre-Task-2.2 code, which
+   * checked the marker only after the Hermes branch): a `.force-fresh`
+   * marker armed on a Hermes agent is now always reserved — so it no longer
+   * leaks in the state dir indefinitely — even though Hermes's own
+   * continue/fresh DECISION below is intentionally left unchanged (per
+   * PHASES.md Task 2.2's explicit ruling): it still comes exclusively from
+   * `hermesDbExists()`, never from the marker. The reservation is still
+   * consumed/restored against this spawn attempt's outcome purely for audit
+   * bookkeeping consistency in that case.
+   */
+  private shouldContinue(): { continueSession: boolean; freshRequest: ImportedFreshRequest | null } {
+    const stateDir = join(this.env.ctxRoot, 'state', this.name);
+    const freshRequest = importFreshRequest(stateDir);
+
     // Hermes: session continuity is determined by whether the SQLite DB exists.
-    // HERMES_HOME env var overrides the default ~/.hermes path.
+    // HERMES_HOME env var overrides the default ~/.hermes path. Unaffected by
+    // `freshRequest` — see the doc comment above.
     if (this.config.runtime === 'hermes') {
       const hermesHome = process.env['HERMES_HOME'];
-      return hermesDbExists(hermesHome);
+      return { continueSession: hermesDbExists(hermesHome), freshRequest };
     }
 
-    // Check for force-fresh marker (all runtimes honor it).
-    const forceFreshPath = join(this.env.ctxRoot, 'state', this.name, '.force-fresh');
-    if (existsSync(forceFreshPath)) {
-      try {
-        unlinkSync(forceFreshPath);
-      } catch { /* ignore */ }
-      return false;
+    // A reserved force-fresh request forces `fresh` mode (all non-Hermes
+    // runtimes honor it). Reserving here does NOT consume it — only
+    // `startImpl()`'s post-spawn success/failure branches do that.
+    if (freshRequest) {
+      return { continueSession: false, freshRequest };
     }
 
     // codex-app-server: session continuity is tracked by the adapter's own
@@ -1230,19 +1290,19 @@ export class AgentProcess {
         this.name,
         'codex-app-server-thread.json',
       );
-      return existsSync(threadStatePath);
+      return { continueSession: existsSync(threadStatePath), freshRequest };
     }
 
     // opencode: do not inspect Claude JSONL history. The OpencodePTY adapter
     // writes a lightweight marker after a successful spawn; that marker is the
     // only signal that the next boot should pass `opencode --continue`.
     if (this.config.runtime === 'opencode') {
-      return opencodeSessionExists(this.env.ctxRoot, this.name);
+      return { continueSession: opencodeSessionExists(this.env.ctxRoot, this.name), freshRequest };
     }
 
     // Default (Claude runtime): existing conversation = JSONL files present.
     const launchDir = this.config.working_directory || this.env.agentDir;
-    if (!launchDir) return false;
+    if (!launchDir) return { continueSession: false, freshRequest };
 
     // Claude projects dir uses the absolute path with all separators replaced by dashes
     // e.g. /Users/foo/agents/boss -> -Users-foo-agents-boss (leading sep becomes -)
@@ -1256,9 +1316,9 @@ export class AgentProcess {
 
     try {
       const files = require('fs').readdirSync(convDir);
-      return files.some((f: string) => f.endsWith('.jsonl'));
+      return { continueSession: files.some((f: string) => f.endsWith('.jsonl')), freshRequest };
     } catch {
-      return false;
+      return { continueSession: false, freshRequest };
     }
   }
 

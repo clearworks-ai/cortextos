@@ -3419,3 +3419,47 @@ def test_client_beats_vendor_regardless_of_participant_count(tmp_path) -> None:
     assert rc == 0
     res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
     assert res["home_path"] == "orgs/riverkeeper.md", res
+
+
+def test_employer_inference_yields_to_a_classifier_named_page(tmp_path) -> None:
+    """Josh 2026-09-11: "a person's employer never decides the meeting when the
+    meeting belongs to a different client." Yohan works for LogicTCG and attends
+    Russian Riverkeeper meetings; his contact row must not drag them onto his
+    employer. RED before the fix: home_path == clients/employer-fixture.md."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients" / "employer-fixture.md").write_text(
+        "# Client: Employer Fixture\n\n## Contacts\n", encoding="utf-8"
+    )
+    (brain / "clients" / "third-party-fixture.md").write_text(
+        "# Client: Third Party Fixture\n\n## Current state\n\n- CRM org name: Third Party Fixture\n",
+        encoding="utf-8",
+    )
+    (repo / "orgs/clearworksai/agents/crm-codex/crm/contacts.json").write_text(
+        json.dumps({"contacts": [{"id": "fx-emp-01", "name": "Pat Vendorside",
+                                  "company": "Employer Fixture", "emails": []}]}),
+        encoding="utf-8",
+    )
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Third Party Fixture working session",
+        participants=[
+            {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours", "spoke": True,
+             "notetaker": False, "handle": None},
+            {"name": "Pat Vendorside", "email": None, "side": "unknown", "spoke": True,
+             "notetaker": False, "handle": None},
+        ],
+        org_name="Third Party Fixture",
+        domain=None,
+        relationship="client",
+        occurred_at="2026-03-02T17:00:00Z",
+        fireflies_id="01EMPLOYERYIELDS",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "clients/third-party-fixture.md", res

@@ -821,6 +821,11 @@ def resolve(
 
     rule4: set[str] = set()
     name_only_rule4: set[str] = set()
+    # Slugs supplied by the CURATED date-aware employer history. These outrank a
+    # classifier-named page (the P-4 protection: a historical meeting must not
+    # follow the person's CURRENT employer), so the employer-inference override
+    # below deliberately skips them.
+    dated_employer_slugs: set[str] = set()
     for p in externals:
         row = _match_contact(p)
         if not row:
@@ -829,7 +834,10 @@ def resolve(
         # current-day) company when a date-ranged override exists for this
         # meeting's occurred_at; otherwise fall back to the ordinary
         # company resolution, byte-identical to before P-4.
-        slug = _employer_slug_at(row, source.get("occurred_at"), employer_history) or _resolve_company_slug(
+        _dated = _employer_slug_at(row, source.get("occurred_at"), employer_history)
+        if _dated:
+            dated_employer_slugs.add(_dated)
+        slug = _dated or _resolve_company_slug(
             row.get("company")
         )
         if not slug:
@@ -977,6 +985,35 @@ def resolve(
             default_pick = _pick(client_cands)
         elif rule4:
             default_pick = _pick(rule4)
+        # Josh 2026-09-11: "a person's employer never decides the meeting when
+        # the meeting belongs to a different client." A name-only contact match
+        # is an EMPLOYER inference (Yohan -> LogicTCG, Mrin -> Clearworks) and
+        # those people attend other clients' meetings. When the classification
+        # names a DIFFERENT org that already has a page, that page wins and the
+        # employer inference is dropped — an RRK meeting with Yohan in it is an
+        # RRK meeting, while "LTCG-Audit: ..." (classifier names no competing
+        # page) still lands on LogicTCG.
+        _cls_named = _existing_page_for_org_name(
+            "" if _is_description_shaped_org_name(cls_org_name) else cls_org_name, clients, closed
+        )
+        if _cls_named is not None and _cls_named[1] != b_pick and b_pick not in dated_employer_slugs:
+            _k, _s = _cls_named
+            if _k == "clients":
+                hit = _client_hit(_s, nodes, clients, rule=4)
+                hit["also_present"] = _also(_s)
+                return hit
+            return {
+                "counterparty_slug": _s,
+                "kind": "org",
+                "relationship": str(cls.get("relationship") or "client"),
+                "home_path": f"orgs/{_s}.md",
+                "node": "none",
+                "created": None,
+                "confidence": float(cls.get("confidence") or 0),
+                "rule": 4,
+                "corroborated": False,
+                "also_present": [],
+            }
         if default_pick != b_pick:
             hit = _client_hit(b_pick, nodes, clients, rule=4)
             hit["also_present"] = _also(b_pick)

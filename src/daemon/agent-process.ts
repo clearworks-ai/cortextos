@@ -26,11 +26,10 @@ import {
 } from './lifecycle/legacy-compat.js';
 import { canonicalAgentId } from './lifecycle/types.js';
 import type { GenerationToken } from './lifecycle/types.js';
+import { classifyExit } from './lifecycle/recovery-policy.js';
+import type { ExitObservation, RecoveryBudgetEntry } from './lifecycle/recovery-policy.js';
 
 type LogFn = (msg: string) => void;
-
-const OPENCODE_CONTINUE_WEDGE_THRESHOLD = 3;
-const OPENCODE_CONTINUE_WEDGE_FAST_EXIT_MS = 60_000;
 
 // ---------------------------------------------------------------------------
 // WS8 Layer A — fleet-degrade marker support
@@ -129,13 +128,6 @@ export class AgentProcess {
   private crashTimestamps: number[] = [];
   private crashWindowMs: number = 0;
   private crashWindowMax: number = 0;
-  // Image-poison recovery circuit breaker: tracks recent recovery attempts
-  // to prevent infinite loops when force-fresh fails to clear poisoned history
-  private imagePoisonRecoveries: number[] = [];
-  // Clean-exit (code 0) recovery: tracks recent clean restarts so a genuinely
-  // broken code-0 tight-loop still halts, while normal code-0 lifecycle exits
-  // (opencode TUI turn-completion) do not charge the daily crash counter.
-  private cleanExitRestarts: number[] = [];
   // Startup-failure detection for code-0 exits: opencode (and any runtime) can
   // exit 0 IMMEDIATELY on a real startup failure (bad config/model/env) — it
   // prints an error and exits cleanly BEFORE the session ever became ready.
@@ -144,10 +136,19 @@ export class AgentProcess {
   // how long the process lived and distinguish "exited before ready" (a real
   // startup fault, surfaced loudly) from "completed a turn" (benign).
   private spawnStartedAtMs: number = 0;
-  // Timestamps of recent code-0 exits that occurred BEFORE the agent reached a
-  // ready/running state. A cluster of these is a startup crashloop, not normal
-  // lifecycle — the circuit breaker below trips and alerts instead of looping.
-  private cleanExitStartupFailures: number[] = [];
+  // Task 2.3: fixed-window recovery-budget counters for the non-crash exit
+  // causes classifyExit() (src/daemon/lifecycle/recovery-policy.ts) can emit —
+  // image-poison, opencode-continuation, and startup-failure/clean-exit —
+  // replacing the four separate timestamp arrays/counters
+  // (imagePoisonRecoveries, cleanExitRestarts, cleanExitStartupFailures,
+  // opencodeContinueWedgeCount) this file used to keep individually. Purely
+  // in-memory today, same lifetime as the fields it replaces — Task 2.4/2.5
+  // promotes this to the supervisor-owned, generation-surviving
+  // `LifecycleSnapshot.recoveryBudgets` store. The legacy daily crash counter
+  // (this.crashCount, file-backed via resetCrashCountIfNewDay) and the
+  // legacy crash-window sliding array (this.crashTimestamps) are deliberately
+  // NOT folded in here — see handleExit()'s crash-tail comment.
+  private recoveryBudgets: Record<string, RecoveryBudgetEntry> = {};
   private sessionStart: Date | null = null;
   private status: AgentStatus['status'] = 'stopped';
   private stopping: boolean = false;
@@ -219,7 +220,6 @@ export class AgentProcess {
   private lastSpawnWasHandoff = false;
   private lastSpawnMode: 'fresh' | 'continue' | null = null;
   private lastStartAtMs = 0;
-  private opencodeContinueWedgeCount = 0;
 
   constructor(name: string, env: CtxEnv, config: AgentConfig, log?: LogFn) {
     this.name = name;
@@ -870,28 +870,6 @@ export class AgentProcess {
   }
 
   /**
-   * Match the API 400 image-poison signature in recent stdout.
-   *
-   * Two variants observed in Anthropic's Messages API responses:
-   *   `API Error: 400 messages.N.content.M.image.source.base64.data: Image format image/<fmt> not supported`
-   *   `API Error: 400 ... image.source.base64.data: ...`
-   *
-   * Matching the prefix `image.source.base64` is robust to wording changes
-   * in Anthropic's error string; matching `image format image/<fmt>` is the
-   * confirmed exact wording today and gives a second signal. Either is enough.
-   */
-  private detectImagePoisonCrash(recentOutput: string): boolean {
-    if (!recentOutput) return false;
-    if (recentOutput.includes('API Error: 400') && recentOutput.includes('image.source.base64')) {
-      return true;
-    }
-    if (/image format image\/[a-z]+ not supported/i.test(recentOutput)) {
-      return true;
-    }
-    return false;
-  }
-
-  /**
    * Write the `.force-fresh` marker that AgentProcess.shouldContinue() reads
    * on the next start() to force a fresh Claude Code session (no --continue).
    * Used by the image-poison auto-recovery in handleExit().
@@ -930,6 +908,29 @@ export class AgentProcess {
     }
   }
 
+  /**
+   * Task 2.3: thin gate-computation + classify + act-on-proposal wrapper.
+   * All classification arithmetic (image-poison / opencode-continuation /
+   * startup-failure / clean-exit / crash) now lives in the pure
+   * `classifyExit()` (src/daemon/lifecycle/recovery-policy.ts). This method
+   * still owns every side effect classifyExit itself cannot perform: reading
+   * the four gate markers, tailing stdout, writing crashes.log/restarts.log,
+   * flipping `status`, calling `notifyStatusChange()`, sending Telegram
+   * alerts, and scheduling the `setTimeout` restart — Task 2.4/2.5 is what
+   * eventually routes these through the supervisor instead of `this.start()`
+   * directly (see PHASES.md Task 2.3).
+   *
+   * The genuine-crash sliding-window halt (this.crashTimestamps) and the
+   * file-backed daily counter (this.crashCount / resetCrashCountIfNewDay,
+   * unchanged) stay OUTSIDE classifyExit's own budgets record: a true
+   * sliding window and a durable per-day file have no equivalent in the
+   * fixed-window `{count, windowStartMs, pausedUntilMs}` shape Task 1.1
+   * locked for `LifecycleSnapshot.recoveryBudgets`. classifyExit is fed the
+   * already-resolved daily count (so its halt/backoff arithmetic reproduces
+   * `this.crashCount` exactly) with `limits.crashWindowMs` forced to 0 so its
+   * own (redundant, differently-shaped) crash-window branch never fires for
+   * this call site.
+   */
   private handleExit(exitCode: number): void {
     // Capture last 16KB of the agent's stdout BEFORE nulling pty.
     // Used by the image-poison auto-recovery check below — reads the log
@@ -939,303 +940,210 @@ export class AgentProcess {
     this.pty = null;
     this.clearSessionTimer();
 
-    // When the cortextos daemon is shut down by PM2, SIGTERM propagates to
-    // the whole process group and reaches each PTY's Claude Code child
-    // BEFORE the daemon's stopAll() loop has a chance to call stopAgent() on
-    // it. Those children exit cleanly (code 0) but arrive at handleExit with
-    // stopRequested=false, which used to classify the exit as a crash and
-    // inflate .crash_count_today by one per agent, per PM2 restart.
-    //
-    // agent-manager.ts:stopAll() already writes a `.daemon-stop` marker in
-    // every agent's state dir at the START of its shutdown loop for an
-    // unrelated reason (SessionEnd crash-alert hook). We reuse that marker
-    // here as the authoritative "the daemon is going down" signal. If the
-    // marker exists AND is recent (written within the last 60s), any PTY
-    // exit is a shutdown casualty, not a real crash — swallow it.
-    //
-    // The 60s window guards against a stale marker from a previous shutdown
-    // that wasn't cleaned up: we do NOT want an old marker to silently mask
-    // a genuine crash days later. handleExit does NOT delete the marker —
-    // cleanup stays with agent-manager / hook-crash-alert per the existing
-    // separation of concerns.
-    if (this.isDaemonShuttingDown()) {
-      return;
+    const now = Date.now();
+    const wasReady = this.status === 'running';
+
+    // The four early-exit gates, checked in the exact same order as before
+    // extraction: daemon-shutdown (SIGTERM propagation on PM2 restart),
+    // user-disabled (config.json/enabled-agents.json), intentional stop
+    // (BUG-040: stopRequested || stopping), planned context-handoff restart
+    // (fresh .restart-planned marker). None of these charge any recovery
+    // budget — see classifyExit's gate handling.
+    const gates = {
+      daemonShuttingDown: this.isDaemonShuttingDown(),
+      disabled: this.isDisabled(),
+      intentional: this.stopRequested || this.stopping,
+      planned: this.isPlannedRestart(),
+    };
+    const anyGate = gates.daemonShuttingDown || gates.disabled || gates.intentional || gates.planned;
+    const isGenuineCrash = exitCode !== 0 && !anyGate;
+
+    // Genuine-crash sliding-window pre-check (legacy `crashTimestamps` array,
+    // unchanged) — see this method's class-level doc comment for why this
+    // stays outside classifyExit. A tripped window halts BEFORE the daily
+    // counter below is ever touched, exactly as before extraction.
+    if (isGenuineCrash) {
+      this.appendCrashDetailToCrashesLog(exitCode, recentOutput);
+      if (this.crashWindowMs > 0) {
+        this.crashTimestamps.push(now);
+        this.crashTimestamps = this.crashTimestamps.filter((ts) => now - ts <= this.crashWindowMs);
+        if (this.crashTimestamps.length >= this.crashWindowMax) {
+          this.log(`CRASH_LOOP: ${this.crashTimestamps.length} crashes in ${this.crashWindowMs / 1000}s window — auto-pausing`);
+          this.appendCrashToRestartsLog(exitCode, 0, 'CRASH_LOOP');
+          this.status = 'halted';
+          this.notifyStatusChange();
+          return;
+        }
+      }
+      // Legacy daily crash counter — file-backed, unchanged. Feeds
+      // classifyExit's crash-daily arithmetic below with the already-
+      // resolved, authoritative count.
+      this.crashCount++;
+      const today = new Date(now).toISOString().split('T')[0];
+      this.resetCrashCountIfNewDay(today);
     }
 
-    // Disabled-agent resurrection fix: an agent disabled via config.json or
-    // enabled-agents.json while running must NOT be respawned by any crash-
-    // recovery path below (image-poison, exponential backoff).
-    // Fresh read at exit time — the disable may have happened after start().
-    // Also skips the crash-count increment: an operator-disabled agent's exit
-    // is intentional-by-policy, not a crash.
-    if (this.isDisabled()) {
+    const dayStartMs = Math.floor(now / 86_400_000) * 86_400_000;
+    const budgets: Record<string, RecoveryBudgetEntry> = {
+      ...this.recoveryBudgets,
+      'crash-daily': { count: Math.max(0, this.crashCount - 1), windowStartMs: dayStartMs, pausedUntilMs: null },
+    };
+
+    const obs: ExitObservation = {
+      token: {
+        // Task 2.5 wires the real supervisor epoch / generation counter into
+        // AgentProcess; neither exists here yet, and classifyExit never
+        // reads this field for its decision — it is carried through only
+        // for future provenance/logging.
+        agentId: canonicalAgentId({ instanceId: this.env.instanceId, org: this.env.org, name: this.name }),
+        supervisorEpoch: 0,
+        generation: this.lifecycleGeneration,
+      },
+      exitCode,
+      signal: null,
+      recentOutput,
+      runtime: this.config.runtime ?? 'claude-code',
+      startedAtMs: this.spawnStartedAtMs,
+      exitedAtMs: now,
+      spawnMode: this.lastSpawnMode,
+      wasReady,
+      gates,
+      limits: {
+        maxCrashesPerDay: this.maxCrashesPerDay,
+        // Disabled here — the real crash-window decision already ran above
+        // against the legacy sliding-window array; see class-level comment.
+        crashWindowMs: 0,
+        crashWindowMax: 0,
+      },
+    };
+
+    const proposal = classifyExit(obs, budgets);
+
+    // Persist every budget this classification touched EXCEPT crash-daily,
+    // which stays owned by the file-backed this.crashCount/
+    // resetCrashCountIfNewDay pair applied above.
+    const { 'crash-daily': _crashDaily, ...restBudgets } = proposal.updatedBudgets;
+    this.recoveryBudgets = { ...this.recoveryBudgets, ...restBudgets };
+
+    // ---- Gates: apply their exact original, distinct side effects ----
+    if (gates.daemonShuttingDown) {
+      return;
+    }
+    if (gates.disabled) {
       this.log('Exit while agent is disabled (config.json enabled:false or enabled-agents.json) — not respawning.');
       this.stopRequested = false;
       this.status = 'stopped';
       this.notifyStatusChange();
       return;
     }
-
-    // BUG-040 fix: check stopRequested instead of (only) stopping. The
-    // stopping flag is cleared inside stop() after a 15s timeout window —
-    // which means a slow PTY shutdown can fire handleExit AFTER stopping is
-    // already false, leading to spurious crash recovery. stopRequested is
-    // set by stop() at the START of the shutdown sequence and persists across
-    // stop()'s return until handleExit clears it (right here). This guarantees
-    // that the FIRST exit after a stop() call is treated as intentional, no
-    // matter how delayed it is.
-    //
-    // Also keep the legacy `stopping` check for in-progress detection during
-    // the (most common) case where the exit fires while stop() is still
-    // awaiting. Either flag short-circuits crash recovery.
-    if (this.stopRequested || this.stopping) {
+    if (gates.intentional) {
       this.stopRequested = false;
       return;
     }
-
-    // Planned context-handoff restart: NOT a crash. When an agent's context
-    // fills, the daemon (fast-checker) or `cortextos bus hard-restart` writes a
-    // fresh `.restart-planned` marker (src/bus/system.ts) and the agent exits
-    // to reload with a smaller context. A busy agent legitimately handoffs
-    // 15-25x/day; counting each toward max_crashes_per_day (or the crash-loop
-    // window) falsely HALTs it — observed live: larry hit 15 planned-restarts,
-    // 0 real crashes, and was HALTED at the default limit of 10. Exempt the
-    // planned exit from BOTH counters, mirroring the isDaemonShuttingDown gate
-    // above. A genuine crash writes no such marker and still counts.
-    if (this.isPlannedRestart()) {
+    if (gates.planned) {
       this.log('Planned context-handoff restart (fresh .restart-planned marker) — not counting as a crash.');
       return;
     }
 
-    // Image-poison auto-recovery (companion to PR #446's photo-injection fix).
-    // Checked FIRST so a poisoned-context crash neither trips the crash-loop
-    // window nor charges the daily counter — it is an upstream artifact, not
-    // an agent malfunction.
-    //
-    // Claude Code crashes with `API Error: 400 messages.N.content.M.image.source.base64.data:
-    // Image format image/<fmt> not supported` when conversation history holds a
-    // base64-encoded image whose claimed media_type does not match the actual
-    // bytes. The poison is permanent: every `--continue` restart reloads the
-    // same conversation history and re-hits the same 400, so the agent
-    // crash-loops until it exhausts max_crashes_per_day and the daemon halts.
-    //
-    // This block covers agents that ALREADY have a poisoned context: detect
-    // the 400 signature in the recent stdout, write `.force-fresh` so the next
-    // start discards the saved conversation, and respawn WITHOUT charging the
-    // crash counter. (The photo-suppression source fix from #446 was superseded
-    // by the Track-2 byte-sniff mime reconciliation; this recovery block is the
-    // independent resilience half and stands on its own.)
-    //
-    // Exit is always code 0 in this failure mode (Claude Code surfaces the
-    // 400 to the user then exits cleanly), so we gate on both exit code and
-    // the error signature to avoid false positives that would skip a real
-    // crash counter increment.
-    if (exitCode === 0 && this.detectImagePoisonCrash(recentOutput)) {
-      const now = Date.now();
-      // Filter recoveries to last 15 minutes
-      this.imagePoisonRecoveries = this.imagePoisonRecoveries.filter(t => now - t < 15 * 60_000);
-      this.imagePoisonRecoveries.push(now);
-
-      // Circuit breaker: 3rd recovery within 15min → stop auto-recovery, alert
-      if (this.imagePoisonRecoveries.length >= 3) {
-        this.log(`Image-poison recovery circuit breaker tripped: ${this.imagePoisonRecoveries.length} recoveries in 15min. Force-fresh is failing to clear poisoned history. Auto-recovery paused. Manual intervention required.`);
-        this.status = 'crashed';
-        this.notifyStatusChange();
-
-        // Send Telegram alert
-        const telegramApi = this.telegramApi;
-        const telegramChatId = this.telegramChatId;
-        if (telegramApi && telegramChatId) {
-          const alertMsg = `🚨 IMAGE-POISON RECOVERY CIRCUIT BREAKER: Agent ${this.name} has hit ${this.imagePoisonRecoveries.length} image-poison recoveries in 15min. Force-fresh is failing to clear poisoned history. Auto-recovery paused. Manual intervention required. Check logs/${this.name}/restarts.log for details.`;
-          telegramApi
-            .sendMessage(telegramChatId, alertMsg)
-            .catch(() => { /* non-fatal: notification is observability only */ });
-        }
-        return;
-      }
-
-      this.log('Image-poison crash detected (API 400, unsupported image format). Arming .force-fresh and restarting without counting against max_crashes_per_day.');
-      this.armForceFresh('image-poison auto-recovery');
-      this.appendCrashToRestartsLog(exitCode, 5000, 'IMAGE_POISON_RECOVERY');
-      this.status = 'crashed';
-      this.notifyStatusChange();
-      setTimeout(() => {
-        if (this.status === 'crashed') {
-          this.start().catch(err => this.log(`Image-poison restart failed: ${err}`));
-        }
-      }, 5000);
-      return;
-    }
-
-    // Clean exit (code 0) is a process ending NORMALLY, not a crash. The
-    // opencode runtime is a TUI that completes a turn and exits 0 by design
-    // (see shouldContinue / the opencode session marker) — 100+ such exits/day
-    // would otherwise exhaust max_crashes_per_day and falsely HALT it. Claude
-    // can also exit 0 on a benign session end. Restart to CONTINUE without
-    // charging the daily crash counter or the crash-loop window. Genuine
-    // failures exit NON-zero (SIGSEGV=139, SIGHUP=129, error=1) and still count;
-    // image-poison (an exit-0 crash-loop) is caught by its signature above and
-    // is unaffected.
-    //
-    // Safety: a genuinely broken code-0 tight-loop (e.g. a runtime that fails
-    // to start and instantly re-exits 0) is still caught here — >=8 clean-exit
-    // restarts within 60s is not "normal turns", it is a spin, so we HALT.
-    if (exitCode === 0) {
-      const now = Date.now();
-
-      // Recover an opencode session that repeatedly exits cleanly immediately
-      // after a --continue attach. The next restart starts fresh instead of
-      // consuming the crash budget in a wedged continuation loop.
-      if (
-        this.config.runtime === 'opencode' &&
-        this.lastSpawnMode === 'continue' &&
-        now - this.lastStartAtMs < OPENCODE_CONTINUE_WEDGE_FAST_EXIT_MS
-      ) {
-        this.opencodeContinueWedgeCount++;
-        if (this.opencodeContinueWedgeCount >= OPENCODE_CONTINUE_WEDGE_THRESHOLD) {
-          this.log(`opencode --continue wedge: ${this.opencodeContinueWedgeCount} fast exit_code=0 continues — arming .force-fresh.`);
-          this.armForceFresh('opencode --continue wedge auto-recovery');
-          this.appendCrashToRestartsLog(exitCode, 5000, 'OPENCODE_CONTINUE_WEDGE_RECOVERY');
-          this.opencodeContinueWedgeCount = 0;
+    // ---- Act on the classified proposal ----
+    switch (proposal.cause) {
+      case 'image-poison': {
+        if (proposal.action === 'pause-and-alert') {
+          this.log(`Image-poison recovery circuit breaker tripped: ${proposal.evidence.recoveriesInWindow} recoveries in 15min. Force-fresh is failing to clear poisoned history. Auto-recovery paused. Manual intervention required.`);
           this.status = 'crashed';
           this.notifyStatusChange();
-          setTimeout(() => {
-            if (this.status === 'crashed') {
-              this.start().catch(err => this.log(`opencode wedge recovery restart failed: ${err}`));
-            }
-          }, 5000);
+          this.sendTelegramAlert(`🚨 IMAGE-POISON RECOVERY CIRCUIT BREAKER: Agent ${this.name} has hit ${proposal.evidence.recoveriesInWindow} image-poison recoveries in 15min. Force-fresh is failing to clear poisoned history. Auto-recovery paused. Manual intervention required. Check logs/${this.name}/restarts.log for details.`);
           return;
         }
-      } else {
-        this.opencodeContinueWedgeCount = 0;
+        this.log('Image-poison crash detected (API 400, unsupported image format). Arming .force-fresh and restarting without counting against max_crashes_per_day.');
+        this.armForceFresh('image-poison auto-recovery');
+        this.appendCrashToRestartsLog(exitCode, proposal.delayMs, 'IMAGE_POISON_RECOVERY');
+        this.scheduleRestart(proposal.delayMs, 'Image-poison restart');
+        return;
       }
-
-      // Startup-failure guard (completes #242): #242 correctly stopped charging
-      // the crash counter for ALL code-0 exits, but it treats every code-0 exit
-      // as a benign turn-completion. A code-0 exit that fires BEFORE the session
-      // ever became ready is the opposite — a real startup fault (bad
-      // config/model/env). opencode prints an error and exits 0, so it slips
-      // past the crash gate, gets silently retried, and (before this) HALTed
-      // with only a bare CRASH_LOOP line and no alert. Detect the
-      // exit-before-ready case (short-lived spawn + agent never reached
-      // 'running') and, on a cluster of them, trip a LOUD circuit breaker with a
-      // Telegram alert, mirroring the image-poison breaker above. A code-0 exit
-      // AFTER the agent was ready is a normal turn and skips this entirely.
-      const spawnAgeMs = this.spawnStartedAtMs > 0 ? now - this.spawnStartedAtMs : Infinity;
-      const exitedBeforeReady = this.status !== 'running' && spawnAgeMs < 8_000;
-      if (exitedBeforeReady) {
-        this.cleanExitStartupFailures = this.cleanExitStartupFailures.filter((ts) => now - ts < 60_000);
-        this.cleanExitStartupFailures.push(now);
-        if (this.cleanExitStartupFailures.length >= 3) {
-          this.log(
-            `CLEAN_EXIT_STARTUP_FAIL: ${this.cleanExitStartupFailures.length} code-0 exits BEFORE ready in 60s ` +
-            `(runtime=${this.config.runtime ?? 'claude-code'}, model=${this.config.model ?? 'default'}) — ` +
-            `this is a startup failure exiting 0, NOT a normal turn. Halting and alerting instead of silent retry. ` +
-            `Check the agent's config/model/env and logs/${this.name}/stdout.log.`,
-          );
-          this.appendCrashToRestartsLog(exitCode, 0, 'CLEAN_EXIT_STARTUP_FAIL');
+      case 'opencode-continuation': {
+        if (proposal.mode === 'fresh') {
+          this.log(`opencode --continue wedge: ${proposal.evidence.wedgeCount} fast exit_code=0 continues — arming .force-fresh.`);
+          this.armForceFresh('opencode --continue wedge auto-recovery');
+          this.appendCrashToRestartsLog(exitCode, proposal.delayMs, 'OPENCODE_CONTINUE_WEDGE_RECOVERY');
+          this.scheduleRestart(proposal.delayMs, 'opencode wedge recovery restart');
+          return;
+        }
+        this.log('Clean exit (code 0) — restarting to continue, not counting as a crash.');
+        this.appendCrashToRestartsLog(exitCode, proposal.delayMs, 'CLEAN_EXIT');
+        this.scheduleRestart(proposal.delayMs, 'Clean-exit restart');
+        return;
+      }
+      case 'startup-failure': {
+        this.log(
+          `CLEAN_EXIT_STARTUP_FAIL: ${proposal.evidence.startupFailuresInWindow} code-0 exits BEFORE ready in 60s ` +
+          `(runtime=${this.config.runtime ?? 'claude-code'}, model=${this.config.model ?? 'default'}) — ` +
+          `this is a startup failure exiting 0, NOT a normal turn. Halting and alerting instead of silent retry. ` +
+          `Check the agent's config/model/env and logs/${this.name}/stdout.log.`,
+        );
+        this.appendCrashToRestartsLog(exitCode, 0, 'CLEAN_EXIT_STARTUP_FAIL');
+        this.status = 'halted';
+        this.notifyStatusChange();
+        this.sendTelegramAlert(`🚨 STARTUP FAILURE: Agent ${this.name} exited cleanly (code 0) ${proposal.evidence.startupFailuresInWindow}x within 60s BEFORE ever becoming ready (runtime=${this.config.runtime ?? 'claude-code'}, model=${this.config.model ?? 'default'}). This is a broken startup exiting 0, not a normal turn — auto-restart paused to avoid a silent crashloop. Check config/model/env and logs/${this.name}/stdout.log.`);
+        return;
+      }
+      case 'clean-exit': {
+        if (proposal.action === 'halt') {
+          this.log(`CLEAN_EXIT_LOOP: ${proposal.evidence.cleanExitsInWindow} code-0 exits in 60s — spinning, halting.`);
+          this.appendCrashToRestartsLog(exitCode, 0, 'CRASH_LOOP');
           this.status = 'halted';
           this.notifyStatusChange();
-          const telegramApi = this.telegramApi;
-          const telegramChatId = this.telegramChatId;
-          if (telegramApi && telegramChatId) {
-            const alertMsg = `🚨 STARTUP FAILURE: Agent ${this.name} exited cleanly (code 0) ${this.cleanExitStartupFailures.length}x within 60s BEFORE ever becoming ready (runtime=${this.config.runtime ?? 'claude-code'}, model=${this.config.model ?? 'default'}). This is a broken startup exiting 0, not a normal turn — auto-restart paused to avoid a silent crashloop. Check config/model/env and logs/${this.name}/stdout.log.`;
-            telegramApi
-              .sendMessage(telegramChatId, alertMsg)
-              .catch(() => { /* non-fatal: notification is observability only */ });
-          }
           return;
         }
-      } else {
-        // A code-0 exit AFTER the agent was ready is a genuine turn completion —
-        // clear any accumulated startup-failure suspicion.
-        this.cleanExitStartupFailures = [];
-      }
-
-      this.cleanExitRestarts = this.cleanExitRestarts.filter((ts) => now - ts < 60_000);
-      this.cleanExitRestarts.push(now);
-      if (this.cleanExitRestarts.length >= 8) {
-        this.log(`CLEAN_EXIT_LOOP: ${this.cleanExitRestarts.length} code-0 exits in 60s — spinning, halting.`);
-        this.appendCrashToRestartsLog(exitCode, 0, 'CRASH_LOOP');
-        this.status = 'halted';
-        this.notifyStatusChange();
+        this.log('Clean exit (code 0) — restarting to continue, not counting as a crash.');
+        this.appendCrashToRestartsLog(exitCode, proposal.delayMs, 'CLEAN_EXIT');
+        this.scheduleRestart(proposal.delayMs, 'Clean-exit restart');
         return;
       }
-      const backoffMs = this.config.runtime === 'opencode' ? 2000 : 3000;
-      this.log('Clean exit (code 0) — restarting to continue, not counting as a crash.');
-      this.appendCrashToRestartsLog(exitCode, backoffMs, 'CLEAN_EXIT');
-      this.status = 'crashed';
-      this.notifyStatusChange();
-      setTimeout(() => {
-        if (this.status === 'crashed') {
-          this.start().catch(err => this.log(`Clean-exit restart failed: ${err}`));
+      case 'crash':
+      default: {
+        if (proposal.action === 'halt') {
+          this.log(`HALTED: exceeded ${this.maxCrashesPerDay} crashes today`);
+          this.appendCrashToRestartsLog(exitCode, 0, 'HALTED');
+          this.status = 'halted';
+          this.notifyStatusChange();
+          return;
         }
-      }, backoffMs);
-      return;
-    }
-
-    // OBSERVABILITY FIX: every path below this point is a genuine crash
-    // (nonzero exit that survived the shutdown / disabled / planned-restart /
-    // stop / image-poison gates above). `recentOutput` holds the stderr/error
-    // tail — but historically only `exit_code=N` reached restarts.log, and
-    // crashes.log's `reason=` stayed empty because the SessionEnd hook that
-    // writes it cannot run when a hard exit_code=1 kills the process. Persist
-    // the captured tail so a future crash carries a real, greppable reason.
-    this.appendCrashDetailToCrashesLog(exitCode, recentOutput);
-
-    // CrashLoopPauser (instar-inspired): if a sliding window is configured,
-    // check whether the agent is crash-looping before falling through to
-    // the legacy daily counter. The window is a more precise signal than
-    // the per-day count: 3 crashes in 30 minutes is a crash loop even if
-    // the daily budget of 10 is far from exhausted.
-    if (this.crashWindowMs > 0) {
-      const now = Date.now();
-      this.crashTimestamps.push(now);
-      // Prune timestamps outside the window.
-      this.crashTimestamps = this.crashTimestamps.filter(
-        (ts) => now - ts <= this.crashWindowMs,
-      );
-      if (this.crashTimestamps.length >= this.crashWindowMax) {
-        this.log(
-          `CRASH_LOOP: ${this.crashTimestamps.length} crashes in ${this.crashWindowMs / 1000}s window — auto-pausing`,
-        );
-        this.appendCrashToRestartsLog(exitCode, 0, 'CRASH_LOOP');
-        this.status = 'halted';
-        this.notifyStatusChange();
+        this.log(`Crash recovery: restart in ${proposal.delayMs / 1000}s (crash #${this.crashCount})`);
+        // Persist the crash to restarts.log so operators have a durable audit
+        // trail. Previously only planned SELF-RESTART / HARD-RESTART from
+        // bus/system.ts wrote here, which left daemon-classified crashes
+        // invisible outside the rotating PM2 daemon stdout log.
+        this.appendCrashToRestartsLog(exitCode, proposal.delayMs, 'CRASH');
+        this.scheduleRestart(proposal.delayMs, 'Restart');
         return;
       }
     }
+  }
 
-    // Legacy daily crash counter (fallback when no crash_window is configured,
-    // or as a secondary gate when the window hasn't filled yet).
-    this.crashCount++;
-    const today = new Date().toISOString().split('T')[0];
-    this.resetCrashCountIfNewDay(today);
-
-    if (this.crashCount >= this.maxCrashesPerDay) {
-      this.log(`HALTED: exceeded ${this.maxCrashesPerDay} crashes today`);
-      this.appendCrashToRestartsLog(exitCode, 0, 'HALTED');
-      this.status = 'halted';
-      this.notifyStatusChange();
-      return;
-    }
-
-    // Exponential backoff restart
-    const backoff = Math.min(5000 * Math.pow(2, this.crashCount - 1), 300000);
-    this.log(`Crash recovery: restart in ${backoff / 1000}s (crash #${this.crashCount})`);
-    // Persist the crash to restarts.log so operators have a durable audit
-    // trail. Previously only planned SELF-RESTART / HARD-RESTART from
-    // bus/system.ts wrote here, which left daemon-classified crashes
-    // invisible outside the rotating PM2 daemon stdout log.
-    this.appendCrashToRestartsLog(exitCode, backoff, 'CRASH');
+  /** Flip to 'crashed', notify, and schedule the recovery restart after
+   * `delayMs` — shared tail of every restart-producing proposal branch in
+   * handleExit(). `failureLabel` reproduces each branch's original
+   * restart-failure log message verbatim. */
+  private scheduleRestart(delayMs: number, failureLabel: string): void {
     this.status = 'crashed';
     this.notifyStatusChange();
-
     setTimeout(() => {
       if (this.status === 'crashed') {
-        this.start().catch(err => this.log(`Restart failed: ${err}`));
+        this.start().catch(err => this.log(`${failureLabel} failed: ${err}`));
       }
-    }, backoff);
+    }, delayMs);
+  }
+
+  /** Best-effort Telegram alert — non-fatal, matches the original inline
+   * send-if-wired pattern used by the image-poison and startup-failure
+   * circuit breakers. */
+  private sendTelegramAlert(message: string): void {
+    const telegramApi = this.telegramApi;
+    const telegramChatId = this.telegramChatId;
+    if (telegramApi && telegramChatId) {
+      telegramApi.sendMessage(telegramChatId, message).catch(() => { /* non-fatal: notification is observability only */ });
+    }
   }
 
   /**
@@ -1746,7 +1654,7 @@ export class AgentProcess {
         kind === 'HALTED'
           ? `exit_code=${exitCode} crash_count=${this.crashCount} max_crashes=${this.maxCrashesPerDay}`
           : kind === 'CLEAN_EXIT_STARTUP_FAIL'
-            ? `exit_code=${exitCode} startup_failures=${this.cleanExitStartupFailures.length} (exited before ready — auto-restart paused, alerted)`
+            ? `exit_code=${exitCode} startup_failures=${this.recoveryBudgets['startup-failure']?.count ?? 0} (exited before ready — auto-restart paused, alerted)`
             : kind === 'IMAGE_POISON_RECOVERY' || kind === 'CLEAN_EXIT' || kind === 'OPENCODE_CONTINUE_WEDGE_RECOVERY'
               ? `exit_code=${exitCode} backoff_s=${backoffMs / 1000} (not counted toward max_crashes)`
               : `exit_code=${exitCode} crash_count=${this.crashCount} backoff_s=${backoffMs / 1000}`;

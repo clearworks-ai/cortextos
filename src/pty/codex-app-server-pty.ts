@@ -71,6 +71,35 @@ interface GoalResponse {
   } | null;
 }
 
+/**
+ * Task 3.4: correlated work/turn outcome events. Emitted alongside (never
+ * instead of) the existing `resolveTurnCompletion()`/`rejectTurnCompletion()`
+ * mechanics, so this is purely an additive observation surface for whoever
+ * registers via `onWorkCorrelation()` (Step 5: `agent-process.ts`, which
+ * forwards these into `AgentLifecycleSupervisor.observe()`).
+ *
+ * `'runtime-accepted'`/`'progress'`/`'completed'` are the three genuinely
+ * separate moments PHASES.md Task 3.4 requires: RPC-level acceptance
+ * (`turn/started`), best-effort activity (`item/agentMessage/delta` —
+ * advisory only, nothing may depend on it arriving), and real
+ * `turn/completed`. `'failed'`/`'needs-review'`/`'cancelled'` are the three
+ * distinct negative outcomes this task's plan calls for: a genuine RPC
+ * `error` is `'failed'`; an uncertain outcome (30-minute completion timeout,
+ * or an unexpected app-server exit mid-turn — we do not know if the runtime
+ * actually finished) is `'needs-review'`; a deliberate retirement
+ * (`kill()`) is `'cancelled'` — a 6th variant beyond the task file's
+ * illustrative 5-member union, added so `kill()`'s deliberate-retirement
+ * semantics stay distinct from the unexpected-death `needs-review` case, per
+ * Step 4's explicit call for work-ledger.ts's `cancel()` transition.
+ */
+export type WorkCorrelationEvent =
+  | { type: 'runtime-accepted'; workIds: string[]; turnId: string }
+  | { type: 'progress'; workIds: string[]; turnId: string }
+  | { type: 'completed'; workIds: string[]; turnId: string }
+  | { type: 'failed'; workIds: string[]; turnId: string | null; error: string }
+  | { type: 'needs-review'; workIds: string[]; turnId: string | null; reason: string }
+  | { type: 'cancelled'; workIds: string[]; turnId: string | null; reason: string };
+
 const THREAD_PERMISSION_OVERRIDES = {
   approvalPolicy: 'never',
   sandbox: 'danger-full-access',
@@ -116,8 +145,19 @@ export class CodexAppServerPTY {
   private _alive = false;
   private _executing = false;
   private _activeTurnId: string | null = null;
+  /**
+   * Task 3.4: the work IDs bound to whichever turn is currently active
+   * (i.e. handed to the most recent `startTurn()` call, plus any workIds
+   * successfully steered onto it via `turn/steer`). This is the sole source
+   * of truth `handleRpcMessage()` reads from to correlate `turn/started`,
+   * `item/agentMessage/delta`, `turn/completed`, and `error` back to the
+   * `WorkRecord`s that produced them.
+   */
+  private _activeTurnWorkIds: string[] = [];
   private _writeBuffer = '';
-  private _turnQueue: unknown[][] = [];
+  private _turnQueue: Array<{ input: unknown[]; workIds: string[] }> = [];
+  /** Task 3.4 Step 2: constructor-injected-style callback surface (mirrors `onExit`'s pattern). */
+  private _onWorkCorrelation: ((event: WorkCorrelationEvent) => void) | null = null;
   private _turnCompletion: {
     resolve: () => void;
     reject: (err: Error) => void;
@@ -209,9 +249,37 @@ export class CodexAppServerPTY {
   }
 
   kill(): void {
+    // Task 3.4 Step 4: `kill()` is always a deliberate retirement — the
+    // currently-active turn (if any) AND everything still queued behind it
+    // must resolve as `cancelled`, captured BEFORE the state they describe
+    // is cleared below (mirrors Step 3's "unexpected death" accounting, but
+    // deliberately a distinct outcome kind).
+    const hadPendingTurn = this._turnCompletion !== null;
+    const cancelledTurnId = this._activeTurnId;
+    const cancelledTurnWorkIds = this._activeTurnWorkIds;
+    const strandedOnKill = this._turnQueue.splice(0, this._turnQueue.length);
+
     this._alive = false;
     this._activeTurnId = null;
-    this._turnQueue = [];
+    this._activeTurnWorkIds = [];
+
+    if (hadPendingTurn && cancelledTurnWorkIds.length > 0) {
+      this.emitWorkCorrelation({
+        type: 'cancelled',
+        workIds: cancelledTurnWorkIds,
+        turnId: cancelledTurnId,
+        reason: 'Codex app-server stopped',
+      });
+    }
+    for (const strandedEntry of strandedOnKill) {
+      this.emitWorkCorrelation({
+        type: 'cancelled',
+        workIds: strandedEntry.workIds,
+        turnId: null,
+        reason: 'Codex app-server stopped before this queued turn started',
+      });
+    }
+
     this.rejectTurnCompletion(new Error('Codex app-server stopped'));
     if (this._rpc) {
       this._rpc.close();
@@ -251,6 +319,15 @@ export class CodexAppServerPTY {
 
   onExit(handler: (exitCode: number, signal?: number) => void): void {
     this._onExitHandler = handler;
+  }
+
+  /** Task 3.4 Step 2/5: register the work-correlation observer (see `WorkCorrelationEvent`). */
+  onWorkCorrelation(handler: (event: WorkCorrelationEvent) => void): void {
+    this._onWorkCorrelation = handler;
+  }
+
+  private emitWorkCorrelation(event: WorkCorrelationEvent): void {
+    this._onWorkCorrelation?.(event);
   }
 
   getOutputBuffer(): OutputBuffer {
@@ -501,7 +578,28 @@ export class CodexAppServerPTY {
           if (this._appServerPty !== pty) return;
           this._appServerPty = null;
           this._alive = false;
+          // Task 3.4 Step 3: an unexpected app-server exit mid-turn is
+          // materially different from `kill()` — this is NOT a deliberate
+          // retirement, we genuinely do not know whether the runtime
+          // finished the active turn, so this is `needs-review`, not
+          // `cancelled`. Captured BEFORE clearing, mirroring `kill()`'s
+          // pattern. Anything still in `_turnQueue` is accounted for by
+          // `drainQueue()`'s own catch block once this rejection propagates
+          // through the awaited `completion` inside `startTurn()`.
+          const hadPendingTurn = this._turnCompletion !== null;
+          const exitedTurnId = this._activeTurnId;
+          const exitedTurnWorkIds = this._activeTurnWorkIds;
+          this._activeTurnId = null;
+          this._activeTurnWorkIds = [];
           this.rejectTurnCompletion(new Error('Codex app-server exited'));
+          if (hadPendingTurn && exitedTurnWorkIds.length > 0) {
+            this.emitWorkCorrelation({
+              type: 'needs-review',
+              workIds: exitedTurnWorkIds,
+              turnId: exitedTurnId,
+              reason: 'Codex app-server exited unexpectedly',
+            });
+          }
           this._onExitHandler?.(exitCode, signal);
         });
 
@@ -623,20 +721,20 @@ export class CodexAppServerPTY {
    * review/compact, NoActiveTurn, transport error) falls back to the queue, so
    * no message is ever lost. CODEX_STEER_DISABLED=1 reverts to pure queueing.
    */
-  private queueTurn(input: unknown[]): void {
+  private queueTurn(input: unknown[], workIds: string[] = []): void {
     if (this._executing && this._activeTurnId && process.env.CODEX_STEER_DISABLED !== '1') {
-      this.steerActiveTurn(input).catch((err) => {
+      this.steerActiveTurn(input, workIds).catch((err) => {
         this._outputBuffer.push(`[codex-app-server] steer path failed: ${err}\n`);
       });
       return;
     }
-    this.enqueueTurn(input);
+    this.enqueueTurn(input, workIds);
   }
 
-  private async steerActiveTurn(input: unknown[]): Promise<void> {
+  private async steerActiveTurn(input: unknown[], workIds: string[] = []): Promise<void> {
     const expectedTurnId = this._activeTurnId;
     if (!this._threadId || !expectedTurnId) {
-      this.enqueueTurn(input);
+      this.enqueueTurn(input, workIds);
       return;
     }
     try {
@@ -645,6 +743,12 @@ export class CodexAppServerPTY {
         expectedTurnId,
         input,
       });
+      // Task 3.4: a successful steer folds these workIds into the ALREADY
+      // active turn — they will resolve together with it (completed/failed/
+      // needs-review/cancelled), not as a separate turn.
+      if (workIds.length > 0) {
+        this._activeTurnWorkIds = [...this._activeTurnWorkIds, ...workIds];
+      }
       this._outputBuffer.push(`[codex-app-server] steered active turn ${expectedTurnId}\n`);
     } catch (err) {
       // Do not retry steer here: the rejection may be a non-steerable turn
@@ -655,12 +759,12 @@ export class CodexAppServerPTY {
       if (CONTEXT_FULL_RE.test(String(err))) {
         this.signalContextFull();
       }
-      this.enqueueTurn(input);
+      this.enqueueTurn(input, workIds);
     }
   }
 
-  private enqueueTurn(input: unknown[]): void {
-    this._turnQueue.push(input);
+  private enqueueTurn(input: unknown[], workIds: string[] = []): void {
+    this._turnQueue.push({ input, workIds });
     if (!this._executing) {
       this.drainQueue().catch((err) => {
         this._outputBuffer.push(`[codex-app-server] turn queue failed: ${err}\n`);
@@ -675,18 +779,41 @@ export class CodexAppServerPTY {
 
   private async drainQueue(): Promise<void> {
     while (this._alive && this._turnQueue.length > 0) {
-      const input = this._turnQueue.shift()!;
+      const entry = this._turnQueue.shift()!;
       this._executing = true;
       try {
-        await this.startTurn(input);
+        await this.startTurn(entry.input, entry.workIds);
+        // The 'completed' event (and any 'failed'/'needs-review' outcome for
+        // THIS entry) was already emitted inside startTurn/handleRpcMessage/
+        // createTurnCompletion's timeout branch — nothing further to do here
+        // for the entry that just resolved.
+      } catch (err) {
+        // Task 3.4 Step 3: the entry that just threw already got its own
+        // outcome emitted at the origin (the 'error' RPC handler, the
+        // completion timeout, or the unexpected-exit handler) — what this
+        // catch adds is accounting for every input STILL in the queue behind
+        // the one that failed, which `drainQueue`'s old behavior silently
+        // stranded forever (PHASES.md's named bug).
+        const stranded = this._turnQueue.splice(0, this._turnQueue.length);
+        for (const strandedEntry of stranded) {
+          this.emitWorkCorrelation({
+            type: 'needs-review',
+            workIds: strandedEntry.workIds,
+            turnId: null,
+            reason: `queue drained after a prior turn failed: ${err instanceof Error ? err.message : String(err)}`,
+          });
+        }
       } finally {
         this._executing = false;
       }
     }
   }
 
-  private async startTurn(input: unknown[]): Promise<void> {
+  private async startTurn(input: unknown[], workIds: string[] = []): Promise<void> {
     if (!this._threadId) throw new Error('No Codex app-server thread is active');
+    // Bind these workIds to "whichever turn starts next" BEFORE the RPC call
+    // — `turn/started` (handleRpcMessage) reads this to fire 'runtime-accepted'.
+    this._activeTurnWorkIds = workIds;
     const completion = this.createTurnCompletion();
     await this.request('turn/start', { threadId: this._threadId, input, ...TURN_PERMISSION_OVERRIDES });
     await completion;
@@ -791,21 +918,50 @@ export class CodexAppServerPTY {
       case 'turn/started':
         if (isRecord(params.turn) && typeof params.turn.id === 'string') {
           this._activeTurnId = params.turn.id;
+          // Task 3.4: the actual RPC-level "the app-server accepted this
+          // turn" moment — distinct from queueTurn merely enqueueing locally.
+          if (this._activeTurnWorkIds.length > 0) {
+            this.emitWorkCorrelation({
+              type: 'runtime-accepted',
+              workIds: [...this._activeTurnWorkIds],
+              turnId: this._activeTurnId,
+            });
+          }
         }
         this.maybeFireTyping();
         this._outputBuffer.push('[codex-app-server] turn started\n');
         break;
-      case 'turn/completed':
+      case 'turn/completed': {
+        const completedTurnId = this._activeTurnId;
+        const completedWorkIds = this._activeTurnWorkIds;
         this._activeTurnId = null;
         this.writeIdleFlag();
         this._outputBuffer.push('[codex-app-server] turn completed\n');
+        // Task 3.4: `thread/tokenUsage/updated` (below) is explicitly NOT a
+        // completion signal — `turn/completed` is the only terminal-success
+        // event. Do not replace `resolveTurnCompletion()`; the correlation
+        // event is emitted alongside it.
         this.resolveTurnCompletion();
+        if (completedTurnId && completedWorkIds.length > 0) {
+          this.emitWorkCorrelation({ type: 'completed', workIds: completedWorkIds, turnId: completedTurnId });
+        }
+        this._activeTurnWorkIds = [];
         break;
+      }
       case 'item/agentMessage/delta':
         if (typeof params.delta === 'string') {
           this._outputBuffer.push(params.delta);
         }
         this.maybeFireTyping();
+        // Task 3.4: best-effort activity signal, separate from acceptance and
+        // completion. Advisory only — nothing may depend on this arriving.
+        if (this._activeTurnId && this._activeTurnWorkIds.length > 0) {
+          this.emitWorkCorrelation({
+            type: 'progress',
+            workIds: [...this._activeTurnWorkIds],
+            turnId: this._activeTurnId,
+          });
+        }
         break;
       case 'item/completed':
         if (isRecord(params.item) && params.item.type === 'agentMessage' && typeof params.item.text === 'string') {
@@ -826,10 +982,19 @@ export class CodexAppServerPTY {
         this._outputBuffer.push('[goal] cleared\n');
         break;
       case 'error': {
+        const erroredTurnId = this._activeTurnId;
+        const erroredWorkIds = this._activeTurnWorkIds;
         this._activeTurnId = null;
         const serialized = JSON.stringify(params);
         this._outputBuffer.push(`[codex-app-server] error: ${serialized}\n`);
         this.rejectTurnCompletion(new Error(serialized));
+        // Task 3.4: a genuine RPC error is a definite 'failed' outcome for
+        // whatever this turn was carrying — distinct from the 'needs-review'
+        // uncertainty of a timeout or an unexpected app-server exit.
+        if (erroredWorkIds.length > 0) {
+          this.emitWorkCorrelation({ type: 'failed', workIds: erroredWorkIds, turnId: erroredTurnId, error: serialized });
+        }
+        this._activeTurnWorkIds = [];
         // A context-full thread fails the turn BEFORE emitting any token usage, so
         // token telemetry can never see this. Detect the failure directly here — the
         // only place the signal is present — and write an authoritative overflow
@@ -868,6 +1033,23 @@ export class CodexAppServerPTY {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this._turnCompletion = null;
+        // Task 3.4: a generic 30-minute timeout is genuinely uncertain — the
+        // runtime might still finish the turn after we stop waiting locally
+        // — so this is 'needs-review', never an invented 'failed'/'completed'.
+        // `_alive` is deliberately left untouched here (still honestly
+        // "alive"); what changes is that this outcome is now recorded at
+        // all, instead of silently vanishing.
+        const timedOutTurnId = this._activeTurnId;
+        const timedOutWorkIds = this._activeTurnWorkIds;
+        if (timedOutWorkIds.length > 0) {
+          this.emitWorkCorrelation({
+            type: 'needs-review',
+            workIds: timedOutWorkIds,
+            turnId: timedOutTurnId,
+            reason: 'Timed out waiting for turn/completed',
+          });
+        }
+        this._activeTurnWorkIds = [];
         reject(new Error('Timed out waiting for turn/completed'));
       }, timeoutMs);
       this._turnCompletion = { resolve, reject, timer };

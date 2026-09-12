@@ -30,6 +30,8 @@ import { canonicalAgentId } from './lifecycle/types.js';
 import type { GenerationToken, LifecycleRequest, RequestReceipt } from './lifecycle/types.js';
 import { classifyExit } from './lifecycle/recovery-policy.js';
 import type { ExitObservation, RecoveryBudgetEntry } from './lifecycle/recovery-policy.js';
+import type { LifecycleObservation } from './lifecycle/supervisor.js';
+import type { WorkCorrelationEvent } from '../pty/codex-app-server-pty.js';
 
 /**
  * Task 2.4: the minimal shape `AgentProcess` needs from its lifecycle owner
@@ -39,9 +41,17 @@ import type { ExitObservation, RecoveryBudgetEntry } from './lifecycle/recovery-
  * one method it actually calls; the real `AgentLifecycleSupervisor` (which
  * structurally satisfies this interface) is wired in by Task 2.5 via
  * `setOwner()`.
+ *
+ * Task 3.4 Step 5: `observe` is added, optional, so any existing owner mock
+ * that only implements `request()` keeps compiling unchanged. The real
+ * `AgentLifecycleSupervisor.observe()` (Task 1.5) structurally satisfies
+ * this without modification — this is the same "reuse the existing public
+ * surface, don't invent a new entry point" instruction Task 3.4's plan
+ * gives for wiring `CodexAppServerPTY`'s `WorkCorrelationEvent`s through.
  */
 export interface LifecycleRequestOwner {
   request(req: LifecycleRequest): Promise<RequestReceipt>;
+  observe?(event: LifecycleObservation): void;
 }
 
 /**
@@ -456,6 +466,39 @@ export class AgentProcess {
     // typing indicators flow through fast-checker.
     if (this.config.runtime === 'codex-app-server' && this.telegramApi && this.telegramChatId) {
       (this.pty as CodexAppServerPTY).setTelegramHandle(this.telegramApi, this.telegramChatId);
+    }
+
+    // Task 3.4 Step 5: the minimal consumer wiring for this generation's
+    // CodexAppServerPTY WorkCorrelationEvents — forwarded into the owner's
+    // observe() (a documented no-op if unsupervised/no owner wired yet, or
+    // if the concrete owner hasn't implemented `observe` at all). Real
+    // workIds only ever arrive once a caller threads them into
+    // queueTurn()/injectMessage (Task 3.5) — until then this listener fires
+    // on nothing, by construction (the adapter's own emit calls are
+    // workIds.length-gated), so this wiring is inert in production today.
+    if (this.config.runtime === 'codex-app-server') {
+      (this.pty as CodexAppServerPTY).onWorkCorrelation?.((event: WorkCorrelationEvent) => {
+        if (!this.owner?.observe) return;
+        const token: GenerationToken = {
+          agentId: canonicalAgentId({ instanceId: this.env.instanceId, org: this.env.org, name: this.name }),
+          // Same documented sentinel used elsewhere in this file (e.g.
+          // sessionRefresh()) — nothing reads this token back today.
+          supervisorEpoch: 0,
+          generation: myGeneration,
+        };
+        const evidence: Record<string, string | number | boolean | null> = {
+          workIds: JSON.stringify(event.workIds),
+          turnId: event.turnId,
+        };
+        if ('error' in event) evidence.error = event.error;
+        if ('reason' in event) evidence.reason = event.reason;
+        this.owner.observe({
+          kind: `work-${event.type}`,
+          token,
+          atMs: Date.now(),
+          evidence,
+        });
+      });
     }
 
     // BUG-011 fix: create a fresh exit signal for this run. resolveExit is

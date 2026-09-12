@@ -12,12 +12,24 @@ import type {
   RequestReceipt,
   RetirementResult,
   StartMode,
+  WorkPhase,
   WorkRecord,
 } from './types.js';
 import { CAUSE_SEVERITY } from './types.js';
 import type { LifecycleStateStore, CommitResult } from './state-store.js';
 import { SCHEMA_VERSION as LIFECYCLE_SCHEMA_VERSION } from './state-store.js';
-import { accept as ledgerAccept, archiveTerminal as ledgerArchiveTerminal, outstandingWork as ledgerOutstandingWork } from './work-ledger.js';
+import {
+  accept as ledgerAccept,
+  archiveTerminal as ledgerArchiveTerminal,
+  outstandingWork as ledgerOutstandingWork,
+  markDispatched as ledgerMarkDispatched,
+  markRuntimeAccepted as ledgerMarkRuntimeAccepted,
+  markExecuting as ledgerMarkExecuting,
+  complete as ledgerComplete,
+  fail as ledgerFail,
+  cancel as ledgerCancel,
+  needsReview as ledgerNeedsReview,
+} from './work-ledger.js';
 
 /**
  * Task 1.5: Supervisor transition core.
@@ -82,6 +94,103 @@ function otherIds(entries: PendingEntry[], self: string): string[] {
 }
 
 /**
+ * Task 3.4 Step 5: `LifecycleObservation.evidence`'s value type has no array
+ * member, so `WorkCorrelationEvent.workIds` crosses that boundary
+ * JSON-encoded as a string (see `WORK_OBSERVATION_KINDS`'s doc comment).
+ * Any decode failure (missing field, malformed JSON, non-array, non-string
+ * elements) is treated as "no correlated workIds" rather than thrown.
+ */
+function decodeWorkIds(raw: string | number | boolean | null | undefined): string[] {
+  if (typeof raw !== 'string') return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === 'string');
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Task 3.4 Step 5: applies one correlated work-observation `kind` to a
+ * single `WorkRecord`, walking through whatever intermediate
+ * `WORK_PRE_EXECUTION_CHAIN` phases the record hasn't reached yet first.
+ * This exists here (not in `work-ledger.ts`) because it is policy about
+ * HOW a runtime observation maps onto the pure per-transition functions --
+ * `work-ledger.ts` stays exactly what Task 3.1 built it as: pure
+ * single-transition functions with no opinion on multi-hop sequencing.
+ * Throws (propagated to the caller's try/catch) if the record is already in
+ * a phase this kind cannot legally reach at all -- e.g. already terminal.
+ */
+function applyWorkCorrelation(
+  record: WorkRecord,
+  kind: string,
+  turnId: string | null,
+  reason: string,
+  nowMs: number,
+): WorkRecord {
+  switch (kind) {
+    case 'work-runtime-accepted': {
+      // The actual RPC-level acceptance moment IS the same moment Codex
+      // begins executing the turn -- there is no separately-observable
+      // "accepted but not yet executing" state for this runtime, so this
+      // walks the record all the way to 'executing' in one call.
+      const walked = advanceWorkRecordToward(record, 'executing', turnId, nowMs);
+      return walked;
+    }
+    case 'work-progress':
+      // Advisory only -- PHASES.md/this task's plan: "do not make anything
+      // depend on progress events arriving." No ledger mutation.
+      return record;
+    case 'work-completed': {
+      const executing = advanceWorkRecordToward(record, 'executing', turnId, nowMs);
+      return ledgerComplete(executing, reason, nowMs);
+    }
+    case 'work-failed':
+      return ledgerFail(record, reason, nowMs);
+    case 'work-needs-review':
+      return ledgerNeedsReview(record, reason, nowMs);
+    case 'work-cancelled':
+      return ledgerCancel(record, reason, nowMs);
+    default:
+      return record;
+  }
+}
+
+/**
+ * Walks `record` forward through `WORK_PRE_EXECUTION_CHAIN` up to (and
+ * including) `target`, applying `markDispatched`/`markRuntimeAccepted`/
+ * `markExecuting` for each hop not yet reached. A record already at or past
+ * `target` (including any terminal/needs-review phase, which is outside the
+ * chain entirely) is returned unchanged -- the caller's own final action
+ * (e.g. `ledgerComplete`) is what will legally reject an out-of-order call
+ * on a genuinely wrong phase.
+ */
+function advanceWorkRecordToward(
+  record: WorkRecord,
+  target: WorkPhase,
+  turnId: string | null,
+  nowMs: number,
+): WorkRecord {
+  const startIdx = WORK_PRE_EXECUTION_CHAIN.indexOf(record.phase);
+  const targetIdx = WORK_PRE_EXECUTION_CHAIN.indexOf(target);
+  if (startIdx === -1 || targetIdx === -1 || startIdx >= targetIdx) return record;
+
+  let current = record;
+  for (let i = startIdx + 1; i <= targetIdx; i += 1) {
+    const phase = WORK_PRE_EXECUTION_CHAIN[i];
+    if (phase === 'dispatched') {
+      current = ledgerMarkDispatched(current, current.batchId ?? `work-${current.workId}`, nowMs);
+    } else if (phase === 'runtime-accepted') {
+      current = ledgerMarkRuntimeAccepted(current, turnId ?? current.runtimeTurnId ?? `turn-${current.workId}`, nowMs);
+    } else if (phase === 'executing') {
+      current = ledgerMarkExecuting(current, nowMs);
+    }
+  }
+  return current;
+}
+
+/**
  * Task 3.2: bounds how many TERMINAL (`completed`/`failed`/`cancelled`)
  * `WorkRecord`s a snapshot retains (`work-ledger.ts`'s `archiveTerminal`
  * always keeps every non-terminal and `needs-review` record regardless of
@@ -90,6 +199,34 @@ function otherIds(entries: PendingEntry[], self: string): string[] {
  * measured workload.
  */
 const MAX_RETAINED_TERMINAL_WORK_RECORDS = 500;
+
+/**
+ * Task 3.4 Step 5: the minimal consumer wiring for `CodexAppServerPTY`'s
+ * `WorkCorrelationEvent`s. `LifecycleObservation.kind` is already typed as
+ * `... | string` (Task 1.5's own doc comment anticipated `observe()` growing
+ * one recognized kind at a time) -- these six additions are namespaced
+ * `work-*` so they can never collide with `'pty-host-cleanup-candidate'` or
+ * any future non-work kind. `agent-process.ts`'s `CodexAppServerPTY`
+ * construction site is what actually emits these, via
+ * `onWorkCorrelation((event) => owner.observe({ kind: `work-${event.type}`, ... }))`.
+ *
+ * `evidence.workIds` carries the correlated work-id array JSON-encoded as a
+ * string, since `LifecycleObservation.evidence`'s value type
+ * (`string | number | boolean | null`) has no array member -- this is the
+ * "extend it minimally" Task 3.4's plan explicitly allows rather than
+ * widening the Shared Contract type itself.
+ */
+const WORK_OBSERVATION_KINDS: ReadonlySet<string> = new Set([
+  'work-runtime-accepted',
+  'work-progress',
+  'work-completed',
+  'work-failed',
+  'work-needs-review',
+  'work-cancelled',
+]);
+
+/** `WorkPhase` values a `WorkRecord` passes through on its way toward `executing`, in order. */
+const WORK_PRE_EXECUTION_CHAIN: WorkPhase[] = ['accepted', 'dispatched', 'runtime-accepted', 'executing'];
 
 /**
  * Task 3.2 Step 4: internal signal thrown from inside `acceptBatch`'s
@@ -166,6 +303,10 @@ export class AgentLifecycleSupervisor {
   observe(event: LifecycleObservation): void {
     if (event.kind === 'pty-host-cleanup-candidate') {
       this.handlePtyHostCleanupCandidate(event);
+      return;
+    }
+    if (WORK_OBSERVATION_KINDS.has(event.kind)) {
+      this.handleWorkObservation(event);
       return;
     }
     // Every other kind remains a documented no-op -- see doc comment above.
@@ -373,6 +514,45 @@ export class AgentLifecycleSupervisor {
    */
   outstandingWork(): WorkRecord[] {
     return ledgerOutstandingWork(this.snapshot());
+  }
+
+  /**
+   * Task 3.4 Step 5: apply one `WorkCorrelationEvent` (already namespaced
+   * `work-*` by the caller, see `WORK_OBSERVATION_KINDS`) to every matching
+   * `WorkRecord` in the ledger, durably. Best-effort by design: this is an
+   * async runtime observation arriving out-of-band, not a caller awaiting a
+   * receipt, so a commit failure or an illegal-transition record (already
+   * terminal, already in a further-along phase, etc.) is silently skipped
+   * for THAT record rather than throwing -- the alternative would be an
+   * unhandled rejection inside a fire-and-forget adapter callback, which is
+   * strictly worse than "this one observation didn't move anything."
+   * `evidence.workIds` decode failure is likewise treated as a no-op, not a
+   * thrown error.
+   */
+  private handleWorkObservation(event: LifecycleObservation): void {
+    const workIds = decodeWorkIds(event.evidence['workIds']);
+    if (workIds.length === 0) return;
+    const turnId = typeof event.evidence['turnId'] === 'string' ? (event.evidence['turnId'] as string) : null;
+    const reason =
+      (typeof event.evidence['error'] === 'string' && (event.evidence['error'] as string)) ||
+      (typeof event.evidence['reason'] === 'string' && (event.evidence['reason'] as string)) ||
+      event.kind;
+    const nowMs = event.atMs;
+
+    this.commitWithRetry((draft) => {
+      draft.outstandingWork = draft.outstandingWork.map((record) => {
+        if (!workIds.includes(record.workId)) return record;
+        try {
+          return applyWorkCorrelation(record, event.kind, turnId, reason, nowMs);
+        } catch {
+          // Illegal transition for this record's current phase (e.g. already
+          // terminal) -- leave it untouched rather than throw out of a
+          // fire-and-forget runtime callback.
+          return record;
+        }
+      });
+      draft.outstandingWork = ledgerArchiveTerminal(draft, MAX_RETAINED_TERMINAL_WORK_RECORDS);
+    });
   }
 
   // --- Mailbox plumbing ----------------------------------------------------

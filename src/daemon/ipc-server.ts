@@ -3,6 +3,12 @@ import { existsSync, unlinkSync, chmodSync, readFileSync } from 'fs';
 import { join, resolve as pathResolve } from 'path';
 import type { IPCRequest, IPCResponse, CronSummaryRow, CronDefinition } from '../types/index.js';
 import { AgentManager } from './agent-manager.js';
+import type { StartMode } from './lifecycle/types.js';
+
+/** Task 2.8: `restart-agent`'s `data.mode` is typed and validated — an
+ * unsupported value is rejected outright (`INVALID_MODE`), never silently
+ * dropped or coerced. */
+const VALID_START_MODES: ReadonlySet<string> = new Set<StartMode>(['continue', 'fresh']);
 import { getIpcPath } from '../utils/paths.js';
 import { readCrons, getExecutionLog, getExecutionLogPage, addCron, updateCron, removeCron, getCronByName } from '../bus/crons.js';
 import type { ExecutionLogStatusFilter } from '../bus/crons.js';
@@ -567,7 +573,7 @@ export class IPCServer {
   /**
    * Handle an incoming IPC request.
    */
-  private handleRequest(request: IPCRequest, socket: Socket): void {
+  private async handleRequest(request: IPCRequest, socket: Socket): Promise<void> {
     // BUG-015: log every incoming IPC request with its source so we can
     // trace which CLI command triggered which daemon action. The source
     // field is populated by CLI clients (cortextos enable / disable / stop
@@ -602,12 +608,58 @@ export class IPCServer {
             // agent-manager's own dedup logic still runs and is the source of
             // truth; we just give the operator a structured response code.
             const insp = this.agentManager.inspectAgentOp('start', request.agent);
-            this.agentManager.startAgent(
-              request.agent,
-              (request.data?.dir as string) || '',
-            ).catch(err => console.error(`Failed to start ${request.agent}:`, err));
+            const resume = request.data?.resume === true;
+
+            // Task 2.8 / PRD §2.7: "an explicit resume intent is required to
+            // clear an operator stop/HALT; a plain maintenance start ...
+            // cannot resurrect a contained agent and instead returns a
+            // structured blocked reason." Checked BEFORE dispatch reaches
+            // `startAgent` at all — the fresh-entry start path bypasses the
+            // supervisor's own mailbox entirely (a documented, pre-existing
+            // gap: only the "stale in-registry" reconcile path routes
+            // through the owner today), so refusing here, unconditionally,
+            // is the only place this guarantee can be made airtight.
+            let blocked: { code: 'REQUIRES_RESUME'; message: string } | null = null;
             if (insp.ok) {
-              response = { success: true, data: `Starting ${request.agent}` };
+              const persisted = this.agentManager.getPersistedLifecycleState(request.agent);
+              if (persisted) {
+                const contained =
+                  persisted.desiredState === 'stopped' ||
+                  persisted.desiredState === 'halted' ||
+                  persisted.desiredState === 'quarantined';
+                if (contained && !resume) {
+                  blocked = {
+                    code: 'REQUIRES_RESUME',
+                    message:
+                      `refusing plain start: "${request.agent}" was explicitly ${persisted.desiredState} ` +
+                      `(reason: ${persisted.blockedReason ?? 'operator action'}) — pass ` +
+                      `{ data: { resume: true } } ("cortextos start --resume") to clear it`,
+                  };
+                } else if (contained && resume && persisted.desiredState === 'quarantined' && persisted.retiringResourceCount > 0) {
+                  // Quarantine additionally requires a successful resource
+                  // reconciliation before resume — a prior teardown left
+                  // resources unresolved, so resume is refused even though
+                  // it was explicitly requested.
+                  blocked = {
+                    code: 'REQUIRES_RESUME',
+                    message:
+                      `refusing resume: "${request.agent}" is quarantined with ` +
+                      `${persisted.retiringResourceCount} unresolved retiring resource(s) — ` +
+                      `resource reconciliation must complete before resume`,
+                  };
+                }
+              }
+            }
+
+            if (blocked) {
+              console.log(`[ipc] start-agent ${request.agent}: ${blocked.code} — ${blocked.message}`);
+              response = { success: false, error: blocked.message, code: blocked.code, accepted: false };
+            } else if (insp.ok) {
+              this.agentManager.startAgent(
+                request.agent,
+                (request.data?.dir as string) || '',
+              ).catch(err => console.error(`Failed to start ${request.agent}:`, err));
+              response = { success: true, data: `Starting ${request.agent}`, accepted: true };
             } else {
               console.log(`[ipc] start-agent ${request.agent}: ${insp.code} — ${insp.message}`);
               response = { success: false, error: insp.message, code: insp.code };
@@ -620,13 +672,44 @@ export class IPCServer {
             response = { success: false, error: 'Agent name required', code: 'INVALID_INPUT' };
           } else {
             const insp = this.agentManager.inspectAgentOp('stop', request.agent);
-            this.agentManager.stopAgent(request.agent)
-              .catch(err => console.error(`Failed to stop ${request.agent}:`, err));
-            if (insp.ok) {
-              response = { success: true, data: `Stopping ${request.agent}` };
-            } else {
+            if (!insp.ok) {
               console.log(`[ipc] stop-agent ${request.agent}: ${insp.code} — ${insp.message}`);
               response = { success: false, error: insp.message, code: insp.code };
+              break;
+            }
+            // Task 2.8: IPC `stop-agent` IS the explicit-stop control
+            // surface — every production caller (`cortextos stop`,
+            // `cortextos disable`, the dashboard's disable/DELETE routes)
+            // represents an explicit human/operator action (confirmed via
+            // grep across src/ and dashboard/: no cron or internal
+            // autonomous-recovery path sends `stop-agent` over IPC; those
+            // route through AgentManager-internal calls that pass
+            // `userInitiated: false` directly, never through this
+            // handler). So `userInitiated` is always `true` here — NOT
+            // inferred from `request.source`, which stays diagnostic text
+            // only (never an authentication/authorization signal).
+            if (this.agentManager.isAgentSupervised(request.agent)) {
+              // Fast to await: the supervisor's commit resolves within one
+              // microtask tick (Task 1.5) — the actual teardown effect is a
+              // detached async chain the mailbox does not await, so this
+              // never blocks on the ~21s graceful-stop window.
+              const result = await this.agentManager.stopAgent(request.agent, true);
+              response = {
+                success: true,
+                data: result.accepted ? `Stop accepted for ${request.agent}` : `Stop rejected for ${request.agent}: ${result.blockedReason ?? 'unknown reason'}`,
+                accepted: result.accepted ?? false,
+                operationId: result.operationId,
+                phase: result.phase,
+                blockedReason: result.blockedReason,
+              };
+            } else {
+              // Legacy path: byte-for-byte unchanged dispatch semantics —
+              // fire-and-forget, never awaited here (awaiting would risk
+              // exceeding `IPCClient`'s 5s socket timeout against the
+              // legacy ~21s graceful-stop window).
+              this.agentManager.stopAgent(request.agent, true)
+                .catch(err => console.error(`Failed to stop ${request.agent}:`, err));
+              response = { success: true, data: `Stopping ${request.agent}`, accepted: true };
             }
           }
           break;
@@ -635,17 +718,88 @@ export class IPCServer {
           if (!request.agent) {
             response = { success: false, error: 'Agent name required', code: 'INVALID_INPUT' };
           } else {
+            const rawMode = request.data?.mode;
+            if (rawMode !== undefined && (typeof rawMode !== 'string' || !VALID_START_MODES.has(rawMode))) {
+              response = {
+                success: false,
+                error: `Invalid data.mode "${String(rawMode)}" — expected "continue" or "fresh"`,
+                code: 'INVALID_MODE',
+              };
+              break;
+            }
+            const mode = (rawMode as StartMode | undefined) ?? 'continue';
+
             const insp = this.agentManager.inspectAgentOp('restart', request.agent);
-            this.agentManager.restartAgent(request.agent)
-              .catch(err => console.error(`Failed to restart ${request.agent}:`, err));
-            if (insp.ok) {
-              response = { success: true, data: `Restarting ${request.agent}` };
-            } else {
+            if (!insp.ok) {
               console.log(`[ipc] restart-agent ${request.agent}: ${insp.code} — ${insp.message}`);
               response = { success: false, error: insp.message, code: insp.code };
+              break;
+            }
+            // `restart-agent` is always ONE operation here — a single call
+            // into `AgentManager.restartAgent`, never a separate stop-agent
+            // + start-agent pair of IPC-equivalent dispatches.
+            if (this.agentManager.isAgentSupervised(request.agent)) {
+              const result = await this.agentManager.restartAgent(request.agent, mode);
+              response = {
+                success: true,
+                data: result.accepted ? `Restart accepted for ${request.agent}` : `Restart rejected for ${request.agent}: ${result.blockedReason ?? 'unknown reason'}`,
+                accepted: result.accepted ?? false,
+                operationId: result.operationId,
+                phase: result.phase,
+                blockedReason: result.blockedReason,
+              };
+            } else {
+              this.agentManager.restartAgent(request.agent, mode)
+                .catch(err => console.error(`Failed to restart ${request.agent}:`, err));
+              response = { success: true, data: `Restarting ${request.agent}`, accepted: true };
             }
           }
           break;
+
+        case 'agent-lifecycle-status':
+          if (!request.agent) {
+            response = { success: false, error: 'Agent name required', code: 'INVALID_INPUT' };
+          } else {
+            const persisted = this.agentManager.getPersistedLifecycleState(request.agent);
+            if (!persisted) {
+              response = { success: false, error: `No lifecycle record for "${request.agent}"`, code: 'NOT_FOUND' };
+            } else {
+              response = {
+                success: true,
+                data: persisted,
+                phase: persisted.phase,
+                blockedReason: persisted.blockedReason,
+              };
+            }
+          }
+          break;
+
+        case 'lifecycle-operation-status': {
+          const operationId = request.data?.operationId;
+          if (!request.agent || typeof operationId !== 'string' || !operationId) {
+            response = { success: false, error: 'agent and data.operationId are required', code: 'INVALID_INPUT' };
+          } else {
+            const supervisor = this.agentManager.getSupervisorForAgent(request.agent);
+            if (!supervisor) {
+              response = { success: false, error: `"${request.agent}" is not on the supervised lifecycle path`, code: 'NOT_FOUND' };
+            } else {
+              const op = supervisor.operation(operationId);
+              if (!op) {
+                response = { success: false, error: `Unknown operationId "${operationId}"`, code: 'NOT_FOUND' };
+              } else {
+                response = {
+                  success: true,
+                  data: op,
+                  accepted: true,
+                  operationId: op.operationId,
+                  phase: op.phase,
+                  blockedReason: op.blockedReason,
+                };
+              }
+            }
+          }
+          break;
+        }
 
         case 'wake':
           // Wake a specific agent's fast checker (replaces SIGUSR1)

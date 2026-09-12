@@ -30,10 +30,61 @@ import { randomUUID } from 'crypto';
 import { AgentLifecycleSupervisor } from './lifecycle/supervisor.js';
 import { AgentProcessRuntimeAdapter } from './lifecycle/agent-runtime.js';
 import { LifecycleStateStore } from './lifecycle/state-store.js';
+import { writeForceFreshMarker } from './lifecycle/legacy-compat.js';
 import { canonicalAgentId } from './lifecycle/types.js';
-import type { DesiredState, ObservedPhase } from './lifecycle/types.js';
+import type { DesiredState, ObservedPhase, StartMode, RequestReceipt } from './lifecycle/types.js';
 
 type LogFn = (msg: string) => void;
+
+/**
+ * Task 2.8: uniform result `stopAgent`/`restartAgent` return to their IPC
+ * caller, so a response can report REAL durable-acceptance evidence
+ * (`accepted`/`operationId`/`phase`/`blockedReason`) instead of declaring
+ * success merely because dispatch didn't throw. `dispatched: false` means
+ * the operation never actually ran (e.g. the agent wasn't in the registry) —
+ * distinct from `dispatched: true, accepted: false`, which means a real
+ * supervisor request WAS submitted and durably refused. A legacy
+ * (unsupervised) agent has no supervisor receipt to report at all —
+ * `supervised: false` marks that honestly rather than fabricating
+ * placeholder accept/phase values.
+ */
+export interface LifecycleDispatchResult {
+  dispatched: boolean;
+  supervised: boolean;
+  accepted: boolean | null;
+  operationId: string | null;
+  phase: ObservedPhase | null;
+  blockedReason: string | null;
+}
+
+const NOT_DISPATCHED_RESULT: LifecycleDispatchResult = {
+  dispatched: false,
+  supervised: false,
+  accepted: null,
+  operationId: null,
+  phase: null,
+  blockedReason: null,
+};
+
+const LEGACY_DISPATCHED_RESULT: LifecycleDispatchResult = {
+  dispatched: true,
+  supervised: false,
+  accepted: null,
+  operationId: null,
+  phase: null,
+  blockedReason: null,
+};
+
+function dispatchResultFromReceipt(receipt: RequestReceipt): LifecycleDispatchResult {
+  return {
+    dispatched: true,
+    supervised: true,
+    accepted: receipt.accepted,
+    operationId: receipt.operationId,
+    phase: receipt.phase,
+    blockedReason: receipt.blockedReason,
+  };
+}
 
 /**
  * One agent's registry entry. Named (was an inline literal on `agents`) so the
@@ -638,17 +689,49 @@ export class AgentManager {
   private peekPersistedDesiredState(
     name: string,
     org: string,
-  ): { desiredState: DesiredState; phase: ObservedPhase; blockedReason: string | null } | null {
+  ): { desiredState: DesiredState; phase: ObservedPhase; blockedReason: string | null; retiringResourceCount: number } | null {
     try {
       const agentId = canonicalAgentId({ instanceId: this.instanceId, org, name });
       const paths = this.lifecycleBusPaths(name, org);
       const store = new LifecycleStateStore(paths, agentId);
       const loaded = store.load();
       if ('corrupt' in loaded) return null;
-      return { desiredState: loaded.desiredState, phase: loaded.phase, blockedReason: loaded.blockedReason };
+      return {
+        desiredState: loaded.desiredState,
+        phase: loaded.phase,
+        blockedReason: loaded.blockedReason,
+        // Task 2.8: "quarantine additionally requires a successful resource
+        // reconciliation before resume" — the ingress layer's resume gate
+        // needs a cheap read-only signal for "is there still unretired work
+        // owned by a prior generation", without constructing a full runtime
+        // adapter/supervisor. A non-empty `retiringResources` means a prior
+        // teardown never finished verifying every resource gone.
+        retiringResourceCount: loaded.retiringResources.length,
+      };
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Task 2.8: public read-only accessor for `peekPersistedDesiredState`,
+   * with org auto-resolved via `resolveAgentOrg` (same resolution
+   * `startAgent` itself uses) so IPC callers never need to know an agent's
+   * org up front. The IPC ingress layer's `start-agent` case uses this to
+   * refuse a plain maintenance `start` against an agent whose durable
+   * desired state is `stopped`/`halted`/`quarantined` — the same
+   * "don't resurrect a deliberately-stopped agent" check `bootSelfHeal`
+   * already performs above at boot time, reused here for the IPC case per
+   * `peekPersistedDesiredState`'s own doc comment ("a later task has the
+   * confirm/refute check already in place"). Returns `null` when there is
+   * no adopted record yet (a genuinely first-ever start) or the record is
+   * corrupt — both cases mean "no persisted opinion, proceed as today."
+   */
+  getPersistedLifecycleState(
+    name: string,
+    org?: string,
+  ): { desiredState: DesiredState; phase: ObservedPhase; blockedReason: string | null; retiringResourceCount: number } | null {
+    return this.peekPersistedDesiredState(name, this.resolveAgentOrg(name, org));
   }
 
   /**
@@ -705,7 +788,7 @@ export class AgentManager {
    * finds that record still `not(corrupt)` and simply reuses it — durability
    * lives on disk, not in this in-memory map entry.
    */
-  private async stopSupervisedAgent(name: string, entry: AgentEntry, userInitiated: boolean): Promise<void> {
+  private async stopSupervisedAgent(name: string, entry: AgentEntry, userInitiated: boolean): Promise<LifecycleDispatchResult> {
     this.stoppingAgents.add(name);
     try {
       const scheduler = this.cronSchedulers.get(name);
@@ -747,7 +830,7 @@ export class AgentManager {
         if (this.pendingRestarts.delete(name)) {
           console.log(`[agent-manager] Dropped queued restart for ${name} — explicit user stop/disable wins.`);
         }
-        return;
+        return dispatchResultFromReceipt(receipt);
       }
 
       if (this.pendingRestarts.has(name)) {
@@ -757,6 +840,7 @@ export class AgentManager {
           console.error(`[agent-manager] Queued restart failed for ${name}:`, err),
         );
       }
+      return dispatchResultFromReceipt(receipt);
     } finally {
       this.stoppingAgents.delete(name);
     }
@@ -798,13 +882,13 @@ export class AgentManager {
    * guarantee; this method does not hand-roll a second stop+start pair at
    * the `AgentManager` layer.
    */
-  private async restartSupervisedAgent(name: string, entry: AgentEntry): Promise<void> {
-    console.log(`[agent-manager] Restarting ${name} (supervised, one operation)`);
+  private async restartSupervisedAgent(name: string, entry: AgentEntry, mode: StartMode): Promise<LifecycleDispatchResult> {
+    console.log(`[agent-manager] Restarting ${name} (supervised, one operation, mode=${mode})`);
     const receipt = await entry.supervisor!.request({
       requestId: randomUUID(),
       kind: 'restart',
       cause: 'manual-cli',
-      mode: 'continue',
+      mode,
       observedGeneration: null,
       userInitiated: true,
       evidence: {},
@@ -814,9 +898,10 @@ export class AgentManager {
       console.warn(
         `[agent-manager] ${name} supervised restart was not accepted: ${receipt.blockedReason ?? 'unknown reason'}`,
       );
-      return;
+      return dispatchResultFromReceipt(receipt);
     }
-    console.log(`[agent-manager] Restart complete for ${name} (supervised)`);
+    console.log(`[agent-manager] Restart accepted for ${name} (supervised)`);
+    return dispatchResultFromReceipt(receipt);
   }
 
   async startAgent(name: string, agentDir: string, config?: AgentConfig, org?: string): Promise<void> {
@@ -1898,11 +1983,11 @@ export class AgentManager {
   /**
    * Stop a specific agent.
    */
-  async stopAgent(name: string, userInitiated = false): Promise<void> {
+  async stopAgent(name: string, userInitiated = false): Promise<LifecycleDispatchResult> {
     const entry = this.agents.get(name);
     if (!entry) {
       console.log(`[agent-manager] Agent ${name} not found`);
-      return;
+      return NOT_DISPATCHED_RESULT;
     }
 
     // Task 2.5 Step 4 / Step 7 (no dual control): a supervised agent's stop
@@ -1997,7 +2082,7 @@ export class AgentManager {
         // deliberately left alone: the queue refers to whoever is mapped. The
         // finally below still releases stoppingAgents.
         console.warn(`[agent-manager] ${name} was re-registered while stopping — old instance fully torn down, new instance left mapped.`);
-        return;
+        return LEGACY_DISPATCHED_RESULT;
       }
 
       this.agents.delete(name);
@@ -2010,7 +2095,7 @@ export class AgentManager {
         if (this.pendingRestarts.delete(name)) {
           console.log(`[agent-manager] Dropped queued restart for ${name} — explicit user stop/disable wins.`);
         }
-        return;
+        return LEGACY_DISPATCHED_RESULT;
       }
 
       // BUG-031: honor any restart that was queued while we were stopping.
@@ -2033,6 +2118,7 @@ export class AgentManager {
           console.error(`[agent-manager] Queued restart failed for ${name}:`, err),
         );
       }
+      return LEGACY_DISPATCHED_RESULT;
     } finally {
       this.stoppingAgents.delete(name);
     }
@@ -2049,11 +2135,11 @@ export class AgentManager {
    * agentDir is auto-discovered by startAgent() from frameworkRoot/orgs/{org}/agents/{name}.
    * Participates in the pendingRestarts race protection used by restart-all.
    */
-  async restartAgent(name: string): Promise<void> {
+  async restartAgent(name: string, mode: StartMode = 'continue'): Promise<LifecycleDispatchResult> {
     const entry = this.agents.get(name);
     if (!entry) {
       console.log(`[agent-manager] Agent ${name} not found — cannot restart`);
-      return;
+      return NOT_DISPATCHED_RESULT;
     }
 
     // Task 2.5 Step 5 / Step 7 (no dual control): a supervised agent's
@@ -2061,7 +2147,24 @@ export class AgentManager {
     // pair at this layer — that would reintroduce the exact race this task
     // exists to close. A non-supervised agent's restart is untouched below.
     if (entry.supervised === true && entry.supervisor) {
-      return this.restartSupervisedAgent(name, entry);
+      return this.restartSupervisedAgent(name, entry, mode);
+    }
+
+    // Task 2.8: `mode` has no supervisor to thread through on the legacy
+    // path, but it must not be silently dropped either — the SAME
+    // `.force-fresh` marker mechanism Task 2.2 already built for
+    // `src/bus/system.ts`'s `hardRestart()` makes a 'fresh' restart request
+    // real for an unsupervised agent too: `AgentProcess`'s own
+    // `shouldContinue()` reads this marker on the imminent start below.
+    if (mode === 'fresh') {
+      try {
+        const org = this.resolveAgentOrg(name);
+        const paths = this.lifecycleBusPaths(name, org);
+        mkdirSync(paths.stateDir, { recursive: true });
+        writeForceFreshMarker(paths.stateDir, 'restart requested with mode=fresh (legacy path)\n');
+      } catch (err) {
+        console.warn(`[agent-manager] ${name}: failed to write .force-fresh marker for legacy fresh restart:`, err);
+      }
     }
 
     console.log(`[agent-manager] Restarting ${name}`);
@@ -2077,10 +2180,11 @@ export class AgentManager {
     const successor = this.agents.get(name);
     if (successor !== undefined && successor !== entry) {
       console.log(`[agent-manager] ${name} was re-registered while restarting — a new instance already holds the name, skipping the start.`);
-      return;
+      return LEGACY_DISPATCHED_RESULT;
     }
     await this.startAgent(name, '');
     console.log(`[agent-manager] Restart complete for ${name}`);
+    return LEGACY_DISPATCHED_RESULT;
   }
 
   /**
@@ -2220,6 +2324,17 @@ export class AgentManager {
         status.dormant = true;
         status.dormancyReason = d.reason;
       }
+      // Task 2.8: project the authoritative desired/observed lifecycle state
+      // for an agent actually on the supervised cutover path, ADDITIVE to
+      // (never replacing) the dormancy signal above — dormancy stays a
+      // separately-labeled, cadence-based advisory with no remediation
+      // attached; this is the durable, request-driven source of truth.
+      if (entry.supervised === true && entry.supervisor) {
+        const snap = entry.supervisor.snapshot();
+        status.desiredState = snap.desiredState;
+        status.phase = snap.phase;
+        status.blockedReason = snap.blockedReason;
+      }
       statuses.push(status);
     }
 
@@ -2352,6 +2467,21 @@ export class AgentManager {
     const entry = this.agents.get(name);
     if (!entry || entry.supervised !== true) return undefined;
     return entry.supervisor;
+  }
+
+  /**
+   * Task 2.8: cheap synchronous check the IPC ingress layer uses to decide
+   * whether it's safe to `await` a `stopAgent`/`restartAgent` call before
+   * responding. The supervised path's owner-mediated `request()` resolves
+   * within one microtask tick (Task 1.5's mailbox never awaits real runtime
+   * work before resolving the receipt) — safe and fast to await. The legacy
+   * path's `entry.process.stop()` can take up to ~21s (graceful-exit window)
+   * — awaiting that inside the IPC handler would blow past `IPCClient`'s 5s
+   * socket timeout, a real regression for every not-yet-cut-over agent.
+   * Returns `false` for an unmapped name (nothing to await either way).
+   */
+  isAgentSupervised(name: string): boolean {
+    return this.agents.get(name)?.supervised === true;
   }
 
   /**

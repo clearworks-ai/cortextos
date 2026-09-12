@@ -6,6 +6,7 @@ import { execSync, spawn, spawnSync } from 'child_process';
 import { IPCClient } from '../daemon/ipc-server.js';
 import { resolveInstanceId } from './resolve-instance-id.js';
 import { buildSubprocessCtxEnv } from '../utils/env.js';
+import { waitForAgentSettled } from './stop.js';
 
 const IS_WINDOWS = platform() === 'win32';
 const SAFE_CMD = /^[@a-z0-9._/-]+$/i;
@@ -32,8 +33,9 @@ export const startCommand = new Command('start')
   .argument('[agent]', 'Specific agent to start (starts all if omitted)')
   .option('--instance <id>', 'Instance ID')
   .option('--foreground', 'Run daemon in foreground (no PM2, for debugging)')
+  .option('--resume', 'Clear an explicit operator stop/HALT/quarantine and start the agent (required — a plain start refuses to resurrect a contained agent)')
   .description('Start the cortextOS daemon and agents')
-  .action(async (agent: string | undefined, options: { instance?: string; foreground?: boolean }) => {
+  .action(async (agent: string | undefined, options: { instance?: string; foreground?: boolean; resume?: boolean }) => {
     const instanceId = resolveInstanceId(options.instance);
     const ipc = new IPCClient(instanceId);
     const shouldBootstrapDaemon = await requireDaemonOfflineForBootstrap(ipc);
@@ -202,9 +204,24 @@ export const startCommand = new Command('start')
       }
 
       console.log(`Starting agent: ${agent}`);
-      const response = await ipc.send({ type: 'start-agent', agent, source: 'cortextos start' });
+      const response = await ipc.send({
+        type: 'start-agent',
+        agent,
+        source: 'cortextos start',
+        ...(options.resume ? { data: { resume: true } } : {}),
+      });
       if (response.success) {
-        console.log(`  ${response.data}`);
+        // Task 2.8: dispatch acceptance is not completion — poll a bounded
+        // window before declaring the agent up.
+        const { settled } = await waitForAgentSettled(ipc, agent, (s) => s?.status === 'running');
+        if (settled) {
+          console.log(`  ${agent} is running.`);
+        } else {
+          console.log(`  ${response.data} (durably accepted) — still starting, check \`cortextos status\`.`);
+        }
+      } else if (response.code === 'REQUIRES_RESUME') {
+        console.error(`  Blocked: ${response.error}`);
+        process.exit(1);
       } else {
         console.error(`  Error: ${response.error}`);
       }

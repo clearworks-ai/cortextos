@@ -905,7 +905,14 @@ export type IPCCommandType =
   | 'add-cron'
   | 'update-cron'
   | 'remove-cron'
-  | 'fleet-health';
+  | 'fleet-health'
+  // Task 2.8: read-only lifecycle-status queries. Neither mutates anything —
+  // both exist so a CLI/dashboard can poll a bounded window after a
+  // start/stop/restart dispatch instead of declaring "stopped"/"restarted"
+  // the instant dispatch was merely accepted (PRD §2.7 control-surface
+  // truthfulness).
+  | 'agent-lifecycle-status'
+  | 'lifecycle-operation-status';
 
 // ---------------------------------------------------------------------------
 // Execution log pagination response — Subtask 4.3
@@ -1026,6 +1033,24 @@ export interface WorkerStatus {
   exitCode?: number;
 }
 
+/**
+ * Task 2.8: plain string-literal mirrors of `src/daemon/lifecycle/types.ts`'s
+ * `DesiredState`/`ObservedPhase` (Task 1.1). Duplicated here rather than
+ * imported: this file sits outside `src/daemon/`, and Task 1.6's isolation
+ * gate (`tests/unit/daemon/lifecycle-isolation.test.ts`) flags any specifier
+ * containing the substring `daemon/lifecycle` from a file outside
+ * `src/daemon/lifecycle/` unless explicitly allowlisted — importing the real
+ * types here would require expanding that allowlist, which is out of this
+ * task's declared scope (`src/types/index.ts` is not in Task 2.8's
+ * Files-to-Modify list for the isolation test). The value sets are identical
+ * by construction; `src/daemon/agent-manager.ts` (which CAN import the real
+ * types, being inside `src/daemon/`) assigns its real `DesiredState`/
+ * `ObservedPhase` values directly into fields typed with these — TypeScript's
+ * structural typing accepts it since the literal sets match exactly.
+ */
+export type LifecycleDesiredStateWire = 'running' | 'stopped' | 'halted' | 'quarantined';
+export type LifecycleObservedPhaseWire = 'absent' | 'starting' | 'ready' | 'retiring' | 'blocked';
+
 export interface IPCResponse {
   success: boolean;
   data?: unknown;
@@ -1034,8 +1059,25 @@ export interface IPCResponse {
    * Structured error code for failed responses. Lets operators distinguish
    * "agent does not exist" (NOT_FOUND) from "request collapsed against an
    * in-flight identical op" (DEDUPED). See issue #346.
+   *
+   * Task 2.8: `REQUIRES_RESUME` — a plain maintenance `start-agent` was
+   * refused because the agent's durable desired state is
+   * stopped/halted/quarantined; an explicit `data.resume: true` is required.
+   * `INVALID_MODE` — `data.mode` was present but not `'continue' | 'fresh'`;
+   * rejected outright rather than silently ignored.
    */
-  code?: 'NOT_FOUND' | 'DEDUPED' | 'INVALID_INPUT' | 'NOT_RUNNING' | 'AGENT_NOT_SCHEDULED';
+  code?: 'NOT_FOUND' | 'DEDUPED' | 'INVALID_INPUT' | 'NOT_RUNNING' | 'AGENT_NOT_SCHEDULED' | 'REQUIRES_RESUME' | 'INVALID_MODE';
+  /**
+   * Task 2.8: additive control-surface-truthfulness fields (PRD §2.7).
+   * `success: true` on a start/stop/restart response has always meant, and
+   * still only means, "durably accepted" — these fields make that explicit
+   * instead of implicit, so a caller can tell "accepted" apart from
+   * "completed" without guessing from `data`'s human-readable string.
+   */
+  accepted?: boolean;
+  operationId?: string | null;
+  phase?: LifecycleObservedPhaseWire | null;
+  blockedReason?: string | null;
 }
 
 // Agent Discovery Types
@@ -1067,5 +1109,17 @@ export interface AgentStatus {
   // interactive first-run prompt past the auto-accept backstop (wedged, not bootstrapped)
   dormant?: boolean; // silent-dormancy fix: enabled agent whose heartbeat is stale
   // relative to its own liveness baseline (uptime, or daemon uptime if absent-from-map)
+  /**
+   * Task 2.8: authoritative desired/observed lifecycle state, projected from
+   * the per-agent `AgentLifecycleSupervisor`'s durable snapshot — present
+   * only for an agent actually on the supervised cutover path (absent for a
+   * legacy/unsupervised agent). `cortextos status` prints these as the
+   * authoritative source of truth; the pre-existing `dormant`/`dormancyReason`
+   * pair above stays a SEPARATE, cadence-based, advisory-only signal with no
+   * remediation attached to it — this pair is not a replacement for that one.
+   */
+  desiredState?: LifecycleDesiredStateWire;
+  phase?: LifecycleObservedPhaseWire;
+  blockedReason?: string | null;
   dormancyReason?: string; // human explanation of the dormancy verdict
 }

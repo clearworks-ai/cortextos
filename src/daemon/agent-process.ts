@@ -17,6 +17,7 @@ import { loadBuffer } from './conversation-buffer.js';
 import { ensureMissionAnchorFromBuffer } from './restart-context.js';
 import { readEnabledAgentsMap } from '../bus/enabled-agents-io.js';
 import { snapshotDescendants, killSnapshotSurvivors } from '../utils/process-tree.js';
+import { randomUUID } from 'crypto';
 import {
   importFreshRequest,
   consumeFreshRequest,
@@ -25,9 +26,22 @@ import {
   type ImportedFreshRequest,
 } from './lifecycle/legacy-compat.js';
 import { canonicalAgentId } from './lifecycle/types.js';
-import type { GenerationToken } from './lifecycle/types.js';
+import type { GenerationToken, LifecycleRequest, RequestReceipt } from './lifecycle/types.js';
 import { classifyExit } from './lifecycle/recovery-policy.js';
 import type { ExitObservation, RecoveryBudgetEntry } from './lifecycle/recovery-policy.js';
+
+/**
+ * Task 2.4: the minimal shape `AgentProcess` needs from its lifecycle owner
+ * — decoupled from the concrete `AgentLifecycleSupervisor` class the same
+ * way `RuntimeAdapter` (src/daemon/lifecycle/supervisor.ts) decouples the
+ * supervisor from a concrete `AgentProcess`. This file only depends on the
+ * one method it actually calls; the real `AgentLifecycleSupervisor` (which
+ * structurally satisfies this interface) is wired in by Task 2.5 via
+ * `setOwner()`.
+ */
+export interface LifecycleRequestOwner {
+  request(req: LifecycleRequest): Promise<RequestReceipt>;
+}
 
 type LogFn = (msg: string) => void;
 
@@ -220,11 +234,23 @@ export class AgentProcess {
   private lastSpawnWasHandoff = false;
   private lastSpawnMode: 'fresh' | 'continue' | null = null;
   private lastStartAtMs = 0;
+  // Task 2.4: gates sessionRefresh() between the legacy stop()/start() pair
+  // (default, byte-for-byte unchanged from before this task) and submitting
+  // a `LifecycleRequest` through the owner. Task 2.5 is what threads each
+  // agent's real per-agent `config.supervised` value into this constructor
+  // param — until then this stays `false` for every production caller, so
+  // nothing changes in production from this task alone.
+  private readonly supervised: boolean;
+  // Task 2.4: the lifecycle owner sessionRefresh() submits requests through
+  // when `supervised` is true. Null until `setOwner()` is called — see that
+  // method's doc comment for why this can't be a constructor param.
+  private owner: LifecycleRequestOwner | null = null;
 
-  constructor(name: string, env: CtxEnv, config: AgentConfig, log?: LogFn) {
+  constructor(name: string, env: CtxEnv, config: AgentConfig, log?: LogFn, supervised = false) {
     this.name = name;
     this.env = env;
     this.config = config;
+    this.supervised = supervised;
     if (config.max_crashes_per_day !== undefined) {
       this.maxCrashesPerDay = config.max_crashes_per_day;
     }
@@ -234,6 +260,22 @@ export class AgentProcess {
     }
     this.dedup = new MessageDedup();
     this.log = log || ((msg) => console.log(`[${name}] ${msg}`));
+  }
+
+  /**
+   * Task 2.4/2.5: late-bind this process's lifecycle owner.
+   *
+   * `AgentProcess` must exist before `AgentProcessRuntimeAdapter` can wrap
+   * it, and the adapter must exist before `AgentLifecycleSupervisor` can
+   * wrap THAT — so the supervisor reference can only be handed back to this
+   * instance after all three are constructed, ruling out a constructor
+   * param for this one field. Task 2.5's registry calls this once, right
+   * after building the trio, for every agent it marks `supervised`. Not
+   * called by any production code yet — `supervised` stays `false`
+   * everywhere until Task 2.5 lands.
+   */
+  setOwner(owner: LifecycleRequestOwner): void {
+    this.owner = owner;
   }
 
   /**
@@ -636,36 +678,73 @@ export class AgentProcess {
   /**
    * Restart with --continue (session refresh).
    *
-   * Delegates to stop() + start() so it inherits the BUG-011 race fix
-   * automatically. This also eliminates a separate bug in the previous
-   * inline implementation where the OLD pty's exit handler could fire
-   * AFTER the NEW pty was set up, nulling out the wrong reference.
-   * `start()` will pick up `continue` mode automatically because the
+   * Task 2.4: gated by `this.supervised`. When `false`/absent (the default —
+   * the only behavior possible until Task 2.5 lands), this is byte-for-byte
+   * the pre-Task-2.4 body: delegates to stop() + start() so it inherits the
+   * BUG-011 race fix automatically, eliminating the separate bug in the
+   * pre-BUG-011 inline implementation where the OLD pty's exit handler could
+   * fire AFTER the NEW pty was set up, nulling out the wrong reference.
+   * `start()` picks up `continue` mode automatically because the
    * conversation directory still has .jsonl files (shouldContinue() is true).
+   *
+   * When `true`, this instead submits a single `refresh` LifecycleRequest
+   * through the owner (`AgentLifecycleSupervisor`) and returns its receipt —
+   * the owner performs the retire→start under one operationId, revalidating
+   * immediately before spawning (Task 1.5's `isEffectStale()` fencing), so a
+   * stop/halt committed after this call has already entered still revokes
+   * it. This is the closure of deep-dive Scenario B ("I stopped it, but
+   * another copy came back").
    */
-  async sessionRefresh(): Promise<void> {
-    this.log('Session refresh (--continue restart)');
-    // Write .session-refresh marker so the SessionEnd crash-alert hook
-    // (src/hooks/hook-crash-alert.ts) classifies the imminent PTY exit as a
-    // session refresh rather than a crash. The hook's marker handler +
-    // quiet-suppression set + message switch were all wired for this type,
-    // but no writer existed — every --continue rollover at the session-time
-    // cap surfaced as a false-positive 'crash' on chief/analyst + the
-    // crashes.log file.
+  async sessionRefresh(): Promise<RequestReceipt | void> {
+    if (!this.supervised) {
+      // Legacy path — byte-for-byte unchanged from the pre-Task-2.4 body.
+      this.log('Session refresh (--continue restart)');
+      // Write .session-refresh marker so the SessionEnd crash-alert hook
+      // (src/hooks/hook-crash-alert.ts) classifies the imminent PTY exit as a
+      // session refresh rather than a crash. The hook's marker handler +
+      // quiet-suppression set + message switch were all wired for this type,
+      // but no writer existed — every --continue rollover at the session-time
+      // cap surfaced as a false-positive 'crash' on chief/analyst + the
+      // crashes.log file.
+      try {
+        const paths = resolvePaths(this.name, this.env.instanceId, this.env.org);
+        // Task 2.2: route the write through `projectSessionRefreshMarker` so it
+        // is keyed to an identified transition (a `GenerationToken`) rather than
+        // an ownerless `writeFileSync`. The on-disk content is byte-for-byte
+        // unchanged — the hook that reads it (`hook-crash-alert.ts`) checks only
+        // presence, never content — this only fixes the call site ahead of Task
+        // 2.4's rewire of `sessionRefresh()` into a real supervisor request.
+        const token: GenerationToken = {
+          agentId: canonicalAgentId({ instanceId: this.env.instanceId, org: this.env.org, name: this.name }),
+          // Legacy/unsupervised path: no real per-agent supervisor epoch exists
+          // yet at this call site (Task 2.5 wires the real one). 0 is a
+          // documented sentinel, not a load-bearing value — nothing reads this
+          // token back today.
+          supervisorEpoch: 0,
+          generation: this.lifecycleGeneration,
+        };
+        projectSessionRefreshMarker(paths.stateDir, token);
+      } catch (err) {
+        this.log(`Failed to write .session-refresh marker: ${err}`);
+      }
+      await this.stop();
+      await this.start();
+      this.log('Session refreshed');
+      return;
+    }
+
+    // Supervised path — submit through the owner instead of calling
+    // stop()/start() directly. The marker write still happens (both paths
+    // need it, per this task's acceptance criteria), keyed to the
+    // generation actually being retired — i.e. the CURRENT generation,
+    // before the owner's retire→start operation begins.
+    this.log('Session refresh (--continue restart) — submitting through owner');
     try {
       const paths = resolvePaths(this.name, this.env.instanceId, this.env.org);
-      // Task 2.2: route the write through `projectSessionRefreshMarker` so it
-      // is keyed to an identified transition (a `GenerationToken`) rather than
-      // an ownerless `writeFileSync`. The on-disk content is byte-for-byte
-      // unchanged — the hook that reads it (`hook-crash-alert.ts`) checks only
-      // presence, never content — this only fixes the call site ahead of Task
-      // 2.4's rewire of `sessionRefresh()` into a real supervisor request.
       const token: GenerationToken = {
         agentId: canonicalAgentId({ instanceId: this.env.instanceId, org: this.env.org, name: this.name }),
-        // Legacy/unsupervised path: no real per-agent supervisor epoch exists
-        // yet at this call site (Task 2.5 wires the real one). 0 is a
-        // documented sentinel, not a load-bearing value — nothing reads this
-        // token back today.
+        // Same documented sentinel as the legacy branch — nothing reads this
+        // token back today (see projectSessionRefreshMarker's own doc).
         supervisorEpoch: 0,
         generation: this.lifecycleGeneration,
       };
@@ -673,9 +752,26 @@ export class AgentProcess {
     } catch (err) {
       this.log(`Failed to write .session-refresh marker: ${err}`);
     }
-    await this.stop();
-    await this.start();
-    this.log('Session refreshed');
+
+    if (!this.owner) {
+      // Defensive fail-closed: supervised=true with no owner wired is a
+      // build-sequence error (Task 2.5 always calls setOwner() before ever
+      // constructing an AgentProcess with supervised=true) — never silently
+      // fall back to the legacy stop()/start() pair, which would defeat this
+      // task's entire point of making the operation revocable.
+      throw new Error(`sessionRefresh: supervised=true but no lifecycle owner is wired for agent "${this.name}"`);
+    }
+
+    return this.owner.request({
+      requestId: randomUUID(),
+      kind: 'refresh',
+      cause: 'session-age',
+      mode: 'continue',
+      observedGeneration: this.lifecycleGeneration,
+      userInitiated: false,
+      evidence: { source: 'session-timer' },
+      requestedAtMs: Date.now(),
+    });
   }
 
   /**
@@ -1542,6 +1638,25 @@ export class AgentProcess {
       : `🔄 ${this.name} restarted (planned): ${reason || 'no reason given'}`;
   }
 
+  /**
+   * Task 2.4: intentionally UNCHANGED. This 71-hour deadline still lives as
+   * a plain `setTimeout` on this instance and still re-reads
+   * `max_session_seconds` from config.json on every fire (preserved exactly,
+   * per this task's acceptance criteria). What changed is only what firing
+   * DECIDES to do: the fired callback below still just calls
+   * `this.sessionRefresh()` — that method itself now branches on
+   * `this.supervised`, so a supervised agent's fired deadline flows into
+   * `this.owner.request(...)` without this method needing to know anything
+   * about it. `clearSessionTimer()` (called at the top of `runStop()`, which
+   * both the legacy `stop()` path AND the supervised path's fenced
+   * `runStopFenced()` call) still cancels this timer on retirement either
+   * way — "the deadline lives on the owner" (per this task's acceptance
+   * criteria) refers to the *owner's revalidation now being a second,
+   * independent line of defense* on top of this timer being cleared, not to
+   * this `setTimeout` being physically relocated — see PHASES.md Task 2.4
+   * Step 1's explicit preference for this smaller-diff shape over a new
+   * supervisor-owned scheduling primitive.
+   */
   private startSessionTimer(): void {
     const DEFAULT_MAX_SESSION_S = 255600;
     // Node setTimeout uses int32 ms internally. Values > 2^31-1 (~24.8d) silently

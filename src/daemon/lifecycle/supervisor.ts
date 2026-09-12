@@ -562,25 +562,6 @@ export class AgentLifecycleSupervisor {
       return;
     }
 
-    if (winner.req.kind === 'refresh') {
-      const result = this.commitWithRetry(mutateBudgets);
-      const post = result.ok ? result.snapshot : snapshot;
-      this.setOperation(operationId, post.phase, allOf(pool), post.blockedReason);
-      for (const entry of pool) {
-        entry.resolve({
-          requestId: entry.req.requestId,
-          operationId,
-          accepted: result.ok,
-          desiredState: post.desiredState,
-          phase: post.phase,
-          generation: post.currentGeneration,
-          blockedReason: result.ok ? post.blockedReason : `${result.code}: ${result.message}`,
-          coalescedWith: otherIds(pool, entry.req.requestId),
-        });
-      }
-      return;
-    }
-
     if (winner.req.kind === 'start' && snapshot.desiredState === 'running' && snapshot.phase !== 'absent') {
       // Already running/ready -- a redundant 'start' is trivially satisfied,
       // no new generation.
@@ -602,12 +583,25 @@ export class AgentLifecycleSupervisor {
       return;
     }
 
-    // 'start' (nothing currently running) or 'restart' (retire-then-start):
-    // allocate the new generation now, in the same commit, per Step 4 --
-    // only a *decided* start allocates, never a merely-requested one.
+    // 'start' (nothing currently running), 'restart', or 'refresh' (both
+    // retire-then-start): allocate the new generation now, in the same
+    // commit, per Step 4 -- only a *decided* start allocates, never a
+    // merely-requested one.
+    //
+    // Task 2.4: a `refresh` (session-age rollover, or any future refresh
+    // cause) performs the exact same retire-then-start allocation as
+    // `restart` -- it IS a live generation's "restart in place," not a
+    // distinct code path. Task 1.5 originally left `refresh` as a
+    // budget-only no-op here (nothing submitted one yet at that point in the
+    // build); this is the fix that actually closes deep-dive Scenario B,
+    // since a `refresh`'s retire+start must run under ONE operationId with
+    // the same isEffectStale() revalidation `restart`/`start` already get --
+    // a stop/halt committed after a refresh has begun retiring must still be
+    // able to revoke the pending start, exactly as it already does for a
+    // restart.
     const oldGeneration = snapshot.currentGeneration;
     const oldResources = [...snapshot.resources];
-    const isRestart = winner.req.kind === 'restart' && oldGeneration !== null;
+    const isRestart = (winner.req.kind === 'restart' || winner.req.kind === 'refresh') && oldGeneration !== null;
     const newGen = snapshot.nextGeneration;
 
     const result = this.commitWithRetry((draft) => {

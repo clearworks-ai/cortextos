@@ -717,6 +717,17 @@ export class AgentProcess {
     return this.config;
   }
 
+  /**
+   * Copy of this process's canonical CtxEnv. Used by FastChecker's watchdog to
+   * target its heartbeat subprocess at THIS agent's identity rather than the
+   * daemon's own inherited environment (which is whichever agent last spawned
+   * with these vars set in-process — historically caused every agent's 50-min
+   * watchdog tick to write under one agent's name).
+   */
+  getEnvironment(): Readonly<CtxEnv> {
+    return { ...this.env };
+  }
+
   // --- Private methods ---
 
   /**

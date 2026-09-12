@@ -204,15 +204,45 @@ export class FastChecker {
     await this.waitForBootstrap();
     this.log('Bootstrap complete. Beginning poll loop.');
 
-    // Idle-session heartbeat watchdog: fires every 50 min regardless of REPL state
+    // Idle-session heartbeat watchdog: fires every 50 min regardless of REPL state.
+    //
+    // The watchdog subprocess must be pinned to THIS agent's identity via an
+    // explicit env/cwd override. Without it, execFile() inherits the daemon's
+    // own process.env, and `cortextos bus update-heartbeat` resolves its target
+    // agent from CTX_AGENT_NAME in that inherited environment — whichever agent
+    // last set it in-process, not the agent this checker instance belongs to.
+    // Observed in production: every agent's watchdog tick landed under one
+    // agent's heartbeat/event files (282 misattributed entries in one day).
     const HEARTBEAT_INTERVAL_MS = 50 * 60 * 1000;
-    const agentName = this.agent.name;
-    this.heartbeatTimer = setInterval(() => {
-      const ts = new Date().toISOString();
-      execFile('cortextos', ['bus', 'update-heartbeat', `[watchdog] ${agentName} alive — idle session ${ts}`], (err) => {
-        if (err) this.log(`Heartbeat watchdog error: ${err.message}`);
-      });
-    }, HEARTBEAT_INTERVAL_MS);
+    const target = this.agent.getEnvironment();
+    if (target.agentName !== this.agent.name || !target.agentDir || target.ctxRoot !== this.paths.ctxRoot) {
+      this.log(`Heartbeat watchdog target-context mismatch for ${this.agent.name} — not starting an ambiguously attributed watchdog`);
+    } else {
+      const watchdogEnv: NodeJS.ProcessEnv = {
+        ...process.env,
+        CTX_AGENT_NAME: target.agentName,
+        CTX_AGENT_DIR: target.agentDir,
+        CTX_ORG: target.org,
+        CTX_ROOT: target.ctxRoot,
+        CTX_INSTANCE_ID: target.instanceId,
+        CTX_FRAMEWORK_ROOT: target.frameworkRoot,
+        CTX_PROJECT_ROOT: target.projectRoot,
+        CTX_TIMEZONE: target.timezone ?? '',
+        CTX_ORCHESTRATOR: target.orchestrator ?? '',
+      };
+      this.heartbeatTimer = setInterval(() => {
+        if (!this.running || !this.agent.isRunning()) return;
+        const ts = new Date().toISOString();
+        execFile(
+          'cortextos',
+          ['bus', 'update-heartbeat', `[watchdog] ${target.agentName} alive — daemon-observed process liveness ${ts}`],
+          { cwd: target.agentDir, env: watchdogEnv },
+          (err) => {
+            if (err) this.log(`Heartbeat watchdog error (${target.agentName}): ${err.message}`);
+          },
+        );
+      }, HEARTBEAT_INTERVAL_MS);
+    }
 
     while (this.running) {
       try {

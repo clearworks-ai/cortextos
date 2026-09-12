@@ -17,12 +17,22 @@ import { hardRestart } from '../../../src/bus/system.js';
 import type { BusPaths, TelegramCallbackQuery } from '../../../src/types';
 
 // Minimal mock for AgentProcess
-function createMockAgent(name = 'test-agent') {
+function createMockAgent(name = 'test-agent', ctxRoot = '/tmp/framework') {
   return {
     name,
     isBootstrapped: vi.fn().mockReturnValue(true),
+    isRunning: vi.fn().mockReturnValue(true),
     injectMessage: vi.fn().mockReturnValue(true),
     write: vi.fn(),
+    getEnvironment: vi.fn().mockReturnValue({
+      instanceId: 'test-instance',
+      ctxRoot,
+      frameworkRoot: '/tmp/framework',
+      agentName: name,
+      agentDir: `/tmp/framework/agents/${name}`,
+      org: 'test-org',
+      projectRoot: '/tmp/framework',
+    }),
   } as any;
 }
 
@@ -853,15 +863,24 @@ describe('FastChecker', () => {
     beforeEach(() => { vi.useFakeTimers(); });
     afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
 
-    it('fires exec after bootstrap at 50-min interval', async () => {
+    it('fires exec after bootstrap at 50-min interval, targeted at the agent\'s own identity', async () => {
       const { execFile } = await import('child_process');
-      const agent = createMockAgent('my-agent');
+      const agent = createMockAgent('my-agent', paths.ctxRoot);
       const checker = new FastChecker(agent, paths, '/tmp/framework');
       checker.start();
       await vi.advanceTimersByTimeAsync(50 * 60 * 1000);
       expect(execFile).toHaveBeenCalledWith(
         'cortextos',
-        expect.arrayContaining(['bus', 'update-heartbeat', expect.stringContaining('[watchdog] my-agent alive — idle session')]),
+        expect.arrayContaining(['bus', 'update-heartbeat', expect.stringContaining('[watchdog] my-agent alive')]),
+        expect.objectContaining({
+          cwd: '/tmp/framework/agents/my-agent',
+          env: expect.objectContaining({
+            CTX_AGENT_NAME: 'my-agent',
+            CTX_AGENT_DIR: '/tmp/framework/agents/my-agent',
+            CTX_ORG: 'test-org',
+            CTX_ROOT: paths.ctxRoot,
+          }),
+        }),
         expect.any(Function),
       );
       checker.stop();
@@ -871,7 +890,7 @@ describe('FastChecker', () => {
     it('clears timer on stop — no further exec calls after stop', async () => {
       const { execFile } = await import('child_process');
       const execMock = execFile as ReturnType<typeof vi.fn>;
-      const agent = createMockAgent('my-agent');
+      const agent = createMockAgent('my-agent', paths.ctxRoot);
       const checker = new FastChecker(agent, paths, '/tmp/framework');
       checker.start();
       await vi.advanceTimersByTimeAsync(50 * 60 * 1000);
@@ -885,7 +904,7 @@ describe('FastChecker', () => {
 
     it('does not fire before bootstrap completes', async () => {
       const { execFile } = await import('child_process');
-      const agent = createMockAgent('my-agent');
+      const agent = createMockAgent('my-agent', paths.ctxRoot);
       agent.isBootstrapped.mockReturnValue(false);
       const checker = new FastChecker(agent, paths, '/tmp/framework');
       checker.start();
@@ -895,6 +914,65 @@ describe('FastChecker', () => {
         expect.arrayContaining([expect.stringContaining('[watchdog]')]),
         expect.any(Function),
       );
+      checker.stop();
+      checker.wake();
+    });
+
+    it('does not skip subsequent ticks when the agent is not running', async () => {
+      const { execFile } = await import('child_process');
+      const execMock = execFile as ReturnType<typeof vi.fn>;
+      const agent = createMockAgent('my-agent', paths.ctxRoot);
+      agent.isRunning.mockReturnValue(false);
+      const checker = new FastChecker(agent, paths, '/tmp/framework');
+      checker.start();
+      await vi.advanceTimersByTimeAsync(50 * 60 * 1000);
+      expect(execMock).not.toHaveBeenCalled();
+      checker.stop();
+      checker.wake();
+    });
+
+    it('two agents with different identities each write under their own context, not a shared/inherited one', async () => {
+      const { execFile } = await import('child_process');
+      const execMock = execFile as ReturnType<typeof vi.fn>;
+
+      const knox = createMockAgent('knox-codex', paths.ctxRoot);
+      const knoxChecker = new FastChecker(knox, paths, '/tmp/framework');
+      knoxChecker.start();
+      await vi.advanceTimersByTimeAsync(50 * 60 * 1000);
+
+      const larry = createMockAgent('larry-codex', paths.ctxRoot);
+      const larryChecker = new FastChecker(larry, paths, '/tmp/framework');
+      larryChecker.start();
+      await vi.advanceTimersByTimeAsync(50 * 60 * 1000);
+
+      const targets = execMock.mock.calls.map((call) => (call[2] as { env: NodeJS.ProcessEnv }).env.CTX_AGENT_NAME);
+      expect(targets).toContain('knox-codex');
+      expect(targets).toContain('larry-codex');
+      // Neither call's env carries the OTHER agent's identity — no bleed-through
+      // from a shared/inherited process.env (the exact bug this fix closes).
+      for (const call of execMock.mock.calls) {
+        const env = (call[2] as { env: NodeJS.ProcessEnv }).env;
+        const cwd = (call[2] as { cwd: string }).cwd;
+        const name = env.CTX_AGENT_NAME;
+        expect(cwd).toBe(`/tmp/framework/agents/${name}`);
+      }
+
+      knoxChecker.stop();
+      knoxChecker.wake();
+      larryChecker.stop();
+      larryChecker.wake();
+    });
+
+    it('does not start an ambiguously-attributed watchdog when the agent context mismatches the checker paths', async () => {
+      const { execFile } = await import('child_process');
+      const execMock = execFile as ReturnType<typeof vi.fn>;
+      // getEnvironment() returns a DIFFERENT ctxRoot than this checker's paths —
+      // simulates the exact inherited-environment mismatch the fix guards against.
+      const agent = createMockAgent('my-agent', '/some/other/ctx/root');
+      const checker = new FastChecker(agent, paths, '/tmp/framework');
+      checker.start();
+      await vi.advanceTimersByTimeAsync(50 * 60 * 1000);
+      expect(execMock).not.toHaveBeenCalled();
       checker.stop();
       checker.wake();
     });

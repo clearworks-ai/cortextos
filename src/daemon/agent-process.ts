@@ -164,6 +164,14 @@ export class AgentProcess {
   // spawned since this old one was created. Without this guard, a late exit
   // from an old PTY can race past stopRequested and trigger crash recovery on
   // the new agent.
+  // Task 2.1: retained as defense-in-depth, NOT deleted or conflated with the
+  // lifecycle supervisor's own `GenerationToken.generation` (Task 1.1/1.5).
+  // This counter solves a narrower, same-object problem (discarding a late
+  // exit from a PTY this same `AgentProcess` instance already replaced); the
+  // supervisor's generation solves the broader cross-restart/cross-process
+  // "which incarnation owns this resource" problem the lifecycle store
+  // persists. Both stay active side by side — this one is subordinate to,
+  // never a substitute for, the supervisor's.
   private lifecycleGeneration: number = 0;
   // BUG-011 fix: stop() awaits this promise (resolved by the onExit handler in start())
   // to guarantee the PTY exit has fired before stopping=false is reset. Without
@@ -182,6 +190,12 @@ export class AgentProcess {
   // both awaited through to pty.spawn(), leaving TWO live PTYs for one agent —
   // the dual-larry / 5x-frank2 duplicate-process incident (2026-08-04). This
   // promise coalesces every concurrent start onto the first in-flight spawn.
+  // Task 2.1: retained as defense-in-depth. This guard protects `start()`
+  // specifically; it is bypassed by the fenced `startImplFenced()` entry
+  // point the lifecycle supervisor's `AgentProcessRuntimeAdapter` calls
+  // instead, once wired in (Task 2.5) — single-flight coordination for that
+  // path becomes the supervisor's own generation/intent-revision fencing
+  // (Task 1.5), which this field is subordinate to, not a substitute for.
   private inFlightStart: Promise<void> | null = null;
   private dedup: MessageDedup;
   private log: LogFn;
@@ -393,6 +407,24 @@ export class AgentProcess {
   }
 
   /**
+   * Task 2.1 fenced low-level entry point: calls the exact same private
+   * `startImpl()` body that `start()` calls, WITHOUT `start()`'s
+   * single-flight (`inFlightStart`) coalescing guard.
+   *
+   * ONLY `src/daemon/lifecycle/agent-runtime.ts`'s `AgentProcessRuntimeAdapter`
+   * may call this — it is the fenced spawn effect the lifecycle supervisor's
+   * generation/intent-revision arbitration coordinates instead. Do not add any
+   * other production caller. Until Tasks 2.4/2.5 rewire `start()` itself to
+   * submit a lifecycle request through the supervisor, `start()` remains the
+   * only path production code should use directly; this wrapper exists solely
+   * so the adapter can be unit/integration-tested against a real `AgentProcess`
+   * ahead of that rewire.
+   */
+  async startImplFenced(): Promise<void> {
+    return this.startImpl();
+  }
+
+  /**
    * Stop the agent gracefully.
    *
    * Change B (join-in-flight): a re-entrant stop() awaits the in-flight teardown
@@ -556,6 +588,21 @@ export class AgentProcess {
     this.status = 'stopped';
     this.notifyStatusChange();
     this.log('Stopped');
+  }
+
+  /**
+   * Task 2.1 fenced low-level entry point: calls the exact same private
+   * `runStop()` teardown body that `stop()` calls, WITHOUT `stop()`'s
+   * join-in-flight re-entry guard.
+   *
+   * ONLY `src/daemon/lifecycle/agent-runtime.ts`'s `AgentProcessRuntimeAdapter`
+   * may call this. `runStop()`'s teardown sequence (graceful shutdown,
+   * descendant snapshot/sweep) is unchanged by this task — Task 2.6 is what
+   * upgrades it to return a structured `RetirementResult` instead of `void`.
+   * Do not add any other production caller.
+   */
+  async runStopFenced(): Promise<void> {
+    return this.runStop();
   }
 
   /**

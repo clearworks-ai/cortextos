@@ -331,8 +331,13 @@ function probeProcessLiveness(pid: number): 'alive' | 'dead' | 'ambiguous' {
  * `/proc` filesystem, so callers fall back to a recorded wall-clock
  * timestamp -- a deliberately weaker proxy, documented as such wherever
  * it's used.
+ *
+ * Exported so other lifecycle callers (e.g. Task 2.1's
+ * `AgentProcessRuntimeAdapter`, capturing `pty-host` resource evidence) reuse
+ * this exact platform-conditional logic instead of re-deciding, per-caller,
+ * whether birth evidence is available on the current platform.
  */
-function getProcessBirthEvidence(pid: number): string | null {
+export function getProcessBirthEvidence(pid: number): string | null {
   if (process.platform === 'linux') {
     try {
       const stat = readFileSync(`/proc/${pid}/stat`, 'utf-8');

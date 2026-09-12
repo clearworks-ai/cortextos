@@ -26,6 +26,12 @@ import { dispatchMeetingConsumers } from './meeting-consumer-dispatch.js';
 import { BuzzRelayClient, BuzzDispatcher, loadBuzzConfig, type NostrEvent } from '../buzz/index.js';
 import { computeDormancy, parseHeartbeatIntervalMs } from '../utils/dormancy.js';
 import { CRONS_DIRECTORY, CRONS_FILENAME } from '../bus/crons-schema.js';
+import { randomUUID } from 'crypto';
+import { AgentLifecycleSupervisor } from './lifecycle/supervisor.js';
+import { AgentProcessRuntimeAdapter } from './lifecycle/agent-runtime.js';
+import { LifecycleStateStore } from './lifecycle/state-store.js';
+import { canonicalAgentId } from './lifecycle/types.js';
+import type { DesiredState, ObservedPhase } from './lifecycle/types.js';
 
 type LogFn = (msg: string) => void;
 
@@ -54,6 +60,24 @@ type AgentEntry = {
    * this object, and the object is what we still hold across the await.
    */
   stopped?: boolean;
+  /**
+   * Task 2.5: true iff this agent's config had `supervised: true` at the
+   * time this entry was constructed — read once per operation, not a live
+   * toggle (see `AgentConfig.supervised`'s doc comment). Every rewired
+   * entry point (`startAgent`/`stopAgent`/`restartAgent`/`bootSelfHeal`)
+   * branches on this field, never on a freshly-reloaded config, so a single
+   * entry's lifetime is never split across both authorities.
+   */
+  supervised?: boolean;
+  /**
+   * Task 2.5: this entry's per-agent `AgentLifecycleSupervisor`, present
+   * whenever `supervised` is true (and lazily constructed even when it is
+   * not, per Task 1.4's "record exists for later cutover" — see
+   * `AgentManager.supervisors`). The DURABLE lifecycle record this object
+   * reads/writes lives on disk (`LifecycleStateStore`) and is never deleted;
+   * only the runtime resources it tracks are retired.
+   */
+  supervisor?: AgentLifecycleSupervisor;
 };
 
 /**
@@ -98,6 +122,18 @@ export class AgentManager {
   // idempotent no-op path, and have its start SWALLOWED — so callers MUST keep
   // stop-before-start ordering for coordinated restarts.
   private stoppingAgents: Set<string> = new Set();
+  /**
+   * Task 2.5: per-agent `AgentLifecycleSupervisor` registry, keyed by name.
+   * Constructed for EVERY agent (Task 1.4 lazy adoption on first touch),
+   * regardless of that agent's `config.supervised` value, so a durable
+   * lifecycle record exists for a later cutover — but a supervisor
+   * `request()` is only ever issued for an agent whose current `AgentEntry`
+   * has `supervised === true` (see `AgentEntry.supervised`). The DURABLE
+   * record (on disk, via `LifecycleStateStore`) is never deleted; this map
+   * just caches the in-memory `AgentLifecycleSupervisor` object bound to the
+   * agent's CURRENT `AgentProcess` instance/adapter for this daemon process.
+   */
+  private supervisors: Map<string, AgentLifecycleSupervisor> = new Map();
   private instanceId: string;
   private ctxRoot: string;
   private frameworkRoot: string;
@@ -328,6 +364,38 @@ export class AgentManager {
       if (entry && entry.enabled === false) continue;
       if (this.agents.has(name)) continue;
 
+      // Task 2.5 Step 3: for a supervised agent, "enabled but absent from
+      // map" must NOT override a persisted stopped/halted/quarantined
+      // desired state (or a blocked prior retirement) from an earlier
+      // daemon incarnation — that would resurrect an agent an operator (or
+      // a supervised stop) deliberately stopped. An agent with no existing
+      // record yet (first-ever adoption), or one that isn't opted in, has
+      // no such record to check (or isn't checked) and proceeds exactly as
+      // today.
+      if (config.supervised === true) {
+        const persisted = this.peekPersistedDesiredState(name, org);
+        if (persisted) {
+          if (
+            persisted.desiredState === 'stopped' ||
+            persisted.desiredState === 'halted' ||
+            persisted.desiredState === 'quarantined'
+          ) {
+            console.log(
+              `[agent-manager] Boot self-heal: skipping ${name} — persisted desired state is ` +
+              `"${persisted.desiredState}" (supervised); not overriding.`,
+            );
+            continue;
+          }
+          if (persisted.phase === 'blocked') {
+            console.log(
+              `[agent-manager] Boot self-heal: skipping ${name} — a prior retirement is blocked ` +
+              `(supervised): ${persisted.blockedReason ?? 'unknown reason'}.`,
+            );
+            continue;
+          }
+        }
+      }
+
       missing.push(name);
       console.warn(
         `[agent-manager] Boot self-heal: ${name} is enabled but not in registry after ` +
@@ -476,6 +544,281 @@ export class AgentManager {
     return { ok: true };
   }
 
+  /**
+   * Task 2.5: build the `BusPaths` a per-agent `LifecycleStateStore` reads
+   * and writes under. Deliberately NOT `resolvePaths()` (used elsewhere in
+   * this file for FastChecker/TelegramPoller wiring): `resolvePaths()`
+   * recomputes `ctxRoot` from `homedir()` rather than using this
+   * `AgentManager` instance's own `this.ctxRoot` constructor param. In
+   * production those two values are identical (`daemon/index.ts` constructs
+   * `AgentManager` with exactly `join(homedir(), '.cortextos', instanceId)`),
+   * but a test — or any future caller — that constructs `AgentManager`
+   * directly against a temp-directory `ctxRoot` would otherwise have this
+   * store silently read/write real `~/.cortextos/...` instead of the
+   * intended root. Keying off `this.ctxRoot` directly is strictly more
+   * correct and makes the store impossible to accidentally point at the
+   * wrong root.
+   */
+  private lifecycleBusPaths(name: string, org: string): BusPaths {
+    const ctxRoot = this.ctxRoot;
+    const orgBase = org ? join(ctxRoot, 'orgs', org) : ctxRoot;
+    return {
+      ctxRoot,
+      inbox: join(ctxRoot, 'inbox', name),
+      inflight: join(ctxRoot, 'inflight', name),
+      processed: join(ctxRoot, 'processed', name),
+      logDir: join(ctxRoot, 'logs', name),
+      stateDir: join(ctxRoot, 'state', name),
+      taskDir: join(orgBase, 'tasks'),
+      approvalDir: join(orgBase, 'approvals'),
+      analyticsDir: join(orgBase, 'analytics'),
+      deliverablesDir: join(orgBase, 'deliverables'),
+    };
+  }
+
+  /**
+   * Task 2.5 Step 1: resolve (and, on first touch, lazily adopt) the
+   * durable lifecycle store for `name`, and decide whether this operation
+   * is actually allowed to route through the supervisor.
+   *
+   * `supervisedActive` starts as `config.supervised === true` and is forced
+   * back to `false` — with a warning, never a crash or a silent guess — if
+   * `store.load()` reports anything other than a clean "not-yet-adopted"
+   * first touch: a genuinely fresh agent gets `adopt('running')` called for
+   * it here (this call site is always immediately followed by a real start
+   * attempt); anything else (an existing record for a colliding identity,
+   * corrupt JSON, a schema mismatch, or `adopt()` itself failing) is
+   * "conflicting legacy evidence" per Task 1.4's fail-closed rule and blocks
+   * supervised routing for this agent THIS run, falling back to the legacy
+   * path rather than guessing at a state nobody actually observed.
+   */
+  private resolveSupervisorGate(
+    name: string,
+    org: string,
+    config: AgentConfig,
+  ): { store: LifecycleStateStore; agentId: string; supervisedActive: boolean } {
+    const agentId = canonicalAgentId({ instanceId: this.instanceId, org, name });
+    const paths = this.lifecycleBusPaths(name, org);
+    const store = new LifecycleStateStore(paths, agentId);
+    let supervisedActive = config.supervised === true;
+
+    const loaded = store.load();
+    if ('corrupt' in loaded) {
+      if (loaded.reason === 'not-yet-adopted') {
+        const adoptResult = store.adopt('running', {
+          desiredStateReason: 'lazy adoption on first touch (Task 2.5)',
+        });
+        if (!adoptResult.ok) {
+          console.warn(
+            `[agent-manager] lifecycle-supervisor adoption for "${name}" blocked ` +
+            `(${adoptResult.code}: ${adoptResult.message}) — conflicting legacy evidence, ` +
+            `falling back to the legacy path for this agent rather than guessing.`,
+          );
+          supervisedActive = false;
+        }
+      } else {
+        console.warn(
+          `[agent-manager] lifecycle-supervisor store for "${name}" is corrupt (${loaded.reason}) — ` +
+          `falling back to the legacy path for this agent rather than guessing.`,
+        );
+        supervisedActive = false;
+      }
+    }
+
+    return { store, agentId, supervisedActive };
+  }
+
+  /**
+   * Task 2.5 Step 3: read-only peek at a supervised agent's persisted
+   * `desiredState`/`phase`/`blockedReason` WITHOUT constructing a full
+   * `AgentLifecycleSupervisor` (no adapter/runtime needed for a pure read).
+   * Returns `null` on any corrupt/missing/unreadable record — bootSelfHeal's
+   * caller treats that identically to "no opinion, proceed as today".
+   */
+  private peekPersistedDesiredState(
+    name: string,
+    org: string,
+  ): { desiredState: DesiredState; phase: ObservedPhase; blockedReason: string | null } | null {
+    try {
+      const agentId = canonicalAgentId({ instanceId: this.instanceId, org, name });
+      const paths = this.lifecycleBusPaths(name, org);
+      const store = new LifecycleStateStore(paths, agentId);
+      const loaded = store.load();
+      if ('corrupt' in loaded) return null;
+      return { desiredState: loaded.desiredState, phase: loaded.phase, blockedReason: loaded.blockedReason };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Task 2.5 Step 2: for a supervised agent whose `AgentEntry` is still
+   * mapped but not actually alive (crashed, or otherwise dead without a
+   * clean `stopAgent` teardown), reconcile via an owner-mediated request
+   * instead of `startAgent`'s manual kill-tree eviction. The SAME
+   * `AgentProcess`/adapter/supervisor triple is reused — `AgentLifecycleSupervisor`
+   * internally handles retiring any stale resources before granting a new
+   * generation, so no manager-local stop/unmap/reconstruct path bypasses
+   * verified retirement.
+   */
+  private async reconcileSupervisedRestart(name: string, entry: AgentEntry): Promise<void> {
+    console.log(`[agent-manager] ${name} in registry but not actually alive — reconciling via owner (supervised).`);
+    const supervisor = entry.supervisor!;
+    const receipt = await supervisor.request({
+      requestId: randomUUID(),
+      kind: 'start',
+      cause: 'reaper',
+      mode: 'continue',
+      observedGeneration: null,
+      userInitiated: false,
+      evidence: {},
+      requestedAtMs: Date.now(),
+    });
+    if (!receipt.accepted) {
+      console.warn(
+        `[agent-manager] ${name} supervised reconciliation start was not accepted: ` +
+        `${receipt.blockedReason ?? 'unknown reason'}`,
+      );
+      return;
+    }
+    entry.stopped = false;
+    entry.checker.start().catch((err) => {
+      console.error(`[${name}] Fast checker error:`, err);
+    });
+    const scheduler = this.cronSchedulers.get(name);
+    if (scheduler) scheduler.reload();
+  }
+
+  /**
+   * Task 2.5 Step 4: `stopAgent`'s supervised path. Same capture-before-await
+   * discipline and scheduler/poller/checker teardown as the legacy body, but
+   * the actual retirement is one supervisor `stop` request instead of a bare
+   * `entry.process.stop()` — durable desired-state commit ('stopped') and
+   * intent-revision bump happen in the SAME synchronous window `stoppingAgents`
+   * is claimed in, before the retirement effect is even scheduled.
+   *
+   * Deliberately does NOT delete `entry` from `this.agents` differently than
+   * the legacy path — it deletes it the same way. "The supervisor is not
+   * deleted when a runtime stops" (acceptance criterion) refers to the
+   * DURABLE record (`LifecycleStateStore`'s on-disk file, keyed by agentId,
+   * never unlinked by this method): the next `startAgent` call for this name
+   * finds that record still `not(corrupt)` and simply reuses it — durability
+   * lives on disk, not in this in-memory map entry.
+   */
+  private async stopSupervisedAgent(name: string, entry: AgentEntry, userInitiated: boolean): Promise<void> {
+    this.stoppingAgents.add(name);
+    try {
+      const scheduler = this.cronSchedulers.get(name);
+      entry.stopped = true;
+
+      if (entry.poller) entry.poller.stop();
+      if (entry.activityPoller) entry.activityPoller.stop();
+      for (const buzzEntry of this.buzzClients.values()) {
+        buzzEntry.dispatcher.unregister(name);
+      }
+      entry.checker.stop();
+
+      const receipt = await entry.supervisor!.request({
+        requestId: randomUUID(),
+        kind: 'stop',
+        cause: userInitiated ? 'manual-cli' : 'manual-ipc',
+        mode: null,
+        observedGeneration: null,
+        userInitiated,
+        evidence: {},
+        requestedAtMs: Date.now(),
+      });
+      if (!receipt.accepted) {
+        console.warn(
+          `[agent-manager] ${name} supervised stop was not accepted: ${receipt.blockedReason ?? 'unknown reason'}`,
+        );
+      }
+
+      if (scheduler) {
+        scheduler.stop();
+        if (this.cronSchedulers.get(name) === scheduler) {
+          this.cronSchedulers.delete(name);
+        }
+      }
+
+      this.agents.delete(name);
+
+      if (userInitiated) {
+        if (this.pendingRestarts.delete(name)) {
+          console.log(`[agent-manager] Dropped queued restart for ${name} — explicit user stop/disable wins.`);
+        }
+        return;
+      }
+
+      if (this.pendingRestarts.has(name)) {
+        this.pendingRestarts.delete(name);
+        console.log(`[agent-manager] Honoring queued restart for ${name} (supervised).`);
+        this.startAgent(name, '').catch((err) =>
+          console.error(`[agent-manager] Queued restart failed for ${name}:`, err),
+        );
+      }
+    } finally {
+      this.stoppingAgents.delete(name);
+    }
+  }
+
+  /**
+   * Task 2.5 Step 6: `stopAll()`'s (daemon shutdown) supervised path.
+   * Retires the runtime directly, WITHOUT submitting a supervisor `stop`
+   * request — see the call site's comment in `stopAll()` for why: every
+   * `kind: 'stop'` request durably commits `desiredState: 'stopped'`
+   * regardless of cause, which would violate "daemon shutdown is not a user
+   * stop." The lifecycle store is never touched here, so whatever
+   * `desiredState` was persisted survives the restart untouched.
+   */
+  private async retireSupervisedAgentForShutdown(name: string, entry: AgentEntry): Promise<void> {
+    const scheduler = this.cronSchedulers.get(name);
+    entry.stopped = true;
+    if (entry.poller) entry.poller.stop();
+    if (entry.activityPoller) entry.activityPoller.stop();
+    for (const buzzEntry of this.buzzClients.values()) {
+      buzzEntry.dispatcher.unregister(name);
+    }
+    entry.checker.stop();
+    await entry.process.stop();
+    if (scheduler) {
+      scheduler.stop();
+      if (this.cronSchedulers.get(name) === scheduler) {
+        this.cronSchedulers.delete(name);
+      }
+    }
+    this.agents.delete(name);
+  }
+
+  /**
+   * Task 2.5 Step 5: `restartAgent`'s supervised path — one supervisor
+   * `restart` request instead of a manual `stopAgent()` + `startAgent()`
+   * pair. The supervisor's own retire-then-start atomicity (built in Task
+   * 1.5, exercised by Task 2.4's session-refresh rewrite) provides the
+   * guarantee; this method does not hand-roll a second stop+start pair at
+   * the `AgentManager` layer.
+   */
+  private async restartSupervisedAgent(name: string, entry: AgentEntry): Promise<void> {
+    console.log(`[agent-manager] Restarting ${name} (supervised, one operation)`);
+    const receipt = await entry.supervisor!.request({
+      requestId: randomUUID(),
+      kind: 'restart',
+      cause: 'manual-cli',
+      mode: 'continue',
+      observedGeneration: null,
+      userInitiated: true,
+      evidence: {},
+      requestedAtMs: Date.now(),
+    });
+    if (!receipt.accepted) {
+      console.warn(
+        `[agent-manager] ${name} supervised restart was not accepted: ${receipt.blockedReason ?? 'unknown reason'}`,
+      );
+      return;
+    }
+    console.log(`[agent-manager] Restart complete for ${name} (supervised)`);
+  }
+
   async startAgent(name: string, agentDir: string, config?: AgentConfig, org?: string): Promise<void> {
     if (this.agents.has(name)) {
       // BUG-031: this branch was the workaround for the BUG-011 PTY race
@@ -523,6 +866,17 @@ export class AgentManager {
         // later spurious restart. Idempotent no-op instead — no warn, no queue.
         console.log(`[agent-manager] ${name} already running and healthy — duplicate start ignored (idempotent no-op).`);
         return;
+      }
+      // Task 2.5 Step 2 / Step 7 (no dual control): a supervised entry's
+      // stale-eviction path is an owner reconciliation request, never the
+      // manual kill-tree eviction below. Gated on the STALE entry's OWN
+      // `supervised` flag (set when that entry was constructed), not a
+      // freshly-reloaded config — the whole point of `supervised` being
+      // "read once per operation" is that a single entry's lifetime is
+      // never split across both authorities.
+      const staleForSupervisionCheck = this.agents.get(name)!;
+      if (staleForSupervisionCheck.supervised === true && staleForSupervisionCheck.supervisor) {
+        return this.reconcileSupervisedRestart(name, staleForSupervisionCheck);
       }
       // liveness fix: entry exists but is NOT actually alive (halted/crashed/
       // stopped, or a running entry whose OS pid is gone). Evict the stale entry
@@ -679,6 +1033,13 @@ export class AgentManager {
       config = this.loadAgentConfig(agentDir);
     }
 
+    // Task 2.5 Step 1: resolve (and lazily adopt, on first touch) this
+    // agent's durable lifecycle store — for EVERY agent, regardless of
+    // `config.supervised` — so a record exists for a later cutover even
+    // while this agent stays on the legacy path.
+    const { store: lifecycleStore, agentId: lifecycleAgentId, supervisedActive } =
+      this.resolveSupervisorGate(name, resolvedOrg, config);
+
     const env: CtxEnv = {
       instanceId: this.instanceId,
       ctxRoot: this.ctxRoot,
@@ -756,13 +1117,27 @@ export class AgentManager {
       }
     }
 
-    const agentProcess = new AgentProcess(name, env, config, log);
+    const agentProcess = new AgentProcess(name, env, config, log, supervisedActive);
     // Issue #330: pass the Telegram handle into AgentProcess so CodexAppServerPTY
     // can emit sendChatAction directly from the JSONL stream. Has no effect for
     // claude-code / hermes runtimes — those still use fast-checker.
     if (telegramApi && chatId) {
       agentProcess.setTelegramHandle(telegramApi, chatId);
     }
+
+    // Task 2.5 Step 1: one AgentLifecycleSupervisor per canonical identity,
+    // constructed for every agent (its adapter wraps THIS `agentProcess`
+    // instance) — but `setOwner()` is only called, and the supervisor is
+    // only ever handed a `request()`, when this agent is actually gated on
+    // (`supervisedActive`). The durable store (`lifecycleStore`) is the same
+    // one `resolveSupervisorGate` already resolved/adopted above.
+    const lifecycleAdapter = new AgentProcessRuntimeAdapter(agentProcess, lifecycleStore, config.runtime, env);
+    const agentSupervisor = new AgentLifecycleSupervisor(lifecycleAgentId, lifecycleStore, lifecycleAdapter);
+    this.supervisors.set(name, agentSupervisor);
+    if (supervisedActive) {
+      agentProcess.setOwner(agentSupervisor);
+    }
+
     const checker = new FastChecker(agentProcess, paths, this.frameworkRoot, {
       log,
       telegramApi,
@@ -815,7 +1190,12 @@ export class AgentManager {
     // after at least one await, so looking the entry back up by name can return
     // a DIFFERENT instance's entry — attaching our poller to it would break that
     // entry's teardown and guarantee ours leaks.
-    const ownEntry: AgentEntry = { process: agentProcess, checker };
+    const ownEntry: AgentEntry = {
+      process: agentProcess,
+      checker,
+      supervised: supervisedActive,
+      supervisor: agentSupervisor,
+    };
     this.agents.set(name, ownEntry);
 
     // Start agent
@@ -1525,6 +1905,14 @@ export class AgentManager {
       return;
     }
 
+    // Task 2.5 Step 4 / Step 7 (no dual control): a supervised agent's stop
+    // is one owner-mediated request, not the manual `stoppingAgents` +
+    // `entry.process.stop()` composition below. Gated on THIS entry's own
+    // `supervised` flag, never re-read from a live config.
+    if (entry.supervised === true && entry.supervisor) {
+      return this.stopSupervisedAgent(name, entry, userInitiated);
+    }
+
     // idempotency fix (#923): claim the name synchronously BEFORE the first await
     // (entry.process.stop() below) so a startAgent() racing this teardown sees
     // the marker and queues via pendingRestarts instead of taking the no-op
@@ -1667,6 +2055,15 @@ export class AgentManager {
       console.log(`[agent-manager] Agent ${name} not found — cannot restart`);
       return;
     }
+
+    // Task 2.5 Step 5 / Step 7 (no dual control): a supervised agent's
+    // restart is ONE supervisor operation, never a manual stop-then-start
+    // pair at this layer — that would reintroduce the exact race this task
+    // exists to close. A non-supervised agent's restart is untouched below.
+    if (entry.supervised === true && entry.supervisor) {
+      return this.restartSupervisedAgent(name, entry);
+    }
+
     console.log(`[agent-manager] Restarting ${name}`);
     await this.stopAgent(name);
     // map-entry-race fix: a normal stop leaves the name UNBOUND, so the test is
@@ -1740,7 +2137,33 @@ export class AgentManager {
 
     for (const name of names) {
       try {
-        await this.stopAgent(name);
+        const entry = this.agents.get(name);
+        // Task 2.5 Step 6: daemon shutdown is not a user stop — for a
+        // supervised agent, retire the runtime WITHOUT going through
+        // `stopAgent()`'s generic supervisor `stop` request, which would
+        // durably commit `desiredState: 'stopped'` (every `kind: 'stop'`
+        // request unconditionally sets that, regardless of cause — see
+        // `AgentLifecycleSupervisor.handleStopHalt()`). Calling
+        // `entry.process.stop()` directly retires the PTY/generation
+        // exactly as today WITHOUT ever touching the lifecycle store, so
+        // whatever `desiredState` was persisted (almost always 'running')
+        // survives the daemon restart and `bootSelfHeal` brings the agent
+        // back up next boot. A non-supervised agent's shutdown path is
+        // untouched below (still routes through `stopAgent()`).
+        //
+        // KNOWN LIMITATION (documented, not silently dropped): this does
+        // NOT close `stopAll`'s documented re-registration-during-snapshot
+        // orphan window via intent-revision fencing for supervised agents —
+        // that would require `AgentLifecycleSupervisor` to expose a request
+        // kind that bumps `intentRevision` without mutating `desiredState`,
+        // which does not exist today and is out of this task's
+        // Files-to-Modify scope (`supervisor.ts` is not listed). Flagged as
+        // follow-up work rather than silently claimed done.
+        if (entry?.supervised === true && entry.supervisor) {
+          await this.retireSupervisedAgentForShutdown(name, entry);
+        } else {
+          await this.stopAgent(name);
+        }
       } catch (err) {
         console.error(`[agent-manager] Error stopping ${name}:`, err);
       }

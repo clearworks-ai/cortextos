@@ -218,6 +218,26 @@ export interface AgentConfig {
   working_directory?: string;
   enabled?: boolean;
   /**
+   * Opt-in per-agent canary flag for the Agent Lifecycle Supervisor
+   * (src/daemon/lifecycle/*). Default absent = legacy path (conservative
+   * default, matches how `degrade_ok`/`enabled` already work): `AgentManager`
+   * keeps composing its own stop/start chain out of `AgentEntry` bookkeeping
+   * (`stoppingAgents`/`evictingAgents`/`pendingRestarts`) exactly as it does
+   * on `main` today. `true` routes this agent's `AgentManager` entry points
+   * (`startAgent`/`stopAgent`/`restartAgent`/`bootSelfHeal`/`stopAll`) through
+   * its `AgentLifecycleSupervisor` instead — one-operation retire/start
+   * atomicity, durable desired-state, generation/intent-revision fencing.
+   * A supervisor record is still created for a non-supervised agent (lazy
+   * adoption on first touch), but no supervisor request is ever issued for
+   * it. Flipping this value is NOT a live in-flight switch — it's read once
+   * per operation from the loaded config and takes effect on next daemon
+   * start/config reload, same as `enabled`/`degrade_ok`. This is the
+   * per-agent cutover mechanism for a canary rollout (e.g. flip `knox` to
+   * supervised while the rest of the fleet stays legacy) — see
+   * `.claude/orchestration-lifecycle-supervisor/PRD.md` §5 Open Question 4.
+   */
+  supervised?: boolean;
+  /**
    * Credential/env keys this agent declares it needs present in its resolved
    * environment (agent `.env` + process env). Read-only introspection: the
    * fleet-reconcile check (see src/bus/reconcile.ts) flags any declared key

@@ -15,6 +15,9 @@ import { createHash } from 'crypto';
 import { FastChecker } from '../../../src/daemon/fast-checker';
 import { hardRestart } from '../../../src/bus/system.js';
 import type { BusPaths, TelegramCallbackQuery } from '../../../src/types';
+import { LifecycleStateStore } from '../../../src/daemon/lifecycle/state-store';
+import { AgentLifecycleSupervisor, type RuntimeAdapter } from '../../../src/daemon/lifecycle/supervisor';
+import type { WorkRecord } from '../../../src/daemon/lifecycle/types';
 
 // Minimal mock for AgentProcess
 function createMockAgent(name = 'test-agent', ctxRoot = '/tmp/framework') {
@@ -1574,5 +1577,293 @@ describe('FastChecker wedge default armed for codex runtime (attempt-7 Fix B)', 
 
     expect(hardRestart).not.toHaveBeenCalled();
     expect(sessionRefresh).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Task 3.3: Scenario A closure. `pollCycle()`'s supervised branch must
+ * durably accept the whole peeked batch (via a REAL `AgentLifecycleSupervisor`
+ * + `LifecycleStateStore` over a temp fixture root) strictly before any
+ * splice/save/ACK — never "best effort", never after. These tests exercise
+ * the real store/supervisor pair (not a mock), matching
+ * `lifecycle-work-store.test.ts`'s own fixture pattern, since the whole
+ * point of this task is durability actually landing on disk.
+ */
+describe('FastChecker supervised pollCycle — Task 3.3 (Scenario A closure)', () => {
+  let testDir: string;
+  let paths: BusPaths;
+  const agentId = 'test-instance/test-org/supervised-agent';
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join(tmpdir(), 'cortextos-fastchecker-supervised-'));
+    paths = createTestPaths(testDir);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  /** `acceptBatch`/`outstandingWork` never touch the RuntimeAdapter -- only
+   * `dispatchViaSupervisor`'s translation shim calls `agent.injectMessage`
+   * directly (Task 3.3 Step 3: Task 3.5 hasn't migrated the real
+   * `RuntimeAdapter.deliver()` wiring yet) -- so a throwing stub proves
+   * these tests never accidentally depend on it. */
+  function makeUnusedRuntime(): RuntimeAdapter {
+    return {
+      async startGeneration(): Promise<never> {
+        throw new Error('unexpected startGeneration call in a pollCycle supervised test');
+      },
+      async retireGeneration(): Promise<never> {
+        throw new Error('unexpected retireGeneration call in a pollCycle supervised test');
+      },
+      async deliver(): Promise<never> {
+        throw new Error('unexpected deliver call in a pollCycle supervised test');
+      },
+    };
+  }
+
+  function makeSupervisedChecker(logs?: string[]) {
+    const agent = createMockAgent('supervised-agent');
+    const store = new LifecycleStateStore(paths, agentId);
+    const supervisor = new AgentLifecycleSupervisor(agentId, store, makeUnusedRuntime());
+    const checker = new FastChecker(agent, paths, '/tmp/framework', {
+      supervisor,
+      supervised: true,
+      log: logs ? (m: string) => logs.push(m) : undefined,
+    });
+    return { agent, store, supervisor, checker };
+  }
+
+  function writeInboxMessage(id: string, text = 'hello'): void {
+    writeFileSync(
+      join(paths.inbox, `${id}.json`),
+      JSON.stringify({
+        id,
+        from: 'bob',
+        to: 'supervised-agent',
+        priority: 'normal',
+        timestamp: new Date().toISOString(),
+        text,
+        reply_to: null,
+      }),
+      'utf-8',
+    );
+  }
+
+  /**
+   * `AgentLifecycleSupervisor.outstandingWork()` (not a raw `store.load()`)
+   * -- a not-yet-adopted/corrupt store surfaces as `[]` through the same
+   * public surface production code uses, per that method's own doc comment.
+   */
+  function outstandingWork(supervisor: AgentLifecycleSupervisor): WorkRecord[] {
+    return supervisor.outstandingWork();
+  }
+
+  it('acceptance failure gates the WHOLE cycle: injectMessage is never called and every queue/inbox is left untouched', async () => {
+    const { agent, supervisor, checker } = makeSupervisedChecker();
+    checker.queueTelegramMessage('=== TELEGRAM fail-accept ===\n', 'telegram/chat1/1');
+    writeInboxMessage('m1');
+
+    const atomicModule = await import('../../../src/utils/atomic');
+    const original = atomicModule.atomicWriteDurableSync;
+    const spy = vi.spyOn(atomicModule, 'atomicWriteDurableSync').mockImplementation((filePath: string, data: string) => {
+      if (filePath.endsWith('supervisor.json')) {
+        throw new Error('simulated disk failure (acceptBatch commit)');
+      }
+      return original(filePath, data);
+    });
+
+    try {
+      await (checker as any).pollCycle();
+    } finally {
+      spy.mockRestore();
+    }
+
+    // Delivery was never even attempted -- acceptance happens BEFORE dispatch.
+    expect(agent.injectMessage).not.toHaveBeenCalled();
+    expect((checker as any).telegramMessages).toHaveLength(1);
+    expect(existsSync(join(paths.stateDir, '.pending-telegram-queue.json'))).toBe(true);
+    // checkInbox() already moved m1 inbox -> inflight (pre-existing, unrelated
+    // to this task -- see fast-checker.ts's inline note) -- but it must NOT
+    // have advanced to processed/, which only ackInbox() (gated on dispatch
+    // success) can do.
+    expect(existsSync(join(paths.inflight, 'm1.json'))).toBe(true);
+    expect(existsSync(join(paths.processed, 'm1.json'))).toBe(false);
+
+    expect(outstandingWork(supervisor)).toHaveLength(0);
+  });
+
+  it('durable acceptance + successful dispatch drains Telegram/Slack and ACKs inbox -- one WorkRecord per source item, all in phase accepted', async () => {
+    const { agent, supervisor, checker } = makeSupervisedChecker();
+    checker.queueTelegramMessage('=== TELEGRAM A ===\n', 'telegram/chat1/1');
+    checker.queueSlackMessage('=== SLACK A ===\n', 'slack/c1/100.1');
+    writeInboxMessage('m1', 'hello from bob');
+
+    await (checker as any).pollCycle();
+
+    expect(agent.injectMessage).toHaveBeenCalledTimes(1);
+    const injectedBlock = agent.injectMessage.mock.calls[0][0] as string;
+    expect(injectedBlock).toContain('TELEGRAM A');
+    expect(injectedBlock).toContain('SLACK A');
+    expect(injectedBlock).toContain('hello from bob');
+
+    expect((checker as any).telegramMessages).toHaveLength(0);
+    expect((checker as any).slackMessages).toHaveLength(0);
+    expect(existsSync(join(paths.stateDir, '.pending-telegram-queue.json'))).toBe(false);
+    expect(existsSync(join(paths.processed, 'm1.json'))).toBe(true);
+    expect((checker as any).lastMessageInjectedAt).toBeGreaterThan(0);
+
+    const records = outstandingWork(supervisor);
+    expect(records).toHaveLength(3);
+    expect(records.every((r) => r.phase === 'accepted')).toBe(true);
+    const bySourceKey = new Map(records.map((r) => [r.sourceKey, r]));
+    expect(bySourceKey.has('telegram/chat1/1')).toBe(true);
+    expect(bySourceKey.has('slack/c1/100.1')).toBe(true);
+    expect(bySourceKey.has('m1')).toBe(true); // bus inbox sourceKey is msg.id verbatim
+  }, 12000);
+
+  it('an inbox-only supervised cycle does not set the Telegram typing timestamp', async () => {
+    const { agent, checker } = makeSupervisedChecker();
+    writeInboxMessage('m1');
+
+    await (checker as any).pollCycle();
+
+    expect(agent.injectMessage).toHaveBeenCalledTimes(1);
+    expect((checker as any).lastMessageInjectedAt).toBe(0);
+  }, 12000);
+
+  it('NOT_RUNNING leaves Telegram queued on disk; a later successful cycle delivers against the SAME workId, not a duplicate', async () => {
+    const { agent, supervisor, checker } = makeSupervisedChecker();
+    agent.injectMessage.mockReturnValue(false);
+    checker.queueTelegramMessage('=== TELEGRAM retry ===\n', 'telegram/chat1/42');
+
+    await (checker as any).pollCycle();
+
+    expect((checker as any).telegramMessages).toHaveLength(1);
+    expect(existsSync(join(paths.stateDir, '.pending-telegram-queue.json'))).toBe(true);
+    const firstRecords = outstandingWork(supervisor);
+    expect(firstRecords).toHaveLength(1);
+    expect(firstRecords[0].phase).toBe('accepted');
+    const firstWorkId = firstRecords[0].workId;
+
+    agent.injectMessage.mockReturnValue(true);
+    await (checker as any).pollCycle();
+
+    expect((checker as any).telegramMessages).toHaveLength(0);
+    expect(existsSync(join(paths.stateDir, '.pending-telegram-queue.json'))).toBe(false);
+
+    const secondRecords = outstandingWork(supervisor);
+    expect(secondRecords).toHaveLength(1); // reused, not duplicated
+    expect(secondRecords[0].workId).toBe(firstWorkId);
+  }, 12000);
+
+  it('NOT_RUNNING leaves an inbox message un-ACKed (still in inflight/, not processed/) with its WorkRecord durably accepted', async () => {
+    const { agent, supervisor, checker } = makeSupervisedChecker();
+    agent.injectMessage.mockReturnValue(false);
+    writeInboxMessage('m1');
+
+    await (checker as any).pollCycle();
+
+    expect(existsSync(join(paths.inflight, 'm1.json'))).toBe(true);
+    expect(existsSync(join(paths.processed, 'm1.json'))).toBe(false);
+    const records = outstandingWork(supervisor);
+    expect(records).toHaveLength(1);
+    expect(records[0].phase).toBe('accepted');
+  });
+
+  it('crash recovery: acceptBatch succeeding out-of-band (simulated crash before dispatch/removal) is resolved by the next pollCycle into the SAME WorkRecord, not a new one', async () => {
+    const { agent, supervisor, checker } = makeSupervisedChecker();
+    const sourceKey = 'telegram/chat1/999';
+    const payload = '=== TELEGRAM crash-sim ===\n';
+    checker.queueTelegramMessage(payload, sourceKey);
+
+    // Simulate "the process crashed the instant acceptBatch's commit landed,
+    // before dispatch/removal ever ran": accept the exact same
+    // sourceKey/payload/digest pollCycle itself would compute, entirely out
+    // of band -- the Telegram queue is untouched, exactly as it would be
+    // after a real crash at that point.
+    const payloadDigest = createHash('sha256').update(payload).digest('hex');
+    const preAccept = await supervisor.acceptBatch([{ sourceKey, payload, payloadDigest }]);
+    expect(preAccept.ok).toBe(true);
+    if (!preAccept.ok) return;
+    const preWorkId = preAccept.workIds[0];
+
+    // "Restart": a pollCycle now runs against the still-queued Telegram
+    // message and the pre-existing accepted WorkRecord.
+    await (checker as any).pollCycle();
+
+    expect(agent.injectMessage).toHaveBeenCalledTimes(1);
+    expect((checker as any).telegramMessages).toHaveLength(0);
+
+    const records = outstandingWork(supervisor);
+    expect(records).toHaveLength(1); // NOT 2 -- re-acceptance deduped by sourceKey+payloadDigest
+    expect(records[0].workId).toBe(preWorkId);
+  }, 12000);
+
+  it('a DUPLICATE dispatch result is a receipt for existing work -- not treated as delivered, not silently dropped', async () => {
+    const logs: string[] = [];
+    const { checker } = makeSupervisedChecker(logs);
+    checker.queueTelegramMessage('=== TELEGRAM dup ===\n', 'telegram/chat1/7');
+
+    const dispatchSpy = vi.spyOn(checker as any, 'dispatchViaSupervisor').mockResolvedValue({
+      ok: false,
+      code: 'DUPLICATE',
+      retryable: false,
+      existingWorkIds: ['work-existing-1'],
+      message: 'duplicate',
+    });
+
+    await (checker as any).pollCycle();
+    dispatchSpy.mockRestore();
+
+    expect((checker as any).telegramMessages).toHaveLength(1); // not drained
+    expect(logs.some((l) => l.includes('DUPLICATE') && l.includes('work-existing-1'))).toBe(true);
+  });
+
+  it('a REVOKED/FAILED dispatch result preserves every queue/inbox for retry (no drain, no silent loss)', async () => {
+    const logs: string[] = [];
+    const { checker } = makeSupervisedChecker(logs);
+    checker.queueTelegramMessage('=== TELEGRAM revoked ===\n', 'telegram/chat1/8');
+    writeInboxMessage('m1');
+
+    const dispatchSpy = vi.spyOn(checker as any, 'dispatchViaSupervisor').mockResolvedValue({
+      ok: false,
+      code: 'REVOKED',
+      retryable: false,
+      message: 'generation revoked mid-flight',
+    });
+
+    await (checker as any).pollCycle();
+    dispatchSpy.mockRestore();
+
+    expect((checker as any).telegramMessages).toHaveLength(1);
+    expect(existsSync(join(paths.inflight, 'm1.json'))).toBe(true);
+    expect(existsSync(join(paths.processed, 'm1.json'))).toBe(false);
+    expect(logs.some((l) => l.includes('REVOKED'))).toBe(true);
+  });
+
+  it('the 5s post-injection cooldown fires exactly once, only on a successful supervised dispatch', async () => {
+    const { checker } = makeSupervisedChecker();
+    checker.queueTelegramMessage('=== TELEGRAM cooldown ===\n', 'telegram/chat1/9');
+
+    const setTimeoutSpy = vi.spyOn(global, 'setTimeout').mockImplementation(((fn: () => void) => {
+      fn();
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    }) as unknown as typeof setTimeout);
+
+    await (checker as any).pollCycle();
+
+    expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
+    expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 5000);
+    setTimeoutSpy.mockRestore();
+  });
+
+  it('throws a defensive fail-closed error if supervised=true but no supervisor was wired (build-sequence guard, mirrors AgentProcess)', async () => {
+    const agent = createMockAgent('unwired-supervised-agent');
+    const checker = new FastChecker(agent, paths, '/tmp/framework', { supervised: true });
+    checker.queueTelegramMessage('=== TELEGRAM unwired ===\n', 'telegram/chat1/10');
+
+    await expect((checker as any).pollCycle()).rejects.toThrow(/no lifecycle supervisor is wired/);
   });
 });

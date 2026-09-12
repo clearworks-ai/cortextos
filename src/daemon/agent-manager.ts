@@ -1230,6 +1230,12 @@ export class AgentManager {
       // FastChecker only needs the first ID for its single-recipient typing
       // indicator / quick-checks. Multi-user is enforced by the gates above.
       allowedUserId: allowedUserId ? parseInt(allowedUserId.split(',')[0].trim(), 10) : undefined,
+      // Task 3.3: same pairing AgentProcess already gets above (Task 2.5) —
+      // the supervisor is always constructed, but `pollCycle`'s durable-
+      // acceptance-before-ACK path is only exercised when this agent is
+      // actually on the supervised cutover path.
+      supervisor: agentSupervisor,
+      supervised: supervisedActive,
     });
 
     // Send Telegram notification on crashes and session refreshes
@@ -1432,6 +1438,13 @@ export class AgentManager {
         const isMedia = !!(msg.photo || msg.document || msg.voice || msg.audio || msg.video || msg.video_note);
         const replyToText = buildReplyContext(msg.reply_to_message);
 
+        // Task 3.3: stable ingress idempotency key for this inbound Telegram
+        // message (PRD §2.5 "Telegram bot/chat/message ID") — every branch
+        // below (media / media-fallback / text) handles the SAME `msg`, so
+        // they share one sourceKey; there is no collision risk between them
+        // since `isMedia` routes to exactly one branch per message.
+        const telegramSourceKey = `telegram/${effectiveChatId}/${msg.message_id}`;
+
         if (isMedia && telegramApi) {
           const downloadDir = join(agentDir, 'telegram-images');
           processMediaMessage(msg, telegramApi, downloadDir).then((media) => {
@@ -1439,7 +1452,7 @@ export class AgentManager {
               log('Media processing returned null - falling back to text format');
               const text = stripControlChars(msg.caption || '');
               const formatted = FastChecker.formatTelegramTextMessage(from, effectiveChatId, text, this.frameworkRoot, replyToText);
-              if (!checker.isDuplicate(formatted)) checker.queueTelegramMessage(formatted);
+              if (!checker.isDuplicate(formatted)) checker.queueTelegramMessage(formatted, telegramSourceKey);
               return;
             }
 
@@ -1471,12 +1484,12 @@ export class AgentManager {
               return;
             }
             log(`Media message received: type=${media.type}, path=${media.image_path || media.file_path}`);
-            checker.queueTelegramMessage(formatted);
+            checker.queueTelegramMessage(formatted, telegramSourceKey);
           }).catch((err) => {
             log(`Media processing error: ${err} - falling back to text format`);
             const text = stripControlChars(msg.caption || '');
             const formatted = FastChecker.formatTelegramTextMessage(from, effectiveChatId, text, this.frameworkRoot, replyToText);
-            if (!checker.isDuplicate(formatted)) checker.queueTelegramMessage(formatted);
+            if (!checker.isDuplicate(formatted)) checker.queueTelegramMessage(formatted, telegramSourceKey);
           });
           return;
         }
@@ -1500,7 +1513,7 @@ export class AgentManager {
           log('Duplicate Telegram message suppressed');
           return;
         }
-        checker.queueTelegramMessage(formatted);
+        checker.queueTelegramMessage(formatted, telegramSourceKey);
       });
 
       poller.onCallback((query) => {
@@ -1568,7 +1581,11 @@ export class AgentManager {
           log('Duplicate Telegram reaction suppressed');
           return;
         }
-        checker.queueTelegramMessage(formatted);
+        // Task 3.3: a reaction event is distinct from the message it reacts
+        // to (same message_id, different underlying event) — disambiguate
+        // with reaction.date so this never collides with the reacted-to
+        // message's own sourceKey (`telegram/<chat>/<message_id>`).
+        checker.queueTelegramMessage(formatted, `telegram/${reactionChatId}/${reaction.message_id}/reaction/${reaction.date}`);
       });
 
       // Wrap poller.start() in a restart-on-Conflict loop. The poller's

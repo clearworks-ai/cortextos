@@ -7,6 +7,8 @@ import type { InboxMessage, BusPaths, TelegramMessage, TelegramCallbackQuery } f
 import { checkInbox, ackInbox } from '../bus/message.js';
 import { updateApproval } from '../bus/approval.js';
 import { AgentProcess } from './agent-process.js';
+import type { AgentLifecycleSupervisor } from './lifecycle/supervisor.js';
+import type { DispatchResult } from './lifecycle/types.js';
 import type { TelegramAPI } from '../telegram/api.js';
 import { KEYS } from '../pty/inject.js';
 import { stripControlChars, sanitizeForPtyInjection, wrapFenceSafe } from '../utils/validate.js';
@@ -101,8 +103,24 @@ export class FastChecker {
   private chatId?: string;
   private allowedUserId?: number;
 
+  // Task 3.3: constructor-injected lifecycle supervisor (mirrors how
+  // `AgentProcess` is already injected into this constructor). Only ever
+  // consulted when `supervised` is true — an unsupervised checker's
+  // `pollCycle()` never reads either field, so a missing supervisor never
+  // affects the legacy path.
+  private supervisor?: AgentLifecycleSupervisor;
+  private supervised: boolean;
+
   // External Telegram handler (set by daemon)
-  private telegramMessages: Array<{ formatted: string; ackIds: string[] }> = [];
+  //
+  // Task 3.3: `sourceKey` is the stable ingress idempotency key handed to
+  // `AgentLifecycleSupervisor.acceptBatch()` (PRD §2.5's "Telegram bot/chat/
+  // message ID"). Real Telegram identity when the caller has one (chat id +
+  // message id — see `queueTelegramMessage`'s call sites in agent-manager.ts);
+  // falls back to a digest of `formatted` when the caller doesn't pass one
+  // (documented known idempotency gap — see queueTelegramMessage's doc
+  // comment).
+  private telegramMessages: Array<{ formatted: string; ackIds: string[]; sourceKey: string }> = [];
   // Disk copy of the pending Telegram queue. Telegram advances its server-side
   // offset the instant a message is queued (the poller handler just pushes into
   // telegramMessages and returns), so Telegram never redelivers — this file is
@@ -120,7 +138,10 @@ export class FastChecker {
   // two would restart/extend a Telegram typing indicator for Slack-only
   // activity. Peek-then-drain matches the current Telegram inject contract
   // so a failed inject does not drop Slack inbound.
-  private slackMessages: string[] = [];
+  //
+  // Task 3.3: `sourceKey` mirrors `telegramMessages`' — real Slack identity
+  // (channel + `ts`) when the caller has one, else a digest fallback.
+  private slackMessages: Array<{ formatted: string; sourceKey: string }> = [];
 
   // Persistent dedup: message hashes to prevent duplicate delivery
   // Persistent dedup: message hash -> last-seen timestamp (ms)
@@ -157,7 +178,15 @@ export class FastChecker {
     agent: AgentProcess,
     paths: BusPaths,
     frameworkRoot: string,
-    options: { pollInterval?: number; log?: LogFn; telegramApi?: TelegramAPI; chatId?: string; allowedUserId?: number } = {},
+    options: {
+      pollInterval?: number;
+      log?: LogFn;
+      telegramApi?: TelegramAPI;
+      chatId?: string;
+      allowedUserId?: number;
+      supervisor?: AgentLifecycleSupervisor;
+      supervised?: boolean;
+    } = {},
   ) {
     this.agent = agent;
     this.paths = paths;
@@ -167,6 +196,8 @@ export class FastChecker {
     this.telegramApi = options.telegramApi;
     this.chatId = options.chatId;
     this.allowedUserId = options.allowedUserId;
+    this.supervisor = options.supervisor;
+    this.supervised = options.supervised === true;
 
     // Initialize persistent dedup
     this.dedupFilePath = join(paths.stateDir, '.message-dedup-hashes');
@@ -286,9 +317,22 @@ export class FastChecker {
   /**
    * Queue a formatted Telegram message for injection.
    * Called by the daemon's Telegram handler.
+   *
+   * Task 3.3: `sourceKey` is this message's stable ingress idempotency key
+   * for `AgentLifecycleSupervisor.acceptBatch()`. Callers that have a real
+   * Telegram identity (chat id + message id, or chat id + message id +
+   * reaction timestamp) should pass it — see agent-manager.ts's poller
+   * handlers. When omitted, this falls back to a digest of `formatted`
+   * itself: a documented, deliberate known gap (Task 3.3's completion note)
+   * — two byte-identical messages collapse to the same work (the safe
+   * direction, per Task 3.1's duplicate-vs-conflict rule), but two distinct
+   * real messages that happen to render identical text would collide. No
+   * caller today omits it in production; the fallback exists for direct/
+   * test callers only.
    */
-  queueTelegramMessage(formatted: string): void {
-    this.telegramMessages.push({ formatted, ackIds: [] });
+  queueTelegramMessage(formatted: string, sourceKey?: string): void {
+    const key = sourceKey ?? `telegram-digest-${this.hashMessage(formatted)}`;
+    this.telegramMessages.push({ formatted, ackIds: [], sourceKey: key });
     this.savePendingTelegram();
   }
 
@@ -303,9 +347,14 @@ export class FastChecker {
   /**
    * Queue a formatted Slack message for injection.
    * Called by the daemon's Slack Socket Mode dispatcher.
+   *
+   * Task 3.3: `sourceKey` mirrors `queueTelegramMessage`'s — pass Slack's
+   * real `channel`+`ts` identity when available (see slack/dispatcher.ts),
+   * else this falls back to a digest of `formatted` (same documented gap).
    */
-  queueSlackMessage(formatted: string): void {
-    this.slackMessages.push(formatted);
+  queueSlackMessage(formatted: string, sourceKey?: string): void {
+    const key = sourceKey ?? `slack-digest-${this.hashMessage(formatted)}`;
+    this.slackMessages.push({ formatted, sourceKey: key });
   }
 
   /**
@@ -341,47 +390,82 @@ export class FastChecker {
     // Telegram-only. Peek, then drain only after inject succeeds.
     const slackPendingCount = this.slackMessages.length;
     for (let i = 0; i < slackPendingCount; i++) {
-      messageBlock += this.slackMessages[i];
+      messageBlock += this.slackMessages[i].formatted;
     }
 
 
-    // Check agent inbox
+    // Check agent inbox. Task 3.3: also retain each message's own formatted
+    // text (not just the concatenated messageBlock) — the supervised path
+    // below needs one acceptBatch input per source item, not one opaque
+    // blob. Building this array costs nothing on the unsupervised path: it
+    // is simply never read there.
     const inboxMessages = checkInbox(this.paths);
+    const inboxFormatted: Array<{ id: string; formatted: string }> = [];
     for (const msg of inboxMessages) {
-      messageBlock += this.formatInboxMessage(msg);
+      const formatted = this.formatInboxMessage(msg);
+      messageBlock += formatted;
       ackIds.push(msg.id);
+      inboxFormatted.push({ id: msg.id, formatted });
     }
 
-    // Inject if there's anything
+    // Inject if there's anything.
+    //
+    // Task 3.3 (Scenario A closure): a `supervised` agent's removal
+    // (telegram splice / pending-file rewrite / slack splice / inbox ACK)
+    // must be gated on durable acceptance (`acceptBatch`) succeeding AND the
+    // dispatch outcome, never on the bare `injectMessage()` boolean alone —
+    // see `pollCycleSupervisedDispatch`. An unsupervised agent's behavior
+    // below is byte-for-byte the pre-Task-3.3 body.
     if (messageBlock) {
-      const injected = this.agent.injectMessage(messageBlock);
-      if (injected) {
-        // Delivery confirmed — NOW drain the telegram messages we consumed
-        // (only the peeked prefix) and persist the shortened queue.
-        if (pendingCount > 0) {
-          this.telegramMessages.splice(0, pendingCount);
-          this.savePendingTelegram();
+      if (this.supervised) {
+        if (!this.supervisor) {
+          // Defensive fail-closed — agent-manager.ts always constructs a
+          // FastChecker with both `supervised: true` and a real `supervisor`
+          // together (mirrors AgentProcess's own supervised/owner pairing).
+          // Never silently fall back to the unsupervised path, which would
+          // defeat this task's entire point.
+          throw new Error(
+            `pollCycle: supervised=true but no lifecycle supervisor is wired for agent "${this.agent.name}"`,
+          );
         }
-        if (slackPendingCount > 0) {
-          this.slackMessages.splice(0, slackPendingCount);
+        await this.pollCycleSupervisedDispatch(
+          messageBlock,
+          pendingCount,
+          slackPendingCount,
+          inboxFormatted,
+          ackIds,
+          hasTelegramMessage,
+        );
+      } else {
+        const injected = this.agent.injectMessage(messageBlock);
+        if (injected) {
+          // Delivery confirmed — NOW drain the telegram messages we consumed
+          // (only the peeked prefix) and persist the shortened queue.
+          if (pendingCount > 0) {
+            this.telegramMessages.splice(0, pendingCount);
+            this.savePendingTelegram();
+          }
+          if (slackPendingCount > 0) {
+            this.slackMessages.splice(0, slackPendingCount);
+          }
+          // ACK inbox messages
+          for (const id of ackIds) {
+            ackInbox(this.paths, id);
+          }
+          this.log(`Injected ${messageBlock.length} bytes`);
+          // Only update typing timestamp for Telegram messages, not inbox/cron.
+          // Inbox messages (agent-to-agent, session continuations) must not
+          // restart the typing indicator after Stop has cleared it.
+          if (hasTelegramMessage) {
+            this.lastMessageInjectedAt = Date.now();
+          }
+          // Cooldown after injection
+          await sleep(5000);
         }
-        // ACK inbox messages
-        for (const id of ackIds) {
-          ackInbox(this.paths, id);
-        }
-        this.log(`Injected ${messageBlock.length} bytes`);
-        // Only update typing timestamp for Telegram messages, not inbox/cron.
-        // Inbox messages (agent-to-agent, session continuations) must not
-        // restart the typing indicator after Stop has cleared it.
-        if (hasTelegramMessage) {
-          this.lastMessageInjectedAt = Date.now();
-        }
-        // Cooldown after injection
-        await sleep(5000);
+        // Injection failed (agent NOT_RUNNING or DEDUPED): telegram messages stay
+        // in this.telegramMessages (and on disk) and inbox stays un-ack'd — both
+        // retry on the next pollCycle once the agent is back up.
       }
-      // Injection failed (agent NOT_RUNNING or DEDUPED): telegram messages stay
-      // in this.telegramMessages (and on disk) and inbox stays un-ack'd — both
-      // retry on the next pollCycle once the agent is back up.
     }
 
     // Typing indicator: send while Claude is actively working
@@ -395,6 +479,139 @@ export class FastChecker {
     // Wedge watchdog: detect a stuck REPL (stale conversation buffer while the
     // heartbeat stays fresh + pending inbox work) and force ONE recovery restart.
     this.checkWedge();
+  }
+
+  /**
+   * Task 3.3 (Scenario A closure): the supervised half of `pollCycle`'s
+   * inject branch. Durably accepts the whole peeked batch (Telegram prefix +
+   * Slack prefix + inbox items) via `AgentLifecycleSupervisor.acceptBatch()`
+   * BEFORE attempting delivery — never after, never "best effort". Only once
+   * `acceptBatch` returns `ok: true` does this even attempt to dispatch; only
+   * once dispatch itself reports success does it splice the queues, rewrite
+   * the pending-Telegram file, or ACK the inbox. Every other outcome
+   * (acceptance failure, `NOT_RUNNING`, `DUPLICATE`, `REVOKED`/`FAILED`)
+   * leaves every transport copy exactly where it was, to retry next cycle.
+   *
+   * Crash-recovery correctness (see this task's file, Step 6): a crash
+   * before `acceptBatch` returns loses nothing (nothing was persisted or
+   * removed); a crash after `acceptBatch` succeeds but before dispatch/
+   * removal re-peeks the SAME messages next cycle, and `acceptBatch`'s
+   * sourceKey-based dedup (Task 3.1/3.2) resolves them to the SAME
+   * `workId`s, not new ones; a crash after removal is durably safe because
+   * the `WorkRecord`s were already committed by `acceptBatch` before removal
+   * ever ran.
+   */
+  private async pollCycleSupervisedDispatch(
+    messageBlock: string,
+    pendingCount: number,
+    slackPendingCount: number,
+    inboxFormatted: Array<{ id: string; formatted: string }>,
+    ackIds: string[],
+    hasTelegramMessage: boolean,
+  ): Promise<void> {
+    const supervisor = this.supervisor!;
+
+    const telegramInputs = this.telegramMessages.slice(0, pendingCount).map((entry) => ({
+      sourceKey: entry.sourceKey,
+      payload: entry.formatted,
+      payloadDigest: this.hashMessage(entry.formatted),
+    }));
+    const slackInputs = this.slackMessages.slice(0, slackPendingCount).map((entry) => ({
+      sourceKey: entry.sourceKey,
+      payload: entry.formatted,
+      payloadDigest: this.hashMessage(entry.formatted),
+    }));
+    const inboxInputs = inboxFormatted.map((entry) => ({
+      sourceKey: entry.id,
+      payload: entry.formatted,
+      payloadDigest: this.hashMessage(entry.formatted),
+    }));
+
+    // Step 2 (this task's file): durable acceptance strictly before any
+    // removal — and before delivery is even attempted.
+    const acceptResult = await supervisor.acceptBatch([...telegramInputs, ...slackInputs, ...inboxInputs]);
+    if (!acceptResult.ok) {
+      this.log(`Durable acceptance failed (${acceptResult.reason}) — leaving all queues/inbox untouched this cycle`);
+      return;
+    }
+
+    // Step 3: dispatch via the supervisor-mediated DispatchResult contract,
+    // not the bare injectMessage() boolean.
+    const dispatchResult = await this.dispatchViaSupervisor(messageBlock, acceptResult.workIds, acceptResult.batchId);
+
+    if (dispatchResult.ok) {
+      // NOW it's safe to drain — durable acceptance already succeeded AND
+      // the runtime has at minimum accepted the delivery attempt.
+      if (pendingCount > 0) {
+        this.telegramMessages.splice(0, pendingCount);
+        this.savePendingTelegram();
+      }
+      if (slackPendingCount > 0) {
+        this.slackMessages.splice(0, slackPendingCount);
+      }
+      for (const id of ackIds) {
+        ackInbox(this.paths, id);
+      }
+      this.log(`Injected ${messageBlock.length} bytes (batch ${dispatchResult.batchId})`);
+      if (hasTelegramMessage) {
+        this.lastMessageInjectedAt = Date.now();
+      }
+      await sleep(5000);
+      return;
+    }
+
+    if (dispatchResult.code === 'NOT_RUNNING') {
+      // Existing behavior, now explicit: telegram/slack stay queued, inbox
+      // stays un-ACK'd, retried next cycle. The WorkRecords accepted above
+      // remain in 'accepted' phase — NOT lost, NOT re-accepted next cycle
+      // (acceptBatch's sourceKey dedup handles that), retried against the
+      // SAME workIds by a future dispatch attempt.
+      this.log('Dispatch NOT_RUNNING — queues/inbox preserved for retry');
+      return;
+    }
+
+    if (dispatchResult.code === 'DUPLICATE') {
+      // Per PRD §2.5: a duplicate is a receipt for existing work, not a
+      // disappearance. Not treated as delivered; not silently dropped.
+      this.log(`Dispatch DUPLICATE — linked to existing workIds ${dispatchResult.existingWorkIds.join(', ')}`);
+      return;
+    }
+
+    // REVOKED (a stop landed) / FAILED (the runtime write itself failed).
+    // Do not drain queues — a successor generation, if any, gets a fresh
+    // acceptBatch next cycle from whatever is still queued.
+    this.log(`Dispatch failed (${dispatchResult.code}) — queues/inbox preserved`);
+  }
+
+  /**
+   * Task 3.3 Step 3: translation shim. `AgentProcess.injectMessage()` still
+   * returns a bare boolean today (Task 3.5's `injectMessageDetailed` →
+   * `DispatchResult` migration has not landed) — this wraps that boolean so
+   * `pollCycleSupervisedDispatch` is already written against the stable
+   * `DispatchResult` contract (Task 1.5's `RuntimeAdapter.deliver()` shape)
+   * from day one. Only this shim needs deleting once Task 3.5 lands the real
+   * thing — no caller-side logic changes. `DUPLICATE`/`REVOKED`/`FAILED` are
+   * unreachable through this shim today (acceptBatch already resolved
+   * duplicates before this is ever called, and there is no real revocation
+   * signal yet) — `pollCycleSupervisedDispatch`'s handling of them is
+   * forward-looking, not dead code, since Task 3.5 will make them reachable
+   * without any change to the caller.
+   */
+  private async dispatchViaSupervisor(
+    messageBlock: string,
+    workIds: string[],
+    batchId: string,
+  ): Promise<DispatchResult> {
+    const injected = this.agent.injectMessage(messageBlock);
+    if (injected) {
+      return { ok: true, workIds, batchId };
+    }
+    return {
+      ok: false,
+      code: 'NOT_RUNNING',
+      retryable: true,
+      message: `injectMessage returned false for agent "${this.agent.name}"`,
+    };
   }
 
   /**
@@ -1813,8 +2030,17 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       const parsed = JSON.parse(readFileSync(this.pendingTelegramFilePath, 'utf-8'));
       if (Array.isArray(parsed)) {
         this.telegramMessages = parsed
-          .filter((e): e is { formatted: string; ackIds: string[] } => e && typeof e.formatted === 'string')
-          .map((e) => ({ formatted: e.formatted, ackIds: Array.isArray(e.ackIds) ? e.ackIds : [] }));
+          .filter((e): e is { formatted: string; ackIds: string[]; sourceKey?: string } => e && typeof e.formatted === 'string')
+          .map((e) => ({
+            formatted: e.formatted,
+            ackIds: Array.isArray(e.ackIds) ? e.ackIds : [],
+            // Task 3.3: a file persisted by a pre-3.3 session (or a hand-built
+            // test fixture) has no sourceKey — fall back to a digest, same
+            // rule queueTelegramMessage itself applies when the caller omits
+            // one. Never invent an ordinal-position key (see queue-entry
+            // shape doc comment above).
+            sourceKey: typeof e.sourceKey === 'string' ? e.sourceKey : `telegram-digest-${this.hashMessage(e.formatted)}`,
+          }));
       }
     } catch {
       this.telegramMessages = [];

@@ -1769,6 +1769,217 @@ describe('FastChecker codex context-full recovery (attempt-7 durable fix)', () =
   });
 });
 
+// Task 4.1 (OPTIONAL, non-release-blocking; PRD §5 Open Question 3): the real
+// checkContextStatus() flow with a generation accessor wired, adapting
+// upstream `5a8e7cbc`'s (#937) four-scenario suite. Scenario D replaces
+// upstream's "unanchored legacy path unchanged" case with this fork's actual
+// delta: a generation change (not a session_id change) resets the baseline.
+describe('FastChecker context-handoff baseline suppression (Task 4.1, generation-keyed)', () => {
+  let testDir: string;
+  let paths: BusPaths;
+
+  beforeEach(() => {
+    vi.mocked(hardRestart).mockClear();
+    testDir = mkdtempSync(join(tmpdir(), 'fastcheck-ctxbaseline-'));
+    paths = createTestPaths(testDir);
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  // A generation-aware ctx-agent mock: getLifecycleGeneration() reads a
+  // mutable `state.generation` the test controls directly, standing in for
+  // Phase 2/3's real AgentProcess.getLifecycleGeneration() accessor.
+  function makeGenCtxAgent(name = 'ctx-agent-gen') {
+    const config: any = {};
+    const state = { generation: 0 };
+    const agent = {
+      name,
+      isBootstrapped: vi.fn().mockReturnValue(true),
+      injectMessage: vi.fn().mockReturnValue(true),
+      write: vi.fn(),
+      getAgentDir: () => testDir,
+      getConfig: () => config,
+      getOutputBuffer: () => ({ getRecent: () => '' }),
+      sessionRefresh: vi.fn().mockResolvedValue(undefined),
+      getLifecycleGeneration: () => state.generation,
+    } as any;
+    return { agent, state, config };
+  }
+
+  function writeConfig(cfg: Record<string, unknown>) {
+    writeFileSync(join(testDir, 'config.json'), JSON.stringify(cfg), 'utf-8');
+  }
+
+  function writeCtxStatus(pct: number, extra: Record<string, unknown> = {}) {
+    writeFileSync(
+      join(paths.stateDir, 'context_status.json'),
+      JSON.stringify({ used_percentage: pct, exceeds_200k_tokens: false, written_at: new Date().toISOString(), ...extra }),
+      'utf-8',
+    );
+  }
+
+  function injected(agent: any): string[] {
+    return agent.injectMessage.mock.calls.map((c: any[]) => c[0] as string);
+  }
+
+  // Anchor a session as already past the default (2min) handoff grace window,
+  // without going through the session_id-driven new-session detection path —
+  // this task's whole point is that the baseline/alert reset must NOT depend
+  // on that path.
+  function armPastGrace(checker: any) {
+    checker.ctxSessionStartedAt = Date.now() - 5 * 60_000;
+  }
+
+  it('scenario A: heavy-baseline idle session is suppressed and alerts exactly once', async () => {
+    const { agent } = makeGenCtxAgent();
+    const logs: string[] = [];
+    const checker = new FastChecker(agent, paths, '/tmp/framework', { log: (m) => logs.push(m) });
+    writeConfig({});
+    armPastGrace(checker);
+
+    writeCtxStatus(65); // born above the 60% default handoff threshold
+    await (checker as any).checkContextStatus();
+    expect(injected(agent).some(m => m.includes('CONTEXT HANDOFF REQUIRED'))).toBe(false);
+    expect((checker as any).ctxHandoffFiredAt).toBe(0);
+    expect(logs.filter(m => m.includes('SUPPRESSED')).length).toBe(1);
+
+    // Idle ticks keep suppressing but never alert again.
+    writeCtxStatus(66);
+    await (checker as any).checkContextStatus();
+    writeCtxStatus(68);
+    await (checker as any).checkContextStatus();
+    expect(logs.filter(m => m.includes('SUPPRESSED')).length).toBe(1);
+    expect((checker as any).ctxHandoffFiredAt).toBe(0);
+  });
+
+  it('scenario B: a low-baseline session that grows into threshold still hands off normally', async () => {
+    const { agent } = makeGenCtxAgent();
+    const checker = new FastChecker(agent, paths, '/tmp/framework');
+    writeConfig({});
+    armPastGrace(checker);
+
+    writeCtxStatus(20); // captures a low baseline, well under 60%
+    await (checker as any).checkContextStatus();
+    expect((checker as any).ctxHandoffFiredAt).toBe(0);
+
+    writeCtxStatus(62); // real growth past threshold — baseline(20) < handoff, never suppressed
+    await (checker as any).checkContextStatus();
+    expect(injected(agent).some(m => m.includes('CONTEXT HANDOFF REQUIRED'))).toBe(true);
+    expect((checker as any).ctxHandoffFiredAt).toBeGreaterThan(0);
+  });
+
+  it('scenario C: a born-above-threshold session that accumulates real work-fill still hands off past the margin', async () => {
+    const { agent } = makeGenCtxAgent();
+    const checker = new FastChecker(agent, paths, '/tmp/framework');
+    writeConfig({});
+    armPastGrace(checker);
+
+    writeCtxStatus(65); // born high — suppressed
+    await (checker as any).checkContextStatus();
+    expect((checker as any).ctxHandoffFiredAt).toBe(0);
+
+    writeCtxStatus(78); // 13pts past the captured baseline — past the 10pt margin
+    await (checker as any).checkContextStatus();
+    expect(injected(agent).some(m => m.includes('CONTEXT HANDOFF REQUIRED'))).toBe(true);
+    expect((checker as any).ctxHandoffFiredAt).toBeGreaterThan(0);
+  });
+
+  it('scenario D (the actual fix): a generation change resets the baseline — the upstream null-session_id leak this task closes', async () => {
+    const { agent, state } = makeGenCtxAgent();
+    const logs: string[] = [];
+    const checker = new FastChecker(agent, paths, '/tmp/framework', { log: (m) => logs.push(m) });
+    writeConfig({});
+    armPastGrace(checker);
+
+    state.generation = 1;
+    writeCtxStatus(90); // generation 1 born high — suppressed, alerts once
+    await (checker as any).checkContextStatus();
+    expect((checker as any).ctxHandoffFiredAt).toBe(0);
+    expect(logs.filter(m => m.includes('SUPPRESSED')).length).toBe(1);
+
+    // A real respawn: only the generation changes. Nothing in the session_id
+    // path is touched (ctxLastSessionId is never set in this test) — proving
+    // the reset comes from the generation change alone, which is exactly the
+    // guarantee upstream's own null-session_id caveat cannot make.
+    state.generation = 2;
+    writeCtxStatus(90); // same raw pct that was suppressed under generation 1
+    await (checker as any).checkContextStatus();
+    expect((checker as any).ctxBaselineGeneration).toBe(2);
+    expect((checker as any).ctxSessionBaselinePct).toBe(90); // recaptured fresh under gen 2, not inherited
+    expect((checker as any).ctxHandoffFiredAt).toBe(0); // gen 2 is also born-high, so still suppressed
+    // The alert fires again under gen 2 — gen 1's firing did not leak forward.
+    expect(logs.filter(m => m.includes('SUPPRESSED')).length).toBe(2);
+  });
+
+  it('an unreadable generation (accessor absent) is a no-op — existing threshold policy applies unchanged', async () => {
+    // A legacy/not-yet-adopted agent mock with NO getLifecycleGeneration at
+    // all (mirrors makeCtxAgent()'s existing shape elsewhere in this file).
+    const config: any = {};
+    const agent = {
+      name: 'legacy-agent',
+      isBootstrapped: vi.fn().mockReturnValue(true),
+      injectMessage: vi.fn().mockReturnValue(true),
+      write: vi.fn(),
+      getAgentDir: () => testDir,
+      getConfig: () => config,
+      getOutputBuffer: () => ({ getRecent: () => '' }),
+      sessionRefresh: vi.fn().mockResolvedValue(undefined),
+    } as any;
+    const checker = new FastChecker(agent, paths, '/tmp/framework');
+    writeConfig({});
+    armPastGrace(checker);
+
+    // Born high — WOULD be suppressed if a generation were readable, but
+    // since none is, this must behave exactly like pre-Task-4.1 code: hand
+    // off normally at threshold, no baseline state persisted.
+    writeCtxStatus(65);
+    await (checker as any).checkContextStatus();
+    expect(injected(agent).some(m => m.includes('CONTEXT HANDOFF REQUIRED'))).toBe(true);
+    expect((checker as any).ctxHandoffFiredAt).toBeGreaterThan(0);
+    expect((checker as any).ctxSessionBaselinePct).toBeNull();
+    expect((checker as any).ctxBaselineGeneration).toBeNull();
+  });
+
+  it('mandatory regression: codex context_full still force-restarts unconditionally, even under an active baseline suppression', async () => {
+    const { agent, state, config } = makeGenCtxAgent();
+    config.runtime = 'codex-app-server';
+    const checker = new FastChecker(agent, paths, '/tmp/framework');
+    writeConfig({});
+    armPastGrace(checker);
+
+    state.generation = 1;
+    writeCtxStatus(65); // establishes an active suppressed baseline first
+    await (checker as any).checkContextStatus();
+    expect((checker as any).ctxHandoffFiredAt).toBe(0); // confirmed suppressed, not handed off
+
+    // The codex context_full signal must still force-restart, regardless of
+    // any baseline/suppression state — the hard-overflow path is completely
+    // unaffected by this task (it returns before any baseline code runs).
+    writeCtxStatus(0, { context_full: true });
+    await (checker as any).checkContextStatus();
+    expect(hardRestart).toHaveBeenCalledTimes(1);
+  });
+
+  it('forceContextRestart resets the baseline fields directly (belt-and-suspenders alongside the generation-change reset)', async () => {
+    const { agent, state } = makeGenCtxAgent();
+    const checker = new FastChecker(agent, paths, '/tmp/framework');
+    writeConfig({});
+    armPastGrace(checker);
+
+    state.generation = 1;
+    writeCtxStatus(65);
+    await (checker as any).checkContextStatus();
+    expect((checker as any).ctxSessionBaselinePct).toBe(65);
+
+    (checker as any).forceContextRestart('test-forced-restart');
+    expect((checker as any).ctxSessionBaselinePct).toBeNull();
+    expect((checker as any).ctxBaselineAlertFiredAt).toBe(0);
+    expect((checker as any).ctxBaselineGeneration).toBeNull();
+  });
+});
+
 describe('FastChecker wedge default armed for codex runtime (attempt-7 Fix B)', () => {
   let testDir: string;
   let paths: BusPaths;

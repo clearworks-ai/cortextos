@@ -6,6 +6,7 @@ import {
   CLEAN_EXIT_HALT_THRESHOLD,
   CRASH_BACKOFF_BASE_MS,
   CRASH_BACKOFF_CAP_MS,
+  evaluateContextBaseline,
   FORCE_FRESH_BACKOFF_MS,
   IMAGE_POISON_THRESHOLD,
   IMAGE_POISON_WINDOW_MS,
@@ -14,6 +15,7 @@ import {
   STARTUP_FAILURE_SPAWN_AGE_MS,
   STARTUP_FAILURE_THRESHOLD,
   STARTUP_FAILURE_WINDOW_MS,
+  type ContextBaselineState,
   type ExitObservation,
 } from '../../../src/daemon/lifecycle/recovery-policy';
 import type { LifecycleSnapshot } from '../../../src/daemon/lifecycle/types';
@@ -377,5 +379,202 @@ describe('classifyExit — purity', () => {
     const frozen = JSON.parse(JSON.stringify(budgets));
     classifyExit(baseObs({ exitCode: 1, exitedAtMs: 1000 }), budgets);
     expect(budgets).toEqual(frozen);
+  });
+});
+
+// Task 4.1 (OPTIONAL, non-release-blocking; PRD §5 Open Question 3):
+// generation-keyed context baseline. Mirrors upstream `5a8e7cbc`'s (#937)
+// four-scenario suite, but scenario D replaces upstream's "unanchored legacy
+// path unchanged" with the actual delta this task adds over a literal
+// upstream port: a generation change resets baseline/alert state, which
+// upstream's session_id-keyed fields cannot guarantee (upstream's own commit
+// message documents session_id as null-prone on a fresh session).
+describe('evaluateContextBaseline', () => {
+  const EMPTY_STATE: ContextBaselineState = { generation: null, baselinePct: null, alertFiredAt: null };
+
+  it('scenario A — heavy-baseline idle session: suppressed, alerts exactly once', () => {
+    // First post-grace reading is already at/above threshold (65% >= 60%).
+    const captured = evaluateContextBaseline(EMPTY_STATE, {
+      generation: 1,
+      effectivePct: 65,
+      handoffThreshold: 60,
+      workfillMarginPct: 10,
+      capturedBaselineNow: true,
+      nowMs: 1000,
+    });
+    expect(captured.state.baselinePct).toBe(65);
+    expect(captured.suppressHandoff).toBe(true);
+    expect(captured.emitAlertNow).toBe(true);
+    expect(captured.state.alertFiredAt).toBe(1000);
+
+    // Idle ticks after: still suppressed, but the alert never re-fires.
+    const idle1 = evaluateContextBaseline(captured.state, {
+      generation: 1,
+      effectivePct: 67,
+      handoffThreshold: 60,
+      workfillMarginPct: 10,
+      capturedBaselineNow: true,
+      nowMs: 2000,
+    });
+    expect(idle1.suppressHandoff).toBe(true);
+    expect(idle1.emitAlertNow).toBe(false);
+    expect(idle1.state.alertFiredAt).toBe(1000); // unchanged
+
+    const idle2 = evaluateContextBaseline(idle1.state, {
+      generation: 1,
+      effectivePct: 68,
+      handoffThreshold: 60,
+      workfillMarginPct: 10,
+      capturedBaselineNow: true,
+      nowMs: 3000,
+    });
+    expect(idle2.suppressHandoff).toBe(true);
+    expect(idle2.emitAlertNow).toBe(false);
+  });
+
+  it('scenario B — low-baseline session that grows into threshold: never suppressed, no alert', () => {
+    const captured = evaluateContextBaseline(EMPTY_STATE, {
+      generation: 1,
+      effectivePct: 20,
+      handoffThreshold: 60,
+      workfillMarginPct: 10,
+      capturedBaselineNow: true,
+      nowMs: 1000,
+    });
+    expect(captured.state.baselinePct).toBe(20);
+    expect(captured.suppressHandoff).toBe(false);
+    expect(captured.emitAlertNow).toBe(false);
+
+    // Real growth all the way past threshold — baseline stays pinned at the
+    // original low capture, so suppression never triggers (baselinePct < handoff).
+    const grown = evaluateContextBaseline(captured.state, {
+      generation: 1,
+      effectivePct: 62,
+      handoffThreshold: 60,
+      workfillMarginPct: 10,
+      capturedBaselineNow: true,
+      nowMs: 5000,
+    });
+    expect(grown.suppressHandoff).toBe(false);
+    expect(grown.emitAlertNow).toBe(false);
+    expect(grown.state.baselinePct).toBe(20); // never recaptured
+  });
+
+  it('scenario C — born-above-threshold session that accumulates real work-fill: suppressed while idle, then hands off past the margin', () => {
+    const captured = evaluateContextBaseline(EMPTY_STATE, {
+      generation: 1,
+      effectivePct: 65,
+      handoffThreshold: 60,
+      workfillMarginPct: 10,
+      capturedBaselineNow: true,
+      nowMs: 1000,
+    });
+    expect(captured.suppressHandoff).toBe(true);
+
+    // Small growth (3pts) — still under the 10pt margin, still suppressed.
+    const smallGrowth = evaluateContextBaseline(captured.state, {
+      generation: 1,
+      effectivePct: 68,
+      handoffThreshold: 60,
+      workfillMarginPct: 10,
+      capturedBaselineNow: true,
+      nowMs: 2000,
+    });
+    expect(smallGrowth.suppressHandoff).toBe(true);
+
+    // Real work-fill: 11pts past the baseline — margin exceeded, handoff proceeds.
+    const pastMargin = evaluateContextBaseline(smallGrowth.state, {
+      generation: 1,
+      effectivePct: 76,
+      handoffThreshold: 60,
+      workfillMarginPct: 10,
+      capturedBaselineNow: true,
+      nowMs: 3000,
+    });
+    expect(pastMargin.suppressHandoff).toBe(false);
+    expect(pastMargin.state.baselinePct).toBe(65); // baseline itself never moves
+  });
+
+  it('scenario D — a generation change resets state; the actual fix this task adds', () => {
+    // Generation 1 is suppressed and has already alerted once.
+    const gen1 = evaluateContextBaseline(EMPTY_STATE, {
+      generation: 1,
+      effectivePct: 90,
+      handoffThreshold: 60,
+      workfillMarginPct: 10,
+      capturedBaselineNow: true,
+      nowMs: 1000,
+    });
+    expect(gen1.suppressHandoff).toBe(true);
+    expect(gen1.emitAlertNow).toBe(true);
+
+    // A NEW generation arrives (a real respawn) while the caller still holds
+    // gen1's baselinePct/alertFiredAt values in its own fields — this is
+    // exactly the upstream null-session_id leak scenario, except the
+    // generation itself unambiguously tells us this is a fresh identity.
+    // Even at the SAME raw effectivePct that was suppressed under gen1, the
+    // new generation gets a fresh baseline capture and is alert-eligible again.
+    const gen2First = evaluateContextBaseline(gen1.state, {
+      generation: 2,
+      effectivePct: 90,
+      handoffThreshold: 60,
+      workfillMarginPct: 10,
+      capturedBaselineNow: true,
+      nowMs: 5000,
+    });
+    expect(gen2First.state.generation).toBe(2);
+    expect(gen2First.state.baselinePct).toBe(90); // recaptured fresh, not inherited from gen1
+    expect(gen2First.suppressHandoff).toBe(true); // still born-high under gen2 too
+    expect(gen2First.emitAlertNow).toBe(true); // alert eligible again — gen1's firing did not leak forward
+  });
+
+  it('a session below threshold reaching the same generation twice does not recapture the baseline', () => {
+    const first = evaluateContextBaseline(EMPTY_STATE, {
+      generation: 1,
+      effectivePct: 40,
+      handoffThreshold: 60,
+      workfillMarginPct: 10,
+      capturedBaselineNow: true,
+      nowMs: 1000,
+    });
+    expect(first.state.baselinePct).toBe(40);
+
+    const second = evaluateContextBaseline(first.state, {
+      generation: 1,
+      effectivePct: 55,
+      handoffThreshold: 60,
+      workfillMarginPct: 10,
+      capturedBaselineNow: true,
+      nowMs: 2000,
+    });
+    expect(second.state.baselinePct).toBe(40); // unchanged — already captured for this generation
+  });
+
+  it('capturedBaselineNow: false (still within grace) never captures a baseline', () => {
+    const decision = evaluateContextBaseline(EMPTY_STATE, {
+      generation: 1,
+      effectivePct: 90,
+      handoffThreshold: 60,
+      workfillMarginPct: 10,
+      capturedBaselineNow: false,
+      nowMs: 1000,
+    });
+    expect(decision.state.baselinePct).toBeNull();
+    expect(decision.suppressHandoff).toBe(false);
+    expect(decision.emitAlertNow).toBe(false);
+  });
+
+  it('is a pure function — never mutates the input state object', () => {
+    const state: ContextBaselineState = { generation: 1, baselinePct: 65, alertFiredAt: 1000 };
+    const frozen = JSON.parse(JSON.stringify(state));
+    evaluateContextBaseline(state, {
+      generation: 1,
+      effectivePct: 67,
+      handoffThreshold: 60,
+      workfillMarginPct: 10,
+      capturedBaselineNow: true,
+      nowMs: 2000,
+    });
+    expect(state).toEqual(frozen);
   });
 });

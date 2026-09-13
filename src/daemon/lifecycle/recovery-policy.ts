@@ -378,3 +378,112 @@ export function classifyExit(
     updatedBudgets,
   };
 }
+
+// ---- Task 4.1 (OPTIONAL, non-release-blocking; PRD §5 Open Question 3) ----
+//
+// `evaluateContextBaseline` adapts upstream `5a8e7cbc` (#937, "suppress futile
+// context-handoff when resume baseline exceeds threshold") into this fork.
+// Upstream keyed its per-session baseline capture and one-shot alert off the
+// adapter-reported `session_id` field, which upstream's own commit message
+// documents as null-prone on a fresh Claude session — a caveat upstream
+// accepted ("no worse than the existing session-id-keyed fields"). This build
+// rejects that caveat: `ContextBaselineInput.generation` is always the real,
+// durable, never-null supervisor `GenerationToken.generation` (Task 1.1/1.5),
+// so a fresh spawn is unambiguously a new generation regardless of what (if
+// anything) the runtime reports as its own session identifier.
+//
+// Pure classification only — no I/O, no `Date.now()` (the caller passes
+// `nowMs`), matching this file's existing `classifyExit` discipline. The
+// caller (`FastChecker.checkContextStatus()`) owns: reading the real
+// generation (and treating an unreadable one as a no-op tick — this module is
+// never called with a null generation), persisting `state` back onto its own
+// per-session fields, and performing the alert side effect (log + bus
+// message) when `emitAlertNow` is true.
+
+export interface ContextBaselineState {
+  /** The supervisor generation this baseline/alert state was captured under.
+   * `null` only before any tick has ever supplied a real generation. */
+  generation: number | null;
+  /** The first post-grace `effectivePct` reading observed for `generation`,
+   * or `null` if not yet captured (or reset by a generation change). */
+  baselinePct: number | null;
+  /** `nowMs` of the one-shot suppression alert for `generation`, or `null`
+   * if not yet fired (or reset by a generation change). */
+  alertFiredAt: number | null;
+}
+
+export interface ContextBaselineInput {
+  /** The REAL current supervisor generation for this tick — never null,
+   * never the adapter-reported `session_id`. */
+  generation: number;
+  effectivePct: number;
+  handoffThreshold: number;
+  /** Percentage points of growth beyond the baseline that count as real
+   * work-fill (upstream's `WORKFILL_MARGIN`, passed explicitly by the caller
+   * so this module owns no magic numbers). */
+  workfillMarginPct: number;
+  /** True iff the caller's own "post-grace, not yet captured" gate
+   * (`ctxSessionStartedAt > 0 && !withinHandoffGrace`) holds this tick. This
+   * module does not know about grace windows or session anchors — it only
+   * knows whether it is allowed to capture a baseline right now. */
+  capturedBaselineNow: boolean;
+  nowMs: number;
+}
+
+export interface ContextBaselineDecision {
+  /** New state to persist back onto the caller's per-session fields. */
+  state: ContextBaselineState;
+  /** True => the caller's Tier-2 handoff must return without acquiring a
+   * lease, counting a fire, or arming a Tier-3 deadline. */
+  suppressHandoff: boolean;
+  /** True exactly once per (generation, suppression-episode) — the caller
+   * sends the one-shot orchestrator alert only when this is true. */
+  emitAlertNow: boolean;
+}
+
+export function evaluateContextBaseline(
+  state: ContextBaselineState,
+  input: ContextBaselineInput,
+): ContextBaselineDecision {
+  let { generation, baselinePct, alertFiredAt } = state;
+
+  // The actual fix over upstream: reset on a GENERATION change, never on the
+  // adapter's local session field. A real generation is never null, so this
+  // reset can never be silently skipped the way upstream's null-session_id
+  // restart path skips its own reset block.
+  if (input.generation !== generation) {
+    generation = input.generation;
+    baselinePct = null;
+    alertFiredAt = null;
+  }
+
+  // Capture the first trustworthy reading of this generation, once the
+  // caller's post-grace gate allows it. Mirrors upstream's capture condition
+  // exactly, just generation-scoped instead of session-scoped.
+  if (baselinePct === null && input.capturedBaselineNow) {
+    baselinePct = input.effectivePct;
+  }
+
+  // A generation BORN at/above the handoff threshold cannot be helped by a
+  // handoff — the fresh generation would inherit the same baseline and
+  // re-fire. Suppress only when almost no work-fill has accumulated on top of
+  // that baseline; a generation that starts low and grows into threshold, or
+  // starts high and does real work past the margin, is unaffected.
+  const suppressHandoff =
+    baselinePct !== null
+    && baselinePct >= input.handoffThreshold
+    && input.effectivePct - baselinePct < input.workfillMarginPct;
+
+  // One-shot per (generation, suppression-episode): fires the first tick
+  // suppression applies for this generation, silent on every tick after.
+  const emitAlertNow = suppressHandoff && alertFiredAt === null;
+  if (emitAlertNow) {
+    alertFiredAt = input.nowMs;
+  }
+
+  return {
+    state: { generation, baselinePct, alertFiredAt },
+    suppressHandoff,
+    emitAlertNow,
+  };
+}

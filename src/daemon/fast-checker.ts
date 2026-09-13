@@ -1,15 +1,16 @@
 import { readdirSync, readFileSync, existsSync, writeFileSync, unlinkSync, statSync } from 'fs';
 import { execFile } from 'child_process';
-import { join } from 'path';
+import { join, dirname, basename } from 'path';
 import { createHash } from 'crypto';
 import { hardRestart } from '../bus/system.js';
 import type { InboxMessage, BusPaths, TelegramMessage, TelegramCallbackQuery } from '../types/index.js';
-import { checkInbox, ackInbox } from '../bus/message.js';
+import { checkInbox, ackInbox, sendMessage } from '../bus/message.js';
 import { updateApproval } from '../bus/approval.js';
 import { AgentProcess } from './agent-process.js';
 import type { AgentLifecycleSupervisor } from './lifecycle/supervisor.js';
 import type { DispatchResult, GenerationToken } from './lifecycle/types.js';
 import { canonicalAgentId } from './lifecycle/types.js';
+import { evaluateContextBaseline, type ContextBaselineDecision } from './lifecycle/recovery-policy.js';
 import type { TelegramAPI } from '../telegram/api.js';
 import { KEYS } from '../pty/inject.js';
 import { stripControlChars, sanitizeForPtyInjection, wrapFenceSafe } from '../utils/validate.js';
@@ -35,6 +36,18 @@ export function handoffGraceMs(runtime: string | undefined): number {
   if (runtime === 'codex-app-server' || runtime === 'opencode') return 600_000;
   return 120_000;
 }
+
+/**
+ * Task 4.1 (OPTIONAL, non-release-blocking; PRD §5 Open Question 3): percentage
+ * points of context growth beyond the generation-keyed baseline that count as
+ * real work-fill. Below this margin, a generation born at/above the handoff
+ * threshold has done no meaningful work, so a handoff is futile — the fresh
+ * generation would be reborn at the same baseline and re-fire. Adapted from
+ * upstream `5a8e7cbc` (#937); see `evaluateContextBaseline` in
+ * `./lifecycle/recovery-policy.ts` for why this fork keys the baseline by the
+ * real supervisor generation instead of upstream's null-prone `session_id`.
+ */
+const WORKFILL_MARGIN = 10;
 
 /**
  * Real context-window size (tokens) for a model id.
@@ -209,6 +222,14 @@ export class FastChecker {
   private ctxCircuitBrokenAt: number | null = null; // when circuit tripped (null = healthy)
   // Persisted to disk so --continue restarts don't reset the circuit breaker
   private ctxCircuitFile: string = '';
+  // Task 4.1 (OPTIONAL, non-release-blocking): generation-keyed futile-handoff
+  // baseline (see `evaluateContextBaseline` in ./lifecycle/recovery-policy.ts).
+  // Per-session, NOT persisted — deliberately excluded from loadCtxCircuit/
+  // saveCtxCircuit's JSON shape, matching upstream 5a8e7cbc's own per-session
+  // (not persisted) baseline fields.
+  private ctxBaselineGeneration: number | null = null;
+  private ctxSessionBaselinePct: number | null = null;
+  private ctxBaselineAlertFiredAt: number = 0;
 
   constructor(
     agent: AgentProcess,
@@ -1687,6 +1708,48 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
   }
 
   /**
+   * Task 4.1 (OPTIONAL, non-release-blocking): resolve the org's configured
+   * orchestrator agent name, or null if none is configured / resolvable.
+   * Ported from upstream `5a8e7cbc` — mirrors how the daemon reads it
+   * elsewhere (agent-manager.maybeStartSlackSocketMode,
+   * AgentProcess.buildDeliverablesBlock): the `orchestrator` field lives in
+   * orgs/<org>/context.json under the framework root. The org is derived from
+   * the agent directory, whose canonical layout is
+   * <root>/orgs/<org>/agents/<name>. Returns null on any failure so the
+   * caller degrades to log-only.
+   */
+  private resolveOrchestratorName(): string | null {
+    try {
+      const org = basename(dirname(dirname(this.agent.getAgentDir())));
+      const contextPath = join(this.frameworkRoot, 'orgs', org, 'context.json');
+      const orchestrator = JSON.parse(readFileSync(contextPath, 'utf-8')).orchestrator;
+      return typeof orchestrator === 'string' && orchestrator ? orchestrator : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Task 4.1 (OPTIONAL, non-release-blocking): read the agent's real
+   * supervisor generation (`AgentProcess.getLifecycleGeneration()`,
+   * Task 1.1/1.5's `GenerationToken.generation`) for the
+   * `evaluateContextBaseline` baseline/alert key. Never falls back to
+   * `session_id` — a generation that cannot be read this tick (accessor
+   * throws or is absent, e.g. a not-yet-adopted legacy agent / a test mock
+   * with no lifecycle wiring) is treated as a no-op tick for baseline
+   * purposes: no capture, no suppression, no alert, existing behavior
+   * unchanged.
+   */
+  private readLifecycleGenerationSafe(): number | null {
+    try {
+      const gen = this.agent.getLifecycleGeneration?.();
+      return typeof gen === 'number' ? gen : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Read ctx thresholds from config.json with mtime-based caching (BUG-048 pattern).
    * Re-reads from disk only when the file has changed so dashboard updates take effect
    * within one poll cycle without a daemon restart.
@@ -1936,6 +1999,38 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     const withinHandoffGrace =
       this.ctxSessionStartedAt > 0 && now - this.ctxSessionStartedAt < HANDOFF_GRACE_MS;
 
+    // Task 4.1 (OPTIONAL, non-release-blocking; PRD §5 Open Question 3):
+    // generation-keyed futile-handoff baseline. Adapts upstream `5a8e7cbc`
+    // (#937) but keys the captured baseline and its one-shot alert by the
+    // real supervisor generation (never null) instead of upstream's
+    // null-prone local `session_id` field — see `evaluateContextBaseline` in
+    // ./lifecycle/recovery-policy.ts for the full rationale. An unreadable
+    // generation this tick (accessor throws/absent — a not-yet-adopted
+    // legacy agent, or a test double with no lifecycle wiring) is a no-op:
+    // no capture, no suppression, no alert, behavior identical to today.
+    let baselineDecision: ContextBaselineDecision | null = null;
+    const currentGeneration = this.readLifecycleGenerationSafe();
+    if (currentGeneration !== null) {
+      baselineDecision = evaluateContextBaseline(
+        {
+          generation: this.ctxBaselineGeneration,
+          baselinePct: this.ctxSessionBaselinePct,
+          alertFiredAt: this.ctxBaselineAlertFiredAt > 0 ? this.ctxBaselineAlertFiredAt : null,
+        },
+        {
+          generation: currentGeneration,
+          effectivePct,
+          handoffThreshold: handoff,
+          workfillMarginPct: WORKFILL_MARGIN,
+          capturedBaselineNow: this.ctxSessionStartedAt > 0 && !withinHandoffGrace,
+          nowMs: now,
+        },
+      );
+      this.ctxBaselineGeneration = baselineDecision.state.generation;
+      this.ctxSessionBaselinePct = baselineDecision.state.baselinePct;
+      this.ctxBaselineAlertFiredAt = baselineDecision.state.alertFiredAt ?? 0;
+    }
+
     // Tier 3: deadline exceeded — force restart if agent ignored handoff prompt
     if (this.ctxHandoffDeadlineAt > 0 && now > this.ctxHandoffDeadlineAt) {
       this.log(`Handoff deadline exceeded (${Math.round(effectivePct)}%) — force restarting`);
@@ -1955,6 +2050,36 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
 
     // Tier 2: handoff (fires once per session lifecycle)
     if (effectivePct >= handoff && this.ctxHandoffFiredAt === 0 && !withinHandoffGrace) {
+      // Task 4.1 (OPTIONAL, non-release-blocking): futile-handoff guard. A
+      // generation BORN at/above the handoff threshold cannot be helped by a
+      // handoff — the fresh generation inherits the same heavy resume
+      // baseline and re-fires immediately. Suppress and alert the
+      // orchestrator once instead of thrashing. Returning here means no
+      // lease is acquired, no fire is counted toward the 3-fire breaker, no
+      // Tier-3 deadline is armed, and no .force-fresh is pre-written — the
+      // handoff simply idles until real work-fill lands.
+      if (baselineDecision?.suppressHandoff) {
+        if (baselineDecision.emitAlertNow) {
+          const msg = `Context handoff SUPPRESSED for ${this.agent.name}: resume baseline `
+            + `${Math.round(this.ctxSessionBaselinePct ?? effectivePct)}% already meets/exceeds the ${handoff}% handoff `
+            + `threshold. A handoff cannot reduce a baseline it did not create — the fresh session would `
+            + `be born at the same level and re-fire. Review ctx_handoff_threshold or trim this agent's `
+            + `bootstrap. Auto-handoff idle until real work-fill accumulates.`;
+          this.log(msg);
+          // Route to the org's configured orchestrator as an internal bus message
+          // (agent inbox), NOT to the human's Telegram — this is an infra event, not
+          // a user ping. Best-effort: skip if no orchestrator is configured or it
+          // would be self-messaging, swallow any bus failure — the log line above is
+          // the durable audit trail.
+          const orchestrator = this.resolveOrchestratorName();
+          if (orchestrator && orchestrator !== this.agent.name) {
+            try {
+              sendMessage(this.paths, this.agent.name, orchestrator, 'normal', msg);
+            } catch { /* non-fatal — bus send is best-effort */ }
+          }
+        }
+        return;
+      }
       const lease = requestContextHandoffLease({
         ctxRoot: this.paths.ctxRoot,
         agentName: this.agent.name,
@@ -2068,6 +2193,16 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     this.ctxHandoffFiredAt = 0;
     this.ctxHandoffDeadlineAt = 0;
     this.ctxWarningFiredAt = 0;
+    // Task 4.1 (OPTIONAL, non-release-blocking): belt-and-suspenders reset —
+    // the coming generation bump (this.agent.sessionRefresh() below respawns
+    // and increments AgentProcess's lifecycleGeneration) already makes
+    // evaluateContextBaseline treat the next tick as a fresh generation on
+    // its own, but resetting explicitly here mirrors upstream 5a8e7cbc's own
+    // forceContextRestart reset and keeps these fields honest even if this
+    // restart path is ever reached before a generation bump lands.
+    this.ctxBaselineGeneration = null;
+    this.ctxSessionBaselinePct = null;
+    this.ctxBaselineAlertFiredAt = 0;
 
     // Release this dying session's context-handoff lease on teardown. This restart is
     // IN-PROCESS — sessionRefresh() below does stop()+start() on the same AgentProcess

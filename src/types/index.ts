@@ -1065,8 +1065,26 @@ export interface IPCResponse {
    * stopped/halted/quarantined; an explicit `data.resume: true` is required.
    * `INVALID_MODE` — `data.mode` was present but not `'continue' | 'fresh'`;
    * rejected outright rather than silently ignored.
+   *
+   * Task 3.5: `DUPLICATE`/`REVOKED`/`FAILED` — `inject-agent`'s
+   * `DispatchResult` codes (Task 1.1's Shared Contract), surfaced verbatim
+   * rather than conflated back onto the old `DEDUPED`/`NOT_FOUND` pair.
+   * `DUPLICATE` replaces `DEDUPED` for this path specifically (a real
+   * work-ledger-correlated redelivery, not a bare content-hash coincidence);
+   * `DEDUPED` itself is untouched and still used by `inspectAgentOp()`'s
+   * unrelated start/stop/restart registry-presence check.
    */
-  code?: 'NOT_FOUND' | 'DEDUPED' | 'INVALID_INPUT' | 'NOT_RUNNING' | 'AGENT_NOT_SCHEDULED' | 'REQUIRES_RESUME' | 'INVALID_MODE';
+  code?:
+    | 'NOT_FOUND'
+    | 'DEDUPED'
+    | 'INVALID_INPUT'
+    | 'NOT_RUNNING'
+    | 'AGENT_NOT_SCHEDULED'
+    | 'REQUIRES_RESUME'
+    | 'INVALID_MODE'
+    | 'DUPLICATE'
+    | 'REVOKED'
+    | 'FAILED';
   /**
    * Task 2.8: additive control-surface-truthfulness fields (PRD §2.7).
    * `success: true` on a start/stop/restart response has always meant, and

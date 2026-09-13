@@ -32,7 +32,7 @@ import { AgentProcessRuntimeAdapter } from './lifecycle/agent-runtime.js';
 import { LifecycleStateStore } from './lifecycle/state-store.js';
 import { writeForceFreshMarker } from './lifecycle/legacy-compat.js';
 import { canonicalAgentId } from './lifecycle/types.js';
-import type { DesiredState, ObservedPhase, StartMode, RequestReceipt } from './lifecycle/types.js';
+import type { DesiredState, DispatchResult, EffectToken, ObservedPhase, StartMode, RequestReceipt } from './lifecycle/types.js';
 
 type LogFn = (msg: string) => void;
 
@@ -83,6 +83,34 @@ function dispatchResultFromReceipt(receipt: RequestReceipt): LifecycleDispatchRe
     operationId: receipt.operationId,
     phase: receipt.phase,
     blockedReason: receipt.blockedReason,
+  };
+}
+
+/**
+ * Task 3.5: mints a best-effort `EffectToken` for `injectAgentManual()` —
+ * reflects the agent's per-agent `AgentLifecycleSupervisor`'s live snapshot
+ * at the moment of the call (so it is, by construction, not stale yet — the
+ * same narrow staleness window every other effect-fenced call in this
+ * codebase already tolerates between "read the live state" and "act on it").
+ * `supervisor` is optional purely for test-double `AgentEntry`s that don't
+ * construct one (production entries always have one, per Task 2.5) — falls
+ * back to the same `supervisorEpoch: 0`/`intentRevision: 0` "not yet
+ * established" sentinel convention `acceptBatch`/Task 2.2's marker-writing
+ * already use, so an owner-less `injectMessageDetailed()` call (no
+ * `setOwner()` — an unsupervised agent) never even consults this token's
+ * fields anyway.
+ */
+function mintManualEffect(agentName: string, supervisor?: AgentLifecycleSupervisor): EffectToken {
+  if (!supervisor) {
+    return { agentId: agentName, supervisorEpoch: 0, generation: 0, intentRevision: 0, effectId: randomUUID() };
+  }
+  const snap = supervisor.snapshot();
+  return {
+    agentId: snap.agentId,
+    supervisorEpoch: snap.supervisorEpoch,
+    generation: snap.currentGeneration ?? 0,
+    intentRevision: snap.intentRevision,
+    effectId: randomUUID(),
   };
 }
 
@@ -2632,28 +2660,73 @@ export class AgentManager {
   }
 
   /**
-   * Inject text directly into a running agent's PTY.
-   * Used by `cortextos bus test-cron-fire` to fire a cron immediately for testing.
-   * Returns true if the agent is running and the inject succeeded; false otherwise.
+   * Inject text directly into a running agent's PTY (back-compat boolean
+   * wrapper). Used by `cortextos bus test-cron-fire` and
+   * `startAgentCronScheduler`'s `onFire` to fire a cron immediately.
+   *
+   * Task 3.5: deliberately calls `entry.process.injectMessage()` directly
+   * (the `AgentProcess` legacy synchronous shim) rather than unwrapping
+   * `injectAgentDetailed()` below — that method is now `async` (it requires
+   * an `EffectToken`/`workIds` this call site has neither of), and this
+   * method's own callers (`onFire`, `fire-cron`) both consume its return
+   * value SYNCHRONOUSLY (`if (!injected) throw ...`), a call site this
+   * task's own plan explicitly leaves untouched. Returning a `Promise`
+   * here would silently break that check (a `Promise` object is always
+   * truthy) with no compiler error to catch it — so this method's contract
+   * (plain synchronous `boolean`) is preserved byte-for-byte.
    */
   injectAgent(agentName: string, text: string): boolean {
-    return this.injectAgentDetailed(agentName, text).ok;
+    const entry = this.agents.get(agentName);
+    if (!entry) return false;
+    return entry.process.injectMessage(text);
   }
 
   /**
-   * Inject text into an agent's PTY with structured outcome — issue #346.
+   * Task 3.5: inject text into an agent's PTY with the full `DispatchResult`
+   * outcome (Task 1.1's Shared Contract) — replaces the old ad hoc
+   * `NOT_FOUND | NOT_RUNNING | DEDUPED` shape (issue #346). `effect`/
+   * `workIds` are the caller's own (e.g. Task 3.7's ingress rewiring, once
+   * it accepts a batch and has real `workIds` to dispatch) — this method
+   * itself does no ledger work, it only resolves the agent and forwards.
    *
-   * Returns NOT_FOUND if the agent isn't in the registry, NOT_RUNNING if
-   * registered but the PTY is gone, DEDUPED on a MessageDedup hash hit. The
-   * boolean-returning `injectAgent()` is preserved for callers (cron
-   * scheduler, fast-checker, fire-cron) that only need pass/fail.
+   * `NOT_FOUND` was a real, useful distinct code in the old shape but is
+   * not one of `DispatchResult`'s four failure variants
+   * (`NOT_RUNNING`/`DUPLICATE`/`REVOKED`/`FAILED`) — mapped to `FAILED`
+   * with a message that says so. Confirmed this does not collide with
+   * `inspectAgentOp()`'s own `DEDUPED`/`NOT_FOUND` codes (`agent-manager.ts`
+   * ~L583) — that method is a completely separate start/stop/restart
+   * registry-presence check, never called for inject, so there is no
+   * shared contract to preserve here.
    */
-  injectAgentDetailed(agentName: string, text: string): { ok: true } | { ok: false; code: 'NOT_FOUND' | 'NOT_RUNNING' | 'DEDUPED'; message: string } {
+  injectAgentDetailed(agentName: string, text: string, effect: EffectToken, workIds: string[]): Promise<DispatchResult> {
     const entry = this.agents.get(agentName);
     if (!entry) {
-      return { ok: false, code: 'NOT_FOUND', message: `agent "${agentName}" not in registry` };
+      return Promise.resolve({ ok: false, code: 'FAILED', retryable: false, message: `agent "${agentName}" not in registry` });
     }
-    return entry.process.injectMessageDetailed(text);
+    return entry.process.injectMessageDetailed(text, effect, workIds);
+  }
+
+  /**
+   * Task 3.5: convenience wrapper for a not-yet-migrated caller that has no
+   * `EffectToken`/`workIds` of its own to pass to `injectAgentDetailed()` —
+   * today, only `ipc-server.ts`'s manual `inject-agent` IPC command (a
+   * genuinely ad hoc, not-yet-accepted-into-the-work-ledger dispatch; there
+   * is no `acceptBatch()` upstream of it to produce real `workIds`). Mints
+   * a best-effort `EffectToken` off the agent's own per-agent
+   * `AgentLifecycleSupervisor` (Task 2.5 — always constructed, even for an
+   * unsupervised agent, so a live snapshot is always obtainable) with an
+   * empty `workIds` array, then forwards to the real method above. This
+   * still gets the caller genuine `REVOKED`/`DUPLICATE`/`FAILED` diagnostics
+   * instead of the old bare `DEDUPED`/`NOT_FOUND` conflation — a strict
+   * upgrade, not a regression, for a manual/IPC-triggered inject.
+   */
+  injectAgentManual(agentName: string, text: string): Promise<DispatchResult> {
+    const entry = this.agents.get(agentName);
+    if (!entry) {
+      return Promise.resolve({ ok: false, code: 'FAILED', retryable: false, message: `agent "${agentName}" not in registry` });
+    }
+    const effect = mintManualEffect(agentName, entry.supervisor);
+    return entry.process.injectMessageDetailed(text, effect, []);
   }
 
   /**

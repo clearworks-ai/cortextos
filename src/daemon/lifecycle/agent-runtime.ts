@@ -156,19 +156,14 @@ export class AgentProcessRuntimeAdapter implements RuntimeAdapter {
   }
 
   /**
-   * Not this task's focus (Phase 3 owns real work-record correlation) — a
-   * direct, honest mapping onto `injectMessageDetailed()`'s existing
-   * structured result so the `RuntimeAdapter` contract is fully implemented.
+   * Task 3.5: `AgentProcess.injectMessageDetailed()` now takes the exact
+   * same `(effect, payload, workIds)` shape and returns a real
+   * `DispatchResult` directly (revocation-checked, dedup-as-hint,
+   * dispatch-intent-persisted-before-write) — this adapter method is a
+   * pure forward, no translation layer needed anymore.
    */
   async deliver(effect: EffectToken, payload: string, workIds: string[]): Promise<DispatchResult> {
-    const result = this.process.injectMessageDetailed(payload);
-    if (result.ok) {
-      return { ok: true, workIds, batchId: effect.effectId };
-    }
-    if (result.code === 'NOT_RUNNING') {
-      return { ok: false, code: 'NOT_RUNNING', retryable: true, message: result.message };
-    }
-    return { ok: false, code: 'DUPLICATE', retryable: false, existingWorkIds: workIds, message: result.message };
+    return this.process.injectMessageDetailed(payload, effect, workIds);
   }
 
   // --- Internal ------------------------------------------------------------

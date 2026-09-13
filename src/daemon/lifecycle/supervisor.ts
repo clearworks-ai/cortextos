@@ -517,6 +517,64 @@ export class AgentLifecycleSupervisor {
   }
 
   /**
+   * Task 3.5: public wrapper over the existing revalidation fence
+   * (`isEffectStale`, Task 1.5 Step 6) so an external dispatch caller (the
+   * narrow `LifecycleRequestOwner` interface `agent-process.ts` consults)
+   * can apply the exact same "a revoked generation must never reach the
+   * runtime" rule this class already applies to its own spawn/retire
+   * effects -- true iff `effect`'s `{supervisorEpoch, intentRevision,
+   * generation}` still matches the live snapshot.
+   */
+  isEffectLive(effect: EffectToken): boolean {
+    return !this.isEffectStale(effect);
+  }
+
+  /**
+   * Task 3.5: read-only -- which of `workIds` are already past `'accepted'`
+   * (a genuine prior dispatch/execution), for `AgentProcess.injectMessageDetailed()`'s
+   * dedup-as-hint check (PHASES.md Task 3.5's Research Findings: the real
+   * dedup/idempotency authority is `sourceKey`/`workId` phase progression,
+   * not a `MessageDedup` content-hash coincidence). Never mutates. A workId
+   * with no matching record at all (unknown/already archived) is omitted --
+   * not reported as either dispatched or not.
+   */
+  dispatchedWorkIds(workIds: string[]): string[] {
+    if (workIds.length === 0) return [];
+    const idSet = new Set(workIds);
+    return this.snapshot()
+      .outstandingWork.filter((r) => idSet.has(r.workId) && r.phase !== 'accepted')
+      .map((r) => r.workId);
+  }
+
+  /**
+   * Task 3.5: durably transitions every still-`'accepted'` record among
+   * `workIds` to `'dispatched'`, tagged with `batchId` -- the literal
+   * "dispatch intent is persisted before external submission" acceptance
+   * criterion. Idempotent: a workId already past `'accepted'` (dispatched by
+   * an earlier attempt -- e.g. this exact call is itself a retry) is left
+   * untouched, never re-transitioned or errored. An unknown workId (no
+   * matching record) is silently ignored -- a caller passing a stale/
+   * unrecognized workId is not this method's failure to report; the whole
+   * point is that a persist FAILURE (not an unknown id) is what must stop
+   * the caller from ever reaching the runtime.
+   */
+  beginDispatch(workIds: string[], batchId: string): { ok: true } | { ok: false; error: string } {
+    if (workIds.length === 0) return { ok: true };
+    const nowMs = this.clock();
+    const idSet = new Set(workIds);
+    const result = this.commitWithRetry((draft) => {
+      draft.outstandingWork = draft.outstandingWork.map((record) => {
+        if (!idSet.has(record.workId) || record.phase !== 'accepted') return record;
+        return ledgerMarkDispatched(record, batchId, nowMs);
+      });
+    });
+    if (!result.ok) {
+      return { ok: false, error: `${result.code}: ${result.message}` };
+    }
+    return { ok: true };
+  }
+
+  /**
    * Task 3.4 Step 5: apply one `WorkCorrelationEvent` (already namespaced
    * `work-*` by the caller, see `WORK_OBSERVATION_KINDS`) to every matching
    * `WorkRecord` in the ledger, durably. Best-effort by design: this is an

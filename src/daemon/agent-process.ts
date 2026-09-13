@@ -27,7 +27,7 @@ import {
   type ImportedFreshRequest,
 } from './lifecycle/legacy-compat.js';
 import { canonicalAgentId } from './lifecycle/types.js';
-import type { GenerationToken, LifecycleRequest, RequestReceipt } from './lifecycle/types.js';
+import type { DispatchResult, EffectToken, GenerationToken, LifecycleRequest, RequestReceipt } from './lifecycle/types.js';
 import { classifyExit } from './lifecycle/recovery-policy.js';
 import type { ExitObservation, RecoveryBudgetEntry } from './lifecycle/recovery-policy.js';
 import type { LifecycleObservation } from './lifecycle/supervisor.js';
@@ -48,10 +48,25 @@ import type { WorkCorrelationEvent } from '../pty/codex-app-server-pty.js';
  * this without modification — this is the same "reuse the existing public
  * surface, don't invent a new entry point" instruction Task 3.4's plan
  * gives for wiring `CodexAppServerPTY`'s `WorkCorrelationEvent`s through.
+ *
+ * Task 3.5: three more optional methods, same additive philosophy —
+ * `injectMessageDetailed()` needs to (1) check whether an `EffectToken` it
+ * was handed is still live before ever touching the PTY, (2) look up
+ * whether a `MessageDedup` hash hit actually correlates to already-
+ * dispatched `workIds` (the ledger is the real dedup/idempotency authority
+ * — content-hash coincidence is only ever a hint), and (3) durably persist
+ * dispatch intent before the write. The real `AgentLifecycleSupervisor`
+ * (Task 3.5) structurally satisfies all three without modification; any
+ * owner mock that only implements `request()`/`observe()` keeps compiling,
+ * and `injectMessageDetailed()` degrades to "no ledger to consult" for such
+ * a caller rather than throwing.
  */
 export interface LifecycleRequestOwner {
   request(req: LifecycleRequest): Promise<RequestReceipt>;
   observe?(event: LifecycleObservation): void;
+  isEffectLive?(effect: EffectToken): boolean;
+  dispatchedWorkIds?(workIds: string[]): string[];
+  beginDispatch?(workIds: string[], batchId: string): { ok: true } | { ok: false; error: string };
 }
 
 /**
@@ -914,21 +929,91 @@ export class AgentProcess {
   }
 
   /**
-   * Inject a message into the agent's PTY — structured outcome.
+   * Task 3.5: inject a message into the agent's PTY — full `DispatchResult`
+   * outcome (Task 1.1's Shared Contract), replacing the old ad hoc
+   * `{ok:true} | {ok:false, code:'NOT_RUNNING'|'DEDUPED'}` shape.
    *
-   * Distinguishes NOT_RUNNING (agent registered but no live PTY) from
-   * DEDUPED (content collapsed against the in-process MessageDedup window).
-   * See issue #346 — both used to surface as a bare `false` and got mistaken
-   * for "agent not found" by operators investigating restart/cron failures.
+   * `effect` is the `EffectToken` the caller obtained from its lifecycle
+   * owner (or minted best-effort, for a not-yet-fully-migrated caller);
+   * `workIds` are the work-ledger ids this dispatch attempt is FOR (already
+   * durably accepted — Task 3.2's `acceptBatch` — before this is ever
+   * called). Order of checks, per PHASES.md Task 3.5:
+   *
+   * 1. Revocation first — a stale effect (a stop/retire landed since it was
+   *    minted) returns `REVOKED` WITHOUT touching `this.pty` at all.
+   * 2. Not running — unchanged from the old shape, still `retryable: true`,
+   *    still leaves `content` untouched for a future retry.
+   * 3. Dedup-as-hint — a `MessageDedup` hash hit is no longer an automatic
+   *    block. If the owner can correlate `workIds` against the ledger: no
+   *    correlated ids means this is a genuine content coincidence for
+   *    brand-new work (not blocked, hint only); correlated ids means a real
+   *    redelivery of already-dispatched work (`DUPLICATE`, PTY write
+   *    skipped — it would be redundant). If there is no owner/ledger to
+   *    consult at all, the hash stays the only signal available and remains
+   *    authoritative exactly as it was before this task (never weakened to
+   *    a no-op just because nothing can corroborate it).
+   * 4. Persist dispatch intent — durably marks `workIds` `'dispatched'`
+   *    BEFORE the write. A persistence failure returns `FAILED` and the PTY
+   *    is never touched.
+   * 5. The actual PTY write — mechanics unchanged from the old shape.
+   * 6. Success — `{ ok: true, workIds, batchId: effect.effectId }`.
    */
-  injectMessageDetailed(content: string): { ok: true } | { ok: false; code: 'NOT_RUNNING' | 'DEDUPED'; message: string } {
+  async injectMessageDetailed(content: string, effect: EffectToken, workIds: string[]): Promise<DispatchResult> {
+    if (this.owner?.isEffectLive && !this.owner.isEffectLive(effect)) {
+      return {
+        ok: false,
+        code: 'REVOKED',
+        retryable: false,
+        message: `inject for "${this.name}" revoked — the generation/intent this dispatch targeted is no longer current`,
+      };
+    }
+
     if (!this.pty || this.status !== 'running') {
-      return { ok: false, code: 'NOT_RUNNING', message: `agent "${this.name}" is registered but not running (status: ${this.status})` };
+      return {
+        ok: false,
+        code: 'NOT_RUNNING',
+        retryable: true,
+        message: `agent "${this.name}" is registered but not running (status: ${this.status})`,
+      };
     }
 
     if (this.dedup.isDuplicate(content)) {
-      this.log('Dedup: skipping duplicate message');
-      return { ok: false, code: 'DEDUPED', message: `inject for "${this.name}" deduped — content matches MessageDedup hash window` };
+      const correlated = this.owner?.dispatchedWorkIds ? this.owner.dispatchedWorkIds(workIds) : null;
+      if (correlated === null || correlated.length > 0) {
+        // Either there is no ledger to consult at all (legacy/no owner --
+        // MessageDedup's hash is the only signal available, unchanged from
+        // pre-Task-3.5 behavior), or the ledger confirms this is a genuine
+        // redelivery of already-dispatched work (the common case).
+        const existingWorkIds = correlated ?? workIds;
+        this.log(
+          correlated === null
+            ? 'Dedup: skipping duplicate message (no ledger to correlate against)'
+            : 'Dedup: skipping — workIds already correlate to a dispatched record',
+        );
+        return {
+          ok: false,
+          code: 'DUPLICATE',
+          retryable: false,
+          existingWorkIds,
+          message: `inject for "${this.name}" deduped — content matches MessageDedup hash window`,
+        };
+      }
+      // correlated.length === 0: a real ledger was consulted and confirmed
+      // these workIds are genuinely new — MessageDedup is a hint here, not
+      // the authority. Do not block; fall through to dispatch.
+      this.log('Dedup: content-hash hit for genuinely new workIds — not blocking dispatch');
+    }
+
+    if (this.owner?.beginDispatch) {
+      const persisted = this.owner.beginDispatch(workIds, effect.effectId);
+      if (!persisted.ok) {
+        return {
+          ok: false,
+          code: 'FAILED',
+          retryable: false,
+          message: `dispatch intent persist failed for "${this.name}": ${persisted.error}`,
+        };
+      }
     }
 
     if ('injectMessage' in this.pty && typeof this.pty.injectMessage === 'function') {
@@ -938,16 +1023,45 @@ export class AgentProcess {
       // inherit AgentPTY. Feed it through the same write path used historically.
       injectMessageIntoPty((data) => this.pty?.write(data), content);
     }
-    return { ok: true };
+    return { ok: true, workIds, batchId: effect.effectId };
   }
 
   /**
-   * Inject a message into the agent's PTY (back-compat boolean wrapper).
-   * New callers that need to distinguish DEDUPED from NOT_RUNNING should use
-   * `injectMessageDetailed()` instead.
+   * Task 3.5: back-compat boolean-returning legacy shim, preserved
+   * byte-for-byte from the pre-Task-3.5 body (still synchronous, still
+   * treats a `MessageDedup` hash hit as a hard block) — deliberately does
+   * NOT delegate to `injectMessageDetailed()` above. That method is now
+   * `async` and requires an `EffectToken`/`workIds` this call site has
+   * neither of; routing through it would force every remaining synchronous
+   * caller below to become `async` just to preserve today's fire-and-forget
+   * semantics, which is out of this task's scope (and would silently change
+   * behavior at the two call sites this task's own plan explicitly leaves
+   * alone: `AgentManager.injectAgent()`'s cron-scheduler `onFire` path, and
+   * `FastChecker`'s unsupervised `pollCycle()` branch).
+   *
+   * Remaining callers of this boolean wrapper (grepped 2026-09-12, none
+   * migrated to `injectMessageDetailed()` by this task):
+   *  - `AgentManager.injectAgent()` (agent-manager.ts) — itself a back-compat
+   *    boolean wrapper, called by `startAgentCronScheduler`'s `onFire`
+   *    (cron-fired injects) and `ipc-server.ts`'s `fire-cron` case.
+   *  - `FastChecker.pollCycle()`'s unsupervised branch (fast-checker.ts) —
+   *    byte-for-byte the pre-Task-3.3 body, per that task's own doc comment.
+   *  - `FastChecker`'s question/urgent-message/context-warning/handoff
+   *    injects (fast-checker.ts, several call sites) — operational nudges
+   *    outside Phase 3's accepted-work model entirely.
    */
   injectMessage(content: string): boolean {
-    return this.injectMessageDetailed(content).ok;
+    if (!this.pty || this.status !== 'running') return false;
+    if (this.dedup.isDuplicate(content)) {
+      this.log('Dedup: skipping duplicate message');
+      return false;
+    }
+    if ('injectMessage' in this.pty && typeof this.pty.injectMessage === 'function') {
+      this.pty.injectMessage(content);
+    } else {
+      injectMessageIntoPty((data) => this.pty?.write(data), content);
+    }
+    return true;
   }
 
   /**

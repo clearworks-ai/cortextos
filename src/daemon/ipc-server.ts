@@ -886,12 +886,16 @@ export class IPCServer {
           if (!agentToInject || !textToInject) {
             response = { success: false, error: 'inject-agent requires: agent, data.text', code: 'INVALID_INPUT' };
           } else {
-            // Structured outcome distinguishes NOT_FOUND (agent not in registry)
-            // from NOT_RUNNING (registered but PTY dead) from DEDUPED (content
-            // collision in MessageDedup window). Closes the conflation Boris
-            // surfaced — the harness "3 not found errors" were dedup hits.
-            // See issue #346.
-            const result = this.agentManager.injectAgentDetailed(agentToInject, textToInject);
+            // Task 3.5: structured `DispatchResult` outcome distinguishes
+            // NOT_RUNNING (registered but PTY dead) from DUPLICATE (a real
+            // redelivery of already-dispatched work, per the work ledger —
+            // no longer a bare content-hash conflation) from REVOKED/FAILED.
+            // Closes the conflation Boris surfaced — the harness "3 not
+            // found errors" were dedup hits. See issue #346.
+            // `injectAgentManual()` (not `injectAgentDetailed()` directly —
+            // this manual IPC path has no prior `acceptBatch()` upstream, so
+            // it has no real `EffectToken`/`workIds` of its own to pass).
+            const result = await this.agentManager.injectAgentManual(agentToInject, textToInject);
             if (result.ok) {
               response = { success: true, data: `Injected into agent ${agentToInject}` };
             } else {

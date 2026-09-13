@@ -33,6 +33,24 @@ interface ReporterOptions {
   startedAtMs?: number;
 }
 
+/**
+ * Task 3.8 Step 1 audit (completion-capability): confirmed NOT a completion
+ * signal. This class reports token/context-window usage by polling
+ * OpenCode's own sqlite session/part/message tables (`step-finish` rows) on
+ * a fixed 5s interval (`CONTEXT_REPORT_INTERVAL_MS`, `opencode-pty.ts`) —
+ * the exact same category of signal Task 3.4 explicitly excluded for Codex
+ * (`thread/tokenUsage/updated` is "NOT a completion signal", per that task's
+ * own comment in `codex-app-server-pty.ts`). Grepped every consumer of
+ * `context_status.json` (`fast-checker.ts`, `turn-activity.ts`,
+ * `hook-context-status.ts`, `src/cli/bus.ts`) — none of them treat this
+ * file's presence/update as evidence that a dispatched turn completed; the
+ * two real consumers are a status-line/typing-indicator display and
+ * `turn-activity.ts`'s SESSION-ID identification fallback (Task 3.6's
+ * wedge-liveness mechanism, itself explicitly not a completion proxy). No
+ * bug found here — this class stays exactly what it already was; it does
+ * not participate in Task 3.8's `WorkCorrelationEvent`/`needs-review` wiring
+ * either as a source or as a false-positive risk.
+ */
 export class OpencodeContextReporter {
   private readonly stateDir: string;
   private readonly agentDir: string;

@@ -97,6 +97,7 @@ function displayStatuses(statuses: AgentStatus[]): void {
 
   let anyAwaiting = false;
   let anyDormant = false;
+  let anySupervised = false;
   for (const s of statuses) {
     const name = s.name.padEnd(18);
     let label: string = s.status;
@@ -107,10 +108,24 @@ function displayStatuses(statuses: AgentStatus[]): void {
     const uptime = s.uptime ? formatUptime(s.uptime).padEnd(12) : '-'.padEnd(12);
     const model = s.model || '-';
     console.log(`  ${name}${status}${pid}${uptime}${model}`);
+    // Task 2.8: authoritative desired/observed lifecycle state, present only
+    // for an agent on the supervised cutover path — printed as a SEPARATE
+    // advisory line, never folded into the `status`/`dormant` columns above.
+    // Dormancy above stays exactly what it was: a cadence-based advisory
+    // signal with no remediation attached; this is a distinct, durable,
+    // request-driven signal alongside it.
+    if (s.desiredState !== undefined) {
+      anySupervised = true;
+      const mismatch = s.desiredState !== 'running' || s.phase === 'blocked';
+      if (mismatch) {
+        console.log(`    ‡ desired: ${s.desiredState} / phase: ${s.phase ?? '-'}${s.blockedReason ? ` — ${s.blockedReason}` : ''}`);
+      }
+    }
   }
 
   if (anyAwaiting) console.log('  * awaiting interactive confirmation (first-run prompt not accepted)\n');
   if (anyDormant) console.log('  † enabled but heartbeat stale relative to liveness baseline (possible silent dormancy)\n');
+  if (anySupervised) console.log('  ‡ authoritative desired/observed lifecycle state (supervised agent) — advisory, no remediation taken here\n');
 
   console.log('');
 }

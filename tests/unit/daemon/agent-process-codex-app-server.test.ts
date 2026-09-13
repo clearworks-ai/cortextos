@@ -13,6 +13,7 @@ const mockCodexAppServerPty = {
   }),
   getOutputBuffer: vi.fn().mockReturnValue({ isBootstrapped: vi.fn().mockReturnValue(true) }),
   setTelegramHandle: vi.fn(),
+  onWorkCorrelation: vi.fn(),
 };
 
 const mockAgentPty = {

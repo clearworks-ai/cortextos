@@ -5,6 +5,7 @@ import { readdirSync } from 'fs';
 import { ensureDir } from '../utils/atomic.js';
 import { TelegramAPI } from '../telegram/api.js';
 import type { BusPaths } from '../types/index.js';
+import { writeForceFreshMarker } from '../daemon/lifecycle/legacy-compat.js';
 
 // --- Types ---
 
@@ -78,9 +79,17 @@ export function selfRestart(paths: BusPaths, agentName: string, reason?: string)
 export function hardRestart(paths: BusPaths, agentName: string, reason?: string): void {
   const resolvedReason = reason || 'no reason specified';
 
-  // Create force-fresh marker (agent-process.ts checks this on restart)
+  // Create force-fresh marker (agent-process.ts checks this on restart).
+  // Task 2.2: routed through `legacy-compat.ts`'s `writeForceFreshMarker` —
+  // an atomic temp-write + rename swap — so a concurrent
+  // `importFreshRequest` reader (which reserves by rename) never observes a
+  // partially-written file. Content is unchanged from the previous direct
+  // `writeFileSync`. Deliberate two-step migration: this is still a raw
+  // file-level write, not yet routed through `AgentLifecycleSupervisor.
+  // request()` — that full routing is Task 2.8's job, once the daemon's
+  // IPC/CLI layer submits identified requests end to end.
   ensureDir(paths.stateDir);
-  writeFileSync(join(paths.stateDir, '.force-fresh'), resolvedReason + '\n', 'utf-8');
+  writeForceFreshMarker(paths.stateDir, resolvedReason + '\n');
 
   // Also create restart marker so crash-alert knows it was planned
   writeFileSync(join(paths.stateDir, '.restart-planned'), resolvedReason + '\n', 'utf-8');

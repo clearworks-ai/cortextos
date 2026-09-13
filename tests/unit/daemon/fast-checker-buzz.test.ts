@@ -103,5 +103,34 @@ describe('FastChecker — Buzz (Nostr/NIP-29) additions', () => {
       const checker = new FastChecker(agent, paths, '/tmp/framework');
       expect(() => (checker as any).queueBuzzMessage('some formatted text')).not.toThrow();
     });
+
+    // Task 4.2: ported from upstream `7d26aabc`'s fast-checker-buzz.test.ts
+    // diff (the "Buzz ordering case explicitly called out as valuable" per
+    // PHASES.md's Task 4.2 acceptance criteria) — reframed as an ordering
+    // assertion against this fork's real single-injectMessage-call
+    // concatenation (Telegram peeked before Buzz, see fast-checker.ts's
+    // pollCycle) rather than upstream's injectMessageDetailed mock, which
+    // this fork does not have.
+    it('preserves Telegram-before-Buzz order when both are queued in the same poll cycle', async () => {
+      const agent = createMockAgent();
+      const checker = new FastChecker(agent, paths, '/tmp/framework');
+      const buzzFormatted = FastChecker.formatBuzzTextMessage('sender-1', 'chan-1', 'buzz body');
+
+      (checker as any).queueTelegramMessage('=== TELEGRAM ord ===\n', 'telegram/chat1/1');
+      (checker as any).queueBuzzMessage(buzzFormatted, 'buzz/chan1/1');
+
+      await (checker as any).pollCycle();
+
+      expect(agent.injectMessage).toHaveBeenCalledTimes(1);
+      const delivered = agent.injectMessage.mock.calls[0][0] as string;
+      const iTelegram = delivered.indexOf('TELEGRAM ord');
+      const iBuzz = delivered.indexOf('buzz body');
+      expect(iTelegram).toBeGreaterThanOrEqual(0);
+      expect(iBuzz).toBeGreaterThanOrEqual(0);
+      expect(iTelegram).toBeLessThan(iBuzz);
+
+      expect((checker as any).telegramMessages).toEqual([]);
+      expect((checker as any).buzzMessages).toEqual([]);
+    });
   });
 });

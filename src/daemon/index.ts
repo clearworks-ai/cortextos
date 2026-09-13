@@ -305,6 +305,11 @@ class Daemon {
     // Registry ownership comes from AgentManager (agents + workers).
     this.ptyHostReaper = new PtyHostReaper(this.ctxRoot, {
       getOwnedHostPids: () => this.agentManager?.getOwnedPtyHostPids() ?? new Set<number>(),
+      // Task 2.7: Tier 3 candidates are submitted to the owning agent's
+      // AgentLifecycleSupervisor (when one is actually cut over) instead of
+      // the reaper deciding unilaterally — see PtyHostReaperOptions'
+      // getSupervisorForAgent doc comment.
+      getSupervisorForAgent: (name) => this.agentManager?.getSupervisorForAgent(name),
     });
     this.ptyHostReaper.start();
 

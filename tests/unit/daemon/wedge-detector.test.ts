@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import {
   detectWedge,
   DEFAULT_WEDGE_BUFFER_STALE_MS,
@@ -124,5 +126,52 @@ describe('detectWedge', () => {
       bufferStaleThresholdMs: 5 * 60_000,
     }));
     expect(d.wedged).toBe(true);
+  });
+
+  // Task 3.6: `hasPendingWork` now widens to include real accepted-but-
+  // unfinished lifecycle work (AgentLifecycleSupervisor.outstandingWork()),
+  // not just the bus-inbox/inflight directory listing — closing the exact
+  // Scenario A exclusion (an already-injected input whose transport copy
+  // was removed used to read as "no pending inbox work"). detectWedge()
+  // itself is unchanged: it only ever sees a boolean and has no idea which
+  // source produced it, so this documents the caller-side OR at the
+  // decision-function boundary.
+  it('wedges on outstanding lifecycle work alone, with an empty bus inbox (Scenario A — Task 3.6)', () => {
+    const hasPendingInboxWork = false; // bus inbox/inflight both empty
+    const outstandingWorkCount = 1; // one accepted-but-unfinished WorkRecord
+    const d = detectWedge(wedgedBase({
+      hasPendingWork: hasPendingInboxWork || outstandingWorkCount > 0,
+    }));
+    expect(d.wedged).toBe(true);
+  });
+
+  it('still excludes on no-pending-work when BOTH the bus inbox AND outstanding lifecycle work are empty', () => {
+    const hasPendingInboxWork = false;
+    const outstandingWorkCount = 0;
+    const d = detectWedge(wedgedBase({
+      hasPendingWork: hasPendingInboxWork || outstandingWorkCount > 0,
+    }));
+    expect(d.wedged).toBe(false);
+    expect((d as { reason: string }).reason).toBe('no-pending-work');
+  });
+});
+
+/**
+ * Task 3.6 Step 5 acceptance criterion: "Wedge remains alert-only —
+ * `detectWedge` never gains a restart action, and `reportWedge` never
+ * submits a restart request." This must survive future refactors, not just
+ * assert today's behavior — so it is a structural/source-level check, not a
+ * behavioral one: `detectWedge`'s entire module has ZERO import statements,
+ * which makes it categorically impossible for it to reach any daemon
+ * side-effect function (hardRestart, sessionRefresh, AgentLifecycleSupervisor
+ * .request(), etc.) — it can only ever return data.
+ */
+describe('detectWedge — source-level no-restart-path assertion (Task 3.6 Step 5)', () => {
+  it('the wedge-detector module imports nothing at all — it is a pure data-in/data-out function with no way to trigger a side effect', () => {
+    const source = readFileSync(join(__dirname, '../../../src/daemon/wedge-detector.ts'), 'utf-8');
+    const importLines = source
+      .split('\n')
+      .filter((line) => /^\s*import\b/.test(line));
+    expect(importLines).toEqual([]);
   });
 });

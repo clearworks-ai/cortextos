@@ -1,16 +1,21 @@
 import { readdirSync, readFileSync, existsSync, writeFileSync, unlinkSync, statSync } from 'fs';
 import { execFile } from 'child_process';
-import { join } from 'path';
+import { join, dirname, basename } from 'path';
 import { createHash } from 'crypto';
 import { hardRestart } from '../bus/system.js';
 import type { InboxMessage, BusPaths, TelegramMessage, TelegramCallbackQuery } from '../types/index.js';
-import { checkInbox, ackInbox } from '../bus/message.js';
+import { checkInbox, ackInbox, sendMessage } from '../bus/message.js';
 import { updateApproval } from '../bus/approval.js';
 import { AgentProcess } from './agent-process.js';
+import type { AgentLifecycleSupervisor } from './lifecycle/supervisor.js';
+import type { DispatchResult, GenerationToken } from './lifecycle/types.js';
+import { canonicalAgentId } from './lifecycle/types.js';
+import { evaluateContextBaseline, type ContextBaselineDecision } from './lifecycle/recovery-policy.js';
 import type { TelegramAPI } from '../telegram/api.js';
 import { KEYS } from '../pty/inject.js';
 import { stripControlChars, sanitizeForPtyInjection, wrapFenceSafe } from '../utils/validate.js';
 import { agentHoldsContextHandoffLease, releaseContextHandoffLease, requestContextHandoffLease } from './context-handoff-lease.js';
+import { readCurrentSessionId, readLastTurnAtMs } from './turn-activity.js';
 import {
   detectWedge,
   DEFAULT_WEDGE_HEARTBEAT_FRESH_MS,
@@ -31,6 +36,18 @@ export function handoffGraceMs(runtime: string | undefined): number {
   if (runtime === 'codex-app-server' || runtime === 'opencode') return 600_000;
   return 120_000;
 }
+
+/**
+ * Task 4.1 (OPTIONAL, non-release-blocking; PRD §5 Open Question 3): percentage
+ * points of context growth beyond the generation-keyed baseline that count as
+ * real work-fill. Below this margin, a generation born at/above the handoff
+ * threshold has done no meaningful work, so a handoff is futile — the fresh
+ * generation would be reborn at the same baseline and re-fire. Adapted from
+ * upstream `5a8e7cbc` (#937); see `evaluateContextBaseline` in
+ * `./lifecycle/recovery-policy.ts` for why this fork keys the baseline by the
+ * real supervisor generation instead of upstream's null-prone `session_id`.
+ */
+const WORKFILL_MARGIN = 10;
 
 /**
  * Real context-window size (tokens) for a model id.
@@ -79,6 +96,26 @@ export const DEDUP_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 export const DEDUP_MAX_ENTRIES = 5000;
 
 /**
+ * Task 3.6 Step 4: durable evidence that a wedge stall alert was attempted,
+ * written BEFORE the Telegram send call so a crash mid-send (or an ambiguous
+ * network outcome) still leaves a visible record instead of the prior
+ * silent `.catch(() => {})`. `notifiedAtMs` stays null until the send
+ * Promise resolves; `sendFailed`/`sendError` are set only if it rejects.
+ * Retry is explicitly out of scope here (PHASES.md only requires the
+ * ambiguous outcome be disclosed, not a retry-with-backoff system) — the
+ * existing 30-minute wedge-alert storm-guard cooldown (`wedgeLastRestartAt`)
+ * is the only thing gating whether a repeat attempt happens at all.
+ */
+export interface WedgeNotificationReceipt {
+  agentId: string;
+  reason: string;
+  firstObservedAtMs: number;
+  notifiedAtMs: number | null;
+  sendFailed: boolean;
+  sendError: string | null;
+}
+
+/**
  * Fast message checker for a single agent.
  * Replaces fast-checker.sh: polls Telegram and inbox, injects into PTY.
  */
@@ -100,8 +137,24 @@ export class FastChecker {
   private chatId?: string;
   private allowedUserId?: number;
 
+  // Task 3.3: constructor-injected lifecycle supervisor (mirrors how
+  // `AgentProcess` is already injected into this constructor). Only ever
+  // consulted when `supervised` is true — an unsupervised checker's
+  // `pollCycle()` never reads either field, so a missing supervisor never
+  // affects the legacy path.
+  private supervisor?: AgentLifecycleSupervisor;
+  private supervised: boolean;
+
   // External Telegram handler (set by daemon)
-  private telegramMessages: Array<{ formatted: string; ackIds: string[] }> = [];
+  //
+  // Task 3.3: `sourceKey` is the stable ingress idempotency key handed to
+  // `AgentLifecycleSupervisor.acceptBatch()` (PRD §2.5's "Telegram bot/chat/
+  // message ID"). Real Telegram identity when the caller has one (chat id +
+  // message id — see `queueTelegramMessage`'s call sites in agent-manager.ts);
+  // falls back to a digest of `formatted` when the caller doesn't pass one
+  // (documented known idempotency gap — see queueTelegramMessage's doc
+  // comment).
+  private telegramMessages: Array<{ formatted: string; ackIds: string[]; sourceKey: string }> = [];
   // Disk copy of the pending Telegram queue. Telegram advances its server-side
   // offset the instant a message is queued (the poller handler just pushes into
   // telegramMessages and returns), so Telegram never redelivers — this file is
@@ -110,7 +163,16 @@ export class FastChecker {
 
   // External Buzz (Nostr/NIP-29) handler (set by daemon) — SP3b-style parallel
   // queue alongside telegramMessages, reusing the same isDuplicate dedup.
-  private buzzMessages: Array<{ formatted: string }> = [];
+  //
+  // Task 3.7: peek-then-drain-on-success, same contract as telegramMessages/
+  // slackMessages (a destructive drain before this task lost a queued Buzz
+  // message outright whenever injection failed — there was no re-queue,
+  // matching the exact pre-Task-3.3 Telegram bug this queue never got fixed
+  // for). `sourceKey` mirrors the other two queues': real Nostr event
+  // identity (`NostrEvent.id`, content-addressed by the protocol — see
+  // `queueBuzzMessage`'s doc comment) when the caller has one, else a
+  // digest fallback.
+  private buzzMessages: Array<{ formatted: string; sourceKey: string }> = [];
 
   // External Slack handler (set by daemon's Slack dispatcher). Deliberately
   // a separate queue from telegramMessages, not a shared one: draining it
@@ -119,7 +181,10 @@ export class FastChecker {
   // two would restart/extend a Telegram typing indicator for Slack-only
   // activity. Peek-then-drain matches the current Telegram inject contract
   // so a failed inject does not drop Slack inbound.
-  private slackMessages: string[] = [];
+  //
+  // Task 3.3: `sourceKey` mirrors `telegramMessages`' — real Slack identity
+  // (channel + `ts`) when the caller has one, else a digest fallback.
+  private slackMessages: Array<{ formatted: string; sourceKey: string }> = [];
 
   // Persistent dedup: message hashes to prevent duplicate delivery
   // Persistent dedup: message hash -> last-seen timestamp (ms)
@@ -137,6 +202,12 @@ export class FastChecker {
   // once per DEFAULT_WEDGE_RESTART_COOLDOWN_MS. 0 = never fired.
   private wedgeLastRestartAt: number = 0;
 
+  // Task 3.6 Step 4: pending-notification receipt for the most recent wedge
+  // stall alert this session attempted, persisted to disk BEFORE the
+  // Telegram send call (see reportWedge/writeWedgeNotificationReceipt).
+  private lastWedgeNotificationReceipt: WedgeNotificationReceipt | null = null;
+  private wedgeNotificationReceiptPath: string = '';
+
   // Context monitor state
   private ctxConfigMtime: number = 0;
   private ctxWarningFiredAt: number = 0;    // dedup: 15min cooldown between warnings
@@ -151,12 +222,28 @@ export class FastChecker {
   private ctxCircuitBrokenAt: number | null = null; // when circuit tripped (null = healthy)
   // Persisted to disk so --continue restarts don't reset the circuit breaker
   private ctxCircuitFile: string = '';
+  // Task 4.1 (OPTIONAL, non-release-blocking): generation-keyed futile-handoff
+  // baseline (see `evaluateContextBaseline` in ./lifecycle/recovery-policy.ts).
+  // Per-session, NOT persisted — deliberately excluded from loadCtxCircuit/
+  // saveCtxCircuit's JSON shape, matching upstream 5a8e7cbc's own per-session
+  // (not persisted) baseline fields.
+  private ctxBaselineGeneration: number | null = null;
+  private ctxSessionBaselinePct: number | null = null;
+  private ctxBaselineAlertFiredAt: number = 0;
 
   constructor(
     agent: AgentProcess,
     paths: BusPaths,
     frameworkRoot: string,
-    options: { pollInterval?: number; log?: LogFn; telegramApi?: TelegramAPI; chatId?: string; allowedUserId?: number } = {},
+    options: {
+      pollInterval?: number;
+      log?: LogFn;
+      telegramApi?: TelegramAPI;
+      chatId?: string;
+      allowedUserId?: number;
+      supervisor?: AgentLifecycleSupervisor;
+      supervised?: boolean;
+    } = {},
   ) {
     this.agent = agent;
     this.paths = paths;
@@ -166,6 +253,8 @@ export class FastChecker {
     this.telegramApi = options.telegramApi;
     this.chatId = options.chatId;
     this.allowedUserId = options.allowedUserId;
+    this.supervisor = options.supervisor;
+    this.supervised = options.supervised === true;
 
     // Initialize persistent dedup
     this.dedupFilePath = join(paths.stateDir, '.message-dedup-hashes');
@@ -179,6 +268,11 @@ export class FastChecker {
     // Load persisted circuit breaker state so --continue restarts don't reset it
     this.ctxCircuitFile = join(paths.stateDir, '.ctx-circuit.json');
     this.loadCtxCircuit();
+
+    // Task 3.6 Step 4: path for the wedge stall-alert pending-notification
+    // receipt (write-only per session; no replay-on-boot behavior needed —
+    // wedgeLastRestartAt itself already resets to 0 on a fresh session).
+    this.wedgeNotificationReceiptPath = join(paths.stateDir, '.wedge-notification-receipt.json');
   }
 
   /**
@@ -204,15 +298,76 @@ export class FastChecker {
     await this.waitForBootstrap();
     this.log('Bootstrap complete. Beginning poll loop.');
 
-    // Idle-session heartbeat watchdog: fires every 50 min regardless of REPL state
+    // Idle-session heartbeat watchdog: fires every 50 min regardless of REPL state.
+    //
+    // The watchdog subprocess must be pinned to THIS agent's identity via an
+    // explicit env/cwd override. Without it, execFile() inherits the daemon's
+    // own process.env, and `cortextos bus update-heartbeat` resolves its target
+    // agent from CTX_AGENT_NAME in that inherited environment — whichever agent
+    // last set it in-process, not the agent this checker instance belongs to.
+    // Observed in production: every agent's watchdog tick landed under one
+    // agent's heartbeat/event files (282 misattributed entries in one day).
     const HEARTBEAT_INTERVAL_MS = 50 * 60 * 1000;
-    const agentName = this.agent.name;
-    this.heartbeatTimer = setInterval(() => {
-      const ts = new Date().toISOString();
-      execFile('cortextos', ['bus', 'update-heartbeat', `[watchdog] ${agentName} alive — idle session ${ts}`], (err) => {
-        if (err) this.log(`Heartbeat watchdog error: ${err.message}`);
-      });
-    }, HEARTBEAT_INTERVAL_MS);
+    const target = this.agent.getEnvironment();
+    if (target.agentName !== this.agent.name || !target.agentDir || target.ctxRoot !== this.paths.ctxRoot) {
+      this.log(`Heartbeat watchdog target-context mismatch for ${this.agent.name} — not starting an ambiguously attributed watchdog`);
+    } else {
+      const watchdogEnv: NodeJS.ProcessEnv = {
+        ...process.env,
+        CTX_AGENT_NAME: target.agentName,
+        CTX_AGENT_DIR: target.agentDir,
+        CTX_ORG: target.org,
+        CTX_ROOT: target.ctxRoot,
+        CTX_INSTANCE_ID: target.instanceId,
+        CTX_FRAMEWORK_ROOT: target.frameworkRoot,
+        CTX_PROJECT_ROOT: target.projectRoot,
+        CTX_TIMEZONE: target.timezone ?? '',
+        CTX_ORCHESTRATOR: target.orchestrator ?? '',
+      };
+      this.heartbeatTimer = setInterval(() => {
+        if (!this.running || !this.agent.isRunning()) return;
+        const ts = new Date().toISOString();
+        execFile(
+          'cortextos',
+          ['bus', 'update-heartbeat', `[watchdog] ${target.agentName} alive — daemon-observed process liveness ${ts}`],
+          { cwd: target.agentDir, env: watchdogEnv },
+          (err) => {
+            if (err) this.log(`Heartbeat watchdog error (${target.agentName}): ${err.message}`);
+          },
+        );
+
+        // Task 3.6 Step 3: publish this tick to the supervisor as an
+        // attributed, generation-bound daemon observation — NOT runtime
+        // work-progress evidence. `AgentLifecycleSupervisor.observe()`'s
+        // 'watchdog-heartbeat' handling only records it for introspection
+        // (lastWatchdogHeartbeatObservation()); it never touches
+        // outstandingWork()/the ledger/the turn-activity clock detectWedge()
+        // reads. Best-effort/fail-safe: any construction error here must
+        // never take down the watchdog's actual heartbeat stamp above.
+        if (this.supervisor) {
+          try {
+            const token: GenerationToken = {
+              agentId: canonicalAgentId({ instanceId: target.instanceId, org: target.org, name: target.agentName }),
+              // Same documented sentinel used elsewhere (state-store.ts,
+              // agent-process.ts) — nothing reads this token's epoch back.
+              supervisorEpoch: 0,
+              generation: this.agent.getLifecycleGeneration(),
+            };
+            this.supervisor.observe({
+              kind: 'watchdog-heartbeat',
+              token,
+              atMs: Date.now(),
+              evidence: {
+                agentName: target.agentName,
+                note: 'daemon-observed-process-liveness-only-not-runtime-progress',
+              },
+            });
+          } catch (err) {
+            this.log(`Watchdog observation error (ignored, ${target.agentName}): ${err}`);
+          }
+        }
+      }, HEARTBEAT_INTERVAL_MS);
+    }
 
     while (this.running) {
       try {
@@ -255,26 +410,50 @@ export class FastChecker {
   /**
    * Queue a formatted Telegram message for injection.
    * Called by the daemon's Telegram handler.
+   *
+   * Task 3.3: `sourceKey` is this message's stable ingress idempotency key
+   * for `AgentLifecycleSupervisor.acceptBatch()`. Callers that have a real
+   * Telegram identity (chat id + message id, or chat id + message id +
+   * reaction timestamp) should pass it — see agent-manager.ts's poller
+   * handlers. When omitted, this falls back to a digest of `formatted`
+   * itself: a documented, deliberate known gap (Task 3.3's completion note)
+   * — two byte-identical messages collapse to the same work (the safe
+   * direction, per Task 3.1's duplicate-vs-conflict rule), but two distinct
+   * real messages that happen to render identical text would collide. No
+   * caller today omits it in production; the fallback exists for direct/
+   * test callers only.
    */
-  queueTelegramMessage(formatted: string): void {
-    this.telegramMessages.push({ formatted, ackIds: [] });
+  queueTelegramMessage(formatted: string, sourceKey?: string): void {
+    const key = sourceKey ?? `telegram-digest-${this.hashMessage(formatted)}`;
+    this.telegramMessages.push({ formatted, ackIds: [], sourceKey: key });
     this.savePendingTelegram();
   }
 
   /**
    * Queue a formatted Buzz message for injection.
    * Called by the daemon's BuzzRelayClient message handler.
+   *
+   * Task 3.7: `sourceKey` mirrors `queueTelegramMessage`'s — pass Buzz's
+   * real `NostrEvent.id`-derived identity (see agent-manager.ts's
+   * `client.onMessage` handler), else this falls back to a digest of
+   * `formatted` (same documented gap as Telegram/Slack).
    */
-  queueBuzzMessage(formatted: string): void {
-    this.buzzMessages.push({ formatted });
+  queueBuzzMessage(formatted: string, sourceKey?: string): void {
+    const key = sourceKey ?? `buzz-digest-${this.hashMessage(formatted)}`;
+    this.buzzMessages.push({ formatted, sourceKey: key });
   }
 
   /**
    * Queue a formatted Slack message for injection.
    * Called by the daemon's Slack Socket Mode dispatcher.
+   *
+   * Task 3.3: `sourceKey` mirrors `queueTelegramMessage`'s — pass Slack's
+   * real `channel`+`ts` identity when available (see slack/dispatcher.ts),
+   * else this falls back to a digest of `formatted` (same documented gap).
    */
-  queueSlackMessage(formatted: string): void {
-    this.slackMessages.push(formatted);
+  queueSlackMessage(formatted: string, sourceKey?: string): void {
+    const key = sourceKey ?? `slack-digest-${this.hashMessage(formatted)}`;
+    this.slackMessages.push({ formatted, sourceKey: key });
   }
 
   /**
@@ -298,10 +477,14 @@ export class FastChecker {
       hasTelegramMessage = true;
     }
 
-    // Process queued Buzz messages
-    while (this.buzzMessages.length > 0) {
-      const msg = this.buzzMessages.shift()!;
-      messageBlock += msg.formatted;
+    // Process queued Buzz messages. Task 3.7: PEEK, do not drain here — same
+    // non-destructive contract as the Telegram queue above (a destructive
+    // shift() here, unlike Telegram's, was never fixed after the same class
+    // of bug: an injection failure lost the message permanently since it
+    // was already removed from the queue before delivery was even attempted).
+    const buzzPendingCount = this.buzzMessages.length;
+    for (let i = 0; i < buzzPendingCount; i++) {
+      messageBlock += this.buzzMessages[i].formatted;
     }
 
     // Process queued Slack messages. Deliberately does NOT set
@@ -310,47 +493,86 @@ export class FastChecker {
     // Telegram-only. Peek, then drain only after inject succeeds.
     const slackPendingCount = this.slackMessages.length;
     for (let i = 0; i < slackPendingCount; i++) {
-      messageBlock += this.slackMessages[i];
+      messageBlock += this.slackMessages[i].formatted;
     }
 
 
-    // Check agent inbox
+    // Check agent inbox. Task 3.3: also retain each message's own formatted
+    // text (not just the concatenated messageBlock) — the supervised path
+    // below needs one acceptBatch input per source item, not one opaque
+    // blob. Building this array costs nothing on the unsupervised path: it
+    // is simply never read there.
     const inboxMessages = checkInbox(this.paths);
+    const inboxFormatted: Array<{ id: string; formatted: string }> = [];
     for (const msg of inboxMessages) {
-      messageBlock += this.formatInboxMessage(msg);
+      const formatted = this.formatInboxMessage(msg);
+      messageBlock += formatted;
       ackIds.push(msg.id);
+      inboxFormatted.push({ id: msg.id, formatted });
     }
 
-    // Inject if there's anything
+    // Inject if there's anything.
+    //
+    // Task 3.3 (Scenario A closure): a `supervised` agent's removal
+    // (telegram splice / pending-file rewrite / slack splice / inbox ACK)
+    // must be gated on durable acceptance (`acceptBatch`) succeeding AND the
+    // dispatch outcome, never on the bare `injectMessage()` boolean alone —
+    // see `pollCycleSupervisedDispatch`. An unsupervised agent's behavior
+    // below is byte-for-byte the pre-Task-3.3 body.
     if (messageBlock) {
-      const injected = this.agent.injectMessage(messageBlock);
-      if (injected) {
-        // Delivery confirmed — NOW drain the telegram messages we consumed
-        // (only the peeked prefix) and persist the shortened queue.
-        if (pendingCount > 0) {
-          this.telegramMessages.splice(0, pendingCount);
-          this.savePendingTelegram();
+      if (this.supervised) {
+        if (!this.supervisor) {
+          // Defensive fail-closed — agent-manager.ts always constructs a
+          // FastChecker with both `supervised: true` and a real `supervisor`
+          // together (mirrors AgentProcess's own supervised/owner pairing).
+          // Never silently fall back to the unsupervised path, which would
+          // defeat this task's entire point.
+          throw new Error(
+            `pollCycle: supervised=true but no lifecycle supervisor is wired for agent "${this.agent.name}"`,
+          );
         }
-        if (slackPendingCount > 0) {
-          this.slackMessages.splice(0, slackPendingCount);
+        await this.pollCycleSupervisedDispatch(
+          messageBlock,
+          pendingCount,
+          slackPendingCount,
+          buzzPendingCount,
+          inboxFormatted,
+          ackIds,
+          hasTelegramMessage,
+        );
+      } else {
+        const injected = this.agent.injectMessage(messageBlock);
+        if (injected) {
+          // Delivery confirmed — NOW drain the telegram messages we consumed
+          // (only the peeked prefix) and persist the shortened queue.
+          if (pendingCount > 0) {
+            this.telegramMessages.splice(0, pendingCount);
+            this.savePendingTelegram();
+          }
+          if (slackPendingCount > 0) {
+            this.slackMessages.splice(0, slackPendingCount);
+          }
+          if (buzzPendingCount > 0) {
+            this.buzzMessages.splice(0, buzzPendingCount);
+          }
+          // ACK inbox messages
+          for (const id of ackIds) {
+            ackInbox(this.paths, id);
+          }
+          this.log(`Injected ${messageBlock.length} bytes`);
+          // Only update typing timestamp for Telegram messages, not inbox/cron.
+          // Inbox messages (agent-to-agent, session continuations) must not
+          // restart the typing indicator after Stop has cleared it.
+          if (hasTelegramMessage) {
+            this.lastMessageInjectedAt = Date.now();
+          }
+          // Cooldown after injection
+          await sleep(5000);
         }
-        // ACK inbox messages
-        for (const id of ackIds) {
-          ackInbox(this.paths, id);
-        }
-        this.log(`Injected ${messageBlock.length} bytes`);
-        // Only update typing timestamp for Telegram messages, not inbox/cron.
-        // Inbox messages (agent-to-agent, session continuations) must not
-        // restart the typing indicator after Stop has cleared it.
-        if (hasTelegramMessage) {
-          this.lastMessageInjectedAt = Date.now();
-        }
-        // Cooldown after injection
-        await sleep(5000);
+        // Injection failed (agent NOT_RUNNING or DEDUPED): telegram messages stay
+        // in this.telegramMessages (and on disk) and inbox stays un-ack'd — both
+        // retry on the next pollCycle once the agent is back up.
       }
-      // Injection failed (agent NOT_RUNNING or DEDUPED): telegram messages stay
-      // in this.telegramMessages (and on disk) and inbox stays un-ack'd — both
-      // retry on the next pollCycle once the agent is back up.
     }
 
     // Typing indicator: send while Claude is actively working
@@ -364,6 +586,151 @@ export class FastChecker {
     // Wedge watchdog: detect a stuck REPL (stale conversation buffer while the
     // heartbeat stays fresh + pending inbox work) and force ONE recovery restart.
     this.checkWedge();
+  }
+
+  /**
+   * Task 3.3 (Scenario A closure): the supervised half of `pollCycle`'s
+   * inject branch. Durably accepts the whole peeked batch (Telegram prefix +
+   * Slack prefix + inbox items) via `AgentLifecycleSupervisor.acceptBatch()`
+   * BEFORE attempting delivery — never after, never "best effort". Only once
+   * `acceptBatch` returns `ok: true` does this even attempt to dispatch; only
+   * once dispatch itself reports success does it splice the queues, rewrite
+   * the pending-Telegram file, or ACK the inbox. Every other outcome
+   * (acceptance failure, `NOT_RUNNING`, `DUPLICATE`, `REVOKED`/`FAILED`)
+   * leaves every transport copy exactly where it was, to retry next cycle.
+   *
+   * Crash-recovery correctness (see this task's file, Step 6): a crash
+   * before `acceptBatch` returns loses nothing (nothing was persisted or
+   * removed); a crash after `acceptBatch` succeeds but before dispatch/
+   * removal re-peeks the SAME messages next cycle, and `acceptBatch`'s
+   * sourceKey-based dedup (Task 3.1/3.2) resolves them to the SAME
+   * `workId`s, not new ones; a crash after removal is durably safe because
+   * the `WorkRecord`s were already committed by `acceptBatch` before removal
+   * ever ran.
+   */
+  private async pollCycleSupervisedDispatch(
+    messageBlock: string,
+    pendingCount: number,
+    slackPendingCount: number,
+    buzzPendingCount: number,
+    inboxFormatted: Array<{ id: string; formatted: string }>,
+    ackIds: string[],
+    hasTelegramMessage: boolean,
+  ): Promise<void> {
+    const supervisor = this.supervisor!;
+
+    const telegramInputs = this.telegramMessages.slice(0, pendingCount).map((entry) => ({
+      sourceKey: entry.sourceKey,
+      payload: entry.formatted,
+      payloadDigest: this.hashMessage(entry.formatted),
+    }));
+    const slackInputs = this.slackMessages.slice(0, slackPendingCount).map((entry) => ({
+      sourceKey: entry.sourceKey,
+      payload: entry.formatted,
+      payloadDigest: this.hashMessage(entry.formatted),
+    }));
+    // Task 3.7: Buzz gets the same durable-acceptance treatment as
+    // Telegram/Slack/inbox — see `buzzMessages`'s declaration for why it
+    // previously had none at all (unconditional drain, no acceptBatch call).
+    const buzzInputs = this.buzzMessages.slice(0, buzzPendingCount).map((entry) => ({
+      sourceKey: entry.sourceKey,
+      payload: entry.formatted,
+      payloadDigest: this.hashMessage(entry.formatted),
+    }));
+    const inboxInputs = inboxFormatted.map((entry) => ({
+      sourceKey: entry.id,
+      payload: entry.formatted,
+      payloadDigest: this.hashMessage(entry.formatted),
+    }));
+
+    // Step 2 (this task's file): durable acceptance strictly before any
+    // removal — and before delivery is even attempted.
+    const acceptResult = await supervisor.acceptBatch([...telegramInputs, ...slackInputs, ...buzzInputs, ...inboxInputs]);
+    if (!acceptResult.ok) {
+      this.log(`Durable acceptance failed (${acceptResult.reason}) — leaving all queues/inbox untouched this cycle`);
+      return;
+    }
+
+    // Step 3: dispatch via the supervisor-mediated DispatchResult contract,
+    // not the bare injectMessage() boolean.
+    const dispatchResult = await this.dispatchViaSupervisor(messageBlock, acceptResult.workIds, acceptResult.batchId);
+
+    if (dispatchResult.ok) {
+      // NOW it's safe to drain — durable acceptance already succeeded AND
+      // the runtime has at minimum accepted the delivery attempt.
+      if (pendingCount > 0) {
+        this.telegramMessages.splice(0, pendingCount);
+        this.savePendingTelegram();
+      }
+      if (slackPendingCount > 0) {
+        this.slackMessages.splice(0, slackPendingCount);
+      }
+      if (buzzPendingCount > 0) {
+        this.buzzMessages.splice(0, buzzPendingCount);
+      }
+      for (const id of ackIds) {
+        ackInbox(this.paths, id);
+      }
+      this.log(`Injected ${messageBlock.length} bytes (batch ${dispatchResult.batchId})`);
+      if (hasTelegramMessage) {
+        this.lastMessageInjectedAt = Date.now();
+      }
+      await sleep(5000);
+      return;
+    }
+
+    if (dispatchResult.code === 'NOT_RUNNING') {
+      // Existing behavior, now explicit: telegram/slack stay queued, inbox
+      // stays un-ACK'd, retried next cycle. The WorkRecords accepted above
+      // remain in 'accepted' phase — NOT lost, NOT re-accepted next cycle
+      // (acceptBatch's sourceKey dedup handles that), retried against the
+      // SAME workIds by a future dispatch attempt.
+      this.log('Dispatch NOT_RUNNING — queues/inbox preserved for retry');
+      return;
+    }
+
+    if (dispatchResult.code === 'DUPLICATE') {
+      // Per PRD §2.5: a duplicate is a receipt for existing work, not a
+      // disappearance. Not treated as delivered; not silently dropped.
+      this.log(`Dispatch DUPLICATE — linked to existing workIds ${dispatchResult.existingWorkIds.join(', ')}`);
+      return;
+    }
+
+    // REVOKED (a stop landed) / FAILED (the runtime write itself failed).
+    // Do not drain queues — a successor generation, if any, gets a fresh
+    // acceptBatch next cycle from whatever is still queued.
+    this.log(`Dispatch failed (${dispatchResult.code}) — queues/inbox preserved`);
+  }
+
+  /**
+   * Task 3.3 Step 3: translation shim. `AgentProcess.injectMessage()` still
+   * returns a bare boolean today (Task 3.5's `injectMessageDetailed` →
+   * `DispatchResult` migration has not landed) — this wraps that boolean so
+   * `pollCycleSupervisedDispatch` is already written against the stable
+   * `DispatchResult` contract (Task 1.5's `RuntimeAdapter.deliver()` shape)
+   * from day one. Only this shim needs deleting once Task 3.5 lands the real
+   * thing — no caller-side logic changes. `DUPLICATE`/`REVOKED`/`FAILED` are
+   * unreachable through this shim today (acceptBatch already resolved
+   * duplicates before this is ever called, and there is no real revocation
+   * signal yet) — `pollCycleSupervisedDispatch`'s handling of them is
+   * forward-looking, not dead code, since Task 3.5 will make them reachable
+   * without any change to the caller.
+   */
+  private async dispatchViaSupervisor(
+    messageBlock: string,
+    workIds: string[],
+    batchId: string,
+  ): Promise<DispatchResult> {
+    const injected = this.agent.injectMessage(messageBlock);
+    if (injected) {
+      return { ok: true, workIds, batchId };
+    }
+    return {
+      ok: false,
+      code: 'NOT_RUNNING',
+      retryable: true,
+      message: `injectMessage returned false for agent "${this.agent.name}"`,
+    };
   }
 
   /**
@@ -419,11 +786,38 @@ export class FastChecker {
     const bufferMtime = this.mtimeMsOrNull(join(this.paths.stateDir, 'conversation-buffer.jsonl'));
     const heartbeatMtime = this.mtimeMsOrNull(join(this.paths.stateDir, 'heartbeat.json'));
 
+    // Prefer COMPLETED TURNS over the conversation buffer as the activity clock.
+    // The buffer is touched only on outbound Telegram sends, so a silently
+    // working agent read as wedged — this watchdog force-restarted the fleet 229
+    // times in one daemon log on that signal (frank2 at 3412min "stale", larry at
+    // 2099min, both mid-work). Filtering the token log to the CURRENT session is
+    // mandatory: a leaked previous-session process keeps appending to it, and its
+    // turns would otherwise vouch for a dead agent.
+    const sessionId = readCurrentSessionId(this.paths.stateDir);
+    const lastTurnAtMs = sessionId
+      ? readLastTurnAtMs(join(this.paths.logDir, 'codex-tokens.jsonl'), sessionId)
+      : null;
+
+    // Task 3.6 Step 2: widened, strictly additive OR — the bus-inbox/inflight
+    // check stays as-is (cheap, non-destructive), but a real Telegram/Slack-
+    // originated turn the supervisor has durably accepted and not yet
+    // completed (Task 3.1-3.3's WorkRecord ledger) now also counts as
+    // pending work. This closes the exact Scenario A exclusion: an
+    // already-injected input whose transport copy was removed used to read
+    // as "no pending inbox work" even while the runtime was still stalled
+    // mid-turn on it. `this.supervisor` is only ever set on a supervised
+    // checker (Task 3.3) — an unsupervised checker's `?.` short-circuits to
+    // `undefined`, so `?? 0 > 0` is false, preserving pre-Task-3.6 behavior
+    // exactly for every unsupervised caller/test.
+    const hasInboxWork = this.hasPendingInboxWork();
+    const outstandingWorkCount = this.supervisor?.outstandingWork().length ?? 0;
+
     const decision = detectWedge({
       nowMs: now,
       conversationBufferMtimeMs: bufferMtime,
       heartbeatMtimeMs: heartbeatMtime,
-      hasPendingWork: this.hasPendingInboxWork(),
+      lastTurnAtMs,
+      hasPendingWork: hasInboxWork || outstandingWorkCount > 0,
       agentRunning: this.agent.isRunning(),
       restartInFlight: this.agent.isRestartInFlight(),
       lastWedgeRestartAtMs: this.wedgeLastRestartAt,
@@ -433,9 +827,18 @@ export class FastChecker {
     });
 
     if (decision.wedged) {
-      this.forceWedgeRestart(
-        `conversation buffer stale ${Math.round(decision.bufferAgeMs / 60_000)}min `
-        + `(heartbeat fresh ${Math.round(decision.heartbeatAgeMs / 1000)}s ago) with pending inbox work`,
+      const clock = decision.reason.startsWith('stale-turns') ? 'no completed turn' : 'conversation buffer stale';
+      // Provenance-accurate: a wedge can now fire on outstanding lifecycle
+      // work alone, with an empty bus inbox (Scenario A) — the alert text
+      // must not claim "inbox work" when that is not what actually gated it.
+      const workSource = hasInboxWork && outstandingWorkCount > 0
+        ? 'pending bus-inbox work and outstanding lifecycle work'
+        : hasInboxWork
+          ? 'pending bus-inbox work'
+          : `${outstandingWorkCount} outstanding lifecycle work item(s)`;
+      this.reportWedge(
+        `${clock} for ${Math.round(decision.activityAgeMs / 60_000)}min `
+        + `(heartbeat fresh ${Math.round(decision.heartbeatAgeMs / 1000)}s ago) with ${workSource}`,
       );
     }
   }
@@ -486,26 +889,79 @@ export class FastChecker {
    *     single-flight guard, so it can never spawn a duplicate PTY. detectWedge
    *     also refuses when a restart is already in flight, a second guard layer.
    */
-  private forceWedgeRestart(reason: string): void {
-    const now = Date.now();
-    // Stamp BEFORE kicking the restart so the storm guard is armed even if the
-    // restart itself is slow — the next poll cycle sees the cooldown immediately.
-    this.wedgeLastRestartAt = now;
-    this.log(`WEDGE detected — force restarting (recovery, not counted as crash): ${reason}`);
+  /**
+   * Report a wedge. ALERT ONLY — deliberately does not restart.
+   *
+   * This used to force a fresh restart, and did so 229 times across the fleet in
+   * a single daemon log: frank2 at 3412min "stale" (~57h), larry at 2099min —
+   * agents mid-work, restarted for not having spoken to Josh, because the signal
+   * was outbound-Telegram mtime rather than completed turns.
+   *
+   * The signal is now turn-based (see checkWedgeInner), which removes that false
+   * positive class. Recovery is still a human decision by explicit instruction:
+   * an automatic restart acting on a stall verdict is what produced the
+   * restart/orphan loop, and a legitimately long turn (browser automation, deep
+   * research) must not be executed for taking its time. The alert names the agent
+   * so a human or the chief-of-staff agent can decide.
+   */
+  private reportWedge(reason: string): void {
+    // Stamp immediately so the storm guard suppresses repeat alerts for the same
+    // stall on every subsequent poll cycle.
+    this.wedgeLastRestartAt = Date.now();
+    const msg = `WEDGE suspected for ${this.agent.name} — ALERT ONLY, no automatic restart: ${reason}. `
+      + `Recover with: cortextos restart ${this.agent.name}`;
+    this.log(msg);
+    if (!this.telegramApi || !this.chatId) return;
 
-    // Pre-arm a fresh session: a wedged REPL's --continue history is suspect, and
-    // a clean fresh boot is the reliable recovery. hardRestart writes the planned
-    // markers so the crash-alert hook classifies this as a planned restart, not a
-    // crash (no false crash ping, no crash-count increment).
-    hardRestart(this.paths, this.agent.name, `WEDGE-FORCE-RESTART: ${reason}`);
+    // Task 3.6 Step 4: persist a durable pending-notification receipt BEFORE
+    // the send is attempted — the previous fire-and-forget `.catch(() => {})`
+    // silently swallowed a send failure with nothing on disk to show for it.
+    // notifiedAtMs stays null until the send resolves; a rejection sets
+    // sendFailed/sendError instead of vanishing.
+    const receipt: WedgeNotificationReceipt = {
+      agentId: this.agent.name,
+      reason,
+      firstObservedAtMs: this.wedgeLastRestartAt,
+      notifiedAtMs: null,
+      sendFailed: false,
+      sendError: null,
+    };
+    this.writeWedgeNotificationReceipt(receipt);
+
+    this.telegramApi.sendMessage(this.chatId, msg)
+      .then(() => {
+        this.writeWedgeNotificationReceipt({ ...receipt, notifiedAtMs: Date.now() });
+      })
+      .catch((err: unknown) => {
+        const sendError = err instanceof Error ? err.message : String(err);
+        this.log(`Wedge alert send outcome ambiguous/failed for ${this.agent.name} (disclosed via receipt, not retried): ${sendError}`);
+        this.writeWedgeNotificationReceipt({ ...receipt, sendFailed: true, sendError });
+      });
+  }
+
+  /**
+   * Task 3.6 Step 4: persist the wedge stall-alert pending-notification
+   * receipt to disk (best-effort — see savePendingTelegram/saveCtxCircuit for
+   * the same pattern elsewhere in this file) and keep the in-memory mirror
+   * used by getWedgeNotificationReceipt() current.
+   */
+  private writeWedgeNotificationReceipt(receipt: WedgeNotificationReceipt): void {
+    this.lastWedgeNotificationReceipt = receipt;
     try {
-      writeFileSync(join(this.paths.stateDir, '.force-fresh'), '');
-    } catch { /* non-fatal — restart still recovers, just may --continue */ }
+      writeFileSync(this.wedgeNotificationReceiptPath, JSON.stringify(receipt), 'utf-8');
+    } catch {
+      // Best-effort visibility only — must never block or fail the actual
+      // wedge alert this receipt is documenting.
+    }
+  }
 
-    // sessionRefresh() does stop() + start(); .force-fresh makes shouldContinue()
-    // false for a clean fresh session. start()'s single-flight guard ensures no
-    // duplicate spawn even if another trigger races this.
-    this.agent.sessionRefresh().catch(err => this.log(`Wedge restart failed: ${err}`));
+  /**
+   * Task 3.6 introspection: the most recent wedge stall-alert's
+   * pending-notification receipt this session persisted, or null if no
+   * wedge has alerted (with a transport configured) yet this session.
+   */
+  getWedgeNotificationReceipt(): WedgeNotificationReceipt | null {
+    return this.lastWedgeNotificationReceipt;
   }
 
   /**
@@ -1252,6 +1708,48 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
   }
 
   /**
+   * Task 4.1 (OPTIONAL, non-release-blocking): resolve the org's configured
+   * orchestrator agent name, or null if none is configured / resolvable.
+   * Ported from upstream `5a8e7cbc` — mirrors how the daemon reads it
+   * elsewhere (agent-manager.maybeStartSlackSocketMode,
+   * AgentProcess.buildDeliverablesBlock): the `orchestrator` field lives in
+   * orgs/<org>/context.json under the framework root. The org is derived from
+   * the agent directory, whose canonical layout is
+   * <root>/orgs/<org>/agents/<name>. Returns null on any failure so the
+   * caller degrades to log-only.
+   */
+  private resolveOrchestratorName(): string | null {
+    try {
+      const org = basename(dirname(dirname(this.agent.getAgentDir())));
+      const contextPath = join(this.frameworkRoot, 'orgs', org, 'context.json');
+      const orchestrator = JSON.parse(readFileSync(contextPath, 'utf-8')).orchestrator;
+      return typeof orchestrator === 'string' && orchestrator ? orchestrator : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Task 4.1 (OPTIONAL, non-release-blocking): read the agent's real
+   * supervisor generation (`AgentProcess.getLifecycleGeneration()`,
+   * Task 1.1/1.5's `GenerationToken.generation`) for the
+   * `evaluateContextBaseline` baseline/alert key. Never falls back to
+   * `session_id` — a generation that cannot be read this tick (accessor
+   * throws or is absent, e.g. a not-yet-adopted legacy agent / a test mock
+   * with no lifecycle wiring) is treated as a no-op tick for baseline
+   * purposes: no capture, no suppression, no alert, existing behavior
+   * unchanged.
+   */
+  private readLifecycleGenerationSafe(): number | null {
+    try {
+      const gen = this.agent.getLifecycleGeneration?.();
+      return typeof gen === 'number' ? gen : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Read ctx thresholds from config.json with mtime-based caching (BUG-048 pattern).
    * Re-reads from disk only when the file has changed so dashboard updates take effect
    * within one poll cycle without a daemon restart.
@@ -1501,6 +1999,38 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     const withinHandoffGrace =
       this.ctxSessionStartedAt > 0 && now - this.ctxSessionStartedAt < HANDOFF_GRACE_MS;
 
+    // Task 4.1 (OPTIONAL, non-release-blocking; PRD §5 Open Question 3):
+    // generation-keyed futile-handoff baseline. Adapts upstream `5a8e7cbc`
+    // (#937) but keys the captured baseline and its one-shot alert by the
+    // real supervisor generation (never null) instead of upstream's
+    // null-prone local `session_id` field — see `evaluateContextBaseline` in
+    // ./lifecycle/recovery-policy.ts for the full rationale. An unreadable
+    // generation this tick (accessor throws/absent — a not-yet-adopted
+    // legacy agent, or a test double with no lifecycle wiring) is a no-op:
+    // no capture, no suppression, no alert, behavior identical to today.
+    let baselineDecision: ContextBaselineDecision | null = null;
+    const currentGeneration = this.readLifecycleGenerationSafe();
+    if (currentGeneration !== null) {
+      baselineDecision = evaluateContextBaseline(
+        {
+          generation: this.ctxBaselineGeneration,
+          baselinePct: this.ctxSessionBaselinePct,
+          alertFiredAt: this.ctxBaselineAlertFiredAt > 0 ? this.ctxBaselineAlertFiredAt : null,
+        },
+        {
+          generation: currentGeneration,
+          effectivePct,
+          handoffThreshold: handoff,
+          workfillMarginPct: WORKFILL_MARGIN,
+          capturedBaselineNow: this.ctxSessionStartedAt > 0 && !withinHandoffGrace,
+          nowMs: now,
+        },
+      );
+      this.ctxBaselineGeneration = baselineDecision.state.generation;
+      this.ctxSessionBaselinePct = baselineDecision.state.baselinePct;
+      this.ctxBaselineAlertFiredAt = baselineDecision.state.alertFiredAt ?? 0;
+    }
+
     // Tier 3: deadline exceeded — force restart if agent ignored handoff prompt
     if (this.ctxHandoffDeadlineAt > 0 && now > this.ctxHandoffDeadlineAt) {
       this.log(`Handoff deadline exceeded (${Math.round(effectivePct)}%) — force restarting`);
@@ -1520,6 +2050,36 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
 
     // Tier 2: handoff (fires once per session lifecycle)
     if (effectivePct >= handoff && this.ctxHandoffFiredAt === 0 && !withinHandoffGrace) {
+      // Task 4.1 (OPTIONAL, non-release-blocking): futile-handoff guard. A
+      // generation BORN at/above the handoff threshold cannot be helped by a
+      // handoff — the fresh generation inherits the same heavy resume
+      // baseline and re-fires immediately. Suppress and alert the
+      // orchestrator once instead of thrashing. Returning here means no
+      // lease is acquired, no fire is counted toward the 3-fire breaker, no
+      // Tier-3 deadline is armed, and no .force-fresh is pre-written — the
+      // handoff simply idles until real work-fill lands.
+      if (baselineDecision?.suppressHandoff) {
+        if (baselineDecision.emitAlertNow) {
+          const msg = `Context handoff SUPPRESSED for ${this.agent.name}: resume baseline `
+            + `${Math.round(this.ctxSessionBaselinePct ?? effectivePct)}% already meets/exceeds the ${handoff}% handoff `
+            + `threshold. A handoff cannot reduce a baseline it did not create — the fresh session would `
+            + `be born at the same level and re-fire. Review ctx_handoff_threshold or trim this agent's `
+            + `bootstrap. Auto-handoff idle until real work-fill accumulates.`;
+          this.log(msg);
+          // Route to the org's configured orchestrator as an internal bus message
+          // (agent inbox), NOT to the human's Telegram — this is an infra event, not
+          // a user ping. Best-effort: skip if no orchestrator is configured or it
+          // would be self-messaging, swallow any bus failure — the log line above is
+          // the durable audit trail.
+          const orchestrator = this.resolveOrchestratorName();
+          if (orchestrator && orchestrator !== this.agent.name) {
+            try {
+              sendMessage(this.paths, this.agent.name, orchestrator, 'normal', msg);
+            } catch { /* non-fatal — bus send is best-effort */ }
+          }
+        }
+        return;
+      }
       const lease = requestContextHandoffLease({
         ctxRoot: this.paths.ctxRoot,
         agentName: this.agent.name,
@@ -1633,6 +2193,16 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
     this.ctxHandoffFiredAt = 0;
     this.ctxHandoffDeadlineAt = 0;
     this.ctxWarningFiredAt = 0;
+    // Task 4.1 (OPTIONAL, non-release-blocking): belt-and-suspenders reset —
+    // the coming generation bump (this.agent.sessionRefresh() below respawns
+    // and increments AgentProcess's lifecycleGeneration) already makes
+    // evaluateContextBaseline treat the next tick as a fresh generation on
+    // its own, but resetting explicitly here mirrors upstream 5a8e7cbc's own
+    // forceContextRestart reset and keeps these fields honest even if this
+    // restart path is ever reached before a generation bump lands.
+    this.ctxBaselineGeneration = null;
+    this.ctxSessionBaselinePct = null;
+    this.ctxBaselineAlertFiredAt = 0;
 
     // Release this dying session's context-handoff lease on teardown. This restart is
     // IN-PROCESS — sessionRefresh() below does stop()+start() on the same AgentProcess
@@ -1763,8 +2333,17 @@ Reply using: cortextos bus send-telegram ${chatId} '<your reply>'
       const parsed = JSON.parse(readFileSync(this.pendingTelegramFilePath, 'utf-8'));
       if (Array.isArray(parsed)) {
         this.telegramMessages = parsed
-          .filter((e): e is { formatted: string; ackIds: string[] } => e && typeof e.formatted === 'string')
-          .map((e) => ({ formatted: e.formatted, ackIds: Array.isArray(e.ackIds) ? e.ackIds : [] }));
+          .filter((e): e is { formatted: string; ackIds: string[]; sourceKey?: string } => e && typeof e.formatted === 'string')
+          .map((e) => ({
+            formatted: e.formatted,
+            ackIds: Array.isArray(e.ackIds) ? e.ackIds : [],
+            // Task 3.3: a file persisted by a pre-3.3 session (or a hand-built
+            // test fixture) has no sourceKey — fall back to a digest, same
+            // rule queueTelegramMessage itself applies when the caller omits
+            // one. Never invent an ordinal-position key (see queue-entry
+            // shape doc comment above).
+            sourceKey: typeof e.sourceKey === 'string' ? e.sourceKey : `telegram-digest-${this.hashMessage(e.formatted)}`,
+          }));
       }
     } catch {
       this.telegramMessages = [];

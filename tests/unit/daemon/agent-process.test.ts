@@ -1063,3 +1063,27 @@ describe('AgentProcess - duplicate-PTY fix (death-confirmed + join-in-flight sto
     }
   }, 10000);
 });
+
+describe('AgentProcess - getEnvironment() (watchdog heartbeat identity fix)', () => {
+  it('returns a copy of the canonical CtxEnv, not a mutable reference', () => {
+    const ap = new AgentProcess('alice', mockEnv, {});
+    const env1 = ap.getEnvironment();
+    expect(env1).toEqual(mockEnv);
+    expect(env1).not.toBe(mockEnv);
+
+    // Mutating the returned copy must not affect a second call's result —
+    // FastChecker's watchdog relies on this being a safe, independent snapshot.
+    (env1 as any).agentName = 'mallory';
+    const env2 = ap.getEnvironment();
+    expect(env2.agentName).toBe('alice');
+  });
+
+  it('reflects this process\'s own identity, not another agent\'s', () => {
+    const alice = new AgentProcess('alice', mockEnv, {});
+    const bob = new AgentProcess('bob', { ...mockEnv, agentName: 'bob', agentDir: '/tmp/fw/orgs/acme/agents/bob' }, {});
+
+    expect(alice.getEnvironment().agentName).toBe('alice');
+    expect(bob.getEnvironment().agentName).toBe('bob');
+    expect(alice.getEnvironment().agentDir).not.toBe(bob.getEnvironment().agentDir);
+  });
+});

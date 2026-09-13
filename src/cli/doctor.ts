@@ -4,6 +4,7 @@ import { existsSync, readFileSync, readdirSync, statSync, chmodSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { resolveInstanceId } from './resolve-instance-id.js';
+import { findStateDirOrphans, readPsRows, readCwd } from '../daemon/orphan-scan.js';
 
 interface Check {
   name: string;
@@ -372,6 +373,51 @@ export const doctorCommand = new Command('doctor')
           });
         }
       }
+    }
+
+    // Orphaned runtime processes squatting an agent state dir (knox-codex,
+    // 2026-09-08). A leaked runtime reparents to launchd and keeps writing its
+    // agent's heartbeat/thread/inbox, so the agent reads HEALTHY while being
+    // unreachable, and restarts appear to do nothing. Reported, never killed:
+    // the ledger cannot identify one of these, so any automatic rule would also
+    // match the user's own detached codex sessions. AgentProcess.stop() prevents
+    // new ones; this finds any that predate it.
+    try {
+      const stateRoot = join(homedir(), '.cortextos', instanceId, 'state');
+      if (existsSync(stateRoot)) {
+        const orphans = findStateDirOrphans({
+          stateRoot,
+          psList: readPsRows,
+          cwdOf: readCwd,
+          liveAgentPids: new Set<number>(),
+        });
+        if (orphans.length === 0) {
+          checks.push({
+            name: 'Orphaned agent processes',
+            status: 'pass',
+            message: 'none — no reparented runtime holding an agent state dir',
+          });
+        } else {
+          const byAgent = new Map<string, number[]>();
+          for (const o of orphans) {
+            const list = byAgent.get(o.agent);
+            if (list) list.push(o.pid);
+            else byAgent.set(o.agent, [o.pid]);
+          }
+          const summary = [...byAgent.entries()]
+            .map(([agent, pids]) => `${agent} (pid ${pids.join(', ')})`)
+            .join('; ');
+          checks.push({
+            name: 'Orphaned agent processes',
+            status: 'fail',
+            message: `${orphans.length} reparented runtime process(es) holding an agent state dir: ${summary}`,
+            fix: `These keep writing the agent's heartbeat/thread/inbox, so the agent looks healthy while unreachable. `
+              + `Verify each still shows ppid=1 and the same state dir, then: kill ${orphans.map(o => o.pid).join(' ')}`,
+          });
+        }
+      }
+    } catch {
+      // Never let a diagnostic crash the doctor.
     }
 
     // Display results

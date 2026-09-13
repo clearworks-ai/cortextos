@@ -3725,3 +3725,168 @@ def test_meeting_override_does_not_touch_a_protected_id(tmp_path) -> None:
                                   "relationship": "client", "confidence": 0.4},
                   protected_ids=frozenset({"01K48JSCTVHPPAC6HJTM8B1RQC"}))
     assert res["home_path"] != "clients/office-untitled.md"
+
+
+# --- G2 review (codex gpt-6-astra, 2026-09-13): three Important findings -----------
+
+
+def test_corroborated_domain_majority_beats_a_conflicting_declaration(tmp_path) -> None:
+    """G2 F1: rule 12 must not override a client that MULTIPLE independent external
+    email identities corroborate. Reviewer's reproduction: four @rrk.example
+    participants, classifier says "Logic", clients/logictcg.md declares "Logic" ->
+    the old code filed it under LogicTCG. One attendee's address must not be
+    outvoted by a name the classifier guessed."""
+    from resolve_meeting import main
+
+    vault = tmp_path / "vault"
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients").mkdir(parents=True)
+    (brain / "projects").mkdir()
+    (brain / "orgs").mkdir()
+    (brain / "clients" / "rrk.md").write_text(
+        "# Client: RRK\n\ndomains: rrk.example\n\n## Contacts\n", encoding="utf-8"
+    )
+    (brain / "clients" / "logictcg.md").write_text(
+        "# Client: LogicTCG\n\n## Current state\n\n- CRM org name: Logic\n", encoding="utf-8"
+    )
+    repo = _declared_repo(tmp_path, contacts=[])
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Quarterly check-in",
+        participants=[
+            {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours",
+             "spoke": True, "notetaker": False},
+            {"name": "A One", "email": "a@rrk.example", "side": "theirs",
+             "spoke": True, "notetaker": False},
+            {"name": "B Two", "email": "b@rrk.example", "side": "theirs",
+             "spoke": True, "notetaker": False},
+            {"name": "C Three", "email": "c@rrk.example", "side": "theirs",
+             "spoke": True, "notetaker": False},
+            {"name": "D Four", "email": "d@rrk.example", "side": "theirs",
+             "spoke": True, "notetaker": False},
+        ],
+        org_name="Logic",
+        domain=None,
+        relationship="client",
+        confidence=0.9,
+        meeting_type="delivery",
+        fireflies_id="01G2F1MAJORITY",
+    )
+    assert main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)]) == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "clients/rrk.md"
+    assert res["rule"] == 3
+
+
+def test_override_never_attaches_another_clients_title_node(tmp_path) -> None:
+    """G2 F2 (upgraded to Important): the reviewer's worse case. The title names a
+    DELIVERED node of another client while the overridden client has exactly one
+    ACTIVE node — _client_hit's unique-open-node heuristic then filed the meeting
+    under that unrelated active project and let a promotion transition against it."""
+    from resolve_meeting import main
+
+    vault = tmp_path / "vault"
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients").mkdir(parents=True)
+    (brain / "projects").mkdir()
+    (brain / "orgs").mkdir()
+    (brain / "clients" / "alpha.md").write_text("# Client: Alpha\n\n## Contacts\n", encoding="utf-8")
+    (brain / "clients" / "beta.md").write_text("# Client: Beta\n\n## Contacts\n", encoding="utf-8")
+    (brain / "projects" / "beta-02.md").write_text(
+        "# Client: beta — beta-02\n\n## Node\nid: beta-02\nkind: project\nclient: beta\n"
+        "parent:\ntitle: Active Work\naliases:\ndomains:\ndeal_id:\ndelivery_state: active\n"
+        "opened:\nclosed:\n\n## History (dated, newest first)\n",
+        encoding="utf-8",
+    )
+    (brain / "projects" / "alpha-01.md").write_text(
+        "# Client: alpha — alpha-01\n\n## Node\nid: alpha-01\nkind: project\nclient: alpha\n"
+        "parent:\ntitle: Done Work\naliases:\ndomains:\ndeal_id:\ndelivery_state: delivered\n"
+        "opened:\nclosed:\n\n## History (dated, newest first)\n",
+        encoding="utf-8",
+    )
+    repo = _override_repo(tmp_path, {"01G2F2WRONGNODE": "beta"})
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="alpha-01 wrap up",
+        participants=[
+            {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours",
+             "spoke": True, "notetaker": False},
+            {"name": "Someone Else", "email": None, "side": "theirs",
+             "spoke": True, "notetaker": False},
+        ],
+        org_name="Unknown",
+        domain=None,
+        relationship="client",
+        confidence=0.4,
+        meeting_type="delivery",
+        fireflies_id="01G2F2WRONGNODE",
+    )
+    assert main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)]) == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["counterparty_slug"] == "beta"
+    # the title's node belongs to alpha, so it must NOT be attached, and beta's
+    # unrelated active project must NOT be selected in its place
+    assert res["node"] != "alpha-01"
+    assert res["node"] != "beta-02"
+    assert res["home_path"] == "clients/beta.md"
+
+
+def test_override_title_node_of_the_same_client_is_preserved(tmp_path) -> None:
+    """G2 F2, the other half: compatible explicit node evidence must survive the
+    override rather than being flattened to the client page."""
+    from resolve_meeting import main
+
+    vault = tmp_path / "vault"
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients").mkdir(parents=True)
+    (brain / "projects").mkdir()
+    (brain / "orgs").mkdir()
+    (brain / "clients" / "beta.md").write_text("# Client: Beta\n\n## Contacts\n", encoding="utf-8")
+    (brain / "projects" / "beta-01.md").write_text(
+        "# Client: beta — beta-01\n\n## Node\nid: beta-01\nkind: project\nclient: beta\n"
+        "parent:\ntitle: The Work\naliases:\ndomains:\ndeal_id:\ndelivery_state: active\n"
+        "opened:\nclosed:\n\n## History (dated, newest first)\n",
+        encoding="utf-8",
+    )
+    repo = _override_repo(tmp_path, {"01G2F2SAMENODE": "beta"})
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="beta-01 status",
+        participants=[
+            {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours",
+             "spoke": True, "notetaker": False},
+            {"name": "Someone Else", "email": None, "side": "theirs",
+             "spoke": True, "notetaker": False},
+        ],
+        org_name="Unknown",
+        domain=None,
+        relationship="client",
+        confidence=0.4,
+        meeting_type="delivery",
+        fireflies_id="01G2F2SAMENODE",
+    )
+    assert main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)]) == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["node"] == "beta-01"
+    assert res["home_path"] == "projects/beta-01.md"
+
+
+def test_malformed_override_file_does_not_break_unrelated_meetings(tmp_path) -> None:
+    """G2: the loader's docstring claimed "unparseable -> empty map; never raises",
+    which was FALSE — _load_json does not catch JSONDecodeError, so a half-saved
+    overrides file took down every non-protected meeting, including ones with no
+    override at all."""
+    from resolve_meeting import main
+
+    vault = _override_vault(tmp_path)
+    repo = _declared_repo(tmp_path, contacts=[])
+    crm = repo / "orgs/clearworksai/agents/crm-codex/crm"
+    (crm / "meeting-home-overrides.json").write_text("{", encoding="utf-8")
+    res = _resolve_unknown(tmp_path, vault, repo, fireflies_id="01G2BADJSON")
+    assert res["home_path"]

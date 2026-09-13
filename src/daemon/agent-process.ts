@@ -27,7 +27,7 @@ import {
   type ImportedFreshRequest,
 } from './lifecycle/legacy-compat.js';
 import { canonicalAgentId } from './lifecycle/types.js';
-import type { DispatchResult, EffectToken, GenerationToken, LifecycleRequest, RequestReceipt } from './lifecycle/types.js';
+import type { DispatchResult, EffectToken, GenerationToken, LifecycleRequest, RequestCause, RequestReceipt, StartMode } from './lifecycle/types.js';
 import { classifyExit } from './lifecycle/recovery-policy.js';
 import type { ExitObservation, RecoveryBudgetEntry } from './lifecycle/recovery-policy.js';
 import type { LifecycleObservation } from './lifecycle/supervisor.js';
@@ -1524,7 +1524,7 @@ export class AgentProcess {
         this.log('Image-poison crash detected (API 400, unsupported image format). Arming .force-fresh and restarting without counting against max_crashes_per_day.');
         this.armForceFresh('image-poison auto-recovery');
         this.appendCrashToRestartsLog(exitCode, proposal.delayMs, 'IMAGE_POISON_RECOVERY');
-        this.scheduleRestart(proposal.delayMs, 'Image-poison restart');
+        this.scheduleRestart(proposal.delayMs, 'Image-poison restart', proposal.cause, proposal.mode);
         return;
       }
       case 'opencode-continuation': {
@@ -1532,12 +1532,12 @@ export class AgentProcess {
           this.log(`opencode --continue wedge: ${proposal.evidence.wedgeCount} fast exit_code=0 continues — arming .force-fresh.`);
           this.armForceFresh('opencode --continue wedge auto-recovery');
           this.appendCrashToRestartsLog(exitCode, proposal.delayMs, 'OPENCODE_CONTINUE_WEDGE_RECOVERY');
-          this.scheduleRestart(proposal.delayMs, 'opencode wedge recovery restart');
+          this.scheduleRestart(proposal.delayMs, 'opencode wedge recovery restart', proposal.cause, proposal.mode);
           return;
         }
         this.log('Clean exit (code 0) — restarting to continue, not counting as a crash.');
         this.appendCrashToRestartsLog(exitCode, proposal.delayMs, 'CLEAN_EXIT');
-        this.scheduleRestart(proposal.delayMs, 'Clean-exit restart');
+        this.scheduleRestart(proposal.delayMs, 'Clean-exit restart', proposal.cause, proposal.mode);
         return;
       }
       case 'startup-failure': {
@@ -1563,7 +1563,7 @@ export class AgentProcess {
         }
         this.log('Clean exit (code 0) — restarting to continue, not counting as a crash.');
         this.appendCrashToRestartsLog(exitCode, proposal.delayMs, 'CLEAN_EXIT');
-        this.scheduleRestart(proposal.delayMs, 'Clean-exit restart');
+        this.scheduleRestart(proposal.delayMs, 'Clean-exit restart', proposal.cause, proposal.mode);
         return;
       }
       case 'crash':
@@ -1581,7 +1581,7 @@ export class AgentProcess {
         // bus/system.ts wrote here, which left daemon-classified crashes
         // invisible outside the rotating PM2 daemon stdout log.
         this.appendCrashToRestartsLog(exitCode, proposal.delayMs, 'CRASH');
-        this.scheduleRestart(proposal.delayMs, 'Restart');
+        this.scheduleRestart(proposal.delayMs, 'Restart', proposal.cause, proposal.mode);
         return;
       }
     }
@@ -1590,14 +1590,49 @@ export class AgentProcess {
   /** Flip to 'crashed', notify, and schedule the recovery restart after
    * `delayMs` — shared tail of every restart-producing proposal branch in
    * handleExit(). `failureLabel` reproduces each branch's original
-   * restart-failure log message verbatim. */
-  private scheduleRestart(delayMs: number, failureLabel: string): void {
+   * restart-failure log message verbatim.
+   *
+   * Gap fix (found during Task 5.3, closed as an ad-hoc fix in the same
+   * worktree/branch): previously this always called `this.start()` directly,
+   * regardless of `this.supervised` — the single most-triggered recovery
+   * path in the daemon bypassed `AgentLifecycleSupervisor` entirely even for
+   * supervised agents. Now gated exactly like `sessionRefresh()` (Task 2.4):
+   * `supervised === false`/absent keeps the byte-for-byte legacy
+   * `this.start()` call; `supervised === true` submits a `restart`
+   * `LifecycleRequest` through `this.owner` instead, carrying the exact
+   * `cause`/`mode` `classifyExit()` (`recovery-policy.ts`) already decided
+   * for this exit — the owner revalidates against the current generation
+   * before spawning (Task 1.5's `isEffectStale()` fencing), so a stop/halt
+   * committed during the backoff delay still revokes the pending recovery
+   * instead of racing it. */
+  private scheduleRestart(delayMs: number, failureLabel: string, cause: RequestCause, mode: StartMode): void {
     this.status = 'crashed';
     this.notifyStatusChange();
     setTimeout(() => {
-      if (this.status === 'crashed') {
-        this.start().catch(err => this.log(`${failureLabel} failed: ${err}`));
+      if (this.status !== 'crashed') return;
+      if (this.supervised) {
+        if (!this.owner) {
+          // Defensive fail-closed — same discipline as sessionRefresh():
+          // supervised=true with no owner wired is a build-sequence error
+          // (setOwner() is always called before this can fire), never a
+          // silent fallback to the legacy this.start() path, which would
+          // defeat the entire point of routing recovery through the owner.
+          this.log(`${failureLabel} failed: supervised=true but no lifecycle owner is wired for agent "${this.name}"`);
+          return;
+        }
+        this.owner.request({
+          requestId: randomUUID(),
+          kind: 'restart',
+          cause,
+          mode,
+          observedGeneration: this.lifecycleGeneration,
+          userInitiated: false,
+          evidence: { source: 'exit-classification' },
+          requestedAtMs: Date.now(),
+        }).catch(err => this.log(`${failureLabel} failed: ${err}`));
+        return;
       }
+      this.start().catch(err => this.log(`${failureLabel} failed: ${err}`));
     }, delayMs);
   }
 

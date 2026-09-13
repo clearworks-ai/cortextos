@@ -305,7 +305,7 @@ function collectSourceFiles(dir: string): string[] {
 describe('Mechanism 1-4: exit classification (crash / clean-exit / image-poison / opencode-continuation)', () => {
   it('all four branches share the pure classifyExit() decision (one exit handler, not four independent mechanisms)', () => {
     const src = readSrc('daemon/agent-process.ts');
-    const body = sliceBetween(src, 'private handleExit(exitCode: number): void {', 'private scheduleRestart(delayMs: number, failureLabel: string): void {');
+    const body = sliceBetween(src, 'private handleExit(exitCode: number): void {', 'private scheduleRestart(delayMs: number, failureLabel: string, cause: RequestCause, mode: StartMode): void {');
     expect(body).toContain('classifyExit(obs, budgets)');
     // Every restart-producing case funnels through the same shared helper —
     // proves "mutually exclusive branches of one exit handler", not four
@@ -313,22 +313,107 @@ describe('Mechanism 1-4: exit classification (crash / clean-exit / image-poison 
     expect(body.match(/this\.scheduleRestart\(/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
   });
 
-  it.todo(
-    'KNOWN GAP (confirmed via direct read of the current handleExit() body, not the deep dive\'s pre-migration line numbers): ' +
-    'none of the four restart-producing branches (image-poison, opencode-continuation clean-exit-restart, plain clean-exit, crash) ' +
-    'call this.owner.request()/observe() — every one calls this.scheduleRestart() -> this.start() directly, unconditionally, ' +
-    'regardless of this.supervised. Task 2.3 only extracted the pure classification (classifyExit()); no later Phase 2/3 task ' +
-    'rewired the actual restart action through the supervisor for this seam. This means a supervised agent\'s crash/clean-exit/' +
-    'image-poison/opencode-continuation restart still bypasses AgentLifecycleSupervisor entirely today. Real fix: route handleExit()\'s ' +
-    'restart branches through this.owner.request({kind:\'restart\', cause: <crash|clean-exit|image-poison|opencode-continuation>}) ' +
-    'when this.supervised, mirroring sessionRefresh()\'s existing gate (agent-process.ts ~L883).',
-  );
-
-  it('current fact, asserted directly (not assumed): handleExit() never references this.owner at all', () => {
+  it('handleExit() itself stays a thin policy dispatcher — the owner-routing decision now lives in scheduleRestart(), not inlined here; every restart-producing branch forwards classifyExit()\'s OWN cause/mode rather than a branch-local literal', () => {
     const src = readSrc('daemon/agent-process.ts');
-    const body = sliceBetween(src, 'private handleExit(exitCode: number): void {', 'private scheduleRestart(delayMs: number, failureLabel: string): void {');
+    // sliceBetween's end needle is the scheduleRestart() declaration line —
+    // its doc comment (which legitimately discusses this.owner/this.supervised
+    // as prose) sits ABOVE that line and so falls inside this slice; strip
+    // comments first so only real code is checked, exactly like this file's
+    // existing bus/system.ts scan does for the same reason.
+    const rawBody = sliceBetween(src, 'private handleExit(exitCode: number): void {', 'private scheduleRestart(delayMs: number, failureLabel: string, cause: RequestCause, mode: StartMode): void {');
+    const body = stripComments(rawBody);
     expect(body).not.toMatch(/this\.owner/);
     expect(body).not.toMatch(/\bthis\.supervised\b/);
+    expect(body.match(/this\.scheduleRestart\([^)]*,\s*proposal\.cause,\s*proposal\.mode\)/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
+  });
+
+  it(
+    'RESOLVED (was a KNOWN GAP through Task 5.3; fixed by this ad-hoc post-5.3 pass — the single most-triggered recovery path in ' +
+    'the daemon bypassed AgentLifecycleSupervisor entirely for supervised agents): scheduleRestart() now gates its restart action ' +
+    'on this.supervised, mirroring sessionRefresh()\'s existing Task 2.4 gate exactly — supervised=true submits a real ' +
+    '{kind:"restart", cause:<classified cause>, mode:<classified mode>} LifecycleRequest through this.owner instead of calling ' +
+    'this.start() directly; supervised=false/absent stays byte-for-byte the legacy this.start() call.',
+    () => {
+      const src = readSrc('daemon/agent-process.ts');
+      const body = sliceBetween(
+        src,
+        'private scheduleRestart(delayMs: number, failureLabel: string, cause: RequestCause, mode: StartMode): void {',
+        '/** Best-effort Telegram alert',
+      );
+      expect(body).toContain('this.supervised');
+      expect(body).toContain('this.owner.request(');
+      expect(body).toMatch(/kind:\s*'restart'/);
+      expect(body).toContain('cause,'); // forwards the classified cause, never a re-derived literal
+      expect(body).toContain('mode,');  // forwards the classified mode
+      expect(body).toContain('this.start()'); // legacy call still present — only gated, never deleted
+    },
+  );
+
+  it('runtime: supervised=true — a genuine crash exit submits a real LifecycleRequest{kind:"restart", cause:"crash"} through the owner, and never calls this.start() directly', async () => {
+    vi.useFakeTimers();
+    try {
+      const am = makeManager();
+      await am.startAgent('alice', agentDirA, supervisedConfig, ORG);
+      const entry = am.agents.get('alice')!;
+      expect(entry.supervised).toBe(true);
+      expect(entry.supervisor).toBeDefined();
+
+      const requestSpy = vi.spyOn(AgentLifecycleSupervisor.prototype, 'request');
+      requestSpy.mockClear(); // drop anything startAgent() itself may have already issued
+      const startSpy = vi.spyOn(entry.process, 'start');
+
+      const ptyIdx = ptyInstances.length - 1;
+      expect(ptyIdx).toBeGreaterThanOrEqual(0);
+
+      // Fire a genuine crash (nonzero exit) on the live PTY — drives the real handleExit().
+      onExitHandlers[ptyIdx](1);
+
+      // classifyExit()'s crash-#1 exponential backoff is CRASH_BACKOFF_BASE_MS (5000ms).
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(requestSpy).toHaveBeenCalledWith(expect.objectContaining({
+        kind: 'restart',
+        cause: 'crash',
+        mode: 'continue',
+      }));
+      expect(startSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('runtime: supervised=false/absent — a genuine crash exit calls this.start() directly (legacy path), never touching the owner', async () => {
+    vi.useFakeTimers();
+    try {
+      const NAME = 'carol-unsupervised';
+      const agentDirCarol = join(frameworkRoot, 'orgs', ORG, 'agents', 'carol');
+      mkdirSync(agentDirCarol, { recursive: true });
+      const env: CtxEnv = {
+        instanceId: INSTANCE_ID,
+        ctxRoot,
+        frameworkRoot,
+        agentName: NAME,
+        agentDir: agentDirCarol,
+        org: ORG,
+        projectRoot: frameworkRoot,
+      };
+      const ap = new AgentProcess(NAME, env, { runtime: 'codex-app-server' }, () => {});
+      await ap.start();
+
+      const requestSpy = vi.spyOn(AgentLifecycleSupervisor.prototype, 'request');
+      const startSpy = vi.spyOn(ap, 'start');
+
+      const ptyIdx = ptyInstances.length - 1;
+      expect(ptyIdx).toBeGreaterThanOrEqual(0);
+
+      onExitHandlers[ptyIdx](1);
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(startSpy).toHaveBeenCalledTimes(1);
+      expect(requestSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -491,7 +576,14 @@ describe('Mechanism 9: boot self-heal', () => {
     '(agent-manager.ts) — never through AgentLifecycleSupervisor.request(), even when config.supervised === true. Only the ' +
     '"stale in-registry" reconcile path (reconcileSupervisedRestart) routes a start through the owner today. Task 2.8 worked ' +
     'around the user-facing symptom (resurrecting a stopped agent) by adding the resume-gate check at the IPC ingress layer ' +
-    'instead, but the underlying startAgent() bypass for a genuinely-fresh start remains open.',
+    'instead, but the underlying startAgent() bypass for a genuinely-fresh start remains open. ' +
+    'DELIBERATELY LEFT OPEN by the post-Task-5.3 ad-hoc fix pass that closed the handleExit()/scheduleRestart() gap above: ' +
+    'evaluated and judged NOT the same root cause and NOT cheap to fold into that pass — this is a single fresh-start branch ' +
+    'inside agent-manager.ts\'s `startAgent()` that is the entry point for EVERY agent boot (not just recovery), so gating it on ' +
+    '`config.supervised` changes boot-time behavior fleet-wide and needs its own dedicated design/testing pass, not a drive-by ' +
+    'edit riding on the exit-handler fix. The user-facing symptom (resurrection of a stopped/halted/quarantined agent) is already ' +
+    'closed by Task 2.8\'s IPC resume-gate (see the passing test above) — what remains open here is purely the internal routing ' +
+    'seam, not a live bug a user can trigger today.',
   );
 });
 
@@ -812,7 +904,13 @@ describe('Additional ingress adapters', () => {
     'FastChecker.forceContextRestart(), which calls hardRestart() and then the REAL routed sessionRefresh() immediately after. Task 2.2\'s ' +
     'own doc comment says this routing is "Task 2.8\'s job", but Task 2.8\'s actual Files-to-Modify were ipc-server.ts/cli/{start,stop,restart}.ts, ' +
     'never bus/system.ts — so a bare self-restart/hard-restart invocation from an agent\'s own bus command never reaches ' +
-    'AgentLifecycleSupervisor.request() at all for a supervised agent.',
+    'AgentLifecycleSupervisor.request() at all for a supervised agent. ' +
+    'DELIBERATELY LEFT OPEN by the post-Task-5.3 ad-hoc fix pass that closed the handleExit()/scheduleRestart() gap above: confirmed via ' +
+    'direct read this is a DIFFERENT kind of gap, not the same root cause. `cortextos bus self-restart`/`hard-restart` run as `src/cli/bus.ts` ' +
+    'subprocess invocations from the AGENT\'S OWN PTY tool use — a separate OS process from the daemon that owns the live ' +
+    '`AgentLifecycleSupervisor` instance in memory. There is no `this.owner` to call from bus/system.ts at all; closing this gap for real ' +
+    'means the CLI command submitting an IPC request the daemon\'s ipc-server.ts then turns into a real owner.request() call (the same shape ' +
+    'Task 2.8 already built for `cortextos stop`/`restart`), not a same-file code change — genuinely separate, larger scope than this pass.',
   );
 
   it('crash-alert hook marker consumption: classifyFromMarkers()/the hook body never mutate lifecycle state, only classify + write its own dedup/count files', () => {

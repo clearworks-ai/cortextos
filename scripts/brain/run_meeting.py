@@ -49,6 +49,9 @@ BRAIN_ROLLUP = HERE / "brain_rollup.py"
 STATUS_PLAN = HERE / "status_plan.ts"
 # Josh's Telegram chat (same id meeting-fanout.py uses for commitments).
 RECAP_TELEGRAM_CHAT_ID = "6690120787"
+# BOT_TOKEN lives in an agent .env, not secrets.env; CTX_AGENT_DIR is the seam
+# `bus send-telegram` uses to find it (src/utils/env.ts:88).
+RECAP_TELEGRAM_AGENT_DIR = CODE_ROOT / "orgs/clearworksai/agents/pa-codex"
 
 
 def _status_env(base_env: dict[str, str]) -> dict[str, str]:
@@ -862,9 +865,16 @@ def _apply_writes(
             if _d.get("body"):
                 _parts += ["", _d["body"]]
             try:
+                # `bus send-telegram` reads BOT_TOKEN from the agent .env that
+                # CTX_AGENT_DIR points at, falling back to process.env. The
+                # orchestrator runs in neither context, so without this it exits 1
+                # with "BOT_TOKEN not configured" and Josh silently gets nothing —
+                # which is exactly what happened on the first live meeting.
+                _tg_env = dict(os.environ)
+                _tg_env["CTX_AGENT_DIR"] = str(RECAP_TELEGRAM_AGENT_DIR)
                 _tg = subprocess.run(
                     ["cortextos", "bus", "send-telegram", RECAP_TELEGRAM_CHAT_ID, "\n".join(_parts)],
-                    capture_output=True, text=True, timeout=CHILD_TIMEOUT_S,
+                    capture_output=True, text=True, timeout=CHILD_TIMEOUT_S, env=_tg_env,
                 )
                 if _tg.returncode != 0:
                     print(f"warn: recap telegram rc={_tg.returncode}: {_tg.stderr.strip()[:160]}",

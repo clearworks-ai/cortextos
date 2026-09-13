@@ -531,7 +531,15 @@ def _load_meeting_overrides(repo_root: Path) -> dict[str, str]:
     R4b batch alone, so a page-level '- CRM org name:' would claim all of them.
     Missing or unparseable file -> empty map; never raises.
     """
-    data = _load_json(repo_root / MEETING_OVERRIDES_REL, {})
+    try:
+        data = _load_json(repo_root / MEETING_OVERRIDES_REL, {})
+    except (ValueError, OSError, UnicodeError) as exc:
+        # G2 review 2026-09-13: _load_json does NOT catch a JSONDecodeError, so a
+        # half-saved overrides file used to take down every non-protected meeting in
+        # the batch — including meetings with no override at all. Caught locally so
+        # the shared loader keeps its behaviour for other callers.
+        print(f"warn: unreadable {MEETING_OVERRIDES_REL.name} ({exc}); ignoring overrides", file=sys.stderr)
+        return {}
     if not isinstance(data, dict):
         return {}
     out: dict[str, str] = {}
@@ -890,6 +898,34 @@ def resolve(
     if not is_protected:
         override_slug = _load_meeting_overrides(repo_root).get(_meeting_id(source))
         if override_slug and override_slug in clients:
+            # G2 review 2026-09-13 (F2): keep compatible explicit node evidence, and
+            # never let a title node belonging to ANOTHER client reach _client_hit —
+            # its unique-open-node heuristic would then file the meeting under that
+            # client's unrelated active project and let a delivery-state transition
+            # run against the wrong one.
+            title_nid = next(
+                (
+                    nid
+                    for nid in nodes
+                    if re.search(r"(?<![a-z0-9])" + re.escape(nid.casefold()) + r"(?![a-z0-9])", ntitle)
+                ),
+                None,
+            )
+            if title_nid is not None and nodes[title_nid].get("client") == override_slug:
+                return _hit(nodes[title_nid], title_nid, rule=13, clients=clients, client_cands={override_slug})
+            if title_nid is not None:
+                return {
+                    "counterparty_slug": override_slug,
+                    "kind": "client",
+                    "relationship": "client",
+                    "home_path": f"clients/{override_slug}.md",
+                    "node": "none",
+                    "created": None,
+                    "confidence": 1.0,
+                    "rule": 13,
+                    "corroborated": False,
+                    "also_present": _also(override_slug),
+                }
             override_hit = _client_hit(override_slug, nodes, clients, rule=13)
             override_hit["also_present"] = _also(override_slug)
             return override_hit
@@ -1046,6 +1082,15 @@ def resolve(
     # closed to "" by load_closed_sets (:317-324) and is skipped here.
     if not is_protected and cls_org_name:
         declared_slug = closed["org_name_to_slug"].get(_norm_title(cls_org_name))
+        # G2 review 2026-09-13 (F1): a declaration is one human statement about a
+        # NAME; two or more independent external email identities pointing at the
+        # same client page is evidence about THIS meeting, and it wins. Without this,
+        # four @rrk participants whose classifier guessed "Logic" filed under
+        # LogicTCG. A single mapped attendee among several externals is not
+        # corroboration, so the peer-group case this rule exists for still works.
+        if declared_slug and client_cands and declared_slug not in client_cands:
+            if max(_counts(client_cands).values(), default=0) >= 2:
+                declared_slug = None
         if declared_slug and declared_slug in clients:
             declared_hit = _client_hit(declared_slug, nodes, clients, rule=12)
             declared_hit["also_present"] = _also(declared_slug)

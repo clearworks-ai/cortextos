@@ -621,6 +621,166 @@ describe('OpencodePTY', () => {
     expect(mockPty.kill).toHaveBeenCalled();
     expect(fsMocks.unlinkSync).toHaveBeenCalledWith('/tmp/ctx/state/opencode-agent/opencode-process.json');
   });
+
+  describe('Task 3.8 Step 4: generation-liveness guard on deferred shell-recovery writes', () => {
+    it('cancels a delayed keystroke (shell exit-recovery) after the generation is superseded — no write() reaches the PTY', async () => {
+      vi.useFakeTimers();
+      try {
+        const pty = new OpencodePTY(mockEnv, {});
+        installSpawnMock(pty);
+        await pty.spawn('fresh', '');
+        pty.setGenerationLiveCheck(() => true);
+        mockPty.write.mockClear();
+
+        // Force shell-mode detection: a bare zsh prompt tail, no chat markers.
+        pty.getOutputBuffer().push('boris@host cortextos % ');
+
+        pty.injectMessage('Yo');
+        // Escape fires synchronously — always allowed, it isn't deferred.
+        expect(mockPty.write).toHaveBeenCalledTimes(1);
+        expect(mockPty.write.mock.calls[0][0]).toBe('\x1b');
+
+        // Supersede this generation BEFORE the deferred exit-recovery fires.
+        pty.setGenerationLiveCheck(() => false);
+        await vi.advanceTimersByTimeAsync(10_000);
+
+        // No 'exit', no Enter, no content — every deferred write was cancelled.
+        expect(mockPty.write).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('cancels a delayed keystroke (chat-mode content type) after the generation is superseded', async () => {
+      vi.useFakeTimers();
+      try {
+        const pty = new OpencodePTY(mockEnv, {});
+        installSpawnMock(pty);
+        await pty.spawn('fresh', '');
+        pty.setGenerationLiveCheck(() => true);
+        mockPty.write.mockClear();
+
+        pty.getOutputBuffer().push('Ask anything\n');
+        pty.injectMessage('hello there');
+        expect(mockPty.write).toHaveBeenCalledTimes(1); // Escape only, so far
+
+        pty.setGenerationLiveCheck(() => false);
+        await vi.advanceTimersByTimeAsync(10_000);
+
+        expect(mockPty.write).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('still delivers normally when the generation stays live throughout (no regression)', async () => {
+      vi.useFakeTimers();
+      try {
+        const pty = new OpencodePTY(mockEnv, {});
+        installSpawnMock(pty);
+        await pty.spawn('fresh', '');
+        pty.setGenerationLiveCheck(() => true);
+        mockPty.write.mockClear();
+
+        pty.getOutputBuffer().push('Ask anything\n');
+        pty.injectMessage('hello there');
+        await vi.advanceTimersByTimeAsync(150);
+        expect(mockPty.write.mock.calls[1][0]).toBe('hello there');
+        await vi.advanceTimersByTimeAsync(300);
+        expect(mockPty.write.mock.calls.at(-1)?.[0]).toBe('\r');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe('Task 3.8 Step 5: cleanupStaleProcessMarker verified/blocked result', () => {
+    it('confirmed-dead prior pid: verified result, marker removed, launch proceeds', async () => {
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, sig?: string | number) => {
+        if (sig === 0) {
+          const err = new Error('ESRCH') as NodeJS.ErrnoException;
+          err.code = 'ESRCH';
+          throw err;
+        }
+        return true;
+      }) as typeof process.kill);
+      fsMocks.existsSync.mockImplementation((path: string) =>
+        path === '/tmp/ctx/state/opencode-agent/opencode-process.json');
+      fsMocks.readFileSync.mockImplementation((path: string) => {
+        if (path === '/tmp/ctx/state/opencode-agent/opencode-process.json') {
+          return JSON.stringify({ pid: 11111 });
+        }
+        return '';
+      });
+
+      try {
+        const pty = new OpencodePTY(mockEnv, {});
+        installSpawnMock(pty);
+        await expect(pty.spawn('fresh', '')).resolves.toBeUndefined();
+        expect(fsMocks.unlinkSync).toHaveBeenCalledWith('/tmp/ctx/state/opencode-agent/opencode-process.json');
+        expect(spawnCall).not.toBeNull();
+      } finally {
+        killSpy.mockRestore();
+      }
+    });
+
+    it('ambiguous prior pid (EPERM on SIGTERM): blocked result, launch aborts, marker is NOT deleted', async () => {
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, sig?: string | number) => {
+        if (sig === 0) return true; // liveness probe: alive
+        if (sig === 'SIGTERM') {
+          const err = new Error('EPERM') as NodeJS.ErrnoException;
+          err.code = 'EPERM';
+          throw err;
+        }
+        return true;
+      }) as typeof process.kill);
+      fsMocks.existsSync.mockImplementation((path: string) =>
+        path === '/tmp/ctx/state/opencode-agent/opencode-process.json');
+      fsMocks.readFileSync.mockImplementation((path: string) => {
+        if (path === '/tmp/ctx/state/opencode-agent/opencode-process.json') {
+          return JSON.stringify({ pid: 22222 });
+        }
+        return '';
+      });
+
+      try {
+        const pty = new OpencodePTY(mockEnv, {});
+        installSpawnMock(pty);
+        await expect(pty.spawn('fresh', '')).rejects.toThrow(/unconfirmed prior process pid 22222/);
+        // Launch never proceeded: no TUI was actually spawned, and the
+        // marker was never unlinked over an unconfirmed-dead prior session.
+        expect(spawnCall).toBeNull();
+        expect(fsMocks.unlinkSync).not.toHaveBeenCalledWith('/tmp/ctx/state/opencode-agent/opencode-process.json');
+      } finally {
+        killSpy.mockRestore();
+      }
+    });
+
+    it('ambiguous prior pid (survives SIGKILL): blocked result, launch aborts', async () => {
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, sig?: string | number) => {
+        if (sig === 0) return true; // always reports alive — survives everything
+        return true; // SIGTERM/SIGKILL are accepted but never actually kill it
+      }) as typeof process.kill);
+      fsMocks.existsSync.mockImplementation((path: string) =>
+        path === '/tmp/ctx/state/opencode-agent/opencode-process.json');
+      fsMocks.readFileSync.mockImplementation((path: string) => {
+        if (path === '/tmp/ctx/state/opencode-agent/opencode-process.json') {
+          return JSON.stringify({ pid: 33333 });
+        }
+        return '';
+      });
+
+      try {
+        const pty = new OpencodePTY(mockEnv, {});
+        installSpawnMock(pty);
+        await expect(pty.spawn('fresh', '')).rejects.toThrow(/unconfirmed prior process pid 33333/);
+        expect(spawnCall).toBeNull();
+        expect(fsMocks.unlinkSync).not.toHaveBeenCalledWith('/tmp/ctx/state/opencode-agent/opencode-process.json');
+      } finally {
+        killSpy.mockRestore();
+      }
+    }, 10000);
+  });
 });
 
 function STARTUP_TICKS(count: number): number {

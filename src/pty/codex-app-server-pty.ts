@@ -91,14 +91,15 @@ interface GoalResponse {
  * illustrative 5-member union, added so `kill()`'s deliberate-retirement
  * semantics stay distinct from the unexpected-death `needs-review` case, per
  * Step 4's explicit call for work-ledger.ts's `cancel()` transition.
+ *
+ * Task 3.8: the type itself now lives in `./work-correlation.js` so
+ * `agent-process.ts` can build/forward the same shape on behalf of
+ * non-Codex providers that have no PTY-level emitter (Step 3's
+ * `needs-review` fallback) without a second event shape. Re-exported here
+ * under the original name for back-compat.
  */
-export type WorkCorrelationEvent =
-  | { type: 'runtime-accepted'; workIds: string[]; turnId: string }
-  | { type: 'progress'; workIds: string[]; turnId: string }
-  | { type: 'completed'; workIds: string[]; turnId: string }
-  | { type: 'failed'; workIds: string[]; turnId: string | null; error: string }
-  | { type: 'needs-review'; workIds: string[]; turnId: string | null; reason: string }
-  | { type: 'cancelled'; workIds: string[]; turnId: string | null; reason: string };
+export type { WorkCorrelationEvent } from './work-correlation.js';
+import type { WorkCorrelationEvent } from './work-correlation.js';
 
 const THREAD_PERMISSION_OVERRIDES = {
   approvalPolicy: 'never',
@@ -158,6 +159,20 @@ export class CodexAppServerPTY {
   private _turnQueue: Array<{ input: unknown[]; workIds: string[] }> = [];
   /** Task 3.4 Step 2: constructor-injected-style callback surface (mirrors `onExit`'s pattern). */
   private _onWorkCorrelation: ((event: WorkCorrelationEvent) => void) | null = null;
+  /**
+   * Task 3.8 Step 6: settable intent-revocation check, wired by
+   * `agent-process.ts` using the exact same generation-mismatch fencing
+   * BUG-040 already applies to this adapter's `onExit` handler (captured at
+   * spawn time, compared at check time) -- not a parallel mechanism, the
+   * same one. Defaults to "never revoked" so an adapter constructed without
+   * this wiring (e.g. direct unit tests) preserves today's behavior
+   * unchanged. Consulted by `startAppServerWithRetry()` at each attempt's
+   * start and immediately after its backoff sleep resolves, alongside the
+   * existing local `_alive` check -- `_alive` catches "this exact adapter
+   * was killed"; this catches "a newer generation has already superseded
+   * the intent this spawn was launched for," a strictly broader condition.
+   */
+  private _isIntentRevoked: (() => boolean) | null = null;
   private _turnCompletion: {
     resolve: () => void;
     reject: (err: Error) => void;
@@ -328,6 +343,15 @@ export class CodexAppServerPTY {
 
   private emitWorkCorrelation(event: WorkCorrelationEvent): void {
     this._onWorkCorrelation?.(event);
+  }
+
+  /** Task 3.8 Step 6: see `_isIntentRevoked`'s doc comment. */
+  setIntentRevocationCheck(fn: (() => boolean) | null): void {
+    this._isIntentRevoked = fn;
+  }
+
+  private isIntentRevoked(): boolean {
+    return this._isIntentRevoked ? this._isIntentRevoked() : false;
   }
 
   getOutputBuffer(): OutputBuffer {
@@ -516,6 +540,14 @@ export class CodexAppServerPTY {
       if (!this._alive) {
         throw new Error('Codex adapter killed during app-server spawn');
       }
+      // Task 3.8 Step 6: a stop/retire can commit through the lifecycle
+      // supervisor without this exact adapter having been kill()ed yet (the
+      // same class of race Task 1.5's `isEffectStale()` fences against for
+      // spawn/retire effects) -- one generation-owned startup effect must
+      // abort on a revoked intent, not just a locally-observed kill.
+      if (this.isIntentRevoked()) {
+        throw new Error('Codex adapter startup aborted: lifecycle intent revoked before this attempt');
+      }
       try {
         this.removeSocket();
         await this.startAppServer();
@@ -526,6 +558,12 @@ export class CodexAppServerPTY {
         this._outputBuffer.push(`[codex-app-server] spawn attempt ${attempt + 1} failed: ${err}\n`);
         if (attempt < delays.length - 1 && this._alive) {
           await sleep(delays[attempt]);
+          // Task 3.8 Step 6: a revocation landing DURING the backoff sleep
+          // must be caught here, before the next attempt begins -- not only
+          // at loop-top on the following iteration.
+          if (!this._alive || this.isIntentRevoked()) {
+            throw new Error('Codex adapter startup aborted during backoff: lifecycle intent revoked or adapter killed');
+          }
         }
       }
     }

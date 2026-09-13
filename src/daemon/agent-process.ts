@@ -120,6 +120,17 @@ const UNVERIFIED_TEARDOWN_REPORT: ProcessTeardownReport = {
 
 type LogFn = (msg: string) => void;
 
+/**
+ * Task 3.8 Step 3: how long a dispatch to a provider with no real completion
+ * seam (Claude/Hermes/OpenCode — see `scheduleNoCompletionSeamReview`) waits
+ * before its workIds are honestly marked `needs-review`. Matches the exact
+ * value Task 3.4 already chose for Codex's own generic completion timeout
+ * (`codex-app-server-pty.ts`'s `createTurnCompletion(timeoutMs = 30 * 60 *
+ * 1000)`) for the identical "uncertain, not confirmed-failed" semantics —
+ * not independently derived, deliberately kept consistent across providers.
+ */
+const NO_COMPLETION_SEAM_TIMEOUT_MS = 30 * 60 * 1000;
+
 // ---------------------------------------------------------------------------
 // WS8 Layer A — fleet-degrade marker support
 // ---------------------------------------------------------------------------
@@ -493,27 +504,24 @@ export class AgentProcess {
     // workIds.length-gated), so this wiring is inert in production today.
     if (this.config.runtime === 'codex-app-server') {
       (this.pty as CodexAppServerPTY).onWorkCorrelation?.((event: WorkCorrelationEvent) => {
-        if (!this.owner?.observe) return;
-        const token: GenerationToken = {
-          agentId: canonicalAgentId({ instanceId: this.env.instanceId, org: this.env.org, name: this.name }),
-          // Same documented sentinel used elsewhere in this file (e.g.
-          // sessionRefresh()) — nothing reads this token back today.
-          supervisorEpoch: 0,
-          generation: myGeneration,
-        };
-        const evidence: Record<string, string | number | boolean | null> = {
-          workIds: JSON.stringify(event.workIds),
-          turnId: event.turnId,
-        };
-        if ('error' in event) evidence.error = event.error;
-        if ('reason' in event) evidence.reason = event.reason;
-        this.owner.observe({
-          kind: `work-${event.type}`,
-          token,
-          atMs: Date.now(),
-          evidence,
-        });
+        this.forwardWorkCorrelation(event, myGeneration);
       });
+      // Task 3.8 Step 6: intent-revocation check for `startAppServerWithRetry()`
+      // — reuses the exact same generation-mismatch comparison the onExit
+      // handler above already applies (BUG-040's fencing), not a parallel
+      // mechanism.
+      (this.pty as CodexAppServerPTY).setIntentRevocationCheck?.(
+        () => myGeneration !== this.lifecycleGeneration,
+      );
+    }
+
+    // Task 3.8 Step 4: generation-liveness check for OpencodePTY's deferred
+    // shell-prompt recovery keystrokes — same BUG-040 generation-mismatch
+    // fencing, reused rather than duplicated.
+    if (this.config.runtime === 'opencode') {
+      (this.pty as OpencodePTY).setGenerationLiveCheck?.(
+        () => myGeneration === this.lifecycleGeneration,
+      );
     }
 
     // BUG-011 fix: create a fresh exit signal for this run. resolveExit is
@@ -1018,12 +1026,86 @@ export class AgentProcess {
 
     if ('injectMessage' in this.pty && typeof this.pty.injectMessage === 'function') {
       this.pty.injectMessage(content);
+      // Task 3.8 Step 3: Claude/Hermes/OpenCode (everything that reaches
+      // this branch — CodexAppServerPTY has no `injectMessage` and always
+      // takes the `else` branch below) have no real per-turn completion
+      // seam wired at the PTY layer (Step 1's audit; see the doc comments
+      // on `agent-pty.ts`, `hermes-pty.ts`, `opencode-context-reporter.ts`
+      // for the per-provider findings). Left alone, these workIds would sit
+      // at `dispatched` forever with nothing ever resolving them. Bound
+      // that honestly instead of inventing a false `completed`.
+      if (this.config.runtime !== 'codex-app-server') {
+        this.scheduleNoCompletionSeamReview(workIds, this.lifecycleGeneration, this.config.runtime ?? 'claude');
+      }
     } else {
       // CodexAppServerPTY intentionally models stdin writes itself and does not
       // inherit AgentPTY. Feed it through the same write path used historically.
       injectMessageIntoPty((data) => this.pty?.write(data), content);
     }
     return { ok: true, workIds, batchId: effect.effectId };
+  }
+
+  /**
+   * Task 3.8 Step 5 (shared with 3.4 Step 5): translate one
+   * `WorkCorrelationEvent` into the exact `LifecycleObservation` shape
+   * `AgentLifecycleSupervisor.handleWorkObservation()` already recognizes
+   * (`kind: 'work-${event.type}'`) and forward it to the owner, iff an
+   * owner with `observe()` is wired. Extracted from the Task 3.4
+   * `CodexAppServerPTY.onWorkCorrelation` wiring above so Task 3.8's
+   * `needs-review` fallback for non-Codex providers (below) reuses the
+   * exact same translation instead of a second one.
+   */
+  private forwardWorkCorrelation(event: WorkCorrelationEvent, generation: number): void {
+    if (!this.owner?.observe) return;
+    const token: GenerationToken = {
+      agentId: canonicalAgentId({ instanceId: this.env.instanceId, org: this.env.org, name: this.name }),
+      // Same documented sentinel used elsewhere in this file (e.g.
+      // sessionRefresh()) — nothing reads this token back today.
+      supervisorEpoch: 0,
+      generation,
+    };
+    const evidence: Record<string, string | number | boolean | null> = {
+      workIds: JSON.stringify(event.workIds),
+      turnId: event.turnId,
+    };
+    if ('error' in event) evidence.error = event.error;
+    if ('reason' in event) evidence.reason = event.reason;
+    this.owner.observe({
+      kind: `work-${event.type}`,
+      token,
+      atMs: Date.now(),
+      evidence,
+    });
+  }
+
+  /**
+   * Task 3.8 Step 3: for a provider with no real completion seam (i.e. not
+   * the Codex app-server), bound the "we cannot confirm" window to
+   * `NO_COMPLETION_SEAM_TIMEOUT_MS` (documented below — matches Task 3.4's
+   * own generic 30-minute turn-completion-timeout precedent for the exact
+   * same "uncertain, not confirmed-failed" semantics) rather than leaving
+   * the dispatched `WorkRecord`(s) sitting at `dispatched` forever. Fires
+   * unconditionally once scheduled — a workId is unique per dispatch
+   * (`work-ledger.ts`'s `linkRetry()` doc: a retry always mints a NEW
+   * workId), so this can never fire against a record some other mechanism
+   * has since resolved for a legitimate reason; and if it ever raced a
+   * genuine resolution anyway, `applyWorkCorrelation`'s illegal-transition
+   * guard (every terminal `WorkPhase` has an empty `LEGAL_TRANSITIONS`
+   * entry) makes the stray observation a silent no-op rather than an
+   * incorrect overwrite (`supervisor.ts`'s `handleWorkObservation` already
+   * swallows that case for exactly this reason).
+   */
+  private scheduleNoCompletionSeamReview(workIds: string[], generation: number, runtime: string): void {
+    if (workIds.length === 0) return;
+    setTimeout(() => {
+      const event: WorkCorrelationEvent = {
+        type: 'needs-review',
+        workIds,
+        turnId: null,
+        reason: `no-completion-seam-available: ${runtime} has no first-class turn-completion signal at the PTY layer`,
+      };
+      this.forwardWorkCorrelation(event, generation);
+    }, NO_COMPLETION_SEAM_TIMEOUT_MS).unref?.();
   }
 
   /**

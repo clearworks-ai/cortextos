@@ -27,6 +27,20 @@ const STARTUP_PROMPT_FILE = '.cortextos-startup.md';
  * - No trust-folder prompt: Hermes doesn't ask for folder trust on first run
  * - Exit: Ctrl+D (`\x04`), not `/exit\r\n`
  * - No `--dangerously-skip-permissions` or `--model` flags
+ *
+ * Task 3.8 Step 1 audit (completion-capability): Hermes has NO real
+ * completion seam at all. It is a bare Python REPL (NousResearch/hermes-agent)
+ * with no Claude-Code-style hooks system and no RPC transport — the only two
+ * observable signals are (1) the `❯` bootstrap pattern (`isBootstrapped()`),
+ * which means "the REPL is ready for input," not "a turn just finished," and
+ * (2) `hermesDbExists()`'s `~/.hermes/state.db` check, which is a
+ * continuation-DECISION signal (--continue vs. fresh at the next spawn) that
+ * Task 2.2's research already flagged as distinct from a per-turn completion
+ * signal — conflating the two here would be exactly the mistake PRD.md §5
+ * Open Question 5 warns against. Hermes ships via the honest Step 3 fallback
+ * (`AgentProcess.scheduleNoCompletionSeamReview()`): dispatched work reaches
+ * `needs-review` after the documented window rather than sitting unresolved
+ * forever or having a false `completed` invented for it.
  */
 export class HermesPTY extends AgentPTY {
   private startupPrompt: string = '';

@@ -2353,4 +2353,140 @@ describe('FastChecker supervised pollCycle — Task 3.3 (Scenario A closure)', (
 
     await expect((checker as any).pollCycle()).rejects.toThrow(/no lifecycle supervisor is wired/);
   });
+
+  // --- Task 4.2: ported upstream `7d26aabc` fast-checker regression cases,
+  // reframed against this fork's real post-Phase-3 DispatchResult/work-ledger
+  // contract instead of upstream's "DEDUPED = delivered" assumption. See
+  // that commit's `describe('transport re-queue on inject failure')` block
+  // in `tests/unit/daemon/fast-checker.test.ts` for the original material.
+  //
+  // Upstream's `'inbox lock failure visibility'` case (InboxLockUnavailableError
+  // / src/utils/lock.ts handle-opacity rewrite) is explicitly EXCLUDED per
+  // PRD.md §6 Explicit Constraints — this fork's checkInbox()/lock.ts are not
+  // touched by this build. Not ported.
+  //
+  // Upstream's `'drains the queues (no re-queue) when inject succeeds'`
+  // baseline is already covered by this describe block's own
+  // "durable acceptance + successful dispatch drains Telegram/Slack and ACKs
+  // inbox" test above (Task 3.3's own coverage) — skipped here with this note
+  // rather than duplicated, except for the cross-transport ORDER assertion
+  // (Telegram/Buzz/Slack combined, in original order), which that existing
+  // test does not cover and which is added below alongside the NOT_RUNNING
+  // ordering case, per PHASES.md's explicit callout that Buzz ordering is
+  // "the valuable case."
+  it('NOT_RUNNING preserves Telegram/Buzz/Slack in original order across a combined cycle, then delivers the SAME batch once on recovery', async () => {
+    const logs: string[] = [];
+    const { agent, supervisor, checker } = makeSupervisedChecker(logs);
+    agent.injectMessage.mockReturnValue(false); // dispatchViaSupervisor's shim maps false -> NOT_RUNNING
+
+    checker.queueTelegramMessage('=== TELEGRAM ord-1 ===\n', 'telegram/chat1/501');
+    checker.queueTelegramMessage('=== TELEGRAM ord-2 ===\n', 'telegram/chat1/502');
+    checker.queueBuzzMessage('=== BUZZ ord-1 ===\n', 'buzz/chan1/1');
+    checker.queueSlackMessage('=== SLACK ord-1 ===\n', 'slack/c1/1');
+
+    await (checker as any).pollCycle();
+
+    // Every queue is preserved, IN ORIGINAL ORDER — never dropped, never
+    // reordered — because NOT_RUNNING is not delivery.
+    expect((checker as any).telegramMessages.map((m: { formatted: string }) => m.formatted)).toEqual([
+      '=== TELEGRAM ord-1 ===\n',
+      '=== TELEGRAM ord-2 ===\n',
+    ]);
+    expect((checker as any).buzzMessages.map((m: { formatted: string }) => m.formatted)).toEqual(['=== BUZZ ord-1 ===\n']);
+    expect((checker as any).slackMessages.map((m: { formatted: string }) => m.formatted)).toEqual(['=== SLACK ord-1 ===\n']);
+    expect(logs.some((l) => l.includes('Dispatch NOT_RUNNING'))).toBe(true);
+
+    // Durable acceptance already happened for all 4 items — none were lost,
+    // none were re-accepted as new work (this is the anti-"DEDUPED = delivered"
+    // regression: an unsuccessful dispatch never fabricates completion).
+    const firstRecords = outstandingWork(supervisor);
+    expect(firstRecords).toHaveLength(4);
+    expect(firstRecords.every((r) => r.phase === 'accepted')).toBe(true);
+    const firstWorkIds = new Set(firstRecords.map((r) => r.workId));
+
+    // Recovery: the agent comes back. The next cycle must deliver the exact
+    // same combined batch exactly once, in the same cross-transport order
+    // pollCycle concatenates them (Telegram, then Buzz, then Slack), and
+    // drain every queue.
+    agent.injectMessage.mockReturnValue(true);
+    await (checker as any).pollCycle();
+
+    expect(agent.injectMessage).toHaveBeenCalledTimes(2); // 1 failed attempt + 1 recovered delivery
+    const delivered = agent.injectMessage.mock.calls[1][0] as string;
+    const iTg1 = delivered.indexOf('TELEGRAM ord-1');
+    const iTg2 = delivered.indexOf('TELEGRAM ord-2');
+    const iBz1 = delivered.indexOf('BUZZ ord-1');
+    const iSl1 = delivered.indexOf('SLACK ord-1');
+    expect([iTg1, iTg2, iBz1, iSl1].every((i) => i >= 0)).toBe(true);
+    expect(iTg1).toBeLessThan(iTg2);
+    expect(iTg2).toBeLessThan(iBz1);
+    expect(iBz1).toBeLessThan(iSl1);
+
+    expect((checker as any).telegramMessages).toEqual([]);
+    expect((checker as any).buzzMessages).toEqual([]);
+    expect((checker as any).slackMessages).toEqual([]);
+
+    // Reused, not duplicated — the recovered delivery resolves against the
+    // SAME 4 WorkRecords accepted on the failed attempt, never 8.
+    const secondRecords = outstandingWork(supervisor);
+    expect(secondRecords).toHaveLength(4);
+    expect(new Set(secondRecords.map((r) => r.workId))).toEqual(firstWorkIds);
+  }, 12000);
+
+  // Upstream's `'DEDUPED: does NOT re-queue — treated as delivered, and no
+  // replay beside new traffic'` case is explicitly NOT ported as-is: this
+  // fork rejects "duplicate == delivered" (see the existing
+  // "a DUPLICATE dispatch result is a receipt for existing work" test above,
+  // which already proves the DispatchResult-level anti-regression with
+  // `existingWorkIds` surfaced, never silently dropped, never treated as
+  // delivered).
+  //
+  // The real duplicate-resolution layer in this fork is `acceptBatch`'s own
+  // sourceKey+payloadDigest dedup (Task 3.1/3.2), which resolves a
+  // resubmission to its EXISTING workId rather than emitting a `DUPLICATE`
+  // DispatchResult at all (that code is presently reachable only through the
+  // dispatch-shim mock above — see `dispatchViaSupervisor`'s own doc comment:
+  // "DUPLICATE/REVOKED/FAILED are unreachable through this shim today"). The
+  // upstream-equivalent, real-code case worth proving here is upstream's
+  // underlying intent stated in fork terms: a duplicate resubmission does not
+  // contaminate a genuinely NEW, distinct item accepted in the same batch —
+  // the new item still gets its own distinct workId and is not lost, dropped,
+  // or merged into the duplicate's record.
+  it('a duplicate resubmission in the same acceptBatch call does not contaminate a genuinely new, distinct item', async () => {
+    const { supervisor } = makeSupervisedChecker();
+    const sourceKeyA = 'telegram/chat1/900';
+    const payloadA = '=== TELEGRAM dup-source ===\n';
+    const payloadDigestA = createHash('sha256').update(payloadA).digest('hex');
+
+    const first = await supervisor.acceptBatch([{ sourceKey: sourceKeyA, payload: payloadA, payloadDigest: payloadDigestA }]);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const workIdA = first.workIds[0];
+
+    // Same sourceKey/payload/digest (a duplicate resubmission) queued
+    // alongside a genuinely new, distinct sourceKey in ONE batch.
+    const sourceKeyB = 'telegram/chat1/901';
+    const payloadB = '=== TELEGRAM new-distinct ===\n';
+    const payloadDigestB = createHash('sha256').update(payloadB).digest('hex');
+
+    const second = await supervisor.acceptBatch([
+      { sourceKey: sourceKeyA, payload: payloadA, payloadDigest: payloadDigestA },
+      { sourceKey: sourceKeyB, payload: payloadB, payloadDigest: payloadDigestB },
+    ]);
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+
+    // The duplicate resolves to its ORIGINAL workId (a receipt for existing
+    // work — never a fabricated "delivered", never re-created) and the new
+    // item gets its own distinct workId — no cross-contamination between them.
+    expect(second.workIds).toEqual([workIdA, expect.any(String)]);
+    const workIdB = second.workIds[1];
+    expect(workIdB).not.toBe(workIdA);
+
+    const records = outstandingWork(supervisor);
+    expect(records).toHaveLength(2); // NOT 3 — the duplicate did not spawn a new record
+    const bySourceKey = new Map(records.map((r) => [r.sourceKey, r.workId]));
+    expect(bySourceKey.get(sourceKeyA)).toBe(workIdA);
+    expect(bySourceKey.get(sourceKeyB)).toBe(workIdB);
+  });
 });

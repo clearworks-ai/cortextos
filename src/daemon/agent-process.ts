@@ -796,10 +796,32 @@ export class AgentProcess {
         const sweep = killSnapshotSurvivors(descendantsBeforeStop, { log: (msg) => this.log(msg) });
         // Task 2.6: "already gone before this call" is clean, not an orphan —
         // folded into confirmed-absent alongside pids this call itself
-        // signalled and then verified gone. `recycled` entries are explicitly
-        // NOT ours (per the comment above) and are dropped, not reported.
+        // signalled and then verified gone.
+        //
+        // Task 5.2 fix: `recycled` entries were previously dropped here
+        // entirely — neither confirmed-absent nor unresolved — on the theory
+        // that a pid whose current command no longer matches is "not ours to
+        // kill". That reasoning only covers the case where the ORIGINAL
+        // process fully exited and the OS handed its pid to an unrelated
+        // program. It does NOT cover the case a real-OS integration test
+        // (tests/integration/lifecycle-os-teardown.test.ts) reproduces
+        // deterministically: the SAME still-alive descendant simply rewrote
+        // its own reported command (e.g. `process.title =`) between the
+        // pre-signal snapshot and this sweep. In that case the entry is a
+        // live, still-ours, un-killed process — dropping it produced a false
+        // `status: 'retired'` with the descendant silently unaccounted for,
+        // violating this module's own "ambiguity is never reported as done"
+        // principle (already applied to ESRCH/EPERM inside
+        // killSnapshotSurvivors, just not to this caller's aggregation).
+        // Recycled entries now join `unresolved` instead of vanishing.
         descendantsConfirmedAbsent = [...sweep.confirmedAbsent, ...sweep.alreadyGone];
-        descendantsUnresolved = sweep.unresolved;
+        descendantsUnresolved = [
+          ...sweep.unresolved,
+          ...sweep.recycled.map((entry) => ({
+            entry,
+            reason: 'pid no longer matches the pre-signal snapshot (recycled, or the descendant rewrote its own command) — original identity\'s fate not confirmed',
+          })),
+        ];
       }
     }
 

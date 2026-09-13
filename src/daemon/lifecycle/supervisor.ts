@@ -256,6 +256,8 @@ export class AgentLifecycleSupervisor {
   private readonly operations = new Map<string, OperationStatus>();
   /** Task 2.7: see `handlePtyHostCleanupCandidate`/`lastPtyHostCleanupCandidate`. */
   private lastPtyHostCandidate: { hostPid: number; stillClaimed: boolean; atMs: number } | null = null;
+  /** Task 3.6: see `handleWatchdogHeartbeat`/`lastWatchdogHeartbeatObservation`. */
+  private lastWatchdogHeartbeat: { agentId: string; generation: number; atMs: number; evidence: Record<string, string | number | boolean | null> } | null = null;
 
   constructor(
     private readonly agentId: AgentId,
@@ -305,6 +307,10 @@ export class AgentLifecycleSupervisor {
       this.handlePtyHostCleanupCandidate(event);
       return;
     }
+    if (event.kind === 'watchdog-heartbeat') {
+      this.handleWatchdogHeartbeat(event);
+      return;
+    }
     if (WORK_OBSERVATION_KINDS.has(event.kind)) {
       this.handleWorkObservation(event);
       return;
@@ -342,6 +348,37 @@ export class AgentLifecycleSupervisor {
    */
   lastPtyHostCleanupCandidate(): { hostPid: number; stillClaimed: boolean; atMs: number } | null {
     return this.lastPtyHostCandidate;
+  }
+
+  /**
+   * Task 3.6: `FastChecker`'s 50-minute idle-session watchdog publishes each
+   * tick here as `kind: 'watchdog-heartbeat'`, generation-bound via
+   * `event.token`. This is deliberately the ENTIRE handling: record it in an
+   * in-memory field for introspection (`lastWatchdogHeartbeatObservation()`)
+   * and nothing else. It must NEVER be folded into `outstandingWork()`,
+   * never committed to the durable store, and never read by
+   * `detectWedge()`'s activity-staleness computation (that clock is owned
+   * exclusively by completed-turn evidence -- Task 3.4/`turn-activity.ts`).
+   * The watchdog only proves "the daemon subprocess that owns this checker
+   * instance is alive enough to run `execFile`" -- it is daemon-liveness
+   * evidence about its own producer, never runtime work-progress evidence.
+   */
+  private handleWatchdogHeartbeat(event: LifecycleObservation): void {
+    this.lastWatchdogHeartbeat = {
+      agentId: event.token.agentId,
+      generation: event.token.generation,
+      atMs: event.atMs,
+      evidence: event.evidence,
+    };
+  }
+
+  /**
+   * Task 3.6 introspection: the most recent watchdog-heartbeat observation
+   * recorded via `observe()`, or null if none has arrived yet. Read-only --
+   * nothing in this class consults it to make a lifecycle decision.
+   */
+  lastWatchdogHeartbeatObservation(): { agentId: string; generation: number; atMs: number; evidence: Record<string, string | number | boolean | null> } | null {
+    return this.lastWatchdogHeartbeat;
   }
 
   /**

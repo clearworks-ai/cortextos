@@ -1387,6 +1387,282 @@ describe('FastChecker wedge watchdog — default opt-in (wedge-watchdog-default-
   });
 });
 
+/**
+ * Task 3.6 Step 2: `hasPendingWork` widens to
+ * `hasPendingInboxWork() || supervisor.outstandingWork().length > 0`. This is
+ * the exact Scenario A closure — an already-injected input whose transport
+ * copy was removed used to read as "no pending inbox work" (empty bus
+ * inbox/inflight) even while the runtime was still stalled mid-turn on it,
+ * because the ledger's outstanding WorkRecords were never consulted.
+ */
+describe('FastChecker checkWedgeInner — outstanding lifecycle work counts as pending work (Task 3.6 Step 2, Scenario A closure)', () => {
+  let testDir: string;
+  let paths: BusPaths;
+
+  beforeEach(() => {
+    vi.mocked(hardRestart).mockClear();
+    testDir = mkdtempSync(join(tmpdir(), 'fastcheck-wedge-outstanding-'));
+    paths = createTestPaths(testDir);
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  function createWedgeAgent(config: Record<string, unknown>, name = 'wedge-agent') {
+    return {
+      name,
+      getConfig: vi.fn().mockReturnValue(config),
+      isRunning: vi.fn().mockReturnValue(true),
+      isRestartInFlight: vi.fn().mockReturnValue(false),
+      sessionRefresh: vi.fn().mockResolvedValue(undefined),
+    } as any;
+  }
+
+  // Same stale-buffer/fresh-heartbeat shape as the sibling describe block,
+  // but deliberately WITHOUT writing any bus-inbox message — this is exactly
+  // Scenario A's fixture: `hasPendingInboxWork()` alone reports false.
+  function writeStaleBufferFreshHeartbeatFixture(staleMinutes: number): void {
+    mkdirSync(paths.stateDir, { recursive: true });
+    const bufferPath = join(paths.stateDir, 'conversation-buffer.jsonl');
+    writeFileSync(bufferPath, '{"turn":1}\n', 'utf-8');
+    const staleSec = Math.floor((Date.now() - staleMinutes * 60_000) / 1000);
+    utimesSync(bufferPath, staleSec, staleSec);
+    writeFileSync(join(paths.stateDir, 'heartbeat.json'), '{"ts":1}', 'utf-8');
+  }
+
+  it('wedges on outstanding lifecycle work alone, with an EMPTY bus inbox/inflight', () => {
+    const agent = createWedgeAgent({ wedge_restart_min: 5 });
+    writeStaleBufferFreshHeartbeatFixture(20);
+    const logs: string[] = [];
+    const supervisor = { outstandingWork: vi.fn().mockReturnValue([{ workId: 'w1' }]) } as any;
+    const checker = new FastChecker(agent, paths, '/tmp/framework', {
+      log: (m: string) => logs.push(m),
+      supervisor,
+      supervised: true,
+    });
+
+    (checker as any).checkWedgeInner();
+
+    expect(supervisor.outstandingWork).toHaveBeenCalled();
+    expect(logs.some((l) => l.includes('WEDGE suspected'))).toBe(true);
+  });
+
+  it('does NOT wedge when both the bus inbox/inflight AND outstandingWork() are empty (legitimately idle)', () => {
+    const agent = createWedgeAgent({ wedge_restart_min: 5 });
+    writeStaleBufferFreshHeartbeatFixture(20);
+    const logs: string[] = [];
+    const supervisor = { outstandingWork: vi.fn().mockReturnValue([]) } as any;
+    const checker = new FastChecker(agent, paths, '/tmp/framework', {
+      log: (m: string) => logs.push(m),
+      supervisor,
+      supervised: true,
+    });
+
+    (checker as any).checkWedgeInner();
+
+    expect(logs.some((l) => l.includes('WEDGE suspected'))).toBe(false);
+  });
+
+  it('an unsupervised checker (no supervisor option passed) is unaffected by the widened OR — never throws, behaves exactly as before', () => {
+    const agent = createWedgeAgent({ wedge_restart_min: 5 });
+    writeStaleBufferFreshHeartbeatFixture(20);
+    const logs: string[] = [];
+    const checker = new FastChecker(agent, paths, '/tmp/framework', { log: (m: string) => logs.push(m) });
+
+    expect(() => (checker as any).checkWedgeInner()).not.toThrow();
+    expect(logs.some((l) => l.includes('WEDGE suspected'))).toBe(false);
+  });
+});
+
+/**
+ * Task 3.6 Step 4: `reportWedge()` persists a durable pending-notification
+ * receipt BEFORE the Telegram send is attempted, so a crashed daemon or an
+ * ambiguous network outcome still leaves visible evidence — the previous
+ * fire-and-forget `.catch(() => {})` silently swallowed a send failure with
+ * nothing on disk to show for it.
+ */
+describe('FastChecker reportWedge — pending-notification receipt (Task 3.6 Step 4)', () => {
+  let testDir: string;
+  let paths: BusPaths;
+
+  beforeEach(() => {
+    vi.mocked(hardRestart).mockClear();
+    testDir = mkdtempSync(join(tmpdir(), 'fastcheck-wedge-receipt-'));
+    paths = createTestPaths(testDir);
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  function createWedgeAgent(config: Record<string, unknown>, name = 'wedge-agent') {
+    return {
+      name,
+      getConfig: vi.fn().mockReturnValue(config),
+      isRunning: vi.fn().mockReturnValue(true),
+      isRestartInFlight: vi.fn().mockReturnValue(false),
+      sessionRefresh: vi.fn().mockResolvedValue(undefined),
+    } as any;
+  }
+
+  function writeWedgeFixtures(staleMinutes: number): void {
+    mkdirSync(paths.stateDir, { recursive: true });
+    const bufferPath = join(paths.stateDir, 'conversation-buffer.jsonl');
+    writeFileSync(bufferPath, '{"turn":1}\n', 'utf-8');
+    const staleSec = Math.floor((Date.now() - staleMinutes * 60_000) / 1000);
+    utimesSync(bufferPath, staleSec, staleSec);
+    writeFileSync(join(paths.stateDir, 'heartbeat.json'), '{"ts":1}', 'utf-8');
+    writeFileSync(join(paths.inbox, 'msg-1.json'), '{"id":"m1"}', 'utf-8');
+  }
+
+  it('persists a receipt BEFORE the Telegram send is invoked, then marks it notified on success', async () => {
+    const agent = createWedgeAgent({ wedge_restart_min: 5 });
+    writeWedgeFixtures(20);
+
+    let receiptAtSendTime: { notifiedAtMs: number | null; sendFailed: boolean } | null = null;
+    const sendMessage = vi.fn().mockImplementation(async () => {
+      // Snapshot the receipt exactly as it stood the instant send() fired.
+      receiptAtSendTime = checker.getWedgeNotificationReceipt();
+      return { ok: true };
+    });
+    const checker = new FastChecker(agent, paths, '/tmp/framework', {
+      telegramApi: { sendMessage } as any,
+      chatId: '12345',
+    });
+
+    (checker as any).checkWedgeInner();
+    // Let the fire-and-forget .then()/.catch() chain settle.
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(sendMessage).toHaveBeenCalled();
+    expect(receiptAtSendTime).not.toBeNull();
+    expect(receiptAtSendTime?.notifiedAtMs).toBeNull(); // not yet notified at send-call time
+    expect(receiptAtSendTime?.sendFailed).toBe(false);
+
+    const finalReceipt = checker.getWedgeNotificationReceipt();
+    expect(finalReceipt?.notifiedAtMs).not.toBeNull();
+    expect(finalReceipt?.sendFailed).toBe(false);
+
+    const onDisk = JSON.parse(readFileSync(join(paths.stateDir, '.wedge-notification-receipt.json'), 'utf-8'));
+    expect(onDisk.notifiedAtMs).not.toBeNull();
+  });
+
+  it('discloses (does not silently swallow) a Telegram send failure', async () => {
+    const agent = createWedgeAgent({ wedge_restart_min: 5 });
+    writeWedgeFixtures(20);
+
+    const logs: string[] = [];
+    const sendMessage = vi.fn().mockRejectedValue(new Error('network unreachable'));
+    const checker = new FastChecker(agent, paths, '/tmp/framework', {
+      log: (m: string) => logs.push(m),
+      telegramApi: { sendMessage } as any,
+      chatId: '12345',
+    });
+
+    (checker as any).checkWedgeInner();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const receipt = checker.getWedgeNotificationReceipt();
+    expect(receipt?.sendFailed).toBe(true);
+    expect(receipt?.sendError).toContain('network unreachable');
+    expect(receipt?.notifiedAtMs).toBeNull();
+    expect(logs.some((l) => l.includes('disclosed'))).toBe(true);
+
+    const onDisk = JSON.parse(readFileSync(join(paths.stateDir, '.wedge-notification-receipt.json'), 'utf-8'));
+    expect(onDisk.sendFailed).toBe(true);
+  });
+
+  it('does not persist a receipt at all when no Telegram transport is configured (nothing to disclose)', () => {
+    const agent = createWedgeAgent({ wedge_restart_min: 5 });
+    writeWedgeFixtures(20);
+    const checker = new FastChecker(agent, paths, '/tmp/framework'); // no telegramApi/chatId
+
+    (checker as any).checkWedgeInner();
+
+    expect(checker.getWedgeNotificationReceipt()).toBeNull();
+    expect(existsSync(join(paths.stateDir, '.wedge-notification-receipt.json'))).toBe(false);
+  });
+});
+
+/**
+ * Task 3.6 Step 3: the 50-minute idle-session watchdog publishes each tick to
+ * the supervisor as an attributed, generation-bound daemon observation — and
+ * that observation must never advance outstandingWork()/the ledger/the
+ * turn-activity clock detectWedge() reads. It only proves "the daemon
+ * subprocess that owns this checker instance is alive enough to run
+ * execFile", never that the runtime made progress on any work.
+ */
+describe('FastChecker watchdog — generation-bound daemon observation (Task 3.6 Step 3)', () => {
+  let testDir: string;
+  let paths: BusPaths;
+  const agentId = 'test-instance/test-org/watchdog-agent';
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    testDir = mkdtempSync(join(tmpdir(), 'fastcheck-watchdog-obs-'));
+    paths = createTestPaths(testDir);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  function makeUnusedRuntime(): RuntimeAdapter {
+    return {
+      async startGeneration(): Promise<never> {
+        throw new Error('unexpected startGeneration call in a watchdog-observation test');
+      },
+      async retireGeneration(): Promise<never> {
+        throw new Error('unexpected retireGeneration call in a watchdog-observation test');
+      },
+      async deliver(): Promise<never> {
+        throw new Error('unexpected deliver call in a watchdog-observation test');
+      },
+    };
+  }
+
+  it('publishes a generation-bound watchdog-heartbeat observation every tick, without ever advancing outstandingWork()', async () => {
+    const agent = createMockAgent('watchdog-agent', paths.ctxRoot);
+    agent.getLifecycleGeneration = vi.fn().mockReturnValue(3);
+    const store = new LifecycleStateStore(paths, agentId);
+    const supervisor = new AgentLifecycleSupervisor(agentId, store, makeUnusedRuntime());
+
+    const checker = new FastChecker(agent, paths, '/tmp/framework', { supervisor, supervised: true });
+    checker.start();
+    await vi.advanceTimersByTimeAsync(50 * 60 * 1000);
+
+    const observed = supervisor.lastWatchdogHeartbeatObservation();
+    expect(observed).not.toBeNull();
+    expect(observed?.generation).toBe(3);
+    expect(observed?.agentId).toBe(agentId);
+    expect(observed?.evidence.agentName).toBe('watchdog-agent');
+
+    // Never touches the ledger.
+    expect(supervisor.outstandingWork()).toHaveLength(0);
+
+    checker.stop();
+    checker.wake();
+  });
+
+  it('an unsupervised checker (no supervisor wired) never attempts to publish an observation — no throw, no crash', async () => {
+    const agent = createMockAgent('watchdog-agent', paths.ctxRoot);
+    const checker = new FastChecker(agent, paths, '/tmp/framework'); // no supervisor option
+    checker.start();
+    await vi.advanceTimersByTimeAsync(50 * 60 * 1000);
+    // Absence of a thrown/unhandled exception across the tick IS the
+    // assertion — there is no supervisor to inspect.
+    checker.stop();
+    checker.wake();
+  });
+});
+
 describe('FastChecker codex context-full recovery (attempt-7 durable fix)', () => {
   let testDir: string;
   let paths: BusPaths;

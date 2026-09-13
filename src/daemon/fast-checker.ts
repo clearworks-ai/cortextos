@@ -8,7 +8,8 @@ import { checkInbox, ackInbox } from '../bus/message.js';
 import { updateApproval } from '../bus/approval.js';
 import { AgentProcess } from './agent-process.js';
 import type { AgentLifecycleSupervisor } from './lifecycle/supervisor.js';
-import type { DispatchResult } from './lifecycle/types.js';
+import type { DispatchResult, GenerationToken } from './lifecycle/types.js';
+import { canonicalAgentId } from './lifecycle/types.js';
 import type { TelegramAPI } from '../telegram/api.js';
 import { KEYS } from '../pty/inject.js';
 import { stripControlChars, sanitizeForPtyInjection, wrapFenceSafe } from '../utils/validate.js';
@@ -80,6 +81,26 @@ export function realContextWindow(model: string | undefined): number {
  */
 export const DEDUP_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 export const DEDUP_MAX_ENTRIES = 5000;
+
+/**
+ * Task 3.6 Step 4: durable evidence that a wedge stall alert was attempted,
+ * written BEFORE the Telegram send call so a crash mid-send (or an ambiguous
+ * network outcome) still leaves a visible record instead of the prior
+ * silent `.catch(() => {})`. `notifiedAtMs` stays null until the send
+ * Promise resolves; `sendFailed`/`sendError` are set only if it rejects.
+ * Retry is explicitly out of scope here (PHASES.md only requires the
+ * ambiguous outcome be disclosed, not a retry-with-backoff system) — the
+ * existing 30-minute wedge-alert storm-guard cooldown (`wedgeLastRestartAt`)
+ * is the only thing gating whether a repeat attempt happens at all.
+ */
+export interface WedgeNotificationReceipt {
+  agentId: string;
+  reason: string;
+  firstObservedAtMs: number;
+  notifiedAtMs: number | null;
+  sendFailed: boolean;
+  sendError: string | null;
+}
 
 /**
  * Fast message checker for a single agent.
@@ -159,6 +180,12 @@ export class FastChecker {
   // once per DEFAULT_WEDGE_RESTART_COOLDOWN_MS. 0 = never fired.
   private wedgeLastRestartAt: number = 0;
 
+  // Task 3.6 Step 4: pending-notification receipt for the most recent wedge
+  // stall alert this session attempted, persisted to disk BEFORE the
+  // Telegram send call (see reportWedge/writeWedgeNotificationReceipt).
+  private lastWedgeNotificationReceipt: WedgeNotificationReceipt | null = null;
+  private wedgeNotificationReceiptPath: string = '';
+
   // Context monitor state
   private ctxConfigMtime: number = 0;
   private ctxWarningFiredAt: number = 0;    // dedup: 15min cooldown between warnings
@@ -211,6 +238,11 @@ export class FastChecker {
     // Load persisted circuit breaker state so --continue restarts don't reset it
     this.ctxCircuitFile = join(paths.stateDir, '.ctx-circuit.json');
     this.loadCtxCircuit();
+
+    // Task 3.6 Step 4: path for the wedge stall-alert pending-notification
+    // receipt (write-only per session; no replay-on-boot behavior needed —
+    // wedgeLastRestartAt itself already resets to 0 on a fresh session).
+    this.wedgeNotificationReceiptPath = join(paths.stateDir, '.wedge-notification-receipt.json');
   }
 
   /**
@@ -273,6 +305,37 @@ export class FastChecker {
             if (err) this.log(`Heartbeat watchdog error (${target.agentName}): ${err.message}`);
           },
         );
+
+        // Task 3.6 Step 3: publish this tick to the supervisor as an
+        // attributed, generation-bound daemon observation — NOT runtime
+        // work-progress evidence. `AgentLifecycleSupervisor.observe()`'s
+        // 'watchdog-heartbeat' handling only records it for introspection
+        // (lastWatchdogHeartbeatObservation()); it never touches
+        // outstandingWork()/the ledger/the turn-activity clock detectWedge()
+        // reads. Best-effort/fail-safe: any construction error here must
+        // never take down the watchdog's actual heartbeat stamp above.
+        if (this.supervisor) {
+          try {
+            const token: GenerationToken = {
+              agentId: canonicalAgentId({ instanceId: target.instanceId, org: target.org, name: target.agentName }),
+              // Same documented sentinel used elsewhere (state-store.ts,
+              // agent-process.ts) — nothing reads this token's epoch back.
+              supervisorEpoch: 0,
+              generation: this.agent.getLifecycleGeneration(),
+            };
+            this.supervisor.observe({
+              kind: 'watchdog-heartbeat',
+              token,
+              atMs: Date.now(),
+              evidence: {
+                agentName: target.agentName,
+                note: 'daemon-observed-process-liveness-only-not-runtime-progress',
+              },
+            });
+          } catch (err) {
+            this.log(`Watchdog observation error (ignored, ${target.agentName}): ${err}`);
+          }
+        }
       }, HEARTBEAT_INTERVAL_MS);
     }
 
@@ -679,12 +742,26 @@ export class FastChecker {
       ? readLastTurnAtMs(join(this.paths.logDir, 'codex-tokens.jsonl'), sessionId)
       : null;
 
+    // Task 3.6 Step 2: widened, strictly additive OR — the bus-inbox/inflight
+    // check stays as-is (cheap, non-destructive), but a real Telegram/Slack-
+    // originated turn the supervisor has durably accepted and not yet
+    // completed (Task 3.1-3.3's WorkRecord ledger) now also counts as
+    // pending work. This closes the exact Scenario A exclusion: an
+    // already-injected input whose transport copy was removed used to read
+    // as "no pending inbox work" even while the runtime was still stalled
+    // mid-turn on it. `this.supervisor` is only ever set on a supervised
+    // checker (Task 3.3) — an unsupervised checker's `?.` short-circuits to
+    // `undefined`, so `?? 0 > 0` is false, preserving pre-Task-3.6 behavior
+    // exactly for every unsupervised caller/test.
+    const hasInboxWork = this.hasPendingInboxWork();
+    const outstandingWorkCount = this.supervisor?.outstandingWork().length ?? 0;
+
     const decision = detectWedge({
       nowMs: now,
       conversationBufferMtimeMs: bufferMtime,
       heartbeatMtimeMs: heartbeatMtime,
       lastTurnAtMs,
-      hasPendingWork: this.hasPendingInboxWork(),
+      hasPendingWork: hasInboxWork || outstandingWorkCount > 0,
       agentRunning: this.agent.isRunning(),
       restartInFlight: this.agent.isRestartInFlight(),
       lastWedgeRestartAtMs: this.wedgeLastRestartAt,
@@ -695,9 +772,17 @@ export class FastChecker {
 
     if (decision.wedged) {
       const clock = decision.reason.startsWith('stale-turns') ? 'no completed turn' : 'conversation buffer stale';
+      // Provenance-accurate: a wedge can now fire on outstanding lifecycle
+      // work alone, with an empty bus inbox (Scenario A) — the alert text
+      // must not claim "inbox work" when that is not what actually gated it.
+      const workSource = hasInboxWork && outstandingWorkCount > 0
+        ? 'pending bus-inbox work and outstanding lifecycle work'
+        : hasInboxWork
+          ? 'pending bus-inbox work'
+          : `${outstandingWorkCount} outstanding lifecycle work item(s)`;
       this.reportWedge(
         `${clock} for ${Math.round(decision.activityAgeMs / 60_000)}min `
-        + `(heartbeat fresh ${Math.round(decision.heartbeatAgeMs / 1000)}s ago) with pending inbox work`,
+        + `(heartbeat fresh ${Math.round(decision.heartbeatAgeMs / 1000)}s ago) with ${workSource}`,
       );
     }
   }
@@ -770,9 +855,57 @@ export class FastChecker {
     const msg = `WEDGE suspected for ${this.agent.name} — ALERT ONLY, no automatic restart: ${reason}. `
       + `Recover with: cortextos restart ${this.agent.name}`;
     this.log(msg);
-    if (this.telegramApi && this.chatId) {
-      this.telegramApi.sendMessage(this.chatId, msg).catch(() => {});
+    if (!this.telegramApi || !this.chatId) return;
+
+    // Task 3.6 Step 4: persist a durable pending-notification receipt BEFORE
+    // the send is attempted — the previous fire-and-forget `.catch(() => {})`
+    // silently swallowed a send failure with nothing on disk to show for it.
+    // notifiedAtMs stays null until the send resolves; a rejection sets
+    // sendFailed/sendError instead of vanishing.
+    const receipt: WedgeNotificationReceipt = {
+      agentId: this.agent.name,
+      reason,
+      firstObservedAtMs: this.wedgeLastRestartAt,
+      notifiedAtMs: null,
+      sendFailed: false,
+      sendError: null,
+    };
+    this.writeWedgeNotificationReceipt(receipt);
+
+    this.telegramApi.sendMessage(this.chatId, msg)
+      .then(() => {
+        this.writeWedgeNotificationReceipt({ ...receipt, notifiedAtMs: Date.now() });
+      })
+      .catch((err: unknown) => {
+        const sendError = err instanceof Error ? err.message : String(err);
+        this.log(`Wedge alert send outcome ambiguous/failed for ${this.agent.name} (disclosed via receipt, not retried): ${sendError}`);
+        this.writeWedgeNotificationReceipt({ ...receipt, sendFailed: true, sendError });
+      });
+  }
+
+  /**
+   * Task 3.6 Step 4: persist the wedge stall-alert pending-notification
+   * receipt to disk (best-effort — see savePendingTelegram/saveCtxCircuit for
+   * the same pattern elsewhere in this file) and keep the in-memory mirror
+   * used by getWedgeNotificationReceipt() current.
+   */
+  private writeWedgeNotificationReceipt(receipt: WedgeNotificationReceipt): void {
+    this.lastWedgeNotificationReceipt = receipt;
+    try {
+      writeFileSync(this.wedgeNotificationReceiptPath, JSON.stringify(receipt), 'utf-8');
+    } catch {
+      // Best-effort visibility only — must never block or fail the actual
+      // wedge alert this receipt is documenting.
     }
+  }
+
+  /**
+   * Task 3.6 introspection: the most recent wedge stall-alert's
+   * pending-notification receipt this session persisted, or null if no
+   * wedge has alerted (with a transport configured) yet this session.
+   */
+  getWedgeNotificationReceipt(): WedgeNotificationReceipt | null {
+    return this.lastWedgeNotificationReceipt;
   }
 
   /**

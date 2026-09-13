@@ -348,6 +348,76 @@ describe('AgentLifecycleSupervisor', () => {
     const snap = supervisor.snapshot();
     expect(snap.desiredState).toBe('running');
   });
+
+  // Task 3.6 Step 3: the 50-minute idle-session watchdog publishes its tick
+  // as an attributed, generation-bound observation — but it must never
+  // advance the runtime work-progress clock (outstandingWork()/the ledger).
+  describe('observe() — watchdog-heartbeat (Task 3.6)', () => {
+    it('records the watchdog tick for introspection, generation-bound, without touching outstandingWork() or the ledger', async () => {
+      const store = new LifecycleStateStore(paths, agentId);
+      const runtime = makeImmediateRuntime();
+      const supervisor = new AgentLifecycleSupervisor(agentId, store, runtime);
+
+      // Seed one real outstanding WorkRecord first, so we can prove the
+      // watchdog observation leaves it untouched.
+      const before = await supervisor.acceptBatch([
+        { sourceKey: 'telegram-msg-1', payload: 'hello', payloadDigest: 'digest-1' },
+      ]);
+      expect(before.ok).toBe(true);
+      const outstandingBefore = supervisor.outstandingWork();
+      expect(outstandingBefore).toHaveLength(1);
+
+      expect(supervisor.lastWatchdogHeartbeatObservation()).toBeNull();
+
+      const token: GenerationToken = { agentId, supervisorEpoch: 0, generation: 1 };
+      supervisor.observe({
+        kind: 'watchdog-heartbeat',
+        token,
+        atMs: 123_456,
+        evidence: { agentName: 'knox', note: 'daemon-observed-process-liveness-only-not-runtime-progress' },
+      });
+
+      const observed = supervisor.lastWatchdogHeartbeatObservation();
+      expect(observed).not.toBeNull();
+      expect(observed?.agentId).toBe(agentId);
+      expect(observed?.generation).toBe(1);
+      expect(observed?.atMs).toBe(123_456);
+      expect(observed?.evidence.agentName).toBe('knox');
+
+      // The watchdog observation must not have advanced/altered the
+      // outstanding-work ledger in any way.
+      const outstandingAfter = supervisor.outstandingWork();
+      expect(outstandingAfter).toHaveLength(1);
+      expect(outstandingAfter[0]).toEqual(outstandingBefore[0]);
+      // ...nor the phase/desiredState/blockedReason surface.
+      const snap = supervisor.snapshot();
+      expect(snap.blockedReason).toBeNull();
+    });
+
+    it('a second watchdog tick overwrites the introspection value but still never touches outstandingWork()', async () => {
+      const store = new LifecycleStateStore(paths, agentId);
+      const runtime = makeImmediateRuntime();
+      const supervisor = new AgentLifecycleSupervisor(agentId, store, runtime);
+
+      supervisor.observe({
+        kind: 'watchdog-heartbeat',
+        token: { agentId, supervisorEpoch: 0, generation: 1 },
+        atMs: 1_000,
+        evidence: {},
+      });
+      supervisor.observe({
+        kind: 'watchdog-heartbeat',
+        token: { agentId, supervisorEpoch: 0, generation: 2 },
+        atMs: 2_000,
+        evidence: {},
+      });
+
+      const observed = supervisor.lastWatchdogHeartbeatObservation();
+      expect(observed?.generation).toBe(2);
+      expect(observed?.atMs).toBe(2_000);
+      expect(supervisor.outstandingWork()).toHaveLength(0);
+    });
+  });
 });
 
 function makeResource(resourceId: string, agentId: string, generation: number): OwnedResource {

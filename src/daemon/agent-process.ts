@@ -1125,6 +1125,19 @@ export class AgentProcess {
   }
 
   /**
+   * Task 3.6: this process's current lifecycle-generation counter
+   * (`this.lifecycleGeneration`, incremented once per `spawn()`). Exposed so
+   * a caller outside this class (FastChecker's 50-min idle-session watchdog)
+   * can bind an observation it publishes to `AgentLifecycleSupervisor` to
+   * the exact generation it was observed against, the same way `spawn()`
+   * itself already stamps `GenerationToken.generation` for its own
+   * `WorkCorrelationEvent`/exit-report observations above.
+   */
+  getLifecycleGeneration(): number {
+    return this.lifecycleGeneration;
+  }
+
+  /**
    * Register a status change handler.
    */
   onStatusChanged(handler: (status: AgentStatus) => void): void {

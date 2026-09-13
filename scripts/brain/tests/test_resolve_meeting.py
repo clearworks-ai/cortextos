@@ -3599,3 +3599,129 @@ def test_declared_org_name_claimed_by_two_pages_does_not_fire(tmp_path) -> None:
     res = _resolve_teiger(tmp_path, vault, repo)
     assert res["home_path"] == "orgs/christian-nielsen.md"
     assert res["rule"] == 5
+
+
+# --- R4b phase-2c: per-meeting home overrides -------------------------------------
+# Some classifier org_names are worthless as a mapping key: the literal "Unknown"
+# is emitted for four unrelated people in the R4b batch alone. Josh has ruled on
+# individual meetings there (justine-keller -> Office Untitled, ced-ced -> Future
+# Safe) and no page-level declaration can express that safely.
+
+
+def _override_repo(tmp_path: Path, overrides: dict) -> Path:
+    repo = _declared_repo(tmp_path, contacts=[])
+    crm = repo / "orgs/clearworksai/agents/crm-codex/crm"
+    (crm / "meeting-home-overrides.json").write_text(json.dumps(overrides), encoding="utf-8")
+    return repo
+
+
+def _override_vault(tmp_path: Path) -> Path:
+    vault = tmp_path / "vault"
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients").mkdir(parents=True)
+    (brain / "projects").mkdir()
+    (brain / "orgs").mkdir()
+    (brain / "clients" / "office-untitled.md").write_text(
+        "# Client: Office Untitled\n\n## Contacts\n", encoding="utf-8"
+    )
+    (brain / "orgs" / "future-safe.md").write_text(
+        "# Future Safe\n\nkind: org\nrelationship: vendor\n\n## Contacts\n", encoding="utf-8"
+    )
+    (brain / "orgs" / "clearworks-internal.md").write_text(
+        "# Clearworks Internal\n\nkind: org\nrelationship: internal\n\n## Contacts\n",
+        encoding="utf-8",
+    )
+    return vault
+
+
+def _resolve_unknown(tmp_path, vault, repo, *, title="Justine OUN Handoff",
+                     fireflies_id="01K48JSCTVHPPAC6HJTM8B1RQC"):
+    from resolve_meeting import main
+
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title=title,
+        participants=[
+            {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours",
+             "spoke": True, "notetaker": False},
+            {"name": "Justine Keller", "email": None, "side": "theirs",
+             "spoke": True, "notetaker": False},
+        ],
+        org_name="Unknown",
+        domain=None,
+        relationship="client",
+        confidence=0.4,
+        meeting_type="other",
+        fireflies_id=fireflies_id,
+    )
+    assert main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)]) == 0
+    return json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+
+
+def test_meeting_override_sends_an_unknown_org_name_to_a_client_page(tmp_path) -> None:
+    """Josh round 4: justine-keller is the OUN handoff -> Office Untitled. The
+    classifier emits the literal "Unknown", which three other unrelated people also
+    carry, so only a per-meeting statement can express this."""
+    vault = _override_vault(tmp_path)
+    repo = _override_repo(tmp_path, {"01K48JSCTVHPPAC6HJTM8B1RQC": "office-untitled"})
+    res = _resolve_unknown(tmp_path, vault, repo)
+    assert res["home_path"] == "clients/office-untitled.md"
+    assert res["created"] is None
+    assert res["rule"] == 13
+
+
+def test_meeting_override_to_an_org_page_keeps_the_page_relationship(tmp_path) -> None:
+    """Josh round 3: ced-ced is Future Safe (the classifier said "FS SOC", and the
+    remaining meeting says "Unknown")."""
+    vault = _override_vault(tmp_path)
+    repo = _override_repo(tmp_path, {"01KH9NJ3SP09VX87KG2BNE53QV": "future-safe"})
+    res = _resolve_unknown(tmp_path, vault, repo, fireflies_id="01KH9NJ3SP09VX87KG2BNE53QV")
+    assert res["home_path"] == "orgs/future-safe.md"
+    assert res["relationship"] == "vendor"
+    assert res["created"] is None
+
+
+def test_meeting_override_naming_a_missing_page_fails_closed(tmp_path) -> None:
+    """An override must never CREATE a page — a typo'd slug falls through to the
+    ordinary ladder instead of minting orgs/<typo>.md."""
+    vault = _override_vault(tmp_path)
+    repo = _override_repo(tmp_path, {"01K48JSCTVHPPAC6HJTM8B1RQC": "no-such-page"})
+    res = _resolve_unknown(tmp_path, vault, repo)
+    assert res["home_path"] != "orgs/no-such-page.md"
+    assert (res["created"] or {}).get("slug") != "no-such-page"
+
+
+def test_meeting_override_does_not_touch_a_protected_id(tmp_path) -> None:
+    """Protected ids are already-applied production homes and reproduce the
+    unmodified ladder, exactly as for P-1..P-4 and rule 12."""
+    from resolve_meeting import load_closed_sets, resolve
+
+    vault = _override_vault(tmp_path)
+    repo = _override_repo(tmp_path, {"01K48JSCTVHPPAC6HJTM8B1RQC": "office-untitled"})
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Justine OUN Handoff",
+        participants=[
+            {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours",
+             "spoke": True, "notetaker": False},
+            {"name": "Justine Keller", "email": None, "side": "theirs",
+             "spoke": True, "notetaker": False},
+        ],
+        org_name="Unknown",
+        domain=None,
+        relationship="client",
+        confidence=0.4,
+        meeting_type="other",
+        fireflies_id="01K48JSCTVHPPAC6HJTM8B1RQC",
+    )
+    source = json.loads((src / "source.json").read_text(encoding="utf-8"))
+    closed = load_closed_sets(vault)
+    res = resolve(source, closed, repo,
+                  classification={"org_name": "Unknown", "domain": None,
+                                  "relationship": "client", "confidence": 0.4},
+                  protected_ids=frozenset({"01K48JSCTVHPPAC6HJTM8B1RQC"}))
+    assert res["home_path"] != "clients/office-untitled.md"

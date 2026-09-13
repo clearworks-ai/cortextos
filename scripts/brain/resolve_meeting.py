@@ -58,6 +58,7 @@ CONTACTS_REL = Path("orgs/clearworksai/agents/crm-codex/crm/contacts.json")
 # load as empty and are a no-op, never an error.
 INTERNAL_ROSTER_REL = Path("orgs/clearworksai/agents/crm-codex/crm/internal-roster.json")
 EMPLOYER_HISTORY_REL = Path("orgs/clearworksai/agents/crm-codex/crm/employer-history.json")
+MEETING_OVERRIDES_REL = Path("orgs/clearworksai/agents/crm-codex/crm/meeting-home-overrides.json")
 
 # Plan v2 (R4b Phase 1) coordinator correction 2026-09-08: resolve() has no
 # applied-state/receipt input (it takes only source, closed sets, repo_root,
@@ -522,6 +523,24 @@ def _office_hours_home(closed: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _load_meeting_overrides(repo_root: Path) -> dict[str, str]:
+    """Per-meeting home overrides: {"<meeting id>": "<page slug>"}.
+
+    The last resort for a meeting whose classifier org_name cannot be a mapping
+    key at all — the literal "Unknown" is emitted for four unrelated people in the
+    R4b batch alone, so a page-level '- CRM org name:' would claim all of them.
+    Missing or unparseable file -> empty map; never raises.
+    """
+    data = _load_json(repo_root / MEETING_OVERRIDES_REL, {})
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, str] = {}
+    for mid, slug in data.items():
+        if isinstance(mid, str) and isinstance(slug, str) and mid.strip() and slug.strip():
+            out[mid.strip()] = slug.strip()
+    return out
+
+
 def _load_employer_history(repo_root: Path) -> dict[str, list[dict[str, Any]]]:
     """P-4 (plan v2 Phase 1): person -> [{date_from, date_to, slug}, ...],
     keyed by contact id (falls back to normalized contact name). Absent
@@ -859,6 +878,45 @@ def resolve(
         if slug in closed["orgs"] and email_matched:
             org_cands.add(slug)
 
+    # (13) per-meeting override — an explicit human statement about THIS meeting,
+    # the most specific input there is, so it sits above every other rule including
+    # the categorical office-hours branch. Exists because some classifier org_names
+    # cannot be a mapping key at any page level: the literal "Unknown" is emitted
+    # for four unrelated people in the R4b batch (justine-keller, ced-ced,
+    # shane-farkas, dulce-appiagyei), and Josh has ruled individual meetings among
+    # them. FAILS CLOSED: an override naming a page that does not exist is ignored
+    # rather than creating it, so a typo'd slug can never mint a page. Protected ids
+    # reproduce the unmodified ladder, as with P-1..P-4 and rule 12.
+    if not is_protected:
+        override_slug = _load_meeting_overrides(repo_root).get(_meeting_id(source))
+        if override_slug and override_slug in clients:
+            override_hit = _client_hit(override_slug, nodes, clients, rule=13)
+            override_hit["also_present"] = _also(override_slug)
+            return override_hit
+        if override_slug and override_slug in closed["orgs"]:
+            page_rel = _relationship_from_text(
+                closed["orgs"][override_slug].read_text(encoding="utf-8")
+            )
+            override_rel = (
+                page_rel if page_rel in RELATIONSHIPS else str(cls.get("relationship") or "client")
+            )
+            return {
+                "counterparty_slug": override_slug,
+                "kind": "org",
+                "relationship": override_rel,
+                "home_path": f"orgs/{override_slug}.md",
+                "node": "none",
+                "created": None,
+                "confidence": float(cls.get("confidence") or 0),
+                "rule": 13,
+                "corroborated": False,
+                "also_present": _also(override_slug),
+            }
+        if override_slug:
+            print(
+                f"warn: meeting override {override_slug!r} names no existing page; ignoring",
+                file=sys.stderr,
+            )
     # (1) node id in title
     for nid, node in nodes.items():
         if re.search(r"(?<![a-z0-9])" + re.escape(nid.casefold()) + r"(?![a-z0-9])", ntitle):

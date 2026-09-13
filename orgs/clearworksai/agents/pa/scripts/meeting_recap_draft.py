@@ -296,6 +296,26 @@ def build_body(meeting: dict[str, Any], voice_guidance: str) -> str:
     return "\n\n".join(parts)
 
 
+DRAFT_LINK_TEMPLATE = "https://mail.google.com/mail/u/0/#drafts?compose={draft_id}"
+
+
+def _draft_id_from_stdout(stdout: str) -> str | None:
+    """gws-dwd prints {"draft_id": ..., "message_id": ...}. Anything else (an older
+    shim, a wrapper that logs a line first) means no link — never a failure, because
+    the draft itself was created and the copy is still worth sending."""
+    for line in reversed(str(stdout or "").splitlines()):
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            value = json.loads(line).get("draft_id")
+        except ValueError:
+            continue
+        if value:
+            return str(value)
+    return None
+
+
 def run_gmail_draft(subject: str, body: str, runner: Runner) -> RunResult:
     return runner(
         [
@@ -333,6 +353,10 @@ def process_meetings(
         "skipped_suppressed": 0,
         "draft_failures": [],
         "planned": [],
+        # Josh 2026-09-13: the draft link AND the copy have to travel to Telegram, so
+        # the orchestrator needs them here. gws-dwd prints {"draft_id", "message_id"};
+        # the id was previously discarded, which is why there was never a link.
+        "drafts": [],
     }
 
     for meeting in meetings:
@@ -396,6 +420,14 @@ def process_meetings(
             if result.returncode == 0:
                 _append_ledger_locked(ledger_path, key, subject)
                 summary["drafts_created"] += 1
+                draft_id = _draft_id_from_stdout(result.stdout)
+                summary["drafts"].append({
+                    "key": key,
+                    "subject": subject,
+                    "body": body,
+                    "draft_id": draft_id,
+                    "link": DRAFT_LINK_TEMPLATE.format(draft_id=draft_id) if draft_id else None,
+                })
                 ledger_ids.add(key)
                 continue
             summary["draft_failures"].append(

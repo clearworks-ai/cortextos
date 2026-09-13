@@ -81,8 +81,11 @@ def test_apply_refuses_without_sign_marker(tmp_path, monkeypatch):
     monkeypatch.delenv("FIREFLIES_API_KEY", raising=False)  # symmetry, R2-F-5
     vault = tmp_path / "vault"
     (vault / "raw/media/transcripts/fireflies/MID").mkdir(parents=True)
+    # Josh 2026-09-13 scoped the D-09 gate to BULK runs (a single live meeting
+    # auto-applies), so this refusal is exercised on a batch-bound run — the
+    # path where the gate still applies.
     rc = main([
-        "--meeting-id", "MID", "--apply",
+        "--meeting-id", "MID", "--apply", "--batch", "fireflies-20260907T213624Z",
         "--repo-root", str(tmp_path / "repo"), "--vault", str(vault),
     ])
     assert rc == 15
@@ -1024,7 +1027,7 @@ def test_apply_rejects_marker_missing_source_binding_fields(tmp_path):
 
     result = subprocess.run(
         [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
-         "--repo-root", str(repo), "--vault", str(vault), "--apply"],
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--batch", "fireflies-20260907T213624Z"],
         capture_output=True, text=True, env=env,
     )
     assert result.returncode == 15, result.stderr + result.stdout
@@ -1063,7 +1066,7 @@ def test_apply_rejects_when_source_changed_after_signoff(tmp_path):
 
     result = subprocess.run(
         [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
-         "--repo-root", str(repo), "--vault", str(vault), "--apply"],
+         "--repo-root", str(repo), "--vault", str(vault), "--apply", "--batch", "fireflies-20260907T213624Z"],
         capture_output=True, text=True, env=env,
     )
     assert result.returncode == 15, result.stderr + result.stdout

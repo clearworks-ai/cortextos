@@ -33,7 +33,12 @@ describe('planMeetingWritebackSpawn', () => {
     });
     expect(plan!.dir).toBe(join(FW, 'orgs', ORG, 'agents', 'pa'));
     expect(plan!.prompt).toContain('FF_MEETING_ID=abc');
-    expect(plan!.prompt).toContain('meeting-writeback-worker/SKILL.md');
+    // Phase G: the spawned session now runs the deterministic pipeline instead of
+    // reading the legacy SKILL — that lane received webhooks for months without
+    // ever filing a meeting or drafting a recap.
+    expect(plan!.prompt).toContain('scripts/brain/run_meeting.py');
+    expect(plan!.prompt).toContain('--meeting-id abc --apply');
+    expect(plan!.prompt).not.toContain('SKILL.md');
   });
 
   it('returns null when the target agent has no writeback skill (so caller falls back to NL relay)', () => {

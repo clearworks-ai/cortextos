@@ -542,3 +542,67 @@ def test_marcos_meeting_is_never_suppressed():
     }
     assert MODULE.SUPPRESSED_NAMES == ()
     assert MODULE.is_suppressed_meeting(meeting) is False
+
+
+class DraftLinkCaptureTests(unittest.TestCase):
+    """Josh 2026-09-13: "i need those telegramed to me the links to the drafts and
+    the copy every time." gws-dwd already prints {"draft_id": ...} on stdout; the
+    recap script was throwing it away, so there was no link to send."""
+
+    def _meeting(self):
+        return {
+            "id": "meeting-link",
+            "title": "MSIA recap",
+            "date": "2026-07-27T11:00:00Z",
+            "organizer": "josh@clearworks.ai",
+            "attendees": ["mark@msia.org"],
+            "summary": {"overview": "Reviewed the audit findings.", "bullets": "", "action_items": ""},
+            "client_context": "Clearworks maps this meeting to client=MSIA. Deal stage=won.",
+            "next_steps": [{"text": "Send findings deck", "direction": "outbound", "owner": "Josh"}],
+        }
+
+    def test_draft_id_and_link_and_copy_are_surfaced(self):
+        def runner(args):
+            return subprocess.CompletedProcess(
+                args, 0, stdout='{"draft_id": "r-8891234", "message_id": "m-42"}', stderr=""
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            summary = MODULE.process_meetings(
+                [self._meeting()],
+                ledger_path=Path(tmp) / "ledger.txt",
+                voice_guidance="Keep it direct.",
+                vip_list=set(),
+                runner=runner,
+            )
+
+        self.assertEqual(summary["drafts_created"], 1)
+        self.assertEqual(len(summary["drafts"]), 1)
+        d = summary["drafts"][0]
+        self.assertEqual(d["draft_id"], "r-8891234")
+        self.assertEqual(d["link"], "https://mail.google.com/mail/u/0/#drafts?compose=r-8891234")
+        self.assertTrue(d["subject"])
+        # the COPY has to travel with it — Josh reads the draft from Telegram
+        self.assertIn("Reviewed the audit findings.", d["body"])
+
+    def test_unparseable_draft_output_still_counts_the_draft(self):
+        """The draft really was created; a missing/garbled id must not fail the step
+        or lose the copy — it just means no link."""
+        def runner(args):
+            return subprocess.CompletedProcess(args, 0, stdout="drafted", stderr="")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            summary = MODULE.process_meetings(
+                [self._meeting()],
+                ledger_path=Path(tmp) / "ledger.txt",
+                voice_guidance="Keep it direct.",
+                vip_list=set(),
+                runner=runner,
+            )
+
+        self.assertEqual(summary["drafts_created"], 1)
+        self.assertEqual(summary["draft_failures"], [])
+        self.assertEqual(len(summary["drafts"]), 1)
+        self.assertIsNone(summary["drafts"][0]["draft_id"])
+        self.assertIsNone(summary["drafts"][0]["link"])
+        self.assertTrue(summary["drafts"][0]["body"])

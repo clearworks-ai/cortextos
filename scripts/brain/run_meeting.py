@@ -47,6 +47,8 @@ CRM_SYNC = CODE_ROOT / "orgs/clearworksai/agents/crm/crm/meeting-crm-sync.py"
 FANOUT_SCRIPT = CODE_ROOT / "orgs/clearworksai/agents/crm/crm/meeting-fanout.py"
 BRAIN_ROLLUP = HERE / "brain_rollup.py"
 STATUS_PLAN = HERE / "status_plan.ts"
+# Josh's Telegram chat (same id meeting-fanout.py uses for commitments).
+RECAP_TELEGRAM_CHAT_ID = "6690120787"
 
 
 def _status_env(base_env: dict[str, str]) -> dict[str, str]:
@@ -846,9 +848,34 @@ def _apply_writes(
                 subject = None
             if not subject:
                 subject = "(ledger-skipped)"
+        # Josh 2026-09-13: "i need those telegramed to me the links to the drafts and
+        # the copy every time." The draft itself is addressed to Josh in Gmail (FR-008),
+        # but he reads Telegram, so the link + full copy go to him there the moment the
+        # draft exists. Best-effort by design: a Telegram outage must never fail a
+        # meeting whose draft, CRM row and vault write all succeeded.
+        for _d in (rec_out.get("drafts") or []):
+            _parts = [f"Recap draft ready — {_d.get('subject') or subject or 'Untitled'}"]
+            if _d.get("link"):
+                _parts.append(_d["link"])
+            else:
+                _parts.append("(no draft link — the Gmail shim returned no draft_id)")
+            if _d.get("body"):
+                _parts += ["", _d["body"]]
+            try:
+                _tg = subprocess.run(
+                    ["cortextos", "bus", "send-telegram", RECAP_TELEGRAM_CHAT_ID, "\n".join(_parts)],
+                    capture_output=True, text=True, timeout=CHILD_TIMEOUT_S,
+                )
+                if _tg.returncode != 0:
+                    print(f"warn: recap telegram rc={_tg.returncode}: {_tg.stderr.strip()[:160]}",
+                          file=sys.stderr)
+            except (subprocess.TimeoutExpired, OSError) as exc:
+                print(f"warn: recap telegram failed: {exc}", file=sys.stderr)
+
         doc = progress.merge_progress(prog_path, "draft", {
             "done": True, "subject": subject,
             "created": bool(rec_out.get("drafts_created")), "skipped_ledger": skipped_ledger,
+            "drafts": rec_out.get("drafts") or [],
         })
 
     # Phase 3 (spec §12, FR-012 line 327): D-09 phase-3 re-sign check (Task

@@ -7,6 +7,7 @@ import hashlib
 import json
 import re
 import sys
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +58,7 @@ CONTACTS_REL = Path("orgs/clearworksai/agents/crm-codex/crm/contacts.json")
 # load as empty and are a no-op, never an error.
 INTERNAL_ROSTER_REL = Path("orgs/clearworksai/agents/crm-codex/crm/internal-roster.json")
 EMPLOYER_HISTORY_REL = Path("orgs/clearworksai/agents/crm-codex/crm/employer-history.json")
+MEETING_OVERRIDES_REL = Path("orgs/clearworksai/agents/crm-codex/crm/meeting-home-overrides.json")
 
 # Plan v2 (R4b Phase 1) coordinator correction 2026-09-08: resolve() has no
 # applied-state/receipt input (it takes only source, closed sets, repo_root,
@@ -146,8 +148,60 @@ def normalize_quote(text: str) -> str:
     return t
 
 
+def _deaccent(text: str) -> str:
+    """NFKD-fold and drop combining marks so accented letters survive slugging.
+    Without this `Verónica Zárate` slugs to `ver-nica-z-rate` (R4b, 2026-09-11)."""
+    return "".join(c for c in unicodedata.normalize("NFKD", str(text)) if not unicodedata.combining(c))
+
+
 def slugify(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    folded = re.sub(r"[^a-z0-9]+", "-", _deaccent(text).lower()).strip("-")
+    if folded:
+        return folded
+    # All-accent / non-latin input: keep the pre-fold behaviour rather than
+    # returning an empty slug (which would collide across meetings).
+    return re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-")
+
+
+def _candidate_tier(slug: str, clients: dict[str, Any], closed: dict[str, Any]) -> int:
+    """0 = client-tier, 1 = everything else. Josh 2026-09-11: "with a client the
+    client always wins" — a meeting holding both a client and a vendor belongs to
+    the CLIENT regardless of participant count (Russian Riverkeeper + 4 Upcode
+    attendees is a Russian Riverkeeper meeting). Clearworks + a vendor alone is
+    fine as the vendor."""
+    if slug in clients:
+        return 0
+    page = (closed.get("orgs") or {}).get(slug)
+    if page is not None:
+        try:
+            rel = _relationship_from_text(Path(page).read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            rel = None
+        if rel == "client":
+            return 0
+    return 1
+
+
+def _norm_entity(text: Any) -> str:
+    return re.sub(r"[^a-z0-9]", "", _deaccent(str(text or "")).lower())
+
+
+def _existing_page_for_org_name(org_name: Any, clients: dict[str, Any], closed: dict[str, Any]) -> tuple[str, str] | None:
+    """(kind, slug) of an EXISTING client/org page the classification names, else None.
+    Exact or prefix match in either direction on normalized names, both sides >= 4
+    chars. Deliberately NOT substring: "OU" would otherwise match genesisgoldgroup."""
+    n = _norm_entity(org_name)
+    if len(n) < 4:
+        return None
+    pages: list[tuple[str, str]] = [("clients", c) for c in clients] + [("orgs", o) for o in closed.get("orgs", {})]
+    for kind, slug in pages:
+        if _norm_entity(slug) == n:
+            return (kind, slug)
+    for kind, slug in pages:
+        pn = _norm_entity(slug)
+        if len(pn) >= 4 and (n.startswith(pn) or pn.startswith(n)):
+            return (kind, slug)
+    return None
 
 
 def registrable_label(domain: str) -> str:
@@ -196,13 +250,24 @@ def _relationship_from_text(text: str) -> str | None:
 
 
 def _org_name_from_text(text: str) -> str | None:
-    """Parse a '- CRM org name: X' (or bare 'CRM org name: X') line from a client/org page."""
+    """First '- CRM org name: X' line. Kept for callers wanting a single value."""
+    names = _org_names_from_text(text)
+    return names[0] if names else None
+
+
+def _org_names_from_text(text: str) -> list[str]:
+    """ALL '- CRM org name: X' lines on a page. A page legitimately carries several
+    spellings the classifier emits ("Logic", "Logic TCG", "Logic Technology
+    Consulting Group"); reading only the first silently dropped the rest
+    (codex NEW-3, 2026-09-08)."""
+    out: list[str] = []
     for line in text.splitlines():
         m = re.match(r"^\s*-?\s*CRM org name\s*:\s*(.+)$", line, re.I)
         if m:
             val = m.group(1).strip()
-            return val or None
-    return None
+            if val and val not in out:
+                out.append(val)
+    return out
 
 
 def _community_org_slug(org_name: str) -> str:
@@ -246,9 +311,21 @@ def load_closed_sets(vault: Path) -> dict[str, Any]:
             for dom in _domains_from_text(text):
                 domain_to_slug[registrable_label(dom)] = path.stem
                 domain_to_slug[dom] = path.stem
-            oname = _org_name_from_text(text)
-            if oname:
-                org_name_to_slug[_norm_title(oname)] = path.stem
+            for oname in _org_names_from_text(text):
+                key = _norm_title(oname)
+                prior = org_name_to_slug.get(key)
+                if prior is not None and prior != path.stem:
+                    # Fail closed on a duplicate CRM org name across pages rather
+                    # than letting directory order decide (codex NEW-3).
+                    print(
+                        f"warn: CRM org name {oname!r} claimed by both {prior!r} and {path.stem!r}; ignoring both",
+                        file=sys.stderr,
+                    )
+                    org_name_to_slug[key] = ""
+                    continue
+                if prior == "":
+                    continue
+                org_name_to_slug[key] = path.stem
     proj = brain / "projects"
     if proj.is_dir():
         for path in proj.glob("*.md"):
@@ -446,6 +523,24 @@ def _office_hours_home(closed: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _load_meeting_overrides(repo_root: Path) -> dict[str, str]:
+    """Per-meeting home overrides: {"<meeting id>": "<page slug>"}.
+
+    The last resort for a meeting whose classifier org_name cannot be a mapping
+    key at all — the literal "Unknown" is emitted for four unrelated people in the
+    R4b batch alone, so a page-level '- CRM org name:' would claim all of them.
+    Missing or unparseable file -> empty map; never raises.
+    """
+    data = _load_json(repo_root / MEETING_OVERRIDES_REL, {})
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, str] = {}
+    for mid, slug in data.items():
+        if isinstance(mid, str) and isinstance(slug, str) and mid.strip() and slug.strip():
+            out[mid.strip()] = slug.strip()
+    return out
+
+
 def _load_employer_history(repo_root: Path) -> dict[str, list[dict[str, Any]]]:
     """P-4 (plan v2 Phase 1): person -> [{date_from, date_to, slug}, ...],
     keyed by contact id (falls back to normalized contact name). Absent
@@ -617,6 +712,7 @@ def resolve(
         return min(
             cands,
             key=lambda s: (
+                _candidate_tier(s, clients, closed),
                 -counts.get(s, 0),
                 -(1 if s in cls_match else 0),
                 -sum(
@@ -744,6 +840,11 @@ def resolve(
 
     rule4: set[str] = set()
     name_only_rule4: set[str] = set()
+    # Slugs supplied by the CURATED date-aware employer history. These outrank a
+    # classifier-named page (the P-4 protection: a historical meeting must not
+    # follow the person's CURRENT employer), so the employer-inference override
+    # below deliberately skips them.
+    dated_employer_slugs: set[str] = set()
     for p in externals:
         row = _match_contact(p)
         if not row:
@@ -752,7 +853,10 @@ def resolve(
         # current-day) company when a date-ranged override exists for this
         # meeting's occurred_at; otherwise fall back to the ordinary
         # company resolution, byte-identical to before P-4.
-        slug = _employer_slug_at(row, source.get("occurred_at"), employer_history) or _resolve_company_slug(
+        _dated = _employer_slug_at(row, source.get("occurred_at"), employer_history)
+        if _dated:
+            dated_employer_slugs.add(_dated)
+        slug = _dated or _resolve_company_slug(
             row.get("company")
         )
         if not slug:
@@ -774,6 +878,45 @@ def resolve(
         if slug in closed["orgs"] and email_matched:
             org_cands.add(slug)
 
+    # (13) per-meeting override — an explicit human statement about THIS meeting,
+    # the most specific input there is, so it sits above every other rule including
+    # the categorical office-hours branch. Exists because some classifier org_names
+    # cannot be a mapping key at any page level: the literal "Unknown" is emitted
+    # for four unrelated people in the R4b batch (justine-keller, ced-ced,
+    # shane-farkas, dulce-appiagyei), and Josh has ruled individual meetings among
+    # them. FAILS CLOSED: an override naming a page that does not exist is ignored
+    # rather than creating it, so a typo'd slug can never mint a page. Protected ids
+    # reproduce the unmodified ladder, as with P-1..P-4 and rule 12.
+    if not is_protected:
+        override_slug = _load_meeting_overrides(repo_root).get(_meeting_id(source))
+        if override_slug and override_slug in clients:
+            override_hit = _client_hit(override_slug, nodes, clients, rule=13)
+            override_hit["also_present"] = _also(override_slug)
+            return override_hit
+        if override_slug and override_slug in closed["orgs"]:
+            page_rel = _relationship_from_text(
+                closed["orgs"][override_slug].read_text(encoding="utf-8")
+            )
+            override_rel = (
+                page_rel if page_rel in RELATIONSHIPS else str(cls.get("relationship") or "client")
+            )
+            return {
+                "counterparty_slug": override_slug,
+                "kind": "org",
+                "relationship": override_rel,
+                "home_path": f"orgs/{override_slug}.md",
+                "node": "none",
+                "created": None,
+                "confidence": float(cls.get("confidence") or 0),
+                "rule": 13,
+                "corroborated": False,
+                "also_present": _also(override_slug),
+            }
+        if override_slug:
+            print(
+                f"warn: meeting override {override_slug!r} names no existing page; ignoring",
+                file=sys.stderr,
+            )
     # (1) node id in title
     for nid, node in nodes.items():
         if re.search(r"(?<![a-z0-9])" + re.escape(nid.casefold()) + r"(?![a-z0-9])", ntitle):
@@ -889,6 +1032,43 @@ def resolve(
                 "corroborated": False,
                 "also_present": [],
             }
+    # (12) an EXPLICIT human declaration beats the domain/contacts ladder.
+    # d3d89787 gave rule 7 this door; it was never enough, because the paths that
+    # fire EARLIER never consulted it: a free-mail attendee with a contacts.json
+    # row takes rule 5, and a single mapped domain among many unmapped ones takes
+    # rule 3. Both carve the meeting away from a page a human has explicitly told
+    # us owns that exact classifier string (Josh 2026-09-12: the Teiger peer group
+    # is Doug Teiger Consulting, not the one attendee whose address happened to be
+    # known, and not LMD Architecture because one of 36 firms in the room has a
+    # page). Sits BELOW office-hours (11) and the community door (10), which are
+    # categorical, and below the node/alias matches (1, 2), which are more specific
+    # than an org-level name. A string claimed by two pages is already failed
+    # closed to "" by load_closed_sets (:317-324) and is skipped here.
+    if not is_protected and cls_org_name:
+        declared_slug = closed["org_name_to_slug"].get(_norm_title(cls_org_name))
+        if declared_slug and declared_slug in clients:
+            declared_hit = _client_hit(declared_slug, nodes, clients, rule=12)
+            declared_hit["also_present"] = _also(declared_slug)
+            return declared_hit
+        if declared_slug and declared_slug in closed["orgs"]:
+            page_rel = _relationship_from_text(
+                closed["orgs"][declared_slug].read_text(encoding="utf-8")
+            )
+            declared_rel = (
+                page_rel if page_rel in RELATIONSHIPS else str(cls.get("relationship") or "client")
+            )
+            return {
+                "counterparty_slug": declared_slug,
+                "kind": "org",
+                "relationship": declared_rel,
+                "home_path": f"orgs/{declared_slug}.md",
+                "node": "none",
+                "created": None,
+                "confidence": float(cls.get("confidence") or 0),
+                "rule": 12,
+                "corroborated": False,
+                "also_present": _also(declared_slug),
+            }
     # (B, folded into rule 4) contacts.json identifies a person by name that a
     # bare email-domain guess cannot see at all (no email on that participant
     # object). When that identity resolves to a different client than the
@@ -900,6 +1080,35 @@ def resolve(
             default_pick = _pick(client_cands)
         elif rule4:
             default_pick = _pick(rule4)
+        # Josh 2026-09-11: "a person's employer never decides the meeting when
+        # the meeting belongs to a different client." A name-only contact match
+        # is an EMPLOYER inference (Yohan -> LogicTCG, Mrin -> Clearworks) and
+        # those people attend other clients' meetings. When the classification
+        # names a DIFFERENT org that already has a page, that page wins and the
+        # employer inference is dropped — an RRK meeting with Yohan in it is an
+        # RRK meeting, while "LTCG-Audit: ..." (classifier names no competing
+        # page) still lands on LogicTCG.
+        _cls_named = _existing_page_for_org_name(
+            "" if _is_description_shaped_org_name(cls_org_name) else cls_org_name, clients, closed
+        )
+        if _cls_named is not None and _cls_named[1] != b_pick and b_pick not in dated_employer_slugs:
+            _k, _s = _cls_named
+            if _k == "clients":
+                hit = _client_hit(_s, nodes, clients, rule=4)
+                hit["also_present"] = _also(_s)
+                return hit
+            return {
+                "counterparty_slug": _s,
+                "kind": "org",
+                "relationship": str(cls.get("relationship") or "client"),
+                "home_path": f"orgs/{_s}.md",
+                "node": "none",
+                "created": None,
+                "confidence": float(cls.get("confidence") or 0),
+                "rule": 4,
+                "corroborated": False,
+                "also_present": [],
+            }
         if default_pick != b_pick:
             hit = _client_hit(b_pick, nodes, clients, rule=4)
             hit["also_present"] = _also(b_pick)
@@ -1087,6 +1296,43 @@ def resolve(
         # OUT OF THE CANDIDATE LIST rule 7 picks `first` from ONLY — this
         # `candidates` list is local to rule 7 and must never replace the
         # shared `externals` list rules 3/5/6/9/10 read above.
+        # F2 (2026-09-11): before minting a person page, if the sanitized
+        # classification names an org that ALREADY has a page, file the
+        # meeting there. Exact or prefix match on both sides, minimum 4
+        # normalized chars, never arbitrary substring — measured: substring
+        # sends "OU" to clients/genesisgoldgroup because "ou" occurs inside
+        # "genesisgold-grou-p". Creates nothing.
+        # A description-shaped org_name is normally treated as absent, but if a
+        # human has EXPLICITLY declared that exact string as a '- CRM org name:'
+        # on a page, that declaration wins: the guard exists to stop a
+        # description CREATING a page, not to stop it MATCHING a declared alias
+        # ("Ben Botti's company (SaaS & network management platform vendor)"
+        # is declared on the Auvik page by Josh's adjudication).
+        _declared = closed["org_name_to_slug"].get(_norm_title(cls_org_name))
+        if _declared:
+            _dk = "clients" if _declared in clients else ("orgs" if _declared in closed["orgs"] else None)
+            _cls_page = (_dk, _declared) if _dk else None
+        else:
+            _cls_name_7 = "" if _is_description_shaped_org_name(cls_org_name) else cls_org_name
+            _cls_page = _existing_page_for_org_name(_cls_name_7, clients, closed)
+        if _cls_page is not None:
+            _kind, _slug = _cls_page
+            if _kind == "clients":
+                _cls_hit = _client_hit(_slug, nodes, clients, rule=7)
+                _cls_hit["also_present"] = []
+                return _cls_hit
+            return {
+                "counterparty_slug": _slug,
+                "kind": "org",
+                "relationship": str(cls.get("relationship") or "client"),
+                "home_path": f"orgs/{_slug}.md",
+                "node": "none",
+                "created": None,
+                "confidence": float(cls.get("confidence") or 0),
+                "rule": 7,
+                "corroborated": False,
+                "also_present": [],
+            }
         candidates = [p for p in externals if not _is_placeholder_participant_name(p.get("name"))]
         if not candidates:
             # Fallback (G0a C-4 / G0b AR-001): every rule-7 candidate was a

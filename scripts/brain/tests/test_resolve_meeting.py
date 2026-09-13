@@ -3374,3 +3374,354 @@ def test_r4b_control_juan_202608_bare_single_token_name_rule7_unaffected(tmp_pat
     assert res["rule"] == 7
     assert res["kind"] == "person"
     assert res["home_path"] == "orgs/juan-202608.md"
+
+
+def test_client_beats_vendor_regardless_of_participant_count(tmp_path) -> None:
+    """Josh 2026-09-11: "with a client the client always wins". One client-side
+    attendee versus FOUR vendor-side attendees still belongs to the client.
+    Regression fixture: Russian Riverkeeper + Upcode RE: Salesforce Use
+    (01KWFT9JDNE3), which flipped to the vendor once Upcode got its own page."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_r4_vault(tmp_path)
+    ob = vault / "raw/areas/clearworks/org-brain"
+    # Real topology (01KWFT9JDNE3): BOTH sides are org pages; the client-side one
+    # is an org page carrying `relationship: client`, which is what must win.
+    (ob / "orgs" / "riverkeeper.md").write_text(
+        "# Riverkeeper\n\nkind: org\nrelationship: client\ndomains: riverkeeper.org\n\n## Contacts\n",
+        encoding="utf-8",
+    )
+    (ob / "orgs" / "vendorco.md").write_text(
+        "# VendorCo\n\nkind: org\nrelationship: vendor\ndomains: vendorco.com\n\n## Contacts\n",
+        encoding="utf-8",
+    )
+    src = tmp_path / "cbv"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Riverkeeper + VendorCo RE: Salesforce",
+        org_name="Riverkeeper",
+        domain="riverkeeper.org",
+        relationship="client",
+        confidence=0.7,
+        meeting_type="other",
+        fireflies_id="01CBVCLIENTBEATSVENDOR",
+        participants=[
+            {"name": None, "email": "a@vendorco.com", "side": "theirs", "spoke": True},
+            {"name": None, "email": "b@vendorco.com", "side": "theirs", "spoke": True},
+            {"name": None, "email": "c@vendorco.com", "side": "theirs", "spoke": True},
+            {"name": None, "email": "d@vendorco.com", "side": "theirs", "spoke": True},
+            {"name": None, "email": "e@riverkeeper.org", "side": "theirs", "spoke": True},
+            {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours", "spoke": True},
+        ],
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "orgs/riverkeeper.md", res
+
+
+def test_employer_inference_yields_to_a_classifier_named_page(tmp_path) -> None:
+    """Josh 2026-09-11: "a person's employer never decides the meeting when the
+    meeting belongs to a different client." Yohan works for LogicTCG and attends
+    Russian Riverkeeper meetings; his contact row must not drag them onto his
+    employer. RED before the fix: home_path == clients/employer-fixture.md."""
+    from resolve_meeting import main
+
+    vault, repo = _seed_brain(tmp_path)
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients" / "employer-fixture.md").write_text(
+        "# Client: Employer Fixture\n\n## Contacts\n", encoding="utf-8"
+    )
+    (brain / "clients" / "third-party-fixture.md").write_text(
+        "# Client: Third Party Fixture\n\n## Current state\n\n- CRM org name: Third Party Fixture\n",
+        encoding="utf-8",
+    )
+    (repo / "orgs/clearworksai/agents/crm-codex/crm/contacts.json").write_text(
+        json.dumps({"contacts": [{"id": "fx-emp-01", "name": "Pat Vendorside",
+                                  "company": "Employer Fixture", "emails": []}]}),
+        encoding="utf-8",
+    )
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Third Party Fixture working session",
+        participants=[
+            {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours", "spoke": True,
+             "notetaker": False, "handle": None},
+            {"name": "Pat Vendorside", "email": None, "side": "unknown", "spoke": True,
+             "notetaker": False, "handle": None},
+        ],
+        org_name="Third Party Fixture",
+        domain=None,
+        relationship="client",
+        occurred_at="2026-03-02T17:00:00Z",
+        fireflies_id="01EMPLOYERYIELDS",
+    )
+    rc = main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)])
+    assert rc == 0
+    res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+    assert res["home_path"] == "clients/third-party-fixture.md", res
+
+
+# --- R4b phase-2c: a declared '- CRM org name:' wins outside rule 7 too ----------
+# d3d89787 gave rule 7 a declared-alias-first check. Josh's 2026-09-12 rulings
+# ("that group with doug is actually Doug Tieger Consulting", "lmd is lmd need one
+# single company") cannot be implemented without the same check on the paths that
+# fire EARLIER than rule 7 — rule 5 (a free-mail attendee who matches a contact row)
+# and rule 3 (a single minority domain candidate among many unmapped ones).
+
+
+def _declared_repo(tmp_path: Path, contacts: list[dict] | None = None) -> Path:
+    repo = tmp_path / "repo"
+    crm = repo / "orgs/clearworksai/agents/crm-codex/crm"
+    crm.mkdir(parents=True, exist_ok=True)
+    (crm / "org-aliases.json").write_text("{}", encoding="utf-8")
+    (crm / "contacts.json").write_text(
+        json.dumps({"contacts": contacts or []}), encoding="utf-8"
+    )
+    return repo
+
+
+def _teiger_participants() -> list[dict]:
+    return [
+        {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours",
+         "spoke": True, "notetaker": False},
+        # free-mail AND a contacts.json row -> this is what rule 5 fires on
+        {"name": "Christian Nielsen", "email": "christian@gmail.com", "side": "theirs",
+         "spoke": True, "notetaker": False},
+        {"name": "Marcela Bermudez", "email": "mbermudez@lmdarchitecture.com",
+         "side": "theirs", "spoke": True, "notetaker": False},
+        {"name": "Aaron Brumer", "email": "aaron@aaronbrumer.example", "side": "theirs",
+         "spoke": True, "notetaker": False},
+        {"name": "Erin Morris", "email": "erin@erinmorris.example", "side": "theirs",
+         "spoke": True, "notetaker": False},
+    ]
+
+
+_TEIGER_ORG_NAME = "Douglas Teiger AIA Architect Peer Group"
+
+
+def _seed_declared(tmp_path: Path, *, also_declared_on: str | None = None,
+                   lmd_declares_domain: bool = False) -> tuple[Path, Path]:
+    vault = tmp_path / "vault"
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients").mkdir(parents=True)
+    (brain / "projects").mkdir()
+    (brain / "orgs").mkdir()
+    (brain / "orgs" / "doug-teiger-consulting.md").write_text(
+        "# Doug Teiger Consulting\n\nkind: org\nrelationship: colleague\n\n"
+        "## Current state\n\n"
+        f"- CRM org name: {_TEIGER_ORG_NAME}\n",
+        encoding="utf-8",
+    )
+    lmd = "# Client: LMD Architecture\n\n"
+    if lmd_declares_domain:
+        lmd += "domains: lmdarchitecture.com\n\n"
+    lmd += "## Contacts\n"
+    (brain / "clients" / "lmd-architecture.md").write_text(lmd, encoding="utf-8")
+    (brain / "orgs" / "clearworks-internal.md").write_text(
+        "# Clearworks Internal\n\nkind: org\nrelationship: internal\n\n## Contacts\n",
+        encoding="utf-8",
+    )
+    if also_declared_on:
+        (brain / "orgs" / f"{also_declared_on}.md").write_text(
+            f"# {also_declared_on}\n\nkind: org\nrelationship: colleague\n\n"
+            "## Current state\n\n"
+            f"- CRM org name: {_TEIGER_ORG_NAME}\n",
+            encoding="utf-8",
+        )
+    repo = _declared_repo(
+        tmp_path,
+        contacts=[{"id": "christian-nielsen", "name": "Christian Nielsen",
+                   "emails": ["christian@gmail.com"], "company": ""}],
+    )
+    return vault, repo
+
+
+def _resolve_teiger(tmp_path, vault, repo, *, title="Best Practice Group 03 Teiger 2025 Q2"):
+    from resolve_meeting import main
+
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title=title,
+        participants=_teiger_participants(),
+        org_name=_TEIGER_ORG_NAME,
+        domain=None,
+        relationship="colleague",
+        confidence=0.7,
+        meeting_type="other",
+        fireflies_id="01TEIGERDECLARED",
+    )
+    assert main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)]) == 0
+    return json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+
+
+def test_declared_org_name_beats_rule5_person_page(tmp_path) -> None:
+    """Josh 2026-09-12: the Teiger peer group is Doug Teiger Consulting. The meeting
+    has a free-mail attendee who matches a contacts.json row, so rule 5 fires first
+    and carves orgs/christian-nielsen.md out of an attendee. An explicit human
+    declaration of the exact classifier string must win instead."""
+    vault, repo = _seed_declared(tmp_path)
+    res = _resolve_teiger(tmp_path, vault, repo)
+    assert res["home_path"] == "orgs/doug-teiger-consulting.md"
+    assert res["created"] is None
+    assert res["kind"] == "org"
+
+
+def test_declared_org_name_beats_a_minority_domain_candidate(tmp_path) -> None:
+    """Josh 2026-09-12: "lmd is lmd need one single company". Merging the LMD
+    duplicate makes lmdarchitecture.com a client candidate, and it is the ONLY
+    mapped domain among many, so rule 3 would hand this 5-way peer-group meeting to
+    LMD Architecture on one attendee's address. The declaration must still win."""
+    vault, repo = _seed_declared(tmp_path, lmd_declares_domain=True)
+    res = _resolve_teiger(tmp_path, vault, repo)
+    assert res["home_path"] == "orgs/doug-teiger-consulting.md"
+    assert res["created"] is None
+
+
+def test_office_hours_title_still_beats_a_declared_org_name(tmp_path) -> None:
+    """P-3 is categorical (Josh 2026-09-08, "the office hours just make them
+    clearworks"). The new declared-alias door must sit BELOW it, never above."""
+    vault, repo = _seed_declared(tmp_path)
+    res = _resolve_teiger(tmp_path, vault, repo, title="AI Office Hours (AIA LA)")
+    assert res["home_path"] == "orgs/clearworks-internal.md"
+
+
+def test_declared_org_name_claimed_by_two_pages_does_not_fire(tmp_path) -> None:
+    """load_closed_sets fails a duplicate CRM org name closed for BOTH pages
+    (:317-324). The new door must honour that and fall through to the old
+    behaviour rather than picking one by directory order."""
+    vault, repo = _seed_declared(tmp_path, also_declared_on="some-other-org")
+    res = _resolve_teiger(tmp_path, vault, repo)
+    assert res["home_path"] == "orgs/christian-nielsen.md"
+    assert res["rule"] == 5
+
+
+# --- R4b phase-2c: per-meeting home overrides -------------------------------------
+# Some classifier org_names are worthless as a mapping key: the literal "Unknown"
+# is emitted for four unrelated people in the R4b batch alone. Josh has ruled on
+# individual meetings there (justine-keller -> Office Untitled, ced-ced -> Future
+# Safe) and no page-level declaration can express that safely.
+
+
+def _override_repo(tmp_path: Path, overrides: dict) -> Path:
+    repo = _declared_repo(tmp_path, contacts=[])
+    crm = repo / "orgs/clearworksai/agents/crm-codex/crm"
+    (crm / "meeting-home-overrides.json").write_text(json.dumps(overrides), encoding="utf-8")
+    return repo
+
+
+def _override_vault(tmp_path: Path) -> Path:
+    vault = tmp_path / "vault"
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients").mkdir(parents=True)
+    (brain / "projects").mkdir()
+    (brain / "orgs").mkdir()
+    (brain / "clients" / "office-untitled.md").write_text(
+        "# Client: Office Untitled\n\n## Contacts\n", encoding="utf-8"
+    )
+    (brain / "orgs" / "future-safe.md").write_text(
+        "# Future Safe\n\nkind: org\nrelationship: vendor\n\n## Contacts\n", encoding="utf-8"
+    )
+    (brain / "orgs" / "clearworks-internal.md").write_text(
+        "# Clearworks Internal\n\nkind: org\nrelationship: internal\n\n## Contacts\n",
+        encoding="utf-8",
+    )
+    return vault
+
+
+def _resolve_unknown(tmp_path, vault, repo, *, title="Justine OUN Handoff",
+                     fireflies_id="01K48JSCTVHPPAC6HJTM8B1RQC"):
+    from resolve_meeting import main
+
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title=title,
+        participants=[
+            {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours",
+             "spoke": True, "notetaker": False},
+            {"name": "Justine Keller", "email": None, "side": "theirs",
+             "spoke": True, "notetaker": False},
+        ],
+        org_name="Unknown",
+        domain=None,
+        relationship="client",
+        confidence=0.4,
+        meeting_type="other",
+        fireflies_id=fireflies_id,
+    )
+    assert main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)]) == 0
+    return json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+
+
+def test_meeting_override_sends_an_unknown_org_name_to_a_client_page(tmp_path) -> None:
+    """Josh round 4: justine-keller is the OUN handoff -> Office Untitled. The
+    classifier emits the literal "Unknown", which three other unrelated people also
+    carry, so only a per-meeting statement can express this."""
+    vault = _override_vault(tmp_path)
+    repo = _override_repo(tmp_path, {"01K48JSCTVHPPAC6HJTM8B1RQC": "office-untitled"})
+    res = _resolve_unknown(tmp_path, vault, repo)
+    assert res["home_path"] == "clients/office-untitled.md"
+    assert res["created"] is None
+    assert res["rule"] == 13
+
+
+def test_meeting_override_to_an_org_page_keeps_the_page_relationship(tmp_path) -> None:
+    """Josh round 3: ced-ced is Future Safe (the classifier said "FS SOC", and the
+    remaining meeting says "Unknown")."""
+    vault = _override_vault(tmp_path)
+    repo = _override_repo(tmp_path, {"01KH9NJ3SP09VX87KG2BNE53QV": "future-safe"})
+    res = _resolve_unknown(tmp_path, vault, repo, fireflies_id="01KH9NJ3SP09VX87KG2BNE53QV")
+    assert res["home_path"] == "orgs/future-safe.md"
+    assert res["relationship"] == "vendor"
+    assert res["created"] is None
+
+
+def test_meeting_override_naming_a_missing_page_fails_closed(tmp_path) -> None:
+    """An override must never CREATE a page — a typo'd slug falls through to the
+    ordinary ladder instead of minting orgs/<typo>.md."""
+    vault = _override_vault(tmp_path)
+    repo = _override_repo(tmp_path, {"01K48JSCTVHPPAC6HJTM8B1RQC": "no-such-page"})
+    res = _resolve_unknown(tmp_path, vault, repo)
+    assert res["home_path"] != "orgs/no-such-page.md"
+    assert (res["created"] or {}).get("slug") != "no-such-page"
+
+
+def test_meeting_override_does_not_touch_a_protected_id(tmp_path) -> None:
+    """Protected ids are already-applied production homes and reproduce the
+    unmodified ladder, exactly as for P-1..P-4 and rule 12."""
+    from resolve_meeting import load_closed_sets, resolve
+
+    vault = _override_vault(tmp_path)
+    repo = _override_repo(tmp_path, {"01K48JSCTVHPPAC6HJTM8B1RQC": "office-untitled"})
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title="Justine OUN Handoff",
+        participants=[
+            {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours",
+             "spoke": True, "notetaker": False},
+            {"name": "Justine Keller", "email": None, "side": "theirs",
+             "spoke": True, "notetaker": False},
+        ],
+        org_name="Unknown",
+        domain=None,
+        relationship="client",
+        confidence=0.4,
+        meeting_type="other",
+        fireflies_id="01K48JSCTVHPPAC6HJTM8B1RQC",
+    )
+    source = json.loads((src / "source.json").read_text(encoding="utf-8"))
+    closed = load_closed_sets(vault)
+    res = resolve(source, closed, repo,
+                  classification={"org_name": "Unknown", "domain": None,
+                                  "relationship": "client", "confidence": 0.4},
+                  protected_ids=frozenset({"01K48JSCTVHPPAC6HJTM8B1RQC"}))
+    assert res["home_path"] != "clients/office-untitled.md"

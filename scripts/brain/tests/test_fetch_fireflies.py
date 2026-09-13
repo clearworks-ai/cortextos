@@ -592,3 +592,39 @@ def test_fetch_success_clears_stale_fetch_error(tmp_path, monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=0: _RawResp(ok))
     assert ff.main(["--meeting-id", "OK1", "--vault", str(vault), "--repo-root", str(tmp_path)]) == 0
     assert _fe(vault, "OK1") is None
+
+
+def test_full_transcript_with_null_duration_is_ready(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Production 2026-09-13: "C2<>RR Sync" (fireflies:01KWZGMYN3JC77EZ7NE3K6ZFND)
+    carried 374 sentences and `duration: null`, and the readiness check rejected it
+    on the null alone — so a fully transcribed meeting sat unprocessed from 2026-07-15
+    until someone passed --allow-short by hand. Duration is only a readiness signal
+    when the sentence count is too low to judge on its own."""
+    from fetch_fireflies import main
+
+    full = _transcript(duration=None)
+    assert len(full["sentences"]) >= 20
+    monkeypatch.setenv("FIREFLIES_API_KEY", "k")
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_a, **_k: _Resp(full))
+    vault = tmp_path / "vault"
+    rc = main(["--meeting-id", "abc12345zzzz", "--vault", str(vault)])
+    assert rc == 0
+    assert (vault / "raw/media/transcripts/fireflies/abc12345zzzz/source.json").is_file()
+
+
+def test_short_transcript_with_null_duration_is_still_not_ready(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The guard still has to catch a genuinely half-written transcript."""
+    from fetch_fireflies import main
+
+    short = _transcript(
+        duration=None,
+        sentences=[{"index": 0, "speaker_name": "A", "text": "hi", "start_time": 0}],
+    )
+    monkeypatch.setenv("FIREFLIES_API_KEY", "k")
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_a, **_k: _Resp(short))
+    vault = tmp_path / "vault"
+    assert main(["--meeting-id", "abc12345zzzz", "--vault", str(vault)]) == 2

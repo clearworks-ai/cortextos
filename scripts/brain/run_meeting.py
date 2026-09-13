@@ -110,6 +110,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--apply", action="store_true")
     p.add_argument("--force", action="store_true")
     p.add_argument("--backfill", action="store_true")
+    # Passthrough to fetch_fireflies: a transcript Fireflies reports as short (or
+    # with no duration) is normally skipped as not-ready. Without this flag there
+    # was NO way to recover such a meeting through the orchestrator at all — the
+    # only route was calling fetch_fireflies.py by hand first (production
+    # 2026-09-13, "C2<>RR Sync").
+    p.add_argument("--allow-short", action="store_true")
     # B3 (G2 r3 CH3-4): optional — only meaningful with --backfill.
     # backfill.py's run_apply_subprocess (Agent A) passes this through so
     # validate_batch_marker can require the marker's own batch_id to equal
@@ -137,14 +143,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.apply:
         return _run_apply(
             meeting_id, vault, repo, source_dir, force=args.force, backfill=args.backfill,
-            expected_batch_id=args.batch,
+            expected_batch_id=args.batch, allow_short=args.allow_short,
         )
-    return _run_dry(meeting_id, vault, repo, source_dir)
+    return _run_dry(meeting_id, vault, repo, source_dir, allow_short=args.allow_short)
 
 
-def _run_dry(meeting_id: str, vault: Path, repo: Path, source_dir: Path) -> int:
+def _run_dry(meeting_id: str, vault: Path, repo: Path, source_dir: Path,
+             allow_short: bool = False) -> int:
     fetch_rc = fetch_main(
         ["--meeting-id", meeting_id, "--vault", str(vault), "--repo-root", str(repo)]
+        + (["--allow-short"] if allow_short else [])
     )
     if fetch_rc != 0:
         return 2 if fetch_rc != 64 else 64
@@ -466,7 +474,8 @@ def _check_crm_scripts_support_full_file() -> int:
     return 0
 
 
-def _run_apply(meeting_id, vault, repo, source_dir, *, force, backfill=False, expected_batch_id=None) -> int:
+def _run_apply(meeting_id, vault, repo, source_dir, *, force, backfill=False,
+               expected_batch_id=None, allow_short=False) -> int:
     # G0b C2-3: unconditional — no --skip-sign-check bypass exists.
     # CH-1/S-2: existence alone is not proof of a real sign-off — validate
     # signed_by/signed_at/capture_sha256 (progress.validate_sign_marker).
@@ -508,7 +517,8 @@ def _run_apply(meeting_id, vault, repo, source_dir, *, force, backfill=False, ex
         print(f"already applied: {prior_receipt['vault_sha']}")
         return 0
 
-    fetch_rc = fetch_main(["--meeting-id", meeting_id, "--vault", str(vault), "--repo-root", str(repo)])
+    fetch_rc = fetch_main(["--meeting-id", meeting_id, "--vault", str(vault), "--repo-root", str(repo)]
+                          + (["--allow-short"] if allow_short else []))
     if fetch_rc != 0:
         print(f"FAILED at fetch: rc={fetch_rc}", file=sys.stderr)
         return 2

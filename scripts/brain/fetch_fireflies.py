@@ -382,8 +382,15 @@ def main(argv: list[str] | None = None) -> int:
 
     sentences = tr.get("sentences") or []
     n = len(sentences) if isinstance(sentences, list) else 0
-    if (n < 20 or tr.get("duration") is None) and not args.allow_short:
+    # A null `duration` is only evidence of a half-written transcript when the
+    # sentence count is ALSO too low to judge. Requiring both cost a real meeting:
+    # "C2<>RR Sync" (fireflies:01KWZGMYN3JC77EZ7NE3K6ZFND) had 374 sentences and
+    # duration: null, and sat unprocessed from 2026-07-15 to 2026-09-13 because the
+    # `or` rejected it outright — silently, since not-ready is a normal skip.
+    if n < 20 and not args.allow_short:
         return _fail("not_ready", f"not-ready: sentences={n}")
+    if n < 20 and tr.get("duration") is None and not args.allow_short:
+        return _fail("not_ready", f"not-ready: sentences={n} duration=None")
 
     clear_fetch_error(vault, "fireflies", meeting_id)
 

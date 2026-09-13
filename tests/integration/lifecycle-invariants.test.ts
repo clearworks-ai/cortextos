@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
@@ -903,5 +903,112 @@ describe('Task 5.1: stop-vs-refresh ordering matrix', () => {
     const budgets = supervisor.snapshot().recoveryBudgets;
     expect(budgets['context-hard-full']?.count).toBeGreaterThanOrEqual(1);
     expect(budgets['session-age']?.count).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// =============================================================================
+// Task 5.5 Step 1: daemon crash/restart recovery
+// =============================================================================
+
+/**
+ * Task 5.5 (extends this file per PHASES.md/the task file's own "Files to
+ * Modify" list): a daemon process dies mid-operation (its in-memory
+ * supervisor object is simply abandoned, never let to finish an in-flight
+ * commit/effect) and a FRESH daemon process boots against the same on-disk
+ * `<stateDir>/lifecycle/supervisor.json`. This mirrors Invariant 2/4's own
+ * "kill the in-memory object, construct a brand-new one over the same
+ * store" technique -- the correct way to simulate a daemon crash against a
+ * store whose commits are individually fsynced/atomic (Task 1.3), so there
+ * is no way to interrupt a SINGLE commit mid-write short of genuine
+ * filesystem corruption (Step 2/3's own scope in the companion
+ * `lifecycle-recovery-boundaries.test.ts` file).
+ */
+describe('Task 5.5 Step 1: daemon crash/restart recovery', () => {
+  it('a fresh daemon boot after a mid-effect crash: the generation counter continues (never resets to 1), and no accepted work is orphaned', async () => {
+    const adapter = new FakeRuntimeAdapter();
+    const crashedSupervisor = freshSupervisor(adapter);
+    await settleStart(crashedSupervisor); // generation 1, ready
+    await crashedSupervisor.request(mkReq({ kind: 'restart', cause: 'manual-cli', mode: 'continue' }));
+    await flush();
+    expect(crashedSupervisor.snapshot().currentGeneration).toBe(2);
+
+    // Work accepted but never dispatched before the "crash".
+    const accepted = await crashedSupervisor.acceptBatch([{ sourceKey: 'src-precrash', payload: 'p', payloadDigest: 'd1' }]);
+    if (!accepted.ok) throw new Error('acceptBatch failed');
+
+    // Commit a THIRD generation's decision durably, but never let its effect
+    // (startGeneration) resolve -- this simulates the daemon dying in the
+    // exact window between "decision committed" and "effect executed".
+    const startDeferred = deferred<{ ok: boolean; resources: OwnedResource[] }>();
+    adapter.startGeneration.mockReturnValueOnce(startDeferred.promise);
+    const refreshReceipt = await crashedSupervisor.request(
+      mkReq({ kind: 'refresh', cause: 'session-age', mode: 'continue', observedGeneration: 2 }),
+    );
+    expect(refreshReceipt.accepted).toBe(true);
+    expect(refreshReceipt.generation).toBe(3);
+    const preCrashSnapshot = crashedSupervisor.snapshot();
+    expect(preCrashSnapshot.currentGeneration).toBe(3);
+    expect(preCrashSnapshot.phase).toBe('starting');
+
+    // "Kill" the daemon: `crashedSupervisor` (and its never-resolving
+    // `startDeferred`) is simply abandoned in memory from this point on --
+    // never awaited, never referenced again. A FRESH daemon incarnation
+    // boots a brand-new `AgentLifecycleSupervisor` instance against the SAME
+    // durable store.
+    const freshBootSupervisor = freshSupervisor(new FakeRuntimeAdapter());
+    const rebootSnapshot = freshBootSupervisor.snapshot();
+
+    // Generation counter continues from where the crashed daemon left off --
+    // NEVER resets to 1.
+    expect(rebootSnapshot.currentGeneration).toBe(3);
+    expect(rebootSnapshot.nextGeneration).toBe(4);
+
+    // No orphaned accepted work: the pre-crash acceptBatch record is still
+    // present after the reboot, in a legitimate (non-vanished) phase.
+    const survivedWork = rebootSnapshot.outstandingWork.find((r) => r.workId === accepted.workIds[0]);
+    expect(survivedWork).toBeDefined();
+    expect(survivedWork!.phase).toBe('accepted');
+    expect(freshBootSupervisor.outstandingWork().some((r) => r.workId === accepted.workIds[0])).toBe(true);
+
+    // The committed-but-unexecuted generation 3 is itself preserved intact,
+    // not silently discarded or guessed at -- see Task 5.5 Step 6's own
+    // dedicated test (lifecycle-recovery-boundaries.test.ts) for exactly how
+    // this committed-but-unexecuted state gets reconciled going forward.
+    expect(rebootSnapshot.phase).toBe('starting');
+    expect(rebootSnapshot.resources).toHaveLength(0);
+  });
+
+  it('an ambiguous (corrupt) on-disk record after a crash yields a blocked owner on the fresh boot -- never a guessed generation-1 reset, never a silent repair', async () => {
+    const adapter = new FakeRuntimeAdapter();
+    const supervisor = freshSupervisor(adapter);
+    await settleStart(supervisor); // generation 1, ready, valid durable record
+
+    // Simulate the on-disk record becoming ambiguous/unreadable after a
+    // crash (e.g. a non-atomic write from some other process, or genuine
+    // disk corruption) -- the fresh daemon cannot tell whether the last
+    // mutate actually completed.
+    const recordPath = join(paths.stateDir, 'lifecycle', 'supervisor.json');
+    const truncated = `{"agentId": "${agentId}", "revision": 2, "desiredState": "run`; // deliberately truncated mid-value
+    writeFileSync(recordPath, truncated);
+
+    // A fresh daemon boots a brand-new supervisor against this same store.
+    const freshBootSupervisor = freshSupervisor(new FakeRuntimeAdapter());
+    const receipt = await freshBootSupervisor.request(mkReq({ kind: 'start', cause: 'boot-self-heal', mode: 'continue' }));
+
+    // Blocked, never guessed in either direction: never silently treated as
+    // a fresh generation-1 agent, never silently "repaired" back to the
+    // last known-good revision.
+    expect(receipt.accepted).toBe(false);
+    expect(receipt.blockedReason).toMatch(/store unavailable/);
+    expect(receipt.generation).toBeNull();
+    expect(receipt.phase).toBe('absent'); // the corrupt-store placeholder shape, not a "repaired" ready
+
+    const reloaded = reloadSnapshot();
+    expect('corrupt' in reloaded).toBe(true);
+    if ('corrupt' in reloaded) expect(reloaded.reason).toBe('json-parse-failed');
+
+    // No silent repair happened: the raw file on disk is exactly what we
+    // wrote -- nothing rewrote it to a clean/valid shape.
+    expect(readFileSync(recordPath, 'utf-8')).toBe(truncated);
   });
 });

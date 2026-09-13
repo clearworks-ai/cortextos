@@ -40,6 +40,24 @@ export interface PtyHostLedgerEntry {
   daemonPid: number;
   /** epoch ms at fork time. */
   startedAt: number;
+  /**
+   * Task 2.7: best-effort owning-generation identity, carried through so the
+   * pty-host reaper's Tier 3 sweep can resolve "who currently owns this
+   * host" without treating the ledger as authoritative. This remains a
+   * COMPATIBILITY PROJECTION, not a schema bump (all three fields optional,
+   * `version` below is unchanged): `agentId` is populated whenever
+   * CTX_INSTANCE_ID/CTX_ORG/CTX_AGENT_NAME are present in the spawn env
+   * (already true in production today — see `hostSpawn()`); `supervisorEpoch`/
+   * `generation` require the real `EffectToken` to be threaded through
+   * `AgentProcess` -> `AgentPTY` -> `hostSpawn`'s env, which is a separate,
+   * larger wiring task outside this task's declared scope, and are therefore
+   * `undefined` until that lands. Absence here must NEVER be read as "not
+   * owned" — it only means identity wasn't available at fork time; the
+   * reaper falls back to `agent` (name) lookup, which IS populated today.
+   */
+  agentId?: string;
+  supervisorEpoch?: number;
+  generation?: number;
 }
 
 interface LedgerFile {

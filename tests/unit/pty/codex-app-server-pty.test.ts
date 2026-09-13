@@ -1550,6 +1550,131 @@ describe('CodexAppServerPTY kill-during-spawn race (RW-7)', () => {
   });
 });
 
+describe('CodexAppServerPTY Task 3.8 Step 6: startAppServerWithRetry intent-revocation', () => {
+  function makeFakePty() {
+    return {
+      pid: 4242,
+      write: vi.fn(),
+      onData: vi.fn(),
+      onExit: vi.fn(),
+      kill: vi.fn(),
+    };
+  }
+
+  it('a revocation landing DURING the backoff sleep aborts before the next attempt begins', async () => {
+    vi.useFakeTimers();
+    try {
+      const pty = new CodexAppServerPTY(mockEnv, {});
+      const inner = pty as unknown as {
+        _alive: boolean;
+        _spawnFn: unknown;
+        startAppServerWithRetry(): Promise<void>;
+        setIntentRevocationCheck(fn: (() => boolean) | null): void;
+      };
+      inner._alive = true;
+
+      let revoked = false;
+      inner.setIntentRevocationCheck(() => revoked);
+
+      const spawnCalls = vi.fn();
+      inner._spawnFn = () => {
+        spawnCalls();
+        return Promise.reject(new Error('spawn failed'));
+      };
+
+      const retryPromise = inner.startAppServerWithRetry();
+      const rejection = expect(retryPromise).rejects.toThrow('lifecycle intent revoked');
+
+      // Attempt 1 fails immediately, then the loop sleeps for delays[0]=1000ms.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(spawnCalls).toHaveBeenCalledTimes(1);
+
+      // Revoke mid-backoff, then let the sleep resolve.
+      revoked = true;
+      await vi.advanceTimersByTimeAsync(1000);
+
+      await rejection;
+      // No second attempt was ever made — the revocation was caught right
+      // after the backoff sleep resolved, before attempt 2 began.
+      expect(spawnCalls).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a revocation observed at loop-top (before any attempt) aborts immediately', async () => {
+    const pty = new CodexAppServerPTY(mockEnv, {});
+    const inner = pty as unknown as {
+      _alive: boolean;
+      _spawnFn: unknown;
+      startAppServerWithRetry(): Promise<void>;
+      setIntentRevocationCheck(fn: (() => boolean) | null): void;
+    };
+    inner._alive = true;
+    inner.setIntentRevocationCheck(() => true);
+
+    const spawnCalls = vi.fn();
+    inner._spawnFn = () => {
+      spawnCalls();
+      return Promise.resolve(makeFakePty());
+    };
+
+    await expect(inner.startAppServerWithRetry()).rejects.toThrow('lifecycle intent revoked');
+    expect(spawnCalls).not.toHaveBeenCalled();
+  });
+
+  it('every failed attempt leaves no socket file behind before the next attempt starts', async () => {
+    vi.useFakeTimers();
+    try {
+      const pty = new CodexAppServerPTY(mockEnv, {});
+      const inner = pty as unknown as {
+        _alive: boolean;
+        _spawnFn: unknown;
+        startAppServerWithRetry(): Promise<void>;
+      };
+      inner._alive = true;
+
+      // Simulate a stale socket file existing before each attempt.
+      fsMocks.existsSync.mockReturnValue(true);
+      const spawnCalls = vi.fn();
+      inner._spawnFn = () => {
+        spawnCalls();
+        return Promise.reject(new Error('spawn failed'));
+      };
+
+      const retryPromise = inner.startAppServerWithRetry();
+      const rejection = expect(retryPromise).rejects.toThrow('spawn failed');
+
+      await vi.advanceTimersByTimeAsync(0); // attempt 1
+      await vi.advanceTimersByTimeAsync(1000); // backoff -> attempt 2
+      await vi.advanceTimersByTimeAsync(4000); // backoff -> attempt 3
+      await rejection;
+
+      expect(spawnCalls).toHaveBeenCalledTimes(3);
+      // removeSocket() runs at the top of every attempt AND inside
+      // cleanupSpawnAttempt() after every failure — never left dangling.
+      expect(fsMocks.unlinkSync.mock.calls.filter((c) => String(c[0]).endsWith('codex.sock')).length)
+        .toBeGreaterThanOrEqual(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('no intent-revocation check wired: preserves today\'s behavior unchanged (never revoked)', async () => {
+    const pty = new CodexAppServerPTY(mockEnv, {});
+    const inner = pty as unknown as {
+      _alive: boolean;
+      _spawnFn: unknown;
+      startAppServerWithRetry(): Promise<void>;
+    };
+    inner._alive = true;
+    inner._spawnFn = () => Promise.resolve(makeFakePty());
+    fsMocks.existsSync.mockReturnValue(true);
+
+    await expect(inner.startAppServerWithRetry()).resolves.toBeUndefined();
+  });
+});
+
 describe('CodexAppServerPTY shutdown acknowledgement', () => {
   it('reports exit only after the app-server pty confirms termination', async () => {
     let appServerExit: ((event: { exitCode: number; signal?: number }) => void) | undefined;

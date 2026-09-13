@@ -84,7 +84,9 @@ export async function dispatchSlackMessage(
     );
 
     if (target.checker.isDuplicate(formatted)) continue;
-    target.checker.queueSlackMessage(formatted);
+    // Task 3.3: Slack's own channel+ts identity (PRD §2.5) — stable across a
+    // redelivery, unlike a queue-position ordinal.
+    target.checker.queueSlackMessage(formatted, `slack/${event.channel}/${event.ts}`);
     result.delivered.push(target.name);
   }
 

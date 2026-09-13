@@ -38,6 +38,38 @@ type PtyDisposable = { dispose(): void };
 /**
  * Manages a single Claude Code PTY session.
  * Replaces the tmux session management in agent-wrapper.sh.
+ *
+ * Task 3.8 Step 1 audit (completion-capability): this class has NO RPC-level
+ * "the model finished responding" signal at the PTY layer the way
+ * `CodexAppServerPTY` has `turn/completed` — it is a keystroke-driven TUI
+ * with output-buffer scraping, same as `OpencodePTY`/`HermesPTY`.
+ *
+ * A real, genuinely load-bearing completion signal DOES exist one layer up,
+ * outside this class: Claude Code's own "Stop" hook fires exactly once per
+ * real turn end and is the exclusive registrant on that hook slot in this
+ * repo's agent templates (`templates/agent/.claude/settings.json`'s `Stop`
+ * array has one entry, `hook-idle-flag`, which never returns a blocking
+ * decision) — so it is not conflated with a continuation-decision or an
+ * activity heartbeat; it genuinely means "Claude stopped." `hook-idle-flag`
+ * runs as a SEPARATE process and writes `state/<agent>/last_idle.flag`; it
+ * carries no workId/turnId correlation, and `fast-checker.ts` already
+ * consumes that same file (comparing its mtime against the last injection
+ * timestamp) for its typing-indicator inference.
+ *
+ * Wiring that hook into a generation-bound `WorkCorrelationEvent` here would
+ * require NEW infrastructure this class does not have today — threading a
+ * workId down through `injectMessage()` the way `CodexAppServerPTY.queueTurn()`
+ * does, plus a file-watch/poll bridge correlating idle-transitions to a
+ * specific dispatched workId — not a hardening of an existing recovery
+ * mechanism (which is what Task 3.8's Steps 4-6 concretely enumerate), and
+ * it would sit alongside `fast-checker.ts`'s own existing consumption of the
+ * same file rather than replacing it. Per PRD.md §5 Open Question 5's own
+ * bias ("do not manufacture a fake completion signal... the honest answer is
+ * needs-review"), this task ships Claude via the same Step 3 fallback as
+ * Hermes/OpenCode (`AgentProcess.scheduleNoCompletionSeamReview()`) rather
+ * than half-wiring a correlation bridge under time/scope pressure. The
+ * Stop-hook finding is recorded here, not hidden, as a real seam a future
+ * task could wire.
  */
 export class AgentPTY {
   private pty: IPty | null = null;

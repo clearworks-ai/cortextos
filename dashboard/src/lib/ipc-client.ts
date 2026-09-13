@@ -78,15 +78,49 @@ export interface IPCRequest {
     | 'add-cron'
     | 'update-cron'
     | 'remove-cron'
-    | 'fleet-health';
+    | 'fleet-health'
+    // Task 2.9: the two Task 2.8 read-only lifecycle introspection commands,
+    // used by the dashboard lifecycle route to verify a `retired` outcome
+    // before proceeding with any destructive DELETE work rather than
+    // treating IPC "accepted" as "completed".
+    | 'agent-lifecycle-status'
+    | 'lifecycle-operation-status';
   agent?: string;
   data?: Record<string, unknown>;
 }
+
+/**
+ * Task 2.9: mirrors `src/types/index.ts`'s `ObservedPhase`/error `code` union
+ * (`src/daemon/lifecycle/types.ts`'s `ObservedPhase`, Task 1.1) as plain
+ * string literals, duplicated rather than imported for the same reason
+ * `src/types/index.ts` itself duplicates them (`LifecycleDesiredStateWire`/
+ * `LifecycleObservedPhaseWire`, Task 2.8's comment there): this file sits
+ * under `dashboard/`, entirely outside the daemon's isolation-gate-scanned
+ * `src/` tree, so there's no actual gate concern here — the duplication is
+ * purely to keep the dashboard package's type graph free of a cross-package
+ * import into the daemon's `src/daemon/lifecycle` internals. Value sets are
+ * identical by construction with the real daemon-side `IPCResponse`.
+ */
+export type LifecycleObservedPhase = 'absent' | 'starting' | 'ready' | 'retiring' | 'blocked';
 
 export interface IPCResponse {
   success: boolean;
   data?: unknown;
   error?: string;
+  /**
+   * Task 2.9 (consumes Task 2.8's typed envelope): `accepted` is DURABLE
+   * ACCEPTANCE of the request, never completion — a `true` here does not
+   * mean the agent has actually retired/started yet. `operationId` lets a
+   * caller poll `lifecycle-operation-status` for the real, eventually-
+   * settled outcome. `phase`/`blockedReason` are the most recent observed
+   * phase for that operation (or, for `agent-lifecycle-status`, the agent's
+   * current persisted phase).
+   */
+  accepted?: boolean;
+  operationId?: string;
+  phase?: LifecycleObservedPhase;
+  blockedReason?: string | null;
+  code?: 'NOT_FOUND' | 'DEDUPED' | 'INVALID_INPUT' | 'NOT_RUNNING' | 'AGENT_NOT_SCHEDULED' | 'REQUIRES_RESUME' | 'INVALID_MODE';
 }
 
 function getIpcPath(instanceId: string = 'default'): string {

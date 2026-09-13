@@ -38,6 +38,23 @@ const REAP_POLL_INTERVAL_MS = 200;
 const REAP_SIGTERM_GRACE_MS = 2000;
 const REAP_SIGKILL_GRACE_MS = 2000;
 
+/** Definite fate of a signal attempt against a recorded stale PID (Task 3.8 Step 5). */
+type StaleProcessOutcome = 'confirmed-dead' | 'ambiguous';
+
+/**
+ * Task 3.8 Step 5: `cleanupStaleProcessMarker()`'s result -- deliberately
+ * mirrors `RetirementResult`'s (`src/daemon/lifecycle/types.ts`) `status`/
+ * `reason` discriminant shape rather than importing that type: the
+ * isolation gate (Task 1.6/2.2's `lifecycle-isolation.test.ts`) only
+ * allowlists `daemon/lifecycle` imports from `src/bus/system.ts` and files
+ * already under `src/daemon/` -- `src/pty/*.ts` is not an approved wiring
+ * site, and this local type keeps that true while still reusing the exact
+ * "retired vs. blocked, with a reason" pattern Phase 2 established.
+ */
+type StaleMarkerCleanupResult =
+  | { status: 'retired' }
+  | { status: 'blocked'; pid: number; reason: string };
+
 const reapSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -82,6 +99,19 @@ export class OpencodePTY extends AgentPTY {
   private contextReporter: OpencodeContextReporter | null = null;
   private contextReportTimer: ReturnType<typeof setInterval> | null = null;
   private spawnStartedAtMs = 0;
+  /**
+   * Task 3.8 Step 4: settable generation-liveness check, wired by
+   * `agent-process.ts` using the exact same `lifecycleGeneration` fencing
+   * BUG-040 already applies to a PTY's `onExit` handler (captured at spawn
+   * time, compared at check time) -- not a parallel mechanism, the same
+   * one. Defaults to "always live" so a PTY constructed without this wiring
+   * (e.g. the direct unit tests in `opencode-pty.test.ts`) preserves
+   * today's behavior unchanged. Consulted immediately before every
+   * deferred (`setTimeout`) write inside the shell-prompt recovery chain
+   * (`injectMessage`/`typeAndSubmit`) so a keystroke scheduled by an older
+   * generation can never land on a successor's PTY.
+   */
+  private _generationLiveCheck: (() => boolean) | null = null;
 
   constructor(env: CtxEnv, config: AgentConfig, logPath?: string) {
     super(env, config, logPath, OPENCODE_BOOTSTRAP_PATTERN);
@@ -153,7 +183,21 @@ export class OpencodePTY extends AgentPTY {
     // `opencode run <message>`). Cortext agents must stay alive for future
     // Telegram, inbox, and cron injections, so start the persistent TUI first
     // and inject the startup prompt through the normal PTY input path.
-    await this.cleanupStaleProcessMarker();
+    //
+    // Task 3.8 Step 5: `cleanupStaleProcessMarker()` reports the marker's
+    // prior-resource evidence and returns a verified/blocked result -- a
+    // 'blocked' outcome (the recorded prior process's liveness/termination
+    // could not be confirmed) must not let launch proceed silently over an
+    // unconfirmed-dead prior session. Throwing here surfaces it exactly the
+    // way every other spawn() failure already does: the caller's try/catch
+    // (`AgentProcess.start()`/`startImpl()`) sets status='crashed' and logs
+    // the failure -- never a silent continuation.
+    const cleanup = await this.cleanupStaleProcessMarker();
+    if (cleanup.status === 'blocked') {
+      throw new Error(
+        `[opencode-pty] refusing to launch over unconfirmed prior process pid ${cleanup.pid}: ${cleanup.reason}`,
+      );
+    }
     this.spawnStartedAtMs = Date.now();
     await super.spawn(mode, '');
     this.writeSessionMarker(mode);
@@ -171,6 +215,15 @@ export class OpencodePTY extends AgentPTY {
     } finally {
       this.removeProcessMarker();
     }
+  }
+
+  /** Task 3.8 Step 4: see `_generationLiveCheck`'s doc comment. */
+  setGenerationLiveCheck(fn: (() => boolean) | null): void {
+    this._generationLiveCheck = fn;
+  }
+
+  private isGenerationLive(): boolean {
+    return this._generationLiveCheck ? this._generationLiveCheck() : true;
   }
 
   override injectMessage(content: string): void {
@@ -209,6 +262,10 @@ export class OpencodePTY extends AgentPTY {
 
     if (mode === 'shell') {
       setTimeout(() => {
+        // Task 3.8 Step 4: a stop/retire may have superseded this generation
+        // during the delay -- never type an exit-recovery keystroke into
+        // what is now a successor's PTY.
+        if (!this.isGenerationLive()) return;
         try {
           this.write('exit');
           this.write(KEYS.ENTER);
@@ -218,6 +275,7 @@ export class OpencodePTY extends AgentPTY {
           return;
         }
         setTimeout(() => {
+          if (!this.isGenerationLive()) return;
           try {
             this.typeAndSubmit(safeContent);
           } catch (err) {
@@ -230,6 +288,7 @@ export class OpencodePTY extends AgentPTY {
     }
 
     setTimeout(() => {
+      if (!this.isGenerationLive()) return;
       try {
         this.typeAndSubmit(safeContent);
       } catch (err) {
@@ -280,6 +339,9 @@ export class OpencodePTY extends AgentPTY {
       this.write(safeContent.slice(i, i + maxChunk));
     }
     setTimeout(() => {
+      // Task 3.8 Step 4: same generation guard as the callers above --
+      // typeAndSubmit's own trailing Enter is itself a deferred write.
+      if (!this.isGenerationLive()) return;
       try {
         this.write(KEYS.ENTER);
       } catch (err) {
@@ -434,50 +496,75 @@ If it instructs you to send Telegram or bus output, run the required terminal co
     }
   }
 
-  private async cleanupStaleProcessMarker(): Promise<void> {
+  private async cleanupStaleProcessMarker(): Promise<StaleMarkerCleanupResult> {
+    const markerPath = this.processMarkerPath();
     try {
-      const markerPath = this.processMarkerPath();
-      if (!existsSync(markerPath)) return;
+      if (!existsSync(markerPath)) return { status: 'retired' };
       const parsed = JSON.parse(readFileSync(markerPath, 'utf-8')) as { pid?: unknown };
       const pid = typeof parsed.pid === 'number' ? parsed.pid : null;
       if (pid && pid > 0 && pid !== process.pid) {
-        await this.terminateStaleProcess(pid);
+        const outcome = await this.terminateStaleProcess(pid);
+        if (outcome === 'ambiguous') {
+          // Task 3.8 Step 5: liveness/termination could not be confirmed
+          // (EPERM signaling it, or it survived SIGKILL) -- the previous
+          // behavior silently unlinked the marker and proceeded anyway,
+          // which is exactly the "marker deletion + timeout is not
+          // sufficient" gap this task's acceptance criterion calls out.
+          // Report it to the caller and let launch be blocked instead.
+          return {
+            status: 'blocked',
+            pid,
+            reason: 'prior OpenCode process liveness/termination could not be confirmed (EPERM or survived SIGKILL)',
+          };
+        }
       }
       unlinkSync(markerPath);
+      return { status: 'retired' };
     } catch {
       // A corrupt marker must not block the agent from starting.
+      return { status: 'retired' };
     }
   }
 
   /**
-   * Terminate a recorded stale OpenCode process and CONFIRM it is dead before
+   * Terminate a recorded stale OpenCode process and CONFIRM its fate before
    * returning: SIGTERM -> poll for exit -> SIGKILL escalation -> poll again.
    * A bare fire-and-forget SIGTERM could leave a wedged prior session alive
    * while its marker was already unlinked, so the next spawn ran alongside an
-   * orphan still holding the agent's session/state root. Bounded and best-effort:
-   * a target that survives even SIGKILL is logged, not allowed to block boot.
+   * orphan still holding the agent's session/state root.
+   *
+   * Task 3.8 Step 5: returns a definite outcome instead of `void` so the
+   * caller can distinguish confirmed-dead (safe to unlink + launch) from
+   * genuinely ambiguous (EPERM, or still alive after SIGKILL — never safe to
+   * treat as reaped). Only `ESRCH` on a signal attempt is treated as
+   * definite absence (the same ESRCH-only-definite-absence discipline Task
+   * 1.2 established for the lock-reclaim path) — the previous code treated
+   * ANY `kill()` failure, including `EPERM` (process exists, owned
+   * elsewhere — very much alive), as "nothing more we can do; treat as
+   * reaped", which is the latent bug this task's acceptance criterion is
+   * pointing at.
    */
-  private async terminateStaleProcess(pid: number): Promise<void> {
-    if (!isReapTargetAlive(pid)) return;
+  private async terminateStaleProcess(pid: number): Promise<StaleProcessOutcome> {
+    if (!isReapTargetAlive(pid)) return 'confirmed-dead';
     try {
       process.kill(pid, 'SIGTERM');
-    } catch {
-      // ESRCH (already gone) or EPERM — nothing more we can do; treat as reaped.
-      return;
+    } catch (err) {
+      return (err as NodeJS.ErrnoException).code === 'ESRCH' ? 'confirmed-dead' : 'ambiguous';
     }
-    if (await this.waitForProcessExit(pid, REAP_SIGTERM_GRACE_MS)) return;
+    if (await this.waitForProcessExit(pid, REAP_SIGTERM_GRACE_MS)) return 'confirmed-dead';
 
     try {
       process.kill(pid, 'SIGKILL');
-    } catch {
-      return;
+    } catch (err) {
+      return (err as NodeJS.ErrnoException).code === 'ESRCH' ? 'confirmed-dead' : 'ambiguous';
     }
-    if (await this.waitForProcessExit(pid, REAP_SIGKILL_GRACE_MS)) return;
+    if (await this.waitForProcessExit(pid, REAP_SIGKILL_GRACE_MS)) return 'confirmed-dead';
 
-    // Still alive after SIGKILL — do not block boot, but leave a breadcrumb.
+    // Still alive after SIGKILL — genuinely ambiguous, never safe to treat as reaped.
     this.getOutputBuffer().push(
-      `[opencode-pty] stale process ${pid} survived SIGKILL during reap; continuing boot\n`,
+      `[opencode-pty] stale process ${pid} survived SIGKILL during reap; blocking launch\n`,
     );
+    return 'ambiguous';
   }
 
   /** Poll until the pid is gone or the grace window elapses. Returns true if dead. */

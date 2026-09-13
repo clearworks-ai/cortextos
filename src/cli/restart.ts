@@ -1,22 +1,23 @@
 import { Command } from 'commander';
 import { IPCClient } from '../daemon/ipc-server.js';
-import { writeStopMarker } from './stop.js';
+import { writeStopMarker, waitForAgentSettled } from './stop.js';
 import { resolveInstanceId } from './resolve-instance-id.js';
 import type { IPCResponse } from '../types/index.js';
 
 type RestartIPC = {
-  send(request: { type: 'restart-agent'; agent: string; source: string }): Promise<IPCResponse>;
+  send(request: { type: 'restart-agent'; agent: string; source: string; data?: { mode?: 'continue' | 'fresh' } }): Promise<IPCResponse>;
 };
 
-export function requestSerializedRestart(ipc: RestartIPC, agent: string): Promise<IPCResponse> {
-  return ipc.send({ type: 'restart-agent', agent, source: 'cortextos restart' });
+export function requestSerializedRestart(ipc: RestartIPC, agent: string, mode?: 'continue' | 'fresh'): Promise<IPCResponse> {
+  return ipc.send({ type: 'restart-agent', agent, source: 'cortextos restart', ...(mode ? { data: { mode } } : {}) });
 }
 
 export const restartCommand = new Command('restart')
   .argument('<agent>', 'Agent name to restart')
   .option('--instance <id>', 'Instance ID')
+  .option('--fresh', 'Restart with a fresh session instead of continuing (data.mode: "fresh")')
   .description('Restart a running agent (stop + start). Re-reads config.json and .env, respawns the PTY. Does NOT restart the daemon process itself — use `pm2 restart cortextos-daemon` for that.')
-  .action(async (agent: string, options: { instance?: string }) => {
+  .action(async (agent: string, options: { instance?: string; fresh?: boolean }) => {
     const instanceId = resolveInstanceId(options.instance);
     const ipc = new IPCClient(instanceId);
     const daemonRunning = await ipc.isDaemonRunning();
@@ -37,10 +38,19 @@ export const restartCommand = new Command('restart')
     // not operation completion, so start can overtake the asynchronous stop
     // and the late stop can remove the replacement PID. AgentManager.restartAgent
     // awaits stopAgent before startAgent and owns the serialization contract.
-    const response = await requestSerializedRestart(ipc, agent);
+    const response = await requestSerializedRestart(ipc, agent, options.fresh ? 'fresh' : undefined);
     if (!response.success) {
       console.error(`  Restart failed: ${response.error}`);
       process.exit(1);
     }
-    console.log(`  ${response.data}`);
+
+    // Task 2.8: dispatch acceptance is not completion — poll a bounded
+    // window for the agent to actually come back running before declaring
+    // "restarted".
+    const { settled } = await waitForAgentSettled(ipc, agent, (s) => s?.status === 'running');
+    if (settled) {
+      console.log(`  Restarted ${agent} (confirmed running).`);
+    } else {
+      console.log(`  Restart accepted for ${agent} (durable); still completing — check \`cortextos status\`.`);
+    }
   });

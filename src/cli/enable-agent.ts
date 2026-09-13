@@ -5,6 +5,7 @@ import { homedir } from 'os';
 import { IPCClient } from '../daemon/ipc-server.js';
 import { TelegramAPI, formatValidateError } from '../telegram/api.js';
 import { resolveInstanceId } from './resolve-instance-id.js';
+import { waitForAgentSettled } from './stop.js';
 
 /**
  * BUG-035 fix: discover the cortextOS framework root without depending on
@@ -284,7 +285,16 @@ export const disableAgentCommand = new Command('disable')
 
       const response = await ipc.send({ type: 'stop-agent', agent, source: 'cortextos disable' });
       if (response.success) {
-        console.log(`Agent "${agent}" disabled and stopped.`);
+        // Task 2.8: dispatch acceptance is not completion — a prior version
+        // of this command printed "disabled and stopped" the instant the
+        // IPC dispatch was accepted, over-claiming a state nobody had
+        // verified yet. Poll a bounded window for the real outcome.
+        const { settled } = await waitForAgentSettled(ipc, agent, (s) => s === undefined || s.status !== 'running');
+        if (settled) {
+          console.log(`Agent "${agent}" disabled and stopped.`);
+        } else {
+          console.log(`Agent "${agent}" disabled; stop accepted (durable) — teardown still in progress, check \`cortextos status\`.`);
+        }
       } else {
         console.log(`Agent "${agent}" disabled. Stop failed: ${response.error}`);
       }

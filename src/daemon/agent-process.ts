@@ -17,11 +17,119 @@ import { loadBuffer } from './conversation-buffer.js';
 import { ensureMissionAnchorFromBuffer } from './restart-context.js';
 import { readEnabledAgentsMap } from '../bus/enabled-agents-io.js';
 import { snapshotDescendants, killSnapshotSurvivors } from '../utils/process-tree.js';
+import type { ProcessSnapshotEntry, UnresolvedSurvivor } from '../utils/process-tree.js';
+import { randomUUID } from 'crypto';
+import {
+  importFreshRequest,
+  consumeFreshRequest,
+  restoreFreshRequest,
+  projectSessionRefreshMarker,
+  type ImportedFreshRequest,
+} from './lifecycle/legacy-compat.js';
+import { canonicalAgentId } from './lifecycle/types.js';
+import type { DispatchResult, EffectToken, GenerationToken, LifecycleRequest, RequestCause, RequestReceipt, StartMode } from './lifecycle/types.js';
+import { classifyExit } from './lifecycle/recovery-policy.js';
+import type { ExitObservation, RecoveryBudgetEntry } from './lifecycle/recovery-policy.js';
+import type { LifecycleObservation } from './lifecycle/supervisor.js';
+import type { WorkCorrelationEvent } from '../pty/codex-app-server-pty.js';
+
+/**
+ * Task 2.4: the minimal shape `AgentProcess` needs from its lifecycle owner
+ * — decoupled from the concrete `AgentLifecycleSupervisor` class the same
+ * way `RuntimeAdapter` (src/daemon/lifecycle/supervisor.ts) decouples the
+ * supervisor from a concrete `AgentProcess`. This file only depends on the
+ * one method it actually calls; the real `AgentLifecycleSupervisor` (which
+ * structurally satisfies this interface) is wired in by Task 2.5 via
+ * `setOwner()`.
+ *
+ * Task 3.4 Step 5: `observe` is added, optional, so any existing owner mock
+ * that only implements `request()` keeps compiling unchanged. The real
+ * `AgentLifecycleSupervisor.observe()` (Task 1.5) structurally satisfies
+ * this without modification — this is the same "reuse the existing public
+ * surface, don't invent a new entry point" instruction Task 3.4's plan
+ * gives for wiring `CodexAppServerPTY`'s `WorkCorrelationEvent`s through.
+ *
+ * Task 3.5: three more optional methods, same additive philosophy —
+ * `injectMessageDetailed()` needs to (1) check whether an `EffectToken` it
+ * was handed is still live before ever touching the PTY, (2) look up
+ * whether a `MessageDedup` hash hit actually correlates to already-
+ * dispatched `workIds` (the ledger is the real dedup/idempotency authority
+ * — content-hash coincidence is only ever a hint), and (3) durably persist
+ * dispatch intent before the write. The real `AgentLifecycleSupervisor`
+ * (Task 3.5) structurally satisfies all three without modification; any
+ * owner mock that only implements `request()`/`observe()` keeps compiling,
+ * and `injectMessageDetailed()` degrades to "no ledger to consult" for such
+ * a caller rather than throwing.
+ */
+export interface LifecycleRequestOwner {
+  request(req: LifecycleRequest): Promise<RequestReceipt>;
+  observe?(event: LifecycleObservation): void;
+  isEffectLive?(effect: EffectToken): boolean;
+  dispatchedWorkIds?(workIds: string[]): string[];
+  beginDispatch?(workIds: string[], batchId: string): { ok: true } | { ok: false; error: string };
+}
+
+/**
+ * Task 2.6: structured outcome of `runStop()`'s teardown — what
+ * `AgentProcess` itself (which has no concept of `GenerationToken`/
+ * `OwnedResource` ownership) can honestly report about the OS-level process
+ * identities it tried to retire. `src/daemon/lifecycle/agent-runtime.ts`'s
+ * `AgentProcessRuntimeAdapter.retireGeneration()` is what translates this
+ * into the owner-facing `RetirementResult` (Task 1.1's `types.ts`), tagging
+ * each identity with the real `GenerationToken` it already tracks.
+ *
+ * `attempted: false` means NOTHING was checked this call (there was no live
+ * PTY handle at entry) — this must never be read as "clean". The two
+ * concrete cases: (1) a second concurrent `stop()` joins an already-running
+ * teardown via `stopInFlight` and gets that ORIGINAL call's real report,
+ * never a fresh empty one (so `attempted: false` should not actually surface
+ * on that path); (2) `runStop()` ran with no PTY to inspect — e.g. called on
+ * an already-stopped process — in which case there was genuinely nothing to
+ * verify, and the caller must not silently assume everything it thought it
+ * owned is gone.
+ */
+export interface ProcessTeardownReport {
+  attempted: boolean;
+  /** The OS pid of the runtime child this call tried to confirm dead, or
+   * null when there was none to check (no real pid on the PTY, or
+   * `attempted` is false). */
+  runtimePid: number | null;
+  /** True only when this call positively verified the runtime pid is gone,
+   * or there was never a real pid to check. False means it survived the
+   * graceful+SIGKILL escalation (including the EPERM-as-alive case — see
+   * `isChildAlive()`), or `attempted` was false — either way, never treat
+   * this as proof of a clean stop. */
+  runtimeConfirmedAbsent: boolean;
+  /** Descendants (grandchildren etc.) confirmed absent or already gone
+   * before this call touched them — safe to report as released. */
+  descendantsConfirmedAbsent: ProcessSnapshotEntry[];
+  /** Descendants whose fate this call could not positively confirm —
+   * signalled but still present, a kill that failed with something other
+   * than ESRCH, or an unreliable verification read. Never promoted to
+   * confirmed-absent by a caller. */
+  descendantsUnresolved: UnresolvedSurvivor[];
+}
+
+const UNVERIFIED_TEARDOWN_REPORT: ProcessTeardownReport = {
+  attempted: false,
+  runtimePid: null,
+  runtimeConfirmedAbsent: false,
+  descendantsConfirmedAbsent: [],
+  descendantsUnresolved: [],
+};
 
 type LogFn = (msg: string) => void;
 
-const OPENCODE_CONTINUE_WEDGE_THRESHOLD = 3;
-const OPENCODE_CONTINUE_WEDGE_FAST_EXIT_MS = 60_000;
+/**
+ * Task 3.8 Step 3: how long a dispatch to a provider with no real completion
+ * seam (Claude/Hermes/OpenCode — see `scheduleNoCompletionSeamReview`) waits
+ * before its workIds are honestly marked `needs-review`. Matches the exact
+ * value Task 3.4 already chose for Codex's own generic completion timeout
+ * (`codex-app-server-pty.ts`'s `createTurnCompletion(timeoutMs = 30 * 60 *
+ * 1000)`) for the identical "uncertain, not confirmed-failed" semantics —
+ * not independently derived, deliberately kept consistent across providers.
+ */
+const NO_COMPLETION_SEAM_TIMEOUT_MS = 30 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // WS8 Layer A — fleet-degrade marker support
@@ -120,13 +228,6 @@ export class AgentProcess {
   private crashTimestamps: number[] = [];
   private crashWindowMs: number = 0;
   private crashWindowMax: number = 0;
-  // Image-poison recovery circuit breaker: tracks recent recovery attempts
-  // to prevent infinite loops when force-fresh fails to clear poisoned history
-  private imagePoisonRecoveries: number[] = [];
-  // Clean-exit (code 0) recovery: tracks recent clean restarts so a genuinely
-  // broken code-0 tight-loop still halts, while normal code-0 lifecycle exits
-  // (opencode TUI turn-completion) do not charge the daily crash counter.
-  private cleanExitRestarts: number[] = [];
   // Startup-failure detection for code-0 exits: opencode (and any runtime) can
   // exit 0 IMMEDIATELY on a real startup failure (bad config/model/env) — it
   // prints an error and exits cleanly BEFORE the session ever became ready.
@@ -135,10 +236,19 @@ export class AgentProcess {
   // how long the process lived and distinguish "exited before ready" (a real
   // startup fault, surfaced loudly) from "completed a turn" (benign).
   private spawnStartedAtMs: number = 0;
-  // Timestamps of recent code-0 exits that occurred BEFORE the agent reached a
-  // ready/running state. A cluster of these is a startup crashloop, not normal
-  // lifecycle — the circuit breaker below trips and alerts instead of looping.
-  private cleanExitStartupFailures: number[] = [];
+  // Task 2.3: fixed-window recovery-budget counters for the non-crash exit
+  // causes classifyExit() (src/daemon/lifecycle/recovery-policy.ts) can emit —
+  // image-poison, opencode-continuation, and startup-failure/clean-exit —
+  // replacing the four separate timestamp arrays/counters
+  // (imagePoisonRecoveries, cleanExitRestarts, cleanExitStartupFailures,
+  // opencodeContinueWedgeCount) this file used to keep individually. Purely
+  // in-memory today, same lifetime as the fields it replaces — Task 2.4/2.5
+  // promotes this to the supervisor-owned, generation-surviving
+  // `LifecycleSnapshot.recoveryBudgets` store. The legacy daily crash counter
+  // (this.crashCount, file-backed via resetCrashCountIfNewDay) and the
+  // legacy crash-window sliding array (this.crashTimestamps) are deliberately
+  // NOT folded in here — see handleExit()'s crash-tail comment.
+  private recoveryBudgets: Record<string, RecoveryBudgetEntry> = {};
   private sessionStart: Date | null = null;
   private status: AgentStatus['status'] = 'stopped';
   private stopping: boolean = false;
@@ -148,7 +258,7 @@ export class AgentProcess {
   // manager's eviction path (`await stale.process.stop()`), which must block
   // until the real, death-confirmed teardown completes rather than racing a
   // fresh spawn against a still-alive predecessor (the duplicate-PTY defect).
-  private stopInFlight: Promise<void> | null = null;
+  private stopInFlight: Promise<ProcessTeardownReport> | null = null;
   // BUG-040 fix: persists across stop() return until handleExit clears it.
   // Required because BUG-032's CRLF + 5s wait can cause graceful shutdown to
   // exceed the 5s Promise.race timeout in stop(), which would otherwise reset
@@ -164,6 +274,14 @@ export class AgentProcess {
   // spawned since this old one was created. Without this guard, a late exit
   // from an old PTY can race past stopRequested and trigger crash recovery on
   // the new agent.
+  // Task 2.1: retained as defense-in-depth, NOT deleted or conflated with the
+  // lifecycle supervisor's own `GenerationToken.generation` (Task 1.1/1.5).
+  // This counter solves a narrower, same-object problem (discarding a late
+  // exit from a PTY this same `AgentProcess` instance already replaced); the
+  // supervisor's generation solves the broader cross-restart/cross-process
+  // "which incarnation owns this resource" problem the lifecycle store
+  // persists. Both stay active side by side — this one is subordinate to,
+  // never a substitute for, the supervisor's.
   private lifecycleGeneration: number = 0;
   // BUG-011 fix: stop() awaits this promise (resolved by the onExit handler in start())
   // to guarantee the PTY exit has fired before stopping=false is reset. Without
@@ -182,6 +300,12 @@ export class AgentProcess {
   // both awaited through to pty.spawn(), leaving TWO live PTYs for one agent —
   // the dual-larry / 5x-frank2 duplicate-process incident (2026-08-04). This
   // promise coalesces every concurrent start onto the first in-flight spawn.
+  // Task 2.1: retained as defense-in-depth. This guard protects `start()`
+  // specifically; it is bypassed by the fenced `startImplFenced()` entry
+  // point the lifecycle supervisor's `AgentProcessRuntimeAdapter` calls
+  // instead, once wired in (Task 2.5) — single-flight coordination for that
+  // path becomes the supervisor's own generation/intent-revision fencing
+  // (Task 1.5), which this field is subordinate to, not a substitute for.
   private inFlightStart: Promise<void> | null = null;
   private dedup: MessageDedup;
   private log: LogFn;
@@ -196,12 +320,23 @@ export class AgentProcess {
   private lastSpawnWasHandoff = false;
   private lastSpawnMode: 'fresh' | 'continue' | null = null;
   private lastStartAtMs = 0;
-  private opencodeContinueWedgeCount = 0;
+  // Task 2.4: gates sessionRefresh() between the legacy stop()/start() pair
+  // (default, byte-for-byte unchanged from before this task) and submitting
+  // a `LifecycleRequest` through the owner. Task 2.5 is what threads each
+  // agent's real per-agent `config.supervised` value into this constructor
+  // param — until then this stays `false` for every production caller, so
+  // nothing changes in production from this task alone.
+  private readonly supervised: boolean;
+  // Task 2.4: the lifecycle owner sessionRefresh() submits requests through
+  // when `supervised` is true. Null until `setOwner()` is called — see that
+  // method's doc comment for why this can't be a constructor param.
+  private owner: LifecycleRequestOwner | null = null;
 
-  constructor(name: string, env: CtxEnv, config: AgentConfig, log?: LogFn) {
+  constructor(name: string, env: CtxEnv, config: AgentConfig, log?: LogFn, supervised = false) {
     this.name = name;
     this.env = env;
     this.config = config;
+    this.supervised = supervised;
     if (config.max_crashes_per_day !== undefined) {
       this.maxCrashesPerDay = config.max_crashes_per_day;
     }
@@ -211,6 +346,22 @@ export class AgentProcess {
     }
     this.dedup = new MessageDedup();
     this.log = log || ((msg) => console.log(`[${name}] ${msg}`));
+  }
+
+  /**
+   * Task 2.4/2.5: late-bind this process's lifecycle owner.
+   *
+   * `AgentProcess` must exist before `AgentProcessRuntimeAdapter` can wrap
+   * it, and the adapter must exist before `AgentLifecycleSupervisor` can
+   * wrap THAT — so the supervisor reference can only be handed back to this
+   * instance after all three are constructed, ruling out a constructor
+   * param for this one field. Task 2.5's registry calls this once, right
+   * after building the trio, for every agent it marks `supervised`. Not
+   * called by any production code yet — `supervised` stays `false`
+   * everywhere until Task 2.5 lands.
+   */
+  setOwner(owner: LifecycleRequestOwner): void {
+    this.owner = owner;
   }
 
   /**
@@ -275,8 +426,12 @@ export class AgentProcess {
       writeCortextosEnv(this.env.agentDir, this.env);
     }
 
-    // Determine start mode
-    const mode = this.shouldContinue() ? 'continue' : 'fresh';
+    // Determine start mode. Task 2.2: `shouldContinue()` also IMPORTS
+    // (reserves-by-rename) any pending `.force-fresh` request; `freshRequest`
+    // is threaded through to the spawn's success/failure outcome below so a
+    // failed spawn restores it instead of losing the fresh-boot intent.
+    const { continueSession, freshRequest } = this.shouldContinue();
+    const mode = continueSession ? 'continue' : 'fresh';
     // D4 mission-anchor restore: on a FRESH (crash) restart the --continue
     // conversation history is gone, so recover the live mission from the
     // conversation buffer into state/current-mission.txt (best-effort, no-op
@@ -339,6 +494,36 @@ export class AgentProcess {
       (this.pty as CodexAppServerPTY).setTelegramHandle(this.telegramApi, this.telegramChatId);
     }
 
+    // Task 3.4 Step 5: the minimal consumer wiring for this generation's
+    // CodexAppServerPTY WorkCorrelationEvents — forwarded into the owner's
+    // observe() (a documented no-op if unsupervised/no owner wired yet, or
+    // if the concrete owner hasn't implemented `observe` at all). Real
+    // workIds only ever arrive once a caller threads them into
+    // queueTurn()/injectMessage (Task 3.5) — until then this listener fires
+    // on nothing, by construction (the adapter's own emit calls are
+    // workIds.length-gated), so this wiring is inert in production today.
+    if (this.config.runtime === 'codex-app-server') {
+      (this.pty as CodexAppServerPTY).onWorkCorrelation?.((event: WorkCorrelationEvent) => {
+        this.forwardWorkCorrelation(event, myGeneration);
+      });
+      // Task 3.8 Step 6: intent-revocation check for `startAppServerWithRetry()`
+      // — reuses the exact same generation-mismatch comparison the onExit
+      // handler above already applies (BUG-040's fencing), not a parallel
+      // mechanism.
+      (this.pty as CodexAppServerPTY).setIntentRevocationCheck?.(
+        () => myGeneration !== this.lifecycleGeneration,
+      );
+    }
+
+    // Task 3.8 Step 4: generation-liveness check for OpencodePTY's deferred
+    // shell-prompt recovery keystrokes — same BUG-040 generation-mismatch
+    // fencing, reused rather than duplicated.
+    if (this.config.runtime === 'opencode') {
+      (this.pty as OpencodePTY).setGenerationLiveCheck?.(
+        () => myGeneration === this.lifecycleGeneration,
+      );
+    }
+
     // BUG-011 fix: create a fresh exit signal for this run. resolveExit is
     // called from the onExit handler below; stop() awaits exitPromise to
     // guarantee the exit handler has fired before clearing stopping.
@@ -373,11 +558,22 @@ export class AgentProcess {
       // or call getPid() on null in that window.
       if (!this.pty) {
         this.log('PTY exited during spawn — handleExit will recover');
+        // The spawn itself did not throw — mode was honored (a fresh process
+        // really was started with the fresh prompt) even though it exited
+        // immediately after. Consume: whatever recovery handleExit schedules
+        // next (e.g. its own armForceFresh() re-arm) is a separate, later
+        // request this consume never touches.
+        if (freshRequest) consumeFreshRequest(freshRequest);
         return;
       }
       this.status = 'running';
       this.sessionStart = new Date();
       this.log(`Running (pid: ${this.pty.getPid()})`);
+
+      // Task 2.2: consume the imported fresh request ONLY now that the spawn
+      // has succeeded — a spawn failure below (in the catch) restores it
+      // instead, so the fresh-boot intent survives a failed attempt.
+      if (freshRequest) consumeFreshRequest(freshRequest);
 
       this.maybeSendRuntimeLifecycleNotification();
 
@@ -388,8 +584,30 @@ export class AgentProcess {
     } catch (err) {
       this.log(`Failed to start: ${err}`);
       this.status = 'crashed';
+      // Task 2.2: the spawn failed — restore the imported fresh request so
+      // the next attempt still starts fresh instead of silently reverting to
+      // `--continue` (the exact defect upstream `31af138b` fixed).
+      if (freshRequest) restoreFreshRequest(freshRequest);
       this.notifyStatusChange();
     }
+  }
+
+  /**
+   * Task 2.1 fenced low-level entry point: calls the exact same private
+   * `startImpl()` body that `start()` calls, WITHOUT `start()`'s
+   * single-flight (`inFlightStart`) coalescing guard.
+   *
+   * ONLY `src/daemon/lifecycle/agent-runtime.ts`'s `AgentProcessRuntimeAdapter`
+   * may call this — it is the fenced spawn effect the lifecycle supervisor's
+   * generation/intent-revision arbitration coordinates instead. Do not add any
+   * other production caller. Until Tasks 2.4/2.5 rewire `start()` itself to
+   * submit a lifecycle request through the supervisor, `start()` remains the
+   * only path production code should use directly; this wrapper exists solely
+   * so the adapter can be unit/integration-tested against a real `AgentProcess`
+   * ahead of that rewire.
+   */
+  async startImplFenced(): Promise<void> {
+    return this.startImpl();
   }
 
   /**
@@ -401,21 +619,28 @@ export class AgentProcess {
    * (`await stale.process.stop()`), which WANTS to block until the predecessor
    * is truly dead before spawning fresh — the previous no-op let it return
    * immediately and spawn a second live PTY alongside the still-alive first one.
+   *
+   * Task 2.6: return type upgraded `void` -> `ProcessTeardownReport`. A
+   * joining re-entrant call returns the ORIGINAL call's real report (never a
+   * fresh/fabricated one) — see `ProcessTeardownReport`'s doc comment.
    */
-  async stop(): Promise<void> {
+  async stop(): Promise<ProcessTeardownReport> {
     if (this.stopping) {
-      if (this.stopInFlight) await this.stopInFlight;
-      return;
+      if (this.stopInFlight) return this.stopInFlight;
+      // `stopping` and `stopInFlight` are always set together by the branch
+      // below — this should be unreachable, but never fabricate a clean
+      // result if it somehow is.
+      return UNVERIFIED_TEARDOWN_REPORT;
     }
     this.stopInFlight = this.runStop();
     try {
-      await this.stopInFlight;
+      return await this.stopInFlight;
     } finally {
       this.stopInFlight = null;
     }
   }
 
-  private async runStop(): Promise<void> {
+  private async runStop(): Promise<ProcessTeardownReport> {
     this.stopping = true;
     // BUG-040 fix: stopRequested persists ACROSS stop()'s return until
     // handleExit clears it. This is the safety net for the case where the
@@ -432,7 +657,24 @@ export class AgentProcess {
     // pty.kill() to guarantee the exit handler has run before stopping=false.
     const exitPromise = this.exitPromise;
 
-    if (pty) {
+    // Task 2.6: no live PTY handle at entry means nothing can be checked THIS
+    // call — e.g. a sequential stop() on an already-stopped process. Report
+    // it honestly (`attempted: false`) rather than silently claiming a clean
+    // teardown for identities this call never actually looked at.
+    if (!pty) {
+      this.stopping = false;
+      this.status = 'stopped';
+      this.notifyStatusChange();
+      this.log('Stopped');
+      return UNVERIFIED_TEARDOWN_REPORT;
+    }
+
+    let runtimePid: number | null = null;
+    let runtimeConfirmedAbsent = true; // vacuously true unless proven otherwise below
+    let descendantsConfirmedAbsent: ProcessSnapshotEntry[] = [];
+    let descendantsUnresolved: UnresolvedSurvivor[] = [];
+
+    {
       try {
         if (this.config.runtime === 'hermes') {
           // Hermes REPL exit: Ctrl+D is the clean exit signal.
@@ -475,6 +717,7 @@ export class AgentProcess {
       // pty.kill(). node-pty's kill() can invalidate the handle, so getPid()
       // is unreliable afterward — we need the pid to confirm death below.
       const childPid = pty.getPid();
+      runtimePid = childPid ?? null;
 
       // knox-codex 2026-09-08: record this child's descendants WHILE IT IS STILL
       // ALIVE. The runtime spawns its own inner child beneath the PTY child
@@ -534,6 +777,11 @@ export class AgentProcess {
         }
         if (isChildAlive(childPid)) {
           this.log(`WARNING: pid ${childPid} still alive 5s after SIGKILL — proceeding anyway`);
+          // Task 2.6: survived the graceful window AND the SIGKILL escalation
+          // (including the EPERM-as-alive case inside isChildAlive()) — this
+          // is exactly the ambiguity the acceptance criteria forbid reporting
+          // as a clean stop.
+          runtimeConfirmedAbsent = false;
         }
       }
 
@@ -545,7 +793,35 @@ export class AgentProcess {
       // killSnapshotSurvivors() re-checks liveness AND command identity, so a
       // pid recycled during the graceful window is never signalled.
       if (descendantsBeforeStop.length > 0) {
-        killSnapshotSurvivors(descendantsBeforeStop, { log: (msg) => this.log(msg) });
+        const sweep = killSnapshotSurvivors(descendantsBeforeStop, { log: (msg) => this.log(msg) });
+        // Task 2.6: "already gone before this call" is clean, not an orphan —
+        // folded into confirmed-absent alongside pids this call itself
+        // signalled and then verified gone.
+        //
+        // Task 5.2 fix: `recycled` entries were previously dropped here
+        // entirely — neither confirmed-absent nor unresolved — on the theory
+        // that a pid whose current command no longer matches is "not ours to
+        // kill". That reasoning only covers the case where the ORIGINAL
+        // process fully exited and the OS handed its pid to an unrelated
+        // program. It does NOT cover the case a real-OS integration test
+        // (tests/integration/lifecycle-os-teardown.test.ts) reproduces
+        // deterministically: the SAME still-alive descendant simply rewrote
+        // its own reported command (e.g. `process.title =`) between the
+        // pre-signal snapshot and this sweep. In that case the entry is a
+        // live, still-ours, un-killed process — dropping it produced a false
+        // `status: 'retired'` with the descendant silently unaccounted for,
+        // violating this module's own "ambiguity is never reported as done"
+        // principle (already applied to ESRCH/EPERM inside
+        // killSnapshotSurvivors, just not to this caller's aggregation).
+        // Recycled entries now join `unresolved` instead of vanishing.
+        descendantsConfirmedAbsent = [...sweep.confirmedAbsent, ...sweep.alreadyGone];
+        descendantsUnresolved = [
+          ...sweep.unresolved,
+          ...sweep.recycled.map((entry) => ({
+            entry,
+            reason: 'pid no longer matches the pre-signal snapshot (recycled, or the descendant rewrote its own command) — original identity\'s fate not confirmed',
+          })),
+        ];
       }
     }
 
@@ -556,77 +832,340 @@ export class AgentProcess {
     this.status = 'stopped';
     this.notifyStatusChange();
     this.log('Stopped');
+
+    return {
+      attempted: true,
+      runtimePid,
+      runtimeConfirmedAbsent,
+      descendantsConfirmedAbsent,
+      descendantsUnresolved,
+    };
+  }
+
+  /**
+   * Task 2.1 fenced low-level entry point: calls the exact same private
+   * `runStop()` teardown body that `stop()` calls, WITHOUT `stop()`'s
+   * join-in-flight re-entry guard.
+   *
+   * ONLY `src/daemon/lifecycle/agent-runtime.ts`'s `AgentProcessRuntimeAdapter`
+   * may call this. `runStop()`'s teardown sequence (graceful shutdown,
+   * descendant snapshot/sweep) is unchanged by Task 2.6 — that task upgraded
+   * only what this returns, to the structured `ProcessTeardownReport` the
+   * adapter's `retireGeneration()` translates into the owner-facing
+   * `RetirementResult` (Task 1.1's `types.ts`).
+   * Do not add any other production caller.
+   */
+  async runStopFenced(): Promise<ProcessTeardownReport> {
+    return this.runStop();
   }
 
   /**
    * Restart with --continue (session refresh).
    *
-   * Delegates to stop() + start() so it inherits the BUG-011 race fix
-   * automatically. This also eliminates a separate bug in the previous
-   * inline implementation where the OLD pty's exit handler could fire
-   * AFTER the NEW pty was set up, nulling out the wrong reference.
-   * `start()` will pick up `continue` mode automatically because the
+   * Task 2.4: gated by `this.supervised`. When `false`/absent (the default —
+   * the only behavior possible until Task 2.5 lands), this is byte-for-byte
+   * the pre-Task-2.4 body: delegates to stop() + start() so it inherits the
+   * BUG-011 race fix automatically, eliminating the separate bug in the
+   * pre-BUG-011 inline implementation where the OLD pty's exit handler could
+   * fire AFTER the NEW pty was set up, nulling out the wrong reference.
+   * `start()` picks up `continue` mode automatically because the
    * conversation directory still has .jsonl files (shouldContinue() is true).
+   *
+   * When `true`, this instead submits a single `refresh` LifecycleRequest
+   * through the owner (`AgentLifecycleSupervisor`) and returns its receipt —
+   * the owner performs the retire→start under one operationId, revalidating
+   * immediately before spawning (Task 1.5's `isEffectStale()` fencing), so a
+   * stop/halt committed after this call has already entered still revokes
+   * it. This is the closure of deep-dive Scenario B ("I stopped it, but
+   * another copy came back").
    */
-  async sessionRefresh(): Promise<void> {
-    this.log('Session refresh (--continue restart)');
-    // Write .session-refresh marker so the SessionEnd crash-alert hook
-    // (src/hooks/hook-crash-alert.ts) classifies the imminent PTY exit as a
-    // session refresh rather than a crash. The hook's marker handler +
-    // quiet-suppression set + message switch were all wired for this type,
-    // but no writer existed — every --continue rollover at the session-time
-    // cap surfaced as a false-positive 'crash' on chief/analyst + the
-    // crashes.log file.
+  async sessionRefresh(): Promise<RequestReceipt | void> {
+    if (!this.supervised) {
+      // Legacy path — byte-for-byte unchanged from the pre-Task-2.4 body.
+      this.log('Session refresh (--continue restart)');
+      // Write .session-refresh marker so the SessionEnd crash-alert hook
+      // (src/hooks/hook-crash-alert.ts) classifies the imminent PTY exit as a
+      // session refresh rather than a crash. The hook's marker handler +
+      // quiet-suppression set + message switch were all wired for this type,
+      // but no writer existed — every --continue rollover at the session-time
+      // cap surfaced as a false-positive 'crash' on chief/analyst + the
+      // crashes.log file.
+      try {
+        const paths = resolvePaths(this.name, this.env.instanceId, this.env.org);
+        // Task 2.2: route the write through `projectSessionRefreshMarker` so it
+        // is keyed to an identified transition (a `GenerationToken`) rather than
+        // an ownerless `writeFileSync`. The on-disk content is byte-for-byte
+        // unchanged — the hook that reads it (`hook-crash-alert.ts`) checks only
+        // presence, never content — this only fixes the call site ahead of Task
+        // 2.4's rewire of `sessionRefresh()` into a real supervisor request.
+        const token: GenerationToken = {
+          agentId: canonicalAgentId({ instanceId: this.env.instanceId, org: this.env.org, name: this.name }),
+          // Legacy/unsupervised path: no real per-agent supervisor epoch exists
+          // yet at this call site (Task 2.5 wires the real one). 0 is a
+          // documented sentinel, not a load-bearing value — nothing reads this
+          // token back today.
+          supervisorEpoch: 0,
+          generation: this.lifecycleGeneration,
+        };
+        projectSessionRefreshMarker(paths.stateDir, token);
+      } catch (err) {
+        this.log(`Failed to write .session-refresh marker: ${err}`);
+      }
+      await this.stop();
+      await this.start();
+      this.log('Session refreshed');
+      return;
+    }
+
+    // Supervised path — submit through the owner instead of calling
+    // stop()/start() directly. The marker write still happens (both paths
+    // need it, per this task's acceptance criteria), keyed to the
+    // generation actually being retired — i.e. the CURRENT generation,
+    // before the owner's retire→start operation begins.
+    this.log('Session refresh (--continue restart) — submitting through owner');
     try {
       const paths = resolvePaths(this.name, this.env.instanceId, this.env.org);
-      writeFileSync(
-        join(paths.stateDir, '.session-refresh'),
-        'session-time-cap rollover\n',
-        'utf-8',
-      );
+      const token: GenerationToken = {
+        agentId: canonicalAgentId({ instanceId: this.env.instanceId, org: this.env.org, name: this.name }),
+        // Same documented sentinel as the legacy branch — nothing reads this
+        // token back today (see projectSessionRefreshMarker's own doc).
+        supervisorEpoch: 0,
+        generation: this.lifecycleGeneration,
+      };
+      projectSessionRefreshMarker(paths.stateDir, token);
     } catch (err) {
       this.log(`Failed to write .session-refresh marker: ${err}`);
     }
-    await this.stop();
-    await this.start();
-    this.log('Session refreshed');
+
+    if (!this.owner) {
+      // Defensive fail-closed: supervised=true with no owner wired is a
+      // build-sequence error (Task 2.5 always calls setOwner() before ever
+      // constructing an AgentProcess with supervised=true) — never silently
+      // fall back to the legacy stop()/start() pair, which would defeat this
+      // task's entire point of making the operation revocable.
+      throw new Error(`sessionRefresh: supervised=true but no lifecycle owner is wired for agent "${this.name}"`);
+    }
+
+    return this.owner.request({
+      requestId: randomUUID(),
+      kind: 'refresh',
+      cause: 'session-age',
+      mode: 'continue',
+      observedGeneration: this.lifecycleGeneration,
+      userInitiated: false,
+      evidence: { source: 'session-timer' },
+      requestedAtMs: Date.now(),
+    });
   }
 
   /**
-   * Inject a message into the agent's PTY — structured outcome.
+   * Task 3.5: inject a message into the agent's PTY — full `DispatchResult`
+   * outcome (Task 1.1's Shared Contract), replacing the old ad hoc
+   * `{ok:true} | {ok:false, code:'NOT_RUNNING'|'DEDUPED'}` shape.
    *
-   * Distinguishes NOT_RUNNING (agent registered but no live PTY) from
-   * DEDUPED (content collapsed against the in-process MessageDedup window).
-   * See issue #346 — both used to surface as a bare `false` and got mistaken
-   * for "agent not found" by operators investigating restart/cron failures.
+   * `effect` is the `EffectToken` the caller obtained from its lifecycle
+   * owner (or minted best-effort, for a not-yet-fully-migrated caller);
+   * `workIds` are the work-ledger ids this dispatch attempt is FOR (already
+   * durably accepted — Task 3.2's `acceptBatch` — before this is ever
+   * called). Order of checks, per PHASES.md Task 3.5:
+   *
+   * 1. Revocation first — a stale effect (a stop/retire landed since it was
+   *    minted) returns `REVOKED` WITHOUT touching `this.pty` at all.
+   * 2. Not running — unchanged from the old shape, still `retryable: true`,
+   *    still leaves `content` untouched for a future retry.
+   * 3. Dedup-as-hint — a `MessageDedup` hash hit is no longer an automatic
+   *    block. If the owner can correlate `workIds` against the ledger: no
+   *    correlated ids means this is a genuine content coincidence for
+   *    brand-new work (not blocked, hint only); correlated ids means a real
+   *    redelivery of already-dispatched work (`DUPLICATE`, PTY write
+   *    skipped — it would be redundant). If there is no owner/ledger to
+   *    consult at all, the hash stays the only signal available and remains
+   *    authoritative exactly as it was before this task (never weakened to
+   *    a no-op just because nothing can corroborate it).
+   * 4. Persist dispatch intent — durably marks `workIds` `'dispatched'`
+   *    BEFORE the write. A persistence failure returns `FAILED` and the PTY
+   *    is never touched.
+   * 5. The actual PTY write — mechanics unchanged from the old shape.
+   * 6. Success — `{ ok: true, workIds, batchId: effect.effectId }`.
    */
-  injectMessageDetailed(content: string): { ok: true } | { ok: false; code: 'NOT_RUNNING' | 'DEDUPED'; message: string } {
+  async injectMessageDetailed(content: string, effect: EffectToken, workIds: string[]): Promise<DispatchResult> {
+    if (this.owner?.isEffectLive && !this.owner.isEffectLive(effect)) {
+      return {
+        ok: false,
+        code: 'REVOKED',
+        retryable: false,
+        message: `inject for "${this.name}" revoked — the generation/intent this dispatch targeted is no longer current`,
+      };
+    }
+
     if (!this.pty || this.status !== 'running') {
-      return { ok: false, code: 'NOT_RUNNING', message: `agent "${this.name}" is registered but not running (status: ${this.status})` };
+      return {
+        ok: false,
+        code: 'NOT_RUNNING',
+        retryable: true,
+        message: `agent "${this.name}" is registered but not running (status: ${this.status})`,
+      };
     }
 
     if (this.dedup.isDuplicate(content)) {
-      this.log('Dedup: skipping duplicate message');
-      return { ok: false, code: 'DEDUPED', message: `inject for "${this.name}" deduped — content matches MessageDedup hash window` };
+      const correlated = this.owner?.dispatchedWorkIds ? this.owner.dispatchedWorkIds(workIds) : null;
+      if (correlated === null || correlated.length > 0) {
+        // Either there is no ledger to consult at all (legacy/no owner --
+        // MessageDedup's hash is the only signal available, unchanged from
+        // pre-Task-3.5 behavior), or the ledger confirms this is a genuine
+        // redelivery of already-dispatched work (the common case).
+        const existingWorkIds = correlated ?? workIds;
+        this.log(
+          correlated === null
+            ? 'Dedup: skipping duplicate message (no ledger to correlate against)'
+            : 'Dedup: skipping — workIds already correlate to a dispatched record',
+        );
+        return {
+          ok: false,
+          code: 'DUPLICATE',
+          retryable: false,
+          existingWorkIds,
+          message: `inject for "${this.name}" deduped — content matches MessageDedup hash window`,
+        };
+      }
+      // correlated.length === 0: a real ledger was consulted and confirmed
+      // these workIds are genuinely new — MessageDedup is a hint here, not
+      // the authority. Do not block; fall through to dispatch.
+      this.log('Dedup: content-hash hit for genuinely new workIds — not blocking dispatch');
+    }
+
+    if (this.owner?.beginDispatch) {
+      const persisted = this.owner.beginDispatch(workIds, effect.effectId);
+      if (!persisted.ok) {
+        return {
+          ok: false,
+          code: 'FAILED',
+          retryable: false,
+          message: `dispatch intent persist failed for "${this.name}": ${persisted.error}`,
+        };
+      }
     }
 
     if ('injectMessage' in this.pty && typeof this.pty.injectMessage === 'function') {
       this.pty.injectMessage(content);
+      // Task 3.8 Step 3: Claude/Hermes/OpenCode (everything that reaches
+      // this branch — CodexAppServerPTY has no `injectMessage` and always
+      // takes the `else` branch below) have no real per-turn completion
+      // seam wired at the PTY layer (Step 1's audit; see the doc comments
+      // on `agent-pty.ts`, `hermes-pty.ts`, `opencode-context-reporter.ts`
+      // for the per-provider findings). Left alone, these workIds would sit
+      // at `dispatched` forever with nothing ever resolving them. Bound
+      // that honestly instead of inventing a false `completed`.
+      if (this.config.runtime !== 'codex-app-server') {
+        this.scheduleNoCompletionSeamReview(workIds, this.lifecycleGeneration, this.config.runtime ?? 'claude');
+      }
     } else {
       // CodexAppServerPTY intentionally models stdin writes itself and does not
       // inherit AgentPTY. Feed it through the same write path used historically.
       injectMessageIntoPty((data) => this.pty?.write(data), content);
     }
-    return { ok: true };
+    return { ok: true, workIds, batchId: effect.effectId };
   }
 
   /**
-   * Inject a message into the agent's PTY (back-compat boolean wrapper).
-   * New callers that need to distinguish DEDUPED from NOT_RUNNING should use
-   * `injectMessageDetailed()` instead.
+   * Task 3.8 Step 5 (shared with 3.4 Step 5): translate one
+   * `WorkCorrelationEvent` into the exact `LifecycleObservation` shape
+   * `AgentLifecycleSupervisor.handleWorkObservation()` already recognizes
+   * (`kind: 'work-${event.type}'`) and forward it to the owner, iff an
+   * owner with `observe()` is wired. Extracted from the Task 3.4
+   * `CodexAppServerPTY.onWorkCorrelation` wiring above so Task 3.8's
+   * `needs-review` fallback for non-Codex providers (below) reuses the
+   * exact same translation instead of a second one.
+   */
+  private forwardWorkCorrelation(event: WorkCorrelationEvent, generation: number): void {
+    if (!this.owner?.observe) return;
+    const token: GenerationToken = {
+      agentId: canonicalAgentId({ instanceId: this.env.instanceId, org: this.env.org, name: this.name }),
+      // Same documented sentinel used elsewhere in this file (e.g.
+      // sessionRefresh()) — nothing reads this token back today.
+      supervisorEpoch: 0,
+      generation,
+    };
+    const evidence: Record<string, string | number | boolean | null> = {
+      workIds: JSON.stringify(event.workIds),
+      turnId: event.turnId,
+    };
+    if ('error' in event) evidence.error = event.error;
+    if ('reason' in event) evidence.reason = event.reason;
+    this.owner.observe({
+      kind: `work-${event.type}`,
+      token,
+      atMs: Date.now(),
+      evidence,
+    });
+  }
+
+  /**
+   * Task 3.8 Step 3: for a provider with no real completion seam (i.e. not
+   * the Codex app-server), bound the "we cannot confirm" window to
+   * `NO_COMPLETION_SEAM_TIMEOUT_MS` (documented below — matches Task 3.4's
+   * own generic 30-minute turn-completion-timeout precedent for the exact
+   * same "uncertain, not confirmed-failed" semantics) rather than leaving
+   * the dispatched `WorkRecord`(s) sitting at `dispatched` forever. Fires
+   * unconditionally once scheduled — a workId is unique per dispatch
+   * (`work-ledger.ts`'s `linkRetry()` doc: a retry always mints a NEW
+   * workId), so this can never fire against a record some other mechanism
+   * has since resolved for a legitimate reason; and if it ever raced a
+   * genuine resolution anyway, `applyWorkCorrelation`'s illegal-transition
+   * guard (every terminal `WorkPhase` has an empty `LEGAL_TRANSITIONS`
+   * entry) makes the stray observation a silent no-op rather than an
+   * incorrect overwrite (`supervisor.ts`'s `handleWorkObservation` already
+   * swallows that case for exactly this reason).
+   */
+  private scheduleNoCompletionSeamReview(workIds: string[], generation: number, runtime: string): void {
+    if (workIds.length === 0) return;
+    setTimeout(() => {
+      const event: WorkCorrelationEvent = {
+        type: 'needs-review',
+        workIds,
+        turnId: null,
+        reason: `no-completion-seam-available: ${runtime} has no first-class turn-completion signal at the PTY layer`,
+      };
+      this.forwardWorkCorrelation(event, generation);
+    }, NO_COMPLETION_SEAM_TIMEOUT_MS).unref?.();
+  }
+
+  /**
+   * Task 3.5: back-compat boolean-returning legacy shim, preserved
+   * byte-for-byte from the pre-Task-3.5 body (still synchronous, still
+   * treats a `MessageDedup` hash hit as a hard block) — deliberately does
+   * NOT delegate to `injectMessageDetailed()` above. That method is now
+   * `async` and requires an `EffectToken`/`workIds` this call site has
+   * neither of; routing through it would force every remaining synchronous
+   * caller below to become `async` just to preserve today's fire-and-forget
+   * semantics, which is out of this task's scope (and would silently change
+   * behavior at the two call sites this task's own plan explicitly leaves
+   * alone: `AgentManager.injectAgent()`'s cron-scheduler `onFire` path, and
+   * `FastChecker`'s unsupervised `pollCycle()` branch).
+   *
+   * Remaining callers of this boolean wrapper (grepped 2026-09-12, none
+   * migrated to `injectMessageDetailed()` by this task):
+   *  - `AgentManager.injectAgent()` (agent-manager.ts) — itself a back-compat
+   *    boolean wrapper, called by `startAgentCronScheduler`'s `onFire`
+   *    (cron-fired injects) and `ipc-server.ts`'s `fire-cron` case.
+   *  - `FastChecker.pollCycle()`'s unsupervised branch (fast-checker.ts) —
+   *    byte-for-byte the pre-Task-3.3 body, per that task's own doc comment.
+   *  - `FastChecker`'s question/urgent-message/context-warning/handoff
+   *    injects (fast-checker.ts, several call sites) — operational nudges
+   *    outside Phase 3's accepted-work model entirely.
    */
   injectMessage(content: string): boolean {
-    return this.injectMessageDetailed(content).ok;
+    if (!this.pty || this.status !== 'running') return false;
+    if (this.dedup.isDuplicate(content)) {
+      this.log('Dedup: skipping duplicate message');
+      return false;
+    }
+    if ('injectMessage' in this.pty && typeof this.pty.injectMessage === 'function') {
+      this.pty.injectMessage(content);
+    } else {
+      injectMessageIntoPty((data) => this.pty?.write(data), content);
+    }
+    return true;
   }
 
   /**
@@ -687,6 +1226,19 @@ export class AgentProcess {
    */
   isRestartInFlight(): boolean {
     return this.inFlightStart !== null;
+  }
+
+  /**
+   * Task 3.6: this process's current lifecycle-generation counter
+   * (`this.lifecycleGeneration`, incremented once per `spawn()`). Exposed so
+   * a caller outside this class (FastChecker's 50-min idle-session watchdog)
+   * can bind an observation it publishes to `AgentLifecycleSupervisor` to
+   * the exact generation it was observed against, the same way `spawn()`
+   * itself already stamps `GenerationToken.generation` for its own
+   * `WorkCorrelationEvent`/exit-report observations above.
+   */
+  getLifecycleGeneration(): number {
+    return this.lifecycleGeneration;
   }
 
   /**
@@ -784,28 +1336,6 @@ export class AgentProcess {
   }
 
   /**
-   * Match the API 400 image-poison signature in recent stdout.
-   *
-   * Two variants observed in Anthropic's Messages API responses:
-   *   `API Error: 400 messages.N.content.M.image.source.base64.data: Image format image/<fmt> not supported`
-   *   `API Error: 400 ... image.source.base64.data: ...`
-   *
-   * Matching the prefix `image.source.base64` is robust to wording changes
-   * in Anthropic's error string; matching `image format image/<fmt>` is the
-   * confirmed exact wording today and gives a second signal. Either is enough.
-   */
-  private detectImagePoisonCrash(recentOutput: string): boolean {
-    if (!recentOutput) return false;
-    if (recentOutput.includes('API Error: 400') && recentOutput.includes('image.source.base64')) {
-      return true;
-    }
-    if (/image format image\/[a-z]+ not supported/i.test(recentOutput)) {
-      return true;
-    }
-    return false;
-  }
-
-  /**
    * Write the `.force-fresh` marker that AgentProcess.shouldContinue() reads
    * on the next start() to force a fresh Claude Code session (no --continue).
    * Used by the image-poison auto-recovery in handleExit().
@@ -844,6 +1374,29 @@ export class AgentProcess {
     }
   }
 
+  /**
+   * Task 2.3: thin gate-computation + classify + act-on-proposal wrapper.
+   * All classification arithmetic (image-poison / opencode-continuation /
+   * startup-failure / clean-exit / crash) now lives in the pure
+   * `classifyExit()` (src/daemon/lifecycle/recovery-policy.ts). This method
+   * still owns every side effect classifyExit itself cannot perform: reading
+   * the four gate markers, tailing stdout, writing crashes.log/restarts.log,
+   * flipping `status`, calling `notifyStatusChange()`, sending Telegram
+   * alerts, and scheduling the `setTimeout` restart — Task 2.4/2.5 is what
+   * eventually routes these through the supervisor instead of `this.start()`
+   * directly (see PHASES.md Task 2.3).
+   *
+   * The genuine-crash sliding-window halt (this.crashTimestamps) and the
+   * file-backed daily counter (this.crashCount / resetCrashCountIfNewDay,
+   * unchanged) stay OUTSIDE classifyExit's own budgets record: a true
+   * sliding window and a durable per-day file have no equivalent in the
+   * fixed-window `{count, windowStartMs, pausedUntilMs}` shape Task 1.1
+   * locked for `LifecycleSnapshot.recoveryBudgets`. classifyExit is fed the
+   * already-resolved daily count (so its halt/backoff arithmetic reproduces
+   * `this.crashCount` exactly) with `limits.crashWindowMs` forced to 0 so its
+   * own (redundant, differently-shaped) crash-window branch never fires for
+   * this call site.
+   */
   private handleExit(exitCode: number): void {
     // Capture last 16KB of the agent's stdout BEFORE nulling pty.
     // Used by the image-poison auto-recovery check below — reads the log
@@ -853,320 +1406,283 @@ export class AgentProcess {
     this.pty = null;
     this.clearSessionTimer();
 
-    // When the cortextos daemon is shut down by PM2, SIGTERM propagates to
-    // the whole process group and reaches each PTY's Claude Code child
-    // BEFORE the daemon's stopAll() loop has a chance to call stopAgent() on
-    // it. Those children exit cleanly (code 0) but arrive at handleExit with
-    // stopRequested=false, which used to classify the exit as a crash and
-    // inflate .crash_count_today by one per agent, per PM2 restart.
-    //
-    // agent-manager.ts:stopAll() already writes a `.daemon-stop` marker in
-    // every agent's state dir at the START of its shutdown loop for an
-    // unrelated reason (SessionEnd crash-alert hook). We reuse that marker
-    // here as the authoritative "the daemon is going down" signal. If the
-    // marker exists AND is recent (written within the last 60s), any PTY
-    // exit is a shutdown casualty, not a real crash — swallow it.
-    //
-    // The 60s window guards against a stale marker from a previous shutdown
-    // that wasn't cleaned up: we do NOT want an old marker to silently mask
-    // a genuine crash days later. handleExit does NOT delete the marker —
-    // cleanup stays with agent-manager / hook-crash-alert per the existing
-    // separation of concerns.
-    if (this.isDaemonShuttingDown()) {
-      return;
+    const now = Date.now();
+    const wasReady = this.status === 'running';
+
+    // The four early-exit gates, checked in the exact same order as before
+    // extraction: daemon-shutdown (SIGTERM propagation on PM2 restart),
+    // user-disabled (config.json/enabled-agents.json), intentional stop
+    // (BUG-040: stopRequested || stopping), planned context-handoff restart
+    // (fresh .restart-planned marker). None of these charge any recovery
+    // budget — see classifyExit's gate handling.
+    const gates = {
+      daemonShuttingDown: this.isDaemonShuttingDown(),
+      disabled: this.isDisabled(),
+      intentional: this.stopRequested || this.stopping,
+      planned: this.isPlannedRestart(),
+    };
+    const anyGate = gates.daemonShuttingDown || gates.disabled || gates.intentional || gates.planned;
+    const isGenuineCrash = exitCode !== 0 && !anyGate;
+
+    // Genuine-crash sliding-window pre-check (legacy `crashTimestamps` array,
+    // unchanged) — see this method's class-level doc comment for why this
+    // stays outside classifyExit. A tripped window halts BEFORE the daily
+    // counter below is ever touched, exactly as before extraction.
+    if (isGenuineCrash) {
+      this.appendCrashDetailToCrashesLog(exitCode, recentOutput);
+      if (this.crashWindowMs > 0) {
+        this.crashTimestamps.push(now);
+        this.crashTimestamps = this.crashTimestamps.filter((ts) => now - ts <= this.crashWindowMs);
+        if (this.crashTimestamps.length >= this.crashWindowMax) {
+          this.log(`CRASH_LOOP: ${this.crashTimestamps.length} crashes in ${this.crashWindowMs / 1000}s window — auto-pausing`);
+          this.appendCrashToRestartsLog(exitCode, 0, 'CRASH_LOOP');
+          this.status = 'halted';
+          this.notifyStatusChange();
+          return;
+        }
+      }
+      // Legacy daily crash counter — file-backed, unchanged. Feeds
+      // classifyExit's crash-daily arithmetic below with the already-
+      // resolved, authoritative count.
+      this.crashCount++;
+      const today = new Date(now).toISOString().split('T')[0];
+      this.resetCrashCountIfNewDay(today);
     }
 
-    // Disabled-agent resurrection fix: an agent disabled via config.json or
-    // enabled-agents.json while running must NOT be respawned by any crash-
-    // recovery path below (image-poison, exponential backoff).
-    // Fresh read at exit time — the disable may have happened after start().
-    // Also skips the crash-count increment: an operator-disabled agent's exit
-    // is intentional-by-policy, not a crash.
-    if (this.isDisabled()) {
+    const dayStartMs = Math.floor(now / 86_400_000) * 86_400_000;
+    const budgets: Record<string, RecoveryBudgetEntry> = {
+      ...this.recoveryBudgets,
+      'crash-daily': { count: Math.max(0, this.crashCount - 1), windowStartMs: dayStartMs, pausedUntilMs: null },
+    };
+
+    const obs: ExitObservation = {
+      token: {
+        // Task 2.5 wires the real supervisor epoch / generation counter into
+        // AgentProcess; neither exists here yet, and classifyExit never
+        // reads this field for its decision — it is carried through only
+        // for future provenance/logging.
+        agentId: canonicalAgentId({ instanceId: this.env.instanceId, org: this.env.org, name: this.name }),
+        supervisorEpoch: 0,
+        generation: this.lifecycleGeneration,
+      },
+      exitCode,
+      signal: null,
+      recentOutput,
+      runtime: this.config.runtime ?? 'claude-code',
+      startedAtMs: this.spawnStartedAtMs,
+      exitedAtMs: now,
+      spawnMode: this.lastSpawnMode,
+      wasReady,
+      gates,
+      limits: {
+        maxCrashesPerDay: this.maxCrashesPerDay,
+        // Disabled here — the real crash-window decision already ran above
+        // against the legacy sliding-window array; see class-level comment.
+        crashWindowMs: 0,
+        crashWindowMax: 0,
+      },
+    };
+
+    const proposal = classifyExit(obs, budgets);
+
+    // Persist every budget this classification touched EXCEPT crash-daily,
+    // which stays owned by the file-backed this.crashCount/
+    // resetCrashCountIfNewDay pair applied above.
+    const { 'crash-daily': _crashDaily, ...restBudgets } = proposal.updatedBudgets;
+    this.recoveryBudgets = { ...this.recoveryBudgets, ...restBudgets };
+
+    // ---- Gates: apply their exact original, distinct side effects ----
+    if (gates.daemonShuttingDown) {
+      return;
+    }
+    if (gates.disabled) {
       this.log('Exit while agent is disabled (config.json enabled:false or enabled-agents.json) — not respawning.');
       this.stopRequested = false;
       this.status = 'stopped';
       this.notifyStatusChange();
       return;
     }
-
-    // BUG-040 fix: check stopRequested instead of (only) stopping. The
-    // stopping flag is cleared inside stop() after a 15s timeout window —
-    // which means a slow PTY shutdown can fire handleExit AFTER stopping is
-    // already false, leading to spurious crash recovery. stopRequested is
-    // set by stop() at the START of the shutdown sequence and persists across
-    // stop()'s return until handleExit clears it (right here). This guarantees
-    // that the FIRST exit after a stop() call is treated as intentional, no
-    // matter how delayed it is.
-    //
-    // Also keep the legacy `stopping` check for in-progress detection during
-    // the (most common) case where the exit fires while stop() is still
-    // awaiting. Either flag short-circuits crash recovery.
-    if (this.stopRequested || this.stopping) {
+    if (gates.intentional) {
       this.stopRequested = false;
       return;
     }
-
-    // Planned context-handoff restart: NOT a crash. When an agent's context
-    // fills, the daemon (fast-checker) or `cortextos bus hard-restart` writes a
-    // fresh `.restart-planned` marker (src/bus/system.ts) and the agent exits
-    // to reload with a smaller context. A busy agent legitimately handoffs
-    // 15-25x/day; counting each toward max_crashes_per_day (or the crash-loop
-    // window) falsely HALTs it — observed live: larry hit 15 planned-restarts,
-    // 0 real crashes, and was HALTED at the default limit of 10. Exempt the
-    // planned exit from BOTH counters, mirroring the isDaemonShuttingDown gate
-    // above. A genuine crash writes no such marker and still counts.
-    if (this.isPlannedRestart()) {
+    if (gates.planned) {
       this.log('Planned context-handoff restart (fresh .restart-planned marker) — not counting as a crash.');
       return;
     }
 
-    // Image-poison auto-recovery (companion to PR #446's photo-injection fix).
-    // Checked FIRST so a poisoned-context crash neither trips the crash-loop
-    // window nor charges the daily counter — it is an upstream artifact, not
-    // an agent malfunction.
-    //
-    // Claude Code crashes with `API Error: 400 messages.N.content.M.image.source.base64.data:
-    // Image format image/<fmt> not supported` when conversation history holds a
-    // base64-encoded image whose claimed media_type does not match the actual
-    // bytes. The poison is permanent: every `--continue` restart reloads the
-    // same conversation history and re-hits the same 400, so the agent
-    // crash-loops until it exhausts max_crashes_per_day and the daemon halts.
-    //
-    // This block covers agents that ALREADY have a poisoned context: detect
-    // the 400 signature in the recent stdout, write `.force-fresh` so the next
-    // start discards the saved conversation, and respawn WITHOUT charging the
-    // crash counter. (The photo-suppression source fix from #446 was superseded
-    // by the Track-2 byte-sniff mime reconciliation; this recovery block is the
-    // independent resilience half and stands on its own.)
-    //
-    // Exit is always code 0 in this failure mode (Claude Code surfaces the
-    // 400 to the user then exits cleanly), so we gate on both exit code and
-    // the error signature to avoid false positives that would skip a real
-    // crash counter increment.
-    if (exitCode === 0 && this.detectImagePoisonCrash(recentOutput)) {
-      const now = Date.now();
-      // Filter recoveries to last 15 minutes
-      this.imagePoisonRecoveries = this.imagePoisonRecoveries.filter(t => now - t < 15 * 60_000);
-      this.imagePoisonRecoveries.push(now);
-
-      // Circuit breaker: 3rd recovery within 15min → stop auto-recovery, alert
-      if (this.imagePoisonRecoveries.length >= 3) {
-        this.log(`Image-poison recovery circuit breaker tripped: ${this.imagePoisonRecoveries.length} recoveries in 15min. Force-fresh is failing to clear poisoned history. Auto-recovery paused. Manual intervention required.`);
-        this.status = 'crashed';
-        this.notifyStatusChange();
-
-        // Send Telegram alert
-        const telegramApi = this.telegramApi;
-        const telegramChatId = this.telegramChatId;
-        if (telegramApi && telegramChatId) {
-          const alertMsg = `🚨 IMAGE-POISON RECOVERY CIRCUIT BREAKER: Agent ${this.name} has hit ${this.imagePoisonRecoveries.length} image-poison recoveries in 15min. Force-fresh is failing to clear poisoned history. Auto-recovery paused. Manual intervention required. Check logs/${this.name}/restarts.log for details.`;
-          telegramApi
-            .sendMessage(telegramChatId, alertMsg)
-            .catch(() => { /* non-fatal: notification is observability only */ });
-        }
-        return;
-      }
-
-      this.log('Image-poison crash detected (API 400, unsupported image format). Arming .force-fresh and restarting without counting against max_crashes_per_day.');
-      this.armForceFresh('image-poison auto-recovery');
-      this.appendCrashToRestartsLog(exitCode, 5000, 'IMAGE_POISON_RECOVERY');
-      this.status = 'crashed';
-      this.notifyStatusChange();
-      setTimeout(() => {
-        if (this.status === 'crashed') {
-          this.start().catch(err => this.log(`Image-poison restart failed: ${err}`));
-        }
-      }, 5000);
-      return;
-    }
-
-    // Clean exit (code 0) is a process ending NORMALLY, not a crash. The
-    // opencode runtime is a TUI that completes a turn and exits 0 by design
-    // (see shouldContinue / the opencode session marker) — 100+ such exits/day
-    // would otherwise exhaust max_crashes_per_day and falsely HALT it. Claude
-    // can also exit 0 on a benign session end. Restart to CONTINUE without
-    // charging the daily crash counter or the crash-loop window. Genuine
-    // failures exit NON-zero (SIGSEGV=139, SIGHUP=129, error=1) and still count;
-    // image-poison (an exit-0 crash-loop) is caught by its signature above and
-    // is unaffected.
-    //
-    // Safety: a genuinely broken code-0 tight-loop (e.g. a runtime that fails
-    // to start and instantly re-exits 0) is still caught here — >=8 clean-exit
-    // restarts within 60s is not "normal turns", it is a spin, so we HALT.
-    if (exitCode === 0) {
-      const now = Date.now();
-
-      // Recover an opencode session that repeatedly exits cleanly immediately
-      // after a --continue attach. The next restart starts fresh instead of
-      // consuming the crash budget in a wedged continuation loop.
-      if (
-        this.config.runtime === 'opencode' &&
-        this.lastSpawnMode === 'continue' &&
-        now - this.lastStartAtMs < OPENCODE_CONTINUE_WEDGE_FAST_EXIT_MS
-      ) {
-        this.opencodeContinueWedgeCount++;
-        if (this.opencodeContinueWedgeCount >= OPENCODE_CONTINUE_WEDGE_THRESHOLD) {
-          this.log(`opencode --continue wedge: ${this.opencodeContinueWedgeCount} fast exit_code=0 continues — arming .force-fresh.`);
-          this.armForceFresh('opencode --continue wedge auto-recovery');
-          this.appendCrashToRestartsLog(exitCode, 5000, 'OPENCODE_CONTINUE_WEDGE_RECOVERY');
-          this.opencodeContinueWedgeCount = 0;
+    // ---- Act on the classified proposal ----
+    switch (proposal.cause) {
+      case 'image-poison': {
+        if (proposal.action === 'pause-and-alert') {
+          this.log(`Image-poison recovery circuit breaker tripped: ${proposal.evidence.recoveriesInWindow} recoveries in 15min. Force-fresh is failing to clear poisoned history. Auto-recovery paused. Manual intervention required.`);
           this.status = 'crashed';
           this.notifyStatusChange();
-          setTimeout(() => {
-            if (this.status === 'crashed') {
-              this.start().catch(err => this.log(`opencode wedge recovery restart failed: ${err}`));
-            }
-          }, 5000);
+          this.sendTelegramAlert(`🚨 IMAGE-POISON RECOVERY CIRCUIT BREAKER: Agent ${this.name} has hit ${proposal.evidence.recoveriesInWindow} image-poison recoveries in 15min. Force-fresh is failing to clear poisoned history. Auto-recovery paused. Manual intervention required. Check logs/${this.name}/restarts.log for details.`);
           return;
         }
-      } else {
-        this.opencodeContinueWedgeCount = 0;
+        this.log('Image-poison crash detected (API 400, unsupported image format). Arming .force-fresh and restarting without counting against max_crashes_per_day.');
+        this.armForceFresh('image-poison auto-recovery');
+        this.appendCrashToRestartsLog(exitCode, proposal.delayMs, 'IMAGE_POISON_RECOVERY');
+        this.scheduleRestart(proposal.delayMs, 'Image-poison restart', proposal.cause, proposal.mode);
+        return;
       }
-
-      // Startup-failure guard (completes #242): #242 correctly stopped charging
-      // the crash counter for ALL code-0 exits, but it treats every code-0 exit
-      // as a benign turn-completion. A code-0 exit that fires BEFORE the session
-      // ever became ready is the opposite — a real startup fault (bad
-      // config/model/env). opencode prints an error and exits 0, so it slips
-      // past the crash gate, gets silently retried, and (before this) HALTed
-      // with only a bare CRASH_LOOP line and no alert. Detect the
-      // exit-before-ready case (short-lived spawn + agent never reached
-      // 'running') and, on a cluster of them, trip a LOUD circuit breaker with a
-      // Telegram alert, mirroring the image-poison breaker above. A code-0 exit
-      // AFTER the agent was ready is a normal turn and skips this entirely.
-      const spawnAgeMs = this.spawnStartedAtMs > 0 ? now - this.spawnStartedAtMs : Infinity;
-      const exitedBeforeReady = this.status !== 'running' && spawnAgeMs < 8_000;
-      if (exitedBeforeReady) {
-        this.cleanExitStartupFailures = this.cleanExitStartupFailures.filter((ts) => now - ts < 60_000);
-        this.cleanExitStartupFailures.push(now);
-        if (this.cleanExitStartupFailures.length >= 3) {
-          this.log(
-            `CLEAN_EXIT_STARTUP_FAIL: ${this.cleanExitStartupFailures.length} code-0 exits BEFORE ready in 60s ` +
-            `(runtime=${this.config.runtime ?? 'claude-code'}, model=${this.config.model ?? 'default'}) — ` +
-            `this is a startup failure exiting 0, NOT a normal turn. Halting and alerting instead of silent retry. ` +
-            `Check the agent's config/model/env and logs/${this.name}/stdout.log.`,
-          );
-          this.appendCrashToRestartsLog(exitCode, 0, 'CLEAN_EXIT_STARTUP_FAIL');
+      case 'opencode-continuation': {
+        if (proposal.mode === 'fresh') {
+          this.log(`opencode --continue wedge: ${proposal.evidence.wedgeCount} fast exit_code=0 continues — arming .force-fresh.`);
+          this.armForceFresh('opencode --continue wedge auto-recovery');
+          this.appendCrashToRestartsLog(exitCode, proposal.delayMs, 'OPENCODE_CONTINUE_WEDGE_RECOVERY');
+          this.scheduleRestart(proposal.delayMs, 'opencode wedge recovery restart', proposal.cause, proposal.mode);
+          return;
+        }
+        this.log('Clean exit (code 0) — restarting to continue, not counting as a crash.');
+        this.appendCrashToRestartsLog(exitCode, proposal.delayMs, 'CLEAN_EXIT');
+        this.scheduleRestart(proposal.delayMs, 'Clean-exit restart', proposal.cause, proposal.mode);
+        return;
+      }
+      case 'startup-failure': {
+        this.log(
+          `CLEAN_EXIT_STARTUP_FAIL: ${proposal.evidence.startupFailuresInWindow} code-0 exits BEFORE ready in 60s ` +
+          `(runtime=${this.config.runtime ?? 'claude-code'}, model=${this.config.model ?? 'default'}) — ` +
+          `this is a startup failure exiting 0, NOT a normal turn. Halting and alerting instead of silent retry. ` +
+          `Check the agent's config/model/env and logs/${this.name}/stdout.log.`,
+        );
+        this.appendCrashToRestartsLog(exitCode, 0, 'CLEAN_EXIT_STARTUP_FAIL');
+        this.status = 'halted';
+        this.notifyStatusChange();
+        this.sendTelegramAlert(`🚨 STARTUP FAILURE: Agent ${this.name} exited cleanly (code 0) ${proposal.evidence.startupFailuresInWindow}x within 60s BEFORE ever becoming ready (runtime=${this.config.runtime ?? 'claude-code'}, model=${this.config.model ?? 'default'}). This is a broken startup exiting 0, not a normal turn — auto-restart paused to avoid a silent crashloop. Check config/model/env and logs/${this.name}/stdout.log.`);
+        return;
+      }
+      case 'clean-exit': {
+        if (proposal.action === 'halt') {
+          this.log(`CLEAN_EXIT_LOOP: ${proposal.evidence.cleanExitsInWindow} code-0 exits in 60s — spinning, halting.`);
+          this.appendCrashToRestartsLog(exitCode, 0, 'CRASH_LOOP');
           this.status = 'halted';
           this.notifyStatusChange();
-          const telegramApi = this.telegramApi;
-          const telegramChatId = this.telegramChatId;
-          if (telegramApi && telegramChatId) {
-            const alertMsg = `🚨 STARTUP FAILURE: Agent ${this.name} exited cleanly (code 0) ${this.cleanExitStartupFailures.length}x within 60s BEFORE ever becoming ready (runtime=${this.config.runtime ?? 'claude-code'}, model=${this.config.model ?? 'default'}). This is a broken startup exiting 0, not a normal turn — auto-restart paused to avoid a silent crashloop. Check config/model/env and logs/${this.name}/stdout.log.`;
-            telegramApi
-              .sendMessage(telegramChatId, alertMsg)
-              .catch(() => { /* non-fatal: notification is observability only */ });
-          }
           return;
         }
-      } else {
-        // A code-0 exit AFTER the agent was ready is a genuine turn completion —
-        // clear any accumulated startup-failure suspicion.
-        this.cleanExitStartupFailures = [];
-      }
-
-      this.cleanExitRestarts = this.cleanExitRestarts.filter((ts) => now - ts < 60_000);
-      this.cleanExitRestarts.push(now);
-      if (this.cleanExitRestarts.length >= 8) {
-        this.log(`CLEAN_EXIT_LOOP: ${this.cleanExitRestarts.length} code-0 exits in 60s — spinning, halting.`);
-        this.appendCrashToRestartsLog(exitCode, 0, 'CRASH_LOOP');
-        this.status = 'halted';
-        this.notifyStatusChange();
+        this.log('Clean exit (code 0) — restarting to continue, not counting as a crash.');
+        this.appendCrashToRestartsLog(exitCode, proposal.delayMs, 'CLEAN_EXIT');
+        this.scheduleRestart(proposal.delayMs, 'Clean-exit restart', proposal.cause, proposal.mode);
         return;
       }
-      const backoffMs = this.config.runtime === 'opencode' ? 2000 : 3000;
-      this.log('Clean exit (code 0) — restarting to continue, not counting as a crash.');
-      this.appendCrashToRestartsLog(exitCode, backoffMs, 'CLEAN_EXIT');
-      this.status = 'crashed';
-      this.notifyStatusChange();
-      setTimeout(() => {
-        if (this.status === 'crashed') {
-          this.start().catch(err => this.log(`Clean-exit restart failed: ${err}`));
+      case 'crash':
+      default: {
+        if (proposal.action === 'halt') {
+          this.log(`HALTED: exceeded ${this.maxCrashesPerDay} crashes today`);
+          this.appendCrashToRestartsLog(exitCode, 0, 'HALTED');
+          this.status = 'halted';
+          this.notifyStatusChange();
+          return;
         }
-      }, backoffMs);
-      return;
-    }
-
-    // OBSERVABILITY FIX: every path below this point is a genuine crash
-    // (nonzero exit that survived the shutdown / disabled / planned-restart /
-    // stop / image-poison gates above). `recentOutput` holds the stderr/error
-    // tail — but historically only `exit_code=N` reached restarts.log, and
-    // crashes.log's `reason=` stayed empty because the SessionEnd hook that
-    // writes it cannot run when a hard exit_code=1 kills the process. Persist
-    // the captured tail so a future crash carries a real, greppable reason.
-    this.appendCrashDetailToCrashesLog(exitCode, recentOutput);
-
-    // CrashLoopPauser (instar-inspired): if a sliding window is configured,
-    // check whether the agent is crash-looping before falling through to
-    // the legacy daily counter. The window is a more precise signal than
-    // the per-day count: 3 crashes in 30 minutes is a crash loop even if
-    // the daily budget of 10 is far from exhausted.
-    if (this.crashWindowMs > 0) {
-      const now = Date.now();
-      this.crashTimestamps.push(now);
-      // Prune timestamps outside the window.
-      this.crashTimestamps = this.crashTimestamps.filter(
-        (ts) => now - ts <= this.crashWindowMs,
-      );
-      if (this.crashTimestamps.length >= this.crashWindowMax) {
-        this.log(
-          `CRASH_LOOP: ${this.crashTimestamps.length} crashes in ${this.crashWindowMs / 1000}s window — auto-pausing`,
-        );
-        this.appendCrashToRestartsLog(exitCode, 0, 'CRASH_LOOP');
-        this.status = 'halted';
-        this.notifyStatusChange();
+        this.log(`Crash recovery: restart in ${proposal.delayMs / 1000}s (crash #${this.crashCount})`);
+        // Persist the crash to restarts.log so operators have a durable audit
+        // trail. Previously only planned SELF-RESTART / HARD-RESTART from
+        // bus/system.ts wrote here, which left daemon-classified crashes
+        // invisible outside the rotating PM2 daemon stdout log.
+        this.appendCrashToRestartsLog(exitCode, proposal.delayMs, 'CRASH');
+        this.scheduleRestart(proposal.delayMs, 'Restart', proposal.cause, proposal.mode);
         return;
       }
     }
-
-    // Legacy daily crash counter (fallback when no crash_window is configured,
-    // or as a secondary gate when the window hasn't filled yet).
-    this.crashCount++;
-    const today = new Date().toISOString().split('T')[0];
-    this.resetCrashCountIfNewDay(today);
-
-    if (this.crashCount >= this.maxCrashesPerDay) {
-      this.log(`HALTED: exceeded ${this.maxCrashesPerDay} crashes today`);
-      this.appendCrashToRestartsLog(exitCode, 0, 'HALTED');
-      this.status = 'halted';
-      this.notifyStatusChange();
-      return;
-    }
-
-    // Exponential backoff restart
-    const backoff = Math.min(5000 * Math.pow(2, this.crashCount - 1), 300000);
-    this.log(`Crash recovery: restart in ${backoff / 1000}s (crash #${this.crashCount})`);
-    // Persist the crash to restarts.log so operators have a durable audit
-    // trail. Previously only planned SELF-RESTART / HARD-RESTART from
-    // bus/system.ts wrote here, which left daemon-classified crashes
-    // invisible outside the rotating PM2 daemon stdout log.
-    this.appendCrashToRestartsLog(exitCode, backoff, 'CRASH');
-    this.status = 'crashed';
-    this.notifyStatusChange();
-
-    setTimeout(() => {
-      if (this.status === 'crashed') {
-        this.start().catch(err => this.log(`Restart failed: ${err}`));
-      }
-    }, backoff);
   }
 
-  private shouldContinue(): boolean {
+  /** Flip to 'crashed', notify, and schedule the recovery restart after
+   * `delayMs` — shared tail of every restart-producing proposal branch in
+   * handleExit(). `failureLabel` reproduces each branch's original
+   * restart-failure log message verbatim.
+   *
+   * Gap fix (found during Task 5.3, closed as an ad-hoc fix in the same
+   * worktree/branch): previously this always called `this.start()` directly,
+   * regardless of `this.supervised` — the single most-triggered recovery
+   * path in the daemon bypassed `AgentLifecycleSupervisor` entirely even for
+   * supervised agents. Now gated exactly like `sessionRefresh()` (Task 2.4):
+   * `supervised === false`/absent keeps the byte-for-byte legacy
+   * `this.start()` call; `supervised === true` submits a `restart`
+   * `LifecycleRequest` through `this.owner` instead, carrying the exact
+   * `cause`/`mode` `classifyExit()` (`recovery-policy.ts`) already decided
+   * for this exit — the owner revalidates against the current generation
+   * before spawning (Task 1.5's `isEffectStale()` fencing), so a stop/halt
+   * committed during the backoff delay still revokes the pending recovery
+   * instead of racing it. */
+  private scheduleRestart(delayMs: number, failureLabel: string, cause: RequestCause, mode: StartMode): void {
+    this.status = 'crashed';
+    this.notifyStatusChange();
+    setTimeout(() => {
+      if (this.status !== 'crashed') return;
+      if (this.supervised) {
+        if (!this.owner) {
+          // Defensive fail-closed — same discipline as sessionRefresh():
+          // supervised=true with no owner wired is a build-sequence error
+          // (setOwner() is always called before this can fire), never a
+          // silent fallback to the legacy this.start() path, which would
+          // defeat the entire point of routing recovery through the owner.
+          this.log(`${failureLabel} failed: supervised=true but no lifecycle owner is wired for agent "${this.name}"`);
+          return;
+        }
+        this.owner.request({
+          requestId: randomUUID(),
+          kind: 'restart',
+          cause,
+          mode,
+          observedGeneration: this.lifecycleGeneration,
+          userInitiated: false,
+          evidence: { source: 'exit-classification' },
+          requestedAtMs: Date.now(),
+        }).catch(err => this.log(`${failureLabel} failed: ${err}`));
+        return;
+      }
+      this.start().catch(err => this.log(`${failureLabel} failed: ${err}`));
+    }, delayMs);
+  }
+
+  /** Best-effort Telegram alert — non-fatal, matches the original inline
+   * send-if-wired pattern used by the image-poison and startup-failure
+   * circuit breakers. */
+  private sendTelegramAlert(message: string): void {
+    const telegramApi = this.telegramApi;
+    const telegramChatId = this.telegramChatId;
+    if (telegramApi && telegramChatId) {
+      telegramApi.sendMessage(telegramChatId, message).catch(() => { /* non-fatal: notification is observability only */ });
+    }
+  }
+
+  /**
+   * Task 2.2: decides continue-vs-fresh AND imports (reserves-by-rename) any
+   * pending `.force-fresh` request in the same pass — but the import is a
+   * PURE reservation, never a consume. `startImpl()` threads the returned
+   * `freshRequest` through to the spawn's success/failure outcome, so a
+   * failed spawn can restore it (see `legacy-compat.ts`'s
+   * `restoreFreshRequest`) instead of silently losing the fresh-boot intent.
+   *
+   * The `importFreshRequest` call is deliberately ABOVE the Hermes
+   * early-return (moved there relative to the pre-Task-2.2 code, which
+   * checked the marker only after the Hermes branch): a `.force-fresh`
+   * marker armed on a Hermes agent is now always reserved — so it no longer
+   * leaks in the state dir indefinitely — even though Hermes's own
+   * continue/fresh DECISION below is intentionally left unchanged (per
+   * PHASES.md Task 2.2's explicit ruling): it still comes exclusively from
+   * `hermesDbExists()`, never from the marker. The reservation is still
+   * consumed/restored against this spawn attempt's outcome purely for audit
+   * bookkeeping consistency in that case.
+   */
+  private shouldContinue(): { continueSession: boolean; freshRequest: ImportedFreshRequest | null } {
+    const stateDir = join(this.env.ctxRoot, 'state', this.name);
+    const freshRequest = importFreshRequest(stateDir);
+
     // Hermes: session continuity is determined by whether the SQLite DB exists.
-    // HERMES_HOME env var overrides the default ~/.hermes path.
+    // HERMES_HOME env var overrides the default ~/.hermes path. Unaffected by
+    // `freshRequest` — see the doc comment above.
     if (this.config.runtime === 'hermes') {
       const hermesHome = process.env['HERMES_HOME'];
-      return hermesDbExists(hermesHome);
+      return { continueSession: hermesDbExists(hermesHome), freshRequest };
     }
 
-    // Check for force-fresh marker (all runtimes honor it).
-    const forceFreshPath = join(this.env.ctxRoot, 'state', this.name, '.force-fresh');
-    if (existsSync(forceFreshPath)) {
-      try {
-        unlinkSync(forceFreshPath);
-      } catch { /* ignore */ }
-      return false;
+    // A reserved force-fresh request forces `fresh` mode (all non-Hermes
+    // runtimes honor it). Reserving here does NOT consume it — only
+    // `startImpl()`'s post-spawn success/failure branches do that.
+    if (freshRequest) {
+      return { continueSession: false, freshRequest };
     }
 
     // codex-app-server: session continuity is tracked by the adapter's own
@@ -1183,19 +1699,19 @@ export class AgentProcess {
         this.name,
         'codex-app-server-thread.json',
       );
-      return existsSync(threadStatePath);
+      return { continueSession: existsSync(threadStatePath), freshRequest };
     }
 
     // opencode: do not inspect Claude JSONL history. The OpencodePTY adapter
     // writes a lightweight marker after a successful spawn; that marker is the
     // only signal that the next boot should pass `opencode --continue`.
     if (this.config.runtime === 'opencode') {
-      return opencodeSessionExists(this.env.ctxRoot, this.name);
+      return { continueSession: opencodeSessionExists(this.env.ctxRoot, this.name), freshRequest };
     }
 
     // Default (Claude runtime): existing conversation = JSONL files present.
     const launchDir = this.config.working_directory || this.env.agentDir;
-    if (!launchDir) return false;
+    if (!launchDir) return { continueSession: false, freshRequest };
 
     // Claude projects dir uses the absolute path with all separators replaced by dashes
     // e.g. /Users/foo/agents/boss -> -Users-foo-agents-boss (leading sep becomes -)
@@ -1209,9 +1725,9 @@ export class AgentProcess {
 
     try {
       const files = require('fs').readdirSync(convDir);
-      return files.some((f: string) => f.endsWith('.jsonl'));
+      return { continueSession: files.some((f: string) => f.endsWith('.jsonl')), freshRequest };
     } catch {
-      return false;
+      return { continueSession: false, freshRequest };
     }
   }
 
@@ -1527,6 +2043,25 @@ export class AgentProcess {
       : `🔄 ${this.name} restarted (planned): ${reason || 'no reason given'}`;
   }
 
+  /**
+   * Task 2.4: intentionally UNCHANGED. This 71-hour deadline still lives as
+   * a plain `setTimeout` on this instance and still re-reads
+   * `max_session_seconds` from config.json on every fire (preserved exactly,
+   * per this task's acceptance criteria). What changed is only what firing
+   * DECIDES to do: the fired callback below still just calls
+   * `this.sessionRefresh()` — that method itself now branches on
+   * `this.supervised`, so a supervised agent's fired deadline flows into
+   * `this.owner.request(...)` without this method needing to know anything
+   * about it. `clearSessionTimer()` (called at the top of `runStop()`, which
+   * both the legacy `stop()` path AND the supervised path's fenced
+   * `runStopFenced()` call) still cancels this timer on retirement either
+   * way — "the deadline lives on the owner" (per this task's acceptance
+   * criteria) refers to the *owner's revalidation now being a second,
+   * independent line of defense* on top of this timer being cleared, not to
+   * this `setTimeout` being physically relocated — see PHASES.md Task 2.4
+   * Step 1's explicit preference for this smaller-diff shape over a new
+   * supervisor-owned scheduling primitive.
+   */
   private startSessionTimer(): void {
     const DEFAULT_MAX_SESSION_S = 255600;
     // Node setTimeout uses int32 ms internally. Values > 2^31-1 (~24.8d) silently
@@ -1639,7 +2174,7 @@ export class AgentProcess {
         kind === 'HALTED'
           ? `exit_code=${exitCode} crash_count=${this.crashCount} max_crashes=${this.maxCrashesPerDay}`
           : kind === 'CLEAN_EXIT_STARTUP_FAIL'
-            ? `exit_code=${exitCode} startup_failures=${this.cleanExitStartupFailures.length} (exited before ready — auto-restart paused, alerted)`
+            ? `exit_code=${exitCode} startup_failures=${this.recoveryBudgets['startup-failure']?.count ?? 0} (exited before ready — auto-restart paused, alerted)`
             : kind === 'IMAGE_POISON_RECOVERY' || kind === 'CLEAN_EXIT' || kind === 'OPENCODE_CONTINUE_WEDGE_RECOVERY'
               ? `exit_code=${exitCode} backoff_s=${backoffMs / 1000} (not counted toward max_crashes)`
               : `exit_code=${exitCode} crash_count=${this.crashCount} backoff_s=${backoffMs / 1000}`;

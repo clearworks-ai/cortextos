@@ -374,6 +374,20 @@ export class AgentManager {
         console.log(`[agent-manager] Skipping disabled agent: ${name} (enabled-agents.json)`);
         continue;
       }
+      // Task 5.4-fix: a supervised agent's persisted stopped/halted/
+      // quarantined/blocked desired state must not be overridden by this
+      // unconditional bulk-start pass either — see
+      // `supervisedResurrectionGate()`'s doc comment for the full mechanism
+      // this closes (this loop, not `bootSelfHeal()`, is what actually
+      // resurrects a deliberately-stopped supervised agent on a real daemon
+      // restart, since it runs first and always succeeds for an agent with
+      // an existing adopted record, leaving nothing for `bootSelfHeal()`'s
+      // own equivalent gate below to ever act on).
+      const resurrectionGate = this.supervisedResurrectionGate(name, org, config);
+      if (resurrectionGate.skip) {
+        console.log(`[agent-manager] discoverAndStart: skipping ${name} — ${resurrectionGate.reason}.`);
+        continue;
+      }
       // BUG-043 fix: pass the per-agent org so startAgent can use it instead
       // of falling back to `this.org` (the daemon's startup org).
       await this.startAgent(name, dir, config, org);
@@ -487,36 +501,19 @@ export class AgentManager {
       if (entry && entry.enabled === false) continue;
       if (this.agents.has(name)) continue;
 
-      // Task 2.5 Step 3: for a supervised agent, "enabled but absent from
-      // map" must NOT override a persisted stopped/halted/quarantined
-      // desired state (or a blocked prior retirement) from an earlier
-      // daemon incarnation — that would resurrect an agent an operator (or
-      // a supervised stop) deliberately stopped. An agent with no existing
-      // record yet (first-ever adoption), or one that isn't opted in, has
-      // no such record to check (or isn't checked) and proceeds exactly as
-      // today.
-      if (config.supervised === true) {
-        const persisted = this.peekPersistedDesiredState(name, org);
-        if (persisted) {
-          if (
-            persisted.desiredState === 'stopped' ||
-            persisted.desiredState === 'halted' ||
-            persisted.desiredState === 'quarantined'
-          ) {
-            console.log(
-              `[agent-manager] Boot self-heal: skipping ${name} — persisted desired state is ` +
-              `"${persisted.desiredState}" (supervised); not overriding.`,
-            );
-            continue;
-          }
-          if (persisted.phase === 'blocked') {
-            console.log(
-              `[agent-manager] Boot self-heal: skipping ${name} — a prior retirement is blocked ` +
-              `(supervised): ${persisted.blockedReason ?? 'unknown reason'}.`,
-            );
-            continue;
-          }
-        }
+      // Task 2.5 Step 3 (now shared with discoverAndStart's bulk loop via
+      // `supervisedResurrectionGate()` — Task 5.4-fix): for a supervised
+      // agent, "enabled but absent from map" must NOT override a persisted
+      // stopped/halted/quarantined desired state (or a blocked prior
+      // retirement) from an earlier daemon incarnation — that would
+      // resurrect an agent an operator (or a supervised stop) deliberately
+      // stopped. An agent with no existing record yet (first-ever
+      // adoption), or one that isn't opted in, has no such record to check
+      // (or isn't checked) and proceeds exactly as today.
+      const resurrectionGate = this.supervisedResurrectionGate(name, org, config);
+      if (resurrectionGate.skip) {
+        console.log(`[agent-manager] Boot self-heal: skipping ${name} — ${resurrectionGate.reason}.`);
+        continue;
       }
 
       missing.push(name);
@@ -783,6 +780,57 @@ export class AgentManager {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Task 5.4-fix: shared "don't resurrect a deliberately-stopped/halted/
+   * quarantined supervised agent, or one with a blocked prior retirement"
+   * gate — reused by BOTH `discoverAndStart()`'s initial bulk-start loop and
+   * `bootSelfHeal()`'s recovery pass.
+   *
+   * Before this fix, only `bootSelfHeal()` had this check (Task 2.5 Step 3),
+   * but `bootSelfHeal()` only ever considers an agent still ABSENT from
+   * `this.agents` after the bulk loop already ran. A supervised explicit
+   * stop persists `desiredState: 'stopped'` to the per-agent lifecycle
+   * store, but does not also flip `enabled-agents.json`/`config.json`
+   * `enabled: false` (confirmed: no production caller of
+   * `writeEnabledAgentsMap`/`mutateEnabledAgentsMap` exists outside
+   * `enabled-agents-io.ts` itself and tests) — so on a real daemon restart,
+   * `discoverAndStart()`'s bulk loop saw the agent as still "enabled",
+   * called the unconditional `await this.startAgent(...)` on it, and (for a
+   * `config.supervised: true` agent with an existing adopted record)
+   * always successfully spawned a fresh generation and added it to
+   * `this.agents` — silently resurrecting the agent BEFORE
+   * `bootSelfHeal()`'s own equivalent check ever got a chance to matter
+   * (the agent was no longer "missing" by the time `bootSelfHeal()` ran).
+   * Found and closed by Task 5.4's "durable stopped state survives a
+   * simulated daemon restart" replay.
+   */
+  private supervisedResurrectionGate(
+    name: string,
+    org: string,
+    config: AgentConfig,
+  ): { skip: boolean; reason?: string } {
+    if (config.supervised !== true) return { skip: false };
+    const persisted = this.peekPersistedDesiredState(name, org);
+    if (!persisted) return { skip: false };
+    if (
+      persisted.desiredState === 'stopped' ||
+      persisted.desiredState === 'halted' ||
+      persisted.desiredState === 'quarantined'
+    ) {
+      return {
+        skip: true,
+        reason: `persisted desired state is "${persisted.desiredState}" (supervised); not overriding`,
+      };
+    }
+    if (persisted.phase === 'blocked') {
+      return {
+        skip: true,
+        reason: `a prior retirement is blocked (supervised): ${persisted.blockedReason ?? 'unknown reason'}`,
+      };
+    }
+    return { skip: false };
   }
 
   /**

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { AgentConfig, BusPaths } from '../../src/types/index';
@@ -85,6 +85,27 @@ import type { AgentConfig, BusPaths } from '../../src/types/index';
  *     `runStop()`), so the very next `stopAgent(name, true)` call is
  *     guaranteed to land while that retire is still in flight, not before it
  *     started and not after it finished.
+ *
+ * (d) Task 5.4 addition: a fresh `AgentManager` instance, constructed
+ *     against the SAME on-disk `ctxRoot`/`frameworkRoot`, simulating a brand
+ *     new daemon process starting up after a stop and running its REAL
+ *     `discoverAndStart()` path (the actual production daemon-boot entry
+ *     point, `daemon/index.ts`'s own call) — proving the durable `stopped`
+ *     state survives more than just a bare `LifecycleStateStore` reload
+ *     within the same process. This closed a genuine, previously-
+ *     undocumented gap found by writing this exact test: `bootSelfHeal()`
+ *     alone had a "don't resurrect a persisted stopped/halted/quarantined
+ *     supervised agent" gate (Task 2.5 Step 3), but `discoverAndStart()`'s
+ *     own bulk-start loop — which runs FIRST, unconditionally, for every
+ *     agent dir not disabled via `config.json`/`enabled-agents.json` — had
+ *     no such gate at all, and a supervised explicit stop never flips
+ *     either of those disable flags. So the bulk loop would call
+ *     `startAgent()` and successfully spawn a fresh generation before
+ *     `bootSelfHeal()`'s check ever got a chance to matter (the agent was
+ *     no longer "missing" by then). Fixed via a shared
+ *     `supervisedResurrectionGate()` helper now consulted by both the bulk
+ *     loop and `bootSelfHeal()` — see `agent-manager.ts` for the full
+ *     mechanism.
  * ---------------------------------------------------------------------------
  */
 
@@ -508,6 +529,47 @@ describe('Task 2.10: Scenario B replay — supervised: true (closed)', () => {
     expect(entry.stopped).toBe(true);
     expect(entry.checker.stopCount).toBeGreaterThanOrEqual(1);
     expect(reloadDesiredState(ctxRoot, NAME)).toBe('stopped');
+  });
+
+  it('Task 5.4: durable stopped state survives a SIMULATED DAEMON RESTART — a fresh AgentManager running the real discoverAndStart() does not resurrect the agent', async () => {
+    const am = new AgentManager(INSTANCE_ID, ctxRoot, frameworkRoot, ORG) as unknown as AnyAgentManager;
+    const config: AgentConfig = { supervised: true, startup_delay: 0 };
+
+    await am.startAgent(NAME, agentDir, config, ORG);
+    expect(ptyInstances.length).toBe(1); // generation 1's spawn
+
+    // A plain explicit stop (no overlapping refresh race needed for this
+    // assertion — that race is already covered by the two cases above).
+    const stopResult = await am.stopAgent(NAME, true);
+    expect(stopResult.accepted).toBe(true);
+    expect(am.agents.has(NAME)).toBe(false);
+    expect(reloadDesiredState(ctxRoot, NAME)).toBe('stopped');
+
+    // discoverAgents()/loadAgentConfig() reads config.json from DISK — the
+    // in-memory `config` object passed to `startAgent()` above is never
+    // itself persisted there. A real daemon restart's discoverAndStart()
+    // only ever sees `supervised: true` for this agent if config.json on
+    // disk actually says so, exactly like a real installation's config file.
+    writeFileSync(join(agentDir, 'config.json'), JSON.stringify(config), 'utf-8');
+
+    const ptyCountAfterStop = ptyInstances.length;
+
+    // A FRESH AgentManager — same ctxRoot/frameworkRoot/instanceId, its own
+    // empty in-memory `this.agents` map — simulating a brand new daemon
+    // process starting up and discovering this agent dir from scratch.
+    const am2 = new AgentManager(INSTANCE_ID, ctxRoot, frameworkRoot, ORG) as unknown as AnyAgentManager;
+    await am2.discoverAndStart();
+
+    // No new process/generation started for the stopped agent.
+    expect(ptyInstances.length).toBe(ptyCountAfterStop);
+    // The fresh AgentManager's own view: not resurrected into its registry.
+    expect(am2.agents.has(NAME)).toBe(false);
+    // The fresh AgentManager's view of the agent's durable lifecycle state
+    // reports stopped, not running — read through the same public accessor
+    // the IPC/dashboard status surface uses (Task 2.8's
+    // `getPersistedLifecycleState`), not by re-deriving from the map.
+    const persisted = am2.getPersistedLifecycleState(NAME, ORG);
+    expect(persisted?.desiredState).toBe('stopped');
   });
 });
 

@@ -287,6 +287,13 @@ describe('Task 3.9: Scenario A replay — supervised (closed)', () => {
   it('durable acceptance survives a silently stalled dispatch: outstanding work + a wedge ALERT exist despite an empty inbox and a fresh heartbeat', async () => {
     const store = new LifecycleStateStore(paths, agentId);
     const supervisor = new AgentLifecycleSupervisor(agentId, store, unusedRuntime());
+    // Task 5.4: spy on the REAL supervisor.request() across the WHOLE
+    // scenario (installed before anything runs) so the closing assertions
+    // below can prove, at the request-submission level (not just via the
+    // hardRestart/sessionRefresh call-count proxies Task 3.9 already
+    // checked), that the wedge path specifically never submits a
+    // restart/start-shaped LifecycleRequest to the supervisor.
+    const requestSpy = vi.spyOn(supervisor, 'request');
     const pty = makeReadyAdapter('codex-agent', 'thread-1', ctxRoot);
     const token: GenerationToken = { agentId, supervisorEpoch: 0, generation: 1 };
     wireCorrelation(pty, supervisor, token);
@@ -389,6 +396,23 @@ describe('Task 3.9: Scenario A replay — supervised (closed)', () => {
     expect(logs.some((l) => l.includes('ALERT ONLY, no automatic restart'))).toBe(true);
     expect(hardRestart).not.toHaveBeenCalled();
     expect(agent.sessionRefresh).not.toHaveBeenCalled();
+
+    // Task 5.4: the alert is genuinely an ALERT, not a restart, at the
+    // supervisor-request level — no `restart`- or `start`-shaped
+    // `LifecycleRequest` was ever submitted through `supervisor.request()`
+    // as a result of the wedge path, across the ENTIRE scenario (the spy was
+    // installed before the first pollCycle() ran). Task 3.9's own dispatch
+    // path never calls `supervisor.request()` at all (dispatch goes through
+    // `acceptBatch`/`observe`, not `request` — see `unusedRuntime()`'s doc
+    // comment above), so this scenario's supervisor.request() call count is
+    // expected to be exactly zero end to end — a stronger, request-level
+    // confirmation of the same "alert, not restart" fact the log/mock-call
+    // assertions above already established.
+    expect(requestSpy).not.toHaveBeenCalled();
+    const restartOrStartRequests = requestSpy.mock.calls
+      .map(([req]) => req)
+      .filter((req) => req.kind === 'restart' || req.kind === 'start');
+    expect(restartOrStartRequests).toHaveLength(0);
 
     // 3. The empty-inbox and fresh-heartbeat conditions genuinely hold at
     // the moment of the wedge check — the wedge fired DESPITE them, not

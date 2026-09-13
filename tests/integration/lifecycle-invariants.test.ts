@@ -562,33 +562,35 @@ describe('Task 5.1 Invariant 3: a replacement never acquires resources before th
     expect(unblocked.blockedReason).toBeNull();
     expect(adapter.retireGeneration).toHaveBeenCalledTimes(2);
 
-    // BUG FOUND DURING TASK 5.1 (real, reproducible, not softened away):
-    // `handleStopHalt()` computes its retire token as
-    // `{ generation: snapshot.currentGeneration }` -- but a PRIOR blocked
-    // restart/refresh already optimistically advanced `currentGeneration`
-    // past the generation that actually owns the still-unresolved resource
+    // FIX VERIFIED (Task 5.1 finding, closed by an ad-hoc fix inserted before
+    // the rest of Phase 5): `handleStopHalt()` used to compute ONE retire
+    // token as `{ generation: snapshot.currentGeneration }` for the WHOLE
+    // resources+retiringResources pool -- but a PRIOR blocked restart/refresh
+    // already optimistically advanced `currentGeneration` past the
+    // generation that actually owns the still-unresolved resource
     // (`handleAutonomous` bumps `currentGeneration` to the NEW generation in
     // the SAME commit that decides to restart, before `retireGeneration` is
-    // ever awaited -- see supervisor.ts's autonomous-arbitration branch).
-    // So this second, stop-driven retire calls `runtime.retireGeneration()`
-    // with a GenerationToken whose `generation` does not match
-    // `survivor.owner.generation` (1 vs. the already-bumped 2). The runtime
-    // call itself succeeds and reports 'retired', but `runRetire()`'s own
-    // cleanup filter (`sameGeneration(r.owner, token)`) never matches, so the
-    // resource is genuinely retired by the runtime yet PERMANENTLY remains
-    // in the durable `retiringResources` array -- `phase` and
-    // `blockedReason` both look fully clean (asserted above) while the
-    // resource bookkeeping is silently stale forever. This is exactly the
-    // "verified retirement postcondition" PRD.md S2.3 requires and is a real
-    // Phase 1-4 defect, not an artifact of this test's fake adapter (a real
-    // `AgentProcessRuntimeAdapter.retireGeneration()` preserves `owner`
-    // unchanged on every resource it returns, so production hits this
-    // exact mismatch). Recorded here as a reproducing assertion (not
-    // softened to a false pass) so a future fix makes this line START
-    // failing -- the correct signal to update it.
-    expect(unblocked.retiringResources).toHaveLength(1);
-    expect(unblocked.retiringResources[0].owner.generation).toBe(1);
-    expect(unblocked.retiringResources[0].state).toBe('acquired'); // never touched by the cleanup filter
+    // ever awaited). That fabricated token (2) never matched
+    // `survivor.owner.generation` (1), so `runRetire()`'s own cleanup filter
+    // never matched and the resource stayed stranded forever even though the
+    // runtime genuinely reported it retired.
+    //
+    // The real fix (`groupResourcesByOwner` in supervisor.ts): `handleStopHalt()`
+    // now groups the pool by each resource's OWN real owner `GenerationToken`
+    // and retires each distinct owner generation separately, with its own
+    // correct token -- never a token synthesized from `currentGeneration`.
+    // `runRetire()`'s cleanup filter was also hardened to match by the exact
+    // `resourceId`s a given call attempted (not `sameGeneration`), so
+    // concurrent retires of two different stuck generations can never clobber
+    // each other's bookkeeping. The resource is now genuinely, durably
+    // cleaned up -- it no longer survives this call.
+    expect(unblocked.retiringResources).toHaveLength(0);
+    // Verified at the call boundary too: the second retire call was issued
+    // with a token matching the resource's OWN real (older) generation (1),
+    // never the already-advanced currentGeneration (2) -- this is the exact
+    // mismatch the bug used to produce.
+    const secondRetireCallToken = adapter.retireGeneration.mock.calls[1]?.[0] as GenerationToken | undefined;
+    expect(secondRetireCallToken?.generation).toBe(1);
 
     // The rest of "block resolves -> next request proceeds normally" IS
     // real: phase left 'blocked', and a fresh start allocates a genuinely
@@ -604,9 +606,12 @@ describe('Task 5.1 Invariant 3: a replacement never acquires resources before th
     expect(supervisor.snapshot().currentGeneration).toBe(3);
   });
 
-  it.todo(
-    'FIX NEEDED (Task 5.1 finding): handleStopHalt() should compute its retire token from the actual owner generation(s) present in resources+retiringResources, not from the possibly-already-advanced snapshot.currentGeneration -- otherwise a stop that resolves a block left behind by an earlier blocked restart/refresh can leave a genuinely-retired resource permanently stuck in the durable retiringResources array (see the reproducing assertion in the test above)',
-  );
+  // FIX LANDED (ad-hoc fix inserted before the rest of Phase 5, see
+  // supervisor.ts's `groupResourcesByOwner`): the "FIX NEEDED" `it.todo` this
+  // task originally recorded here is now proven directly by the assertions
+  // in the test above (`unblocked.retiringResources` length 0, and the
+  // second retire call's token carrying the resource's own real generation)
+  // rather than left as a pending placeholder.
 });
 
 // =============================================================================

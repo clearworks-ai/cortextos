@@ -81,6 +81,46 @@ function sameGeneration(a: GenerationToken, b: GenerationToken): boolean {
   return a.agentId === b.agentId && a.supervisorEpoch === b.supervisorEpoch && a.generation === b.generation;
 }
 
+function ownerKey(token: GenerationToken): string {
+  return `${token.agentId}::${token.supervisorEpoch}::${token.generation}`;
+}
+
+/**
+ * Bug found during Task 5.1 (see Invariant 3's reproducing test in
+ * `lifecycle-invariants.test.ts`): `handleStopHalt()` used to fabricate ONE
+ * retire `GenerationToken` from `snapshot.currentGeneration` and hand it the
+ * ENTIRE `[...resources, ...retiringResources]` pool. But a prior *blocked*
+ * restart/refresh already optimistically advances `currentGeneration` to the
+ * NEW generation in the same commit that decides to restart -- BEFORE
+ * `retireGeneration` is ever awaited (see the autonomous-arbitration branch
+ * below) -- so the resource actually stuck in `retiringResources` can be
+ * owned by a strictly OLDER generation than whatever `currentGeneration` is
+ * by the time a later `stop` resolves the block. Passing that mismatched
+ * token to `runtime.retireGeneration()` still "succeeds" (the real adapter's
+ * teardown doesn't key off the token), but `runRetire()`'s own
+ * `sameGeneration(r.owner, token)` cleanup filter then never matches the
+ * resource's real (older) owner, so a genuinely-retired resource is
+ * permanently stranded in the durable `retiringResources` array.
+ *
+ * The fix: group the pool by each resource's OWN real `owner` token (never a
+ * synthesized one) and retire each distinct owner generation separately, with
+ * its own correct token -- so `runRetire()`'s filter always matches. Resources
+ * from the SAME generation are still retired together in one call.
+ */
+function groupResourcesByOwner(resources: OwnedResource[]): Array<{ token: GenerationToken; resources: OwnedResource[] }> {
+  const groups = new Map<string, { token: GenerationToken; resources: OwnedResource[] }>();
+  for (const resource of resources) {
+    const key = ownerKey(resource.owner);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.resources.push(resource);
+    } else {
+      groups.set(key, { token: resource.owner, resources: [resource] });
+    }
+  }
+  return [...groups.values()];
+}
+
 function isAutonomousArbitrable(req: LifecycleRequest): boolean {
   return req.kind === 'start' || req.kind === 'restart' || req.kind === 'refresh';
 }
@@ -786,9 +826,12 @@ export class AgentLifecycleSupervisor {
           ? 'quarantined'
           : 'halted';
 
-    const oldGeneration = snapshot.currentGeneration;
-    const oldResources = [...snapshot.resources, ...snapshot.retiringResources];
-    const hasWorkToRetire = oldGeneration !== null && oldResources.length > 0;
+    // Bug fix (Task 5.1 finding): gate and group on the ACTUAL resource pool,
+    // never on `snapshot.currentGeneration` -- see `groupResourcesByOwner`'s
+    // doc comment for why that generation number can already be stale
+    // relative to the resource(s) genuinely still owned/stuck here.
+    const oldResourcePool = [...snapshot.resources, ...snapshot.retiringResources];
+    const hasWorkToRetire = oldResourcePool.length > 0;
     const nonAuthoritative = batch.filter((e) => e.req.requestId !== authoritative.req.requestId);
 
     // Step 4: committing stop/halt sets desiredState and bumps
@@ -844,9 +887,13 @@ export class AgentLifecycleSupervisor {
       });
     }
 
-    if (hasWorkToRetire && oldGeneration !== null) {
-      const oldToken: GenerationToken = { agentId: this.agentId, supervisorEpoch: post.supervisorEpoch, generation: oldGeneration };
-      void this.runRetire(oldToken, oldResources, operationId);
+    if (hasWorkToRetire) {
+      // Retire each distinct real owner generation found in the pool
+      // separately, each with ITS OWN token -- never one token fabricated
+      // from `currentGeneration` for the whole heterogeneous pool.
+      for (const group of groupResourcesByOwner(oldResourcePool)) {
+        void this.runRetire(group.token, group.resources, operationId);
+      }
     }
   }
 
@@ -1244,14 +1291,29 @@ export class AgentLifecycleSupervisor {
     // generation" -- cleanup authority works on stale generations too.
     const result = await this.runtime.retireGeneration(token, resources);
 
+    // Task 5.1 bug fix: match on the exact resourceIds THIS call attempted,
+    // not on `sameGeneration(r.owner, token)` -- `handleStopHalt()` can now
+    // fire one `runRetire()` per distinct owner generation concurrently
+    // (`groupResourcesByOwner`), so a blind `sameGeneration` filter (or the
+    // old unconditional `draft.retiringResources = result.unresolved`
+    // replacement) would either miss entries whose real owner never matched
+    // a mismatched token, or clobber another group's still-pending entries
+    // that happen to be racing in the same window. Filtering by the attempted
+    // set's own `resourceId`s is correct regardless of how many distinct
+    // generations are involved.
+    const attemptedIds = new Set(resources.map((r) => r.resourceId));
+
     const commit = this.commitWithRetry((draft) => {
       if (result.status === 'retired') {
-        draft.resources = draft.resources.filter((r) => !sameGeneration(r.owner, token));
-        draft.retiringResources = draft.retiringResources.filter((r) => !sameGeneration(r.owner, token));
-        if (draft.phase === 'retiring') draft.phase = 'absent';
+        draft.resources = draft.resources.filter((r) => !attemptedIds.has(r.resourceId));
+        draft.retiringResources = draft.retiringResources.filter((r) => !attemptedIds.has(r.resourceId));
+        if (draft.phase === 'retiring' && draft.resources.length === 0 && draft.retiringResources.length === 0) {
+          draft.phase = 'absent';
+        }
         draft.blockedReason = null;
       } else {
-        draft.retiringResources = result.unresolved;
+        const stillPending = draft.retiringResources.filter((r) => !attemptedIds.has(r.resourceId));
+        draft.retiringResources = [...stillPending, ...result.unresolved];
         draft.phase = 'blocked';
         draft.blockedReason = result.reason;
       }

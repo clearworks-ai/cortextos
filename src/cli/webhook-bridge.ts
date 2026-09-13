@@ -388,12 +388,25 @@ function firefliesWritebackTemplate(args: {
       join('.claude', 'skills', 'meeting-writeback-worker', 'SKILL.md'),
       join('plugins', 'meeting-writeback-worker', 'SKILL.md'),
     ],
-    buildPrompt: ({ skillRelativePath, eventId }) =>
+    // Phase G (spec §11): the webhook lane used to hand the meeting to an LLM
+    // session reading meeting-writeback-worker/SKILL.md. That legacy lane is why
+    // Fireflies webhooks have been arriving since at least 2026-09-09 while NO
+    // meeting ever reached the org-brain and no recap draft was ever created —
+    // delivery worked, the wrong pipeline was on the other end. The deterministic
+    // brain loop (run_meeting.py) does fetch -> extract -> resolve -> file -> CRM
+    // -> Gmail draft -> Telegram in code, with no model in the control path.
+    //
+    // Skill resolution above is deliberately left alone: it still decides whether
+    // this target is writeback-capable, so spawn planning is unchanged. Only what
+    // the spawned session DOES changes.
+    buildPrompt: ({ eventId }) =>
       [
         'You are the meeting-writeback worker (short-lived session).',
         `FF_MEETING_ID=${eventId} is set in your environment.`,
-        `Read ${skillRelativePath} and execute every bash block in order,`,
-        'then output DONE. Do nothing else — no heartbeat, no daily memory, no Telegram.',
+        'Run exactly this one command, then output DONE:',
+        `python3 ${join(args.frameworkRoot, 'scripts', 'brain', 'run_meeting.py')}`,
+        `--meeting-id ${eventId} --apply`,
+        'Do nothing else — no heartbeat, no daily memory, no extra commands.',
       ].join(' '),
     buildEnv: (eventId) => ({ FF_MEETING_ID: eventId }),
     skillExists: args.skillExists,

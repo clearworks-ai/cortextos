@@ -150,7 +150,16 @@ export class FastChecker {
 
   // External Buzz (Nostr/NIP-29) handler (set by daemon) — SP3b-style parallel
   // queue alongside telegramMessages, reusing the same isDuplicate dedup.
-  private buzzMessages: Array<{ formatted: string }> = [];
+  //
+  // Task 3.7: peek-then-drain-on-success, same contract as telegramMessages/
+  // slackMessages (a destructive drain before this task lost a queued Buzz
+  // message outright whenever injection failed — there was no re-queue,
+  // matching the exact pre-Task-3.3 Telegram bug this queue never got fixed
+  // for). `sourceKey` mirrors the other two queues': real Nostr event
+  // identity (`NostrEvent.id`, content-addressed by the protocol — see
+  // `queueBuzzMessage`'s doc comment) when the caller has one, else a
+  // digest fallback.
+  private buzzMessages: Array<{ formatted: string; sourceKey: string }> = [];
 
   // External Slack handler (set by daemon's Slack dispatcher). Deliberately
   // a separate queue from telegramMessages, not a shared one: draining it
@@ -402,9 +411,15 @@ export class FastChecker {
   /**
    * Queue a formatted Buzz message for injection.
    * Called by the daemon's BuzzRelayClient message handler.
+   *
+   * Task 3.7: `sourceKey` mirrors `queueTelegramMessage`'s — pass Buzz's
+   * real `NostrEvent.id`-derived identity (see agent-manager.ts's
+   * `client.onMessage` handler), else this falls back to a digest of
+   * `formatted` (same documented gap as Telegram/Slack).
    */
-  queueBuzzMessage(formatted: string): void {
-    this.buzzMessages.push({ formatted });
+  queueBuzzMessage(formatted: string, sourceKey?: string): void {
+    const key = sourceKey ?? `buzz-digest-${this.hashMessage(formatted)}`;
+    this.buzzMessages.push({ formatted, sourceKey: key });
   }
 
   /**
@@ -441,10 +456,14 @@ export class FastChecker {
       hasTelegramMessage = true;
     }
 
-    // Process queued Buzz messages
-    while (this.buzzMessages.length > 0) {
-      const msg = this.buzzMessages.shift()!;
-      messageBlock += msg.formatted;
+    // Process queued Buzz messages. Task 3.7: PEEK, do not drain here — same
+    // non-destructive contract as the Telegram queue above (a destructive
+    // shift() here, unlike Telegram's, was never fixed after the same class
+    // of bug: an injection failure lost the message permanently since it
+    // was already removed from the queue before delivery was even attempted).
+    const buzzPendingCount = this.buzzMessages.length;
+    for (let i = 0; i < buzzPendingCount; i++) {
+      messageBlock += this.buzzMessages[i].formatted;
     }
 
     // Process queued Slack messages. Deliberately does NOT set
@@ -495,6 +514,7 @@ export class FastChecker {
           messageBlock,
           pendingCount,
           slackPendingCount,
+          buzzPendingCount,
           inboxFormatted,
           ackIds,
           hasTelegramMessage,
@@ -510,6 +530,9 @@ export class FastChecker {
           }
           if (slackPendingCount > 0) {
             this.slackMessages.splice(0, slackPendingCount);
+          }
+          if (buzzPendingCount > 0) {
+            this.buzzMessages.splice(0, buzzPendingCount);
           }
           // ACK inbox messages
           for (const id of ackIds) {
@@ -568,6 +591,7 @@ export class FastChecker {
     messageBlock: string,
     pendingCount: number,
     slackPendingCount: number,
+    buzzPendingCount: number,
     inboxFormatted: Array<{ id: string; formatted: string }>,
     ackIds: string[],
     hasTelegramMessage: boolean,
@@ -584,6 +608,14 @@ export class FastChecker {
       payload: entry.formatted,
       payloadDigest: this.hashMessage(entry.formatted),
     }));
+    // Task 3.7: Buzz gets the same durable-acceptance treatment as
+    // Telegram/Slack/inbox — see `buzzMessages`'s declaration for why it
+    // previously had none at all (unconditional drain, no acceptBatch call).
+    const buzzInputs = this.buzzMessages.slice(0, buzzPendingCount).map((entry) => ({
+      sourceKey: entry.sourceKey,
+      payload: entry.formatted,
+      payloadDigest: this.hashMessage(entry.formatted),
+    }));
     const inboxInputs = inboxFormatted.map((entry) => ({
       sourceKey: entry.id,
       payload: entry.formatted,
@@ -592,7 +624,7 @@ export class FastChecker {
 
     // Step 2 (this task's file): durable acceptance strictly before any
     // removal — and before delivery is even attempted.
-    const acceptResult = await supervisor.acceptBatch([...telegramInputs, ...slackInputs, ...inboxInputs]);
+    const acceptResult = await supervisor.acceptBatch([...telegramInputs, ...slackInputs, ...buzzInputs, ...inboxInputs]);
     if (!acceptResult.ok) {
       this.log(`Durable acceptance failed (${acceptResult.reason}) — leaving all queues/inbox untouched this cycle`);
       return;
@@ -611,6 +643,9 @@ export class FastChecker {
       }
       if (slackPendingCount > 0) {
         this.slackMessages.splice(0, slackPendingCount);
+      }
+      if (buzzPendingCount > 0) {
+        this.buzzMessages.splice(0, buzzPendingCount);
       }
       for (const id of ackIds) {
         ackInbox(this.paths, id);

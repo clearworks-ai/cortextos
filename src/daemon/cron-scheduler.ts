@@ -235,8 +235,37 @@ async function fireWithRetry(
   return false;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise(resolve => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      resolve();
+    }, { once: true });
+  });
+}
+
+/**
+ * Task 3.7: combine multiple `AbortSignal`s into one that fires as soon as
+ * ANY input fires. Deliberately hand-rolled rather than `AbortSignal.any`
+ * (Node 20+) — this file's lib/target support is not guaranteed to include
+ * the newer static, and the hand-rolled version is a handful of lines with
+ * no behavioral gap for this use case (fire-once, never reset).
+ */
+function combineAbortSignals(signals: AbortSignal[]): AbortSignal {
+  const controller = new AbortController();
+  for (const s of signals) {
+    if (s.aborted) {
+      controller.abort();
+      break;
+    }
+    s.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+  return controller.signal;
 }
 
 interface ReceiptFireResult { delivered: boolean; attempts: number; receiptRecorded: boolean; }
@@ -254,10 +283,20 @@ async function fireWithReceiptRetry(
   writeDispatched: (attempt: number) => void,
   startAttempt: number,
   attemptLimit = RETRY_DELAYS_MS.length + 1,
+  signal?: AbortSignal,
 ): Promise<ReceiptFireResult> {
   const maxAttempts = attemptLimit;
   for (let offset = 0; offset < maxAttempts; offset++) {
     const attempt = startAttempt + offset;
+    // Task 3.7: a signal that fired while this fire cycle was suspended in a
+    // prior iteration's backoff sleep (below) must stop this cycle from
+    // making any further dispatch attempt — the generation/scheduler this
+    // fire was serving is gone. Checked at the top of every iteration so it
+    // also catches an abort that raced in before the very first attempt.
+    if (signal?.aborted) {
+      logger('[cron-scheduler] onFire for "' + cron.name + '" aborted before attempt ' + attempt + ' — scheduler stopped mid-retry');
+      return { delivered: false, attempts: attempt, receiptRecorded: false };
+    }
     try {
       writeIntent(attempt);
     } catch {
@@ -274,7 +313,11 @@ async function fireWithReceiptRetry(
         const delay = RETRY_DELAYS_MS[offset];
         logger('[cron-scheduler] onFire failed for "' + cron.name + '" (attempt ' + attempt + '/4, retrying in ' + delay + 'ms): ' + message);
         appendExecutionLog(agentName, { ts: new Date().toISOString(), cron: cron.name, status: 'retried', attempt, duration_ms, error: message });
-        await sleep(delay);
+        await sleep(delay, signal);
+        if (signal?.aborted) {
+          logger('[cron-scheduler] onFire for "' + cron.name + '" aborted during retry backoff — no further attempts');
+          return { delivered: false, attempts: attempt, receiptRecorded: false };
+        }
         continue;
       }
       logger('[cron-scheduler] onFire failed for "' + cron.name + '" after all 4 attempts — giving up. Last error: ' + message);
@@ -303,6 +346,25 @@ export interface CronSchedulerOptions {
   onFire: (cron: CronDefinition, context: CronDispatchContext) => Promise<void> | void;
   logger?: (msg: string) => void;
   outcomeStateDir?: string;
+  /**
+   * Task 3.7: an external cancellation signal (e.g. the owning agent's own
+   * teardown) that, when aborted, causes any retry-backoff sleep currently
+   * in flight inside `fireWithReceiptRetry` to resolve immediately instead
+   * of waiting out its full delay, and prevents any further dispatch
+   * attempt for that in-flight fire cycle. Optional and purely additive —
+   * omitting it preserves the pre-Task-3.7 behavior exactly (a suspended
+   * retry runs its backoff to completion). `stop()` also aborts an
+   * internally-owned signal regardless of whether an external one was
+   * supplied, so a caller that never wires one still gets prompt
+   * cancellation of anything in flight when the scheduler itself is
+   * stopped — this only closes the "stopping an interval is not
+   * cancellation of its current callback" gap for the backoff sleep; the
+   * dispatch call itself (`onFire`) is still awaited to completion once
+   * started (Task 3.7's real correctness fix for a fire landing mid-
+   * teardown is the `acceptBatch`+`injectAgentDetailed` rewrite in
+   * `agent-manager.ts`/`cron-dispatch.ts`, not this signal).
+   */
+  signal?: AbortSignal;
 }
 
 export interface CronDispatchContext {
@@ -317,6 +379,15 @@ export class CronScheduler {
   private readonly onFire: (cron: CronDefinition, context: CronDispatchContext) => Promise<void> | void;
   private readonly logger: (msg: string) => void;
   private readonly outcomeStateDir?: string;
+
+  /**
+   * Task 3.7: own abort controller, aborted unconditionally by `stop()`.
+   * Combined with any externally-supplied `opts.signal` (see
+   * `combinedAbortSignal`) so a caller who never wires one still gets the
+   * backoff-cancellation behavior on stop().
+   */
+  private readonly ownAbort = new AbortController();
+  private readonly combinedSignal: AbortSignal;
 
   /** In-memory schedule, keyed by cron name. */
   private scheduled: Map<string, ScheduledCron> = new Map();
@@ -353,6 +424,9 @@ export class CronScheduler {
     this.logger    = opts.logger ?? ((msg: string) => process.stdout.write(msg + '\n'));
     this.outcomeStateDir = opts.outcomeStateDir
       ?? (process.env.CTX_ROOT ? join(process.env.CTX_ROOT, 'state', opts.agentName) : undefined);
+    this.combinedSignal = combineAbortSignals(
+      opts.signal ? [this.ownAbort.signal, opts.signal] : [this.ownAbort.signal],
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -382,6 +456,13 @@ export class CronScheduler {
       this.tickHandle = null;
     }
     this.scheduled.clear();
+    // Task 3.7: abort our own signal unconditionally (even when the caller
+    // never wired an external one) so any `fireWithReceiptRetry` currently
+    // parked in its backoff sleep for a fire that was already in flight
+    // wakes immediately and makes no further dispatch attempt, instead of
+    // running out its full delay after the interval/schedule are already
+    // gone.
+    this.ownAbort.abort();
     this.logger(`[cron-scheduler] stopped for agent "${this.agentName}"`);
   }
 
@@ -706,6 +787,7 @@ export class CronScheduler {
           },
           startAttempt,
           activeOutcome?.state === 'started' ? 1 : RETRY_DELAYS_MS.length + 1,
+          this.combinedSignal,
         );
       const success = fireResult.delivered;
       let outcomeAdvanced = fireResult.receiptRecorded;

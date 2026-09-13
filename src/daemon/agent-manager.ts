@@ -26,7 +26,8 @@ import { dispatchMeetingConsumers } from './meeting-consumer-dispatch.js';
 import { BuzzRelayClient, BuzzDispatcher, loadBuzzConfig, type NostrEvent } from '../buzz/index.js';
 import { computeDormancy, parseHeartbeatIntervalMs } from '../utils/dormancy.js';
 import { CRONS_DIRECTORY, CRONS_FILENAME } from '../bus/crons-schema.js';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
+import { dispatchCronFire } from './cron-dispatch.js';
 import { AgentLifecycleSupervisor } from './lifecycle/supervisor.js';
 import { AgentProcessRuntimeAdapter } from './lifecycle/agent-runtime.js';
 import { LifecycleStateStore } from './lifecycle/state-store.js';
@@ -84,6 +85,30 @@ function dispatchResultFromReceipt(receipt: RequestReceipt): LifecycleDispatchRe
     phase: receipt.phase,
     blockedReason: receipt.blockedReason,
   };
+}
+
+/**
+ * Task 3.7: an abortable version of `new Promise(r => setTimeout(r, ms))`.
+ * Used by the primary/activity Telegram poller Conflict-restart wrappers'
+ * 30-second retry backoff so a stop landing mid-sleep (`entry.ingressAbort`)
+ * wakes the wrapper immediately instead of leaving it parked for up to 30s
+ * after the entry it would act on is already gone. Each wrapper's own
+ * `stillMapped(name, ownEntry)` re-check on waking (present before this
+ * task, unchanged) is what actually prevents a stale retry from restarting
+ * into a successor generation — this only shortens how long it lingers.
+ */
+function sleepAbortable(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      resolve();
+    }, { once: true });
+  });
 }
 
 /**
@@ -157,6 +182,25 @@ type AgentEntry = {
    * only the runtime resources it tracks are retired.
    */
   supervisor?: AgentLifecycleSupervisor;
+  /**
+   * Task 3.7: aborted by `stopAgent()` at the start of this entry's teardown
+   * (alongside `stopped = true`). Threads into the primary/activity Telegram
+   * poller Conflict-restart wrappers' 30-second retry sleep and into this
+   * entry's `CronScheduler` construction, so a stop landing mid-backoff
+   * wakes those loops immediately instead of leaving them parked for up to
+   * 30s after the entry they'd act on is already gone. Purely a prompt-
+   * shutdown/resource-cleanup improvement — the `stillMapped(name, ownEntry)`
+   * identity check each of those loops already performs is what actually
+   * prevents a post-stop retry from restarting into a successor generation;
+   * this signal only shortens how long a doomed retry lingers.
+   *
+   * Optional (rather than required) so pre-existing test doubles that build
+   * an `AgentEntry`-shaped literal directly (bypassing `startAgent()`, e.g.
+   * `agent-manager-map-entry-race.test.ts`'s `fakeEntry()`) keep compiling
+   * and running unchanged — every real production entry (`startAgent()`'s
+   * `ownEntry`) always constructs one; every consumer uses `?.` accordingly.
+   */
+  ingressAbort?: AbortController;
 };
 
 /**
@@ -853,6 +897,16 @@ export class AgentManager {
       }
 
       this.agents.delete(name);
+      // Task 3.7: abort ONLY now — this entry's map identity is already
+      // fully settled (deleted, or already superseded before this point).
+      // Aborting any earlier races the wrapper loops' `stillMapped` check:
+      // `abort()` dispatches its listener SYNCHRONOUSLY, which resumes a
+      // parked wrapper's `await` as a microtask that can run before this
+      // function's own next `await` — if that happened before `agents.delete`
+      // above, `stillMapped(name, entry)` would still read true (the entry is
+      // still in the map) and the wrapper would wrongly restart into a name
+      // that is mid-teardown. See `AgentEntry.ingressAbort`'s doc comment.
+      entry.ingressAbort?.abort();
 
       if (userInitiated) {
         if (this.pendingRestarts.delete(name)) {
@@ -900,6 +954,10 @@ export class AgentManager {
       }
     }
     this.agents.delete(name);
+    // Task 3.7: abort only now — see stopSupervisedAgent()'s identical
+    // placement comment for why this must come after the map identity is
+    // fully settled, not alongside `entry.stopped = true` above.
+    entry.ingressAbort?.abort();
   }
 
   /**
@@ -1314,6 +1372,7 @@ export class AgentManager {
       checker,
       supervised: supervisedActive,
       supervisor: agentSupervisor,
+      ingressAbort: new AbortController(),
     };
     this.agents.set(name, ownEntry);
 
@@ -1673,7 +1732,7 @@ export class AgentManager {
             return;
           }
           log(`Telegram poller for ${name} exited (${poller.lastExitReason}). Sleeping 30s then restarting to retake getUpdates lock.`);
-          await new Promise(r => setTimeout(r, 30_000));
+          await sleepAbortable(30_000, ownEntry.ingressAbort?.signal);
         }
       };
       startPrimaryPollerWithRestart().catch(err => {
@@ -1939,7 +1998,7 @@ export class AgentManager {
           return;
         }
         log(`Activity-channel poller for ${name} exited (${activityPoller.lastExitReason}). Sleeping 30s then restarting.`);
-        await new Promise(r => setTimeout(r, 30_000));
+        await sleepAbortable(30_000, ownEntry.ingressAbort?.signal);
       }
     };
     startActivityPollerWithRestart().catch((err) => {
@@ -1986,7 +2045,14 @@ export class AgentManager {
           const target = this.agents.get(result.agentName);
           if (!target) continue;
           const formatted = FastChecker.formatBuzzTextMessage(event.pubkey, channelId, event.content);
-          target.checker.queueBuzzMessage(formatted);
+          // Task 3.7: `NostrEvent.id` is a content-addressed hash the relay
+          // assigns to every event (per the Nostr protocol) — a stable,
+          // real transport identity, strictly better than the digest-of-
+          // formatted-text fallback Telegram/Slack fall back to when no
+          // caller-supplied identity is available. Namespaced with the
+          // channel so the same event id on two different channels (should
+          // that ever occur) does not collide.
+          target.checker.queueBuzzMessage(formatted, `buzz/${channelId}/${event.id}`);
         }
       });
       entry = { client, dispatcher, started: false };
@@ -2166,6 +2232,16 @@ export class AgentManager {
       return LEGACY_DISPATCHED_RESULT;
     } finally {
       this.stoppingAgents.delete(name);
+      // Task 3.7: abort only now, in `finally` — after every branch above
+      // (superseded-return, deleted-and-return, exception) has already
+      // settled this entry's map identity. `abort()` dispatches its
+      // listener SYNCHRONOUSLY, which resumes a parked poller/cron-scheduler
+      // wrapper's `await` as a microtask that can run before this function's
+      // OWN next `await` resolves — if that happened before `agents.delete`
+      // ran, `stillMapped(name, entry)` would still read true (the entry is
+      // still in the map) and the wrapper would wrongly restart into a name
+      // that is mid-teardown. See `AgentEntry.ingressAbort`'s doc comment.
+      entry.ingressAbort?.abort();
     }
   }
 
@@ -2843,9 +2919,36 @@ export class AgentManager {
       }
 
       try {
-        const injected = this.injectAgent(agentName, injection);
-        if (!injected) {
-          throw new Error(`injectAgent returned false for agent "${agentName}" — agent may not be running`);
+        // Task 3.7: stop treating "successful injection" as delivery.
+        // `sourceKey` carries a real cron-definition + run ID identity —
+        // `context.dispatchKey` (`runId:attempt`) when the scheduler
+        // supplied one, so a crash-recovery replay of the SAME attempt
+        // (cron-scheduler.ts's `activeOutcome.state === 'started'` restart
+        // path) resolves to the SAME `WorkRecord` rather than minting a new
+        // one (see `AgentLifecycleSupervisor.acceptBatch()`'s sourceKey
+        // dedup). The manual/no-context test-cron-fire path (`context`
+        // undefined) falls back to a timestamp-keyed identity — it has no
+        // run ID to reuse and is not subject to the scheduler's own retry
+        // recovery.
+        const sourceKey = context
+          ? `cron/${agentName}/${cron.name}/${context.dispatchKey}`
+          : `cron/${agentName}/${cron.name}/manual/${firedAt}`;
+        const payloadDigest = createHash('sha256').update(injection).digest('hex');
+        const supervisor = this.agents.get(agentName)?.supervisor;
+        if (supervisor) {
+          await dispatchCronFire(sourceKey, injection, payloadDigest, {
+            acceptBatch: (inputs) => supervisor.acceptBatch(inputs),
+            mintEffect: () => mintManualEffect(agentName, supervisor),
+            injectDetailed: (text, effect, workIds) => this.injectAgentDetailed(agentName, text, effect, workIds),
+          });
+        } else {
+          // Defensive fallback only — Task 2.5 always constructs a
+          // per-agent supervisor (even for an unsupervised agent), so a
+          // registered agent with none should not happen in practice.
+          const injected = this.injectAgent(agentName, injection);
+          if (!injected) {
+            throw new Error(`injectAgent returned false for agent "${agentName}" — agent may not be running`);
+          }
         }
       } finally {
         try {
@@ -2860,6 +2963,9 @@ export class AgentManager {
       agentName,
       onFire,
       logger: (msg) => console.log(`[daemon] ${msg}`),
+      // Task 3.7: let this entry's own teardown cancel an in-flight retry
+      // backoff promptly (see `AgentEntry.ingressAbort`'s doc comment).
+      signal: entry.ingressAbort?.signal,
     });
 
     scheduler.start();

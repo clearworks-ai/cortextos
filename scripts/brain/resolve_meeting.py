@@ -367,11 +367,44 @@ def quote_grounded(quote: object, blob: str) -> bool:
     return bool(n) and n in blob
 
 
+# Josh 2026-09-13, on a real recap draft: "i dont love this as a commitment
+# (Mrin will remain available for John to reach out if further clarifications come
+# up)". Standing-availability statements are pleasantries — they carry a real
+# grounding quote, so the quote gate keeps them, and they then become bus tasks and
+# numbered next steps in a CLIENT-FACING draft. Nobody ever does them, because there
+# is nothing to do. Kept deliberately narrow: the phrasing must be availability or
+# an open invitation AND carry no deliverable, so "Josh will make himself available
+# on Tuesday to walk the site" (a real appointment) survives.
+_AVAILABILITY_RES = (
+    re.compile(r"\b(?:remain|remains|stay|stays|be|is|are)\s+available\b", re.I),
+    re.compile(r"\bavailable\s+(?:for|to)\b.*\b(?:reach out|question|clarif|follow[- ]up|assist|help)", re.I),
+    re.compile(r"\breach out\b.*\bif\b", re.I),
+    re.compile(r"\bif\b.*\b(?:questions?|clarif\w*|anything else|issues?)\b.*\b(?:arise|arises|come up|comes up|needed)\b", re.I),
+)
+# A concrete scheduled/deliverable signal that overrides the availability shape.
+_DELIVERABLE_RE = re.compile(
+    r"\b(?:on|by|before|at)\s+(?:mon|tue|wed|thu|fri|sat|sun|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d)"
+    r"|\b(?:send|share|contact|review|set up|schedule|walk|draft|prepare|deliver|call|email|book)\b",
+    re.I,
+)
+
+
+def is_nonactionable_commitment(text: str) -> bool:
+    """True when a commitment is a standing-availability pleasantry, not work."""
+    s = " ".join(str(text or "").split())
+    if not s:
+        return False
+    if not any(rx.search(s) for rx in _AVAILABILITY_RES):
+        return False
+    return not _DELIVERABLE_RE.search(s)
+
+
 def quote_gate(extraction: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
     blob = normalize_quote(
         " ".join(str(u.get("text") or "") for u in (source.get("text_units") or []) if isinstance(u, dict))
     )
-    dropped = {"decisions": 0, "commitments": 0, "open_questions": 0, "promotion": False, "promotion_reason": None}
+    dropped = {"decisions": 0, "commitments": 0, "commitments_nonactionable": 0,
+               "open_questions": 0, "promotion": False, "promotion_reason": None}
     decisions = []
     for item in extraction.get("decisions") or []:
         if isinstance(item, dict) and quote_grounded(item.get("quote"), blob):
@@ -381,6 +414,9 @@ def quote_gate(extraction: dict[str, Any], source: dict[str, Any]) -> dict[str, 
     commitments = []
     for item in extraction.get("commitments") or []:
         if isinstance(item, dict) and quote_grounded(item.get("quote"), blob):
+            if is_nonactionable_commitment(item.get("text")):
+                dropped["commitments_nonactionable"] += 1
+                continue
             commitments.append(item)
         else:
             dropped["commitments"] += 1

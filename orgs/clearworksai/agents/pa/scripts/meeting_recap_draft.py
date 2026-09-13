@@ -296,7 +296,11 @@ def build_body(meeting: dict[str, Any], voice_guidance: str) -> str:
     return "\n\n".join(parts)
 
 
-DRAFT_LINK_TEMPLATE = "https://mail.google.com/mail/u/0/#drafts?compose={draft_id}"
+# /mail/u/0/ is whichever Google account the browser signed into first, so on a
+# multi-account browser the link opens the WRONG inbox (Josh, 2026-09-13: "THE
+# link goes to my personal gmail"). Gmail accepts the account address in place
+# of the numeric index and routes to that mailbox regardless of sign-in order.
+DRAFT_LINK_TEMPLATE = "https://mail.google.com/mail/u/{account}/#drafts?compose={draft_id}"
 
 
 def _draft_id_from_stdout(stdout: str) -> str | None:
@@ -426,7 +430,7 @@ def process_meetings(
                     "subject": subject,
                     "body": body,
                     "draft_id": draft_id,
-                    "link": DRAFT_LINK_TEMPLATE.format(draft_id=draft_id) if draft_id else None,
+                    "link": DRAFT_LINK_TEMPLATE.format(account=DEFAULT_TO, draft_id=draft_id) if draft_id else None,
                 })
                 ledger_ids.add(key)
                 continue

@@ -580,7 +580,14 @@ class DraftLinkCaptureTests(unittest.TestCase):
         self.assertEqual(len(summary["drafts"]), 1)
         d = summary["drafts"][0]
         self.assertEqual(d["draft_id"], "r-8891234")
-        self.assertEqual(d["link"], "https://mail.google.com/mail/u/0/#drafts?compose=r-8891234")
+        # Josh 2026-09-13: "THE link goes to my personal gmail". /mail/u/0/ is
+        # whichever account the browser signed into FIRST, so on a multi-account
+        # browser it opens the wrong inbox. Gmail accepts the account ADDRESS in
+        # place of the index, which pins it to the right mailbox every time.
+        self.assertEqual(
+            d["link"],
+            "https://mail.google.com/mail/u/josh@clearworks.ai/#drafts?compose=r-8891234",
+        )
         self.assertTrue(d["subject"])
         # the COPY has to travel with it — Josh reads the draft from Telegram
         self.assertIn("Reviewed the audit findings.", d["body"])

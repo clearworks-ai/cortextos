@@ -3890,3 +3890,50 @@ def test_malformed_override_file_does_not_break_unrelated_meetings(tmp_path) -> 
     (crm / "meeting-home-overrides.json").write_text("{", encoding="utf-8")
     res = _resolve_unknown(tmp_path, vault, repo, fireflies_id="01G2BADJSON")
     assert res["home_path"]
+
+
+# --- Josh 2026-09-13: "i dont love this as a commitment" --------------------------
+# "Mrin will remain available for John to reach out if further clarifications come
+# up" is a pleasantry, not a commitment. It has a real grounding quote, so the quote
+# gate keeps it, and it then becomes a bus task and a numbered next step in the
+# client-facing recap draft. Standing-availability statements are noise.
+
+
+def _commitment(text: str, quote: str) -> dict:
+    return {"text": text, "quote": quote, "owner": "Mrin S", "owner_side": "ours", "deadline": None}
+
+
+def _gate(items: list[dict], blob: str) -> dict:
+    from resolve_meeting import quote_gate
+    return quote_gate({"commitments": items}, {"text_units": [{"text": blob}]})
+
+
+def test_standing_availability_is_not_a_commitment(tmp_path) -> None:
+    quote = "Mrin will remain available for John to reach out if further clarifications come up."
+    out = _gate([_commitment(quote, quote)], quote)
+    assert out["commitments"] == []
+    assert out["dropped"]["commitments_nonactionable"] == 1
+
+
+def test_other_availability_phrasings_are_also_dropped(tmp_path) -> None:
+    for quote in [
+        "Josh is available if any questions arise.",
+        "Sarah will be available for follow-up questions as needed.",
+        "Tom said to reach out if anything else comes up.",
+    ]:
+        out = _gate([_commitment(quote, quote)], quote)
+        assert out["commitments"] == [], quote
+
+
+def test_real_commitments_survive_the_availability_filter(tmp_path) -> None:
+    """The filter must never eat actual work. These all name a deliverable."""
+    for quote in [
+        "Mrin will contact Abby to get access to a sample client folder.",
+        "Josh will send the findings deck on Friday.",
+        "Sarah will review the phone bill and advise on migration savings.",
+        "Tom will set up Firefly for the client and share the admin link.",
+        "Josh will make himself available on Tuesday to walk the site.",
+    ]:
+        out = _gate([_commitment(quote, quote)], quote)
+        assert len(out["commitments"]) == 1, quote
+        assert out["dropped"]["commitments_nonactionable"] == 0, quote

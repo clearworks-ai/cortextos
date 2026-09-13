@@ -474,13 +474,27 @@ def _check_crm_scripts_support_full_file() -> int:
     return 0
 
 
+def _requires_d09_signature(*, backfill: bool, expected_batch_id: str | None) -> bool:
+    """Whether this apply needs a per-meeting D-09 marker.
+
+    Josh 2026-09-13: bulk runs keep the human gate — that is where it earns its
+    keep, since a bad resolver can mint a hundred junk pages in one batch and D-20
+    is the only thing that catches it before it lands. A SINGLE live meeting
+    auto-applies: the webhook lane has nobody at a keyboard to sign, and requiring a
+    signature per meeting is precisely why this loop never ran unattended. The
+    blast radius of one meeting is one meeting, and it is reversible in git.
+    """
+    return bool(backfill or expected_batch_id)
+
+
 def _run_apply(meeting_id, vault, repo, source_dir, *, force, backfill=False,
                expected_batch_id=None, allow_short=False) -> int:
     # G0b C2-3: unconditional — no --skip-sign-check bypass exists.
     # CH-1/S-2: existence alone is not proof of a real sign-off — validate
     # signed_by/signed_at/capture_sha256 (progress.validate_sign_marker).
     marker = sign_marker_path(vault, "fireflies", meeting_id)
-    sign_failure = progress.validate_sign_marker(marker)
+    needs_signature = _requires_d09_signature(backfill=backfill, expected_batch_id=expected_batch_id)
+    sign_failure = progress.validate_sign_marker(marker) if needs_signature else None
     if sign_failure:
         print(f"FAILED at sign-check: {sign_failure}", file=sys.stderr)
         return 15
@@ -533,7 +547,9 @@ def _run_apply(meeting_id, vault, repo, source_dir, *, force, backfill=False,
     # extract/resolve/adapt regenerate anything, catches the envelope
     # having changed since sign-off (a manual --refetch, a hand-edited
     # source.json, or a re-extraction) before any production write happens.
-    post_fetch_sign_failure = progress.validate_sign_marker(marker, envelope=source_dir)
+    post_fetch_sign_failure = (
+        progress.validate_sign_marker(marker, envelope=source_dir) if needs_signature else None
+    )
     if post_fetch_sign_failure:
         print(f"FAILED at sign-check: {post_fetch_sign_failure}", file=sys.stderr)
         return 15

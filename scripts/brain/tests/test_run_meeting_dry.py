@@ -18,7 +18,11 @@ if str(BRAIN) not in sys.path:
 def test_apply_exits_64() -> None:
     from run_meeting import main
 
-    assert main(["--meeting-id", "x", "--apply"]) == 15  # R2: d09-signed gate (FR-012 sign-check)
+    # Josh 2026-09-13: a single live --apply no longer needs a D-09 marker, so it
+    # runs past the sign-check and stops at fetch instead (exit 2, no API key here).
+    # The gate is asserted on the batch-bound path below, where it still applies.
+    assert main(["--meeting-id", "x", "--apply"]) == 2
+    assert main(["--meeting-id", "x", "--apply", "--batch", "fireflies-20260907T213624Z"]) == 15
     assert main(["--meeting-id", "x"]) == 64
     assert main(["--meeting-id", "fireflies:../etc/passwd", "--dry-run"]) == 64
 

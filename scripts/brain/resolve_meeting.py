@@ -974,6 +974,43 @@ def resolve(
                 "corroborated": False,
                 "also_present": [],
             }
+    # (12) an EXPLICIT human declaration beats the domain/contacts ladder.
+    # d3d89787 gave rule 7 this door; it was never enough, because the paths that
+    # fire EARLIER never consulted it: a free-mail attendee with a contacts.json
+    # row takes rule 5, and a single mapped domain among many unmapped ones takes
+    # rule 3. Both carve the meeting away from a page a human has explicitly told
+    # us owns that exact classifier string (Josh 2026-09-12: the Teiger peer group
+    # is Doug Teiger Consulting, not the one attendee whose address happened to be
+    # known, and not LMD Architecture because one of 36 firms in the room has a
+    # page). Sits BELOW office-hours (11) and the community door (10), which are
+    # categorical, and below the node/alias matches (1, 2), which are more specific
+    # than an org-level name. A string claimed by two pages is already failed
+    # closed to "" by load_closed_sets (:317-324) and is skipped here.
+    if not is_protected and cls_org_name:
+        declared_slug = closed["org_name_to_slug"].get(_norm_title(cls_org_name))
+        if declared_slug and declared_slug in clients:
+            declared_hit = _client_hit(declared_slug, nodes, clients, rule=12)
+            declared_hit["also_present"] = _also(declared_slug)
+            return declared_hit
+        if declared_slug and declared_slug in closed["orgs"]:
+            page_rel = _relationship_from_text(
+                closed["orgs"][declared_slug].read_text(encoding="utf-8")
+            )
+            declared_rel = (
+                page_rel if page_rel in RELATIONSHIPS else str(cls.get("relationship") or "client")
+            )
+            return {
+                "counterparty_slug": declared_slug,
+                "kind": "org",
+                "relationship": declared_rel,
+                "home_path": f"orgs/{declared_slug}.md",
+                "node": "none",
+                "created": None,
+                "confidence": float(cls.get("confidence") or 0),
+                "rule": 12,
+                "corroborated": False,
+                "also_present": _also(declared_slug),
+            }
     # (B, folded into rule 4) contacts.json identifies a person by name that a
     # bare email-domain guess cannot see at all (no email on that participant
     # object). When that identity resolves to a different client than the

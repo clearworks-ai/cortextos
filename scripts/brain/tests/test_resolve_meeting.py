@@ -3463,3 +3463,139 @@ def test_employer_inference_yields_to_a_classifier_named_page(tmp_path) -> None:
     assert rc == 0
     res = json.loads((src / "resolution.json").read_text(encoding="utf-8"))
     assert res["home_path"] == "clients/third-party-fixture.md", res
+
+
+# --- R4b phase-2c: a declared '- CRM org name:' wins outside rule 7 too ----------
+# d3d89787 gave rule 7 a declared-alias-first check. Josh's 2026-09-12 rulings
+# ("that group with doug is actually Doug Tieger Consulting", "lmd is lmd need one
+# single company") cannot be implemented without the same check on the paths that
+# fire EARLIER than rule 7 — rule 5 (a free-mail attendee who matches a contact row)
+# and rule 3 (a single minority domain candidate among many unmapped ones).
+
+
+def _declared_repo(tmp_path: Path, contacts: list[dict] | None = None) -> Path:
+    repo = tmp_path / "repo"
+    crm = repo / "orgs/clearworksai/agents/crm-codex/crm"
+    crm.mkdir(parents=True, exist_ok=True)
+    (crm / "org-aliases.json").write_text("{}", encoding="utf-8")
+    (crm / "contacts.json").write_text(
+        json.dumps({"contacts": contacts or []}), encoding="utf-8"
+    )
+    return repo
+
+
+def _teiger_participants() -> list[dict]:
+    return [
+        {"name": "Josh Weiss", "email": "josh@clearworks.ai", "side": "ours",
+         "spoke": True, "notetaker": False},
+        # free-mail AND a contacts.json row -> this is what rule 5 fires on
+        {"name": "Christian Nielsen", "email": "christian@gmail.com", "side": "theirs",
+         "spoke": True, "notetaker": False},
+        {"name": "Marcela Bermudez", "email": "mbermudez@lmdarchitecture.com",
+         "side": "theirs", "spoke": True, "notetaker": False},
+        {"name": "Aaron Brumer", "email": "aaron@aaronbrumer.example", "side": "theirs",
+         "spoke": True, "notetaker": False},
+        {"name": "Erin Morris", "email": "erin@erinmorris.example", "side": "theirs",
+         "spoke": True, "notetaker": False},
+    ]
+
+
+_TEIGER_ORG_NAME = "Douglas Teiger AIA Architect Peer Group"
+
+
+def _seed_declared(tmp_path: Path, *, also_declared_on: str | None = None,
+                   lmd_declares_domain: bool = False) -> tuple[Path, Path]:
+    vault = tmp_path / "vault"
+    brain = vault / "raw/areas/clearworks/org-brain"
+    (brain / "clients").mkdir(parents=True)
+    (brain / "projects").mkdir()
+    (brain / "orgs").mkdir()
+    (brain / "orgs" / "doug-teiger-consulting.md").write_text(
+        "# Doug Teiger Consulting\n\nkind: org\nrelationship: colleague\n\n"
+        "## Current state\n\n"
+        f"- CRM org name: {_TEIGER_ORG_NAME}\n",
+        encoding="utf-8",
+    )
+    lmd = "# Client: LMD Architecture\n\n"
+    if lmd_declares_domain:
+        lmd += "domains: lmdarchitecture.com\n\n"
+    lmd += "## Contacts\n"
+    (brain / "clients" / "lmd-architecture.md").write_text(lmd, encoding="utf-8")
+    (brain / "orgs" / "clearworks-internal.md").write_text(
+        "# Clearworks Internal\n\nkind: org\nrelationship: internal\n\n## Contacts\n",
+        encoding="utf-8",
+    )
+    if also_declared_on:
+        (brain / "orgs" / f"{also_declared_on}.md").write_text(
+            f"# {also_declared_on}\n\nkind: org\nrelationship: colleague\n\n"
+            "## Current state\n\n"
+            f"- CRM org name: {_TEIGER_ORG_NAME}\n",
+            encoding="utf-8",
+        )
+    repo = _declared_repo(
+        tmp_path,
+        contacts=[{"id": "christian-nielsen", "name": "Christian Nielsen",
+                   "emails": ["christian@gmail.com"], "company": ""}],
+    )
+    return vault, repo
+
+
+def _resolve_teiger(tmp_path, vault, repo, *, title="Best Practice Group 03 Teiger 2025 Q2"):
+    from resolve_meeting import main
+
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(
+        src,
+        title=title,
+        participants=_teiger_participants(),
+        org_name=_TEIGER_ORG_NAME,
+        domain=None,
+        relationship="colleague",
+        confidence=0.7,
+        meeting_type="other",
+        fireflies_id="01TEIGERDECLARED",
+    )
+    assert main(["--source", str(src), "--vault", str(vault), "--repo-root", str(repo)]) == 0
+    return json.loads((src / "resolution.json").read_text(encoding="utf-8"))
+
+
+def test_declared_org_name_beats_rule5_person_page(tmp_path) -> None:
+    """Josh 2026-09-12: the Teiger peer group is Doug Teiger Consulting. The meeting
+    has a free-mail attendee who matches a contacts.json row, so rule 5 fires first
+    and carves orgs/christian-nielsen.md out of an attendee. An explicit human
+    declaration of the exact classifier string must win instead."""
+    vault, repo = _seed_declared(tmp_path)
+    res = _resolve_teiger(tmp_path, vault, repo)
+    assert res["home_path"] == "orgs/doug-teiger-consulting.md"
+    assert res["created"] is None
+    assert res["kind"] == "org"
+
+
+def test_declared_org_name_beats_a_minority_domain_candidate(tmp_path) -> None:
+    """Josh 2026-09-12: "lmd is lmd need one single company". Merging the LMD
+    duplicate makes lmdarchitecture.com a client candidate, and it is the ONLY
+    mapped domain among many, so rule 3 would hand this 5-way peer-group meeting to
+    LMD Architecture on one attendee's address. The declaration must still win."""
+    vault, repo = _seed_declared(tmp_path, lmd_declares_domain=True)
+    res = _resolve_teiger(tmp_path, vault, repo)
+    assert res["home_path"] == "orgs/doug-teiger-consulting.md"
+    assert res["created"] is None
+
+
+def test_office_hours_title_still_beats_a_declared_org_name(tmp_path) -> None:
+    """P-3 is categorical (Josh 2026-09-08, "the office hours just make them
+    clearworks"). The new declared-alias door must sit BELOW it, never above."""
+    vault, repo = _seed_declared(tmp_path)
+    res = _resolve_teiger(tmp_path, vault, repo, title="AI Office Hours (AIA LA)")
+    assert res["home_path"] == "orgs/clearworks-internal.md"
+
+
+def test_declared_org_name_claimed_by_two_pages_does_not_fire(tmp_path) -> None:
+    """load_closed_sets fails a duplicate CRM org name closed for BOTH pages
+    (:317-324). The new door must honour that and fall through to the old
+    behaviour rather than picking one by directory order."""
+    vault, repo = _seed_declared(tmp_path, also_declared_on="some-other-org")
+    res = _resolve_teiger(tmp_path, vault, repo)
+    assert res["home_path"] == "orgs/christian-nielsen.md"
+    assert res["rule"] == 5

@@ -854,9 +854,11 @@ describe('meeting-writeback planner', () => {
 
     expect(plan).not.toBeNull();
     expect(plan?.dir).toBe(join(tempRoot, 'orgs', 'clearworksai', 'agents', 'pa-codex'));
-    expect(plan?.prompt).toContain(
-      join('..', '..', 'skills', 'meeting-writeback-worker', 'SKILL.md'),
-    );
+    // Phase G: skill resolution still gates whether the target is
+    // writeback-capable (hence plan.dir above), but the spawned session now runs
+    // the deterministic pipeline rather than reading the legacy SKILL.
+    expect(plan?.prompt).toContain(join('scripts', 'brain', 'run_meeting.py'));
+    expect(plan?.prompt).toContain('--meeting-id meeting-123 --apply');
   });
 });
 

@@ -114,6 +114,21 @@ source-vs-state diff, and spot-check 3 above run on n = 2 real clients before v1
 - Transport: webhook-hub (Railway, `main`, HMAC per source) → `bridge.clearworks.ai` →
   daemon spawn → handler script. Proven end to end for Fireflies 2026-09-13.
 
+## Roast verdict
+
+**RESHAPE → amendments accepted by Josh** · confidence medium-high · 2026-09-14 · mode=code
+Biggest risk: confidently-wrong resolutions never escalate (D-03 watched the wrong failure mode) and become permanent under fill-blanks-once — MSIA already shows the damage pattern at one source.
+Cheapest 48-hour test (probe): replay digest-supersede against the existing 292-meeting corpus, count duplicate History entries (MSIA = dirty control); plus Astra's 5-thread Gmail gap-check → ledger claims in Phase 2.
+Cheapest 48-hour test (demo): n/a — mechanism questions.
+Scores: Constitution 6/10 · YAGNI 4/10 · Contrarian 3/10 · Code-Researcher 7/10 · Operator 4/10
+
+**Accepted amendments (Josh, "sure try it", 2026-09-14):**
+- **D-03 AMENDED — detection, not approval.** Auto-write stands. ADD: a daily per-client "state changes made yesterday" digest and an invariant check (CRM org vs declared page lines), so wrong-but-confident writes surface within a day. Escalation-on-unresolvable alone is refuted by this repo's own history (eight ground-truth rounds of confident wrong picks).
+- **D-02/D-03 RECONCILED (to be specified in FRs):** supersede = a marked replacement entry in History, never a silent rewrite; define whether/how a supersede propagates into an already-filled fill-blanks-once fact.
+- **D-08 RESEQUENCED:** Gmail thin slice FIRST against the existing resolver; the spine is extracted when the SECOND source needs it; Zoom-attendance drops to last. The Gmail dedup gate against comms-backfill.py's live path is a build-order gate, not a footnote.
+
+**Peer-review corrections carried into Phase 1:** two identity schemes (source_ref+contact_id vs observation digest) must be one scheme or explicitly mapped; D-04 must name the actual source-agnostic resolver core (domain/contact/alias matching) rather than claim "the resolver" extracts.
+
 ## Next (fresh session recommended)
 
 1. specify Phase 0.8 — `Skill(roast)` mode=code on this brief's premise. NOT yet run:

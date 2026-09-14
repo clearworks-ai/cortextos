@@ -2982,7 +2982,17 @@ export class AgentManager {
           ? `cron/${agentName}/${cron.name}/${context.dispatchKey}`
           : `cron/${agentName}/${cron.name}/manual/${firedAt}`;
         const payloadDigest = createHash('sha256').update(injection).digest('hex');
-        const supervisor = this.agents.get(agentName)?.supervisor;
+        // BUGFIX (2026-09-13, production hotfix): this must gate on `supervised`,
+        // not merely on a supervisor object existing — Task 2.5's lazy adoption
+        // means every agent (supervised or not) gets a real supervisor record.
+        // Checking truthiness alone routed EVERY cron fire (on EVERY agent, since
+        // no agent had `supervised: true` in production) through `acceptBatch()`,
+        // creating real work-ledger entries that nothing ever marks complete for
+        // an unsupervised agent — `outstandingWork()` grew monotonically and the
+        // Task 3.6 wedge-exclusion widening then fired "suspected wedge" on every
+        // cycle, for every agent, forever. Use the same `getSupervisorForAgent()`
+        // gate every other call site in this file already uses.
+        const supervisor = this.getSupervisorForAgent(agentName);
         if (supervisor) {
           await dispatchCronFire(sourceKey, injection, payloadDigest, {
             acceptBatch: (inputs) => supervisor.acceptBatch(inputs),

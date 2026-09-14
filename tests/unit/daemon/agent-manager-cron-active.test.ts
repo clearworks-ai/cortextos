@@ -103,3 +103,89 @@ describe('AgentManager.onFire — .cron-active marker (loop6)', () => {
     expect(existsSync(markerPath)).toBe(false);
   });
 });
+
+describe('AgentManager.onFire — supervised gating (production hotfix 2026-09-13)', () => {
+  // Regression for a real production incident: Task 2.5's lazy adoption gives
+  // EVERY agent a real supervisor object, supervised or not. onFire used to
+  // gate on that object's mere presence instead of `entry.supervised === true`,
+  // so every cron fire on every unsupervised agent called `acceptBatch()` and
+  // created a work-ledger entry nothing ever completed — `outstandingWork()`
+  // grew forever and Task 3.6's wedge-exclusion widening then alerted
+  // "suspected wedge" on every cycle, for every agent, in production.
+  let testDir: string;
+  let ctxRoot: string;
+  let frameworkRoot: string;
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join(tmpdir(), 'cron-supervised-gate-test-'));
+    ctxRoot = join(testDir, 'instance');
+    frameworkRoot = join(testDir, 'framework');
+    mkdirSync(join(ctxRoot, 'config'), { recursive: true });
+    cronCapture.onFireByAgent.clear();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  function makeManagerWithSupervisor(agentName: string, supervised: boolean) {
+    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
+    const acceptBatch = vi.fn().mockResolvedValue({ ok: true, workIds: ['work-test-1'], batchId: 'batch-test-1' });
+    const snapshot = vi.fn().mockReturnValue({
+      agentId: agentName,
+      supervisorEpoch: 1,
+      currentGeneration: 1,
+      intentRevision: 0,
+    });
+    // A real (lazily-adopted) supervisor object is present on EVERY entry,
+    // matching Task 2.5's design — the bug was never checking `supervised`.
+    (am as unknown as { agents: Map<string, unknown> }).agents.set(agentName, {
+      process: { config: { runtime: 'claude' } },
+      checker: {},
+      supervised,
+      supervisor: { acceptBatch, snapshot },
+    });
+    (am as unknown as { startAgentCronScheduler(name: string): void }).startAgentCronScheduler(agentName);
+    const onFire = cronCapture.onFireByAgent.get(agentName);
+    if (!onFire) throw new Error('onFire was not captured');
+    return { am, onFire, acceptBatch };
+  }
+
+  it('an unsupervised agent (supervised: false, supervisor object present) never calls acceptBatch — falls back to legacy injectAgent', async () => {
+    const { am, onFire, acceptBatch } = makeManagerWithSupervisor('unsupervised-agent', false);
+    vi.spyOn(am, 'injectAgent').mockReturnValue(true);
+
+    await onFire({ name: 'heartbeat', prompt: 'tick' });
+
+    expect(acceptBatch).not.toHaveBeenCalled();
+    expect(am.injectAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it('an agent with no `supervised` field at all (the real production shape before this fix) never calls acceptBatch either', async () => {
+    const am = new AgentManager('test-instance', ctxRoot, frameworkRoot, 'acme');
+    const acceptBatch = vi.fn().mockResolvedValue({ ok: true, workIds: ['work-test-1'], batchId: 'batch-test-1' });
+    (am as unknown as { agents: Map<string, unknown> }).agents.set('legacy-shape-agent', {
+      process: { config: { runtime: 'claude' } },
+      checker: {},
+      supervisor: { acceptBatch }, // supervised field entirely absent
+    });
+    (am as unknown as { startAgentCronScheduler(name: string): void }).startAgentCronScheduler('legacy-shape-agent');
+    const onFire = cronCapture.onFireByAgent.get('legacy-shape-agent');
+    if (!onFire) throw new Error('onFire was not captured');
+    vi.spyOn(am, 'injectAgent').mockReturnValue(true);
+
+    await onFire({ name: 'heartbeat', prompt: 'tick' });
+
+    expect(acceptBatch).not.toHaveBeenCalled();
+  });
+
+  it('a genuinely supervised agent (supervised: true) DOES route the cron fire through acceptBatch', async () => {
+    const { am, onFire, acceptBatch } = makeManagerWithSupervisor('supervised-agent', true);
+    vi.spyOn(am, 'injectAgentDetailed').mockResolvedValue({ ok: true, workIds: ['work-test-1'], batchId: 'batch-test-1' });
+
+    await onFire({ name: 'heartbeat', prompt: 'tick' });
+
+    expect(acceptBatch).toHaveBeenCalledTimes(1);
+  });
+});

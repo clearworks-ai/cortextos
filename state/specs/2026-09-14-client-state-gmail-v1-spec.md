@@ -3,7 +3,7 @@ title: Client State v1 — Gmail thin slice
 slug: client-state-gmail-v1
 date: 2026-09-14
 mode: standard
-status: in-adversarial
+status: converged
 repo: cortextos
 base-branch: main
 version: 3
@@ -12,7 +12,7 @@ supersedes: state/specs/2026-09-14-client-state-loop-brief.md
 owner: Josh
 ---
 
-# Client State v1 — Gmail thin slice (spec DRAFT)
+# Client State v1 — Gmail thin slice
 
 The wedge from the approved brief, post-roast: ONE source (Gmail), the shared write
 discipline, and the detection net — built directly against the existing resolver and CRM
@@ -41,8 +41,13 @@ another entity's binding is still ambiguous, and the row must represent that.
 - WHEN a message inside the poll window has any non-`filed` resolution THE SYSTEM SHALL
   re-evaluate resolution on each run (a cheap closed-sets re-check, no LLM call), file
   only the not-yet-filed resolutions, and reuse the row's CACHED `extraction` for any
-  later filing — the LLM runs at most once per (source_ref, content_digest), so a
-  partial re-file can never mint differently-worded duplicate commitments.
+  later filing — the LLM runs at most once per (source_ref, content_digest,
+  bound-entity set): WHEN a late-bound resolution files and the entity set differs from
+  the set at extraction time THE SYSTEM SHALL re-run the extraction with the widened
+  open-items context (round-3 fix — a cached extraction computed before entity B
+  resolved never saw B's open items, silently voiding tier-2 dedup for exactly the
+  partial-resolution case), and the refreshed result replaces the cache. Item text is
+  quote-gated identically on re-run, so re-extraction cannot mint ungrounded items.
 - WHEN a re-check changes nothing THE SYSTEM SHALL write nothing — re-checks are not
   observations; digest counts (the backfill cue) are per DISTINCT source_ref.
 - WHEN a sender becomes a known entity after their mail has left the poll window THE
@@ -79,9 +84,13 @@ reads use `+read` (G-09), windowing uses day-granular date operators (G-10).
   snapshot, not today's fleet).
 - WHEN the poller runs THE SYSTEM SHALL acquire a single-flight lock via the existing
   claim primitives (bus claim commands: exclusive file creation, configurable dir + TTL
-  — verified round 2) with TTL 60 minutes, sized above the worst legitimate run (50
+  — verified round 2) with TTL 60 minutes, sized above the worst poller run (50
   messages × bounded extraction), and a locked tick SHALL exit without processing — the
-  next tick catches up safely via the ledger. The manual backfill takes the SAME lock.
+  next tick catches up safely via the ledger. The manual backfill takes the SAME lock
+  and, because its runtime is unbounded (a `--days 30` day-sweep), SHALL refresh the
+  claim periodically (heartbeat-touch) so stale cleanup never releases a live run —
+  without this, a long backfill loses its lock mid-run and the next tick double-files
+  (round-3 finding).
 - WHEN a run completes successfully THE SYSTEM SHALL write a RUN RECEIPT
   (`{last_success_at, window_days, message_count}`) — the artifact gap detection reads;
   per-message rows alone cannot distinguish a quiet weekend from a dead poller.
@@ -166,7 +175,8 @@ System MUST derive `{summary, commitments[], decisions[], open_questions[]}` fro
 message via ONE bounded LLM call whose itemized outputs are quote-grounded against the
 message body, reusing the meeting pipeline's validation pieces with an email-specific
 prompt — a sibling `extract_email.py`, not a fork of the meeting prompt. The result is
-CACHED in the FR-001 ledger row: at most one LLM call per (source_ref, content_digest).
+CACHED in the FR-001 ledger row: at most one LLM call per (source_ref, content_digest,
+bound-entity set) — a late-bound entity widens the context and re-runs (FR-001).
 - The reuse contract names ALL the pieces (G-04, expanded round 1): `quote_gate` for
   item grounding, PLUS `validate_extraction`'s single-line/control-character checks,
   PLUS schema validation of the model output. Known gate behaviors carried knowingly:
@@ -425,6 +435,13 @@ MEDIUM/LOW: per-resolution outcomes + cached extraction (FR-001), tier-2 context
 + quote-gate exemption (FR-005), lock TTL sized to worst run + backfill takes the lock
 (FR-002), no-change re-checks write nothing (FR-001).
 
-**Round 3 — 2026-09-14.** All round-2 findings applied above; structural conformance to
-the validator (frontmatter, single-line EARS per FR, bucket lines, verdict tokens,
-G-16/G-17 added). Verification of round-2 closures: pending final logic pass.
+**Round 3 — 2026-09-14.** All round-2 findings applied; structural conformance to the
+validator (frontmatter, single-line EARS per FR, bucket lines, verdict tokens,
+G-16/G-17 added). Final logic verification: 7/8 round-2 closures CLOSED; 1 GAP
+(backfill runtime vs fixed lock TTL → claim heartbeat-touch, FR-002) and 1 NEW HIGH
+(cached extraction froze tier-2 context before late-binding entities resolved →
+extraction identity widened to (source_ref, content_digest, bound-entity set),
+FR-001/FR-005) — both fixed inline exactly as the reviewer prescribed; no new
+machinery. **CONVERGED 2026-09-14: zero CRITICAL/HIGH findings open after 3 rounds** (2 full
+two-reviewer rounds + 1 scoped verification round, cap reached with all findings
+closed). Validator exit 0.

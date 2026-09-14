@@ -5,7 +5,7 @@
   "repo_root": "/Users/joshweiss/code/cortextos",
   "status": "running",
   "created": "2026-09-14",
-  "updated": "2026-09-14T16:58:47.335Z",
+  "updated": "2026-09-14T17:30:36.614Z",
   "graphify_root": "graphify-out/graph.json",
   "ledger_root": "docs/pipeline/ledgers",
   "staging_mutex_group": "cortextos-staging",
@@ -43,14 +43,105 @@
     {
       "id": "goalify",
       "type": "goalify",
-      "status": "ready",
+      "status": "done",
       "path": null,
       "title": "Create /goal conditions",
       "depends_on": [
         "spec-client-state-gmail-v1-spec"
       ],
       "error": null,
-      "meta": {}
+      "meta": {
+        "goal_ids": [
+          "goal-client-state-gmail-v1-build",
+          "goal-client-state-gmail-v1-activate"
+        ]
+      }
+    },
+    {
+      "id": "goal-client-state-gmail-v1-build",
+      "type": "goal",
+      "status": "running",
+      "path": "docs/pipeline/goals/2026-09-14-client-state-gmail-v1-build-goal.md",
+      "title": "R1 BUILD — Gmail thin slice built, staged, proven on copies (zero prod writes)",
+      "depends_on": [
+        "goalify"
+      ],
+      "chars": 44967,
+      "ledger_path": "docs/pipeline/ledgers/2026-09-14-client-state-gmail-v1-goal-client-state-gmail-v1-build.md",
+      "staging_mutex_group": "cortextos-staging",
+      "stage_shas": [],
+      "promote_blockers": [],
+      "watch_items": [],
+      "error": null,
+      "meta": {
+        "branch": "feat/client-state-gmail-v1-build",
+        "stage_target": "feature/client-state-gmail-v1",
+        "max_usd": 2,
+        "grok": "skipped-by-Josh",
+        "workflow_pack": "fast-release",
+        "artifacts": [
+          {
+            "path": "state/specs/2026-09-14-client-state-gmail-v1-spec.md",
+            "sha256": "16facac4ea332bcb5601b07ad5c791561166e5fe09173b71f265bc6fdac23381",
+            "role": "spec"
+          },
+          {
+            "path": "docs/pipeline/goals/2026-09-14-client-state-gmail-v1-build-goal.md",
+            "sha256": "4d53258128638acc98c06cf1401026273f918b5e93ccfe06688a8f2e981d5489",
+            "role": "condition"
+          }
+        ]
+      },
+      "claim": "stage"
+    },
+    {
+      "id": "goal-client-state-gmail-v1-activate",
+      "type": "goal",
+      "status": "blocked",
+      "path": "docs/pipeline/goals/2026-09-14-client-state-gmail-v1-activate-goal.md",
+      "title": "R2 ACTIVATE — live cron + first production writes (entry gate: Josh promote + explicit go)",
+      "depends_on": [
+        "goal-client-state-gmail-v1-build"
+      ],
+      "chars": 26685,
+      "ledger_path": "docs/pipeline/ledgers/2026-09-14-client-state-gmail-v1-goal-client-state-gmail-v1-activate.md",
+      "staging_mutex_group": "cortextos-staging",
+      "stage_shas": [],
+      "promote_blockers": [],
+      "watch_items": [],
+      "error": null,
+      "meta": {
+        "branch": "feat/client-state-gmail-v1-activate",
+        "stage_target": "feature/client-state-gmail-v1",
+        "human_gate": "entry E1-E3",
+        "max_usd": 2,
+        "grok": "skipped-by-Josh",
+        "workflow_pack": "fast-release",
+        "artifacts": [
+          {
+            "path": "state/specs/2026-09-14-client-state-gmail-v1-spec.md",
+            "sha256": "16facac4ea332bcb5601b07ad5c791561166e5fe09173b71f265bc6fdac23381",
+            "role": "spec"
+          },
+          {
+            "path": "docs/pipeline/goals/2026-09-14-client-state-gmail-v1-activate-goal.md",
+            "sha256": "46775668edc33b2824d3d8ca43f33d74db980067b2819a9432d70982d5e53125",
+            "role": "condition"
+          }
+        ]
+      }
+    },
+    {
+      "id": "promote",
+      "type": "promote",
+      "status": "blocked",
+      "path": null,
+      "title": "Human /promote decision",
+      "depends_on": [
+        "goal-client-state-gmail-v1-build",
+        "goal-client-state-gmail-v1-activate"
+      ],
+      "error": null
     }
   ]
 }

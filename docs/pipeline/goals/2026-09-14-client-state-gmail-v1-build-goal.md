@@ -413,7 +413,13 @@ STANDING RULES (apply to the whole release — state once):
   of the vault, `--crm-dir` = a COPY of `orgs/clearworksai/agents/crm/crm/` whose COPIED
   scripts are invoked (they resolve their stores relative to `__file__`), `--state-dir` =
   a scratch dir, and a PATH-trap shim named `cortextos` (logs argv, exits 1) sits first on
-  PATH for every dry-run and every test so any bus call is counted and fails. A hybrid
+  PATH for every dry-run and every test so any bus WRITE is counted and fails. The shim
+  passes through exactly three READ-ONLY / scratch-scoped bus verbs to the real CLI, each
+  still logged: `bus meeting-brief-claim` and `bus meeting-brief-release` (they write only
+  under the scratch `--claims-dir`) and `bus list-tasks` (a read; the orchestrator needs
+  current open tasks for FR-008 dedup). `create-task`, `send-telegram`, `add-cron`,
+  `comms-filter` and every other verb stay trapped. (Amended 2026-09-14 after G0 round 2
+  finding G0B2-6: the original wording trapped the read the spec requires.) A hybrid
   proof fakes ONLY the irreversible transport (`cortextos bus …`, Telegram) — never the
   internal function that owns the transition (ledger append, renderer, dedup).
 - **Metered spend.** Extraction calls use the exact `claude -p` shape at
@@ -614,9 +620,13 @@ RELEASES (do ONLY R1 — never the activate goal's work)
        poller logs every gws argv) shows only `+triage` / `+read` verbs.
     5. `idempotency.json`: an immediately repeated identical dry-run appends zero ledger
        rows, makes zero `claude` calls (cost delta 0.00), prints zero write previews, and
-       exits 0; a third run with the lock file held by a live PID exits without
-       processing and the receipt is unchanged; with a stale lock (mtime > 60 min) it
-       reclaims and runs.
+       exits 0; a third run with the lock file held by a live PID exits 2 without
+       processing, the run receipt (`run-receipt.json`) is byte-identical to before, and
+       the refusal cause lands in a SEPARATE diagnostic file (`last-lock-refusal.json`)
+       — fail-closed halts persist their cause without falsifying the success receipt;
+       with a stale lock (mtime and stored timestamp > 60 min old) the next acquire
+       reclaims and runs (meeting-brief semantics: stale-cleared then win). (Amended
+       2026-09-14 after G0 round 2 finding G0B2-7.)
     6. `digest-dry-run.txt`: `meeting_loop_watch.py --dry-run` with `FIREFLIES_API_KEY`
        unset and `CLIENT_STATE_DIR=<scratch>/state` prints the Gmail section built from
        the dry-run ledger + receipt (changes list, ignored-sender counts, gap line absent

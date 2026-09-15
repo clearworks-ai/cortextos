@@ -1,0 +1,57 @@
+{
+ "round": 3,
+ "dispositions": [
+  {
+   "id": "P1-1",
+   "status": "RESOLVED",
+   "note": "FR-011 requires \"the expected `subscription` value the handler validates.\" The cited code supports this: provider-shadow-ingress.ts:213 compares `envelope.subscription` with `config.subscription`."
+  },
+  {
+   "id": "P1-5",
+   "status": "NOT",
+   "note": "The recovery sweep is capped at 7 days. If `last_processed_at` is more than 7 days old, it does not cover the entire cursor gap. The spec still needs uncapped/chained coverage or an explicit accepted-loss rule."
+  },
+  {
+   "id": "P1-10",
+   "status": "RESOLVED",
+   "note": "FR-002 states: \"The INITIAL cursor is the `historyId` returned by `users.watch`, persisted by FR-011 item 4 BEFORE push delivery is enabled; it is NEVER initialised from a post-notification `users.getProfile`.\""
+  },
+  {
+   "id": "P1-11",
+   "status": "RESOLVED",
+   "note": "FR-002 requires each history page's IDs to be queued before fetching the next page and records `history_pages`, `history_records`, `unique_ids`, and `remaining` in the event receipt."
+  },
+  {
+   "id": "P1-15",
+   "status": "RESOLVED",
+   "note": "FR-003 states that FREE-MAIL senders \"NEVER declare their domain on any page\" and explicitly amends FR-006 to permit classification-backed exact-address contact creation."
+  },
+  {
+   "id": "P1-17",
+   "status": "RESOLVED",
+   "note": "FR-003 now limits runtime divergence detection to query-admitted/local-rejected IDs and states that the reverse case is \"only observable offline and is covered by the fixture, not a runtime check.\""
+  },
+  {
+   "id": "P1-3",
+   "status": "RESOLVED",
+   "note": "FR-011 requires a second bridge auth mode accepting a valid `x-webhook-bridge-secret` as hub-verified while retaining OIDC Bearer for direct delivery. The cited relay.ts:45-66 code sends the bridge secret and no Authorization header."
+  },
+  {
+   "id": "P2-1",
+   "status": "RESOLVED",
+   "note": "FR-003 now distinguishes recording from filing and explicitly exempts `personal`: it is recorded as `ignored` with no page or CRM write."
+  },
+  {
+   "id": "P2-2",
+   "status": "RESOLVED",
+   "note": "FR-003 explicitly amends FR-006 for admitted free-mail senders, specifies `--company <org_name>`, exact-address idempotency, the `contact:<id>` ledger effect, and no rollback requirement."
+  },
+  {
+   "id": "P2-3",
+   "status": "RESOLVED",
+   "note": "FR-002 requires the pre-delivery `users.watch` historyId as the initial cursor and says that a push with no prior cursor triggers a full-window sweep before setting the cursor from the push watermark."
+  }
+ ],
+ "new_findings": [],
+ "verdict": "NOT_CONVERGED"
+}

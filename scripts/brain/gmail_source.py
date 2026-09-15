@@ -28,6 +28,14 @@ EXCLUSION_QUERY = (  # G-SWEEP-7
     '-subject:"out of office" -subject:"auto-reply"'
 )
 
+# G2r3-11: this is an INBOUND records lane. Gmail's messages.list searches Sent
+# and Drafts too, so without this the pipeline read (and could FILE) our own
+# outgoing mail as an observation about the counterparty -- an internal sender
+# that resolves to a known page would have written a History entry about us.
+# Kept OUT of EXCLUSION_QUERY, which is pinned verbatim to the comms-check
+# skill (G-SWEEP-7); this is this lane's own constraint.
+INBOUND_ONLY = "-in:sent -in:drafts"
+
 OURS_DOMAINS: frozenset[str] = frozenset({"clearworks.ai"})
 
 _QUOTE_TAIL_RE = re.compile(r"^On .* wrote:$")
@@ -72,7 +80,7 @@ def _compose_query(date_ops: str, extra_query: str | None) -> str:
     """<extra_query> <date operators> <EXCLUSION_QUERY> — C5: the manual backfill's
     --query clause composes into EVERY query sweep issues, never bypassing the
     exclusion filter or the date bounds."""
-    parts = [p for p in (extra_query, date_ops, EXCLUSION_QUERY) if p]
+    parts = [p for p in (extra_query, date_ops, INBOUND_ONLY, EXCLUSION_QUERY) if p]  # G-SWEEP-13
     return " ".join(parts)  # G-SWEEP-9
 
 

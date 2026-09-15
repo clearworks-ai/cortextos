@@ -5,12 +5,12 @@ writer's landed part, materialised via
 swept with the SAME regex test_no_unregistered_guard below uses (a G-ID
 token anywhere after a '#' on its line -- docstring/prose mentions of a
 G-ID, which several modules still carry alongside their real marker, do NOT
-count). 89 rows: LEDGER x9, RECEIPT x2, LOCK x10, LOCKREF x1, SWEEP x12, RES x2,
+count). 90 rows: LEDGER x9, RECEIPT x2, LOCK x10, LOCKREF x1, SWEEP x13, RES x2,
 EXT x5, INV x3, BASE x2, SUPER x1, DIG x4, BUS x4 (TS), IDEMP x2, MERGE x3,
 SIM x1, ESC x4, QUERY x1, FAIL x1, BUDGET x3, CRM x3, HIST x3, PARITY x2,
 WRITER x2, OWNER x1, TASK x2, DEDUP x1, EFFECT x3, REV x1, DRY x1.
 
-The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10; the G2 round-2 wave (2026-09-15) added G-ESC-3, G-LOCK-9, G-BUS-4, G-DIG-4, G-LEDGER-8, G-EFFECT-3, G-LOCK-10, G-DRY-1, G-BUDGET-3 and G-INV-3; the G2 round-3 wave added G-ESC-4, G-LEDGER-9, G-HIST-3, G-SWEEP-11, G-SWEEP-12, G-EXT-5 and G-CRM-3.
+The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10; the G2 round-2 wave (2026-09-15) added G-ESC-3, G-LOCK-9, G-BUS-4, G-DIG-4, G-LEDGER-8, G-EFFECT-3, G-LOCK-10, G-DRY-1, G-BUDGET-3 and G-INV-3; the G2 round-3 wave added G-ESC-4, G-LEDGER-9, G-HIST-3, G-SWEEP-11, G-SWEEP-12, G-EXT-5, G-CRM-3 and G-SWEEP-13.
 
 The last 8 rows (G-MERGE-2/3, G-EFFECT-1, G-BUDGET-2, G-REV-1, G-PARITY-2,
 G-LOCK-7/8) were added by the post-cap adjudication wave (2026-09-15) that
@@ -143,6 +143,13 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "silently got no resolution, no CRM row and no page fan-out (G2r3-6, FR-003)",
      "scripts/brain/tests/test_gmail_source.py::test_parse_message_reads_cc_from_a_headers_list",
      r's/            return _parse_address_list\(mapped\[field\]\)  # G-SWEEP-12/            return []  # G-SWEEP-12 (mutated)/'),
+    ("G-SWEEP-13", "scripts/brain/gmail_source.py",
+     "every composed query carries INBOUND_ONLY (-in:sent -in:drafts) - Gmail's messages.list searches Sent and "
+     "Drafts, so without it this INBOUND records lane read our own outgoing mail and an internal sender resolving to "
+     "a known page would have filed a History entry about us (G2r3-11); kept out of EXCLUSION_QUERY, which G-SWEEP-7 "
+     "pins verbatim to the comms-check skill",
+     "scripts/brain/tests/test_gmail_source.py::test_every_query_excludes_sent_and_drafts",
+     r's/    parts = \[p for p in \(extra_query, date_ops, INBOUND_ONLY, EXCLUSION_QUERY\) if p\]  # G-SWEEP-13/    parts = [p for p in (extra_query, date_ops, EXCLUSION_QUERY) if p]  # G-SWEEP-13 (mutated)/'),
     ("G-SWEEP-11", "scripts/brain/gmail_source.py",
      "an EMPTY triage result accompanied by an error envelope or ANY stderr is a GmailSourceError, never a quiet "
      "inbox - the deployed gws-dwd turns a Gmail HTTP error into {\"emails\": [], \"total\": 0} with rc 0, so an "
@@ -476,10 +483,10 @@ def test_guard_registry_ids_are_unique():
     assert len(ids) == len(set(ids)), f"duplicate guard ids: {ids}"
 
 
-def test_guard_registry_has_89_rows():
+def test_guard_registry_has_90_rows():
     # Pinned count (rebuilt 2026-09-14 from the FINAL parts, G0 round-3
     # integration) so a future guard silently dropping out is itself caught.
-    assert len(GUARD_REGISTRY) == 89, f"expected 89 rows, got {len(GUARD_REGISTRY)}"
+    assert len(GUARD_REGISTRY) == 90, f"expected 90 rows, got {len(GUARD_REGISTRY)}"
 
 
 def test_guard_registry_rows_have_five_fields():

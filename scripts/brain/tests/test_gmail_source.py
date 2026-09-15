@@ -106,10 +106,10 @@ def test_window_queries_covers_every_day_no_gaps_no_overlaps_14_days() -> None:
 
 
 def test_full_window_query_spans_the_whole_range_inclusive_exclusive() -> None:
-    from gmail_source import EXCLUSION_QUERY, full_window_query
+    from gmail_source import EXCLUSION_QUERY, INBOUND_ONLY, full_window_query
 
     q = full_window_query(3, date(2026, 9, 14))
-    assert q == f"after:2026/09/12 before:2026/09/15 {EXCLUSION_QUERY}"
+    assert q == f"after:2026/09/12 before:2026/09/15 {INBOUND_ONLY} {EXCLUSION_QUERY}"
 
 
 def test_parse_message_flat_shape_strips_quoted_tail_and_lowercases_addresses() -> None:
@@ -340,13 +340,13 @@ def test_sweep_extra_query_present_in_full_and_every_day_query() -> None:
     # <extra_query> <date ops> <EXCLUSION_QUERY> into BOTH the full-window query and
     # every per-day query; the 50-cap day-sweep still triggers on this path.
     ensure_gmail_fixtures()
-    from gmail_source import EXCLUSION_QUERY, sweep
+    from gmail_source import EXCLUSION_QUERY, INBOUND_ONLY, sweep
 
     today = date(2026, 9, 14)
     days = 3
     extra = "from:dana@svaraworks.com"
 
-    full_query = f"{extra} after:2026/09/12 before:2026/09/15 {EXCLUSION_QUERY}"
+    full_query = f"{extra} after:2026/09/12 before:2026/09/15 {INBOUND_ONLY} {EXCLUSION_QUERY}"
     full_payload = json.loads((FIXTURES / "triage_50.json").read_text())
     responses = [(_triage_argv(full_query), _ok(json.dumps(full_payload)))]
 
@@ -356,7 +356,7 @@ def test_sweep_extra_query_present_in_full_and_every_day_query() -> None:
         ("2026-09-14", "2026/09/14", "2026/09/15"),
     ]
     for label, after, before in day_bounds:
-        composed = f"{extra} after:{after} before:{before} {EXCLUSION_QUERY}"
+        composed = f"{extra} after:{after} before:{before} {INBOUND_ONLY} {EXCLUSION_QUERY}"
         rows = [email_row(f"{label}-001", "t", "z@abundowealth.com", f"{label}T00:00:00Z")]
         responses.append((_triage_argv(composed), _ok(json.dumps({"total": 1, "emails": rows}))))
 
@@ -555,3 +555,18 @@ def test_parse_message_top_level_cc_still_wins():
     msg = gmail_source.parse_message(_flat(to=["josh@clearworks.ai"], cc=["dana@svaraworks.com"]))
     assert msg.cc == ["dana@svaraworks.com"]
     assert msg.to == ["josh@clearworks.ai"]
+
+
+# --- G2r3-11: the records lane is INBOUND only -------------------------------
+
+def test_every_query_excludes_sent_and_drafts():
+    import gmail_source
+    from datetime import date as _date
+
+    today = _date(2026, 9, 14)
+    queries = [q for _, q in gmail_source.window_queries(3, today)]
+    queries.append(gmail_source.full_window_query(3, today))
+    for q in queries:
+        assert "-in:sent" in q, q
+        assert "-in:drafts" in q, q
+        assert "-category:promotions" in q          # the exclusion clause is still composed

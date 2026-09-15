@@ -130,6 +130,18 @@ class Ledger:
                 result = row
         return result
 
+    def frozen_identity(self, source_ref: str, digest: str) -> str | None:
+        """The extraction identity the NEWEST row for this (source_ref, digest)
+        recorded as frozen, or None. FINAL F-2: a frozen message whose freeze is
+        already on the ledger is a no-change re-check -- the sweep writes nothing
+        and enumerates nothing for it (FR-001)."""
+        result: str | None = None
+        for row in self._read_rows():
+            if row.source_ref == source_ref and row.content_digest == digest:
+                attempt = row.extraction_attempt or {}
+                result = str(attempt.get("identity")) if attempt.get("frozen") else None
+        return result
+
     def latest_real(self, source_ref: str, digest: str) -> ObservationRow | None:
         """The newest NON-simulated row for this exact (source_ref, digest).
 
@@ -310,6 +322,30 @@ def record_extraction_failure(state_dir: Path, identity: str, error: str) -> Non
     row["last_error"] = error
     data[identity] = row
     _write_extraction_attempts(state_dir, data)
+
+
+def unstamp_extraction_attempt(state_dir: Path, identity: str) -> None:
+    """FINAL F-1: a TRANSPORT failure (claude never produced a result) hands the
+    stamped attempt back -- the budget is for rejected outputs only. The entry
+    is removed when nothing is left in it."""
+    data = read_extraction_attempts(state_dir)
+    row = dict(data.get(identity) or {})
+    n = int(row.get("attempt") or 0) - 1
+    if n <= 0 and not row.get("last_error"):
+        data.pop(identity, None)
+    else:
+        row["attempt"] = max(n, 0)
+        data[identity] = row
+    _write_extraction_attempts(state_dir, data)
+
+
+def clear_all_extraction_attempts(state_dir: Path) -> int:
+    """`--retry-frozen`: the named un-freeze path. Returns the number cleared."""
+    data = read_extraction_attempts(state_dir)
+    n = len(data)
+    if n:
+        _write_extraction_attempts(state_dir, {})
+    return n
 
 
 def clear_extraction_attempts(state_dir: Path, identity: str) -> None:

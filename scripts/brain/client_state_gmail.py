@@ -38,7 +38,8 @@ import single_flight
 import writeback_email
 from gmail_source import GmailSourceError
 from observation_ledger import (
-    EXTRACTION_MAX_ATTEMPTS, Ledger, ObservationRow, Resolution, clear_extraction_attempts,
+    EXTRACTION_MAX_ATTEMPTS, Ledger, ObservationRow, Resolution, clear_all_extraction_attempts,
+    clear_extraction_attempts, unstamp_extraction_attempt,
     content_digest, extraction_attempt_state, read_receipt, record_extraction_attempt,
     record_extraction_failure, record_failure, record_lease_release_failure,
     record_lock_refusal, write_receipt,
@@ -59,6 +60,7 @@ class Config:
     today: date
     now: datetime
     clock: "Callable[[], float]" = time.monotonic   # monotonic source for the lease heartbeat (injectable for tests)
+    retry_frozen: bool = False  # FINAL F-1: the named un-freeze path (--retry-frozen)
 
 
 @dataclass
@@ -407,6 +409,19 @@ def _file_message(
     # (filed + newly fileable), and enumerate open tasks ONCE for both the
     # extraction context and the dedup check below.
     slugs = sorted({r.slug for r in resolutions if r.slug})
+    identity = extract_email.extraction_identity(source_ref, digest, slugs)
+    # FINAL F-2 (2026-09-15): a frozen identity whose freeze is ALREADY on the
+    # ledger is a no-change re-check (FR-001): write nothing, enumerate nothing,
+    # spend nothing. The receipt still lists it so the digest can surface the
+    # frozen set without a new row per sweep. `--retry-frozen` clears the budget.
+    if ledger.cached_extraction(identity) is None:
+        attempts_now, last_error_now = extraction_attempt_state(cfg.state_dir, identity)
+        if attempts_now >= EXTRACTION_MAX_ATTEMPTS and ledger.frozen_identity(source_ref, digest) == identity:  # G-EXT-8
+            state.extraction_failures.append({
+                "source_ref": source_ref, "identity": identity,
+                "attempts": attempts_now, "last_error": last_error_now, "frozen": True,
+            })
+            return 0, len(escalated), len(ignored)
     open_tasks = client_state_writes.list_open_tasks(runner)  # TaskEnumerationError propagates to run()
     open_email_titles = _open_email_titles_still_open(ledger, open_tasks)
     context = extract_email.build_context(
@@ -419,7 +434,6 @@ def _file_message(
     # reliably breaks the model is retried on every sweep forever); after the
     # second failure the identity FREEZES and says so in the digest, instead of
     # billing quietly until someone notices.
-    identity = extract_email.extraction_identity(source_ref, digest, slugs)
     # LIVE-1 (2026-09-15, first live dry-run): a REJECTED model output is a
     # per-message event. The single automatic retry runs IN THIS SWEEP, and the
     # freeze that follows a second rejection writes the frozen row and lets the
@@ -459,6 +473,12 @@ def _file_message(
             extraction, called = extract_email.cached_or_extract(
                 ledger, msg, context, slugs, runner, max_usd=cfg.max_usd, spent_usd=state.cost,
             )
+        except extract_email.ExtractionTransportError as exc:
+            # FINAL F-1: claude produced NO result (rc != 0 / timeout). Hand the
+            # stamped attempt back and fail the sweep closed: exit 3, cause on
+            # the receipt, next sweep retries. Never freeze on an outage.
+            unstamp_extraction_attempt(cfg.state_dir, identity)
+            raise  # G-EXT-7
         except extract_email.ExtractionError as exc:
             record_extraction_failure(cfg.state_dir, identity, str(exc))
             continue  # G-EXT-6: retry once in-run, then the freeze branch above ends this message
@@ -767,6 +787,9 @@ def run(cfg: Config, runner) -> RunResult:
     claims_dir = cfg.state_dir / "claims"
     result = RunResult(exit_code=0)
     ledger = Ledger(cfg.state_dir / "observations.jsonl")
+    if cfg.retry_frozen:
+        cleared = clear_all_extraction_attempts(cfg.state_dir)
+        result.previews.append(f"retry-frozen: cleared {cleared} extraction attempt record(s)")
     state = _RunState()
     messages_raw: list[dict] = []
     truncation: list[dict] = []
@@ -893,6 +916,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-usd", type=float, default=2.0)
     parser.add_argument("--today", default=None)
+    parser.add_argument("--retry-frozen", action="store_true",
+                        help="give every frozen extraction identity a fresh attempt budget before sweeping (FINAL F-1)")
     args = parser.parse_args(argv)
 
     today = date.fromisoformat(args.today) if args.today else datetime.now(timezone.utc).date()
@@ -900,6 +925,7 @@ def main(argv: list[str] | None = None) -> int:
         repo_root=Path(args.repo_root), vault=Path(args.vault), crm_dir=Path(args.crm_dir),
         state_dir=Path(args.state_dir), days=args.days, query=args.query, dry_run=args.dry_run,
         max_usd=args.max_usd, today=today, now=datetime.now(timezone.utc),
+        retry_frozen=bool(args.retry_frozen),
     )
     from runner import LoggingRunner, SubprocessRunner
     runner = LoggingRunner(SubprocessRunner(), cfg.state_dir)

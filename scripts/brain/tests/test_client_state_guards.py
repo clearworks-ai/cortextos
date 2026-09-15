@@ -189,6 +189,16 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "84 of 119 messages); run-fatal exit 3 stays for transport/lock/writer errors",
      "scripts/brain/tests/test_client_state_gmail.py::test_a_rejected_extraction_does_not_abort_the_sweep",
      r's/            continue  # G-EXT-6: retry once in-run, then the freeze branch above ends this message/            raise  # G-EXT-6 (mutated)/'),
+    ("G-EXT-7", "scripts/brain/client_state_gmail.py",
+     "a claude TRANSPORT failure (rc != 0 / timeout) is run-fatal (exit 3, cause on the receipt) and hands the "
+     "stamped attempt back - never consumed as a rejected output, never frozen (FINAL F-1, 2026-09-15)",
+     "scripts/brain/tests/test_client_state_gmail.py::test_a_transport_failure_is_run_fatal_and_consumes_no_attempt",
+     r's/            raise  # G-EXT-7/            continue  # G-EXT-7 (mutated)/'),
+    ("G-EXT-8", "scripts/brain/client_state_gmail.py",
+     "a frozen identity whose freeze is already on the ledger is a no-change re-check: zero rows, zero list-tasks "
+     "reads, zero claude calls on later sweeps (FINAL F-2, FR-001)",
+     "scripts/brain/tests/test_client_state_gmail.py::test_a_frozen_message_writes_nothing_and_enumerates_nothing_on_later_sweeps",
+     r's/ and ledger\.frozen_identity(source_ref, digest) == identity:  # G-EXT-8/ and False:  # G-EXT-8 (mutated)/'),
     ("G-INV-1", "scripts/brain/client_state_digest.py",
      "compute_invariants keys domain_multi on the FULL domain - never a registrable_label collapse (example.com/example.org must not collide)",
      "scripts/brain/tests/test_client_state_digest.py::test_compute_invariants_does_not_confuse_different_tlds",
@@ -492,7 +502,7 @@ def test_guard_registry_ids_are_unique():
 def test_guard_registry_has_90_rows():
     # Pinned count (rebuilt 2026-09-14 from the FINAL parts, G0 round-3
     # integration) so a future guard silently dropping out is itself caught.
-    assert len(GUARD_REGISTRY) == 91, f"expected 91 rows, got {len(GUARD_REGISTRY)}"
+    assert len(GUARD_REGISTRY) == 93, f"expected 93 rows, got {len(GUARD_REGISTRY)}"
 
 
 def test_guard_registry_rows_have_five_fields():

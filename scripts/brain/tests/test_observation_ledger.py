@@ -1,7 +1,9 @@
-"""FR-001 observation ledger: round-trip, terminal predicate, escalation dedup."""
+"""FR-001 observation ledger: round-trip, terminal predicate, escalation dedup.
+FR-002 run receipt (success + failure paths) + gap detection."""
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 BRAIN = Path(__file__).resolve().parents[1]
@@ -85,6 +87,26 @@ def test_is_terminal_true_only_when_latest_row_same_digest_all_filed(tmp_path) -
     assert ledger.is_terminal("gmail:nope", "digest-a") is False
 
 
+def test_is_terminal_false_for_a_partial_row_even_when_every_resolution_is_filed(tmp_path) -> None:
+    """G-LEDGER-7, isolated. The all-filed check (G-LEDGER-2) and the partial
+    check normally fire together, because a row that died part-way also carries
+    a `partial` resolution. This pins the partial check ON ITS OWN: a row whose
+    resolutions are ALL `filed` but which is flagged `partial` is still not
+    terminal, so the next run finishes the remainder instead of skipping the
+    message. Without it, only the coincidence of the two conditions protects
+    the retry."""
+    path = tmp_path / "observations.jsonl"
+    ledger = OL.Ledger(path)
+    row = _row("gmail:m1", "digest-a", ["filed", "filed"])
+    row.partial = True
+    ledger.append(row)
+    assert ledger.is_terminal("gmail:m1", "digest-a") is False
+
+    row_done = _row("gmail:m1", "digest-a", ["filed", "filed"])
+    ledger.append(row_done)
+    assert ledger.is_terminal("gmail:m1", "digest-a") is True
+
+
 def test_is_terminal_false_when_latest_row_has_a_different_digest(tmp_path) -> None:
     path = tmp_path / "observations.jsonl"
     ledger = OL.Ledger(path)
@@ -153,3 +175,73 @@ def test_open_email_tasks_parses_task_writes_entries(tmp_path) -> None:
         {"id": "t-1", "title": "Send Alloi the tacticals doc", "source_ref": "gmail:m1"},
         {"id": "t-2", "title": "Follow up with Marcos", "source_ref": "gmail:m2"},
     ]
+
+
+def test_write_and_read_receipt_round_trip(tmp_path) -> None:
+    state_dir = tmp_path / "state"
+    receipt = {
+        "last_success_at": "2026-09-14T12:00:00+00:00",
+        "window_days": 3,
+        "message_count": 7,
+        "truncation": [],
+        "cost_usd": 0.42,
+    }
+    OL.write_receipt(state_dir, receipt)
+    got = OL.read_receipt(state_dir)
+    assert got == receipt
+    assert not any(p.name.startswith(".tmp-") for p in state_dir.iterdir())
+
+
+def test_read_receipt_returns_none_when_missing(tmp_path) -> None:
+    assert OL.read_receipt(tmp_path / "state") is None
+
+
+def test_record_failure_preserves_previous_last_success_at(tmp_path) -> None:
+    # G-RECEIPT-1
+    state_dir = tmp_path / "state"
+    OL.write_receipt(
+        state_dir,
+        {
+            "last_success_at": "2026-09-10T00:00:00+00:00",
+            "window_days": 3,
+            "message_count": 5,
+            "truncation": [],
+            "cost_usd": 0.10,
+        },
+    )
+    OL.record_failure(state_dir, "gws timeout", message_count=0, cost_usd=0.0, truncation=[])
+    got = OL.read_receipt(state_dir)
+    assert got["last_success_at"] == "2026-09-10T00:00:00+00:00"
+    assert got["error"] == "gws timeout"
+    assert got["message_count"] == 0
+    assert "failed_at" in got
+
+
+def test_record_failure_with_no_previous_receipt_has_no_last_success_at(tmp_path) -> None:
+    state_dir = tmp_path / "state"
+    OL.record_failure(state_dir, "lock-held")
+    got = OL.read_receipt(state_dir)
+    assert got.get("last_success_at") is None
+    assert got["error"] == "lock-held"
+
+
+def test_gap_line_none_when_within_window() -> None:
+    receipt = {"last_success_at": "2026-09-13T00:00:00+00:00", "window_days": 3}
+    now = datetime(2026, 9, 14, 0, 0, 0, tzinfo=timezone.utc)
+    assert OL.gap_line(receipt, 3, now) is None
+
+
+def test_gap_line_none_when_receipt_missing_or_no_last_success() -> None:
+    now = datetime(2026, 9, 14, 0, 0, 0, tzinfo=timezone.utc)
+    assert OL.gap_line(None, 3, now) is None
+    assert OL.gap_line({"window_days": 3}, 3, now) is None
+
+
+def test_gap_line_names_days_n_repair_when_stale() -> None:
+    # G-RECEIPT-2
+    receipt = {"last_success_at": "2026-09-01T00:00:00+00:00", "window_days": 3}
+    now = datetime(2026, 9, 14, 0, 0, 0, tzinfo=timezone.utc)
+    line = OL.gap_line(receipt, 3, now)
+    assert line is not None
+    assert "--days 13" in line
+    assert "2026-09-01T00:00:00+00:00" in line

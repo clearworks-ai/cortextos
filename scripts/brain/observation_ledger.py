@@ -2,12 +2,19 @@
 message, keyed by source_ref = 'gmail:<messageId>'. Outcome lives per
 resolution (filed / escalated / ignored); a row is 'terminal' only when
 every resolution on the LATEST row for its source_ref is filed against the
-SAME content digest."""
+SAME content digest.
+
+FR-002: run-receipt persistence (last_success_at/window_days/message_count/
+truncation/cost_usd) on the success path (write_receipt) and the failure path
+(record_failure, which preserves the previous last_success_at), plus the gap
+sentence the daily digest names when the receipt is stale (gap_line)."""
 from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 from atomic import atomic_write
@@ -22,6 +29,12 @@ class Resolution:
     reason: str = ""
     contact_id: str | None = None
     email: str = ""
+    effects: list[str] = field(default_factory=list)
+    # G0B3-1: the effect KEYS that have actually LANDED for this resolution --
+    # "crm:<contact_id>", "page:<vault-relative path>", "task:<title>". `outcome`
+    # becomes "filed" only once every REQUIRED key is present, so a run that dies
+    # after the CRM row but before History or task creation leaves a resolution
+    # that the next run finishes instead of treating as complete.
 
 
 @dataclass
@@ -36,6 +49,9 @@ class ObservationRow:
     writes: list[str] = field(default_factory=list)
     revision_of: str | None = None
     suppressed: list[dict] = field(default_factory=list)
+    simulated: bool = False
+    planned_writes: list[str] = field(default_factory=list)
+    partial: bool = False
 
 
 def content_digest(subject: str, body_text: str, from_email: str) -> str:
@@ -67,6 +83,9 @@ def _row_from_dict(d: dict) -> ObservationRow:
         writes=list(d.get("writes", [])),
         revision_of=d.get("revision_of"),
         suppressed=list(d.get("suppressed", [])),
+        simulated=bool(d.get("simulated", False)),
+        planned_writes=list(d.get("planned_writes", [])),
+        partial=bool(d.get("partial", False)),
     )
 
 
@@ -93,6 +112,11 @@ class Ledger:
         data = ("\n".join(lines) + "\n").encode("utf-8") if lines else b""
         atomic_write(self.path, data)  # G-LEDGER-1: read-whole + rewrite-whole, never a bare open("a")
 
+    def all_rows(self) -> list[ObservationRow]:
+        """Every row, oldest first -- the full history, for consumers that must
+        not settle for the LATEST row per ref (the FR-006 coverage diff)."""
+        return self._read_rows()
+
     def latest(self, source_ref: str) -> ObservationRow | None:
         result: ObservationRow | None = None
         for row in self._read_rows():
@@ -101,8 +125,17 @@ class Ledger:
         return result
 
     def is_terminal(self, source_ref: str, digest: str) -> bool:
+        """A row is terminal only when every resolution on the LATEST row for
+        this source_ref/digest is filed AND the row is a REAL one. A dry-run
+        row is `simulated` -- it records what WOULD have been written
+        (`planned_writes`), never what was, so it must never make the
+        subsequent LIVE run a no-op (G0A2-2)."""
         row = self.latest(source_ref)
         if row is None or row.content_digest != digest:
+            return False
+        if row.simulated:  # G-LEDGER-6: a simulated (dry-run) row is never terminal
+            return False
+        if row.partial:  # G-LEDGER-7: a mid-message failure row is never terminal
             return False
         if not row.resolutions:
             return False
@@ -133,7 +166,129 @@ class Ledger:
         return tasks
 
     def escalated_for(self, source_ref: str, digest: str) -> bool:
+        """True once a REAL (non-simulated) run has already sent the FR-003
+        escalation for this exact (source_ref, digest). A dry-run row must not
+        suppress the live Telegram send (G0A2-2)."""
         row = self.latest(source_ref)
         if row is None or row.content_digest != digest:
             return False
+        if row.simulated:  # G-LEDGER-6
+            return False
         return any(r.outcome == "escalated" for r in row.resolutions)  # G-LEDGER-5
+
+
+def write_receipt(state_dir: Path, receipt: dict) -> None:
+    """Atomic JSON write of the FR-002 SUCCESS-PATH run receipt. A failed run
+    uses record_failure instead, which preserves last_success_at."""
+    path = Path(state_dir) / "run-receipt.json"
+    data = json.dumps(receipt, indent=2, sort_keys=True).encode("utf-8") + b"\n"
+    atomic_write(path, data)
+
+
+def read_receipt(state_dir: Path) -> dict | None:
+    path = Path(state_dir) / "run-receipt.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def record_failure(state_dir: Path, error: str, **partial: object) -> None:
+    """FR-002 failure-path receipt: records `error` + `failed_at` (now, UTC
+    ISO) plus any partial progress fields (message_count/cost_usd/truncation)
+    the caller supplies, while PRESERVING the previous receipt's
+    last_success_at/window_days -- a failed run must never look like the
+    poller has never succeeded."""
+    prev = read_receipt(state_dir) or {}
+    out = dict(prev)  # G-RECEIPT-1: start from the previous receipt so last_success_at survives unless partial explicitly overrides it
+    out.update(partial)
+    out["error"] = error
+    out["failed_at"] = datetime.now(timezone.utc).isoformat()
+    write_receipt(state_dir, out)
+
+
+LOCK_REFUSAL_FILENAME = "last-lock-refusal.json"
+
+
+def record_lock_refusal(state_dir: Path, holder_pid: int | None = None, detail: str = "") -> None:
+    """FR-002 lock-held refusal diagnostic. Deliberately does NOT touch
+    run-receipt.json: a fail-closed halt must persist its cause WITHOUT
+    falsifying the success receipt (binding goal G4 item 5, amended
+    2026-09-14). The receipt is byte-identical across a lock-held run; the
+    cause lands here."""
+    path = Path(state_dir) / LOCK_REFUSAL_FILENAME  # G-LOCKREF-1
+    payload = {
+        "error": "lock-held",
+        "refused_at": datetime.now(timezone.utc).isoformat(),
+        "pid": int(holder_pid) if holder_pid is not None else None,
+        "detail": detail,
+    }
+    Path(state_dir).mkdir(parents=True, exist_ok=True)
+    atomic_write(path, json.dumps(payload, indent=2, sort_keys=True).encode("utf-8") + b"\n")
+
+
+LEASE_RELEASE_FAILURE_FILENAME = "last-lease-release-failure.json"
+
+
+def record_lease_release_failure(state_dir: Path, error: str) -> None:
+    """FR-002: `meeting-brief-release` failed, so the lock stays live until its
+    TTL while this run would otherwise look successful. Like the lock-held
+    refusal, the cause goes to its OWN file and run-receipt.json is left alone —
+    the run really did do its work, so `last_success_at` must not be rewritten
+    or erased (G0B3-11)."""
+    path = Path(state_dir) / LEASE_RELEASE_FAILURE_FILENAME  # G-LOCK-7
+    payload = {
+        "error": "lease-release-failed",
+        "detail": error,
+        "failed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    Path(state_dir).mkdir(parents=True, exist_ok=True)
+    atomic_write(path, json.dumps(payload, indent=2, sort_keys=True).encode("utf-8") + b"\n")
+
+
+def read_lease_release_failure(state_dir: Path) -> dict | None:
+    path = Path(state_dir) / LEASE_RELEASE_FAILURE_FILENAME
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def read_lock_refusal(state_dir: Path) -> dict | None:
+    path = Path(state_dir) / LOCK_REFUSAL_FILENAME
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def gap_line(receipt: dict | None, window_days: int, now: datetime) -> str | None:
+    """FR-002: when the receipt's last_success_at is older than the lookback
+    window, return the digest sentence naming the repair (`--days N`,
+    N = ceil(days since last_success_at)); else None."""
+    if not receipt:
+        return None
+    last = receipt.get("last_success_at")
+    if not last:
+        return None
+    try:
+        last_dt = datetime.fromisoformat(last)
+    except ValueError:
+        return None
+    if last_dt.tzinfo is None:
+        last_dt = last_dt.replace(tzinfo=timezone.utc)
+    now_dt = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+    delta_days = (now_dt - last_dt).total_seconds() / 86400.0
+    if delta_days <= window_days:
+        return None
+    n = math.ceil(delta_days)  # G-RECEIPT-2: N = ceil(days since last_success_at)
+    return (
+        f"Gmail poller gap: last success {last} is {n} day(s) old "
+        f"(window {window_days}d) -- repair with `--days {n}`."
+    )

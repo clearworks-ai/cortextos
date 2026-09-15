@@ -198,7 +198,7 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "a frozen identity whose freeze is already on the ledger is a no-change re-check: zero rows, zero list-tasks "
      "reads, zero claude calls on later sweeps (FINAL F-2, FR-001)",
      "scripts/brain/tests/test_client_state_gmail.py::test_a_frozen_message_writes_nothing_and_enumerates_nothing_on_later_sweeps",
-     r's/ and ledger\.frozen_identity(source_ref, digest) == identity:  # G-EXT-8/ and False:  # G-EXT-8 (mutated)/'),
+     r's/ and ledger\.frozen_identity\(source_ref, digest\) == identity:  # G-EXT-8/ and False:  # G-EXT-8 (mutated)/'),
     ("G-INV-1", "scripts/brain/client_state_digest.py",
      "compute_invariants keys domain_multi on the FULL domain - never a registrable_label collapse (example.com/example.org must not collide)",
      "scripts/brain/tests/test_client_state_digest.py::test_compute_invariants_does_not_confuse_different_tlds",

@@ -5,7 +5,7 @@
   "repo_root": "/Users/joshweiss/code/cortextos",
   "status": "running",
   "created": "2026-09-14",
-  "updated": "2026-09-15T04:25:51.457Z",
+  "updated": "2026-09-15T17:25:09.939Z",
   "graphify_root": "graphify-out/graph.json",
   "ledger_root": "docs/pipeline/ledgers",
   "staging_mutex_group": "cortextos-staging",
@@ -153,6 +153,47 @@
         "goal-client-state-gmail-v1-activate"
       ],
       "error": null
+    },
+    {
+      "id": "spec-client-state-gmail-v1-patch1-spec",
+      "type": "spec",
+      "status": "done",
+      "path": "state/specs/2026-09-15-client-state-gmail-v1-patch1-spec.md",
+      "title": "2026-09-15-client-state-gmail-v1-patch1-spec",
+      "depends_on": [],
+      "validate_exit": 0,
+      "error": null,
+      "meta": {
+        "mode": "patch",
+        "validator_command": "node /Users/joshweiss/code/bones-dev-skills/specify/scripts/validate-spec.mjs state/specs/2026-09-15-client-state-gmail-v1-patch1-spec.md",
+        "validated_by": "executed",
+        "supersedes": "2026-09-14-client-state-gmail-v1-spec.md",
+        "plan_artifact": {
+          "path": "state/specs/2026-09-15-client-state-gmail-v1-patch1-spec.md",
+          "sha256": "22f0e75e18ad9d85b838782c199ebc5a03fa96591186b91adc287976dcc41a99",
+          "kind": "spec",
+          "hashed_at": "2026-09-15T17:25:09.938Z"
+        },
+        "artifacts": [
+          {
+            "path": "state/specs/2026-09-15-client-state-gmail-v1-patch1-spec.md",
+            "sha256": "22f0e75e18ad9d85b838782c199ebc5a03fa96591186b91adc287976dcc41a99",
+            "role": "spec"
+          }
+        ]
+      }
+    },
+    {
+      "id": "goalify-2",
+      "type": "goalify",
+      "status": "ready",
+      "path": null,
+      "title": "Create /goal conditions",
+      "depends_on": [
+        "spec-client-state-gmail-v1-patch1-spec"
+      ],
+      "error": null,
+      "meta": {}
     }
   ]
 }

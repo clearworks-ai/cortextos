@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir, homedir } from 'os';
 import type { BusPaths, Task } from '../../../src/types/index';
+import { createTask } from '../../../src/bus/task';
 
 let tempCtxRoot = '';
 
@@ -102,5 +103,79 @@ describe('bus create-task --type (G-BUS-1)', () => {
 
     expect(exitSpy).toHaveBeenCalledWith(1);
     expect(errSpy).toHaveBeenCalledWith("ERROR: --type must be 'agent' or 'human' (got 'robot')");
+  });
+});
+
+describe('bus claim-task --force-claim (G-BUS-2)', () => {
+  const originalCtxRoot = process.env.CTX_ROOT;
+  const originalAgentName = process.env.CTX_AGENT_NAME;
+  const originalInstanceId = process.env.CTX_INSTANCE_ID;
+  const originalOrg = process.env.CTX_ORG;
+
+  beforeEach(() => {
+    tempCtxRoot = mkdtempSync(join(tmpdir(), 'bus-claim-force-'));
+    process.env.CTX_ROOT = tempCtxRoot;
+    process.env.CTX_AGENT_NAME = 'paul';
+    process.env.CTX_INSTANCE_ID = 'default';
+    delete process.env.CTX_ORG;
+  });
+
+  afterEach(() => {
+    if (originalCtxRoot === undefined) delete process.env.CTX_ROOT;
+    else process.env.CTX_ROOT = originalCtxRoot;
+
+    if (originalAgentName === undefined) delete process.env.CTX_AGENT_NAME;
+    else process.env.CTX_AGENT_NAME = originalAgentName;
+
+    if (originalInstanceId === undefined) delete process.env.CTX_INSTANCE_ID;
+    else process.env.CTX_INSTANCE_ID = originalInstanceId;
+
+    if (originalOrg === undefined) delete process.env.CTX_ORG;
+    else process.env.CTX_ORG = originalOrg;
+
+    rmSync(tempCtxRoot, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  it('refuses a human-exempt task without --force-claim', async () => {
+    const paths = makePaths('paul');
+    const taskId = createTask(paths, 'paul', 'acme', 'Decide pricing', { type: 'human', assignee: 'human' });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = mockExit();
+
+    await expect(
+      busCommand.parseAsync(['node', 'bus', 'claim-task', taskId, '--agent', 'boris']),
+    ).rejects.toThrow('__PROCESS_EXIT_1__');
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errSpy).toHaveBeenCalledWith(
+      `Task ${taskId} is human-exempt (type=human, assigned_to=human); pass --force-claim to promote it deliberately`,
+    );
+    expect(readTask(taskId).status).toBe('pending');
+  });
+
+  it('promotes a human-exempt task with --force-claim', async () => {
+    const paths = makePaths('paul');
+    const taskId = createTask(paths, 'paul', 'acme', 'Decide pricing', { type: 'human', assignee: 'human' });
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await busCommand.parseAsync(['node', 'bus', 'claim-task', taskId, '--agent', 'boris', '--force-claim']);
+
+    expect(readTask(taskId).status).toBe('in_progress');
+    expect(readTask(taskId).assigned_to).toBe('boris');
+  });
+
+  it('claims an ordinary agent task exactly as before (regression)', async () => {
+    const paths = makePaths('paul');
+    const taskId = createTask(paths, 'paul', 'acme', 'Ordinary task');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await busCommand.parseAsync(['node', 'bus', 'claim-task', taskId, '--agent', 'boris']);
+
+    expect(readTask(taskId).status).toBe('in_progress');
+    expect(readTask(taskId).assigned_to).toBe('boris');
   });
 });

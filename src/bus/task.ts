@@ -1114,6 +1114,7 @@ export function claimTask(
   paths: BusPaths,
   taskId: string,
   agent: string,
+  opts?: { force?: boolean }, // G-BUS-2
 ): Task {
   const filePath = findTaskFile(paths, taskId);
   if (!filePath) {
@@ -1165,6 +1166,15 @@ export function claimTask(
     if (task.status !== 'pending') {
       throw new Error(
         `Task ${taskId} is not pending (status=${task.status}); cannot claim`,
+      );
+    }
+
+    // G-BUS-2: human-exempt tasks (type=human / assigned_to=human|user /
+    // project=human-tasks / [HUMAN] title) are never silently claimable by an
+    // agent — claim-task must pass --force-claim to promote one deliberately.
+    if (isHumanExemptTask(task) && !opts?.force) {
+      throw new Error(
+        `Task ${taskId} is human-exempt (type=${task.type}, assigned_to=${task.assigned_to}); pass --force-claim to promote it deliberately`,
       );
     }
 

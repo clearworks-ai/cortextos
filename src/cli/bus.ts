@@ -677,7 +677,8 @@ busCommand
   .description('Atomically claim a pending task — marks in_progress + sets assignee in one shot, rejecting if another agent already owns it')
   .argument('<id>', 'Task ID')
   .option('--agent <name>', 'Agent claiming the task (defaults to CTX_AGENT_NAME)')
-  .action((id: string, opts: { agent?: string }) => {
+  .option('--force-claim', 'Override human-exempt protection to deliberately promote a human task to an agent claim') // G-BUS-2
+  .action((id: string, opts: { agent?: string; forceClaim?: boolean }) => {
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
     const agent = opts.agent || env.agentName;
@@ -686,7 +687,7 @@ busCommand
       process.exit(1);
     }
     try {
-      const task = claimTask(paths, id, agent);
+      const task = claimTask(paths, id, agent, { force: opts.forceClaim ?? false });
       // Real-time Multica mirror: claim flips to in_progress — reflect it at once.
       triggerMulticaMirror(id);
       console.log(`Claimed ${id} -> in_progress (assigned to ${agent})`);

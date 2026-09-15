@@ -263,3 +263,28 @@ def test_gap_line_names_days_n_repair_when_stale() -> None:
     assert line is not None
     assert "--days 13" in line
     assert "2026-09-01T00:00:00+00:00" in line
+
+
+def test_cached_extraction_finds_the_newest_match_across_full_history(tmp_path) -> None:
+    """G2B-2: FR-001's at-most-one-LLM-call guarantee is a property of the
+    LEDGER, not of the latest row. A later extraction-less row (an ignored or
+    escalated re-evaluation of the same message) must not hide a call that was
+    already paid for and stamped."""
+    ledger = OL.Ledger(tmp_path / "observations.jsonl")
+    paid = _row("gmail:m1", "digest-a", ["partial"])
+    paid.extraction = {"identity": "ident-a", "summary": "paid once", "cost_usd": 0.05}
+    ledger.append(paid)
+    ledger.append(_row("gmail:m1", "digest-a", ["ignored"]))     # extraction=None
+
+    assert ledger.cached_extraction("ident-a")["summary"] == "paid once"
+    assert ledger.cached_extraction("ident-b") is None
+    assert OL.Ledger(tmp_path / "empty.jsonl").cached_extraction("ident-a") is None
+
+
+def test_cached_extraction_prefers_the_newest_stamped_row(tmp_path) -> None:
+    ledger = OL.Ledger(tmp_path / "observations.jsonl")
+    for n in ("first", "second"):
+        row = _row("gmail:m1", "digest-a", ["partial"])
+        row.extraction = {"identity": "ident-a", "summary": n}
+        ledger.append(row)
+    assert ledger.cached_extraction("ident-a")["summary"] == "second"

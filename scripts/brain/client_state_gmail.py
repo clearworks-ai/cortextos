@@ -327,7 +327,7 @@ def _file_message(
     )
     try:
         extraction, called = extract_email.cached_or_extract(
-            same_digest_prior, msg, context, slugs, runner, max_usd=cfg.max_usd, spent_usd=state.cost,
+            ledger, msg, context, slugs, runner, max_usd=cfg.max_usd, spent_usd=state.cost,
         )
     except extract_email.BudgetExceeded as exc:
         # G0B3-2 / FR-001 (at most ONE LLM call per source_ref+digest+slugs):

@@ -1436,3 +1436,57 @@ def test_missing_claim_executable_exits_3(tmp_path):
     assert result.exit_code == 3
     assert not (cfg.state_dir / "last-lock-refusal.json").exists()
     assert "cortextos" in json.loads(_receipt_bytes(cfg))["error"]
+
+
+def test_an_extraction_less_row_does_not_hide_the_paid_extraction(tmp_path):
+    """G2A-7/G2B-2: a binding set that cycles (bound -> unknown -> bound again)
+    put an extraction-LESS ignored row on top of the paid one. The cache lookup
+    only looked at the latest row, so the identical (source_ref, digest, slugs)
+    paid for claude a second time."""
+    bound = [{"id": "c1", "name": "Marcos", "emails": ["marcos@zorp.example"], "company": "Alloy"}]
+    cfg = _cfg(tmp_path, dry_run=False, max_usd=0.01, contacts=list(bound))
+    contacts_json = cfg.crm_dir / "contacts.json"
+    payload = _gmail_payload(from_email="marcos@zorp.example", from_name="Marcos")
+
+    def _fresh(**over):
+        return _cfg(tmp_path, dry_run=False, vault=cfg.vault, crm_dir=cfg.crm_dir,
+                    state_dir=cfg.state_dir, **over)
+
+    # run 1: the extraction is paid for and stamped, then the budget stops the run
+    r1 = FakeRunner()
+    _lock_ok(r1, cfg.state_dir / "claims")
+    r1.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    r1.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(payload))
+    _open_tasks_empty(r1)
+    r1.record(("claude",), rc=0, stdout=_claude_wrapper(cost_usd=0.05))
+    assert csg.run(cfg, r1).exit_code == 12
+    assert sum(1 for c in r1.calls if c and c[0] == "claude") == 1
+
+    # run 2: the CRM contact vanishes, so the sender binds to nothing -> an
+    # `ignored` row with NO extraction lands on top of the paid one
+    contacts_json.write_text(json.dumps({"contacts": [], "source": "test", "version": 1}), encoding="utf-8")
+    r2 = FakeRunner()
+    cfg2 = _fresh(max_usd=2.0)
+    _lock_ok(r2, cfg2.state_dir / "claims")
+    r2.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    r2.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(payload))
+    assert csg.run(cfg2, r2).exit_code == 0
+    rows = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
+    assert rows[-1]["extraction"] is None
+    assert [r["outcome"] for r in rows[-1]["resolutions"]] == ["ignored"]
+
+    # run 3: the contact comes back -> same source_ref/digest/slugs as run 1.
+    # FR-001 is binding: ZERO further claude calls.
+    contacts_json.write_text(json.dumps({"contacts": bound, "source": "test", "version": 1}), encoding="utf-8")
+    r3 = FakeRunner()
+    cfg3 = _fresh(max_usd=2.0)
+    _lock_ok(r3, cfg3.state_dir / "claims")
+    r3.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    r3.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(payload))
+    _open_tasks_empty(r3)
+    r3.record(("python3", str(cfg3.crm_dir / "add-interaction.py")), rc=0, stdout=_interaction_stdout())
+    result3 = csg.run(cfg3, r3)
+
+    assert result3.exit_code == 0, result3.previews
+    assert sum(1 for c in r3.calls if c and c[0] == "claude") == 0
+    assert result3.filed == 1

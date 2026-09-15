@@ -5,12 +5,12 @@ writer's landed part, materialised via
 swept with the SAME regex test_no_unregistered_guard below uses (a G-ID
 token anywhere after a '#' on its line -- docstring/prose mentions of a
 G-ID, which several modules still carry alongside their real marker, do NOT
-count). 76 rows: LEDGER x7, RECEIPT x2, LOCK x9, LOCKREF x1, SWEEP x10, RES x2,
+count). 77 rows: LEDGER x8, RECEIPT x2, LOCK x9, LOCKREF x1, SWEEP x10, RES x2,
 EXT x4, INV x2, BASE x2, SUPER x1, DIG x4, BUS x4 (TS), IDEMP x2, MERGE x3,
 SIM x1, ESC x3, QUERY x1, FAIL x1, BUDGET x2, CRM x2, HIST x2, PARITY x2,
 WRITER x2, OWNER x1, TASK x2, DEDUP x1, EFFECT x2, REV x1.
 
-The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10; the G2 round-2 wave (2026-09-15) added G-ESC-3, G-LOCK-9, G-BUS-4 and G-DIG-4.
+The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10; the G2 round-2 wave (2026-09-15) added G-ESC-3, G-LOCK-9, G-BUS-4, G-DIG-4 and G-LEDGER-8.
 
 The last 8 rows (G-MERGE-2/3, G-EFFECT-1, G-BUDGET-2, G-REV-1, G-PARITY-2,
 G-LOCK-7/8) were added by the post-cap adjudication wave (2026-09-15) that
@@ -146,9 +146,9 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "scripts/brain/tests/test_extract_email.py::test_extract_argv_pinned",
      r'/CLAUDE_ARGV: list\[str\] = \[/,+12 s/"1",/"2",/'),
     ("G-EXT-3", "scripts/brain/extract_email.py",
-     "cached_or_extract reuses the ledger's cached extraction on an identity match - no new LLM call",
+     "cached_or_extract reuses the cached extraction on an identity match - no new LLM call",
      "scripts/brain/tests/test_extract_email.py::test_cached_or_extract_same_identity_no_call",
-     r's/if cached and cached\.get\("identity"\) == extraction_identity\(source_ref, digest, slugs\):/if False:/'),
+     r's/if cached is not None:  # G-EXT-3/if False:  # G-EXT-3 (mutated)/'),
     ("G-INV-1", "scripts/brain/client_state_digest.py",
      "compute_invariants keys domain_multi on the FULL domain - never a registrable_label collapse (example.com/example.org must not collide)",
      "scripts/brain/tests/test_client_state_digest.py::test_compute_invariants_does_not_confuse_different_tlds",
@@ -257,6 +257,11 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "tier1_duplicate's SequenceMatcher ratio must be STRICTLY > 0.75 - exactly 0.75 is NOT a duplicate",
      "scripts/brain/tests/test_client_state_writes.py::test_tier1_duplicate_boundary_ratio_exactly_0_75_is_false",
      r's/return ratio > 0\.75  # G-DEDUP-1/return ratio >= 0.75  # G-DEDUP-1 (mutated)/'),
+    ("G-LEDGER-8", "scripts/brain/observation_ledger.py",
+     "cached_extraction finds the newest stamped extraction for an identity ANYWHERE in history, so a later "
+     "extraction-less row (an ignored/escalated re-evaluation) cannot hide a claude call already paid for (G2B-2)",
+     "scripts/brain/tests/test_observation_ledger.py::test_cached_extraction_finds_the_newest_match_across_full_history",
+     r's/if cached and cached\.get\("identity"\) == identity:  # G-LEDGER-8/if False:  # G-LEDGER-8 (mutated)/'),
     ("G-LEDGER-6", "scripts/brain/observation_ledger.py",
      "a SIMULATED (--dry-run) row is never terminal and never gates the FR-003 escalation - marked at is_terminal, "
      "escalated_for, and both ObservationRow constructions in client_state_gmail._file_message",
@@ -392,10 +397,10 @@ def test_guard_registry_ids_are_unique():
     assert len(ids) == len(set(ids)), f"duplicate guard ids: {ids}"
 
 
-def test_guard_registry_has_76_rows():
+def test_guard_registry_has_77_rows():
     # Pinned count (rebuilt 2026-09-14 from the FINAL parts, G0 round-3
     # integration) so a future guard silently dropping out is itself caught.
-    assert len(GUARD_REGISTRY) == 76, f"expected 76 rows, got {len(GUARD_REGISTRY)}"
+    assert len(GUARD_REGISTRY) == 77, f"expected 77 rows, got {len(GUARD_REGISTRY)}"
 
 
 def test_guard_registry_rows_have_five_fields():

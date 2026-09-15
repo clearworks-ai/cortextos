@@ -165,6 +165,24 @@ class Ledger:
                 tasks.append({"id": task_id, "title": title, "source_ref": row.source_ref})
         return tasks
 
+    def cached_extraction(self, identity: str) -> dict | None:
+        """The NEWEST stamped extraction anywhere in history whose `identity`
+        matches.
+
+        FR-001's at-most-one-LLM-call per (source_ref, content_digest, bound
+        slugs) is a property of the LEDGER, not of the latest row (G2B-2). A
+        later extraction-LESS row for the same message -- an ignored or
+        escalated re-evaluation, which is constructed without one -- used to
+        hide the call already paid for, so a binding set that cycled
+        (bound -> unknown -> bound) paid twice for identical input. Simulated
+        rows count here, and only here: a dry-run's extraction was really
+        bought and stamped, even though nothing it describes was written."""
+        for row in reversed(self._read_rows()):
+            cached = row.extraction
+            if cached and cached.get("identity") == identity:  # G-LEDGER-8
+                return cached
+        return None
+
     def escalated_for(self, source_ref: str, digest: str) -> bool:
         """True once a REAL (non-simulated) run has already DELIVERED the FR-003
         escalation for this exact (source_ref, digest).

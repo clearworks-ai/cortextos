@@ -18,7 +18,7 @@ from typing import Any
 from brain_rollup import _open_rows, _section_text
 from extract_meeting import _parse_claude_stdout, _require_single_line
 from gmail_source import Message
-from observation_ledger import ObservationRow, content_digest
+from observation_ledger import Ledger, ObservationRow, content_digest
 from resolve_meeting import quote_gate
 from runner import Runner
 from writeback_render import org_brain_root
@@ -339,8 +339,22 @@ def rebind_cached_matches(cached: dict[str, Any], context: list[ContextItem]) ->
     return out
 
 
+def _cached_extraction(cache: "Ledger | ObservationRow | None", identity: str) -> dict[str, Any] | None:
+    """The stamped extraction for `identity`, from wherever the caller keeps it.
+
+    A Ledger searches its WHOLE history (G2B-2) -- a later extraction-less row
+    must not hide a call already paid for. A bare ObservationRow is the narrow
+    single-row form the unit tests pin directly."""
+    if cache is None:
+        return None
+    if isinstance(cache, Ledger):
+        return cache.cached_extraction(identity)
+    cached = cache.extraction
+    return cached if cached and cached.get("identity") == identity else None
+
+
 def cached_or_extract(
-    ledger_latest_row: ObservationRow | None,
+    cache: "Ledger | ObservationRow | None",
     msg: Message,
     context: list[ContextItem],
     slugs: list[str],
@@ -350,19 +364,18 @@ def cached_or_extract(
     spent_usd: float,
 ) -> tuple[dict[str, Any], bool]:
     """FR-001: at most one LLM call per (source_ref, content_digest,
-    bound-entity set). Reuses the latest ledger row's cached extraction when
-    its stamped `identity` matches THIS call's (source_ref, digest, slugs);
+    bound-entity set). Reuses the newest cached extraction in the ledger whose
+    stamped `identity` matches THIS call's (source_ref, digest, slugs);
     otherwise runs extract() — this is the late-bound-entity widen-and-rerun
     path (a newly-resolved entity widens `slugs`, the identity no longer
     matches, and the cache is refreshed with the wider open-items context)."""
     source_ref = f"gmail:{msg.id}"
     digest = content_digest(msg.subject, msg.body_text, msg.from_email)
-    if ledger_latest_row is not None:
-        cached = ledger_latest_row.extraction
-        if cached and cached.get("identity") == extraction_identity(source_ref, digest, slugs):
-            # G-EXT-3: identity match — reuse, no LLM call. The cached
-            # matches_open_item indices are re-resolved against the context
-            # this invocation just built (G0B2-11).
-            return rebind_cached_matches(cached, context), False
+    cached = _cached_extraction(cache, extraction_identity(source_ref, digest, slugs))
+    if cached is not None:  # G-EXT-3
+        # identity match — reuse, no LLM call. The cached matches_open_item
+        # indices are re-resolved against the context this invocation just
+        # built (G0B2-11).
+        return rebind_cached_matches(cached, context), False
     stamped = extract(runner, msg, context, max_usd=max_usd, spent_usd=spent_usd, slugs=slugs)
     return stamped, True

@@ -5,12 +5,12 @@ writer's landed part, materialised via
 swept with the SAME regex test_no_unregistered_guard below uses (a G-ID
 token anywhere after a '#' on its line -- docstring/prose mentions of a
 G-ID, which several modules still carry alongside their real marker, do NOT
-count). 84 rows: LEDGER x9, RECEIPT x2, LOCK x10, LOCKREF x1, SWEEP x10, RES x2,
+count). 85 rows: LEDGER x9, RECEIPT x2, LOCK x10, LOCKREF x1, SWEEP x10, RES x2,
 EXT x4, INV x3, BASE x2, SUPER x1, DIG x4, BUS x4 (TS), IDEMP x2, MERGE x3,
-SIM x1, ESC x4, QUERY x1, FAIL x1, BUDGET x3, CRM x2, HIST x2, PARITY x2,
+SIM x1, ESC x4, QUERY x1, FAIL x1, BUDGET x3, CRM x2, HIST x3, PARITY x2,
 WRITER x2, OWNER x1, TASK x2, DEDUP x1, EFFECT x3, REV x1, DRY x1.
 
-The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10; the G2 round-2 wave (2026-09-15) added G-ESC-3, G-LOCK-9, G-BUS-4, G-DIG-4, G-LEDGER-8, G-EFFECT-3, G-LOCK-10, G-DRY-1, G-BUDGET-3 and G-INV-3; the G2 round-3 wave added G-ESC-4 and G-LEDGER-9.
+The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10; the G2 round-2 wave (2026-09-15) added G-ESC-3, G-LOCK-9, G-BUS-4, G-DIG-4, G-LEDGER-8, G-EFFECT-3, G-LOCK-10, G-DRY-1, G-BUDGET-3 and G-INV-3; the G2 round-3 wave added G-ESC-4, G-LEDGER-9 and G-HIST-3.
 
 The last 8 rows (G-MERGE-2/3, G-EFFECT-1, G-BUDGET-2, G-REV-1, G-PARITY-2,
 G-LOCK-7/8) were added by the post-cap adjudication wave (2026-09-15) that
@@ -248,6 +248,13 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "and `*.md.lock` is gitignored so porcelain alone never caught it (G2B-6)",
      "scripts/brain/tests/test_client_state_gmail.py::test_dry_run_leaves_the_vault_byte_identical",
      r's/if cfg\.dry_run:  # G-DRY-1: no vault lock, so no vault mutation at all/if False:  # G-DRY-1 (mutated)/'),
+    ("G-HIST-3", "scripts/brain/writeback_email.py",
+     "history_entry_present makes the History write idempotent against the PAGE, not the ledger - a crash between the "
+     "atomic page write and the ledger append left the entry written with no effect key, and the next run appended a "
+     "second identical one (G2r3-4); the first rendered line carries the source_ref and any revision marker, so a "
+     "genuine revision is still owed - second site: the guarded write in client_state_gmail._do_writes",
+     "scripts/brain/tests/test_client_state_gmail.py::test_a_page_entry_written_before_a_ledger_crash_is_not_appended_twice",
+     r's/    return any\(line\.rstrip\(\) == first for line in page_text\.splitlines\(\)\)  # G-HIST-3/    return False  # G-HIST-3 (mutated)/'),
     ("G-HIST-2", "scripts/brain/client_state_gmail.py",
      "the page read + apply_history render + atomic write for a bound page all happen under the SAME advisory "
      "sibling <page>.lock the meeting pipeline uses, so a concurrent meeting-writeback filing can never interleave",
@@ -442,10 +449,10 @@ def test_guard_registry_ids_are_unique():
     assert len(ids) == len(set(ids)), f"duplicate guard ids: {ids}"
 
 
-def test_guard_registry_has_84_rows():
+def test_guard_registry_has_85_rows():
     # Pinned count (rebuilt 2026-09-14 from the FINAL parts, G0 round-3
     # integration) so a future guard silently dropping out is itself caught.
-    assert len(GUARD_REGISTRY) == 84, f"expected 84 rows, got {len(GUARD_REGISTRY)}"
+    assert len(GUARD_REGISTRY) == 85, f"expected 85 rows, got {len(GUARD_REGISTRY)}"
 
 
 def test_guard_registry_rows_have_five_fields():

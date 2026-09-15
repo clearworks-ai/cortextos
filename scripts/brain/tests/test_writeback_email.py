@@ -174,3 +174,35 @@ def test_page_path_for_kinds(tmp_path):
     assert we.page_path_for(vault, "alloi", "project") == (
         vault / "raw/areas/clearworks/org-brain/projects/alloi.md"
     )
+
+
+# --- G2r3-4: page-level idempotency, independent of the ledger ---------------
+
+def test_history_entry_present_detects_an_already_written_entry():
+    from writeback_email import HistoryEntry, apply_history, history_entry_present
+
+    entry = HistoryEntry(date="2026-09-14", subject="Renewal", source_ref="gmail:m1",
+                         summary="Marcos asked for the MSA")
+    page = "# Client\n\n## History (dated, newest first)\n\n## Open Items\n"
+    assert history_entry_present(page, entry) is False
+
+    written = apply_history(page, entry)
+    assert history_entry_present(written, entry) is True
+
+
+def test_history_entry_present_distinguishes_a_revision_from_its_original():
+    """A revision of the same source_ref is a DIFFERENT entry and must still be
+    appended; only the identical rendered entry counts as already-landed."""
+    from writeback_email import HistoryEntry, apply_history, history_entry_present
+
+    original = HistoryEntry(date="2026-09-14", subject="Renewal", source_ref="gmail:m1", summary="v1")
+    revision = HistoryEntry(date="2026-09-14", subject="Renewal", source_ref="gmail:m1",
+                            summary="v2", revision_of="deadbeefcafe")
+    page = "# Client\n\n## History (dated, newest first)\n\n## Open Items\n"
+    written = apply_history(page, original)
+
+    assert history_entry_present(written, original) is True
+    assert history_entry_present(written, revision) is False     # still owed
+
+    both = apply_history(written, revision)
+    assert history_entry_present(both, revision) is True

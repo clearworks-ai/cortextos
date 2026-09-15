@@ -59,6 +59,24 @@ def render_history_entry(e: HistoryEntry) -> list[str]:
     return lines
 
 
+def history_entry_present(page_text: str, e: HistoryEntry) -> bool:
+    """Is THIS exact entry already on the page?
+
+    G2r3-4: idempotency that does not depend on the ledger. The page write is
+    atomic and lands BEFORE the observation row, so a crash in between left the
+    entry on the page and nothing on the ledger -- and the next run, remembering
+    nothing, appended a second identical entry. The page is itself the record of
+    what landed.
+
+    The comparison is the FIRST rendered line, which carries the date, the
+    subject, `[source: <source_ref>]` and, for a revision, its
+    `(revision of <old8>)` marker. So a plain entry and a revision of the SAME
+    message stay distinguishable and a genuine revision is still appended.
+    """
+    first = render_history_entry(e)[0]
+    return any(line.rstrip() == first for line in page_text.splitlines())  # G-HIST-3
+
+
 def _local_split_sections(text: str) -> tuple[str, list[tuple[str, str]]]:
     """Byte-identical fallback to writeback_render._split_sections, kept local so
     this module still works if that private helper is ever renamed/removed."""

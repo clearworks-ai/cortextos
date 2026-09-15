@@ -615,9 +615,16 @@ def _do_writes(
             # same page can never interleave with this read-modify-write.
             with _page_lock(page, _heartbeat_of(runner), clock=cfg.clock):  # G-HIST-2
                 old_text = page.read_text(encoding="utf-8") if page.exists() else ""
-                new_text = writeback_email.apply_history(old_text, entry)
-                _atomic_write_text(page, new_text)
-                writes.append(rel_page)
+                # G-HIST-3: the PAGE is the record of what landed. A crash
+                # between the atomic page write and the ledger append left the
+                # entry written and no effect key, so the next run appended it
+                # twice. Already there -> the effect is marked below, nothing is
+                # written, and `writes` stays empty because THIS run wrote
+                # nothing.
+                if not writeback_email.history_entry_present(old_text, entry):
+                    new_text = writeback_email.apply_history(old_text, entry)
+                    _atomic_write_text(page, new_text)
+                    writes.append(rel_page)
         mark(key, owners)
     for resolution in pending:
         # a slug whose page write was carried forward from a prior run still

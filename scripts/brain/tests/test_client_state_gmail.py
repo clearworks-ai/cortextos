@@ -1915,3 +1915,51 @@ def test_a_dry_run_between_two_live_runs_does_not_hide_landed_effects(tmp_path):
     rows3 = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
     assert all(r["outcome"] == "filed" for r in rows3[-1]["resolutions"])
     assert rows3[-1]["partial"] is False
+
+
+def test_a_page_entry_written_before_a_ledger_crash_is_not_appended_twice(tmp_path):
+    """G2r3-4: the page write is atomic and lands BEFORE the ledger row. A crash
+    in between left the entry on the page and NOTHING on the ledger, so the next
+    run re-filed the message and appended a second identical History entry. The
+    page itself is the record of what landed."""
+    cfg = _cfg(tmp_path, dry_run=False)
+    page = _page_path(cfg, "acme")
+
+    runner = FakeRunner()
+    _lock_ok(runner, cfg.state_dir / "claims")
+    runner.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+    _open_tasks_empty(runner)
+    runner.record(("claude",), rc=0, stdout=_claude_wrapper())
+    runner.record(("python3", str(cfg.crm_dir / "upsert-contact.py")), rc=0, stdout="c1\n")
+    runner.record(("python3", str(cfg.crm_dir / "add-interaction.py")), rc=0, stdout=_interaction_stdout())
+
+    real_append = csg.Ledger.append
+
+    def _never_appends(self, row):
+        raise OSError(28, "No space left on device")
+
+    csg.Ledger.append = _never_appends
+    try:
+        assert csg.run(cfg, runner).exit_code == 3
+    finally:
+        csg.Ledger.append = real_append
+
+    assert page.read_text(encoding="utf-8").count("[source: gmail:m1]") == 1
+    ledger_path = cfg.state_dir / "observations.jsonl"
+    assert not ledger_path.exists() or ledger_path.read_text().strip() == ""
+
+    # next run: the ledger remembers nothing, the PAGE does
+    runner2 = FakeRunner()
+    _lock_ok(runner2, cfg.state_dir / "claims")
+    runner2.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner2.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+    _open_tasks_empty(runner2)
+    runner2.record(("claude",), rc=0, stdout=_claude_wrapper())
+    runner2.record(("python3", str(cfg.crm_dir / "upsert-contact.py")), rc=0, stdout="c1\n")
+    runner2.record(("python3", str(cfg.crm_dir / "add-interaction.py")), rc=0, stdout=_interaction_stdout())
+    assert csg.run(cfg, runner2).exit_code == 0
+
+    assert page.read_text(encoding="utf-8").count("[source: gmail:m1]") == 1
+    rows = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
+    assert all(r["outcome"] == "filed" for r in rows[-1]["resolutions"])

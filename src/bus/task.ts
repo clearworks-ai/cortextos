@@ -713,6 +713,7 @@ export function createTask(
     dueDate?: string;
     blockedBy?: string[];
     blocks?: string[];
+    type?: 'agent' | 'human'; // G-BUS-1: default 'agent' — existing callers unaffected
   } = {},
 ): string {
   const {
@@ -725,6 +726,7 @@ export function createTask(
     dueDate = '',
     blockedBy = [],
     blocks = [],
+    type: taskType = 'agent', // G-BUS-1
   } = options;
   const assignee = resolveTaskOwner(agentName, explicitAssignee, {
     title,
@@ -783,7 +785,7 @@ export function createTask(
     id: taskId,
     title,
     description,
-    type: 'agent',
+    type: taskType, // G-BUS-1
     needs_approval: needsApproval,
     status: someday ? 'someday' : 'pending',
     assigned_to: assignee,

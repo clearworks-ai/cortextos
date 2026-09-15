@@ -522,10 +522,17 @@ busCommand
   .option('--due <when>', 'Due date: ISO datetime, YYYY-MM-DD (end of day), or relative +<n>d / +<n>h. Omitted = priority default.')
   .option('--blocked-by <ids>', 'Comma-separated task IDs that must complete before this task can progress')
   .option('--blocks <ids>', 'Comma-separated task IDs that this new task will block (symmetric reverse edge)')
-  .action((title: string, opts: { desc?: string; assignee?: string; priority: string; project?: string; someday?: boolean; needsApproval?: boolean; due?: string; blockedBy?: string; blocks?: string }) => {
+  .option('--type <type>', "Task type: 'agent' or 'human' (default agent)", 'agent') // G-BUS-1
+  .action((title: string, opts: { desc?: string; assignee?: string; priority: string; project?: string; someday?: boolean; needsApproval?: boolean; due?: string; blockedBy?: string; blocks?: string; type?: string }) => {
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
     const parseList = (raw?: string) => (raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : []);
+    // G-BUS-1: validate --type before any write; only 'agent' | 'human' accepted.
+    const taskType = opts.type ?? 'agent';
+    if (taskType !== 'agent' && taskType !== 'human') {
+      console.error(`ERROR: --type must be 'agent' or 'human' (got '${taskType}')`);
+      process.exit(1);
+    }
     const resolvedAssignee = resolveTaskOwner(env.agentName, opts.assignee, {
       title,
       project: opts.project,
@@ -540,6 +547,7 @@ busCommand
       dueDate: opts.due ? parseDueOption(opts.due) : undefined,
       blockedBy: parseList(opts.blockedBy),
       blocks: parseList(opts.blocks),
+      type: taskType as 'agent' | 'human',
     });
     console.log(taskId);
     // Real-time Multica mirror: reflect the new task as an issue immediately.

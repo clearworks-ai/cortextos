@@ -1009,9 +1009,16 @@ def test_a_prior_filed_resolution_the_resolver_no_longer_produces_is_carried(tmp
     led.append(ObservationRow(
         source_ref="gmail:m1", thread_id="t1", content_digest=digest,
         observed_at="2026-09-14T11:00:00+00:00",
-        resolutions=[Resolution(slug="widget-co", kind="client", method="contact-email",
-                                outcome="filed", contact_id="c-gone", email="gone@widget-co.test",
-                                effects=["crm:c-gone", "page:raw/areas/clearworks/org-brain/clients/widget-co.md"])],
+        resolutions=[
+            Resolution(slug="widget-co", kind="client", method="contact-email",
+                       outcome="filed", contact_id="c-gone", email="gone@widget-co.test",
+                       effects=["crm:c-gone", "page:raw/areas/clearworks/org-brain/clients/widget-co.md"]),
+            # G2B-1: `partial` alone no longer vetoes terminality -- an
+            # UNFINISHED resolution is what makes this row non-terminal, and it
+            # is what a real mid-message failure would actually have left.
+            Resolution(slug="", kind="", method="none", outcome="partial",
+                       email="unfinished@widget-co.test"),
+        ],
         writes=["crm:c-gone"], partial=True,
     ))
 
@@ -1490,3 +1497,41 @@ def test_an_extraction_less_row_does_not_hide_the_paid_extraction(tmp_path):
     assert result3.exit_code == 0, result3.previews
     assert sum(1 for c in r3.calls if c and c[0] == "claude") == 0
     assert result3.filed == 1
+
+
+def test_recovery_row_after_every_effect_landed_is_terminal(tmp_path):
+    """G2B-1: the FIRST ledger append fails after every effect has landed and
+    every resolution is filed. The recovery row must derive partial=False, so
+    the next run skips the message instead of re-processing it forever."""
+    cfg = _cfg(tmp_path, dry_run=False)
+    runner = FakeRunner()
+    _lock_ok(runner, cfg.state_dir / "claims")
+    runner.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+    _open_tasks_empty(runner)
+    runner.record(("claude",), rc=0, stdout=_claude_wrapper())
+    runner.record(("python3", str(cfg.crm_dir / "upsert-contact.py")), rc=0, stdout="c1\n")
+    runner.record(("python3", str(cfg.crm_dir / "add-interaction.py")), rc=0, stdout=_interaction_stdout())
+
+    real_append = csg.Ledger.append
+    seen = {"n": 0}
+
+    def _flaky_append(self, row):
+        seen["n"] += 1
+        if seen["n"] == 1:
+            raise OSError(28, "No space left on device")
+        return real_append(self, row)
+
+    csg.Ledger.append = _flaky_append
+    try:
+        result = csg.run(cfg, runner)
+    finally:
+        csg.Ledger.append = real_append
+
+    assert result.exit_code == 3
+    rows = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
+    assert len(rows) == 1
+    assert all(r["outcome"] == "filed" for r in rows[0]["resolutions"])
+    assert rows[0]["partial"] is False
+    from observation_ledger import Ledger as _L
+    assert _L(cfg.state_dir / "observations.jsonl").is_terminal("gmail:m1", rows[0]["content_digest"]) is True

@@ -87,24 +87,29 @@ def test_is_terminal_true_only_when_latest_row_same_digest_all_filed(tmp_path) -
     assert ledger.is_terminal("gmail:nope", "digest-a") is False
 
 
-def test_is_terminal_false_for_a_partial_row_even_when_every_resolution_is_filed(tmp_path) -> None:
-    """G-LEDGER-7, isolated. The all-filed check (G-LEDGER-2) and the partial
-    check normally fire together, because a row that died part-way also carries
-    a `partial` resolution. This pins the partial check ON ITS OWN: a row whose
-    resolutions are ALL `filed` but which is flagged `partial` is still not
-    terminal, so the next run finishes the remainder instead of skipping the
-    message. Without it, only the coincidence of the two conditions protects
-    the retry."""
+def test_is_terminal_true_for_an_all_filed_row_even_when_flagged_partial(tmp_path) -> None:
+    """G2B-1: `partial` is a DERIVED summary of the resolutions, not an
+    independent veto. A recovery row whose every resolution is `filed` means
+    every required effect landed -- there is nothing left to finish, and
+    treating it as non-terminal made every later run re-process the message and
+    append another row forever. The terminal predicate is the resolutions."""
     path = tmp_path / "observations.jsonl"
     ledger = OL.Ledger(path)
     row = _row("gmail:m1", "digest-a", ["filed", "filed"])
     row.partial = True
     ledger.append(row)
-    assert ledger.is_terminal("gmail:m1", "digest-a") is False
-
-    row_done = _row("gmail:m1", "digest-a", ["filed", "filed"])
-    ledger.append(row_done)
     assert ledger.is_terminal("gmail:m1", "digest-a") is True
+
+
+def test_is_terminal_false_when_any_resolution_is_unfinished(tmp_path) -> None:
+    """The other direction: a row carrying an unfinished resolution is NOT
+    terminal even if nothing flagged it partial."""
+    path = tmp_path / "observations.jsonl"
+    ledger = OL.Ledger(path)
+    row = _row("gmail:m1", "digest-a", ["filed", "partial"])
+    row.partial = False
+    ledger.append(row)
+    assert ledger.is_terminal("gmail:m1", "digest-a") is False
 
 
 def test_is_terminal_false_when_latest_row_has_a_different_digest(tmp_path) -> None:

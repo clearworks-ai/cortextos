@@ -385,7 +385,12 @@ def _file_message(
             source_ref=source_ref, thread_id=msg.thread_id, content_digest=digest,
             observed_at=cfg.now.isoformat(), resolutions=resolutions,
             reason=f"partial: {exc}", extraction=extraction, writes=writes,
-            revision_of=revision_of, partial=True,  # G-LEDGER-7
+            revision_of=revision_of,
+            # G-LEDGER-7: DERIVED, never a blanket True. If the failure landed
+            # after every effect and every resolution was already filed, there
+            # is nothing left to finish -- flagging it partial made the message
+            # non-terminal forever and every later run re-processed it.
+            partial=any(r.outcome != "filed" for r in resolutions),
         ))
 
     try:

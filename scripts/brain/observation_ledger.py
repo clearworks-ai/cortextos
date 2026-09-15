@@ -135,8 +135,11 @@ class Ledger:
             return False
         if row.simulated:  # G-LEDGER-6: a simulated (dry-run) row is never terminal
             return False
-        if row.partial:  # G-LEDGER-7: a mid-message failure row is never terminal
-            return False
+        # `partial` is a DERIVED summary of the resolutions (G-LEDGER-7, in
+        # client_state_gmail._persist_partial), never an independent veto: a
+        # recovery row whose every resolution is `filed` means every required
+        # effect landed, and vetoing it made every later run re-process the
+        # message and append another row forever (G2B-1).
         if not row.resolutions:
             return False
         return all(r.outcome == "filed" for r in row.resolutions)  # G-LEDGER-2

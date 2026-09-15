@@ -267,11 +267,12 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "escalated_for, and both ObservationRow constructions in client_state_gmail._file_message",
      "scripts/brain/tests/test_client_state_gmail.py::test_dry_run_then_live_run_still_performs_every_write",
      r's/if row\.simulated:  # G-LEDGER-6: a simulated \(dry-run\) row is never terminal/if False:  # G-LEDGER-6 (mutated)/'),
-    ("G-LEDGER-7", "scripts/brain/observation_ledger.py",
-     "a PARTIAL row (a message that failed part-way) is never terminal, so the next run finishes the remainder - pinned on is_terminal directly, since a real partial row also carries a non-filed resolution that G-LEDGER-2 would catch anyway - "
-     "second site: the partial ObservationRow construction in client_state_gmail._persist_partial",
-     "scripts/brain/tests/test_observation_ledger.py::test_is_terminal_false_for_a_partial_row_even_when_every_resolution_is_filed",
-     r's/if row\.partial:  # G-LEDGER-7: a mid-message failure row is never terminal/if False:  # G-LEDGER-7 (mutated)/'),
+    ("G-LEDGER-7", "scripts/brain/client_state_gmail.py",
+     "a recovery row's `partial` flag is DERIVED from its resolutions, never a blanket True - a failure after every "
+     "effect landed and every resolution was filed leaves nothing to finish, and flagging it partial made the message "
+     "non-terminal forever (G2B-1); second site: is_terminal's prose in observation_ledger.py",
+     "scripts/brain/tests/test_client_state_gmail.py::test_recovery_row_after_every_effect_landed_is_terminal",
+     r's/partial=any\(r\.outcome != "filed" for r in resolutions\),/partial=True,  # G-LEDGER-7 (mutated)/'),
     ("G-LOCKREF-1", "scripts/brain/client_state_gmail.py",
      "a lock-held refusal writes last-lock-refusal.json and leaves run-receipt.json BYTE-IDENTICAL (binding goal G4 "
      "item 5, amended 2026-09-14) - second site: observation_ledger.record_lock_refusal's own path",

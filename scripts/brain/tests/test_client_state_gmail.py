@@ -1860,3 +1860,58 @@ def test_dry_run_never_touches_the_shared_dedup_ledger(tmp_path):
     assert csg.run(cfg, runner).exit_code == 0
     assert not any(c[:3] == ["cortextos", "bus", "send-telegram"] for c in runner.calls)
     assert not any("event-dedup" in c for c in runner.calls)
+
+
+def test_a_dry_run_between_two_live_runs_does_not_hide_landed_effects(tmp_path):
+    """G2r3-3: a SIMULATED row must not carry `filed` into a live run — nothing
+    was written. But nulling the merge source outright ERASED the real partial
+    work underneath it, so the live retry replayed the CRM write and appended a
+    SECOND History entry for the same message."""
+    cfg = _cfg(tmp_path, dry_run=False)
+    page = _page_path(cfg, "acme")
+    payload = _gmail_payload()
+    wrapper = _claude_wrapper(commitments=[
+        {"text": "Send the updated MSA", "owner_name": "Josh", "deadline_iso": None,
+         "quote": "send the updated MSA", "matches_open_item": None},
+    ])
+
+    # run 1 (LIVE): CRM + History land, the task creation dies -> real partial row
+    r1 = FakeRunner()
+    _lock_ok(r1, cfg.state_dir / "claims")
+    r1.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    r1.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(payload))
+    _open_tasks_empty(r1)
+    r1.record(("claude",), rc=0, stdout=wrapper)
+    r1.record(("python3", str(cfg.crm_dir / "upsert-contact.py")), rc=0, stdout="c1\n")
+    r1.record(("python3", str(cfg.crm_dir / "add-interaction.py")), rc=0, stdout=_interaction_stdout())
+    r1.record(("cortextos", "bus", "create-task"), rc=1, stdout="", stderr="bus down")
+    assert csg.run(cfg, r1).exit_code == 3
+    assert page.read_text(encoding="utf-8").count("[source: gmail:m1]") == 1
+
+    # run 2 (DRY): appends a simulated row on top of the real partial one
+    cfg_dry = _cfg(tmp_path, dry_run=True, vault=cfg.vault, crm_dir=cfg.crm_dir, state_dir=cfg.state_dir)
+    r2 = FakeRunner()
+    _lock_ok(r2, cfg_dry.state_dir / "claims")
+    r2.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    r2.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(payload))
+    _open_tasks_empty(r2)
+    assert csg.run(cfg_dry, r2).exit_code == 0
+    rows = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
+    assert rows[-1]["simulated"] is True
+
+    # run 3 (LIVE): only the missing task is created; nothing landed is replayed
+    cfg3 = _cfg(tmp_path, dry_run=False, vault=cfg.vault, crm_dir=cfg.crm_dir, state_dir=cfg.state_dir)
+    r3 = FakeRunner()
+    _lock_ok(r3, cfg3.state_dir / "claims")
+    r3.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    r3.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(payload))
+    _open_tasks_empty(r3)
+    r3.record(("cortextos", "bus", "create-task"), rc=0, stdout="task_1757800000_00000001\n")
+    assert csg.run(cfg3, r3).exit_code == 0
+
+    assert not any(len(c) > 1 and "add-interaction.py" in c[1] for c in r3.calls)   # CRM not replayed
+    assert not any(len(c) > 1 and "upsert-contact.py" in c[1] for c in r3.calls)
+    assert page.read_text(encoding="utf-8").count("[source: gmail:m1]") == 1       # ONE entry, still
+    rows3 = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
+    assert all(r["outcome"] == "filed" for r in rows3[-1]["resolutions"])
+    assert rows3[-1]["partial"] is False

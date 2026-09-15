@@ -5,12 +5,12 @@ writer's landed part, materialised via
 swept with the SAME regex test_no_unregistered_guard below uses (a G-ID
 token anywhere after a '#' on its line -- docstring/prose mentions of a
 G-ID, which several modules still carry alongside their real marker, do NOT
-count). 83 rows: LEDGER x8, RECEIPT x2, LOCK x10, LOCKREF x1, SWEEP x10, RES x2,
+count). 84 rows: LEDGER x9, RECEIPT x2, LOCK x10, LOCKREF x1, SWEEP x10, RES x2,
 EXT x4, INV x3, BASE x2, SUPER x1, DIG x4, BUS x4 (TS), IDEMP x2, MERGE x3,
 SIM x1, ESC x4, QUERY x1, FAIL x1, BUDGET x3, CRM x2, HIST x2, PARITY x2,
 WRITER x2, OWNER x1, TASK x2, DEDUP x1, EFFECT x3, REV x1, DRY x1.
 
-The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10; the G2 round-2 wave (2026-09-15) added G-ESC-3, G-LOCK-9, G-BUS-4, G-DIG-4, G-LEDGER-8, G-EFFECT-3, G-LOCK-10, G-DRY-1, G-BUDGET-3 and G-INV-3; the G2 round-3 wave added G-ESC-4.
+The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10; the G2 round-2 wave (2026-09-15) added G-ESC-3, G-LOCK-9, G-BUS-4, G-DIG-4, G-LEDGER-8, G-EFFECT-3, G-LOCK-10, G-DRY-1, G-BUDGET-3 and G-INV-3; the G2 round-3 wave added G-ESC-4 and G-LEDGER-9.
 
 The last 8 rows (G-MERGE-2/3, G-EFFECT-1, G-BUDGET-2, G-REV-1, G-PARITY-2,
 G-LOCK-7/8) were added by the post-cap adjudication wave (2026-09-15) that
@@ -281,6 +281,11 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "extraction-less row (an ignored/escalated re-evaluation) cannot hide a claude call already paid for (G2B-2)",
      "scripts/brain/tests/test_observation_ledger.py::test_cached_extraction_finds_the_newest_match_across_full_history",
      r's/if cached and cached\.get\("identity"\) == identity:  # G-LEDGER-8/if False:  # G-LEDGER-8 (mutated)/'),
+    ("G-LEDGER-9", "scripts/brain/observation_ledger.py",
+     "latest_real finds the newest NON-simulated row for a (source_ref, digest), so a dry run appended on top of a "
+     "real PARTIAL row cannot hide the effects that genuinely landed under it (G2r3-3)",
+     "scripts/brain/tests/test_client_state_gmail.py::test_a_dry_run_between_two_live_runs_does_not_hide_landed_effects",
+     r's/                result = row  # G-LEDGER-9/                result = None  # G-LEDGER-9 (mutated)/'),
     ("G-LEDGER-6", "scripts/brain/observation_ledger.py",
      "a SIMULATED (--dry-run) row is never terminal and never gates the FR-003 escalation - marked at is_terminal, "
      "escalated_for, and both ObservationRow constructions in client_state_gmail._file_message",
@@ -306,7 +311,7 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "a LIVE run never carries forward 'filed' outcomes from a SIMULATED row - nothing was actually written, so the "
      "live run must do all of it",
      "scripts/brain/tests/test_client_state_gmail.py::test_dry_run_then_live_run_still_performs_every_write",
-     r's/merge_prior = None  # G-SIM-1/pass  # G-SIM-1 (mutated)/'),
+     r's/merge_prior = ledger\.latest_real\(source_ref, digest\)  # G-SIM-1/pass  # G-SIM-1 (mutated)/'),
     ("G-ESC-2", "scripts/brain/client_state_gmail.py",
      "a failed send-telegram raises EscalationError so no 'escalated' row is persisted (escalated_for would otherwise "
      "gate the retry forever) - 2 further sites: both _send_escalation call sites",
@@ -437,10 +442,10 @@ def test_guard_registry_ids_are_unique():
     assert len(ids) == len(set(ids)), f"duplicate guard ids: {ids}"
 
 
-def test_guard_registry_has_83_rows():
+def test_guard_registry_has_84_rows():
     # Pinned count (rebuilt 2026-09-14 from the FINAL parts, G0 round-3
     # integration) so a future guard silently dropping out is itself caught.
-    assert len(GUARD_REGISTRY) == 83, f"expected 83 rows, got {len(GUARD_REGISTRY)}"
+    assert len(GUARD_REGISTRY) == 84, f"expected 84 rows, got {len(GUARD_REGISTRY)}"
 
 
 def test_guard_registry_rows_have_five_fields():

@@ -309,7 +309,13 @@ def _file_message(
     # does carry them forward, which is what makes the repeat preview free.
     merge_prior = same_digest_prior
     if merge_prior is not None and merge_prior.simulated and not cfg.dry_run:
-        merge_prior = None  # G-SIM-1
+        # G-SIM-1: a simulated row's `filed` outcomes never reach a live run.
+        # But dropping the merge source outright ALSO erased the real partial
+        # work a dry run happened to land on top of, so the live retry replayed
+        # the CRM write and appended a second History entry (G2r3-3). Fall back
+        # to the newest NON-simulated row for this digest, whose landed effect
+        # keys the retry must still honour.
+        merge_prior = ledger.latest_real(source_ref, digest)  # G-SIM-1
     if same_digest_prior is not None and (same_digest_prior.simulated or same_digest_prior.partial):
         # G0B3-3 / D-02: a dry-run (or a part-way) row for THIS digest already
         # recorded which digest this message supersedes. Because that row is the

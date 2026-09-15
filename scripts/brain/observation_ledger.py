@@ -124,6 +124,20 @@ class Ledger:
                 result = row
         return result
 
+    def latest_real(self, source_ref: str, digest: str) -> ObservationRow | None:
+        """The newest NON-simulated row for this exact (source_ref, digest).
+
+        A dry run appended between two live runs leaves a simulated row on top,
+        and a simulated row must never hand `filed` outcomes to a live run
+        (nothing was written). But it must not ERASE the real partial work
+        underneath it either -- the effects that genuinely landed live below it
+        (G2r3-3)."""
+        result: ObservationRow | None = None
+        for row in self._read_rows():
+            if row.source_ref == source_ref and row.content_digest == digest and not row.simulated:
+                result = row  # G-LEDGER-9
+        return result
+
     def is_terminal(self, source_ref: str, digest: str) -> bool:
         """A row is terminal only when every resolution on the LATEST row for
         this source_ref/digest is filed AND the row is a REAL one. A dry-run

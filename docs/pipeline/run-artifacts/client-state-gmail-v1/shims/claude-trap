@@ -1,0 +1,8 @@
+#!/bin/bash
+set -euo pipefail
+
+LOG="${CLIENT_STATE_SHIM_LOG:-/tmp/client-state-shim.log}"
+printf '%s %s %s claude-trap %s\n' "$(date -u +%FT%TZ)" "$$" "$PPID" "$*" >> "$LOG"
+echo "TRAP: claude-trap $*" >&2
+printf '%s %s %s TRAP: claude-trap %s\n' "$(date -u +%FT%TZ)" "$$" "$PPID" "$*" >> "$LOG"
+exit 1

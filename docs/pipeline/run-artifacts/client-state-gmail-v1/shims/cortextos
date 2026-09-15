@@ -1,0 +1,44 @@
+#!/bin/bash
+set -euo pipefail
+
+LOG="${CLIENT_STATE_SHIM_LOG:-/tmp/client-state-shim.log}"
+printf '%s %s %s cortextos %s\n' "$(date -u +%FT%TZ)" "$$" "$PPID" "$*" >> "$LOG"
+
+# The binding goal names exactly THREE pass-through bus verbs (amended
+# 2026-09-14 after G0 round-2 finding G0B2-6): meeting-brief-claim and
+# meeting-brief-release (they write only under the scratch --claims-dir) and
+# list-tasks (a READ -- the orchestrator needs current open tasks for FR-008
+# dedup; trapping it makes every live dry-run exit 3 before it can file a
+# message). Every pass-through is still logged above. create-task,
+# send-telegram, add-cron, comms-filter and every other verb stay trapped.
+if [ "${1:-}" = "bus" ] && {
+     [ "${2:-}" = "meeting-brief-claim" ] ||
+     [ "${2:-}" = "meeting-brief-release" ] ||
+     [ "${2:-}" = "list-tasks" ]; }; then
+  REAL="${CLIENT_STATE_REAL_CORTEXTOS:-}"
+  if [ -z "$REAL" ]; then
+    SHIM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    CLEAN_PATH=""
+    IFS=':' read -r -a PARTS <<< "$PATH"
+    for p in "${PARTS[@]}"; do
+      if [ "$p" != "$SHIM_DIR" ]; then
+        CLEAN_PATH="${CLEAN_PATH:+$CLEAN_PATH:}$p"
+      fi
+    done
+    REAL="$(PATH="$CLEAN_PATH" command -v -p cortextos || true)"
+    if [ -z "$REAL" ]; then
+      # -p forces bash's fixed standard-utils PATH, which may not contain a
+      # project-local cortextos; fall back to a plain lookup on the cleaned PATH.
+      REAL="$(PATH="$CLEAN_PATH" command -v cortextos || true)"
+    fi
+  fi
+  if [ -z "$REAL" ]; then
+    echo "cortextos shim: could not locate the real cortextos binary to pass through '$*'" >&2
+    exit 1
+  fi
+  exec "$REAL" "$@"
+fi
+
+echo "TRAP: cortextos $*" >&2
+printf '%s %s %s TRAP: cortextos %s\n' "$(date -u +%FT%TZ)" "$$" "$PPID" "$*" >> "$LOG"
+exit 1

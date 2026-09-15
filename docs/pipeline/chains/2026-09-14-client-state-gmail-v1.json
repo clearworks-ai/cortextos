@@ -5,7 +5,7 @@
   "repo_root": "/Users/joshweiss/code/cortextos",
   "status": "running",
   "created": "2026-09-14",
-  "updated": "2026-09-15T17:33:29.532Z",
+  "updated": "2026-09-15T21:20:58.499Z",
   "graphify_root": "graphify-out/graph.json",
   "ledger_root": "docs/pipeline/ledgers",
   "staging_mutex_group": "cortextos-staging",
@@ -60,18 +60,29 @@
     {
       "id": "goal-client-state-gmail-v1-build",
       "type": "goal",
-      "status": "running",
+      "status": "done",
       "path": "docs/pipeline/goals/2026-09-14-client-state-gmail-v1-build-goal.md",
-      "title": "R1 BUILD \u2014 Gmail thin slice built, staged, proven on copies (zero prod writes)",
+      "title": "R1 BUILD — Gmail thin slice built, staged, proven on copies (zero prod writes)",
       "depends_on": [
         "goalify"
       ],
       "chars": 44967,
       "ledger_path": "docs/pipeline/ledgers/2026-09-14-client-state-gmail-v1-goal-client-state-gmail-v1-build.md",
       "staging_mutex_group": "cortextos-staging",
-      "stage_shas": [],
-      "promote_blockers": [],
-      "watch_items": [],
+      "stage_shas": [
+        "efc90b570123b63347323917219b0d84b00c2d24",
+        "2b130639eb5bdd07334fab8e5b56834a571c4db7"
+      ],
+      "promote_blockers": [
+        "activate goal ENTRY GATE E1-E4: Josh /promote feature/client-state-gmail-v1 -> main; runtime checkout on that code; explicit go; delta goal done",
+        "pre-existing red on main (zero overlap with this diff): 18 dashboard vitest files (BASELINE) + 3 tests in scripts/brain/tests/test_run_meeting_apply.py (`FAILED at status: rc=98`, stale-prompt) — fail on pristine origin/main",
+        "F-4 (FINAL, Important, carried): FR-006 dedup key diverges from the comms-backfill writer for >=2 live senders — coverage-diff contact-id-divergence class + duplicate-contact merge before the CRM writer goes live"
+      ],
+      "watch_items": [
+        "bus meeting-brief-claim exceeded its 120 s timeout once under host load ~10.5 (sweep exited 3 with the cause on the receipt; next sweep recovers) — consider a longer claim timeout at activation",
+        "meeting lane (separate incident 2026-09-15): bridge PTY workers produced no envelope for both of the day's meetings; hotfix #392 (retry sweep fetches envelope-less transcripts) merged to main; the bridge should exec run_meeting.py directly",
+        "relevance (base D-11): 90%+ of a real 3-day inbox is ignored as no-known-entity — superseded by patch-1 FR-003 (delta goal)"
+      ],
       "error": null,
       "meta": {
         "branch": "feat/client-state-gmail-v1-build",
@@ -103,14 +114,97 @@
           "hashed_at": "2026-09-15T04:25:51.457Z"
         }
       },
-      "claim": "stage"
+      "claim": null,
+      "evidence": {
+        "schema_version": 1,
+        "node_id": "goal-client-state-gmail-v1-build",
+        "matrix": "GREEN",
+        "stage_shas": [
+          "efc90b570123b63347323917219b0d84b00c2d24",
+          "2b130639eb5bdd07334fab8e5b56834a571c4db7"
+        ],
+        "promote_blockers": [
+          "activate goal ENTRY GATE E1-E4: Josh /promote feature/client-state-gmail-v1 -> main; runtime checkout on that code; explicit go; delta goal done",
+          "pre-existing red on main (zero overlap with this diff): 18 dashboard vitest files (BASELINE) + 3 tests in scripts/brain/tests/test_run_meeting_apply.py (`FAILED at status: rc=98`, stale-prompt) — fail on pristine origin/main",
+          "F-4 (FINAL, Important, carried): FR-006 dedup key diverges from the comms-backfill writer for >=2 live senders — coverage-diff contact-id-divergence class + duplicate-contact merge before the CRM writer goes live"
+        ],
+        "watch_items": [
+          "bus meeting-brief-claim exceeded its 120 s timeout once under host load ~10.5 (sweep exited 3 with the cause on the receipt; next sweep recovers) — consider a longer claim timeout at activation",
+          "meeting lane (separate incident 2026-09-15): bridge PTY workers produced no envelope for both of the day's meetings; hotfix #392 (retry sweep fetches envelope-less transcripts) merged to main; the bridge should exec run_meeting.py directly",
+          "relevance (base D-11): 90%+ of a real 3-day inbox is ignored as no-known-entity — superseded by patch-1 FR-003 (delta goal)"
+        ],
+        "gate_invocation": [
+          {
+            "gate": "G0-review",
+            "kind": "deterministic",
+            "command": "node /Users/joshweiss/code/bones-dev-skills/goalify/scripts/verify-review-artifact.mjs --file /Users/joshweiss/code/cortextos-worktrees/client-state-gmail-v1/docs/pipeline/run-artifacts/client-state-gmail-v1/G0-review-opus.json --sha 8ac1ca58847cf0991c0ba3a114592921b2d7cede91257adcff0a02701f3c1bad && node /Users/joshweiss/code/bones-dev-skills/goalify/scripts/verify-review-artifact.mjs --file /Users/joshweiss/code/cortextos-worktrees/client-state-gmail-v1/docs/pipeline/run-artifacts/client-state-gmail-v1/G0-adjudication.json --sha 62ec29c51775a43d7530ee1cf413e84cf09bfefb8e27fd254e28a548627c381a",
+            "exit": 0,
+            "notes": "opus G0a + codex G0b, 3 rounds cap-adjudicated; grok skipped-by-Josh"
+          },
+          {
+            "gate": "G1-suite",
+            "kind": "deterministic",
+            "command": "CLIENT_STATE_REPO_ROOT=/private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-tree-efc90b57 bash /private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-tree-efc90b57/docs/pipeline/run-artifacts/client-state-gmail-v1/g1-count-delta.sh check /private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-tree-efc90b57/docs/pipeline/run-artifacts/client-state-gmail-v1/BASELINE-g1-9f443129.json 0 0 5",
+            "exit": 0,
+            "notes": "count delta at efc90b57 vs 9f443129 capture: +0 vitest files / +0 tests / +5 pytest; 305/4058/788; 18 pre-existing red vitest files unchanged"
+          },
+          {
+            "gate": "G2-codex-review",
+            "kind": "ai",
+            "command": "codex review --base feature/client-state-gmail-v1 -c model_reasoning_effort=high",
+            "exit": 0,
+            "notes": "rounds 5→14→10, cap 3, adjudicated; all rulings fixed (13 commits + LIVE-1); model_receipt codex CLI default (ChatGPT account); grok skipped-by-Josh"
+          },
+          {
+            "gate": "G2-codex-challenge",
+            "kind": "ai",
+            "command": "codex exec (independent guarantee verifier; `codex challenge` refused by the OpenAI filter)",
+            "exit": 0,
+            "notes": "G2b-verify-r2.json"
+          },
+          {
+            "gate": "G3-stage",
+            "kind": "deterministic",
+            "command": "gh pr merge 391/393/394/395/396 --merge (base feature/client-state-gmail-v1)",
+            "exit": 0,
+            "notes": "candidate efc90b570123b63347323917219b0d84b00c2d24 (product tree c7cda35bb968); evidence merge 2b130639eb5bdd07334fab8e5b56834a571c4db7"
+          },
+          {
+            "gate": "G4-matrix",
+            "kind": "deterministic",
+            "command": "bash /Users/joshweiss/code/cortextos-worktrees/client-state-gmail-v1/docs/pipeline/run-artifacts/client-state-gmail-v1/g4-check.sh efc90b570123b63347323917219b0d84b00c2d24",
+            "exit": 0,
+            "notes": "items 1-8 PASS; live read-only dry-run on copies 10 filed / 3 escalated / 97 ignored $0.62; escalated case via a declared CRM-copy edit (ESCALATION-CASE.md)"
+          },
+          {
+            "gate": "FINAL-review",
+            "kind": "deterministic",
+            "command": "node /Users/joshweiss/code/bones-dev-skills/goalify/scripts/verify-review-artifact.mjs --file /private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-out-efc90b57/FINAL-review-fable.json --sha efc90b570123b63347323917219b0d84b00c2d24",
+            "exit": 0,
+            "notes": "Fable rounds 1-3: F-1..F-6 all closed, zero open; model_receipt claude-fable-5-1; grok skipped-by-Josh"
+          },
+          {
+            "gate": "mutation-check",
+            "kind": "deterministic",
+            "command": "bash docs/pipeline/run-artifacts/client-state-gmail-v1/mutation-check.sh",
+            "exit": 0,
+            "notes": "95/95 rows green on the candidate tree"
+          }
+        ],
+        "source": "G4 checker (g4-check.sh) over docs/pipeline/run-artifacts/client-state-gmail-v1/g4/",
+        "recorded_at": "2026-09-15T21:20:58Z",
+        "notes": "R1 BUILD DONE on the integration branch; zero production writes; nothing promoted to main. Live proofs: 4 read-only dry-runs on copies today."
+      },
+      "evidence_mode": "evidence",
+      "no_ship": false,
+      "no_ship_reason": null
     },
     {
       "id": "goal-client-state-gmail-v1-activate",
       "type": "goal",
       "status": "blocked",
       "path": "docs/pipeline/goals/2026-09-14-client-state-gmail-v1-activate-goal.md",
-      "title": "R2 ACTIVATE \u2014 live cron + first production writes (entry gate: Josh promote + explicit go)",
+      "title": "R2 ACTIVATE — live cron + first production writes (entry gate: Josh promote + explicit go)",
       "depends_on": [
         "goal-client-state-gmail-v1-build",
         "goal-client-state-gmail-v1-delta"
@@ -206,7 +300,7 @@
     {
       "id": "goal-client-state-gmail-v1-delta",
       "type": "goal",
-      "status": "blocked",
+      "status": "ready",
       "path": "docs/pipeline/goals/2026-09-15-client-state-gmail-v1-delta-goal.md",
       "title": "R2 DELTA: event trigger + real-person relevance (proven on copies)",
       "depends_on": [

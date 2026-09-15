@@ -806,14 +806,14 @@ def test_history_write_happens_under_the_meeting_pipeline_file_lock(tmp_path, mo
     events: list[tuple[str, str]] = []
 
     @contextlib.contextmanager
-    def _recording_lock(page):
+    def _recording_lock(page, heartbeat=None, *, clock=None):
         events.append(("enter", str(page)))
         try:
             yield
         finally:
             events.append(("exit", str(page)))
 
-    monkeypatch.setattr(csg, "client_file_lock", _recording_lock)
+    monkeypatch.setattr(csg, "_page_lock", _recording_lock)
 
     cfg = _cfg(tmp_path, dry_run=False)
     runner = FakeRunner()
@@ -1636,3 +1636,80 @@ def test_a_late_resolution_on_an_already_written_page_is_credited(tmp_path):
     assert rows[-1]["partial"] is False
     # the page still carries exactly ONE entry for this message
     assert acme.read_text(encoding="utf-8").count("[source: gmail:m1]") == 1
+
+
+# --- G2r2-10 (G2B-4): the page lock waits WITHOUT letting the lease go stale --
+
+def test_a_held_page_lock_heartbeats_while_waiting_then_times_out(tmp_path, monkeypatch):
+    """fcntl.flock(LOCK_EX) blocks in the KERNEL, where nothing can heartbeat.
+    A page held by another process past the 60-minute claim TTL therefore let
+    this run's own lease go stale, and the next cron cleared it and started a
+    second concurrent run. The wait is now a timed non-blocking poll that ticks
+    the heartbeat, and gives up loudly instead of hanging."""
+    import fcntl as _fcntl
+
+    ticks = {"t": 0.0}
+    cfg = _cfg(tmp_path, dry_run=False, clock=lambda: ticks["t"])
+
+    monkeypatch.setattr(csg, "PAGE_LOCK_TIMEOUT_S", 1800.0)
+    monkeypatch.setattr(csg, "PAGE_LOCK_POLL_S", 5.0)
+    monkeypatch.setattr(csg, "_page_lock_sleep", lambda s: ticks.__setitem__("t", ticks["t"] + s))
+
+    touches = {"n": 0}
+    real_touch = single_flight.Lease.touch
+
+    def _counting_touch(self):
+        touches["n"] += 1
+        real_touch(self)
+
+    # another process is holding this page's advisory lock
+    page = _page_path(cfg, "acme")
+    lock_path = page.with_name(page.name + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    holder = open(lock_path, "w", encoding="utf-8")
+    _fcntl.flock(holder.fileno(), _fcntl.LOCK_EX)
+
+    runner = FakeRunner()
+    _lock_ok(runner, cfg.state_dir / "claims")
+    runner.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+    _open_tasks_empty(runner)
+    runner.record(("claude",), rc=0, stdout=_claude_wrapper())
+    runner.record(("python3", str(cfg.crm_dir / "upsert-contact.py")), rc=0, stdout="c1\n")
+    runner.record(("python3", str(cfg.crm_dir / "add-interaction.py")), rc=0, stdout=_interaction_stdout())
+
+    single_flight.Lease.touch = _counting_touch
+    try:
+        result = csg.run(cfg, runner)
+    finally:
+        single_flight.Lease.touch = real_touch
+        _fcntl.flock(holder.fileno(), _fcntl.LOCK_UN)
+        holder.close()
+
+    assert result.exit_code == 3
+    err = json.loads((cfg.state_dir / "run-receipt.json").read_text())["error"]
+    assert "page lock" in err and str(lock_path) in err
+    # the lease was heartbeated THROUGH the wait, so it never went stale
+    assert touches["n"] >= 5, touches
+    # the page was never written
+    assert page.read_text(encoding="utf-8").count("[source: gmail:m1]") == 0
+
+
+def test_the_page_lock_is_taken_and_released_when_free(tmp_path):
+    """The happy path still serialises: acquiring, writing and releasing the
+    SAME sibling lockfile the meeting pipeline uses."""
+    cfg = _cfg(tmp_path, dry_run=False)
+    page = _page_path(cfg, "acme")
+    runner = FakeRunner()
+    _lock_ok(runner, cfg.state_dir / "claims")
+    runner.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+    _open_tasks_empty(runner)
+    runner.record(("claude",), rc=0, stdout=_claude_wrapper())
+    runner.record(("python3", str(cfg.crm_dir / "upsert-contact.py")), rc=0, stdout="c1\n")
+    runner.record(("python3", str(cfg.crm_dir / "add-interaction.py")), rc=0, stdout=_interaction_stdout())
+
+    assert csg.run(cfg, runner).exit_code == 0
+    assert page.read_text(encoding="utf-8").count("[source: gmail:m1]") == 1
+    # the lockfile path is byte-identical to meeting_writeback.client_file_lock's
+    assert csg._page_lock_path(page) == page.with_name(page.name + ".lock")

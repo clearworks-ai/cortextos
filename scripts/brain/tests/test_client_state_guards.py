@@ -5,12 +5,12 @@ writer's landed part, materialised via
 swept with the SAME regex test_no_unregistered_guard below uses (a G-ID
 token anywhere after a '#' on its line -- docstring/prose mentions of a
 G-ID, which several modules still carry alongside their real marker, do NOT
-count). 78 rows: LEDGER x8, RECEIPT x2, LOCK x9, LOCKREF x1, SWEEP x10, RES x2,
+count). 79 rows: LEDGER x8, RECEIPT x2, LOCK x10, LOCKREF x1, SWEEP x10, RES x2,
 EXT x4, INV x2, BASE x2, SUPER x1, DIG x4, BUS x4 (TS), IDEMP x2, MERGE x3,
 SIM x1, ESC x3, QUERY x1, FAIL x1, BUDGET x2, CRM x2, HIST x2, PARITY x2,
 WRITER x2, OWNER x1, TASK x2, DEDUP x1, EFFECT x3, REV x1.
 
-The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10; the G2 round-2 wave (2026-09-15) added G-ESC-3, G-LOCK-9, G-BUS-4, G-DIG-4, G-LEDGER-8 and G-EFFECT-3.
+The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10; the G2 round-2 wave (2026-09-15) added G-ESC-3, G-LOCK-9, G-BUS-4, G-DIG-4, G-LEDGER-8, G-EFFECT-3 and G-LOCK-10.
 
 The last 8 rows (G-MERGE-2/3, G-EFFECT-1, G-BUDGET-2, G-REV-1, G-PARITY-2,
 G-LOCK-7/8) were added by the post-cap adjudication wave (2026-09-15) that
@@ -86,6 +86,12 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "byte-identical (G2A-3); second site: _claim_once wrapping an OSError/timeout from the claim call itself",
      "scripts/brain/tests/test_single_flight.py::test_acquire_raises_on_an_operational_claim_failure",
      r's/if verdict is None:  # G-LOCK-9: no claim verdict named -> operational, never contention/if False:  # G-LOCK-9 (mutated)/'),
+    ("G-LOCK-10", "scripts/brain/client_state_gmail.py",
+     "the client-page advisory lock is acquired with a TIMED NON-BLOCKING flock loop that heartbeats the claim while "
+     "it waits and gives up loudly past the bound - a blocking flock waits inside the kernel where nothing can "
+     "heartbeat, so a wedged page holder let this run's 60-minute claim go stale under it (G2B-4)",
+     "scripts/brain/tests/test_client_state_gmail.py::test_a_held_page_lock_heartbeats_while_waiting_then_times_out",
+     r's/heartbeat\.tick\(\)  # G-LOCK-10/pass  # G-LOCK-10 (mutated)/'),
     ("G-LOCK-5", "scripts/brain/single_flight.py",
      "Lease.touch records `lost` when our own lock file has vanished (a concurrent stale-sweep) instead of silently "
      "pretending we still hold the lease - the caller stops before further effects (G0B2-13)",
@@ -231,9 +237,9 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      r's/if e\.revision_of:  # G-HIST-1/if False:  # G-HIST-1 (mutated)/'),
     ("G-HIST-2", "scripts/brain/client_state_gmail.py",
      "the page read + apply_history render + atomic write for a bound page all happen under the SAME advisory "
-     "client_file_lock the meeting pipeline uses, so a concurrent meeting-writeback filing can never interleave",
+     "sibling <page>.lock the meeting pipeline uses, so a concurrent meeting-writeback filing can never interleave",
      "scripts/brain/tests/test_client_state_gmail.py::test_history_write_happens_under_the_meeting_pipeline_file_lock",
-     r's/with client_file_lock\(page\):  # G-HIST-2/with __import__("contextlib").nullcontext():  # G-HIST-2 (mutated)/'),
+     r's/with _page_lock\(page, _heartbeat_of\(runner\), clock=cfg\.clock\):  # G-HIST-2/with __import__("contextlib").nullcontext():  # G-HIST-2 (mutated)/'),
     ("G-PARITY-1", "scripts/brain/client_state_writes.py",
      "write_interaction's argv is built by plan_add_interaction_argv (client_state_projections), never re-derived locally - "
      "second site: client_state_gmail.py's plan_history_entry call for the History write",
@@ -405,10 +411,10 @@ def test_guard_registry_ids_are_unique():
     assert len(ids) == len(set(ids)), f"duplicate guard ids: {ids}"
 
 
-def test_guard_registry_has_78_rows():
+def test_guard_registry_has_79_rows():
     # Pinned count (rebuilt 2026-09-14 from the FINAL parts, G0 round-3
     # integration) so a future guard silently dropping out is itself caught.
-    assert len(GUARD_REGISTRY) == 78, f"expected 78 rows, got {len(GUARD_REGISTRY)}"
+    assert len(GUARD_REGISTRY) == 79, f"expected 79 rows, got {len(GUARD_REGISTRY)}"
 
 
 def test_guard_registry_rows_have_five_fields():

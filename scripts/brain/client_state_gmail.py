@@ -12,7 +12,9 @@ CRM subprocesses, the real vault page write) are skipped in dry-run (G0A-3/G0B-1
 from __future__ import annotations
 
 import argparse
+import contextlib
 import difflib
+import fcntl
 import importlib.util
 import os
 import sys
@@ -94,6 +96,77 @@ def _load_client_file_lock():
 
 
 client_file_lock = _load_client_file_lock()
+
+
+# FR-008 page-lock bounds. A page is normally free; anything past a few minutes
+# means another holder is wedged, and waiting on it silently is what let a live
+# run's 60-minute claim go stale underneath it (G2B-4).
+PAGE_LOCK_TIMEOUT_S = 300.0
+PAGE_LOCK_POLL_S = 2.0
+
+
+class PageLockTimeout(Exception):
+    """Another process held a client page's advisory lock past PAGE_LOCK_TIMEOUT_S."""
+
+
+def _page_lock_sleep(seconds: float) -> None:
+    """Indirection so a test can drive the wait loop on a fake clock."""
+    time.sleep(seconds)
+
+
+def _page_lock_path(page: Path) -> Path:
+    # Byte-identical to meeting_writeback.client_file_lock's sibling lockfile,
+    # so the meeting pipeline and this one still exclude each other.
+    return page.with_name(page.name + ".lock")
+
+
+def _heartbeat_of(runner):
+    """The Heartbeat wrapped around `runner` by run(), if any (tests pass a bare
+    Runner, which simply has none)."""
+    return getattr(runner, "heartbeat", None)
+
+
+@contextlib.contextmanager
+def _page_lock(page: Path, heartbeat=None, *, clock: Callable[[], float] = time.monotonic):
+    """FR-008 advisory lock over ONE client page's read-modify-write, acquired
+    with a TIMED, NON-BLOCKING flock loop.
+
+    The lock FILE is the same sibling `<page>.lock` meeting_writeback.py uses,
+    so the two pipelines still serialise against each other (G-HIST-2). What
+    changed is the WAIT: `flock(LOCK_EX)` blocks inside the kernel, where
+    nothing can heartbeat, so a page held by another process for longer than the
+    60-minute claim TTL let this run's own lease go stale -- the next cron then
+    cleared the "stale" claim and started a SECOND concurrent run while this one
+    was still alive (G2B-4). Every poll ticks the heartbeat, which both touches
+    the lease and raises LeaseLost the moment we stop owning it. Past the bound
+    we give up LOUDLY (record_failure + exit 3), never on a silent stale claim.
+    """
+    lock_path = _page_lock_path(page)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(lock_path, "w", encoding="utf-8")
+    deadline = clock() + PAGE_LOCK_TIMEOUT_S
+    try:
+        while True:
+            try:
+                # LOCK_NB, never a bare LOCK_EX: a blocking flock waits inside
+                # the kernel, where the tick below can never run.
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if heartbeat is not None:
+                    heartbeat.tick()  # G-LOCK-10
+                if clock() >= deadline:
+                    raise PageLockTimeout(
+                        f"page lock held by another process for more than "
+                        f"{PAGE_LOCK_TIMEOUT_S:.0f}s: {lock_path}"
+                    ) from None
+                _page_lock_sleep(PAGE_LOCK_POLL_S)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        handle.close()
 
 
 class EscalationError(Exception):
@@ -511,7 +584,7 @@ def _do_writes(
         # G0B-13: hold the SAME advisory lock the meeting pipeline uses across
         # read + render + write, so a concurrent meeting-writeback filing to the
         # same page can never interleave with this read-modify-write.
-        with client_file_lock(page):  # G-HIST-2
+        with _page_lock(page, _heartbeat_of(runner), clock=cfg.clock):  # G-HIST-2
             old_text = page.read_text(encoding="utf-8") if page.exists() else ""
             new_text = writeback_email.apply_history(old_text, entry)
             if cfg.dry_run:
@@ -678,7 +751,7 @@ def run(cfg: Config, runner) -> RunResult:
     except (
         GmailSourceError, extract_email.ExtractionError, client_state_writes.WriterError,
         client_state_writes.TaskEnumerationError, EscalationError, single_flight.LeaseLost,
-        single_flight.LeaseAcquireError,
+        single_flight.LeaseAcquireError, PageLockTimeout,
     ) as exc:
         # G0B-6: a failure receipt carries the partial progress this run made
         # (messages seen, truncation, cost already paid) alongside the error.

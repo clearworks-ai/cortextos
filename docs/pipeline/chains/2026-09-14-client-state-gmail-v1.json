@@ -5,7 +5,7 @@
   "repo_root": "/Users/joshweiss/code/cortextos",
   "status": "running",
   "created": "2026-09-14",
-  "updated": "2026-09-15T21:20:58.499Z",
+  "updated": "2026-09-15T21:23:59.140Z",
   "graphify_root": "graphify-out/graph.json",
   "ledger_root": "docs/pipeline/ledgers",
   "staging_mutex_group": "cortextos-staging",
@@ -300,7 +300,7 @@
     {
       "id": "goal-client-state-gmail-v1-delta",
       "type": "goal",
-      "status": "ready",
+      "status": "running",
       "path": "docs/pipeline/goals/2026-09-15-client-state-gmail-v1-delta-goal.md",
       "title": "R2 DELTA: event trigger + real-person relevance (proven on copies)",
       "depends_on": [
@@ -335,7 +335,8 @@
             "role": "condition"
           }
         ]
-      }
+      },
+      "claim": "develop"
     },
     {
       "id": "goal-client-state-gmail-v1-tierb",

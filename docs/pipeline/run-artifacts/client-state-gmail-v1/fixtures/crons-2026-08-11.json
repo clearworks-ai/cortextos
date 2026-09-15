@@ -1,0 +1,12 @@
+{
+  "updated_at": "2026-08-11T00:00:00.000Z",
+  "crons": [
+    {
+      "name": "live-fleet-snapshot-clean",
+      "prompt": "noop - cron-precheck fixture, not a real cron",
+      "schedule": "*/10 * * * *",
+      "enabled": true,
+      "created_at": "2026-08-11T00:00:00.000Z"
+    }
+  ]
+}

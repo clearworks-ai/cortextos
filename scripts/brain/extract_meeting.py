@@ -22,6 +22,8 @@ PROMPT_TEMPLATE = """Extract meeting intelligence as JSON matching the schema.
 Unknown keys are forbidden. The string "unknown" is illegal for every enum.
 Quotes for decisions/commitments/promotions/open_questions must be normalized substrings of text_units. open_questions is optional — omit it or leave it empty when none exist.
 
+A COMMITMENT is an explicit promise one participant made TO THE OTHER PARTY in this conversation — something the other side can now hold them to ("I'll send you the link", "I'll have the rubric to you by Friday", "we'll get you the export"). It is NOT: an idea or possibility floated without agreement ("we could set up recurring time", "maybe I'll…"), a participant's own ongoing work or plans that they do not owe the other side ("I'm going to keep refining my podcast workflow"), a restated agenda item, or advice. Every commitment's quote must be the sentence where the promise was made, by the person who made it. When in doubt, leave it out — a missed commitment is cheaper than an invented one. A DECISION is something the parties settled together, not one side's opinion.
+
 Participants (index = owner_participant):
 {participants}
 

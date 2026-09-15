@@ -154,8 +154,14 @@ def plan_digest_line(row: ObservationRow) -> list[str]:
         lines.append(
             f"- Task suppressed (tier {s['tier']}): {s['title']} matches {s['match']!r} ({row.source_ref}){tag}"
         )
-    if any(r.outcome == "escalated" for r in row.resolutions):
-        lines.append(f"- Escalated: {row.source_ref} — ambiguous entity binding{tag}")
+    escalated = [r for r in row.resolutions if r.outcome == "escalated"]
+    if escalated:
+        # The ESCALATION REASON is carried here rather than a fixed phrase: this
+        # is the one renderer of the escalation line (the daily digest used to
+        # emit a second, differently-worded one just to keep the reason), so a
+        # reader of either consumer sees WHY it escalated.
+        reasons = "; ".join(r.reason for r in escalated if r.reason) or "ambiguous entity binding"
+        lines.append(f"- Escalated: {row.source_ref} — {reasons}{tag}")
     if row.revision_of:
         lines.append(f"- Revision: {row.source_ref} supersedes {row.revision_of[:8]}{tag}")
     return lines

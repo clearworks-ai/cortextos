@@ -23,7 +23,7 @@ if str(HERE) not in sys.path:
 
 from atomic import atomic_write  # noqa: E402
 from brain_rollup import _section_text  # noqa: E402
-from client_state_projections import effective_writes, plan_digest_line  # noqa: E402
+from client_state_projections import plan_digest_line  # noqa: E402
 from client_state_writes import list_open_tasks  # noqa: E402
 from observation_ledger import Ledger, ObservationRow, gap_line, read_receipt  # noqa: E402
 from resolve_meeting import _domains_from_text, _norm_title, _org_names_from_text  # noqa: E402
@@ -245,28 +245,24 @@ def gmail_section(
         open_tasks_by_id = {t["id"]: t for t in list_open_tasks(runner)}
 
     for row in rows:
+        # G0B-17: EVERY per-row line -- writes (with the extraction summary),
+        # suppressions, escalations and the revision marker -- comes from the
+        # SHARED projection (client_state_projections.plan_digest_line), the
+        # same rendering the dry-run preview uses. This loop adds ONLY what that
+        # projection cannot know: the join against currently-open tasks below.
+        # It used to re-emit the revision/suppression/escalation events in its
+        # own wording on top of the projection's, so a row with writes AND any
+        # of those reported each one twice. G0B2-4: a SIMULATED (dry-run) row's
+        # effective writes are its `planned_writes`, so the G4 item-6 dry-run
+        # digest reports what the run previewed instead of "0 changes".
+        change_lines.extend(plan_digest_line(row))
         if row.revision_of:
-            change_lines.append(f"- REVISION {row.source_ref} (supersedes {row.revision_of[:8]})")
             for tid in sorted(_superseded_task_ids(ledger, row)):
                 task = open_tasks_by_id.get(tid)
                 if task is not None:
                     # FR-001 D-02: any OPEN task derived from the superseded
                     # digest is flagged for review, never auto-closed.
                     change_lines.append(f"- evidence superseded — review: task:{tid} {task['title']}")
-        if effective_writes(row):
-            # G0B-17: per-write lines (including the extraction summary) come
-            # from the SHARED projection (client_state_projections.plan_digest_line)
-            # -- the same rendering the dry-run preview uses, never a local
-            # re-implementation that can drift from it. G0B2-4: a SIMULATED
-            # (dry-run) row's effective writes are its `planned_writes`, so the
-            # G4 item-6 dry-run digest reports what the run previewed instead
-            # of collapsing to "0 changes".
-            change_lines.extend(plan_digest_line(row))
-        for s in row.suppressed:
-            change_lines.append(f"- suppressed duplicate (tier {s['tier']}): {s['title']} ~ {s['match']}")
-        for res in row.resolutions:
-            if res.outcome == "escalated":
-                change_lines.append(f"- escalated: {row.source_ref} {res.reason}")
 
     ignored_refs: set[str] = set()
     ignored_senders: set[str] = set()

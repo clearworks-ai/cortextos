@@ -288,10 +288,10 @@ def test_gmail_section_renders_each_change_line_type(tmp_path):
     # summary -- the same rendering the dry-run preview uses.
     assert "- Page: clients/acme.md (gmail:msg-a) — Marcos asked for the renewal quote" in text
     assert "- CRM: crm:c-marcos (gmail:msg-a) — Marcos asked for the renewal quote" in text
-    assert "- REVISION gmail:msg-b (supersedes digestb1)" in text
+    assert "- Revision: gmail:msg-b supersedes digestb1" in text
     assert "- evidence superseded — review: task:T-1 Send tacticals doc" in text
-    assert "- suppressed duplicate (tier 1): Send Alloi the tacticals doc ~ Ship tacticals doc" in text
-    assert "- escalated: gmail:msg-d ambiguous:acme|widget-co" in text
+    assert "- Task suppressed (tier 1): Send Alloi the tacticals doc matches 'Ship tacticals doc' (gmail:msg-c)" in text
+    assert "- Escalated: gmail:msg-d — ambiguous:acme|widget-co" in text
     assert "1 messages from 1 senders" in text
     assert "unknown-co.com" in text
     assert "- truncated: 2026-09-12 (50 msgs, cap reached)" in text
@@ -498,3 +498,53 @@ def test_gmail_section_still_collapses_for_a_healthy_receipt(tmp_path):
     lines = cs_digest.gmail_section(state, vault, ledger, now, window_days=3, runner=FakeRunner({}))
     assert len(lines) == 1
     assert lines[0].startswith("Client state (Gmail) OK — 0 changes in 24h, invariants OK, poller last success ")
+
+
+# --- G2a-5: ONE source for every digest event line ---------------------------
+
+def test_gmail_section_emits_each_event_exactly_once(tmp_path):
+    """plan_digest_line(row) already renders the revision, suppression and
+    escalation lines for a row that has writes; the surrounding loop used to
+    render them a SECOND time in its own wording."""
+    vault = tmp_path / "vault"
+    state = tmp_path / "state"
+    state.mkdir(parents=True)
+    ledger = Ledger(state / "observations.jsonl")
+    now = datetime(2026, 9, 14, 12, 0, 0, tzinfo=timezone.utc)
+
+    ledger.append(_row(
+        "gmail:msg-x", "digestx", "2026-09-14T09:00:00+00:00",
+        resolutions=[
+            _resolution(slug="acme", outcome="filed"),
+            _resolution(slug="", kind="", method="none", outcome="escalated",
+                        reason="ambiguous:acme|alloi", email=""),
+        ],
+        writes=["clients/acme.md"],
+        revision_of="digestw0",
+        suppressed=[{"title": "Send the MSA", "tier": 1, "match": "Ship the MSA"}],
+        extraction={"summary": "Marcos asked again"},
+    ))
+    _write(state / "run-receipt.json", json.dumps({
+        "last_success_at": "2026-09-14T11:50:00+00:00",
+        "window_days": 3, "message_count": 1, "truncation": [], "cost_usd": 0.01,
+    }))
+    _seed_baseline_ok(state, now)
+
+    runner = FakeRunner({
+        ("cortextos", "bus", "list-tasks"): subprocess.CompletedProcess(
+            ["cortextos", "bus", "list-tasks"], 0, "[]", "",
+        ),
+    })
+    lines = cs_digest.gmail_section(state, vault, ledger, now, window_days=3, runner=runner)
+
+    revision_lines = [ln for ln in lines if "supersedes" in ln.lower() or "revision" in ln.lower()]
+    suppression_lines = [ln for ln in lines if "Send the MSA" in ln]
+    escalation_lines = [ln for ln in lines if "escalat" in ln.lower()]
+    page_lines = [ln for ln in lines if "clients/acme.md" in ln]
+
+    assert len(revision_lines) == 1, revision_lines
+    assert len(suppression_lines) == 1, suppression_lines
+    assert len(escalation_lines) == 1, escalation_lines
+    assert len(page_lines) == 1, page_lines
+    # the reason the loop's own line carried is not lost
+    assert any("ambiguous:acme|alloi" in ln for ln in escalation_lines), escalation_lines

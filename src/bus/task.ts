@@ -104,6 +104,7 @@ export function classifyTask(task: Task): TaskClass {
     || task.assigned_to === 'user'
     || task.project === 'human-tasks'
     || HUMAN_TITLE_RE.test(title)
+    || task.type === 'human' // G-BUS-3: an explicit type:human task is human-class whoever owns it
   ) {
     return 'human';
   }

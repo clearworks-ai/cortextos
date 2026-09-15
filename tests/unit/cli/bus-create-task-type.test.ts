@@ -92,6 +92,40 @@ describe('bus create-task --type (G-BUS-1)', () => {
     expect(readTask(taskId).type).toBe('agent');
   });
 
+  it('defaults the assignee to "human" when --type human is passed with no --assignee', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await busCommand.parseAsync(['node', 'bus', 'create-task', 'Review the renewal terms', '--type', 'human']);
+
+    const taskId = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
+    const onDisk = readTask(taskId);
+    expect(onDisk.type).toBe('human');
+    expect(onDisk.assigned_to).toBe('human');
+  });
+
+  it('keeps an explicit --assignee when --type human is passed', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await busCommand.parseAsync([
+      'node', 'bus', 'create-task', 'Review the renewal terms', '--type', 'human', '--assignee', 'boris',
+    ]);
+
+    const taskId = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
+    expect(readTask(taskId).assigned_to).toBe('boris');
+  });
+
+  it('leaves the assignee alone for an agent-type task (regression)', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await busCommand.parseAsync(['node', 'bus', 'create-task', 'Untyped assignee check']);
+
+    const taskId = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
+    expect(readTask(taskId).assigned_to).not.toBe('human');
+  });
+
   it('rejects an invalid --type value with exit 1', async () => {
     const exitSpy = mockExit();
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});

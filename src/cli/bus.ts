@@ -533,13 +533,18 @@ busCommand
       console.error(`ERROR: --type must be 'agent' or 'human' (got '${taskType}')`);
       process.exit(1);
     }
-    const resolvedAssignee = resolveTaskOwner(env.agentName, opts.assignee, {
+    // G-BUS-3: `--type human` with no `--assignee` used to leave the INVOKING
+    // AGENT as the owner, which reads as an agent task everywhere the owner is
+    // what is consulted. A human-type task with no named owner belongs to
+    // 'human'; an explicit --assignee is still honoured verbatim.
+    const effectiveAssignee = opts.assignee ?? (taskType === 'human' ? 'human' : undefined);
+    const resolvedAssignee = resolveTaskOwner(env.agentName, effectiveAssignee, {
       title,
       project: opts.project,
     });
     const taskId = createTask(paths, env.agentName, env.org, title, {
       description: opts.desc,
-      assignee: opts.assignee,
+      assignee: effectiveAssignee,
       priority: opts.priority as Priority,
       project: opts.project,
       someday: opts.someday ?? false,

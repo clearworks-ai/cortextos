@@ -199,6 +199,16 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "reads, zero claude calls on later sweeps (FINAL F-2, FR-001)",
      "scripts/brain/tests/test_client_state_gmail.py::test_a_frozen_message_writes_nothing_and_enumerates_nothing_on_later_sweeps",
      r's/ and ledger\.frozen_identity\(source_ref, digest\) == identity:  # G-EXT-8/ and False:  # G-EXT-8 (mutated)/'),
+    ("G-DIG-5", "scripts/brain/client_state_digest.py",
+     "the digest reads the receipt's frozen extraction set, so a still-frozen identity keeps the OK line from "
+     "collapsing after the day of the freeze and names --retry-frozen (FINAL F-5)",
+     "scripts/brain/tests/test_client_state_digest.py::test_gmail_section_keeps_reporting_a_frozen_identity_from_the_receipt",
+     r's/    for failure in \(receipt or \{\}\)\.get\("extraction_failures", \[\]\) or \[\]:  # G-DIG-5/    for failure in []:  # G-DIG-5 (mutated)/'),
+    ("G-ESC-5", "scripts/brain/client_state_gmail.py",
+     "the freeze branch demotes an UNDELIVERED escalation before persisting the frozen row, so an ambiguous "
+     "counterparty on a frozen message is still paged by the sweep that gets past extraction (FINAL F-6)",
+     "scripts/brain/tests/test_client_state_gmail.py::test_an_ambiguous_counterparty_on_a_frozen_message_is_still_paged_once",
+     r's/                _demote_undelivered_escalations\(\)  # G-ESC-5/                pass  # G-ESC-5 (mutated)/'),
     ("G-INV-1", "scripts/brain/client_state_digest.py",
      "compute_invariants keys domain_multi on the FULL domain - never a registrable_label collapse (example.com/example.org must not collide)",
      "scripts/brain/tests/test_client_state_digest.py::test_compute_invariants_does_not_confuse_different_tlds",
@@ -502,7 +512,7 @@ def test_guard_registry_ids_are_unique():
 def test_guard_registry_has_90_rows():
     # Pinned count (rebuilt 2026-09-14 from the FINAL parts, G0 round-3
     # integration) so a future guard silently dropping out is itself caught.
-    assert len(GUARD_REGISTRY) == 93, f"expected 93 rows, got {len(GUARD_REGISTRY)}"
+    assert len(GUARD_REGISTRY) == 95, f"expected 95 rows, got {len(GUARD_REGISTRY)}"
 
 
 def test_guard_registry_rows_have_five_fields():

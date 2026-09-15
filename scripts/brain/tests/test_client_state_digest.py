@@ -609,3 +609,25 @@ def test_new_violations_still_flags_a_page_added_to_a_shrunk_set(tmp_path):
     }
     nv = cs_digest.new_violations(current, baseline)
     assert [r["name"] for r in nv["org_name_multi"]] == ["Acme Corp"]
+
+
+def test_gmail_section_keeps_reporting_a_frozen_identity_from_the_receipt(tmp_path):
+    """FINAL F-5: days after the freeze (no row in the 24h window) the receipt's
+    frozen list must still hold the OK line open and name the un-freeze command."""
+    vault = tmp_path / "vault"
+    state = tmp_path / "state"
+    state.mkdir(parents=True)
+    ledger = Ledger(state / "observations.jsonl")
+    now = datetime(2026, 9, 17, 12, 0, 0, tzinfo=timezone.utc)
+    _write(state / "run-receipt.json", json.dumps({
+        "last_success_at": "2026-09-17T11:55:00+00:00",
+        "window_days": 3, "message_count": 0, "truncation": [], "cost_usd": 0.0,
+        "extraction_failures": [{"source_ref": "gmail:m9", "identity": "x", "attempts": 2,
+                                 "last_error": "open_questions[0]: unknown keys ['matches_open_item']", "frozen": True}],
+    }))
+    _seed_baseline_ok(state, now)
+
+    lines = cs_digest.gmail_section(state, vault, ledger, now, window_days=3, runner=FakeRunner({}))
+    assert not lines[0].startswith("Client state (Gmail) OK"), lines
+    frozen = [ln for ln in lines if "manual re-run: gmail:m9" in ln]
+    assert len(frozen) == 1 and "--retry-frozen" in frozen[0] and "unknown keys" in frozen[0], lines

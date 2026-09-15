@@ -1,0 +1,270 @@
+"""FR-002/FR-003 gmail_source: exclusion query, day windows, gws transport, parsing."""
+from __future__ import annotations
+
+import json
+import sys
+from datetime import date, timedelta
+from pathlib import Path
+
+import pytest
+
+BRAIN = Path(__file__).resolve().parents[1]
+if str(BRAIN) not in sys.path:
+    sys.path.insert(0, str(BRAIN))
+
+TESTS_DIR = Path(__file__).resolve().parent
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
+
+from helpers_client_state import FakeRunner  # noqa: E402
+
+FIXTURES = TESTS_DIR / "fixtures" / "client_state"
+
+
+def _ok(stdout: str):
+    import subprocess
+
+    return subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout, stderr="")
+
+
+def _err(code: int, stderr: str):
+    import subprocess
+
+    return subprocess.CompletedProcess(args=[], returncode=code, stdout="", stderr=stderr)
+
+
+def _triage_argv(query: str, max_results: int = 50) -> list[str]:
+    return ["gws", "gmail", "+triage", "--query", query, "--format", "json", "--max", str(max_results)]
+
+
+def test_exclusion_query_matches_comms_check_worker_verbatim() -> None:
+    # G-SWEEP-7
+    from gmail_source import EXCLUSION_QUERY
+
+    assert EXCLUSION_QUERY == (
+        '-category:promotions -category:social -from:notify.railway.app '
+        '-from:notifications@github.com -from:noreply -from:no-reply '
+        '-from:donotreply -from:do-not-reply -from:mailer-daemon '
+        '-subject:"Accepted:" -subject:"Declined:" -subject:"Tentative:" '
+        '-subject:"out of office" -subject:"auto-reply"'
+    )
+    assert "is:unread" not in EXCLUSION_QUERY
+    assert "newer_than" not in EXCLUSION_QUERY
+
+
+def test_ours_domains_is_clearworks_only() -> None:
+    from gmail_source import OURS_DOMAINS
+
+    assert OURS_DOMAINS == frozenset({"clearworks.ai"})
+
+
+def test_counterparties_excludes_ours_domain_dedupes_and_lowercases() -> None:
+    # G-SWEEP-4
+    from gmail_source import Message
+
+    msg = Message(
+        id="m1",
+        thread_id="t1",
+        from_name="Lori",
+        from_email="Lori@Abundowealth.com",
+        to=["josh@clearworks.ai", "lori@abundowealth.com", "second@abundowealth.com"],
+        cc=["Second@Abundowealth.com"],
+        subject="s",
+        date_iso="2026-09-14T00:00:00Z",
+        body_text="b",
+    )
+    assert msg.counterparties() == ["lori@abundowealth.com", "second@abundowealth.com"]
+
+
+def test_window_queries_covers_every_day_no_gaps_no_overlaps_3_days() -> None:
+    # G-SWEEP-1
+    from gmail_source import EXCLUSION_QUERY, window_queries
+
+    today = date(2026, 9, 14)
+    rows = window_queries(3, today)
+    labels = [label for label, _ in rows]
+    assert labels == ["2026-09-12", "2026-09-13", "2026-09-14"]
+    assert len(set(labels)) == 3
+    for label, query in rows:
+        y, m, d = (int(p) for p in label.split("-"))
+        after = date(y, m, d)
+        before = after + timedelta(days=1)
+        assert query.startswith(f"after:{after:%Y/%m/%d} before:{before:%Y/%m/%d} ")
+        assert query.endswith(EXCLUSION_QUERY)
+
+
+def test_window_queries_covers_every_day_no_gaps_no_overlaps_14_days() -> None:
+    # G-SWEEP-1
+    from gmail_source import window_queries
+
+    today = date(2026, 9, 14)
+    rows = window_queries(14, today)
+    labels = [label for label, _ in rows]
+    expected = [(today - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(13, -1, -1)]
+    assert labels == expected
+    assert len(set(labels)) == 14
+
+
+def test_full_window_query_spans_the_whole_range_inclusive_exclusive() -> None:
+    from gmail_source import EXCLUSION_QUERY, full_window_query
+
+    q = full_window_query(3, date(2026, 9, 14))
+    assert q == f"after:2026/09/12 before:2026/09/15 {EXCLUSION_QUERY}"
+
+
+def test_parse_message_flat_shape_strips_quoted_tail_and_lowercases_addresses() -> None:
+    # G-SWEEP-5
+    from gmail_source import parse_message
+
+    payload = {
+        "id": "m001",
+        "threadId": "t001",
+        "from": "Lori Bodenhamer <Lori@Abundowealth.com>",
+        "to": "Josh Weiss <josh@clearworks.ai>",
+        "cc": "",
+        "subject": "Q3 plan check-in",
+        "date": "2026-09-12T14:03:00Z",
+        "body": (
+            "Hi Josh,\n\nCan we push kickoff to next week?\n\nThanks,\nLori\n\n"
+            "On Fri, Sep 11, 2026 at 3:14 PM Josh Weiss <josh@clearworks.ai> wrote:\n"
+            "> Sounds good, let's plan for the 15th.\n> Talk soon.\n"
+        ),
+    }
+    msg = parse_message(payload)
+    assert msg.id == "m001"
+    assert msg.thread_id == "t001"
+    assert msg.from_email == "lori@abundowealth.com"
+    assert msg.from_name == "Lori Bodenhamer"
+    assert msg.to == ["josh@clearworks.ai"]
+    assert "wrote:" not in msg.body_text
+    assert not any(line.lstrip().startswith(">") for line in msg.body_text.splitlines())
+    assert "Can we push kickoff" in msg.body_text
+
+
+def test_parse_message_accepts_gmail_api_nested_payload_headers_shape() -> None:
+    import base64
+
+    from gmail_source import parse_message
+
+    body = base64.urlsafe_b64encode(b"Hostile-safe plain body.").decode("ascii")
+    payload = {
+        "id": "m002",
+        "threadId": "t002",
+        "payload": {
+            "headers": [
+                {"name": "From", "value": "Dana Iyer <Dana@Svaraworks.com>"},
+                {"name": "To", "value": "josh@clearworks.ai"},
+                {"name": "Cc", "value": ""},
+                {"name": "Subject", "value": "Re: invoice"},
+                {"name": "Date", "value": "2026-09-13T10:00:00Z"},
+            ],
+            "mimeType": "text/plain",
+            "body": {"data": body},
+        },
+    }
+    msg = parse_message(payload)
+    assert msg.id == "m002"
+    assert msg.from_email == "dana@svaraworks.com"
+    assert msg.body_text == "Hostile-safe plain body."
+
+
+def test_parse_message_from_as_dict_and_to_cc_as_string_list() -> None:
+    # Pins the shape the S-03/S-04 writer's +read fixtures actually use: "from" is
+    # {"name","email"}, "to"/"cc" are lists of bare address strings (03-s03-s04.md
+    # _msg_payload, ~line 694). The live +triage shape (probes G-88) has "from" as a
+    # plain string — parse_message must accept both.
+    from gmail_source import parse_message
+
+    payload = {
+        "id": "m010",
+        "threadId": "t010",
+        "from": {"name": "Dana Iyer", "email": "Dana@Svaraworks.com"},
+        "to": ["josh@clearworks.ai", "Second@Abundowealth.com"],
+        "cc": [],
+        "subject": "s",
+        "date": "2026-09-13T10:00:00Z",
+        "body": "hi",
+    }
+    msg = parse_message(payload)
+    assert msg.from_name == "Dana Iyer"
+    assert msg.from_email == "dana@svaraworks.com"
+    assert msg.to == ["josh@clearworks.ai", "second@abundowealth.com"]
+    assert msg.cc == []
+
+
+def test_parse_message_to_cc_as_list_of_dicts_and_from_address_key() -> None:
+    from gmail_source import parse_message
+
+    payload = {
+        "id": "m011",
+        "threadId": "t011",
+        "from": {"name": "Lori Bodenhamer", "address": "Lori@Abundowealth.com"},
+        "to": [{"name": "Josh Weiss", "email": "josh@clearworks.ai"}],
+        "cc": [{"name": "Second Contact", "email": "Second@Abundowealth.com"}, "third@abundowealth.com"],
+        "subject": "s",
+        "date": "2026-09-13T10:00:00Z",
+        "body": "hi",
+    }
+    msg = parse_message(payload)
+    assert msg.from_name == "Lori Bodenhamer"
+    assert msg.from_email == "lori@abundowealth.com"
+    assert msg.to == ["josh@clearworks.ai"]
+    assert msg.cc == ["second@abundowealth.com", "third@abundowealth.com"]
+
+
+def test_list_messages_parses_dict_with_messages_key() -> None:
+    from gmail_source import list_messages
+
+    runner = FakeRunner([(["gws", "gmail", "+triage"], _ok(json.dumps({"messages": [{"id": "a"}, {"id": "b"}]})))])
+    rows = list_messages(runner, "q", max_results=50)
+    assert [r["id"] for r in rows] == ["a", "b"]
+    assert runner.calls == [["gws", "gmail", "+triage", "--query", "q", "--format", "json", "--max", "50"]]
+
+
+def test_list_messages_parses_dict_with_emails_key() -> None:
+    # G-SWEEP-8: live gws-dwd returns {"emails": [...], "total": N} (probes G-88), not
+    # {"messages": [...]} — support both.
+    from gmail_source import list_messages
+
+    runner = FakeRunner([(["gws", "gmail", "+triage"], _ok(json.dumps({"emails": [{"id": "x"}], "total": 1})))])
+    rows = list_messages(runner, "q", max_results=50)
+    assert [r["id"] for r in rows] == ["x"]
+
+
+def test_list_messages_parses_bare_list() -> None:
+    from gmail_source import list_messages
+
+    runner = FakeRunner([(["gws", "gmail", "+triage"], _ok(json.dumps([{"id": "c"}])))])
+    rows = list_messages(runner, "q", max_results=50)
+    assert [r["id"] for r in rows] == ["c"]
+
+
+def test_read_message_calls_plus_read_with_id_and_returns_parsed_message() -> None:
+    from gmail_source import read_message
+
+    payload = {
+        "id": "m001", "threadId": "t001", "from": "a@b.com", "to": "josh@clearworks.ai",
+        "subject": "s", "date": "2026-09-14T00:00:00Z", "body": "hi",
+    }
+    runner = FakeRunner([(["gws", "gmail", "+read"], _ok(json.dumps(payload)))])
+    msg = read_message(runner, "m001")
+    assert msg.id == "m001"
+    assert runner.calls == [["gws", "gmail", "+read", "--id", "m001", "--format", "json"]]
+
+
+def test_list_messages_nonzero_rc_raises_gmail_source_error() -> None:
+    # G-SWEEP-6
+    from gmail_source import GmailSourceError, list_messages
+
+    runner = FakeRunner([(["gws", "gmail", "+triage"], _err(1, "insufficient scopes"))])
+    with pytest.raises(GmailSourceError, match="insufficient scopes"):
+        list_messages(runner, "q", max_results=50)
+
+
+def test_read_message_nonzero_rc_raises_gmail_source_error() -> None:
+    # G-SWEEP-6
+    from gmail_source import GmailSourceError, read_message
+
+    runner = FakeRunner([(["gws", "gmail", "+read"], _err(3, "gws timeout"))])
+    with pytest.raises(GmailSourceError, match="gws timeout"):
+        read_message(runner, "m001")

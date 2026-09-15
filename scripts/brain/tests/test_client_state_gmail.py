@@ -1963,3 +1963,85 @@ def test_a_page_entry_written_before_a_ledger_crash_is_not_appended_twice(tmp_pa
     assert page.read_text(encoding="utf-8").count("[source: gmail:m1]") == 1
     rows = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
     assert all(r["outcome"] == "filed" for r in rows[-1]["resolutions"])
+
+
+# --- G2r3-7: at-most-once vs an output the validator REJECTED ----------------
+# FR-001's guarantee is no duplicate spend on a USABLE result. A rejected or
+# indeterminate output produced nothing, so exactly ONE automatic retry is
+# allowed — and then the identity freezes, so a poisoned message cannot bill
+# forever in silence.
+
+def _invalid_wrapper():
+    """A claude result the schema validator rejects (no `summary`)."""
+    return json.dumps({
+        "type": "result", "subtype": "success",
+        "result": json.dumps({"schema": "brain.email_extraction/1"}),
+        "total_cost_usd": 0.01,
+    })
+
+
+def _extraction_runner(cfg, claude_stdout):
+    r = FakeRunner()
+    _lock_ok(r, cfg.state_dir / "claims")
+    r.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    r.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+    _open_tasks_empty(r)
+    if claude_stdout is not None:
+        r.record(("claude",), rc=0, stdout=claude_stdout)
+    r.record(("python3", str(cfg.crm_dir / "upsert-contact.py")), rc=0, stdout="c1\n")
+    r.record(("python3", str(cfg.crm_dir / "add-interaction.py")), rc=0, stdout=_interaction_stdout())
+    return r
+
+
+def test_an_invalid_extraction_is_retried_exactly_once_then_frozen(tmp_path):
+    cfg = _cfg(tmp_path, dry_run=False)
+
+    # attempt 1: rejected
+    r1 = _extraction_runner(cfg, _invalid_wrapper())
+    assert csg.run(cfg, r1).exit_code == 3
+    assert sum(1 for c in r1.calls if c and c[0] == "claude") == 1
+
+    # attempt 2 (the ONE automatic retry): rejected again
+    r2 = _extraction_runner(cfg, _invalid_wrapper())
+    assert csg.run(cfg, r2).exit_code == 3
+    assert sum(1 for c in r2.calls if c and c[0] == "claude") == 1
+
+    # attempt 3: FROZEN — no further automatic calls, and the digest says so
+    r3 = _extraction_runner(cfg, None)
+    result3 = csg.run(cfg, r3)
+    assert result3.exit_code == 0
+    assert sum(1 for c in r3.calls if c and c[0] == "claude") == 0
+
+    rows = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
+    frozen = rows[-1]
+    assert frozen["extraction_attempt"]["frozen"] is True
+    assert frozen["extraction_attempt"]["attempt"] == 2
+    assert frozen["extraction_attempt"]["last_error"]
+    assert frozen["partial"] is True
+
+    import client_state_projections as _proj
+    from observation_ledger import _row_from_dict
+
+    lines = _proj.plan_digest_line(_row_from_dict(frozen))
+    assert any("extraction failed twice — manual re-run" in ln for ln in lines), lines
+
+
+def test_a_successful_extraction_clears_the_attempt_budget(tmp_path):
+    """One rejected output must not spend the budget of the NEXT message state:
+    a success clears the counter, and the cached success is never re-invoked."""
+    cfg = _cfg(tmp_path, dry_run=False)
+
+    r1 = _extraction_runner(cfg, _invalid_wrapper())
+    assert csg.run(cfg, r1).exit_code == 3
+
+    r2 = _extraction_runner(cfg, _claude_wrapper())
+    assert csg.run(cfg, r2).exit_code == 0
+    assert sum(1 for c in r2.calls if c and c[0] == "claude") == 1
+
+    from observation_ledger import read_extraction_attempts
+    assert read_extraction_attempts(cfg.state_dir) == {}
+
+    # and the cached success is never re-invoked
+    r3 = _extraction_runner(cfg, None)
+    assert csg.run(cfg, r3).exit_code == 0
+    assert sum(1 for c in r3.calls if c and c[0] == "claude") == 0

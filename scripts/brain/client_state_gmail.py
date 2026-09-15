@@ -38,8 +38,10 @@ import single_flight
 import writeback_email
 from gmail_source import GmailSourceError
 from observation_ledger import (
-    Ledger, ObservationRow, Resolution, content_digest, read_receipt,
-    record_failure, record_lease_release_failure, record_lock_refusal, write_receipt,
+    EXTRACTION_MAX_ATTEMPTS, Ledger, ObservationRow, Resolution, clear_extraction_attempts,
+    content_digest, extraction_attempt_state, read_receipt, record_extraction_attempt,
+    record_extraction_failure, record_failure, record_lease_release_failure,
+    record_lock_refusal, write_receipt,
 )
 from resolve_meeting import load_closed_sets
 
@@ -407,10 +409,39 @@ def _file_message(
     context = extract_email.build_context(
         extract_email.open_items_for(cfg.vault, slugs), open_email_titles,
     )
+    # G-EXT-5 (G2r3-7): FR-001's at-most-once is about never paying TWICE for a
+    # USABLE result. An output the validator rejected produced nothing, so ONE
+    # automatic retry is legitimate -- and only one. The attempt is stamped
+    # BEFORE the call (a crash inside claude must still count, or a message that
+    # reliably breaks the model is retried on every sweep forever); after the
+    # second failure the identity FREEZES and says so in the digest, instead of
+    # billing quietly until someone notices.
+    identity = extract_email.extraction_identity(source_ref, digest, slugs)
+    if ledger.cached_extraction(identity) is None:
+        attempts, last_error = extraction_attempt_state(cfg.state_dir, identity)
+        if attempts >= EXTRACTION_MAX_ATTEMPTS:
+            for r in resolutions:
+                if r.outcome == "pending":
+                    r.outcome = "partial"
+            ledger.append(ObservationRow(
+                source_ref=source_ref, thread_id=msg.thread_id, content_digest=digest,
+                observed_at=cfg.now.isoformat(), resolutions=resolutions,
+                reason=f"extraction frozen after {attempts} attempts: {last_error}",
+                revision_of=revision_of, simulated=cfg.dry_run, partial=True,
+                extraction_attempt={
+                    "identity": identity, "attempt": attempts,
+                    "last_error": last_error, "frozen": True,
+                },
+            ))
+            return 0, len(escalated), len(ignored)
+        record_extraction_attempt(cfg.state_dir, identity)
     try:
         extraction, called = extract_email.cached_or_extract(
             ledger, msg, context, slugs, runner, max_usd=cfg.max_usd, spent_usd=state.cost,
         )
+    except extract_email.ExtractionError as exc:
+        record_extraction_failure(cfg.state_dir, identity, str(exc))
+        raise
     except extract_email.BudgetExceeded as exc:
         # G0B3-2 / FR-001 (at most ONE LLM call per source_ref+digest+slugs):
         # the call has ALREADY been paid for and stamped. Persist it here, as a
@@ -432,6 +463,7 @@ def _file_message(
         raise
     if called:
         state.cost += float(extraction.get("cost_usd", 0.0))
+        clear_extraction_attempts(cfg.state_dir, identity)  # a usable result retires the budget
 
     from_email_norm = (msg.from_email or "").strip().lower()
     crm_lines: list[str] = []

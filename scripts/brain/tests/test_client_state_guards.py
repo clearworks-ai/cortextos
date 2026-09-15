@@ -5,12 +5,12 @@ writer's landed part, materialised via
 swept with the SAME regex test_no_unregistered_guard below uses (a G-ID
 token anywhere after a '#' on its line -- docstring/prose mentions of a
 G-ID, which several modules still carry alongside their real marker, do NOT
-count). 87 rows: LEDGER x9, RECEIPT x2, LOCK x10, LOCKREF x1, SWEEP x12, RES x2,
-EXT x4, INV x3, BASE x2, SUPER x1, DIG x4, BUS x4 (TS), IDEMP x2, MERGE x3,
+count). 88 rows: LEDGER x9, RECEIPT x2, LOCK x10, LOCKREF x1, SWEEP x12, RES x2,
+EXT x5, INV x3, BASE x2, SUPER x1, DIG x4, BUS x4 (TS), IDEMP x2, MERGE x3,
 SIM x1, ESC x4, QUERY x1, FAIL x1, BUDGET x3, CRM x2, HIST x3, PARITY x2,
 WRITER x2, OWNER x1, TASK x2, DEDUP x1, EFFECT x3, REV x1, DRY x1.
 
-The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10; the G2 round-2 wave (2026-09-15) added G-ESC-3, G-LOCK-9, G-BUS-4, G-DIG-4, G-LEDGER-8, G-EFFECT-3, G-LOCK-10, G-DRY-1, G-BUDGET-3 and G-INV-3; the G2 round-3 wave added G-ESC-4, G-LEDGER-9, G-HIST-3, G-SWEEP-11 and G-SWEEP-12.
+The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10; the G2 round-2 wave (2026-09-15) added G-ESC-3, G-LOCK-9, G-BUS-4, G-DIG-4, G-LEDGER-8, G-EFFECT-3, G-LOCK-10, G-DRY-1, G-BUDGET-3 and G-INV-3; the G2 round-3 wave added G-ESC-4, G-LEDGER-9, G-HIST-3, G-SWEEP-11, G-SWEEP-12 and G-EXT-5.
 
 The last 8 rows (G-MERGE-2/3, G-EFFECT-1, G-BUDGET-2, G-REV-1, G-PARITY-2,
 G-LOCK-7/8) were added by the post-cap adjudication wave (2026-09-15) that
@@ -169,6 +169,13 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "cached_or_extract reuses the cached extraction on an identity match - no new LLM call",
      "scripts/brain/tests/test_extract_email.py::test_cached_or_extract_same_identity_no_call",
      r's/if cached is not None:  # G-EXT-3/if False:  # G-EXT-3 (mutated)/'),
+    ("G-EXT-5", "scripts/brain/observation_ledger.py",
+     "the extraction attempt is stamped BEFORE the claude call, so a crash inside it still counts against the budget - "
+     "one automatic retry per identity after a REJECTED output (which produced nothing, so it is not duplicate spend "
+     "on a usable result), then the identity freezes and the digest says 'extraction failed twice - manual re-run' "
+     "(G2r3-7); other sites: the freeze branch and the clear-on-success in client_state_gmail",
+     "scripts/brain/tests/test_client_state_gmail.py::test_an_invalid_extraction_is_retried_exactly_once_then_frozen",
+     r's/    row\["attempt"\] = int\(row\.get\("attempt"\) or 0\) \+ 1  # G-EXT-5/    row["attempt"] = 0  # G-EXT-5 (mutated)/'),
     ("G-INV-1", "scripts/brain/client_state_digest.py",
      "compute_invariants keys domain_multi on the FULL domain - never a registrable_label collapse (example.com/example.org must not collide)",
      "scripts/brain/tests/test_client_state_digest.py::test_compute_invariants_does_not_confuse_different_tlds",
@@ -461,10 +468,10 @@ def test_guard_registry_ids_are_unique():
     assert len(ids) == len(set(ids)), f"duplicate guard ids: {ids}"
 
 
-def test_guard_registry_has_87_rows():
+def test_guard_registry_has_88_rows():
     # Pinned count (rebuilt 2026-09-14 from the FINAL parts, G0 round-3
     # integration) so a future guard silently dropping out is itself caught.
-    assert len(GUARD_REGISTRY) == 87, f"expected 87 rows, got {len(GUARD_REGISTRY)}"
+    assert len(GUARD_REGISTRY) == 88, f"expected 88 rows, got {len(GUARD_REGISTRY)}"
 
 
 def test_guard_registry_rows_have_five_fields():

@@ -190,6 +190,16 @@ def plan_digest_line(row: ObservationRow) -> list[str]:
         lines.append(f"- Escalated: {row.source_ref} — {reasons}{tag}")
     if row.revision_of:
         lines.append(f"- Revision: {row.source_ref} supersedes {row.revision_of[:8]}{tag}")
+    attempt = row.extraction_attempt or {}
+    if attempt.get("frozen"):
+        # G2r3-7: a frozen identity makes NO further automatic LLM calls, so the
+        # only thing that moves it is a person. Silence here would be the
+        # failure mode FR-009 exists to prevent.
+        reason = str(attempt.get("last_error") or "").strip()
+        lines.append(
+            f"- extraction failed twice — manual re-run: {row.source_ref}"
+            + (f" ({reason})" if reason else "") + tag
+        )
     return lines
 
 

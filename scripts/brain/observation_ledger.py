@@ -52,6 +52,11 @@ class ObservationRow:
     simulated: bool = False
     planned_writes: list[str] = field(default_factory=list)
     partial: bool = False
+    # G2r3-7: the extraction ATTEMPT record for this row's identity --
+    # {"identity", "attempt", "last_error", "frozen"?}. Set on the row that
+    # reports a frozen identity, so the audit trail says why no further LLM
+    # call will be made.
+    extraction_attempt: dict | None = None
 
 
 def content_digest(subject: str, body_text: str, from_email: str) -> str:
@@ -86,6 +91,7 @@ def _row_from_dict(d: dict) -> ObservationRow:
         simulated=bool(d.get("simulated", False)),
         planned_writes=list(d.get("planned_writes", [])),
         partial=bool(d.get("partial", False)),
+        extraction_attempt=d.get("extraction_attempt"),
     )
 
 
@@ -251,6 +257,67 @@ def record_failure(state_dir: Path, error: str, **partial: object) -> None:
     out["error"] = error
     out["failed_at"] = datetime.now(timezone.utc).isoformat()
     write_receipt(state_dir, out)
+
+
+EXTRACTION_ATTEMPTS_FILENAME = "extraction-attempts.json"
+# FR-001 is "no duplicate spend on a USABLE result". An output the validator
+# REJECTED produced nothing, so one automatic retry is legitimate -- but only
+# one: a poisoned message must not be able to bill forever in silence (G2r3-7).
+EXTRACTION_MAX_ATTEMPTS = 2
+
+
+def read_extraction_attempts(state_dir: Path) -> dict:
+    path = Path(state_dir) / EXTRACTION_ATTEMPTS_FILENAME
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_extraction_attempts(state_dir: Path, data: dict) -> None:
+    path = Path(state_dir) / EXTRACTION_ATTEMPTS_FILENAME
+    Path(state_dir).mkdir(parents=True, exist_ok=True)
+    atomic_write(path, json.dumps(data, indent=2, sort_keys=True).encode("utf-8") + b"\n")
+
+
+def extraction_attempt_state(state_dir: Path, identity: str) -> tuple[int, str]:
+    """(attempts already made, last error) for this extraction identity."""
+    row = read_extraction_attempts(state_dir).get(identity) or {}
+    return int(row.get("attempt") or 0), str(row.get("last_error") or "")
+
+
+def record_extraction_attempt(state_dir: Path, identity: str) -> int:
+    """Stamp the NEXT attempt and return its number.
+
+    Written BEFORE the call, never after: a crash inside claude (or a kill
+    mid-call) must still count against the budget, or a message that reliably
+    hangs the model would be retried on every sweep forever."""
+    data = read_extraction_attempts(state_dir)
+    row = dict(data.get(identity) or {})
+    row["attempt"] = int(row.get("attempt") or 0) + 1  # G-EXT-5
+    row["last_attempt_at"] = datetime.now(timezone.utc).isoformat()
+    data[identity] = row
+    _write_extraction_attempts(state_dir, data)
+    return int(row["attempt"])
+
+
+def record_extraction_failure(state_dir: Path, identity: str, error: str) -> None:
+    data = read_extraction_attempts(state_dir)
+    row = dict(data.get(identity) or {})
+    row["last_error"] = error
+    data[identity] = row
+    _write_extraction_attempts(state_dir, data)
+
+
+def clear_extraction_attempts(state_dir: Path, identity: str) -> None:
+    """A usable result retires the identity's budget."""
+    data = read_extraction_attempts(state_dir)
+    if identity in data:
+        del data[identity]
+        _write_extraction_attempts(state_dir, data)
 
 
 LOCK_REFUSAL_FILENAME = "last-lock-refusal.json"

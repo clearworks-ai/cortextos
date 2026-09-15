@@ -1821,3 +1821,42 @@ def test_dry_run_failure_after_extraction_persists_the_paid_extraction(tmp_path)
     assert csg.run(cfg_live, runner3).exit_code == 0
     assert sum(1 for c in runner3.calls if c and c[0] == "claude") == 0
     assert _page_path(cfg_live).read_text(encoding="utf-8").count("[source: gmail:m1]") == 1
+
+
+def test_escalation_send_is_gated_on_a_source_event_key(tmp_path):
+    """G2r3-2: the send goes through the bus's source-event dedup ledger, so a
+    crash between a DELIVERED Telegram and this run's ledger append cannot
+    re-page Josh on the next sweep."""
+    contacts = [{"id": "c1", "name": "Marcos", "emails": ["marcos@acme.org"], "company": "Alloy"}]
+    cfg = _cfg(tmp_path, dry_run=False, contacts=contacts)
+    payload = _gmail_payload(from_email="marcos@acme.org", from_name="Marcos")
+    runner = FakeRunner()
+    _lock_ok(runner, cfg.state_dir / "claims")
+    runner.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(payload))
+    runner.record(("cortextos", "bus", "send-telegram"), rc=0, stdout="sent")
+
+    assert csg.run(cfg, runner).exit_code == 0
+
+    from observation_ledger import content_digest
+
+    send = next(c for c in runner.calls if c[:3] == ["cortextos", "bus", "send-telegram"])
+    digest = content_digest("Renewal", "Can you send the updated MSA? Let's proceed.", "marcos@acme.org")
+    assert send[-4:] == ["--kind", "comms", "--source-key", f"clientstate:gmail.m1.{digest[:8]}"]
+
+
+def test_dry_run_never_touches_the_shared_dedup_ledger(tmp_path):
+    """The source-event ledger is a shared WRITE. A dry run previews the
+    escalation and must not record it, or the later live run would be
+    suppressed and Josh would never be paged."""
+    contacts = [{"id": "c1", "name": "Marcos", "emails": ["marcos@acme.org"], "company": "Alloy"}]
+    cfg = _cfg(tmp_path, dry_run=True, contacts=contacts)
+    runner = FakeRunner()
+    _lock_ok(runner, cfg.state_dir / "claims")
+    runner.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner.record(("gws", "gmail", "+read"), rc=0,
+                  stdout=json.dumps(_gmail_payload(from_email="marcos@acme.org", from_name="Marcos")))
+
+    assert csg.run(cfg, runner).exit_code == 0
+    assert not any(c[:3] == ["cortextos", "bus", "send-telegram"] for c in runner.calls)
+    assert not any("event-dedup" in c for c in runner.calls)

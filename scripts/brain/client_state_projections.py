@@ -107,6 +107,32 @@ def plan_escalation(msg: Message, resolutions: list[Resolution]) -> str:
     )
 
 
+def escalation_source_key(source_ref: str, digest: str) -> str:
+    """FR-003/FR-009 send-side dedup identity for ONE (source_ref, digest).
+
+    The ledger record of an escalation is written only AFTER delivery is
+    confirmed (G-ESC-3), which leaves one window the ledger cannot cover: a
+    crash between a DELIVERED Telegram and the append. The bus's shared
+    comms-event-dedup ledger closes it, because the send itself is gated on
+    first-sight of this key.
+
+    `<namespace>:<id>` per src/utils/event-dedup.ts SOURCE_KEY_PATTERN, whose id
+    half may NOT contain a ':' -- so the source_ref's own colon is folded to
+    '.'. The digest half is what makes an EDITED message a new alert.
+    """
+    return f"clientstate:{source_ref.replace(':', '.')}.{digest[:8]}"
+
+
+def plan_escalation_argv(text: str, source_key: str) -> list[str]:
+    """G-ESC-4: `--kind comms` makes the source key MANDATORY on the bus side --
+    an invalid or missing key fails the send closed rather than falling back to
+    byte-hash dedup, which a reworded alert would slip straight past."""
+    return [
+        "cortextos", "bus", "send-telegram", TELEGRAM_CHAT_ID, text,
+        "--kind", "comms", "--source-key", source_key,
+    ]
+
+
 def message_outcome(resolutions: list[Resolution]) -> str:
     """The message-level outcome a preview block declares (G0B3-4): `filed` when
     anything was filed, else `escalated` when anything escalated, else

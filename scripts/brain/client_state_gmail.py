@@ -175,8 +175,8 @@ class EscalationError(Exception):
     whole message aborts and the next run escalates again (G0B-4)."""
 
 
-def _send_escalation(runner, text: str) -> None:
-    proc = runner.run(["cortextos", "bus", "send-telegram", projections.TELEGRAM_CHAT_ID, text])
+def _send_escalation(runner, text: str, source_key: str) -> None:
+    proc = runner.run(projections.plan_escalation_argv(text, source_key))  # G-ESC-4
     if proc.returncode != 0:  # G-ESC-2
         raise EscalationError(
             f"send-telegram failed rc={proc.returncode}: {(proc.stderr or '').strip()}"
@@ -362,7 +362,10 @@ def _file_message(
             escalation_text = projections.plan_escalation(msg, resolutions)
             if not cfg.dry_run:
                 try:
-                    _send_escalation(runner, escalation_text)  # G-ESC-2: rc checked
+                    _send_escalation(  # G-ESC-2: rc checked
+                        runner, escalation_text,
+                        projections.escalation_source_key(source_ref, digest),
+                    )
                 except Exception:
                     # G-ESC-3: delivery did not happen. Persist the attempt as a
                     # NON-terminal row with the escalations demoted, so the next
@@ -646,7 +649,9 @@ def _do_writes(
             # A raise here reaches _file_message's handler, which persists a
             # partial row through _persist_partial -- and that demotes the
             # undelivered escalations (G-ESC-3) before the row is written.
-            _send_escalation(runner, escalation_text)  # G-ESC-2: rc checked
+            _send_escalation(  # G-ESC-2: rc checked
+                runner, escalation_text, projections.escalation_source_key(source_ref, digest),
+            )
             esc_state["delivered"] = True
 
     # --- completion: `filed` only when EVERY required effect landed ----------

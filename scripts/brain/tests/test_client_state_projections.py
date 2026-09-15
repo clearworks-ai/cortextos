@@ -241,3 +241,28 @@ def test_plan_history_entry_marks_nothing_for_a_good_date():
     entry = projections.plan_history_entry(msg, {"summary": "s"}, "gmail:m1", None)
     assert entry.date == "2026-09-14"
     assert "date: unparsed" not in entry.summary
+
+
+# --- G2r3-2: the escalation send carries a source-event dedup key -------------
+# FR-003/FR-009: a crash between a delivered Telegram and the ledger append must
+# not re-page Josh. The ledger record is written AFTER confirmed delivery, so it
+# cannot cover that window; the bus's own comms-event-dedup ledger can.
+
+def test_escalation_source_key_is_a_valid_bus_source_key():
+    import re
+
+    key = projections.escalation_source_key("gmail:m1", "deadbeefcafe0000")
+    # src/utils/event-dedup.ts SOURCE_KEY_PATTERN: the id half may NOT contain
+    # a ':', so the source_ref's own colon is folded to '.'.
+    assert re.fullmatch(r"[a-z0-9_-]{1,32}:[A-Za-z0-9_/+=@.<>-]{1,512}", key), key
+    assert key == "clientstate:gmail.m1.deadbeef"
+    # identity is (source_ref, digest): a new digest is a NEW alert
+    assert projections.escalation_source_key("gmail:m1", "0000beefcafedead") != key
+
+
+def test_plan_escalation_argv_is_a_fail_closed_comms_send():
+    argv = projections.plan_escalation_argv("some text", "clientstate:gmail.m1.deadbeef")
+    assert argv == [
+        "cortextos", "bus", "send-telegram", projections.TELEGRAM_CHAT_ID, "some text",
+        "--kind", "comms", "--source-key", "clientstate:gmail.m1.deadbeef",
+    ]

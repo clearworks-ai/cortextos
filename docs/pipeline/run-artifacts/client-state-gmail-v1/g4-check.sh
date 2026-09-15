@@ -185,6 +185,14 @@ if doc.get('vault_porcelain', None) != '':
 # evidence must therefore also carry a RECURSIVE FILE-LISTING diff of the vault
 # copy, taken before and after the run, and it must be empty. A missing key is a
 # FAILURE, not a pass: evidence that was never gathered proves nothing.
+# G2r3-2: the escalation send is gated on the bus's SHARED comms-event-dedup
+# ledger. That ledger is a WRITE: a dry run must preview the escalation and
+# record nothing, or the later live run would be suppressed and Josh never
+# paged. The dry-run shim log must therefore show zero event-dedup calls (and
+# zero sends, which the forbidden-verb trap already covers).
+if doc.get('shim_event_dedup_calls', None) != 0:
+    bad.append('shim_event_dedup_calls is ' + repr(doc.get('shim_event_dedup_calls'))
+               + ' - a dry run must never write the shared comms-event-dedup ledger')
 if 'vault_tree_diff' not in doc:
     bad.append('vault_tree_diff missing - a recursive vault file-listing diff is required '
                'because porcelain cannot see gitignored artifacts such as *.md.lock')
@@ -364,7 +372,7 @@ check_4_no_prod_writes() {
   local out
   out=$(python3 "$PYLIB/check3.py" "$f")
   if [ "$out" = "OK" ]; then
-    record "4-no-prod-writes.json" 0 "porcelain + recursive tree diff empty, sha pairs match, no forbidden verbs"
+    record "4-no-prod-writes.json" 0 "porcelain + recursive tree diff empty, sha pairs match, no forbidden verbs, no event-dedup writes"
   else
     record "4-no-prod-writes.json" 1 "$out"
   fi
@@ -568,6 +576,7 @@ EOF
 {
   "vault_porcelain": "",
   "vault_tree_diff": "",
+  "shim_event_dedup_calls": 0,
   "crm": {
     "contacts_json": {"sha_before": "aaa", "sha_after": "aaa"},
     "interactions_jsonl": {"sha_before": "bbb", "sha_after": "bbb"}
@@ -673,6 +682,8 @@ EOF
     "4-no-prod-writes.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/no-prod-writes.json'));d['crm']['contacts_json']['sha_after']='zzz';json.dump(d,open('DIR/no-prod-writes.json','w'))\""
     "4-no-prod-writes.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/no-prod-writes.json'));d['vault_tree_diff']='+ clients/acme.md.lock';json.dump(d,open('DIR/no-prod-writes.json','w'))\""
     "4-no-prod-writes.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/no-prod-writes.json'));d.pop('vault_tree_diff');json.dump(d,open('DIR/no-prod-writes.json','w'))\""
+    "4-no-prod-writes.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/no-prod-writes.json'));d['shim_event_dedup_calls']=1;json.dump(d,open('DIR/no-prod-writes.json','w'))\""
+    "4-no-prod-writes.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/no-prod-writes.json'));d.pop('shim_event_dedup_calls');json.dump(d,open('DIR/no-prod-writes.json','w'))\""
     "5-idempotency.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/idempotency.json'));d['stale_discovering_run_refuses']=False;json.dump(d,open('DIR/idempotency.json','w'))\""
     "5-idempotency.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/idempotency.json'));d['stale_refusal_reason']='already-claimed';json.dump(d,open('DIR/idempotency.json','w'))\""
     "5-idempotency.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/idempotency.json'));d.pop('third_run_receipt_byte_identical');json.dump(d,open('DIR/idempotency.json','w'))\""

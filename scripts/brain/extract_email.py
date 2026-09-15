@@ -16,12 +16,16 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from brain_rollup import _open_rows, _section_text
-from extract_meeting import _require_single_line
+from extract_meeting import _parse_claude_stdout, _require_single_line
 from gmail_source import Message
+from observation_ledger import content_digest
+from resolve_meeting import quote_gate
+from runner import Runner
 from writeback_render import org_brain_root
 
 HERE = Path(__file__).resolve().parent
@@ -51,6 +55,23 @@ Schema:
 {schema}
 """
 
+# G-EXT-2: this exact argv — the shape at extract_meeting.py:358-371. Never
+# edit without updating this constant AND test_extract_argv_pinned.
+CLAUDE_ARGV: list[str] = [
+    "claude",
+    "-p",
+    "--setting-sources",
+    "",
+    "--disallowedTools",
+    "*",
+    "--model",
+    "sonnet",
+    "--output-format",
+    "json",
+    "--max-turns",
+    "1",
+]
+
 
 @dataclass
 class ContextItem:
@@ -58,6 +79,28 @@ class ContextItem:
     text: str
     owner: str
     source: str
+
+
+class ExtractionError(Exception):
+    """claude rc != 0, or the model's JSON failed to parse or validate."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+class BudgetExceeded(Exception):
+    """Raised AFTER stamping — `extraction` carries the already-paid cost so
+    the caller can persist it (ledger row + run receipt) before propagating
+    (exit code 12 semantics)."""
+
+    def __init__(self, extraction: dict[str, Any], spent_usd: float, max_usd: float) -> None:
+        super().__init__(
+            f"budget exceeded: spent_usd={spent_usd} cost_usd={extraction.get('cost_usd')} max_usd={max_usd}"
+        )
+        self.extraction = extraction
+        self.spent_usd = spent_usd
+        self.max_usd = max_usd
 
 
 def build_context(open_items: list[dict[str, Any]], open_task_titles: list[str]) -> list[ContextItem]:
@@ -131,7 +174,6 @@ def _matches_json_type(value: Any, type_name: str) -> bool:
     if type_name == "null":
         return value is None
     if type_name == "integer" and isinstance(value, bool):
-        # bool is a subclass of int in Python — JSON schema treats them as distinct.
         return False
     expected = _JSON_TYPES.get(type_name)
     if expected is None:
@@ -140,13 +182,8 @@ def _matches_json_type(value: Any, type_name: str) -> bool:
 
 
 def _validate_against_email_schema(value: Any, schema: dict[str, Any], path: str) -> None:
-    """G0B-12/C9: typed walker driven by email_extraction.schema.json. Checks
-    const, primitive/nullable type, required keys, and additionalProperties:false
-    at every level (root object, and each array-of-objects' item schema) BEFORE
-    any content check runs. Deviation: a locally-written twin of
-    extract_meeting.py's _validate_against_schema, not an import — that symbol
-    is not on the plan's blessed extract_meeting.py reuse list (only
-    _require_single_line/_parse_claude_stdout are)."""
+    """G0B-12/C9: typed walker driven by email_extraction.schema.json — see
+    Task 9 for the full rationale/deviation note."""
     if "const" in schema and value != schema["const"]:
         raise ValueError(f"{path}: expected const {schema['const']!r}, got {value!r}")
 
@@ -177,9 +214,7 @@ def _validate_against_email_schema(value: Any, schema: dict[str, Any], path: str
 
 
 def validate_email_extraction(obj: dict[str, Any], n_context: int) -> None:
-    """C9 order: (1) typed schema walk — required keys, nested primitive types,
-    additionalProperties:false at every level, nullable deadline_iso/
-    matches_open_item; (2) single-line/control-character checks; (3) the
+    """C9 order: (1) typed schema walk; (2) single-line checks; (3) the
     matches_open_item range check."""
     if not isinstance(obj, dict):
         raise ValueError("extraction is not an object")
@@ -201,3 +236,75 @@ def validate_email_extraction(obj: dict[str, Any], n_context: int) -> None:
         moi = c.get("matches_open_item")
         if moi is not None and not (1 <= moi <= n_context):  # G-EXT-1: must reference a listed context id
             raise ValueError(f"commitments[{i}].matches_open_item: out of range 1..{n_context}")
+
+
+def _claude_failure_reason(proc: Any) -> str:
+    # Deviation: duplicated locally rather than imported. The plan's
+    # architecture note blesses only _require_single_line/_parse_claude_stdout
+    # for reuse from extract_meeting.py; _claude_failure_reason is not on
+    # that list, so this ~6-line helper is copied rather than pulling in a
+    # fourth, unlisted private symbol.
+    if proc.stdout:
+        try:
+            wrapper = json.loads(proc.stdout)
+            if isinstance(wrapper, dict) and wrapper.get("result"):
+                return str(wrapper["result"])
+        except json.JSONDecodeError:
+            pass
+    return (proc.stderr or "").strip() or f"claude exit {proc.returncode}"
+
+
+def extract(
+    runner: Runner,
+    msg: Message,
+    context: list[ContextItem],
+    *,
+    max_usd: float,
+    spent_usd: float,
+    slugs: list[str],
+) -> dict[str, Any]:
+    """Runs exactly one bounded claude -p call, quote-gates the result against
+    the email body, and stamps cost/identity.
+
+    Deviation from the skeleton signature: adds a required keyword-only
+    `slugs: list[str]`. extraction_identity needs (source_ref, digest, slugs)
+    and no other parameter here supplies the bound-entity slug set — without
+    it the FR-001 cache identity could not be computed inside extract().
+    """
+    prompt = build_prompt(msg, context)
+    proc = runner.run(list(CLAUDE_ARGV), input=prompt)  # G-EXT-2
+    if proc.returncode != 0:
+        raise ExtractionError(_claude_failure_reason(proc))
+    try:
+        model_obj, wrapper = _parse_claude_stdout(proc.stdout)
+        validate_email_extraction(model_obj, len(context))
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise ExtractionError(str(exc)) from exc
+
+    source = {"text_units": [{"text": msg.body_text}]}
+    # summary is NOT a quote_gate key (resolve_meeting.quote_gate only reads
+    # decisions/commitments/open_questions/proposed_delivery_state) — it
+    # copies every other key of `extraction` whole via dict(extraction), so
+    # `gated["summary"]` (and matches_open_item on surviving commitments)
+    # pass through untouched.
+    gated = quote_gate(model_obj, source)
+
+    cost_usd = float(wrapper.get("total_cost_usd") or 0)
+    model_usage = wrapper.get("modelUsage") or {}
+    model_receipt = ",".join(sorted(model_usage.keys())) or "unverified"
+
+    source_ref = f"gmail:{msg.id}"
+    digest = content_digest(msg.subject, msg.body_text, msg.from_email)
+
+    stamped = dict(gated)
+    stamped["schema"] = "brain.email_extraction/1"
+    stamped["summary"] = model_obj.get("summary")
+    stamped["cost_usd"] = cost_usd
+    stamped["model_receipt"] = model_receipt
+    stamped["extracted_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    stamped["identity"] = extraction_identity(source_ref, digest, slugs)
+    stamped["bound_slugs"] = sorted(slugs)
+
+    if spent_usd + cost_usd > max_usd:
+        raise BudgetExceeded(stamped, spent_usd, max_usd)
+    return stamped

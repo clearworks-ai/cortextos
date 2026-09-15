@@ -193,3 +193,179 @@ def test_validate_email_extraction_rejects_non_string_quote() -> None:
     obj["decisions"][0]["quote"] = 42
     with pytest.raises(ValueError, match=r"decisions\[0\]\.quote"):
         validate_email_extraction(obj, n_context=2)
+import subprocess
+
+from helpers_client_state import FakeRunner
+
+
+def _msg(body_text: str = "Hi Josh, I will send the signed contract by Friday. Thanks, Marcos") -> "Message":
+    from gmail_source import Message
+
+    return Message(
+        id="m1",
+        thread_id="t1",
+        from_name="Marcos",
+        from_email="marcos@acme.com",
+        to=["josh@clearworks.ai"],
+        cc=[],
+        subject="Contract",
+        date_iso="2026-09-14T10:00:00Z",
+        body_text=body_text,
+    )
+
+
+def _claude_wrapper(result_obj: dict, total_cost_usd: float = 0.0123, include_model_usage: bool = True) -> str:
+    wrapper: dict = {
+        "type": "result",
+        "subtype": "success",
+        "result": json.dumps(result_obj),
+        "total_cost_usd": total_cost_usd,
+    }
+    if include_model_usage:
+        wrapper["modelUsage"] = {"claude-sonnet-5": {"inputTokens": 2, "outputTokens": 4, "costUSD": total_cost_usd}}
+    return json.dumps(wrapper)
+
+
+def _claude_response(stdout: str, rc: int = 0, stderr: str = "") -> dict:
+    # C1: FakeRunner accepts a dict {argv_prefix_tuple: CompletedProcess}; keying
+    # by the full CLAUDE_ARGV tuple is also a valid (exact) prefix.
+    from extract_email import CLAUDE_ARGV
+
+    return {tuple(CLAUDE_ARGV): subprocess.CompletedProcess(list(CLAUDE_ARGV), rc, stdout, stderr)}
+
+
+def test_extract_grounded_kept_ungrounded_dropped() -> None:
+    from extract_email import extract
+
+    msg = _msg()
+    model_obj = {
+        "schema": "brain.email_extraction/1",
+        "summary": "Marcos will send the signed contract.",
+        "decisions": [],
+        "commitments": [
+            {
+                "text": "Send the signed contract",
+                "owner_name": "Marcos",
+                "deadline_iso": None,
+                "quote": "I will send the signed contract",
+                "matches_open_item": None,
+            },
+            {
+                "text": "Wire ten thousand dollars",
+                "owner_name": "Marcos",
+                "deadline_iso": None,
+                "quote": "totally made up quote not in the body",
+                "matches_open_item": None,
+            },
+        ],
+        "open_questions": [],
+    }
+    runner = FakeRunner(_claude_response(_claude_wrapper(model_obj)))
+    stamped = extract(runner, msg, [], max_usd=2.0, spent_usd=0.0, slugs=["acme"])
+    assert len(stamped["commitments"]) == 1
+    assert stamped["commitments"][0]["text"] == "Send the signed contract"
+    assert stamped["dropped"]["commitments"] == 1
+
+
+def test_extract_summary_kept_ungated() -> None:
+    from extract_email import extract
+
+    msg = _msg()
+    model_obj = {
+        "schema": "brain.email_extraction/1",
+        "summary": "A summary sentence that quotes nothing from the body at all.",
+        "decisions": [],
+        "commitments": [],
+        "open_questions": [],
+    }
+    runner = FakeRunner(_claude_response(_claude_wrapper(model_obj)))
+    stamped = extract(runner, msg, [], max_usd=2.0, spent_usd=0.0, slugs=["acme"])
+    assert stamped["summary"] == "A summary sentence that quotes nothing from the body at all."
+
+
+def test_extract_matches_open_item_preserved() -> None:
+    from extract_email import ContextItem, extract
+
+    msg = _msg()
+    context = [ContextItem(id=1, text="Send proposal", owner="Josh", source="fireflies:abc")]
+    model_obj = {
+        "schema": "brain.email_extraction/1",
+        "summary": "ok",
+        "decisions": [],
+        "commitments": [
+            {
+                "text": "Send the signed contract",
+                "owner_name": "Marcos",
+                "deadline_iso": None,
+                "quote": "I will send the signed contract",
+                "matches_open_item": 1,
+            },
+        ],
+        "open_questions": [],
+    }
+    runner = FakeRunner(_claude_response(_claude_wrapper(model_obj)))
+    stamped = extract(runner, msg, context, max_usd=2.0, spent_usd=0.0, slugs=["acme"])
+    # quote_gate copies dict items whole — matches_open_item survives the gate
+    # untouched even though it is not itself a grounding field.
+    assert stamped["commitments"][0]["matches_open_item"] == 1
+
+
+def test_extract_cost_and_receipt_stamped() -> None:
+    from extract_email import extract
+
+    msg = _msg()
+    model_obj = {"schema": "brain.email_extraction/1", "summary": "ok", "decisions": [], "commitments": [], "open_questions": []}
+    runner = FakeRunner(_claude_response(_claude_wrapper(model_obj)))
+    stamped = extract(runner, msg, [], max_usd=2.0, spent_usd=0.0, slugs=["acme"])
+    assert stamped["cost_usd"] == 0.0123
+    assert stamped["model_receipt"] == "claude-sonnet-5"
+    assert "extracted_at" in stamped
+    assert stamped["identity"]
+    assert stamped["bound_slugs"] == ["acme"]
+
+
+def test_extract_budget_exceeded_raises_after_stamping() -> None:
+    from extract_email import BudgetExceeded, extract
+
+    msg = _msg()
+    model_obj = {"schema": "brain.email_extraction/1", "summary": "ok", "decisions": [], "commitments": [], "open_questions": []}
+    runner = FakeRunner(_claude_response(_claude_wrapper(model_obj, total_cost_usd=0.0123)))
+    with pytest.raises(BudgetExceeded) as exc_info:
+        extract(runner, msg, [], max_usd=0.01, spent_usd=0.0, slugs=["acme"])
+    assert exc_info.value.extraction["cost_usd"] == 0.0123
+    assert exc_info.value.extraction["identity"]
+
+
+def test_extract_claude_failure_raises_with_reason() -> None:
+    from extract_email import ExtractionError, extract
+
+    msg = _msg()
+    runner = FakeRunner(_claude_response("", rc=1, stderr="boom"))
+    with pytest.raises(ExtractionError) as exc_info:
+        extract(runner, msg, [], max_usd=2.0, spent_usd=0.0, slugs=[])
+    assert "boom" in exc_info.value.reason
+
+
+def test_extract_argv_pinned() -> None:
+    from extract_email import CLAUDE_ARGV, extract
+
+    msg = _msg()
+    model_obj = {"schema": "brain.email_extraction/1", "summary": "ok", "decisions": [], "commitments": [], "open_questions": []}
+    runner = FakeRunner(_claude_response(_claude_wrapper(model_obj)))
+    extract(runner, msg, [], max_usd=2.0, spent_usd=0.0, slugs=[])
+    # G-EXT-2: exact extract_meeting.py:358-371 shape.
+    assert runner.calls[0] == list(CLAUDE_ARGV)
+    assert runner.calls[0] == [
+        "claude",
+        "-p",
+        "--setting-sources",
+        "",
+        "--disallowedTools",
+        "*",
+        "--model",
+        "sonnet",
+        "--output-format",
+        "json",
+        "--max-turns",
+        "1",
+    ]

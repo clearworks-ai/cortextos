@@ -41,6 +41,8 @@ export interface CloseEpicResult {
 }
 
 const SYSTEM_TASK_CREATOR_RE = /^(transcript-scanner|comms-check|session-save|heartbeat)-/;
+/** Claimants the human-exempt barrier does not apply to — they ARE the human. */
+const HUMAN_CLAIMANTS: ReadonlySet<string> = new Set(['human', 'user']);
 const HUMAN_TITLE_RE = /^(\[HUMAN\]|Josh:|Decide:)/i;
 const RECLAIM_HUMAN_TITLE_RE = /^\[HUMAN\]/i;
 const SYSTEM_TITLE_RE = /^cron:/i;
@@ -1144,6 +1146,26 @@ export function claimTask(
       throw new Error(`Task ${taskId} claim failed (unreadable): ${err}`);
     }
 
+    // G-BUS-2: human-exempt tasks (type=human / assigned_to=human|user /
+    // project=human-tasks / [HUMAN] title) are never silently claimable by an
+    // agent — claim-task must pass --force-claim to promote one deliberately.
+    //
+    // Evaluated HERE, before EVERY successful return path (G2B-7): the
+    // same-owner claim-file idempotency branch and the O_EXCL race-recovery
+    // branch both `return task`, and updateTask permits resetting an
+    // in_progress task to pending WITHOUT deleting its .claim file — so an
+    // agent that once force-claimed a human task could re-claim it silently
+    // forever through the leftover claim file.
+    //
+    // HUMAN_CLAIMANTS are exempt from the barrier: it exists to stop AGENTS
+    // taking Josh's work, and Multica's writeback assigns such a task to Josh
+    // with exactly `claimTask(paths, taskId, 'human')` (src/bus/multica/poll.ts).
+    if (isHumanExemptTask(task) && !opts?.force && !HUMAN_CLAIMANTS.has(agent)) {
+      throw new Error(
+        `Task ${taskId} is human-exempt (type=${task.type}, assigned_to=${task.assigned_to}); pass --force-claim to promote it deliberately`,
+      );
+    }
+
     const claimPath = join(claimsDir, `${taskId}.claim`);
     const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 
@@ -1167,15 +1189,6 @@ export function claimTask(
     if (task.status !== 'pending') {
       throw new Error(
         `Task ${taskId} is not pending (status=${task.status}); cannot claim`,
-      );
-    }
-
-    // G-BUS-2: human-exempt tasks (type=human / assigned_to=human|user /
-    // project=human-tasks / [HUMAN] title) are never silently claimable by an
-    // agent — claim-task must pass --force-claim to promote one deliberately.
-    if (isHumanExemptTask(task) && !opts?.force) {
-      throw new Error(
-        `Task ${taskId} is human-exempt (type=${task.type}, assigned_to=${task.assigned_to}); pass --force-claim to promote it deliberately`,
       );
     }
 

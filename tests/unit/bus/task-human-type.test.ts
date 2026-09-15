@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createTask, isHumanExemptTask, claimTask, classifyTask } from '../../../src/bus/task';
+import { createTask, isHumanExemptTask, claimTask, classifyTask, updateTask } from '../../../src/bus/task';
 import type { BusPaths, Task } from '../../../src/types';
 
 describe('createTask type option (G-BUS-1)', () => {
@@ -164,5 +164,71 @@ describe('classifyTask type:"human" (G-BUS-3)', () => {
   it('still classifies a cron: task as system, type notwithstanding', () => {
     const taskId = createTask(paths, 'paul', 'acme', 'cron: rotate logs', { type: 'human', assignee: 'boris' });
     expect(classifyTask(readTaskJson(taskId))).toBe('system');
+  });
+});
+
+// --- G2r2-4 (G2B-7 / G2A-4): guard placement + the human claimant -----------
+
+describe('claimTask human-exempt guard placement (G-BUS-2)', () => {
+  let testDir: string;
+  let paths: BusPaths;
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join(tmpdir(), 'cortextos-claim-order-test-'));
+    paths = {
+      ctxRoot: testDir,
+      inbox: join(testDir, 'inbox', 'paul'),
+      inflight: join(testDir, 'inflight', 'paul'),
+      processed: join(testDir, 'processed', 'paul'),
+      logDir: join(testDir, 'logs', 'paul'),
+      stateDir: join(testDir, 'state', 'paul'),
+      taskDir: join(testDir, 'tasks'),
+      approvalDir: join(testDir, 'approvals'),
+      analyticsDir: join(testDir, 'analytics'),
+      heartbeatDir: join(testDir, 'heartbeats'),
+    };
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  const readTaskJson = (taskId: string): Task => (
+    JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8')) as Task
+  );
+
+  it("lets Multica's claimTask(paths, id, 'human') through without force", () => {
+    // src/bus/multica/poll.ts:175 assigns a pending human task to Josh with
+    // exactly this call. The claimant IS the human, so the barrier does not apply.
+    const taskId = createTask(paths, 'paul', 'acme', 'Decide pricing', { type: 'human', assignee: 'human' });
+    const task = claimTask(paths, taskId, 'human');
+    expect(task.status).toBe('in_progress');
+    expect(readTaskJson(taskId).status).toBe('in_progress');
+    expect(readTaskJson(taskId).assigned_to).toBe('human');
+  });
+
+  it("lets the 'user' claimant through without force", () => {
+    const taskId = createTask(paths, 'paul', 'acme', 'Decide pricing', { type: 'human', assignee: 'human' });
+    expect(claimTask(paths, taskId, 'user').status).toBe('in_progress');
+  });
+
+  it('refuses an agent re-claim through the existing same-owner claim file', () => {
+    // G2B-7: force-claim as boris, reset to pending (update-task permits it,
+    // leaving the .claim file), then claim again with no force. The same-owner
+    // idempotency branch used to return success before the barrier ran.
+    const taskId = createTask(paths, 'paul', 'acme', 'Decide pricing', { type: 'human', assignee: 'human' });
+    claimTask(paths, taskId, 'boris', { force: true });
+    updateTask(paths, taskId, 'pending');
+    expect(existsSync(join(paths.taskDir, '.claims', `${taskId}.claim`))).toBe(true);
+
+    expect(() => claimTask(paths, taskId, 'boris')).toThrow(/is human-exempt/);
+    expect(readTaskJson(taskId).status).toBe('pending');
+  });
+
+  it('still lets an ordinary agent re-claim its own task idempotently (regression)', () => {
+    const taskId = createTask(paths, 'paul', 'acme', 'Ordinary task');
+    claimTask(paths, taskId, 'boris');
+    updateTask(paths, taskId, 'pending');
+    expect(claimTask(paths, taskId, 'boris').id).toBe(taskId);
   });
 });

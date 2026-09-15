@@ -314,9 +314,10 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      'tests/unit/bus/task-human-type.test.ts::persists type "human" on disk when options.type is "human"',
      r"s/type: taskType, \/\/ G-BUS-1/type: 'agent', \/\/ G-BUS-1 (mutated)/"),
     ("G-BUS-2", "src/bus/task.ts",
-     "claimTask refuses a human-exempt task (isHumanExemptTask) unless opts.force is passed",
+     "claimTask refuses a human-exempt task (isHumanExemptTask) unless opts.force is passed or the claimant is the "
+     "human itself - evaluated BEFORE every successful return path, including the same-owner claim-file branch (G2B-7)",
      "tests/unit/bus/task-human-type.test.ts::throws the exact human-exempt message and leaves the task pending with no claim file",
-     r"s/if \(isHumanExemptTask\(task\) && !opts\?\.force\) \{/if (false) {/"),
+     r"s/if \(isHumanExemptTask\(task\) && !opts\?\.force && !HUMAN_CLAIMANTS\.has\(agent\)\) \{/if (false) {/"),
     ("G-SWEEP-10", "scripts/brain/gmail_source.py",
      "parse_message normalises EVERY Date form (RFC 2822 Date header, ISO-8601, epoch s/ms) into ISO-8601 UTC at the "
      "SOURCE, so a downstream date_iso[:10] is a real calendar date and never 'Sun, 14 Se' (G2a finding 4); second "

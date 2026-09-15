@@ -771,6 +771,7 @@ export function createTask(
       title,
       project,
       assigned_to: assignee,
+      type: taskType, // G-BUS-4: `type` is persisted below but classifies HERE too
     } as Task);
     effectiveDueDate = computeDefaultDueDate(priority, someday, taskClass);
   }

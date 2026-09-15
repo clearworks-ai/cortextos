@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createTask, isHumanExemptTask, claimTask, classifyTask, updateTask } from '../../../src/bus/task';
+import { createTask, isHumanExemptTask, claimTask, classifyTask, updateTask, CLASS_DUE_DAYS_CAP } from '../../../src/bus/task';
 import type { BusPaths, Task } from '../../../src/types';
 
 describe('createTask type option (G-BUS-1)', () => {
@@ -230,5 +230,56 @@ describe('claimTask human-exempt guard placement (G-BUS-2)', () => {
     claimTask(paths, taskId, 'boris');
     updateTask(paths, taskId, 'pending');
     expect(claimTask(paths, taskId, 'boris').id).toBe(taskId);
+  });
+});
+
+// --- G2r2-5 (G2A-5): the provisional due-date classification sees `type` -----
+
+describe('createTask default due date for a type:"human" task (G-BUS-4)', () => {
+  let testDir: string;
+  let paths: BusPaths;
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join(tmpdir(), 'cortextos-due-class-test-'));
+    paths = {
+      ctxRoot: testDir,
+      inbox: join(testDir, 'inbox', 'paul'),
+      inflight: join(testDir, 'inflight', 'paul'),
+      processed: join(testDir, 'processed', 'paul'),
+      logDir: join(testDir, 'logs', 'paul'),
+      stateDir: join(testDir, 'state', 'paul'),
+      taskDir: join(testDir, 'tasks'),
+      approvalDir: join(testDir, 'approvals'),
+      analyticsDir: join(testDir, 'analytics'),
+      heartbeatDir: join(testDir, 'heartbeats'),
+    };
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  const readTaskJson = (taskId: string): Task => (
+    JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8')) as Task
+  );
+
+  it('caps the default due date at the human-class bound, not the build default', () => {
+    // Nothing else about this task implies human class: an agent assignee, an
+    // agent project, an ordinary title. Only `type` does.
+    const humanId = createTask(paths, 'paul', 'acme', 'Review the renewal terms', {
+      type: 'human',
+      assignee: 'boris',
+    });
+    const buildId = createTask(paths, 'paul', 'acme', 'Review the renewal terms', {
+      assignee: 'boris',
+    });
+
+    const humanDue = Date.parse(String(readTaskJson(humanId).due_date));
+    const buildDue = Date.parse(String(readTaskJson(buildId).due_date));
+    expect(Number.isNaN(humanDue)).toBe(false);
+    expect(humanDue).toBeLessThan(buildDue);
+
+    const capMs = CLASS_DUE_DAYS_CAP.human! * 24 * 60 * 60 * 1000;
+    expect(humanDue - Date.now()).toBeLessThanOrEqual(capMs + 60_000);
   });
 });

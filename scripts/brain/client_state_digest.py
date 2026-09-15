@@ -1,17 +1,19 @@
 """FR-009 invariants + daily Gmail digest section for meeting_loop_watch.py.
 
-Part A (Task 18): invariant computation over org-brain pages plus a COMMITTED,
-EXPLICITLY WRITTEN baseline (G0B-14, wave2 C10 — no auto-baseline; the
-`write-baseline` CLI entry is a one-time step) so only NEW violations ever
-reach Josh. Part B (Task 19) adds gmail_section(), the renderer
-meeting_loop_watch.py calls, and the `write-baseline` CLI.
+Part A: invariant computation over org-brain pages plus a COMMITTED, EXPLICITLY
+WRITTEN baseline (G0B-14 — no auto-baseline; `write-baseline` is a one-time CLI
+step) so only NEW violations ever reach Josh. Part B: gmail_section(), the
+renderer meeting_loop_watch.py calls, independent of the Fireflies section
+(FR-009 INDEPENDENCE).
 """
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import sys
-from datetime import datetime, timezone
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,12 +23,18 @@ if str(HERE) not in sys.path:
 
 from atomic import atomic_write  # noqa: E402
 from brain_rollup import _section_text  # noqa: E402
-from observation_ledger import Ledger  # noqa: E402
+from client_state_projections import effective_writes, plan_digest_line  # noqa: E402
+from client_state_writes import list_open_tasks  # noqa: E402
+from observation_ledger import Ledger, ObservationRow, gap_line, read_receipt  # noqa: E402
 from resolve_meeting import _domains_from_text, _norm_title, _org_names_from_text  # noqa: E402
+from runner import Runner  # noqa: E402
 from writeback_render import org_brain_root  # noqa: E402
 
 BASELINE_FILE = "invariants-baseline.json"
 _PAGE_FOLDERS = ("clients", "orgs", "projects")
+# "since forever" sentinel for a FULL ledger history read (G0B-15 — the row a
+# revision supersedes can be arbitrarily older than the digest's 24h window).
+_EPOCH_SENTINEL = "1970-01-01T00:00:00+00:00"
 # G-INV-2: only a "gmail:" source ref counts toward the missing-ref invariant —
 # the live meeting pipeline appends "fireflies:" refs daily; an all-source
 # check would violate forever and train Josh to skim past the one channel
@@ -130,9 +138,11 @@ def write_baseline(state_dir: Path, inv: dict[str, Any], epoch_iso: str) -> Path
 def new_violations(current: dict[str, Any], baseline: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     """Items in `current` not present in `baseline`, matched by CANONICAL record:
     (name/domain, sorted page-set tuple) for the two duplicate-declaration
-    sections, ref alone for missing refs (G-BASE-2 / G0B-14 fix — comparing by
+    sections, (ref, page) for missing refs (G-BASE-2 / G0B-14 fix — comparing by
     name/domain KEY ALONE would grandfather a page added to an already-known
-    duplicate group; the page-set must be part of the identity)."""
+    duplicate group, and comparing a missing ref by REF ALONE would grandfather
+    the SAME ref later going missing from a DIFFERENT page; the page must be
+    part of the identity on both sides)."""
     out: dict[str, list[dict[str, Any]]] = {}
     for section, key_name in (("org_name_multi", "name"), ("domain_multi", "domain")):
         base_canon = {
@@ -144,8 +154,183 @@ def new_violations(current: dict[str, Any], baseline: dict[str, Any]) -> dict[st
             for item in current.get(section, [])
             if (item[key_name], tuple(sorted(item.get("pages", [])))) not in base_canon
         ]
-    base_refs = {item["ref"] for item in baseline.get("missing_gmail_refs", [])}
+    base_refs = {(item["ref"], item.get("page")) for item in baseline.get("missing_gmail_refs", [])}
     out["missing_gmail_refs"] = [
-        item for item in current.get("missing_gmail_refs", []) if item["ref"] not in base_refs
+        item
+        for item in current.get("missing_gmail_refs", [])
+        if (item["ref"], item.get("page")) not in base_refs  # G-BASE-2
     ]
     return out
+
+
+def _write_token(write: str) -> str:
+    """"task:<id>|<title>" -> "task:<id>" (Ledger writes convention)."""
+    return write.split("|", 1)[0]
+
+
+def _task_id(write: str) -> str:
+    token = _write_token(write)
+    return token.split(":", 1)[1] if ":" in token else token
+
+
+def _sender_domain(email: str) -> str:
+    return email.split("@", 1)[1].lower() if "@" in email else ""
+
+
+def _superseded_task_ids(ledger: Ledger, row: ObservationRow) -> set[str]:
+    # G-SUPER-1 (G0B-15): the digest a revision supersedes can be arbitrarily
+    # older than the 24h window this digest covers, so the search reads FULL
+    # ledger history (rows_since(_EPOCH_SENTINEL)), never just `rows_since(now
+    # - 1 day)` — filtered to the exact row this revision's revision_of names.
+    ids: set[str] = set()
+    for hist in ledger.rows_since(_EPOCH_SENTINEL):
+        if hist.source_ref != row.source_ref or hist.content_digest != row.revision_of:
+            continue
+        for w in hist.writes:
+            if w.startswith("task:"):
+                ids.add(_task_id(w))
+    return ids
+
+
+def gmail_section(
+    state_dir: Path,
+    vault: Path,
+    ledger: Ledger,
+    now: datetime,
+    window_days: int,
+    runner: Runner,
+) -> list[str]:
+    state_dir = Path(state_dir)
+    since = (now - timedelta(days=1)).isoformat()
+    rows = ledger.rows_since(since)
+
+    change_lines: list[str] = []
+
+    # G-SUPER-1: one list_open_tasks() enumeration covers every revision row
+    # in this window's current-status join -- only called when there is
+    # something to join against.
+    open_tasks_by_id: dict[str, dict[str, Any]] = {}
+    if any(row.revision_of for row in rows):
+        open_tasks_by_id = {t["id"]: t for t in list_open_tasks(runner)}
+
+    for row in rows:
+        if row.revision_of:
+            change_lines.append(f"- REVISION {row.source_ref} (supersedes {row.revision_of[:8]})")
+            for tid in sorted(_superseded_task_ids(ledger, row)):
+                task = open_tasks_by_id.get(tid)
+                if task is not None:
+                    # FR-001 D-02: any OPEN task derived from the superseded
+                    # digest is flagged for review, never auto-closed.
+                    change_lines.append(f"- evidence superseded — review: task:{tid} {task['title']}")
+        if effective_writes(row):
+            # G0B-17: per-write lines (including the extraction summary) come
+            # from the SHARED projection (client_state_projections.plan_digest_line)
+            # -- the same rendering the dry-run preview uses, never a local
+            # re-implementation that can drift from it. G0B2-4: a SIMULATED
+            # (dry-run) row's effective writes are its `planned_writes`, so the
+            # G4 item-6 dry-run digest reports what the run previewed instead
+            # of collapsing to "0 changes".
+            change_lines.extend(plan_digest_line(row))
+        for s in row.suppressed:
+            change_lines.append(f"- suppressed duplicate (tier {s['tier']}): {s['title']} ~ {s['match']}")
+        for res in row.resolutions:
+            if res.outcome == "escalated":
+                change_lines.append(f"- escalated: {row.source_ref} {res.reason}")
+
+    ignored_refs: set[str] = set()
+    ignored_senders: set[str] = set()
+    domain_counts: Counter[str] = Counter()
+    for row in rows:
+        for res in row.resolutions:
+            if res.outcome != "ignored":
+                continue
+            ignored_refs.add(row.source_ref)
+            ignored_senders.add(res.email or row.source_ref)
+            dom = _sender_domain(res.email)
+            if dom:
+                domain_counts[dom] += 1
+    if ignored_refs:
+        line = f"- ignored (no-known-entity): {len(ignored_refs)} messages from {len(ignored_senders)} senders"
+        top = ", ".join(f"{d} ({n})" for d, n in domain_counts.most_common(5))
+        if top:
+            line += f" — top: {top}"
+        change_lines.append(line)
+
+    receipt = read_receipt(state_dir)
+    for trunc in (receipt or {}).get("truncation", []):
+        change_lines.append(f"- truncated: {trunc.get('day')} ({trunc.get('count')} msgs, cap reached)")
+
+    gap = gap_line(receipt, window_days, now)
+
+    # G-BASE-1 (G0B-14): NO auto-baseline. A missing or corrupt baseline is an
+    # ERROR the digest reports -- it is never written here; `write-baseline`
+    # is a deliberate, one-time CLI step the activate goal commits.
+    baseline = load_baseline(state_dir)
+    if baseline is None:
+        invariant_lines = ["- invariants: baseline missing — run write-baseline"]
+    else:
+        nv = new_violations(compute_invariants(vault, ledger, baseline["epoch"]), baseline["invariants"])
+        invariant_lines = []
+        for row in nv["org_name_multi"]:
+            invariant_lines.append(
+                f"- invariant: CRM org name {row['name']!r} declared on {len(row['pages'])} pages: "
+                f"{', '.join(row['pages'])}"
+            )
+        for row in nv["domain_multi"]:
+            invariant_lines.append(
+                f"- invariant: domain {row['domain']!r} declared on {len(row['pages'])} pages: "
+                f"{', '.join(row['pages'])}"
+            )
+        for row in nv["missing_gmail_refs"]:
+            invariant_lines.append(
+                f"- invariant: missing ledger ref {row['ref']} (page {row['page']}, dated {row['date']})"
+            )
+        if not invariant_lines:
+            invariant_lines = ["- invariants: OK"]
+
+    # G-DIG-1: a silent watcher is indistinguishable from a dead one, so the
+    # single-line OK collapses ONLY when there is truly nothing to report
+    # (which also means a missing baseline NEVER collapses -- its error line
+    # is not "- invariants: OK").
+    if not change_lines and gap is None and invariant_lines == ["- invariants: OK"]:
+        last_success = (receipt or {}).get("last_success_at", "unknown")
+        return [f"Client state (Gmail) OK — 0 changes in 24h, invariants OK, poller last success {last_success}"]
+
+    lines = ["Client state (Gmail) — last 24h", *change_lines]
+    if gap:
+        lines.append(gap)
+    lines.extend(invariant_lines)
+    return lines
+
+
+def _cmd_write_baseline(args: argparse.Namespace) -> int:
+    state_dir = Path(args.state_dir)
+    vault = Path(args.vault)
+    ledger_path = Path(args.ledger) if args.ledger else state_dir / "observations.jsonl"
+    ledger = Ledger(ledger_path)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    inv = compute_invariants(vault, ledger, now_iso)
+    path = write_baseline(state_dir, inv, now_iso)
+    print(f"baseline written: {path} (epoch {now_iso})")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="client_state_digest.py")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    wb = sub.add_parser(
+        "write-baseline",
+        help="commit a one-time invariants baseline (explicit, never automatic — G0B-14)",
+    )
+    wb.add_argument("--state-dir", required=True)
+    wb.add_argument("--vault", required=True)
+    wb.add_argument("--ledger", default=None, help="defaults to <state-dir>/observations.jsonl")
+    wb.set_defaults(func=_cmd_write_baseline)
+
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

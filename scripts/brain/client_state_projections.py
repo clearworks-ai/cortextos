@@ -33,3 +33,13 @@ def plan_add_interaction_argv(crm_dir: Path, contact_id: str, msg: Any, extracti
         if text:
             argv.extend(["--decision", text])
     return argv
+def plan_task_create_argv(plan) -> list[str]:
+    """`plan` is a client_state_writes.TaskPlan (title/owner/source_ref/dedup);
+    typed loosely here to avoid a circular import (client_state_writes imports
+    THIS module to build its argv)."""
+    return [
+        "cortextos", "bus", "create-task", plan.title,
+        "--assignee", "human",
+        "--type", "human",
+        "--desc", f"source {plan.source_ref}",
+    ]

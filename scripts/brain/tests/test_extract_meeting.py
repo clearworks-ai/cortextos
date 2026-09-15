@@ -365,3 +365,13 @@ def test_decision_wrong_type_rejected() -> None:
     bad["decisions"] = [{"text": 123, "quote": "hello"}]
     with pytest.raises(ValueError, match=r"decisions\[0\]\.text.*expected string.*got int"):
         validate_extraction(bad)
+
+
+def test_prompt_defines_commitment_as_an_explicit_promise_to_the_other_party():
+    """Josh 2026-09-15 (Rethink Media recap): 'neither of these are real commitments, and
+    you missed the one real commitment I made' — the prompt had no definition, so ideas
+    and the speaker's own to-dos became commitments. The definition is pinned here."""
+    from extract_meeting import PROMPT_TEMPLATE
+    assert "A COMMITMENT is an explicit promise one participant made TO THE OTHER PARTY" in PROMPT_TEMPLATE
+    assert "a participant's own ongoing work or plans" in PROMPT_TEMPLATE
+    assert "When in doubt, leave it out" in PROMPT_TEMPLATE

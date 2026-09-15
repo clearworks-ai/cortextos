@@ -449,6 +449,10 @@ def _file_message(
         if ledger.cached_extraction(identity) is None:
             attempts, last_error = extraction_attempt_state(cfg.state_dir, identity)
             if attempts >= EXTRACTION_MAX_ATTEMPTS or in_run_calls >= EXTRACTION_MAX_ATTEMPTS:
+                # FINAL F-6: an UNDELIVERED escalation must not be persisted as
+                # `escalated` (escalated_for would read it as delivered forever);
+                # demote it so the run that gets past extraction still pages.
+                _demote_undelivered_escalations()  # G-ESC-5
                 for r in resolutions:
                     if r.outcome == "pending":
                         r.outcome = "partial"
@@ -464,7 +468,7 @@ def _file_message(
                 ))
                 state.extraction_failures.append({
                     "source_ref": source_ref, "identity": identity,
-                    "attempts": attempts, "last_error": last_error,
+                    "attempts": attempts, "last_error": last_error, "frozen": True,
                 })
                 return 0, len(escalated), len(ignored)
             record_extraction_attempt(cfg.state_dir, identity)
@@ -490,6 +494,7 @@ def _file_message(
             # again for an identical message. The stamped extraction carries its own
             # `identity`, `bound_slugs` and `context` mapping, so the retry's
             # cached_or_extract matches it and rebinds against the fresh context.
+            _demote_undelivered_escalations()  # FINAL F-6: same reason as the freeze branch
             for r in resolutions:
                 if r.outcome == "pending":
                     r.outcome = "partial"

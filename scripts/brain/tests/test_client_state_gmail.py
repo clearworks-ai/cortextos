@@ -2221,3 +2221,48 @@ def test_retry_frozen_gives_a_frozen_identity_a_fresh_budget(tmp_path):
     assert all(res["outcome"] == "filed" for res in rows[-1]["resolutions"])
     from observation_ledger import read_extraction_attempts
     assert read_extraction_attempts(cfg.state_dir) == {}
+
+
+def test_an_ambiguous_counterparty_on_a_frozen_message_is_still_paged_once(tmp_path):
+    """FINAL F-6: sender fileable (domain -> acme), cc ambiguous (CRM company Alloy vs
+    domain acme). Two rejected outputs freeze the message: the undelivered escalation
+    must NOT be persisted as `escalated`; the --retry-frozen sweep that gets past
+    extraction pages exactly once; a third sweep stays silent."""
+    contacts = [
+        {"id": "c1", "name": "Marcos", "emails": ["marcos@acme.org"], "company": ""},
+        {"id": "c2", "name": "Amb", "emails": ["amb@acme.org"], "company": "Alloy"},
+    ]
+    cfg = _cfg(tmp_path, dry_run=False, contacts=contacts)
+    payload = _gmail_payload(from_email="marcos@acme.org", from_name="Marcos")
+    payload["cc"] = ["amb@acme.org"]
+
+    def runner_for(claude_outputs):
+        r = FakeRunner()
+        _lock_ok(r, cfg.state_dir / "claims")
+        r.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+        r.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(payload))
+        _open_tasks_empty(r)
+        for out in claude_outputs:
+            r.record(("claude",), rc=0, stdout=out)
+        r.record(("cortextos", "bus", "send-telegram"), rc=0, stdout="sent")
+        r.record(("python3", str(cfg.crm_dir / "upsert-contact.py")), rc=0, stdout="c1\n")
+        r.record(("python3", str(cfg.crm_dir / "add-interaction.py")), rc=0, stdout=_interaction_stdout())
+        return r
+
+    sends = lambda r: sum(1 for c in r.calls if c[:3] == ["cortextos", "bus", "send-telegram"])
+
+    r1 = runner_for([_invalid_wrapper(), _invalid_wrapper()])
+    assert csg.run(cfg, r1).exit_code == 0
+    assert sends(r1) == 0
+    rows = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
+    assert rows[-1]["extraction_attempt"]["frozen"] is True
+    assert "escalated" not in {res["outcome"] for res in rows[-1]["resolutions"]}, rows[-1]["resolutions"]
+
+    import dataclasses
+    r2 = runner_for([_claude_wrapper()])
+    assert csg.run(dataclasses.replace(cfg, retry_frozen=True), r2).exit_code == 0
+    assert sends(r2) == 1
+
+    r3 = runner_for([])
+    assert csg.run(cfg, r3).exit_code == 0
+    assert sends(r3) == 0

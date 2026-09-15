@@ -301,6 +301,22 @@ def gmail_section(
     for trunc in (receipt or {}).get("truncation", []):
         change_lines.append(f"- truncated: {trunc.get('day')} ({trunc.get('count')} msgs, cap reached)")
 
+    # FINAL F-5 (2026-09-15): the frozen set lives on the RECEIPT (the F-2 skip
+    # writes no row on later sweeps), so a still-frozen identity must keep the
+    # OK line from collapsing for as long as it stays frozen -- not only on the
+    # day of the freeze. Deduped against the row-derived line for that day.
+    for failure in (receipt or {}).get("extraction_failures", []) or []:  # G-DIG-5
+        if not (isinstance(failure, dict) and failure.get("frozen")):
+            continue
+        ref = str(failure.get("source_ref") or "")
+        if any(f"manual re-run: {ref}" in ln for ln in change_lines):
+            continue
+        reason = str(failure.get("last_error") or "").strip()
+        change_lines.append(
+            f"- extraction frozen — manual re-run: {ref}"
+            + (f" ({reason})" if reason else "") + " — client_state_gmail.py --retry-frozen"
+        )
+
     # G-DIG-3 (FR-009): the collapsed OK sentence below CLAIMS a healthy poller
     # ("poller last success <X>"), so a receipt that cannot prove one must
     # speak. Appending to change_lines is what makes the claim unreachable --

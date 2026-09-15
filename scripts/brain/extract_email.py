@@ -5,11 +5,6 @@ extract_meeting._require_single_line/_parse_claude_stdout and
 resolve_meeting.quote_gate. Everything else (prompt, schema, typed validator,
 cache identity) is new — an email is a flat body, not a participants/text_units
 meeting envelope.
-
-Task 9 lands: schema path + typed walker, ContextItem, build_context,
-open_items_for, extraction_identity, build_prompt, validate_email_extraction.
-Task 10 adds: CLAUDE_ARGV, ExtractionError, BudgetExceeded, extract().
-Task 11 adds: cached_or_extract().
 """
 from __future__ import annotations
 
@@ -23,7 +18,7 @@ from typing import Any
 from brain_rollup import _open_rows, _section_text
 from extract_meeting import _parse_claude_stdout, _require_single_line
 from gmail_source import Message
-from observation_ledger import content_digest
+from observation_ledger import ObservationRow, content_digest
 from resolve_meeting import quote_gate
 from runner import Runner
 from writeback_render import org_brain_root
@@ -239,11 +234,7 @@ def validate_email_extraction(obj: dict[str, Any], n_context: int) -> None:
 
 
 def _claude_failure_reason(proc: Any) -> str:
-    # Deviation: duplicated locally rather than imported. The plan's
-    # architecture note blesses only _require_single_line/_parse_claude_stdout
-    # for reuse from extract_meeting.py; _claude_failure_reason is not on
-    # that list, so this ~6-line helper is copied rather than pulling in a
-    # fourth, unlisted private symbol.
+    # Deviation: duplicated locally rather than imported — see Task 10.
     if proc.stdout:
         try:
             wrapper = json.loads(proc.stdout)
@@ -267,9 +258,7 @@ def extract(
     the email body, and stamps cost/identity.
 
     Deviation from the skeleton signature: adds a required keyword-only
-    `slugs: list[str]`. extraction_identity needs (source_ref, digest, slugs)
-    and no other parameter here supplies the bound-entity slug set — without
-    it the FR-001 cache identity could not be computed inside extract().
+    `slugs: list[str]` — see Task 10.
     """
     prompt = build_prompt(msg, context)
     proc = runner.run(list(CLAUDE_ARGV), input=prompt)  # G-EXT-2
@@ -282,11 +271,6 @@ def extract(
         raise ExtractionError(str(exc)) from exc
 
     source = {"text_units": [{"text": msg.body_text}]}
-    # summary is NOT a quote_gate key (resolve_meeting.quote_gate only reads
-    # decisions/commitments/open_questions/proposed_delivery_state) — it
-    # copies every other key of `extraction` whole via dict(extraction), so
-    # `gated["summary"]` (and matches_open_item on surviving commitments)
-    # pass through untouched.
     gated = quote_gate(model_obj, source)
 
     cost_usd = float(wrapper.get("total_cost_usd") or 0)
@@ -304,7 +288,81 @@ def extract(
     stamped["extracted_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     stamped["identity"] = extraction_identity(source_ref, digest, slugs)
     stamped["bound_slugs"] = sorted(slugs)
+    # G0B2-11: matches_open_item is an INVOCATION-LOCAL index into the context
+    # that was sent with THIS call. Persist the mapping alongside the result so
+    # a later cache hit can re-resolve those indices against a rebuilt context
+    # instead of indexing blindly into a different list.
+    stamped["context"] = [
+        {"id": item.id, "text": item.text, "owner": item.owner, "source": item.source}
+        for item in context
+    ]
 
     if spent_usd + cost_usd > max_usd:
         raise BudgetExceeded(stamped, spent_usd, max_usd)
     return stamped
+
+
+def rebind_cached_matches(cached: dict[str, Any], context: list[ContextItem]) -> dict[str, Any]:
+    """G0B2-11: re-resolve a CACHED extraction's `matches_open_item` indices
+    against the context built for THIS invocation.
+
+    The cached indices point into `cached["context"]` — the list that was sent
+    with the paid call. Between then and now an open item can have been closed,
+    reordered, or replaced, so the same integer can denote a different item (or
+    no item at all). For each commitment we look the ORIGINAL item up in the
+    stored mapping, then find that same (text, source) in the current context:
+    a hit re-points the index, a miss clears it to None so the commitment is no
+    longer tier-2-suppressed against something that is gone. Never raises
+    IndexError, and never triggers a new LLM call — the at-most-one-call
+    identity stays (source_ref, digest, sorted slugs)."""
+    stored = cached.get("context")
+    commitments = cached.get("commitments") or []
+    if not any(c.get("matches_open_item") is not None for c in commitments):
+        return cached
+    by_index = {int(item["id"]): item for item in (stored or []) if isinstance(item, dict) and "id" in item}
+    current_by_key = {(item.text, item.source): item.id for item in context}
+    out = dict(cached)
+    rebound: list[dict[str, Any]] = []
+    for commitment in commitments:
+        idx = commitment.get("matches_open_item")
+        if idx is None:
+            rebound.append(commitment)
+            continue
+        entry = dict(commitment)
+        original = by_index.get(int(idx))
+        new_id = None
+        if original is not None:
+            new_id = current_by_key.get((original.get("text", ""), original.get("source", "")))
+        entry["matches_open_item"] = new_id  # G-EXT-4
+        rebound.append(entry)
+    out["commitments"] = rebound
+    return out
+
+
+def cached_or_extract(
+    ledger_latest_row: ObservationRow | None,
+    msg: Message,
+    context: list[ContextItem],
+    slugs: list[str],
+    runner: Runner,
+    *,
+    max_usd: float,
+    spent_usd: float,
+) -> tuple[dict[str, Any], bool]:
+    """FR-001: at most one LLM call per (source_ref, content_digest,
+    bound-entity set). Reuses the latest ledger row's cached extraction when
+    its stamped `identity` matches THIS call's (source_ref, digest, slugs);
+    otherwise runs extract() — this is the late-bound-entity widen-and-rerun
+    path (a newly-resolved entity widens `slugs`, the identity no longer
+    matches, and the cache is refreshed with the wider open-items context)."""
+    source_ref = f"gmail:{msg.id}"
+    digest = content_digest(msg.subject, msg.body_text, msg.from_email)
+    if ledger_latest_row is not None:
+        cached = ledger_latest_row.extraction
+        if cached and cached.get("identity") == extraction_identity(source_ref, digest, slugs):
+            # G-EXT-3: identity match — reuse, no LLM call. The cached
+            # matches_open_item indices are re-resolved against the context
+            # this invocation just built (G0B2-11).
+            return rebind_cached_matches(cached, context), False
+    stamped = extract(runner, msg, context, max_usd=max_usd, spent_usd=spent_usd, slugs=slugs)
+    return stamped, True

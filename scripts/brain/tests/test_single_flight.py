@@ -56,9 +56,13 @@ def test_acquire_returns_none_on_nonzero_rc(tmp_path) -> None:
     assert len(runner.calls) == 1
 
 
-def test_acquire_retries_once_on_stale_cleared_stderr_and_wins(tmp_path) -> None:
-    # G-LOCK-4 / C11: a stale-cleared refusal is retried once, in-process, so
-    # the caller wins the now-empty slot without waiting for the next tick.
+def test_acquire_never_retries_in_band_after_stale_cleared(tmp_path) -> None:
+    """G-LOCK-4 (corrected, G2r3-1): the CLI call that DISCOVERS staleness
+    unlinks the dead holder's lock and reports stale-cleared WITHOUT reclaiming,
+    precisely so no caller wins off that path. An in-band retry broke exactly
+    that: two pollers overlapping on the same stale lock could BOTH clear and
+    BOTH win, and Lease.touch's existence-only heartbeat cannot tell whose lock
+    it is holding. This run refuses; the NEXT sweep claims the empty slot."""
     runner = FakeRunner(
         [
             (CLAIM_PREFIX, CompletedProcess([], returncode=1, stdout="", stderr="Already claimed x (stale-cleared)\n")),
@@ -66,9 +70,19 @@ def test_acquire_retries_once_on_stale_cleared_stderr_and_wins(tmp_path) -> None
         ]
     )
     claims_dir = tmp_path / "claims"
-    lease = SF.acquire(runner, claims_dir, "client-state-lock", ttl_min=60)
-    assert lease is not None
-    assert len(runner.calls) == 2
+    refusal: dict = {}
+    lease = SF.acquire(runner, claims_dir, "client-state-lock", ttl_min=60, refusal=refusal)
+    assert lease is None
+    assert len(runner.calls) == 1               # NO second claim call
+    assert refusal["reason"] == "stale-cleared"
+
+
+def test_acquire_reports_the_already_claimed_reason(tmp_path) -> None:
+    runner = FakeRunner()
+    runner.record(CLAIM_PREFIX, rc=1, stderr="Already claimed x (already-claimed)\n")
+    refusal: dict = {}
+    assert SF.acquire(runner, tmp_path / "claims", "client-state-lock", ttl_min=60, refusal=refusal) is None
+    assert refusal["reason"] == "already-claimed"
 
 
 def test_lock_path_reproduces_claimLockPath_filename() -> None:
@@ -158,24 +172,13 @@ def test_acquire_live_bus_stale_lock_cleared_then_next_claim_wins(tmp_path) -> N
     stale_s = stale_ms / 1000.0
     os.utime(path, (stale_s, stale_s))
 
-    # Probe the raw CLI directly (bypassing acquire()'s own G-LOCK-4 retry)
-    # to prove the lock is genuinely stale at the bus-CLI level: rc != 0,
-    # reason stale-cleared, and the lock file is now gone.
-    refusal = runner.run(
-        [
-            "cortextos",
-            "bus",
-            "meeting-brief-claim",
-            name,
-            "--claims-dir",
-            str(claims_dir),
-            "--ttl-min",
-            "60",
-        ]
-    )
-    assert refusal.returncode != 0
-    assert "stale-cleared" in (refusal.stderr or "")
-    assert not path.exists()
+    # G2r3-1: acquire() itself REFUSES on the stale-cleared verdict -- it is the
+    # call that discovers staleness, and meeting-brief.ts deliberately clears
+    # without reclaiming so no discoverer ever wins in band.
+    verdict: dict = {}
+    assert SF.acquire(runner, claims_dir, name, ttl_min=60, refusal=verdict) is None
+    assert verdict["reason"] == "stale-cleared"
+    assert not path.exists()                      # the dead holder's lock is gone
 
     # The SUBSEQUENT acquire() call -- now that the stale lock is cleared --
     # wins cleanly via the normal fast path.
@@ -252,16 +255,3 @@ def test_acquire_raises_when_the_claim_command_cannot_run(tmp_path) -> None:
     assert "cortextos" in str(exc.value)
 
 
-def test_acquire_raises_when_the_stale_retry_fails_operationally(tmp_path) -> None:
-    runner = FakeRunner()
-    runner.record(CLAIM_PREFIX, rc=1, stderr="Already claimed x (stale-cleared)\n")
-    runner.record(CLAIM_PREFIX, rc=1, stderr="EACCES: permission denied\n")
-    with pytest.raises(SF.LeaseAcquireError):
-        SF.acquire(runner, tmp_path / "claims", "client-state-lock", ttl_min=60)
-
-
-def test_acquire_returns_none_when_the_stale_retry_finds_a_live_claim(tmp_path) -> None:
-    runner = FakeRunner()
-    runner.record(CLAIM_PREFIX, rc=1, stderr="Already claimed x (stale-cleared)\n")
-    runner.record(CLAIM_PREFIX, rc=1, stderr="Already claimed x (already-claimed)\n")
-    assert SF.acquire(runner, tmp_path / "claims", "client-state-lock", ttl_min=60) is None

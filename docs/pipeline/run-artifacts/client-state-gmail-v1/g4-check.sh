@@ -244,13 +244,17 @@ else:
     if not isinstance(refusal.get('refused_at'), str) or not refusal.get('refused_at'):
         bad.append('third_run_lock_refusal.refused_at missing')
 
-# --- stale lock: meeting-brief semantics (stale never wins in-band) --------
-need('stale_lock_reclaimed_and_ran', True)
-# G0A-20 / C11: claimEventLease on a stale lock unlinks it and returns
-# stale-cleared WITHOUT claiming in that same call (src/bus/meeting-brief.ts
-# :398-418) - single_flight.acquire retries once in-band, so the assertion is:
-# the call that discovers staleness never wins itself, but a stale lock is
-# still reclaimed within ONE acquire() invocation (Task 2's retry-once fix).
+# --- stale lock: meeting-brief semantics (stale NEVER wins in band) --------
+# G2r3-1 (corrects G0A-20): claimEventLease on a stale lock unlinks it and
+# returns stale-cleared WITHOUT claiming in that same call
+# (src/bus/meeting-brief.ts:398-418), precisely so the discovering call never
+# wins. The earlier retry-once behaviour re-introduced that race: two pollers
+# overlapping on one stale lock could both clear and both win. So the evidence
+# is now two DISTINCT invocations - this one refuses, the next one wins.
+need('stale_discovering_run_refuses', True,
+     'the acquire() that discovers staleness must refuse (exit 2, ONE claim call), never reclaim in band')
+if doc.get('stale_refusal_reason') != 'stale-cleared':
+    bad.append('stale_refusal_reason is ' + repr(doc.get('stale_refusal_reason')) + ", expected 'stale-cleared'")
 need('stale_then_next_acquire_wins', True)
 print('OK' if not bad else 'FAIL: ' + '; '.join(bad))
 PY
@@ -669,6 +673,8 @@ EOF
     "4-no-prod-writes.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/no-prod-writes.json'));d['crm']['contacts_json']['sha_after']='zzz';json.dump(d,open('DIR/no-prod-writes.json','w'))\""
     "4-no-prod-writes.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/no-prod-writes.json'));d['vault_tree_diff']='+ clients/acme.md.lock';json.dump(d,open('DIR/no-prod-writes.json','w'))\""
     "4-no-prod-writes.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/no-prod-writes.json'));d.pop('vault_tree_diff');json.dump(d,open('DIR/no-prod-writes.json','w'))\""
+    "5-idempotency.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/idempotency.json'));d['stale_discovering_run_refuses']=False;json.dump(d,open('DIR/idempotency.json','w'))\""
+    "5-idempotency.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/idempotency.json'));d['stale_refusal_reason']='already-claimed';json.dump(d,open('DIR/idempotency.json','w'))\""
     "5-idempotency.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/idempotency.json'));d.pop('third_run_receipt_byte_identical');json.dump(d,open('DIR/idempotency.json','w'))\""
     "5-idempotency.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/idempotency.json'));d['third_run_receipt_byte_identical']=False;json.dump(d,open('DIR/idempotency.json','w'))\""
     "5-idempotency.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/idempotency.json'));d.pop('third_run_lock_refusal');json.dump(d,open('DIR/idempotency.json','w'))\""

@@ -696,15 +696,19 @@ def run(cfg: Config, runner) -> RunResult:
         # call lands on the structured failure path (record_failure + exit 3)
         # instead of escaping run() raw. Only a real already-claimed verdict
         # returns None.
-        lease = single_flight.acquire(runner, claims_dir, "client-state-gmail", ttl_min=60)
+        refusal: dict = {}
+        lease = single_flight.acquire(runner, claims_dir, "client-state-gmail", ttl_min=60, refusal=refusal)
         if lease is None:
             # G0A2-16 / binding goal G4 item 5 (amended 2026-09-14): a lock-held
             # refusal leaves run-receipt.json BYTE-IDENTICAL and writes its cause to
             # last-lock-refusal.json. record_failure is for the gws/extraction/
             # writer/budget/catch-all paths, which the goal still wants on the
             # receipt; a fail-closed halt must not falsify the success receipt.
-            record_lock_refusal(cfg.state_dir, holder_pid=os.getpid(), detail=str(claims_dir))  # G-LOCKREF-1
-            return RunResult(exit_code=2, previews=["lock held — another run is in progress"])
+            reason = refusal.get("reason", "already-claimed")
+            record_lock_refusal(
+                cfg.state_dir, holder_pid=os.getpid(), detail=str(claims_dir), reason=reason,  # G-LOCKREF-1
+            )
+            return RunResult(exit_code=2, previews=[f"lock not acquired ({reason}) — refusing this run"])
 
         # G0B3-6 / A2: heartbeat the lease for the WHOLE acquired interval, not once
         # per message. Wrapping the runner puts a tick on every call boundary the

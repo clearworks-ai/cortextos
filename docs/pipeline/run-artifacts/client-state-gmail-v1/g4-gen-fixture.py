@@ -180,19 +180,27 @@ def main() -> int:
     receipt_after_third = (cfg.state_dir / "run-receipt.json").read_bytes()
     refusal = json.loads((cfg.state_dir / "last-lock-refusal.json").read_text())
 
-    # stale lock: the claim CLI reports stale-cleared, single_flight retries once and wins
+    # stale lock, meeting-brief semantics (G2r3-1): the call that DISCOVERS
+    # staleness clears the dead holder's lock and refuses -- it never reclaims
+    # in band, because two overlapping pollers would otherwise both clear and
+    # both win. So run 4 REFUSES (exit 2) and run 5, a separate invocation,
+    # wins the now-empty slot.
     cfg4 = _cfg(scratch / "run4", now)
     r4 = FakeRunner()
     r4.record(("cortextos", "bus", "meeting-brief-claim"), rc=1, stdout="",
               stderr="Already claimed client-state-gmail (stale-cleared)")
-    r4.record(("cortextos", "bus", "meeting-brief-claim"), rc=0, stdout="ok")
-    r4.record(("cortextos", "bus", "meeting-brief-release"), rc=0, stdout="ok")
-    lock4 = single_flight.lock_path(cfg4.state_dir / "claims", "client-state-gmail")
-    lock4.parent.mkdir(parents=True, exist_ok=True)
-    lock4.touch()
-    r4.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([]))
     result4 = csg.run(cfg4, r4)
     claim_calls = [c for c in r4.calls if c[:3] == ["cortextos", "bus", "meeting-brief-claim"]]
+    stale_refusal = json.loads((cfg4.state_dir / "last-lock-refusal.json").read_text())
+
+    r5 = FakeRunner()
+    r5.record(("cortextos", "bus", "meeting-brief-claim"), rc=0, stdout="ok")
+    r5.record(("cortextos", "bus", "meeting-brief-release"), rc=0, stdout="ok")
+    lock5 = single_flight.lock_path(cfg4.state_dir / "claims", "client-state-gmail")
+    lock5.parent.mkdir(parents=True, exist_ok=True)
+    lock5.touch()
+    r5.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([]))
+    result5 = csg.run(cfg4, r5)
 
     idem = dict(second)
     # NOTE (G0B2-7 / amended goal G4 item 5): there is deliberately NO
@@ -205,8 +213,9 @@ def main() -> int:
         "third_run_exit_code": result3.exit_code,
         "third_run_receipt_byte_identical": receipt_after_third == receipt_before_third,
         "third_run_lock_refusal": refusal,
-        "stale_lock_reclaimed_and_ran": result4.exit_code == 0,
-        "stale_then_next_acquire_wins": len(claim_calls) == 2,
+        "stale_discovering_run_refuses": result4.exit_code == 2 and len(claim_calls) == 1,
+        "stale_refusal_reason": stale_refusal.get("reason"),
+        "stale_then_next_acquire_wins": result5.exit_code == 0,
     })
     (OUT / "idempotency.json").write_text(json.dumps(idem, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 

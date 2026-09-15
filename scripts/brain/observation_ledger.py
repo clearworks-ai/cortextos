@@ -242,7 +242,10 @@ def record_failure(state_dir: Path, error: str, **partial: object) -> None:
 LOCK_REFUSAL_FILENAME = "last-lock-refusal.json"
 
 
-def record_lock_refusal(state_dir: Path, holder_pid: int | None = None, detail: str = "") -> None:
+def record_lock_refusal(
+    state_dir: Path, holder_pid: int | None = None, detail: str = "",
+    reason: str = "already-claimed",
+) -> None:
     """FR-002 lock-held refusal diagnostic. Deliberately does NOT touch
     run-receipt.json: a fail-closed halt must persist its cause WITHOUT
     falsifying the success receipt (binding goal G4 item 5, amended
@@ -251,6 +254,10 @@ def record_lock_refusal(state_dir: Path, holder_pid: int | None = None, detail: 
     path = Path(state_dir) / LOCK_REFUSAL_FILENAME  # G-LOCKREF-1
     payload = {
         "error": "lock-held",
+        # G2r3-1: WHICH verdict refused this run. `stale-cleared` means this
+        # call cleared a dead holder's lock and deliberately did not reclaim
+        # it -- the next sweep wins the empty slot.
+        "reason": reason,
         "refused_at": datetime.now(timezone.utc).isoformat(),
         "pid": int(holder_pid) if holder_pid is not None else None,
         "detail": detail,

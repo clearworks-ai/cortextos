@@ -73,13 +73,15 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "scripts/brain/tests/test_single_flight.py::test_lease_touch_advances_lock_mtime",
      r's/os\.utime\(path, None\)  # G-LOCK-2: heartbeat -- mtime bump, claimAgeMs treats mtime as authoritative/pass  # G-LOCK-2 (mutated)/'),
     ("G-LOCK-3", "scripts/brain/single_flight.py",
-     "a PLAIN refusal (no 'stale-cleared' in stderr) returns None and never retries - acquire() must not pretend a real double-claim won",
+     "ONLY an rc-0 claim produces a Lease - acquire() must never pretend a refusal won",
      "scripts/brain/tests/test_single_flight.py::test_acquire_returns_none_on_nonzero_rc",
-     r's/return None  # G-LOCK-3: plain refusal \(already-claimed, still live\) -- no retry/return Lease(claims_dir=Path(claims_dir), name=name, runner=runner)  # G-LOCK-3 (mutated)/'),
+     r's/if result\.returncode == 0:  # G-LOCK-3: ONLY an rc-0 claim ever produces a Lease/if True:  # G-LOCK-3 (mutated)/'),
     ("G-LOCK-4", "scripts/brain/single_flight.py",
-     "a 'stale-cleared' refusal retries acquire ONCE in-process and wins the now-empty slot (G4 item 5: stale => next acquire wins)",
-     "scripts/brain/tests/test_single_flight.py::test_acquire_retries_once_on_stale_cleared_stderr_and_wins",
-     r's/return Lease\(claims_dir=Path\(claims_dir\), name=name, runner=runner\)  # G-LOCK-4: retry-once wins/return None  # G-LOCK-4 (mutated)/'),
+     "acquire NEVER retries in band: neither refusal verdict wins off the discovering call, because meeting-brief.ts "
+     "clears a stale lock without reclaiming it and two overlapping pollers would otherwise both clear and both win "
+     "(G2r3-1). This run refuses; the NEXT sweep claims the empty slot",
+     "scripts/brain/tests/test_single_flight.py::test_acquire_never_retries_in_band_after_stale_cleared",
+     r's/    return None  # G-LOCK-4: NEVER a retry -- neither verdict wins in band/    return Lease(claims_dir=Path(claims_dir), name=name, runner=runner)  # G-LOCK-4 (mutated)/'),
     ("G-LOCK-9", "scripts/brain/single_flight.py",
      "a non-zero meeting-brief-claim whose stderr names NEITHER claim verdict is an OPERATIONAL failure "
      "(LeaseAcquireError -> record_failure + exit 3), never the lock-held exit 2 that leaves the success receipt "

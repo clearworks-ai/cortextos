@@ -202,21 +202,28 @@ def _refusal_or_raise(result) -> str:
     return verdict
 
 
-def acquire(runner: Runner, claims_dir: Path, name: str, ttl_min: int = 60) -> Lease | None:
+def acquire(
+    runner: Runner, claims_dir: Path, name: str, ttl_min: int = 60,
+    *, refusal: dict | None = None,
+) -> Lease | None:
+    """A Lease, or None when another poller holds the slot (`refusal["reason"]`
+    then names the CLI's verdict). An OPERATIONAL failure raises
+    LeaseAcquireError instead (G-LOCK-9).
+
+    There is NO in-band retry. meeting-brief.ts deliberately unlinks a dead
+    holder's lock and reports `stale-cleared` WITHOUT reclaiming, precisely so
+    the call that DISCOVERS staleness never wins off that path; retrying
+    immediately re-introduced the race it exists to prevent -- two pollers
+    overlapping on the same stale lock could both clear and both win, and
+    Lease.touch's existence-only heartbeat cannot tell whose lock it is
+    holding. This run refuses (exit 2, receipt untouched); the NEXT sweep
+    O_EXCL-claims the now-empty slot cleanly (G2r3-1).
+    """
     argv = _claim_argv(claims_dir, name, ttl_min)
     result = _claim_once(runner, argv)
-    if result.returncode == 0:
+    if result.returncode == 0:  # G-LOCK-3: ONLY an rc-0 claim ever produces a Lease
         return Lease(claims_dir=Path(claims_dir), name=name, runner=runner)
-    if _refusal_or_raise(result) == "stale-cleared":
-        # The CLI call that DISCOVERS staleness never wins in-band
-        # (meeting-brief.ts unlinks the dead holder's lock and reports
-        # stale-cleared WITHOUT reclaiming -- two overlapping fires can
-        # never both win off this path). Retry ONCE, immediately: the lock
-        # is now gone, so the retry's O_CREAT|O_EXCL fast path wins cleanly
-        # instead of making the caller wait for its next tick.
-        retry = _claim_once(runner, argv)
-        if retry.returncode == 0:
-            return Lease(claims_dir=Path(claims_dir), name=name, runner=runner)  # G-LOCK-4: retry-once wins
-        _refusal_or_raise(retry)
-        return None
-    return None  # G-LOCK-3: plain refusal (already-claimed, still live) -- no retry
+    verdict = _refusal_or_raise(result)
+    if refusal is not None:
+        refusal["reason"] = verdict
+    return None  # G-LOCK-4: NEVER a retry -- neither verdict wins in band

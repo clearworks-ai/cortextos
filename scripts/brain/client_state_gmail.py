@@ -345,6 +345,7 @@ def _file_message(
             observed_at=cfg.now.isoformat(), resolutions=resolutions,
             reason=f"budget: {exc}", extraction=exc.extraction, writes=[],
             revision_of=revision_of, partial=True,
+            simulated=cfg.dry_run,  # G-LEDGER-6: a dry-run budget row is a PREVIEW, not a real run
         ))
         raise
     if called:

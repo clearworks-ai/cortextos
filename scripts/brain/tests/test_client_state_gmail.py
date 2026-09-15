@@ -1364,3 +1364,37 @@ def test_runner_timeout_on_create_task_persists_the_landed_page_effect(tmp_path)
     assert _page_path(cfg).read_text(encoding="utf-8").count("[source: gmail:m1]") == 1
     rows2 = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
     assert all(r["outcome"] == "filed" for r in rows2[-1]["resolutions"])
+
+
+def test_budget_exit_in_a_dry_run_persists_a_SIMULATED_row(tmp_path):
+    """G2A-2: a dry run that blows --max-usd persisted its budget row with
+    simulated=false, so the ledger and the digest described a preview as a real
+    run — and an ambiguous resolution on it could suppress the later LIVE
+    escalation (escalated_for skips simulated rows only)."""
+    cfg = _cfg(tmp_path, dry_run=True, max_usd=0.01)
+    runner = FakeRunner()
+    _lock_ok(runner, cfg.state_dir / "claims")
+    runner.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+    _open_tasks_empty(runner)
+    runner.record(("claude",), rc=0, stdout=_claude_wrapper(cost_usd=0.05))
+
+    result = csg.run(cfg, runner)
+    assert result.exit_code == 12
+    rows = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
+    assert len(rows) == 1
+    assert rows[0]["simulated"] is True
+
+
+def test_budget_exit_in_a_live_run_stays_real(tmp_path):
+    cfg = _cfg(tmp_path, dry_run=False, max_usd=0.01)
+    runner = FakeRunner()
+    _lock_ok(runner, cfg.state_dir / "claims")
+    runner.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+    _open_tasks_empty(runner)
+    runner.record(("claude",), rc=0, stdout=_claude_wrapper(cost_usd=0.05))
+
+    assert csg.run(cfg, runner).exit_code == 12
+    rows = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
+    assert rows[0]["simulated"] is False

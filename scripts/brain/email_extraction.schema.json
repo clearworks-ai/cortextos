@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "brain.email_extraction/1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "summary", "decisions", "commitments", "open_questions"],
+  "properties": {
+    "schema": { "const": "brain.email_extraction/1" },
+    "summary": { "type": "string" },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "quote"],
+        "properties": {
+          "text": { "type": "string" },
+          "quote": { "type": "string" }
+        }
+      }
+    },
+    "commitments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "owner_name", "deadline_iso", "quote", "matches_open_item"],
+        "properties": {
+          "text": { "type": "string" },
+          "owner_name": { "type": "string" },
+          "deadline_iso": { "type": ["string", "null"] },
+          "quote": { "type": "string" },
+          "matches_open_item": { "type": ["integer", "null"] }
+        }
+      }
+    },
+    "open_questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "quote"],
+        "properties": {
+          "text": { "type": "string" },
+          "quote": { "type": "string" }
+        }
+      }
+    }
+  }
+}

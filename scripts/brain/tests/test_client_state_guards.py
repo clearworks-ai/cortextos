@@ -5,10 +5,12 @@ writer's landed part, materialised via
 swept with the SAME regex test_no_unregistered_guard below uses (a G-ID
 token anywhere after a '#' on its line -- docstring/prose mentions of a
 G-ID, which several modules still carry alongside their real marker, do NOT
-count). 68 rows: LEDGER x7, RECEIPT x2, LOCK x8, LOCKREF x1, SWEEP x9, RES x2,
-EXT x4, INV x2, BASE x2, SUPER x1, DIG x2, BUS x2 (TS), IDEMP x2, MERGE x3,
+count). 69 rows: LEDGER x7, RECEIPT x2, LOCK x8, LOCKREF x1, SWEEP x9, RES x2,
+EXT x4, INV x2, BASE x2, SUPER x1, DIG x3, BUS x2 (TS), IDEMP x2, MERGE x3,
 SIM x1, ESC x2, QUERY x1, FAIL x1, BUDGET x2, CRM x2, HIST x2, PARITY x2,
 WRITER x2, OWNER x1, TASK x2, DEDUP x1, EFFECT x1, REV x1.
+
+The G2a review-fix wave (2026-09-14) added G-DIG-3.
 
 The last 8 rows (G-MERGE-2/3, G-EFFECT-1, G-BUDGET-2, G-REV-1, G-PARITY-2,
 G-LOCK-7/8) were added by the post-cap adjudication wave (2026-09-15) that
@@ -165,6 +167,12 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "gmail_section_lines() catches every Exception so a Gmail-side failure never silences the Fireflies section (FR-009 independence)",
      "scripts/brain/tests/test_meeting_loop_watch_sections.py::test_main_dry_run_gmail_error_does_not_block_fireflies",
      r's/except Exception as exc:  # noqa: BLE001 — G-DIG-2 sections fail independently/raise/'),
+    ("G-DIG-3", "scripts/brain/client_state_digest.py",
+     "the one-line 'poller last success X' OK sentence is unreachable unless the receipt PROVES a success no later "
+     "failure invalidated - a missing/corrupt/never-stamped receipt or an error newer than last_success_at emits an "
+     "explicit '- poller: ...' warning line instead (G2a finding 1, FR-009)",
+     "scripts/brain/tests/test_client_state_digest.py::test_gmail_section_warns_when_receipt_missing",
+     r's/change_lines\.extend\(_poller_health_lines\(receipt\)\)  # G-DIG-3/pass  # G-DIG-3 (mutated)/'),
     ("G-IDEMP-1", "scripts/brain/client_state_gmail.py",
      "run() skips re-processing (no new extraction/claude call) when ledger.is_terminal(source_ref, digest)",
      "scripts/brain/tests/test_client_state_gmail.py::test_second_identical_live_run_skips_the_terminal_message",
@@ -341,10 +349,10 @@ def test_guard_registry_ids_are_unique():
     assert len(ids) == len(set(ids)), f"duplicate guard ids: {ids}"
 
 
-def test_guard_registry_has_68_rows():
+def test_guard_registry_has_69_rows():
     # Pinned count (rebuilt 2026-09-14 from the FINAL parts, G0 round-3
     # integration) so a future guard silently dropping out is itself caught.
-    assert len(GUARD_REGISTRY) == 68, f"expected 68 rows, got {len(GUARD_REGISTRY)}"
+    assert len(GUARD_REGISTRY) == 69, f"expected 69 rows, got {len(GUARD_REGISTRY)}"
 
 
 def test_guard_registry_rows_have_five_fields():

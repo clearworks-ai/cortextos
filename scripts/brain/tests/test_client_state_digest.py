@@ -410,3 +410,91 @@ def test_write_baseline_cli_writes_committed_baseline(tmp_path):
     baseline = cs_digest.load_baseline(state)
     assert baseline is not None
     assert baseline["invariants"]["org_name_multi"] == []
+
+
+# --- G2a-1 / FR-009: poller-health gate on the one-line OK sentence ----------
+# A silent watcher must be distinguishable from a dead one. The collapsed
+# "Client state (Gmail) OK — ... poller last success <X>" sentence asserts a
+# healthy poller, so it may only be emitted when the receipt PROVES a success
+# that no later failure has invalidated.
+
+def _no_rows_state(tmp_path) -> tuple[Path, Path, Ledger, datetime]:
+    vault = tmp_path / "vault"
+    state = tmp_path / "state"
+    state.mkdir(parents=True)
+    ledger = Ledger(state / "observations.jsonl")
+    now = datetime(2026, 9, 14, 12, 0, 0, tzinfo=timezone.utc)
+    _seed_baseline_ok(state, now)
+    return vault, state, ledger, now
+
+
+def test_gmail_section_warns_when_receipt_missing(tmp_path):
+    vault, state, ledger, now = _no_rows_state(tmp_path)
+    assert not (state / "run-receipt.json").exists()
+
+    lines = cs_digest.gmail_section(state, vault, ledger, now, window_days=3, runner=FakeRunner({}))
+    text = "\n".join(lines)
+
+    assert not text.startswith("Client state (Gmail) OK"), text
+    assert "poller last success unknown" not in text
+    assert any(ln.startswith("- poller: no successful run on record") for ln in lines), text
+
+
+def test_gmail_section_warns_when_receipt_corrupt(tmp_path):
+    vault, state, ledger, now = _no_rows_state(tmp_path)
+    (state / "run-receipt.json").write_text("{not json", encoding="utf-8")
+
+    lines = cs_digest.gmail_section(state, vault, ledger, now, window_days=3, runner=FakeRunner({}))
+    text = "\n".join(lines)
+
+    assert not text.startswith("Client state (Gmail) OK"), text
+    assert any(ln.startswith("- poller: no successful run on record") for ln in lines), text
+
+
+def test_gmail_section_warns_when_receipt_has_no_last_success(tmp_path):
+    vault, state, ledger, now = _no_rows_state(tmp_path)
+    _write(state / "run-receipt.json", json.dumps({
+        "window_days": 3, "message_count": 0, "truncation": [], "cost_usd": 0.0,
+    }))
+
+    lines = cs_digest.gmail_section(state, vault, ledger, now, window_days=3, runner=FakeRunner({}))
+    text = "\n".join(lines)
+
+    assert not text.startswith("Client state (Gmail) OK"), text
+    assert any(ln.startswith("- poller: no successful run on record") for ln in lines), text
+
+
+def test_gmail_section_warns_when_last_run_failed_after_last_success(tmp_path):
+    """record_failure preserves last_success_at, so a receipt carrying a RECENT
+    error still looks fresh to gap_line. The digest must say the last run
+    failed instead of collapsing to OK."""
+    vault, state, ledger, now = _no_rows_state(tmp_path)
+    _write(state / "run-receipt.json", json.dumps({
+        "last_success_at": "2026-09-14T09:00:00+00:00",
+        "error": "gws gmail +triage failed rc=1: token expired",
+        "failed_at": "2026-09-14T11:55:00+00:00",
+        "window_days": 3, "message_count": 0, "truncation": [], "cost_usd": 0.0,
+    }))
+
+    lines = cs_digest.gmail_section(state, vault, ledger, now, window_days=3, runner=FakeRunner({}))
+    text = "\n".join(lines)
+
+    assert not text.startswith("Client state (Gmail) OK"), text
+    assert "- poller: last run FAILED at 2026-09-14T11:55:00+00:00: " \
+           "gws gmail +triage failed rc=1: token expired" in text
+
+
+def test_gmail_section_still_collapses_for_a_healthy_receipt(tmp_path):
+    """A receipt whose error PREDATES the last success is a repaired poller --
+    it still collapses, so the health gate cannot become a permanent warning."""
+    vault, state, ledger, now = _no_rows_state(tmp_path)
+    _write(state / "run-receipt.json", json.dumps({
+        "last_success_at": "2026-09-14T11:55:00+00:00",
+        "error": "gws gmail +triage failed rc=1: token expired",
+        "failed_at": "2026-09-13T04:00:00+00:00",
+        "window_days": 3, "message_count": 0, "truncation": [], "cost_usd": 0.0,
+    }))
+
+    lines = cs_digest.gmail_section(state, vault, ledger, now, window_days=3, runner=FakeRunner({}))
+    assert len(lines) == 1
+    assert lines[0].startswith("Client state (Gmail) OK — 0 changes in 24h, invariants OK, poller last success ")

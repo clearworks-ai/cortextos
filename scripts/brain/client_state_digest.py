@@ -177,6 +177,37 @@ def _sender_domain(email: str) -> str:
     return email.split("@", 1)[1].lower() if "@" in email else ""
 
 
+def _parse_receipt_ts(value: Any) -> datetime | None:
+    try:
+        dt = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+def _poller_health_lines(receipt: dict | None) -> list[str]:
+    """FR-009: the warning lines a receipt that CANNOT prove a healthy poller
+    owes the digest. A missing, unreadable or never-stamped receipt says "no
+    successful run on record"; an `error` stamped AFTER `last_success_at`
+    (record_failure deliberately preserves the older last_success_at, so
+    gap_line alone still reads "fresh") says the last run FAILED. An error that
+    predates the last success is a repaired poller and yields nothing, so the
+    gate can never become a permanent warning. An unparseable `failed_at` is
+    treated as current -- fail-closed."""
+    last_success = (receipt or {}).get("last_success_at")
+    if not last_success:
+        return ["- poller: no successful run on record — run-receipt.json missing, unreadable or never stamped"]
+    error = str((receipt or {}).get("error") or "").strip()
+    if not error:
+        return []
+    failed_at = (receipt or {}).get("failed_at")
+    failed_dt = _parse_receipt_ts(failed_at)
+    success_dt = _parse_receipt_ts(last_success)
+    if failed_dt is not None and success_dt is not None and failed_dt <= success_dt:
+        return []
+    return [f"- poller: last run FAILED at {failed_at or 'unknown'}: {error}"]
+
+
 def _superseded_task_ids(ledger: Ledger, row: ObservationRow) -> set[str]:
     # G-SUPER-1 (G0B-15): the digest a revision supersedes can be arbitrarily
     # older than the 24h window this digest covers, so the search reads FULL
@@ -259,6 +290,13 @@ def gmail_section(
     receipt = read_receipt(state_dir)
     for trunc in (receipt or {}).get("truncation", []):
         change_lines.append(f"- truncated: {trunc.get('day')} ({trunc.get('count')} msgs, cap reached)")
+
+    # G-DIG-3 (FR-009): the collapsed OK sentence below CLAIMS a healthy poller
+    # ("poller last success <X>"), so a receipt that cannot prove one must
+    # speak. Appending to change_lines is what makes the claim unreachable --
+    # the G-DIG-1 collapse already refuses to fire while any change line
+    # exists, so there is exactly ONE place the OK sentence is gated.
+    change_lines.extend(_poller_health_lines(receipt))  # G-DIG-3
 
     gap = gap_line(receipt, window_days, now)
 

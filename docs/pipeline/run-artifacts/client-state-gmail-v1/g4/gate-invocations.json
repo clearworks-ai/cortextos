@@ -1,0 +1,73 @@
+{
+  "candidate": {
+    "merge_sha": "efc90b570123b63347323917219b0d84b00c2d24",
+    "product_tree_hash": "c7cda35bb968",
+    "integration_branch": "feature/client-state-gmail-v1",
+    "build_branch_tip": "594327f2"
+  },
+  "G0-review": {
+    "cmd": "node /Users/joshweiss/code/bones-dev-skills/goalify/scripts/verify-review-artifact.mjs --file /Users/joshweiss/code/cortextos-worktrees/client-state-gmail-v1/docs/pipeline/run-artifacts/client-state-gmail-v1/G0-review-opus.json --sha 8ac1ca58847cf0991c0ba3a114592921b2d7cede91257adcff0a02701f3c1bad && node /Users/joshweiss/code/bones-dev-skills/goalify/scripts/verify-review-artifact.mjs --file /Users/joshweiss/code/cortextos-worktrees/client-state-gmail-v1/docs/pipeline/run-artifacts/client-state-gmail-v1/G0-adjudication.json --sha 62ec29c51775a43d7530ee1cf413e84cf09bfefb8e27fd254e28a548627c381a",
+    "exit": 0,
+    "recorded_at": "2026-09-15T04:25:24.433Z",
+    "model_requested": "opus (G0a empirical) + codex exec (G0b)",
+    "model_receipt": "G0-review-opus.json reviewer field; G0b-codex-r3-stdout.log",
+    "rounds": "3 (cap) + adjudication G0-adjudication.json",
+    "grok": "skipped-by-Josh"
+  },
+  "G1-suite": {
+    "cmd": "CLIENT_STATE_REPO_ROOT=/private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-tree-efc90b57 bash /private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-tree-efc90b57/docs/pipeline/run-artifacts/client-state-gmail-v1/g1-count-delta.sh check /private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-tree-efc90b57/docs/pipeline/run-artifacts/client-state-gmail-v1/BASELINE-g1-9f443129.json 0 0 5",
+    "exit": 0,
+    "recorded_at": "2026-09-15T20:57:32.579Z",
+    "sha": "efc90b570123b63347323917219b0d84b00c2d24",
+    "baseline": "9f443129 capture (305/4033\u21924058; pytest 783) \u2192 +0 files / +0 tests / +5 pytest",
+    "prior_records": "plan tree (e071d7e8) exit 0; 9f443129 exit 0; 2c3ab594 exit 0; 9fc208f0 exit 0"
+  },
+  "G2": {
+    "review": "codex review --base feature/client-state-gmail-v1 -c model_reasoning_effort=high (rounds 1-3)",
+    "challenge": "codex exec independent verifier (G2b-verify-r2.json; first `codex challenge` refused by the OpenAI filter, rephrased)",
+    "rounds": "5 \u2192 14 \u2192 10; cap 3 \u2192 adjudicated 2026-09-15; 13 fix commits + LIVE-1",
+    "grok": "skipped-by-Josh",
+    "model_receipt": "codex CLI, ChatGPT-account default model"
+  },
+  "G3": {
+    "prs": [
+      "https://github.com/clearworks-ai/cortextos/pull/391",
+      "https://github.com/clearworks-ai/cortextos/pull/393",
+      "https://github.com/clearworks-ai/cortextos/pull/394",
+      "https://github.com/clearworks-ai/cortextos/pull/395"
+    ],
+    "merge_shas": [
+      "9f443129",
+      "2c3ab594",
+      "9fc208f0",
+      "efc90b570123b63347323917219b0d84b00c2d24"
+    ],
+    "base": "feature/client-state-gmail-v1 (not main)"
+  },
+  "G4-matrix": {
+    "cmd": "bash docs/pipeline/run-artifacts/client-state-gmail-v1/g4-check.sh efc90b570123b63347323917219b0d84b00c2d24",
+    "exit": 0,
+    "note": "g4-check.sh items 1-8 PASS; checker patched for nameless senders + floor path (selftest rc 0)",
+    "escalation_case": "ESCALATION-CASE.md (declared CRM-copy edit)",
+    "recorded_at": "2026-09-15T21:19:48.349Z"
+  },
+  "FINAL-review": {
+    "cmd": "node \u2026/verify-review-artifact.mjs --file g4/FINAL-review-fable.json --sha efc90b570123b63347323917219b0d84b00c2d24",
+    "exit": 0,
+    "model_requested": "fable",
+    "model_receipt": "claude-fable-5-1",
+    "rounds": "3 (r1: 2 Critical + 2 Important; r2: F-1/F-2 fixed, +F-5/F-6; r3: all closed, zero open)",
+    "grok": "skipped-by-Josh"
+  },
+  "mutation_check": {
+    "rows": 95,
+    "green": 95,
+    "tree": "594327f2 == efc90b57"
+  },
+  "live_proofs": [
+    "run-artifacts/client-state-gmail-v1/live/dry-run-3d-r1-FAILED (LIVE-1)",
+    "live/dry-run-3d-r2",
+    "g4 dry-run at 2c3ab594 (10/3/95)",
+    "g4 dry-run at efc90b57 (10/3/97, $0.62)"
+  ]
+}

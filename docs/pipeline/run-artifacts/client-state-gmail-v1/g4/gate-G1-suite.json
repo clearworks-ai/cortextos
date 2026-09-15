@@ -1,0 +1,9 @@
+{
+  "gate": "G1-suite",
+  "kind": "deterministic",
+  "command": "CLIENT_STATE_REPO_ROOT=/private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-tree-efc90b57 bash /private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-tree-efc90b57/docs/pipeline/run-artifacts/client-state-gmail-v1/g1-count-delta.sh check /private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-tree-efc90b57/docs/pipeline/run-artifacts/client-state-gmail-v1/BASELINE-g1-9f443129.json 0 0 5",
+  "exit": 0,
+  "recorded_at": "2026-09-15T20:57:32.579Z",
+  "cwd": "/private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-tree-efc90b57",
+  "notes": "recorded by bonesify record-gate"
+}

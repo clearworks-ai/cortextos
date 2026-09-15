@@ -1,0 +1,30 @@
+{
+  "base_sha": "efc90b570123b63347323917219b0d84b00c2d24",
+  "node_rc": 0,
+  "pytest_failed": 0,
+  "pytest_failing": [],
+  "pytest_passed": 788,
+  "pytest_rc": 0,
+  "vitest_failing": [
+    "dashboard/src/app/api/agents/[name]/lifecycle/__tests__/route.test.ts",
+    "dashboard/src/app/api/comms/__tests__/routes.test.ts",
+    "dashboard/src/app/api/tasks/[id]/__tests__/route.test.ts",
+    "dashboard/src/app/api/workflows/crons/__tests__/executions-export.test.ts",
+    "dashboard/src/app/api/workflows/crons/__tests__/fire-route.test.ts",
+    "dashboard/src/app/api/workflows/health/__tests__/health-route.test.ts",
+    "dashboard/src/components/tasks/__tests__/kanban-board.test.ts",
+    "dashboard/src/lib/__tests__/clients.test.ts",
+    "dashboard/src/lib/__tests__/cost-parser-codex.test.ts",
+    "dashboard/src/lib/__tests__/cost-parser.test.ts",
+    "dashboard/src/lib/__tests__/sync.test.ts",
+    "tests/integration/phase4-dashboard-backtest.test.ts",
+    "tests/integration/phase4-performance.test.ts",
+    "tests/integration/phase5-e2e-simulation.test.ts",
+    "tests/integration/phase5-user-journeys.test.ts",
+    "tests/unit/daemon/rebaseline-runtime-gates.test.ts",
+    "tests/unit/pty/pty-leak.test.ts"
+  ],
+  "vitest_files": 305,
+  "vitest_rc": 1,
+  "vitest_tests": 4058
+}

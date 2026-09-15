@@ -1,0 +1,9 @@
+{
+  "gate": "FINAL-review",
+  "kind": "deterministic",
+  "command": "node /Users/joshweiss/code/bones-dev-skills/goalify/scripts/verify-review-artifact.mjs --file /private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-out-efc90b57/FINAL-review-fable.json --sha efc90b570123b63347323917219b0d84b00c2d24",
+  "exit": 0,
+  "recorded_at": "2026-09-15T21:11:59.481Z",
+  "cwd": "/private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-tree-efc90b57",
+  "notes": "recorded by bonesify record-gate"
+}

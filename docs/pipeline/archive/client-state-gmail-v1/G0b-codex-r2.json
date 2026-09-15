@@ -1,0 +1,319 @@
+{
+  "reviewer": "codex",
+  "round": 2,
+  "reviewed": {
+    "plan": "docs/pipeline/plans/2026-09-14-client-state-gmail-v1-build.md",
+    "plan_sha256": "06cbb519b477d296c9b8c056e355798685099b9792743b3c0565dc459838873b"
+  },
+  "round1_dispositions": [
+    {
+      "id": "G0B-1",
+      "disposition": "still-open",
+      "evidence": "Task 15 now persists observations, extraction, receipts and LoggingRunner output (plan:8015-8133), but all writes tokens are appended only in live branches. A dry-run filed row therefore has writes=[], and Task 19 only calls plan_digest_line when row.writes is nonempty (10039-10045). The required digest from the simulation ledger still cannot show its simulated changes."
+    },
+    {
+      "id": "G0B-2",
+      "disposition": "still-open",
+      "evidence": "plan_message_preview now supplies sender, structured resolutions, extraction items, quotes and model receipt (7671-7718). However, the domain-matched new-sender path previews contact creation without assigning a prospective contact reference, so it never previews that sender's interaction row (7955-7981). The resulting output also lacks the literal source_ref field required by its own G4 checker."
+    },
+    {
+      "id": "G0B-3",
+      "disposition": "still-open",
+      "evidence": "The merge and widened slug union exist at plan:7823-7840 and 7936-7945, but merge identity includes mutable contact_id and slug. Auto-created contact IDs are not copied into the persisted resolution. An in-memory reproduction changed the same sender from contact_id=None to its newly created ID and _merge_resolutions returned pending rather than preserving filed. Previously filed resolutions absent from fresh results are also dropped."
+    },
+    {
+      "id": "G0B-4",
+      "disposition": "still-open",
+      "evidence": "Task 15 adds plan_escalation and ledger.escalated_for gating (7917-7927, 8009-8021), but both live send calls ignore returncode. A failed Telegram command is followed by an escalated observation; the unchanged recheck then returns before attempting delivery again."
+    },
+    {
+      "id": "G0B-5",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Task 5 composes extra_query, date bounds and the exclusion clause for both full-window and daily queries (2527-2530, 2706-2736). Task 15 calls sweep(..., extra_query=cfg.query) at 8049. The real exclusion clause byte-matches the existing comms-check skill."
+    },
+    {
+      "id": "G0B-6",
+      "disposition": "still-open",
+      "evidence": "record_failure preserves prior last_success_at (1541-1554), and the budget handler adds the overflowing call's cost (8080-8089). It still never persists exc.extraction, its identity or model_receipt. A writer failure likewise loses the current message's paid extraction. Partial message counts/truncation are not supplied to failure receipts. Lock refusal also rewrites the receipt, contradicting G4 item 5."
+    },
+    {
+      "id": "G0B-7",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Task 14 plan_tasks reads commitments[].owner_name at plan:6784-6787. Task 15's integration fixtures use owner_name, deadline_iso, quote and matches_open_item (7188-7193, 7248-7254, 7493-7502), matching the extraction schema."
+    },
+    {
+      "id": "G0B-8",
+      "disposition": "still-open",
+      "evidence": "The ledger now exposes task IDs, enumeration uses both classes with --open --limit 200, and the orchestrator joins current IDs (1498-1513, 6812-6840, 7858-7864). But normalize_owner does not map human/user to Josh. The plan itself creates tasks assigned_to=human. In-memory execution of an identical Josh commitment against an open human-assigned task returned dedup=None."
+    },
+    {
+      "id": "G0B-9",
+      "disposition": "fixed-and-reverified",
+      "evidence": "resolve_message retains distinct counterparties rather than deduplicating slugs (3221-3240). Task 15 executes the CRM branch per pending resolution and uses a separate seen_slugs set for History (7954-8001). The same-page test requests two distinct contact IDs; its separate FakeRunner fixture failure is G0B2-1."
+    },
+    {
+      "id": "G0B-10",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Task 15 requires contact_id is None and is_sender before auto-creation (7955-7970). The upsert projection uses msg.from_name and msg.from_email. Recipients without contacts bypass creation while remaining eligible for page History."
+    },
+    {
+      "id": "G0B-11",
+      "disposition": "still-open",
+      "evidence": "Nonzero writer exits now raise WriterError and task enumeration errors propagate (6680-6852). However, write_interaction accepts any parseable JSON, create_task accepts any nonempty first line, and ensure_contact accepts arbitrary non-JSON last-line text as an ID. More importantly, Task 15 deliberately discards all per-message progress on failure (6950-6957): History/task effects completed before a later failure are not recorded, while apply_history unconditionally appends on retry."
+    },
+    {
+      "id": "G0B-12",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Task 11's final validator recursively checks schema types, required fields, additionalProperties and nullable fields, rejects booleans as integers, then applies single-line and index-range checks (5444-5508). Task 9 includes wrong deadline type, nested extra-key and non-string quote regressions (4170-4203)."
+    },
+    {
+      "id": "G0B-13",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Task 15 loads client_file_lock from the existing meeting_writeback.py by repository-relative path (7800-7812), then holds it across page read, render and replacement (7988-8001). The final module imported successfully in memory against the real reused module. That module uses sibling .md.lock flock and its meeting writer holds the same lock across planned_files and atomic_write."
+    },
+    {
+      "id": "G0B-14",
+      "disposition": "still-open",
+      "evidence": "Explicit write-baseline and missing-baseline reporting are implemented (10076-10147); duplicate name/domain comparison now includes sorted pages. But missing_gmail_refs still compares ref alone (9968-9972), contrary to C10's canonical ref/page requirement. An in-memory check adding the same missing ref on another page returned no new violation."
+    },
+    {
+      "id": "G0B-15",
+      "disposition": "fixed-and-reverified",
+      "evidence": "_superseded_task_ids scans full ledger history for the superseded digest (9991-10003), and gmail_section joins those IDs to current list_open_tasks results before emitting review lines (10020-10038). The revised fixture places the old task-bearing observation on September 1 and its revision on September 14 (9645-9654)."
+    },
+    {
+      "id": "G0B-16",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Task 20 wraps the Fireflies body, including list_transcripts, in try/except and independently wraps the Gmail body (10446-10516). main composes both section results. The new tests include a raising list_transcripts path rather than testing only missing credentials."
+    },
+    {
+      "id": "G0B-17",
+      "disposition": "fixed-and-reverified",
+      "evidence": "plan_digest_line reads row.extraction.summary and includes it in page and CRM lines (7643-7658); Task 19 imports and consumes it for write-bearing rows (9845, 10039-10045). Dry-run rows failing to carry simulated writes remain covered by G0B-1/G0B2-4."
+    },
+    {
+      "id": "G0B-18",
+      "disposition": "still-open",
+      "evidence": "Task 8 removes the del cfg failure and supplies a complete skeleton. Its required six-test PASS is nevertheless false with the delivered shared FakeRunner: the backfill test queues only one triage response, then requires three calls (3652-3669). Direct execution of sweep with that fixture raised GmailSourceError after two triage calls."
+    },
+    {
+      "id": "G0B-19",
+      "disposition": "still-open",
+      "evidence": "Task 15's tests are now a whole file with valid Gmail/Claude shapes and explicit lease fixtures (7095-7535). The same-page test still queues one consumable CRM response for two calls (7332-7352), producing rc 127 on the second call. Task 8's incompatible test file is also retained and collected by G1."
+    },
+    {
+      "id": "G0B-20",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Task 1 normalizes both mapping and list response containers, records bare argv lists and provides record() (546-605). Task 5's dictionaries therefore no longer cause unpacking failures. The newly introduced consumption mismatch is separately reported as G0B2-1."
+    },
+    {
+      "id": "G0B-21",
+      "disposition": "fixed-and-reverified",
+      "evidence": "The stale-lock test now ages both file contents and mtime, probes raw stale-cleared refusal, then acquires successfully (942-980). This matches real claimAgeMs's maximum of content timestamp and mtime. acquire also retries once on stale-cleared stderr (1056-1075)."
+    },
+    {
+      "id": "G0B-22",
+      "disposition": "still-open",
+      "evidence": "The revised FAIL-record parser exactly reproduced all 18 failing files from baseline-npm-test.log; separate vitest/node/pytest return codes are captured (10946-11071). But check ignores vitest_rc/pytest_rc, silently treats a missing or failed base diff as empty, and capture emits no base_sha. The required overlap/runner-outcome guarantee remains fail-open."
+    },
+    {
+      "id": "G0B-23",
+      "disposition": "still-open",
+      "evidence": "Task 21 adds companion artifacts and some fields, but item 1 accepts absent counts when both dictionaries omit them; item 3 still checks only three global tokens and any ledger model receipt; item 5 checks the wrong run's unchanged receipt; item 6 omits invariants/changes/gap checks; item 7 accepts assertion booleans without required behavioral evidence; item 8 accepts any two layer names and filename mentions (11272-11524)."
+    },
+    {
+      "id": "G0B-24",
+      "disposition": "still-open",
+      "evidence": "The shared projection module exists, but Task 23 still invokes planners twice and feeds a local fake directly instead of exercising actual write consumers. In-memory execution reproduced History parity AttributeError and empty-digest AssertionError (12835-12938). No plan_message_preview parity test exists, and Task 15 never consumes plan_digest_line for a dry-run digest preview."
+    },
+    {
+      "id": "G0B-25",
+      "disposition": "still-open",
+      "evidence": "Task 17 correctly restores exact pre-mutation backups instead of HEAD (8958-9012). Task 23's general harness registers restore arrays inside backup=$(backup_target ...), however, so those updates vanish in the subshell (12608-12618, 12680). A read-only shell reproduction returned restore_targets=0."
+    },
+    {
+      "id": "G0B-26",
+      "disposition": "fixed-and-reverified",
+      "evidence": "The canonical interface now includes transient pending and extract's slugs parameter (92, 170-171). Task 11's hostile test is extraction-only and parses Task 5's single fixture (5213-5259). Tasks 12 and 14 introduce minimal projection implementations before their consumers, then Task 15 replaces the complete module; the original forward plan_tasks import is gone."
+    }
+  ],
+  "findings": [
+    {
+      "id": "G0B2-1",
+      "severity": "Critical",
+      "title": "The consuming FakeRunner invalidates the claimed Task 8 and Task 15 PASS results",
+      "location": "Plan:546-605, 3652-3669, 7332-7352",
+      "evidence": "The shared fake removes each matching response. Task 8 queues one full-window triage result but needs two additional daily results: direct execution raised GmailSourceError on daily call one, leaving two calls rather than the asserted three. Task 15 queues one add-interaction result for two contacts; executing that response sequence returned [0,127]. The S-06 verification note admits testing against a locally constructed substitute rather than the final sibling implementation.",
+      "fix": "Use the delivered shared FakeRunner everywhere, queue every expected response, and rerun the intermediate and final tests against the exact assembled modules. Replace the claimed counts with those runs."
+    },
+    {
+      "id": "G0B2-2",
+      "severity": "Critical",
+      "title": "Task 15 leaves incompatible intermediate tests in the final full-suite discovery path",
+      "location": "Plan:3493-3495, 3602-3634, 3923-3929, 6897-6909",
+      "evidence": "test_client_state_gmail_task8.py remains in scripts/brain/tests and imports the same module Task 15 replaces. Its known-message tests provide neither list-tasks nor Claude responses, so the final implementation fails before filing. Saying this file is outside Task 15's focused gate does not exclude it from G1's python3 -m pytest scripts/brain/tests. The file map also omits this retained file and test_client_state_projections.py.",
+      "fix": "Migrate the useful Task 8 cases to final-compatible fixtures and tests, or explicitly retire the intermediate-only file in Task 15. Reconcile the final file map and count delta."
+    },
+    {
+      "id": "G0B2-3",
+      "severity": "Critical",
+      "title": "The rewritten parity suite does not match the new projection API or test its actual consumers",
+      "location": "Plan:12778-12938",
+      "evidence": "History parity calls plan_history_entry(row,resolution,extraction,msg), while Task 15 defines (msg,extraction,source_ref,revision_of); execution raises AttributeError: ObservationRow has no attribute date_iso. Digest parity supplies writes=[] and then asserts nonempty output; execution raises AssertionError. The other four cases call the planner twice and directly invoke a local _FakeRunner, bypassing ensure_contact, write_interaction, create_task and the orchestrator send branch.",
+      "fix": "Use the concrete Task 15 signatures and shared FakeRunner, exercise each actual live consumer against the same inputs as its preview, and include digest and message-preview consumers. Run this file in Task 23's gate."
+    },
+    {
+      "id": "G0B2-4",
+      "severity": "Critical",
+      "title": "Persisted dry-run rows erase the simulated changes needed by the digest",
+      "location": "Plan:7951-8028, 10039-10045",
+      "evidence": "Dry-run appends filed observations with extraction but writes=[]. All CRM, page and task tokens are appended only in live branches. plan_digest_line on such a row returned [] in memory, and gmail_section does not even call it for an empty writes list. With a clean baseline, a run that previewed filings can become a digest reporting zero changes.",
+      "fix": "Persist a clearly identified simulation projection of planned effects in scratch state and have the digest consume it, without enabling external writes. Verify the required changes and extraction summary from the actual dry-run ledger."
+    },
+    {
+      "id": "G0B2-5",
+      "severity": "Critical",
+      "title": "G4 rejects the real preview format while accepting its hand-written substitute",
+      "location": "Plan:7687-7697, 11331-11337, 11572-11582",
+      "evidence": "The real preview identifies a message as '=== gmail:<id> thread=...' but never emits the literal source_ref token. check_3_dry_run requires that token. Direct projection execution confirmed its absence. The checker selftest passes because its synthetic text invents source_ref=gmail:..., which is not the producer's format.",
+      "fix": "Define one machine-readable preview contract shared by producer and checker, and derive the positive checker fixture from real producer output rather than hand-written lookalike text."
+    },
+    {
+      "id": "G0B2-6",
+      "severity": "Critical",
+      "title": "The live dry-run shim blocks required open-task reads",
+      "location": "Plan:7937-7943, 10850-10885",
+      "evidence": "Every newly fileable message calls list_open_tasks before extraction. The required cortextos shim only passes meeting-brief-claim/release and rejects every list-tasks command with rc 1. Consequently the prescribed shim-protected live dry-run exits 3 before any known message can be filed, making G4 item 3 unreachable.",
+      "fix": "Permit the narrowly specified read-only list-tasks commands through the dry-run shim, or supply an explicit current read snapshot through a separate read adapter. Keep create-task, send-telegram, add-cron and comms-filter blocked."
+    },
+    {
+      "id": "G0B2-7",
+      "severity": "Critical",
+      "title": "Receipt production and the revised idempotency checker disagree about both repeat and lock-held runs",
+      "location": "Plan:1541-1554, 8040-8042, 8070-8074, 11437-11441",
+      "evidence": "The binding goal requires the third, lock-held run to leave its receipt unchanged. run instead calls record_failure, adding error/failed_at. Meanwhile the checker requires second_run_receipt_unchanged, although the ordinary repeated successful run rewrites last_success_at and cost_usd. It does not require the third-run receipt comparison at all.",
+      "fix": "Keep lock-refusal diagnostics separate from the successful run receipt. Make the checker assert unchanged receipt for the third run, and verify second-run rows, calls, previews, cost and exit status without inventing a conflicting receipt requirement."
+    },
+    {
+      "id": "G0B2-8",
+      "severity": "Critical",
+      "title": "The mutation restore trap has no registered targets",
+      "location": "Plan:12588-12618, 12679-12681",
+      "evidence": "backup_target appends to RESTORE_TARGETS and RESTORE_BACKUPS, but is invoked through command substitution. Its array updates occur in a subshell and disappear. The EXIT trap therefore cannot restore an interrupted mutation and then deletes the backup directory. A shell-only reproduction printed backup=backup restore_targets=0.",
+      "fix": "Call backup_target in the parent shell and return its path through a dedicated variable. Preserve backups if restoration fails and test an intentional interruption after mutation against uncommitted content."
+    },
+    {
+      "id": "G0B2-9",
+      "severity": "Critical",
+      "title": "The rebuilt mutation registry contains invalid targets and tests that cannot detect their mutations",
+      "location": "Plan:12289-12292, 12412-12429",
+      "evidence": "G-LEDGER-4 names test_open_email_task_titles_parses_task_writes_entries, but the delivered function is test_open_email_tasks_parses_task_writes_entries. Its +5-line sed range also misses the operative condition; running the sed expression against the final module produced no change. G-QUERY-1 points to test_client_state_gmail.py although that test exists only in the Task 8 file. G-IDEMP-2 uses a terminal-skip test that never reaches the changed branch, and G-MERGE-1 uses a first-run test with no prior row.",
+      "fix": "Resolve every registry node against the final test files, mutate the actual operative line, and add nonterminal-recheck and prior-partial-row tests that exercise these guards. Require control green, applied diff and behavioral mutated red for every row."
+    },
+    {
+      "id": "G0B2-10",
+      "severity": "Critical",
+      "title": "Reading actual task ownership breaks dedup against the human tasks this release creates",
+      "location": "Plan:6730-6744, 6799-6804, 7620-7627",
+      "evidence": "The writer creates tasks with --assignee human. The revised tier-1 comparison now correctly reads assigned_to, but the alias map excludes human and user. Thus Josh and human compare unequal. An in-memory identical-title example returned dedup=None; email-task context also assigns an empty owner, so it cannot rescue tier 1.",
+      "fix": "Normalize the bus's human/user assignee identities to the configured human owner, retaining distinct ownership for other agents. Add a round-trip create/list/dedup test using actual bus-shaped task fields."
+    },
+    {
+      "id": "G0B2-11",
+      "severity": "Critical",
+      "title": "Cached invocation-local match indices are applied to a newly rebuilt context",
+      "location": "Plan:5571-5596, 6788-6792, 7936-7945",
+      "evidence": "cached_or_extract checks only source_ref, digest and slugs. On a later pending resolution with the same bound slug set, the orchestrator rebuilds context from currently open items/tasks but reuses old matches_open_item indices. If an earlier item closed or ordering changed, the index can suppress against the wrong item or raise IndexError. Cache-hit results are not rebound or range-checked against this new context.",
+      "fix": "Persist the extraction's context mapping with its cache and resolve cached matches against that mapping plus current open status. Preserve the locked at-most-one-call identity rather than silently adding context churn as a new LLM trigger."
+    },
+    {
+      "id": "G0B2-12",
+      "severity": "Critical",
+      "title": "The coverage diff mistakes ignored observations for successful CRM coverage",
+      "location": "Plan:11958-11972, 12007-12015",
+      "evidence": "old_path_rows excludes every old interaction whose source_ref appears in Ledger.distinct_refs. That set explicitly includes ignored and escalated observations, including messages for which the new path wrote no CRM row. It also loses the source_ref-plus-contact_id distinction for partially filed multiparty mail. These are precisely the coverage losses FR-006 requires the tool to enumerate.",
+      "fix": "Compare old interaction keys against confirmed new CRM write keys per source_ref and contact_id across ledger history. Test ignored, escalated and partially filed messages as missing coverage, not covered refs."
+    },
+    {
+      "id": "G0B2-13",
+      "severity": "Critical",
+      "title": "The new lost-lock handler continues processing without a lease",
+      "location": "Plan:1024-1033, 8056-8058",
+      "evidence": "Lease.touch now swallows FileNotFoundError as a benign race and run continues processing. Once its lock disappears, another poller can acquire it while this invocation still writes; the old invocation's unconditional release can also remove the replacement lease. This defeats the single-flight protection rather than recovering it.",
+      "fix": "Treat loss of the held lease as a stop condition before further effects, preserve a failure diagnostic, and avoid releasing a lease no longer owned by this invocation. Add a lost-lease concurrency regression."
+    },
+    {
+      "id": "G0B2-14",
+      "severity": "Critical",
+      "title": "The expanded G4 selftest still certifies incomplete evidence as complete",
+      "location": "Plan:11272-11524, 11555-11692",
+      "evidence": "The positive item-3 fixture contains no sender, quotes, summary, CRM/page/task previews or valid resolution-bearing ledger row, yet is declared fully satisfying. Item 1 compares missing counts as None==None and never binds the companion record SHA. Item 8 needs only any two layer names and two filename mentions, not Layer 1 plus Layer 3 and their real review evidence. Negative fixtures remove one coarse feature per item, leaving these omissions untested.",
+      "fix": "Validate typed mandatory fields and per-message evidence, require the named floor layers and actual evidence paths, and independently remove each required field/artifact in negative tests. Include actual producer artifacts as positive fixtures."
+    },
+    {
+      "id": "G0B2-15",
+      "severity": "Critical",
+      "title": "The new G1 overlap check silently disappears when its baseline or git command is invalid",
+      "location": "Plan:11036-11049, 11081-11085, 11124-11147",
+      "evidence": "capture emits no base_sha although check depends on it. Missing base_sha skips the diff; an invalid SHA or failed git diff is swallowed with || true and also becomes an empty diff. check additionally stores but never evaluates vitest_rc or pytest_rc. Thus the corrected parser does not establish the required fail-closed gate.",
+      "fix": "Capture and require a resolvable baseline SHA, fail on diff-generation errors, and reconcile runner return codes with parsed outcomes. Test missing/invalid SHA and abnormal runner exits explicitly."
+    }
+  ],
+  "rejected_as_locked": [
+    {
+      "issue": "Require pagination or deterministic ordering beyond a single day's 50-result cap",
+      "reason": "Rejected: spec Accepted assumptions explicitly accept reported per-day truncation, unknown exact volume and unspecified list ordering."
+    },
+    {
+      "issue": "Replace or recalibrate the strict tier-1 threshold during this build",
+      "reason": "Rejected: FR-008 and Accepted assumptions pin ratio >0.75; digest-reported suppressions are the calibration channel."
+    },
+    {
+      "issue": "Repair cron range-with-step parsing or migration defects in this release",
+      "reason": "Rejected: Accepted assumptions defer those defects and choose bus add-cron for activation."
+    },
+    {
+      "issue": "Include sent mail, unknown-human state filing or automatic on-contact-add sweeps",
+      "reason": "Rejected: inbound-only scope, D-11 and Non-goals explicitly exclude them."
+    },
+    {
+      "issue": "Invoke the attention lane's comms-filter or require a shared escalation dedup store",
+      "reason": "Rejected: FR-003 forbids comms-filter; goal A4 and contract C7 choose ledger-based escalation gating. No shared key is written, so absence of a clientstate: key alone is not a finding."
+    },
+    {
+      "issue": "Quote-gate summary or matches_open_item, add a triviality gate, or allow autonomous extracted tasks",
+      "reason": "Rejected: FR-005 explicitly exempts summary/context references, requires extraction for filed messages, and FR-008 requires human containment."
+    },
+    {
+      "issue": "Demand pre-call knowledge of the final extraction cost",
+      "reason": "Rejected: cost is obtained from the completed wrapper. The defects concern retaining paid evidence and enforcing the documented failure path, not predicting that cost."
+    },
+    {
+      "issue": "Treat Task 8's temporary stub or History heading-prefix compatibility as final-product defects by themselves",
+      "reason": "Rejected: Task 8 is explicitly superseded by Task 15; matching the existing History heading is deliberate. Retaining incompatible Task 8 tests in the final suite is a separate executable defect."
+    },
+    {
+      "issue": "FR-010 existing-file modification scope",
+      "reason": "No additional existing-file modification found. The complete existing code/config target list is .gitignore, scripts/brain/meeting_loop_watch.py, src/bus/task.ts and src/cli/bus.ts. These are permitted by the goal's allowlist; the CRM scripts, meeting_writeback.py and other reused brain modules remain read-only. Newly introduced tests and modules are not existing-file modifications."
+    }
+  ],
+  "verified_line_cites": [
+    "scripts/brain/extract_meeting.py:358-371 ok",
+    "orgs/clearworksai/skills/comms-check-worker/SKILL.md:26 ok",
+    "src/bus/meeting-brief.ts:336-353 ok",
+    "src/bus/meeting-brief.ts:398-418 ok",
+    "src/cli/bus.ts:2541-2555 ok",
+    "scripts/brain/writeback_render.py:133-137 ok",
+    "src/bus/task.ts:89 ok",
+    "src/bus/task.ts:701 ok",
+    "src/types/index.ts:54 ok",
+    "src/cli/bus.ts:513 ok",
+    "src/bus/task.ts:1111 ok",
+    "src/cli/bus.ts:667 ok",
+    "src/bus/task.ts:198 ok",
+    "scripts/brain/resolve_meeting.py:295-352 WRONG (the cited code exists, but Tasks 18/19 describe both maps as last-writer-wins; duplicate CRM org-name keys are suppressed to an empty string at line 324, while domain keys overwrite at lines 312-313)",
+    "scripts/brain/tests/test_observation_ledger.py:169 WRONG (not an existing source file in the reviewed worktree; this is a predicted future traceback, not a verifiable current-source citation)",
+    "orgs/clearworksai/agents/pa/scripts/meeting_writeback.py:52-70 ok",
+    "orgs/clearworksai/agents/pa/scripts/meeting_writeback.py:640-656 ok"
+  ]
+}

@@ -522,17 +522,29 @@ busCommand
   .option('--due <when>', 'Due date: ISO datetime, YYYY-MM-DD (end of day), or relative +<n>d / +<n>h. Omitted = priority default.')
   .option('--blocked-by <ids>', 'Comma-separated task IDs that must complete before this task can progress')
   .option('--blocks <ids>', 'Comma-separated task IDs that this new task will block (symmetric reverse edge)')
-  .action((title: string, opts: { desc?: string; assignee?: string; priority: string; project?: string; someday?: boolean; needsApproval?: boolean; due?: string; blockedBy?: string; blocks?: string }) => {
+  .option('--type <type>', "Task type: 'agent' or 'human' (default agent)", 'agent') // G-BUS-1
+  .action((title: string, opts: { desc?: string; assignee?: string; priority: string; project?: string; someday?: boolean; needsApproval?: boolean; due?: string; blockedBy?: string; blocks?: string; type?: string }) => {
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
     const parseList = (raw?: string) => (raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : []);
-    const resolvedAssignee = resolveTaskOwner(env.agentName, opts.assignee, {
+    // G-BUS-1: validate --type before any write; only 'agent' | 'human' accepted.
+    const taskType = opts.type ?? 'agent';
+    if (taskType !== 'agent' && taskType !== 'human') {
+      console.error(`ERROR: --type must be 'agent' or 'human' (got '${taskType}')`);
+      process.exit(1);
+    }
+    // G-BUS-3: `--type human` with no `--assignee` used to leave the INVOKING
+    // AGENT as the owner, which reads as an agent task everywhere the owner is
+    // what is consulted. A human-type task with no named owner belongs to
+    // 'human'; an explicit --assignee is still honoured verbatim.
+    const effectiveAssignee = opts.assignee ?? (taskType === 'human' ? 'human' : undefined);
+    const resolvedAssignee = resolveTaskOwner(env.agentName, effectiveAssignee, {
       title,
       project: opts.project,
     });
     const taskId = createTask(paths, env.agentName, env.org, title, {
       description: opts.desc,
-      assignee: opts.assignee,
+      assignee: effectiveAssignee,
       priority: opts.priority as Priority,
       project: opts.project,
       someday: opts.someday ?? false,
@@ -540,6 +552,7 @@ busCommand
       dueDate: opts.due ? parseDueOption(opts.due) : undefined,
       blockedBy: parseList(opts.blockedBy),
       blocks: parseList(opts.blocks),
+      type: taskType as 'agent' | 'human',
     });
     console.log(taskId);
     // Real-time Multica mirror: reflect the new task as an issue immediately.
@@ -669,7 +682,8 @@ busCommand
   .description('Atomically claim a pending task — marks in_progress + sets assignee in one shot, rejecting if another agent already owns it')
   .argument('<id>', 'Task ID')
   .option('--agent <name>', 'Agent claiming the task (defaults to CTX_AGENT_NAME)')
-  .action((id: string, opts: { agent?: string }) => {
+  .option('--force-claim', 'Override human-exempt protection to deliberately promote a human task to an agent claim') // G-BUS-2
+  .action((id: string, opts: { agent?: string; forceClaim?: boolean }) => {
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
     const agent = opts.agent || env.agentName;
@@ -678,7 +692,7 @@ busCommand
       process.exit(1);
     }
     try {
-      const task = claimTask(paths, id, agent);
+      const task = claimTask(paths, id, agent, { force: opts.forceClaim ?? false });
       // Real-time Multica mirror: claim flips to in_progress — reflect it at once.
       triggerMulticaMirror(id);
       console.log(`Claimed ${id} -> in_progress (assigned to ${agent})`);

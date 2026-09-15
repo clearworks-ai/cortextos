@@ -1,0 +1,12 @@
+{
+  "sha": "efc90b570123b63347323917219b0d84b00c2d24",
+  "tree_clean": true,
+  "untracked_scratch": [],
+  "vitest_files": 305,
+  "vitest_tests": 4058,
+  "pytest_passed": 788,
+  "pytest_failed": 0,
+  "measured_in": "/private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-tree-efc90b57",
+  "product_tree_hash": "c7cda35bb968",
+  "note": "vitest single-file runs dirty .cortextOS/state/agents/{alice,bob}/crons.json \u2014 restored with git checkout before this record"
+}

@@ -1,0 +1,272 @@
+{
+  "reviewer": "codex",
+  "reviewed": {
+    "plan": "docs/pipeline/plans/2026-09-14-client-state-gmail-v1-build.md"
+  },
+  "findings": [
+    {
+      "id": "G0B-1",
+      "severity": "Critical",
+      "title": "Dry-run cannot produce the required persisted simulation or idempotency evidence",
+      "location": "Task 15 / client_state_gmail.py",
+      "evidence": "Plan lines 7163-7210 and 7274-7275 suppress copied CRM/page writes, observation rows, and receipts during dry-run. Consequently the repeated dry-run has no extraction cache, and the digest has no simulation ledger or receipt to read. This contradicts binding G4 items 3, 5, and 6. main() also replaces Task 8's LoggingRunner with SubprocessRunner, eliminating the required argv log.",
+      "fix": "Execute CRM/page transitions against validated copies and persist observations, extraction cache, and receipts in scratch state during dry-run. Suppress only external task/Telegram delivery. Restore LoggingRunner and prove the repeated run is inert."
+    },
+    {
+      "id": "G0B-2",
+      "severity": "Critical",
+      "title": "Dry-run output omits mandatory per-message evidence",
+      "location": "Task 15 / client_state_gmail.py",
+      "evidence": "The previews at plan lines 7163-7202 and final output at 7314-7319 omit sender, complete structured resolutions, extracted itemization with grounding quotes, and model_receipt. G4 item 3 explicitly requires these fields.",
+      "fix": "Add shared structured preview projections containing every required field, including escalation text and extraction/model receipts, and validate their presence per message."
+    },
+    {
+      "id": "G0B-3",
+      "severity": "Critical",
+      "title": "Partial resolutions are re-filed and unchanged rechecks append observations",
+      "location": "Task 15 / client_state_gmail.py",
+      "evidence": "Plan lines 7247-7268 resolve afresh without reconciling the latest same-digest row. _file_message processes every returned pending resolution, including an entity already filed on a partial row. Pure ignored/escalated messages append again at 7140. FR-001 requires filing only unresolved resolutions and no writes for unchanged rechecks.",
+      "fix": "Merge current resolution results with prior same-digest outcomes, preserve filed entities, and append only meaningful changes. Build widened extraction context from all bound entities, not merely newly fileable entities."
+    },
+    {
+      "id": "G0B-4",
+      "severity": "Critical",
+      "title": "Ambiguity is recorded as escalated without any escalation delivery",
+      "location": "Task 15 / client_state_gmail.py",
+      "evidence": "Plan lines 7121-7141 only count escalations and produce a generic dry-run line. No live send path or Ledger.escalated_for call exists; Task 23 explicitly acknowledges this at 11124-11129. FR-003 requires an actual Telegram escalation exactly once per source_ref/digest.",
+      "fix": "Implement shared escalation text and a live clientstate:-scoped send path, preview it in dry-run, and persist successful delivery state so unchanged rechecks remain silent."
+    },
+    {
+      "id": "G0B-5",
+      "severity": "Critical",
+      "title": "Manual backfill bypasses exclusions and full-window coverage",
+      "location": "Task 15 / client_state_gmail.py",
+      "evidence": "Plan lines 7227-7231 pass cfg.query directly to list_messages. This drops EXCLUSION_QUERY, ignores --days, and bypasses the 50-cap day-sweep, violating FR-001 manual-handler reuse, FR-002 coverage, and FR-003 filtering.",
+      "fix": "Allow sweep to accept an additional query clause and compose date bounds, that clause, and EXCLUSION_QUERY into every full-window and daily query."
+    },
+    {
+      "id": "G0B-6",
+      "severity": "Critical",
+      "title": "Failure handling falsifies success receipts and loses paid extraction evidence",
+      "location": "Task 15 / client_state_gmail.py",
+      "evidence": "Lock refusal returns no diagnostic artifact; gws/schema failures escape without persisted causes. The budget handler at 7278-7288 sets last_success_at to the failed run's timestamp and records state.cost before adding the overflowing call. It discards BudgetExceeded.extraction, losing its cost, model receipt, and cache. This violates the binding failure-evidence and metered-spend rules.",
+      "fix": "Preserve the previous successful timestamp, persist concrete errors and partial progress, and record the exception's paid extraction and cost before exit 12. Reconcile lock diagnostics with G4's unchanged-receipt requirement using a separate allowed diagnostic artifact."
+    },
+    {
+      "id": "G0B-7",
+      "severity": "Critical",
+      "title": "Commitment owner field mismatch prevents all normal extracted tasks",
+      "location": "Tasks 9–15 / extract_email.py and client_state_writes.py",
+      "evidence": "The schema and validator produce commitments[].owner_name, but plan_tasks reads commitment['owner'] at plan lines 6485-6488. Valid extracted Josh commitments therefore normalize an empty owner and are discarded. Tests conceal this by supplying owner instead.",
+      "fix": "Use owner_name consistently through extraction, task planning, fixtures, and integration tests."
+    },
+    {
+      "id": "G0B-8",
+      "severity": "Critical",
+      "title": "Dedup inputs are neither reliably open nor correctly owned",
+      "location": "Tasks 1, 14, 15 / observation_ledger.py and client_state_writes.py",
+      "evidence": "list_open_tasks at plan lines 6510-6522 omits --open and requests only human-class tasks. Ledger.open_email_task_titles returns historical task titles without checking current status. plan_tasks also treats every enumerated task owner as Josh. Completed tasks can suppress new commitments, while relevant tasks outside the human class are missed. The requested limit 500 is clamped by the existing CLI's maximum.",
+      "fix": "Enumerate relevant classes and open statuses explicitly, preserve actual normalized ownership, and join ledger task IDs to current task state before using their titles as open context. Handle enumeration limits visibly."
+    },
+    {
+      "id": "G0B-9",
+      "severity": "Critical",
+      "title": "Same-page contact dedup drops required CRM interactions",
+      "location": "Tasks 6 and 15 / resolve_email.py and client_state_gmail.py",
+      "evidence": "resolve_message drops subsequent counterparties with an already-seen slug at plan lines 3009-3015. Task 15 writes interactions only for retained resolutions. Two known contacts on the same client page consequently receive only one interaction, violating FR-006's per-known-contact requirement.",
+      "fix": "Preserve unique contact recipients separately from unique page bindings. Write interactions per contact_id and History per bound page."
+    },
+    {
+      "id": "G0B-10",
+      "severity": "Critical",
+      "title": "Recipient contact creation combines the sender's name with another person's email",
+      "location": "Task 15 / client_state_gmail.py",
+      "evidence": "plan_contact_write at plan lines 7017-7028 creates any unresolved contact using msg.from_name and resolution.email. Since resolutions include recipients, a domain-matched recipient can be created with the sender's display name. FR-006 permits auto-creation only for the domain-matched sender from their From header.",
+      "fix": "Restrict auto-creation to the sender resolution. Recipients without existing contact rows must not be auto-created; retain interactions for existing recipient contacts."
+    },
+    {
+      "id": "G0B-11",
+      "severity": "Critical",
+      "title": "Failed writer subprocesses can become terminal successful observations",
+      "location": "Tasks 12, 14, 15 / client_state_writes.py and client_state_gmail.py",
+      "evidence": "write_interaction ignores returncode at plan lines 6431-6433; create_task ignores returncode and may return an empty ID at 6535-6537. Task 15 nevertheless records write tokens and filed outcomes. A failed task or CRM write can therefore be permanently skipped on subsequent terminal checks. Task enumeration failure similarly becomes an empty list.",
+      "fix": "Reject nonzero exits and malformed success responses, preserve stderr and partial progress, and never mark failed effects filed. Treat failed task enumeration as an error, not an empty authoritative result."
+    },
+    {
+      "id": "G0B-12",
+      "severity": "Critical",
+      "title": "Email validation does not enforce the declared schema",
+      "location": "Tasks 9–11 / extract_email.py",
+      "evidence": "The handwritten validator omits deadline_iso type validation and relies on _require_single_line for several string fields. The real helper at extract_meeting.py:178-180 accepts non-string values. Thus invalid nested types pass despite FR-005 and the goal requiring schema validation before quote gating.",
+      "fix": "Validate required fields, nested primitive types, additional properties, and nullable fields against the sibling schema, while retaining the separate single-line checks and matches_open_item range validation."
+    },
+    {
+      "id": "G0B-13",
+      "severity": "Critical",
+      "title": "History updates can overwrite concurrent meeting writes",
+      "location": "Task 15 / client_state_gmail.py",
+      "evidence": "plan_history_write reads the page at plan lines 7072-7079, then do_history_write replaces it without a shared page lock. The existing meeting writer holds a sibling .md.lock across read/render/write at orgs/clearworksai/agents/pa/scripts/meeting_writeback.py:640-656. The Gmail-only single-flight lock does not exclude that writer, allowing a stale replacement to erase its History entry.",
+      "fix": "Use the existing sibling-file flock protocol in the new Gmail code and hold it across page read, render, and replacement, without modifying the shared meeting implementation."
+    },
+    {
+      "id": "G0B-14",
+      "severity": "Critical",
+      "title": "Invariant baseline initialization and comparison can silently grandfather new violations",
+      "location": "Tasks 18–19 / client_state_digest.py",
+      "evidence": "gmail_section automatically writes a baseline when missing or invalid at plan lines 9060-9065, contrary to the one-time committed baseline requirement. new_violations compares only name/domain/ref keys at 8985-8989, so extending a baseline duplicate from pages [a,b] to [a,b,c] is also suppressed.",
+      "fix": "Require explicit baseline setup and report missing/corrupt baseline as an error. Compare canonical violation records or page-set additions so newly affected pages remain visible."
+    },
+    {
+      "id": "G0B-15",
+      "severity": "Critical",
+      "title": "Superseded-task reporting misses older open tasks",
+      "location": "Task 19 / client_state_digest.py",
+      "evidence": "Plan lines 9010-9028 search only observations from the last 24 hours. A revision today cannot flag an open task derived from an older observation outside that window. Conversely, no current task-status check excludes completed tasks. FR-001 requires review flags for any open task derived from the superseded digest.",
+      "fix": "Resolve today's revisions against full ledger history, identify the superseded task IDs, and check their current open status before emitting review lines."
+    },
+    {
+      "id": "G0B-16",
+      "severity": "Critical",
+      "title": "Fireflies exceptions still prevent the Gmail digest from running",
+      "location": "Task 20 / meeting_loop_watch.py",
+      "evidence": "Only a missing API key is converted to an error result. list_transcripts and subsequent processing can throw, while main calls fireflies_section unguarded at plan line 9420 before Gmail at 9421. FR-009 requires independently failing sections.",
+      "fix": "Catch exceptions independently around each section and always compose both result/error lines before delivery. Add a test where list_transcripts raises."
+    },
+    {
+      "id": "G0B-17",
+      "severity": "Critical",
+      "title": "Digest never displays the derived extraction summary",
+      "location": "Task 19 / client_state_digest.py",
+      "evidence": "The change renderer at plan lines 9020-9033 emits write tokens, slugs, source refs, and suppression/escalation notices but never reads row.extraction.summary. FR-005 explicitly relies on the ungrounded derived summary appearing in the digest so an incorrect summary is visible within a day.",
+      "fix": "Render a concise extraction summary alongside each changed page and source_ref, using the shared digest projection required by the goal."
+    },
+    {
+      "id": "G0B-18",
+      "severity": "Critical",
+      "title": "Task 8's implementation raises before its named gate can pass",
+      "location": "Task 8 / client_state_gmail.py",
+      "evidence": "At plan lines 3602-3603, _file_message executes 'del cfg, runner, ledger' and immediately accesses cfg.dry_run. A known-message path raises UnboundLocalError. Task 15 eventually replacing this function does not make Task 8's required intermediate PASS achievable.",
+      "fix": "Remove cfg from the deletion and run Task 8's focused gate against its actual dependencies before proceeding."
+    },
+    {
+      "id": "G0B-19",
+      "severity": "Important",
+      "title": "Task 15's appended tests cannot compile or exercise the real transports",
+      "location": "Task 15 / tests/test_client_state_gmail.py",
+      "evidence": "The explicitly appended block contains another future import; concatenating it with Task 8's block produces SyntaxError. Its fake omits claim/release handling and lock creation. Gmail fixtures use from_email/body_text instead of parse_message's from/body payload, and Claude fixtures omit the required wrapper/schema/grounding fields.",
+      "fix": "Move imports to the file header, implement realistic lease behavior in the fake, and feed recorded Gmail payloads plus valid Claude wrapper responses through the real adapters."
+    },
+    {
+      "id": "G0B-20",
+      "severity": "Important",
+      "title": "Task 5 uses the shared FakeRunner with an incompatible response container",
+      "location": "Task 5 / tests/test_gmail_source.py",
+      "evidence": "Task 1 defines responses as a list of prefix/result pairs, but Task 5 supplies a dictionary keyed by argv tuples at plan lines 2209, 2240, and 2263. FakeRunner iterates the dictionary keys as pairs, causing unpacking failures.",
+      "fix": "Standardize the response contract and convert mappings to the documented prefix/result pair representation."
+    },
+    {
+      "id": "G0B-21",
+      "severity": "Important",
+      "title": "Stale-lock test does not make the real lease stale",
+      "location": "Task 2 / tests/test_single_flight.py",
+      "evidence": "Plan lines 864-876 age only mtime. Actual claimAgeMs uses the newer of mtime and the stored timestamp at meeting-brief.ts:343-353, so the freshly written content timestamp keeps the lease live.",
+      "fix": "Age both the stored millisecond timestamp and mtime, then assert stale-cleared refusal followed by a subsequent successful claim."
+    },
+    {
+      "id": "G0B-22",
+      "severity": "Important",
+      "title": "G1 treats passing test files as failures and discards runner outcomes",
+      "location": "Task 21 / g1-count-delta.sh",
+      "evidence": "extract_vitest at plan line 9809 collects every .test.ts path, including passed files. New passing files consequently become new_vfail. The script also erases command return codes with '|| true' and omits the required failure-file overlap check against the release diff.",
+      "fix": "Parse actual failure records, retain runner outcomes including the node-test phase, and implement exact count-delta and diff-overlap validation."
+    },
+    {
+      "id": "G0B-23",
+      "severity": "Important",
+      "title": "G4 checker accepts incomplete evidence",
+      "location": "Task 21 / g4-check.sh",
+      "evidence": "Item 1 checks only SHA, not G1 counts or cleanliness. Item 3 checks three text tokens without requiring the paired ledger/receipt or complete per-message fields. Item 5 omits zero previews, cost delta, and unchanged receipt. Item 8 accepts any nonempty file. These checks do not enforce the binding numbered DONE conditions.",
+      "fix": "Validate every required field and companion artifact, compare suite counts to G1, verify unchanged-state and cost evidence, and require named verification layers with existing evidence paths. Add negative fixtures for each omitted condition."
+    },
+    {
+      "id": "G0B-24",
+      "severity": "Important",
+      "title": "Required parity evidence is replaced by skips and same-function comparisons",
+      "location": "Task 23 / tests/test_client_state_parity.py",
+      "evidence": "Plan lines 11286-11314 explicitly skip escalation and digest parity. The History test calls the planning function twice without executing the write consumer, while interaction parity compares selected fields from separate derivations. The goal requires shared derivation and a parity check for every projection.",
+      "fix": "Introduce the missing shared projections and compare actual preview/live consumers on copies. Do not count skipped checks or calling the same planner twice as consumer parity."
+    },
+    {
+      "id": "G0B-25",
+      "severity": "Important",
+      "title": "Mutation instructions discard the uncommitted claim guard",
+      "location": "Task 17 / mutation verification",
+      "evidence": "Step 6 explicitly runs before the Task 17 commit, but plan lines 8151 and 8162 restore src/bus/task.ts with git checkout. HEAD contains Task 16, not Task 17, so restoration removes the newly implemented claim guard and invalidates subsequent control runs.",
+      "fix": "Restore from an exact pre-mutation backup under an exit trap, preserving all preexisting worktree changes. Apply the same restoration discipline to the general mutation harness."
+    },
+    {
+      "id": "G0B-26",
+      "severity": "Important",
+      "title": "Task ordering and the supposedly exact interface contract remain inconsistent",
+      "location": "Interfaces / Tasks 6, 11, 14, 15",
+      "evidence": "Task 11 imports plan_tasks from later Task 14 and explicitly accepts a red test until then. Separately, the exact Interfaces block excludes pending outcomes although Tasks 6 and 15 require that transient value, and extract gains a required slugs argument absent from the global signature.",
+      "fix": "Move the routing test after its implementation dependency, and update the canonical interfaces to distinguish transient resolution status from persisted outcomes and include the actual extraction signatures."
+    }
+  ],
+  "rejected_as_locked": [
+    {
+      "would_be_finding": "Single-day results capped at 50 require complete pagination.",
+      "row": "Spec §Accepted assumptions: reported single-day truncation and unspecified list ordering are accepted."
+    },
+    {
+      "would_be_finding": "Unknown real-human senders should be escalated by this records lane.",
+      "row": "D-11: known entities only; unknown humans remain covered by the attention lane."
+    },
+    {
+      "would_be_finding": "The strictly greater than 0.75 dedup threshold needs replacement before implementation.",
+      "row": "FR-008 and §Accepted assumptions: threshold transfer is owned, with digest suppressions as the calibration channel."
+    },
+    {
+      "would_be_finding": "Quote-grounded hostile text must never survive extraction, and summaries must be quote-gated.",
+      "row": "FR-005/G-12 and the goal's locked FR-005 decision: summaries remain derived, attacker-authored quotes can be grounded, and containment is no tools plus human-routed tasks."
+    }
+  ],
+  "verified_line_cites": [
+    ".gitignore:93 ok (existing-file modification 1/4: additive runtime ignores)",
+    "scripts/brain/meeting_loop_watch.py:105 ok (existing-file modification 2/4: section restructure)",
+    "src/bus/task.ts:701 ok (existing-file modification 3/4: creation and claim guards)",
+    "src/cli/bus.ts:513 ok (existing-file modification 4/4: creation and claim flags; no other existing-file modifications specified)",
+    "scripts/brain/resolve_meeting.py:295 ok",
+    "scripts/brain/resolve_meeting.py:312 ok (bare-label and full-domain map insertion)",
+    "scripts/brain/resolve_meeting.py:402 ok",
+    "scripts/brain/resolve_meeting.py:445 ok",
+    "scripts/brain/resolve_meeting.py:777 ok (nested company resolver)",
+    "scripts/brain/resolve_meeting.py:841 ok (nested contact matcher)",
+    "scripts/brain/extract_meeting.py:101 ok (schema walker)",
+    "scripts/brain/extract_meeting.py:178 ok (control checks, not type validation)",
+    "scripts/brain/extract_meeting.py:358 ok (argv through line 371 matches exactly)",
+    "scripts/brain/writeback_render.py:133 ok",
+    "scripts/brain/writeback_render.py:136 ok",
+    "scripts/brain/writeback_render.py:310 ok",
+    "scripts/brain/brain_rollup.py:184 ok",
+    "scripts/brain/brain_rollup.py:205 ok",
+    "scripts/brain/brain_rollup.py:244 ok",
+    "orgs/clearworksai/agents/crm/crm/add-interaction.py:52 ok",
+    "orgs/clearworksai/agents/crm/crm/add-interaction.py:86 ok",
+    "orgs/clearworksai/agents/crm/crm/upsert-contact.py:17 ok (script-relative stores)",
+    "orgs/clearworksai/agents/crm/crm/upsert-contact.py:200 ok (--match-email)",
+    "src/bus/task.ts:198 ok",
+    "src/bus/task.ts:786 ok",
+    "src/bus/task.ts:1111 ok",
+    "src/bus/task.ts:1163 ok",
+    "src/types/index.ts:53 WRONG (Task.type is at line 54; line 53 is description)",
+    "src/cli/bus.ts:667 ok",
+    "src/cli/bus.ts:786 ok (list-tasks; actual JSON switch is --format json)",
+    "src/cli/bus.ts:2541 ok (claim options through line 2555)",
+    "src/cli/bus.ts:2558 ok (release; shim passes only claim and release)",
+    "src/bus/meeting-brief.ts:330 ok (hashed lock filename)",
+    "src/bus/meeting-brief.ts:368 ok (claimEventLease)",
+    "src/bus/meeting-brief.ts:368 WRONG (mtime/content-age calculation is at lines 336-353; stale-cleared refusal is at lines 397-415)",
+    "orgs/clearworksai/skills/comms-check-worker/SKILL.md:26 ok (EXCLUSION_QUERY matches the exclusion clause verbatim under A1)"
+  ]
+}

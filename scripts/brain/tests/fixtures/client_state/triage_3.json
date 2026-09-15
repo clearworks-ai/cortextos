@@ -1,0 +1,41 @@
+{
+  "total": 3,
+  "emails": [
+    {
+      "id": "m001",
+      "threadId": "t001",
+      "from": "Lori Bodenhamer <lori@abundowealth.com>",
+      "to": "josh@clearworks.ai",
+      "date": "2026-09-12T14:03:00Z",
+      "subject": "s",
+      "snippet": "",
+      "labels": [
+        "INBOX"
+      ]
+    },
+    {
+      "id": "m002",
+      "threadId": "t002",
+      "from": "Dana Iyer <dana@svaraworks.com>",
+      "to": "josh@clearworks.ai",
+      "date": "2026-09-13T09:11:00Z",
+      "subject": "s",
+      "snippet": "",
+      "labels": [
+        "INBOX"
+      ]
+    },
+    {
+      "id": "m003",
+      "threadId": "t001",
+      "from": "Lori Bodenhamer <lori@abundowealth.com>",
+      "to": "josh@clearworks.ai",
+      "date": "2026-09-14T08:47:00Z",
+      "subject": "s",
+      "snippet": "",
+      "labels": [
+        "INBOX"
+      ]
+    }
+  ]
+}

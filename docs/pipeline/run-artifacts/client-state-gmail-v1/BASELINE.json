@@ -1,0 +1,51 @@
+{
+  "captured_at": "2026-09-14T17:39:59Z",
+  "base_sha": "600e05f3",
+  "branch": "feat/client-state-gmail-v1-build",
+  "vitest": {
+    "files_total": 303,
+    "files_passed": 276,
+    "files_failed": 18,
+    "files_skipped": 9,
+    "tests_total": 4033,
+    "tests_passed": 3917,
+    "tests_failed": 10,
+    "tests_skipped": 101,
+    "tests_todo": 5,
+    "failing_files": [
+      "dashboard/src/app/api/agents/[name]/lifecycle/__tests__/route.test.ts",
+      "dashboard/src/app/api/comms/__tests__/routes.test.ts",
+      "dashboard/src/app/api/tasks/[id]/__tests__/route.test.ts",
+      "dashboard/src/app/api/workflows/crons/__tests__/executions-export.test.ts",
+      "dashboard/src/app/api/workflows/crons/__tests__/fire-route.test.ts",
+      "dashboard/src/app/api/workflows/health/__tests__/health-route.test.ts",
+      "dashboard/src/components/tasks/__tests__/kanban-board.test.ts",
+      "dashboard/src/lib/__tests__/clients.test.ts",
+      "dashboard/src/lib/__tests__/cost-parser-codex.test.ts",
+      "dashboard/src/lib/__tests__/cost-parser.test.ts",
+      "dashboard/src/lib/__tests__/sync.test.ts",
+      "tests/integration/phase4-dashboard-backtest.test.ts",
+      "tests/integration/phase4-performance.test.ts",
+      "tests/integration/phase5-e2e-simulation.test.ts",
+      "tests/integration/phase5-user-journeys.test.ts",
+      "tests/unit/daemon/fast-checker.test.ts",
+      "tests/unit/daemon/rebaseline-runtime-gates.test.ts",
+      "tests/unit/pty/pty-leak.test.ts"
+    ],
+    "cmd": "npm test",
+    "rc": 1
+  },
+  "pytest": {
+    "passed": 507,
+    "failed": 0,
+    "failing": [],
+    "cmd": "python3 -m pytest scripts/brain/tests -q -p no:cacheprovider",
+    "rc": 0,
+    "duration_s": 140.6
+  },
+  "build": {
+    "cmd": "npm run build",
+    "rc": 0,
+    "note": "CJS build success"
+  }
+}

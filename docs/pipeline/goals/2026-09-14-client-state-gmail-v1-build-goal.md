@@ -389,7 +389,11 @@ STANDING RULES (apply to the whole release — state once):
   ledger line naming who/when.
 - **FR-010 file allowlist (mechanical).** Shared files this diff MAY modify:
   `scripts/brain/meeting_loop_watch.py`, `src/bus/task.ts`, `src/cli/bus.ts`, plus their
-  tests, plus one additive `.gitignore` line for the runtime state dir. NEW files under
+  tests, plus one additive `.gitignore` line for the runtime state dir. **Amended
+  2026-09-15 (G2 round-3 ruling G2r3-9, recorded here per FINAL F-3):** also
+  `src/bus/multica/poll.ts` — the one call site that deliberately claims a human task
+  now passes `{ force: true }` explicitly, which is what let the claimant-name exemption
+  be removed from the bus guard; the patch-1 spec FR-010 lists the same file. NEW files under
   `scripts/brain/`, `scripts/brain/tests/`, `docs/pipeline/**`, `state/client-state/`
   are free. Everything else in `scripts/brain/**`, `orgs/clearworksai/agents/crm/**`,
   `orgs/clearworksai/agents/pa*/**`, `src/**` is READ-ONLY here: the `resolve_meeting.py`

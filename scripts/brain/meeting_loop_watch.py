@@ -119,10 +119,17 @@ def main() -> int:
     recent = [r for r in rows if _occurred(r) >= cutoff]
     have = {p.name for p in ENVELOPES.iterdir() if p.is_dir()} if ENVELOPES.is_dir() else set()
 
-    missing, empty = [], []
+    missing, empty, incomplete = [], [], []
     for row in sorted(recent, key=_occurred):
         mid = str(row.get("id"))
         if mid in have:
+            # 2026-09-14: an envelope dir only proves FETCH happened. The
+            # receipt is written last, after extract → resolve → file → phase 3;
+            # a run that died at any step (extract "Credit balance is too low",
+            # or the phase-3 sign-check) leaves the envelope and no receipt, and
+            # this watch used to call that "filed". Key on the receipt instead.
+            if not (STATE / f"fireflies-{mid}" / "receipt.json").exists():
+                incomplete.append((_occurred(row).date().isoformat(), mid, str(row.get("title") or "")[:48]))
             continue
         reason = _not_ready_reason(mid)
         count = _sentence_count(reason)
@@ -133,9 +140,9 @@ def main() -> int:
     transport_ok = hub == "ok" and bridge == "ok"
     newest = max((_occurred(r) for r in rows), default=None)
 
-    if not missing and transport_ok:
+    if not missing and not incomplete and transport_ok:
         lines = [
-            f"Meeting loop OK — {len(recent)} transcript(s) in the last {args.days}d, all filed.",
+            f"Meeting loop OK — {len(recent)} transcript(s) in the last {args.days}d, all filed (receipts present).",
             f"Newest: {newest.date().isoformat() if newest else 'none'} · hub {hub} · bridge {bridge}",
         ]
         if empty:
@@ -145,6 +152,10 @@ def main() -> int:
         if missing:
             lines.append(f"\n{len(missing)} transcript(s) NOT in the vault and not empty:")
             lines += [f"- {d} {t} ({m})" for d, m, t, _ in missing[:10]]
+        if incomplete:
+            lines.append(f"\n{len(incomplete)} transcript(s) fetched but NOT processed (no receipt — "
+                         "the run died after fetch; re-run run_meeting.py --apply for each):")
+            lines += [f"- {d} {t} ({m})" for d, m, t in incomplete[:10]]
         if not transport_ok:
             lines.append(f"\nTransport: hub {hub} · bridge {bridge}")
         lines.append("\nEvery failure in this chain has been silent — check the hub logs "

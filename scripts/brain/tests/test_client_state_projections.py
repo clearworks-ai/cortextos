@@ -208,3 +208,36 @@ def test_plan_digest_line_renders_planned_writes_for_a_simulated_row():
     row.simulated = False
     row.writes = ["crm:c1"]
     assert "[simulated]" not in "\n".join(projections.plan_digest_line(row))
+
+
+# --- G2a-4: the History entry date is DERIVED, never a blind [:10] slice ------
+
+def test_plan_history_entry_never_emits_a_malformed_date():
+    """Even if an un-normalised RFC 2822 value reaches plan_history_entry, the
+    entry must not carry 'Sun, 14 Se' as its date."""
+    from datetime import datetime, timezone
+
+    msg = _Msg(id="m1", thread_id="t1", from_name="Marcos", from_email="marcos@acme.org",
+               subject="Renewal", date_iso="Sun, 14 Sep 2026 03:00:00 -0700")
+    entry = projections.plan_history_entry(msg, {"summary": "s"}, "gmail:m1", None)
+    assert entry.date == "2026-09-14", entry.date
+
+
+def test_plan_history_entry_falls_back_to_today_with_an_unparsed_marker():
+    from datetime import datetime, timezone
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    for bad in ("", "whenever, really", "1970-13-45"):
+        msg = _Msg(id="m1", thread_id="t1", from_name="Marcos", from_email="marcos@acme.org",
+                   subject="Renewal", date_iso=bad)
+        entry = projections.plan_history_entry(msg, {"summary": "s"}, "gmail:m1", None)
+        assert entry.date == today, (bad, entry.date)
+        assert "date: unparsed" in entry.summary, (bad, entry.summary)
+
+
+def test_plan_history_entry_marks_nothing_for_a_good_date():
+    msg = _Msg(id="m1", thread_id="t1", from_name="Marcos", from_email="marcos@acme.org",
+               subject="Renewal", date_iso="2026-09-14T10:00:00Z")
+    entry = projections.plan_history_entry(msg, {"summary": "s"}, "gmail:m1", None)
+    assert entry.date == "2026-09-14"
+    assert "date: unparsed" not in entry.summary

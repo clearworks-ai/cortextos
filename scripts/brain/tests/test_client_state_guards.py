@@ -5,12 +5,12 @@ writer's landed part, materialised via
 swept with the SAME regex test_no_unregistered_guard below uses (a G-ID
 token anywhere after a '#' on its line -- docstring/prose mentions of a
 G-ID, which several modules still carry alongside their real marker, do NOT
-count). 71 rows: LEDGER x7, RECEIPT x2, LOCK x8, LOCKREF x1, SWEEP x9, RES x2,
+count). 72 rows: LEDGER x7, RECEIPT x2, LOCK x8, LOCKREF x1, SWEEP x10, RES x2,
 EXT x4, INV x2, BASE x2, SUPER x1, DIG x3, BUS x3 (TS), IDEMP x2, MERGE x3,
 SIM x1, ESC x2, QUERY x1, FAIL x1, BUDGET x2, CRM x2, HIST x2, PARITY x2,
 WRITER x2, OWNER x1, TASK x2, DEDUP x1, EFFECT x2, REV x1.
 
-The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2 and G-BUS-3.
+The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10.
 
 The last 8 rows (G-MERGE-2/3, G-EFFECT-1, G-BUDGET-2, G-REV-1, G-PARITY-2,
 G-LOCK-7/8) were added by the post-cap adjudication wave (2026-09-15) that
@@ -22,7 +22,7 @@ sed_expr). module_path is either a scripts/brain/*.py file (sed_expr is a
 BSD `sed -E` expression) or src/bus/task.ts (the three G-BUS-* rows). A marker
 appearing at MULTIPLE operative sites (G-ESC-1 x2, G-ESC-2 x3, G-EXT-2 x2,
 G-LEDGER-6 x4, G-LEDGER-7 x2, G-LOCK-6 x2, G-LOCKREF-1 x2, G-OWNER-1 x2,
-G-PARITY-1 x2, G-SUPER-1 x2, G-SWEEP-6 x4, G-SWEEP-7 x2, G-WRITER-1 x3,
+G-PARITY-1 x2, G-SUPER-1 x2, G-SWEEP-6 x4, G-SWEEP-7 x2, G-SWEEP-10 x2, G-WRITER-1 x3,
 G-WRITER-2 x3) gets ONE row whose
 sed_expr mutates the FIRST site (file/definition order); the description
 names every other site so a reviewer can find them without re-deriving this
@@ -304,6 +304,12 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "claimTask refuses a human-exempt task (isHumanExemptTask) unless opts.force is passed",
      "tests/unit/bus/task-human-type.test.ts::throws the exact human-exempt message and leaves the task pending with no claim file",
      r"s/if \(isHumanExemptTask\(task\) && !opts\?\.force\) \{/if (false) {/"),
+    ("G-SWEEP-10", "scripts/brain/gmail_source.py",
+     "parse_message normalises EVERY Date form (RFC 2822 Date header, ISO-8601, epoch s/ms) into ISO-8601 UTC at the "
+     "SOURCE, so a downstream date_iso[:10] is a real calendar date and never 'Sun, 14 Se' (G2a finding 4); second "
+     "site: the flat gws +read shape in _parse_message_flat_shape",
+     "scripts/brain/tests/test_gmail_source.py::test_parse_message_normalises_rfc2822_date_header",
+     r's/date_iso=normalise_date_iso\(headers\.get\("date", ""\)\),  # G-SWEEP-10/date_iso=str(headers.get("date", "")),  # G-SWEEP-10 (mutated)/'),
     ("G-BUS-3", "src/bus/task.ts",
      "classifyTask treats type:'human' as class human, so a `--type human` task gets the human due-date cap, shows up "
      "in `list-tasks --class human` and never hits a build-only check (G2a finding 3); the CLI half - `--type human` "
@@ -361,10 +367,10 @@ def test_guard_registry_ids_are_unique():
     assert len(ids) == len(set(ids)), f"duplicate guard ids: {ids}"
 
 
-def test_guard_registry_has_71_rows():
+def test_guard_registry_has_72_rows():
     # Pinned count (rebuilt 2026-09-14 from the FINAL parts, G0 round-3
     # integration) so a future guard silently dropping out is itself caught.
-    assert len(GUARD_REGISTRY) == 71, f"expected 71 rows, got {len(GUARD_REGISTRY)}"
+    assert len(GUARD_REGISTRY) == 72, f"expected 72 rows, got {len(GUARD_REGISTRY)}"
 
 
 def test_guard_registry_rows_have_five_fields():

@@ -394,3 +394,67 @@ def test_read_m001_fixture_parses_and_strips_quoted_tail() -> None:
     assert msg.id == "m001"
     assert "wrote:" not in msg.body_text
     assert not any(line.lstrip().startswith(">") for line in msg.body_text.splitlines())
+
+
+# --- G2a-4: Date normalisation at the source ---------------------------------
+# The Gmail-API-native payload's Date header is RFC 2822 ("Sun, 14 Sep 2026 ..."),
+# so the downstream `date_iso[:10]` slice produced "Sun, 14 Se" as a History
+# entry date. parse_message now normalises EVERY Date form into ISO-8601 UTC.
+
+def _api_payload(date_value):
+    return {
+        "id": "m1",
+        "threadId": "t1",
+        "payload": {
+            "headers": [
+                {"name": "From", "value": "Marcos <marcos@acme.org>"},
+                {"name": "To", "value": "josh@clearworks.ai"},
+                {"name": "Subject", "value": "Renewal"},
+                {"name": "Date", "value": date_value},
+            ],
+            "mimeType": "text/plain",
+            "body": {},
+        },
+    }
+
+
+def test_parse_message_normalises_rfc2822_date_header():
+    import gmail_source
+
+    msg = gmail_source.parse_message(_api_payload("Sun, 14 Sep 2026 03:00:00 -0700"))
+    assert msg.date_iso == "2026-09-14T10:00:00Z"
+    assert msg.date_iso[:10] == "2026-09-14"
+
+
+def test_parse_message_normalises_iso_dates_to_utc():
+    import gmail_source
+
+    assert gmail_source.parse_message(_api_payload("2026-09-14T10:00:00Z")).date_iso == "2026-09-14T10:00:00Z"
+    assert gmail_source.parse_message(_api_payload("2026-09-14T03:00:00-07:00")).date_iso == "2026-09-14T10:00:00Z"
+    # naive ISO is read as UTC rather than dropped
+    assert gmail_source.parse_message(_api_payload("2026-09-14T10:00:00")).date_iso == "2026-09-14T10:00:00Z"
+
+
+def test_parse_message_normalises_epoch_dates():
+    import gmail_source
+
+    assert gmail_source.parse_message(_api_payload("1789380000000")).date_iso == "2026-09-14T10:00:00Z"  # ms
+    assert gmail_source.parse_message(_api_payload("1789380000")).date_iso == "2026-09-14T10:00:00Z"     # seconds
+
+
+def test_parse_message_drops_an_unparseable_date():
+    import gmail_source
+
+    assert gmail_source.parse_message(_api_payload("whenever, really")).date_iso == ""
+    assert gmail_source.parse_message(_api_payload("")).date_iso == ""
+
+
+def test_parse_message_flat_shape_normalises_rfc2822_too():
+    import gmail_source
+
+    payload = {
+        "id": "m1", "threadId": "t1",
+        "from": "Marcos <marcos@acme.org>", "to": "josh@clearworks.ai", "cc": "",
+        "subject": "Renewal", "date": "Sun, 14 Sep 2026 03:00:00 -0700", "body": "hi",
+    }
+    assert gmail_source.parse_message(payload).date_iso == "2026-09-14T10:00:00Z"

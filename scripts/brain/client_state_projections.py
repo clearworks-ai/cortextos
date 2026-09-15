@@ -7,10 +7,11 @@ plan_*_argv functions below to build argv rather than building their own, so the
 is exactly one place an argv shape can drift."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from gmail_source import Message
+from gmail_source import Message, normalise_date_iso
 from observation_ledger import ObservationRow, Resolution
 from writeback_email import HistoryEntry
 
@@ -20,15 +21,32 @@ from writeback_email import HistoryEntry
 TELEGRAM_CHAT_ID = "6690120787"
 
 
+def _history_date(date_iso: Any) -> tuple[str, bool]:
+    """(YYYY-MM-DD, unparsed). gmail_source.normalise_date_iso is the ONE date
+    parser, so this re-runs it rather than trusting a raw `[:10]` slice: an
+    un-normalised RFC 2822 value reaching here used to become "Sun, 14 Se" and
+    land in a History entry looking like a real date. Anything it cannot read
+    falls back to today's UTC date AND reports itself, so the entry is dated
+    plausibly and says so instead of carrying a malformed date silently."""
+    normalised = normalise_date_iso(date_iso)
+    if normalised:
+        return normalised[:10], False
+    return datetime.now(timezone.utc).date().isoformat(), True
+
+
 def plan_history_entry(msg: Message, extraction: dict[str, Any], source_ref: str, revision_of: str | None) -> HistoryEntry:
     """G-HIST-1/G-PARITY-2: the ONE place a Gmail message + its extraction become
     a HistoryEntry -- both the dry-run diff preview and the live apply_history
     call build the entry through this function."""
+    entry_date, date_unparsed = _history_date(msg.date_iso)
+    summary = str(extraction.get("summary") or "")
+    if date_unparsed:
+        summary = (summary + " [date: unparsed]").strip()
     return HistoryEntry(
-        date=(msg.date_iso or "")[:10] or "1970-01-01",
+        date=entry_date,
         subject=msg.subject,
         source_ref=source_ref,
-        summary=str(extraction.get("summary") or ""),
+        summary=summary,
         decisions=[str(d.get("text") or "") for d in (extraction.get("decisions") or [])],
         open_questions=[str(q.get("text") or "") for q in (extraction.get("open_questions") or [])],
         revision_of=revision_of,

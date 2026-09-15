@@ -10,7 +10,7 @@ import email.utils
 import json
 import re
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -94,6 +94,50 @@ def full_window_query(days: int, today: date) -> str:
     start = today - timedelta(days=days - 1)
     end = today + timedelta(days=1)
     return _compose_query(_date_ops(start, end), None)
+
+
+_EPOCH_RE = re.compile(r"-?\d{9,}")
+
+
+def normalise_date_iso(value: Any) -> str:
+    """Every Date form a Gmail payload can carry, reduced to ONE shape:
+    `YYYY-MM-DDTHH:MM:SSZ` in UTC.
+
+    The Gmail-API-native payload's `Date` header is RFC 2822
+    ("Sun, 14 Sep 2026 03:00:00 -0700"); the recorded gws +read shape is
+    ISO-8601; `internalDate` is an epoch stamp in milliseconds (seconds are
+    accepted too). Normalising HERE, at the source, is what makes a downstream
+    `date_iso[:10]` a real calendar date -- the RFC 2822 form sliced to
+    "Sun, 14 Se" and landed in History entries. A value none of the three
+    parsers accepts yields "" rather than a malformed date that reads as real.
+    """
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    dt: datetime | None = None
+    if _EPOCH_RE.fullmatch(raw):
+        epoch = int(raw)
+        if abs(epoch) >= 100_000_000_000:  # milliseconds, not seconds
+            epoch //= 1000
+        try:
+            dt = datetime.fromtimestamp(epoch, tz=timezone.utc)
+        except (OSError, OverflowError, ValueError):
+            return ""
+    if dt is None:
+        try:
+            dt = datetime.fromisoformat(raw[:-1] + "+00:00" if raw.endswith("Z") else raw)
+        except ValueError:
+            dt = None
+    if dt is None:
+        try:
+            dt = email.utils.parsedate_to_datetime(raw)
+        except (TypeError, ValueError):
+            dt = None
+    if dt is None:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _address_from_value(value: Any) -> tuple[str, str]:
@@ -186,7 +230,7 @@ def _parse_message_gmail_api_shape(payload: dict) -> Message:
         to=_parse_address_list(headers.get("to")),
         cc=_parse_address_list(headers.get("cc")),
         subject=headers.get("subject", ""),
-        date_iso=headers.get("date", ""),
+        date_iso=normalise_date_iso(headers.get("date", "")),  # G-SWEEP-10
         body_text=_strip_quoted_tail(body_raw),
     )
 
@@ -201,7 +245,7 @@ def _parse_message_flat_shape(payload: dict) -> Message:
         to=_parse_address_list(payload.get("to")),
         cc=_parse_address_list(payload.get("cc")),
         subject=str(payload.get("subject", "")),
-        date_iso=str(payload.get("date", "")),
+        date_iso=normalise_date_iso(payload.get("date", "")),  # G-SWEEP-10
         body_text=_strip_quoted_tail(str(payload.get("body", ""))),
     )
 

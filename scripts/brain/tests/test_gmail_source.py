@@ -504,3 +504,54 @@ def test_list_messages_ignores_stderr_when_rows_came_back():
     runner.record(("gws", "gmail", "+triage"), rc=0,
                   stdout='{"emails": [{"id": "m1"}], "total": 1}', stderr="warning: slow response")
     assert gmail_source.list_messages(runner, "q") == [{"id": "m1"}]
+
+
+# --- G2r3-6: Cc must survive the deployed adapter's flat response -------------
+# gws-dwd's read_email() omits the Cc header from its flat response, so a known
+# counterparty who appears only in Cc got no resolution, no CRM interaction and
+# no page fan-out — FR-003 requires From/To/Cc.
+
+def _flat(**over):
+    payload = {
+        "id": "m1", "threadId": "t1",
+        "from": "Marcos <marcos@acme.org>",
+        "subject": "Renewal", "date": "2026-09-14T10:00:00Z", "body": "hi",
+    }
+    payload.update(over)
+    return payload
+
+
+def test_parse_message_reads_cc_from_a_headers_list():
+    import gmail_source
+
+    msg = gmail_source.parse_message(_flat(headers=[
+        {"name": "To", "value": "josh@clearworks.ai"},
+        {"name": "Cc", "value": "Dana Iyer <dana@svaraworks.com>, lori@abundowealth.com"},
+    ]))
+    assert msg.cc == ["dana@svaraworks.com", "lori@abundowealth.com"]
+    assert msg.to == ["josh@clearworks.ai"]
+    assert "dana@svaraworks.com" in msg.counterparties()
+
+
+def test_parse_message_reads_cc_from_a_headers_mapping():
+    import gmail_source
+
+    msg = gmail_source.parse_message(_flat(headers={"To": "josh@clearworks.ai", "CC": "dana@svaraworks.com"}))
+    assert msg.cc == ["dana@svaraworks.com"]
+    assert msg.to == ["josh@clearworks.ai"]
+
+
+def test_parse_message_reads_capitalised_top_level_recipient_keys():
+    import gmail_source
+
+    msg = gmail_source.parse_message(_flat(To="josh@clearworks.ai", Cc="dana@svaraworks.com"))
+    assert msg.cc == ["dana@svaraworks.com"]
+    assert msg.to == ["josh@clearworks.ai"]
+
+
+def test_parse_message_top_level_cc_still_wins(): 
+    import gmail_source
+
+    msg = gmail_source.parse_message(_flat(to=["josh@clearworks.ai"], cc=["dana@svaraworks.com"]))
+    assert msg.cc == ["dana@svaraworks.com"]
+    assert msg.to == ["josh@clearworks.ai"]

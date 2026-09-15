@@ -235,6 +235,31 @@ def _parse_message_gmail_api_shape(payload: dict) -> Message:
     )
 
 
+def _flat_recipients(payload: dict, field: str) -> list[str]:
+    """`to`/`cc` from EVERY shape the deployed adapter has been seen to emit.
+
+    G2r3-6: gws-dwd's read_email() omits the Cc header from its flat response,
+    so `payload.get("cc")` was always None in real runs and a known counterparty
+    who appeared only in Cc got no resolution, no CRM interaction and no page
+    fan-out -- FR-003 requires From/To/Cc. A top-level key (any capitalisation)
+    wins; otherwise the nested `headers`, as either a Gmail-style list of
+    {name, value} or a plain mapping, is consulted.
+    """
+    for key in (field, field.capitalize(), field.upper()):
+        if key in payload:
+            return _parse_address_list(payload[key])
+    headers = payload.get("headers")
+    if isinstance(headers, list):
+        mapped = _headers_map(headers)
+        if field in mapped:
+            return _parse_address_list(mapped[field])  # G-SWEEP-12
+    elif isinstance(headers, dict):
+        for key, value in headers.items():
+            if str(key).strip().lower() == field:
+                return _parse_address_list(value)
+    return []
+
+
 def _parse_message_flat_shape(payload: dict) -> Message:
     from_name, from_email = _address_from_value(payload.get("from", ""))
     return Message(
@@ -242,8 +267,8 @@ def _parse_message_flat_shape(payload: dict) -> Message:
         thread_id=str(payload.get("threadId", "")),
         from_name=from_name.strip(),
         from_email=from_email.strip().lower(),
-        to=_parse_address_list(payload.get("to")),
-        cc=_parse_address_list(payload.get("cc")),
+        to=_flat_recipients(payload, "to"),
+        cc=_flat_recipients(payload, "cc"),
         subject=str(payload.get("subject", "")),
         date_iso=normalise_date_iso(payload.get("date", "")),  # G-SWEEP-10
         body_text=_strip_quoted_tail(str(payload.get("body", ""))),

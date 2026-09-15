@@ -66,22 +66,30 @@ def compute_invariants(vault: Path, ledger: Ledger, epoch_iso: str) -> dict[str,
             if path.stem.startswith("_"):
                 continue
             text = path.read_text(encoding="utf-8")
+            # G-INV-3: pages are identified by their VAULT-RELATIVE PATH, never
+            # by `path.stem`. Two folders may legitimately hold the same slug
+            # (clients/acme.md and orgs/acme.md), and keying on the stem
+            # collapsed them into ONE entry -- so a domain or CRM org name
+            # declared on BOTH looked like a single page and the >=2-pages
+            # invariant, whose entire job is catching exactly that split, never
+            # fired.
+            page_id = str(path.relative_to(brain))
 
             for oname in _org_names_from_text(text):
                 key = _norm_title(oname)
                 if not key:
                     continue
                 entry = org_pages.setdefault(key, {"name": oname, "pages": []})
-                if path.stem not in entry["pages"]:
-                    entry["pages"].append(path.stem)
+                if page_id not in entry["pages"]:
+                    entry["pages"].append(page_id)
 
             for dom in _domains_from_text(text):
                 # G-INV-1: FULL domain only, never registrable_label — a
                 # bare-label collapse (example.com/example.org -> "example")
                 # is exactly the false positive this invariant must not raise.
                 pages = domain_pages.setdefault(dom, [])
-                if path.stem not in pages:
-                    pages.append(path.stem)
+                if page_id not in pages:
+                    pages.append(page_id)
 
             history = _section_text(path, "History")
             for line in history.splitlines():
@@ -92,7 +100,7 @@ def compute_invariants(vault: Path, ledger: Ledger, epoch_iso: str) -> dict[str,
                 if entry_date < epoch_date:
                     continue  # pre-epoch refs are grandfathered by construction
                 if ref not in known_refs:
-                    missing_refs.append({"ref": ref, "page": path.stem, "date": entry_date})
+                    missing_refs.append({"ref": ref, "page": page_id, "date": entry_date})
 
     org_name_multi = [
         {"name": v["name"], "pages": sorted(v["pages"])}

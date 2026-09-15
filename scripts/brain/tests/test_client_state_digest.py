@@ -56,7 +56,7 @@ def test_compute_invariants_flags_duplicate_org_name_across_pages(tmp_path):
     _page(vault, "clients", "acme-b", org_names=("acme corp",))
     inv = cs_digest.compute_invariants(vault, _empty_ledger(tmp_path), "2026-01-01")
     assert len(inv["org_name_multi"]) == 1
-    assert set(inv["org_name_multi"][0]["pages"]) == {"acme-a", "acme-b"}
+    assert set(inv["org_name_multi"][0]["pages"]) == {"clients/acme-a.md", "clients/acme-b.md"}
 
 
 def test_compute_invariants_flags_duplicate_domain_across_pages(tmp_path):
@@ -65,7 +65,7 @@ def test_compute_invariants_flags_duplicate_domain_across_pages(tmp_path):
     _page(vault, "orgs", "dup-b", domains="shared.com")
     inv = cs_digest.compute_invariants(vault, _empty_ledger(tmp_path), "2026-01-01")
     assert any(
-        row["domain"] == "shared.com" and set(row["pages"]) == {"dup-a", "dup-b"}
+        row["domain"] == "shared.com" and set(row["pages"]) == {"clients/dup-a.md", "orgs/dup-b.md"}
         for row in inv["domain_multi"]
     )
 
@@ -83,7 +83,7 @@ def test_compute_invariants_does_not_confuse_different_tlds(tmp_path):
     _page(vault, "clients", "dup-b", domains="shared.com")
     inv = cs_digest.compute_invariants(vault, _empty_ledger(tmp_path), "2026-01-01")
     rows = sorted(inv["domain_multi"], key=lambda r: r["domain"])
-    assert rows == [{"domain": "shared.com", "pages": ["dup-a", "dup-b"]}], rows
+    assert rows == [{"domain": "shared.com", "pages": ["clients/dup-a.md", "clients/dup-b.md"]}], rows
 
 
 def test_compute_invariants_missing_gmail_ref_post_epoch_only(tmp_path):
@@ -548,3 +548,30 @@ def test_gmail_section_emits_each_event_exactly_once(tmp_path):
     assert len(page_lines) == 1, page_lines
     # the reason the loop's own line carried is not lost
     assert any("ambiguous:acme|alloi" in ln for ln in escalation_lines), escalation_lines
+
+
+# --- G2r2-14: pages are identified by vault-relative PATH, not by stem --------
+
+def test_compute_invariants_distinguishes_same_stem_in_different_folders(tmp_path):
+    """Keying on `path.stem` collapsed clients/acme.md and orgs/acme.md into one
+    entry, so a domain or CRM org name declared on BOTH was recorded as
+    belonging to a single page and the >=2-pages invariant never fired — the
+    exact duplicate-entity split FR-009 exists to catch."""
+    vault = tmp_path / "vault"
+    _page(vault, "clients", "acme", domains="acme.org", org_names=("Acme Corp",))
+    _page(vault, "orgs", "acme", domains="acme.org", org_names=("Acme Corp",))
+
+    inv = cs_digest.compute_invariants(vault, _empty_ledger(tmp_path), "2026-01-01")
+
+    assert [r["domain"] for r in inv["domain_multi"]] == ["acme.org"]
+    assert inv["domain_multi"][0]["pages"] == ["clients/acme.md", "orgs/acme.md"]
+    assert len(inv["org_name_multi"]) == 1
+    assert inv["org_name_multi"][0]["pages"] == ["clients/acme.md", "orgs/acme.md"]
+
+
+def test_compute_invariants_missing_ref_names_the_full_page_path(tmp_path):
+    vault = tmp_path / "vault"
+    _page(vault, "orgs", "ref-page",
+          history=("- 2026-09-10 — post-epoch email (email) [source: gmail:post456]",))
+    inv = cs_digest.compute_invariants(vault, _empty_ledger(tmp_path), "2026-09-05")
+    assert [r["page"] for r in inv["missing_gmail_refs"]] == ["orgs/ref-page.md"]

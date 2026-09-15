@@ -28,6 +28,18 @@ class LeaseReleaseError(Exception):
     instead of returning 0 (G0B3-11)."""
 
 
+class LeaseAcquireError(Exception):
+    """`meeting-brief-claim` failed for an OPERATIONAL reason rather than
+    losing a race: an unwritable claims dir, a missing `cortextos`, a timeout,
+    or any refusal whose stderr names no real claim verdict.
+
+    That distinction is load-bearing (G2A-3). `acquire` returning None means
+    "another LIVE run holds the claim", and the caller turns that into exit 2
+    with the success receipt left BYTE-IDENTICAL. Collapsing an operational
+    failure into the same None reported a poller that could not run at all as
+    ordinary contention, and the stale receipt kept the digest calm."""
+
+
 class LeaseLost(Exception):
     """Raised by the caller when `Lease.lost` is set: the lock file this run
     holds has disappeared (a concurrent stale-sweep, or another poller already
@@ -165,20 +177,46 @@ def _claim_argv(claims_dir: Path, name: str, ttl_min: int) -> list[str]:
     ]
 
 
+# src/cli/bus.ts meeting-brief-claim prints `Already claimed <id> (<reason>)` on
+# stderr, where <reason> is one of src/bus/meeting-brief.ts's two refusal
+# verdicts. A non-zero rc naming NEITHER is not a claim verdict at all.
+_CLAIM_VERDICTS = ("already-claimed", "stale-cleared")
+
+
+def _claim_once(runner: Runner, argv: list[str]):
+    try:
+        return runner.run(argv)
+    except Exception as exc:  # noqa: BLE001 -- a timeout/missing binary is operational, not contention
+        raise LeaseAcquireError(f"meeting-brief-claim did not return: {exc}") from exc  # G-LOCK-9
+
+
+def _refusal_or_raise(result) -> str:
+    """The claim verdict named by a non-zero result's stderr; anything else is
+    an operational failure and must never look like contention (G2A-3)."""
+    stderr = result.stderr or ""
+    verdict = next((v for v in _CLAIM_VERDICTS if v in stderr), None)
+    if verdict is None:  # G-LOCK-9: no claim verdict named -> operational, never contention
+        raise LeaseAcquireError(
+            f"meeting-brief-claim rc={result.returncode}: {stderr.strip() or '(no stderr)'}"
+        )
+    return verdict
+
+
 def acquire(runner: Runner, claims_dir: Path, name: str, ttl_min: int = 60) -> Lease | None:
     argv = _claim_argv(claims_dir, name, ttl_min)
-    result = runner.run(argv)
+    result = _claim_once(runner, argv)
     if result.returncode == 0:
         return Lease(claims_dir=Path(claims_dir), name=name, runner=runner)
-    if "stale-cleared" in (result.stderr or ""):
+    if _refusal_or_raise(result) == "stale-cleared":
         # The CLI call that DISCOVERS staleness never wins in-band
         # (meeting-brief.ts unlinks the dead holder's lock and reports
         # stale-cleared WITHOUT reclaiming -- two overlapping fires can
         # never both win off this path). Retry ONCE, immediately: the lock
         # is now gone, so the retry's O_CREAT|O_EXCL fast path wins cleanly
         # instead of making the caller wait for its next tick.
-        retry = runner.run(argv)
+        retry = _claim_once(runner, argv)
         if retry.returncode == 0:
             return Lease(claims_dir=Path(claims_dir), name=name, runner=runner)  # G-LOCK-4: retry-once wins
+        _refusal_or_raise(retry)
         return None
     return None  # G-LOCK-3: plain refusal (already-claimed, still live) -- no retry

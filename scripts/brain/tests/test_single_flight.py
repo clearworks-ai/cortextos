@@ -224,3 +224,44 @@ def test_lost_lease_release_is_a_noop_and_never_raises(tmp_path) -> None:
     lease = SF.Lease(claims_dir=tmp_path / "claims", name="client-state-lock", runner=runner, lost=True)
     lease.release()
     assert runner.calls == []
+
+
+# --- G2A-3: contention vs operational failure --------------------------------
+# `acquire` returning None means "someone else holds a LIVE claim" and the
+# caller turns that into exit 2 with an untouched success receipt. An unwritable
+# claims dir, a missing `cortextos`, or a timed-out claim call is NOT contention
+# — collapsing it to None hid a poller that could not run at all.
+
+def test_acquire_raises_on_an_operational_claim_failure(tmp_path) -> None:
+    runner = FakeRunner()
+    runner.record(CLAIM_PREFIX, rc=1, stderr="EACCES: permission denied, mkdir '/claims'\n")
+    with pytest.raises(SF.LeaseAcquireError) as exc:
+        SF.acquire(runner, tmp_path / "claims", "client-state-lock", ttl_min=60)
+    assert "permission denied" in str(exc.value)
+    assert len(runner.calls) == 1          # G-LOCK-3: still no retry
+
+
+def test_acquire_raises_when_the_claim_command_cannot_run(tmp_path) -> None:
+    class _Missing(FakeRunner):
+        def run(self, argv, **kw):
+            self.calls.append(list(argv))
+            raise FileNotFoundError(2, "No such file or directory: 'cortextos'")
+
+    with pytest.raises(SF.LeaseAcquireError) as exc:
+        SF.acquire(_Missing(), tmp_path / "claims", "client-state-lock", ttl_min=60)
+    assert "cortextos" in str(exc.value)
+
+
+def test_acquire_raises_when_the_stale_retry_fails_operationally(tmp_path) -> None:
+    runner = FakeRunner()
+    runner.record(CLAIM_PREFIX, rc=1, stderr="Already claimed x (stale-cleared)\n")
+    runner.record(CLAIM_PREFIX, rc=1, stderr="EACCES: permission denied\n")
+    with pytest.raises(SF.LeaseAcquireError):
+        SF.acquire(runner, tmp_path / "claims", "client-state-lock", ttl_min=60)
+
+
+def test_acquire_returns_none_when_the_stale_retry_finds_a_live_claim(tmp_path) -> None:
+    runner = FakeRunner()
+    runner.record(CLAIM_PREFIX, rc=1, stderr="Already claimed x (stale-cleared)\n")
+    runner.record(CLAIM_PREFIX, rc=1, stderr="Already claimed x (already-claimed)\n")
+    assert SF.acquire(runner, tmp_path / "claims", "client-state-lock", ttl_min=60) is None

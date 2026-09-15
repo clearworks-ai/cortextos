@@ -580,31 +580,37 @@ def _do_writes(
 def run(cfg: Config, runner) -> RunResult:
     cfg.state_dir.mkdir(parents=True, exist_ok=True)
     claims_dir = cfg.state_dir / "claims"
-    lease = single_flight.acquire(runner, claims_dir, "client-state-gmail", ttl_min=60)
-    if lease is None:
-        # G0A2-16 / binding goal G4 item 5 (amended 2026-09-14): a lock-held
-        # refusal leaves run-receipt.json BYTE-IDENTICAL and writes its cause to
-        # last-lock-refusal.json. record_failure is for the gws/extraction/
-        # writer/budget/catch-all paths, which the goal still wants on the
-        # receipt; a fail-closed halt must not falsify the success receipt.
-        record_lock_refusal(cfg.state_dir, holder_pid=os.getpid(), detail=str(claims_dir))  # G-LOCKREF-1
-        return RunResult(exit_code=2, previews=["lock held — another run is in progress"])
-
     result = RunResult(exit_code=0)
     ledger = Ledger(cfg.state_dir / "observations.jsonl")
     state = _RunState()
     messages_raw: list[dict] = []
     truncation: list[dict] = []
-
-    # G0B3-6 / A2: heartbeat the lease for the WHOLE acquired interval, not once
-    # per message. Wrapping the runner puts a tick on every call boundary the
-    # run has — each sweep query, each `gws +read`, the `claude` call, and every
-    # CRM/bus write — so neither a 14-day backfill sweep nor one slow extraction
-    # can let a live run's lock go stale.
-    heartbeat = single_flight.Heartbeat(lease, clock=cfg.clock)
-    runner = single_flight.HeartbeatRunner(runner, heartbeat)  # G-LOCK-8
+    lease = None
 
     try:
+        # G-LOCK-9 (G2A-3): acquisition happens INSIDE the guarded try, so a
+        # missing `cortextos`, an unwritable claims dir or a timed-out claim
+        # call lands on the structured failure path (record_failure + exit 3)
+        # instead of escaping run() raw. Only a real already-claimed verdict
+        # returns None.
+        lease = single_flight.acquire(runner, claims_dir, "client-state-gmail", ttl_min=60)
+        if lease is None:
+            # G0A2-16 / binding goal G4 item 5 (amended 2026-09-14): a lock-held
+            # refusal leaves run-receipt.json BYTE-IDENTICAL and writes its cause to
+            # last-lock-refusal.json. record_failure is for the gws/extraction/
+            # writer/budget/catch-all paths, which the goal still wants on the
+            # receipt; a fail-closed halt must not falsify the success receipt.
+            record_lock_refusal(cfg.state_dir, holder_pid=os.getpid(), detail=str(claims_dir))  # G-LOCKREF-1
+            return RunResult(exit_code=2, previews=["lock held — another run is in progress"])
+
+        # G0B3-6 / A2: heartbeat the lease for the WHOLE acquired interval, not once
+        # per message. Wrapping the runner puts a tick on every call boundary the
+        # run has — each sweep query, each `gws +read`, the `claude` call, and every
+        # CRM/bus write — so neither a 14-day backfill sweep nor one slow extraction
+        # can let a live run's lock go stale.
+        heartbeat = single_flight.Heartbeat(lease, clock=cfg.clock)
+        runner = single_flight.HeartbeatRunner(runner, heartbeat)  # G-LOCK-8
+
         messages_raw, truncation = gmail_source.sweep(runner, cfg.days, cfg.today, extra_query=cfg.query)  # G-QUERY-1
         result.truncation = truncation
 
@@ -658,6 +664,7 @@ def run(cfg: Config, runner) -> RunResult:
     except (
         GmailSourceError, extract_email.ExtractionError, client_state_writes.WriterError,
         client_state_writes.TaskEnumerationError, EscalationError, single_flight.LeaseLost,
+        single_flight.LeaseAcquireError,
     ) as exc:
         # G0B-6: a failure receipt carries the partial progress this run made
         # (messages seen, truncation, cost already paid) alongside the error.
@@ -675,7 +682,8 @@ def run(cfg: Config, runner) -> RunResult:
         return result
     finally:
         try:
-            lease.release()  # G-LOCK-6: a no-op once the lease is lost
+            if lease is not None:
+                lease.release()  # G-LOCK-6: a no-op once the lease is lost
         except single_flight.LeaseReleaseError as exc:
             # G0B3-11: the work may well have succeeded, but the lock is still
             # held — every later poll will refuse. Surface it as exit 3 with its

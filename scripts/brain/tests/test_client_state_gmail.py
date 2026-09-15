@@ -523,7 +523,8 @@ def test_lock_held_exit_2_leaves_receipt_byte_identical_and_writes_refusal_file(
 
     # 2) the lock is held by a live holder -- the claim CLI refuses
     runner2 = FakeRunner()
-    runner2.record(("cortextos", "bus", "meeting-brief-claim"), rc=1, stdout="", stderr="held")
+    runner2.record(("cortextos", "bus", "meeting-brief-claim"), rc=1, stdout="",
+                   stderr="Already claimed client-state-gmail (already-claimed)")
     result = csg.run(cfg, runner2)
 
     assert result.exit_code == 2
@@ -1398,3 +1399,40 @@ def test_budget_exit_in_a_live_run_stays_real(tmp_path):
     assert csg.run(cfg, runner).exit_code == 12
     rows = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
     assert rows[0]["simulated"] is False
+
+
+def _receipt_bytes(cfg) -> bytes:
+    return (cfg.state_dir / "run-receipt.json").read_bytes()
+
+
+def test_claim_operational_failure_exits_3_and_records_failure(tmp_path):
+    """G2A-3: an unwritable claims dir is not lock contention. It must produce
+    the structured failure receipt (exit 3), NOT a lock-held refusal that leaves
+    the success receipt looking fresh."""
+    cfg = _cfg(tmp_path, dry_run=True)
+    runner = FakeRunner()
+    runner.record(("cortextos", "bus", "meeting-brief-claim"), rc=1, stdout="",
+                  stderr="EACCES: permission denied, mkdir '/claims'")
+
+    result = csg.run(cfg, runner)
+
+    assert result.exit_code == 3
+    assert not (cfg.state_dir / "last-lock-refusal.json").exists()
+    assert "permission denied" in json.loads(_receipt_bytes(cfg))["error"]
+
+
+def test_missing_claim_executable_exits_3(tmp_path):
+    cfg = _cfg(tmp_path, dry_run=True)
+
+    class _Missing(FakeRunner):
+        def run(self, argv, **kw):
+            self.calls.append(list(argv))
+            if argv[:3] == ["cortextos", "bus", "meeting-brief-claim"]:
+                raise FileNotFoundError(2, "No such file or directory: 'cortextos'")
+            return super().run(argv, **kw)
+
+    result = csg.run(cfg, _Missing())
+
+    assert result.exit_code == 3
+    assert not (cfg.state_dir / "last-lock-refusal.json").exists()
+    assert "cortextos" in json.loads(_receipt_bytes(cfg))["error"]

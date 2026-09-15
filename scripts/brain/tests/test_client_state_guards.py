@@ -5,12 +5,12 @@ writer's landed part, materialised via
 swept with the SAME regex test_no_unregistered_guard below uses (a G-ID
 token anywhere after a '#' on its line -- docstring/prose mentions of a
 G-ID, which several modules still carry alongside their real marker, do NOT
-count). 73 rows: LEDGER x7, RECEIPT x2, LOCK x8, LOCKREF x1, SWEEP x10, RES x2,
+count). 74 rows: LEDGER x7, RECEIPT x2, LOCK x9, LOCKREF x1, SWEEP x10, RES x2,
 EXT x4, INV x2, BASE x2, SUPER x1, DIG x3, BUS x3 (TS), IDEMP x2, MERGE x3,
 SIM x1, ESC x3, QUERY x1, FAIL x1, BUDGET x2, CRM x2, HIST x2, PARITY x2,
 WRITER x2, OWNER x1, TASK x2, DEDUP x1, EFFECT x2, REV x1.
 
-The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10; the G2 round-2 wave (2026-09-15) added G-ESC-3.
+The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10; the G2 round-2 wave (2026-09-15) added G-ESC-3 and G-LOCK-9.
 
 The last 8 rows (G-MERGE-2/3, G-EFFECT-1, G-BUDGET-2, G-REV-1, G-PARITY-2,
 G-LOCK-7/8) were added by the post-cap adjudication wave (2026-09-15) that
@@ -80,6 +80,12 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "a 'stale-cleared' refusal retries acquire ONCE in-process and wins the now-empty slot (G4 item 5: stale => next acquire wins)",
      "scripts/brain/tests/test_single_flight.py::test_acquire_retries_once_on_stale_cleared_stderr_and_wins",
      r's/return Lease\(claims_dir=Path\(claims_dir\), name=name, runner=runner\)  # G-LOCK-4: retry-once wins/return None  # G-LOCK-4 (mutated)/'),
+    ("G-LOCK-9", "scripts/brain/single_flight.py",
+     "a non-zero meeting-brief-claim whose stderr names NEITHER claim verdict is an OPERATIONAL failure "
+     "(LeaseAcquireError -> record_failure + exit 3), never the lock-held exit 2 that leaves the success receipt "
+     "byte-identical (G2A-3); second site: _claim_once wrapping an OSError/timeout from the claim call itself",
+     "scripts/brain/tests/test_single_flight.py::test_acquire_raises_on_an_operational_claim_failure",
+     r's/if verdict is None:  # G-LOCK-9: no claim verdict named -> operational, never contention/if False:  # G-LOCK-9 (mutated)/'),
     ("G-LOCK-5", "scripts/brain/single_flight.py",
      "Lease.touch records `lost` when our own lock file has vanished (a concurrent stale-sweep) instead of silently "
      "pretending we still hold the lease - the caller stops before further effects (G0B2-13)",
@@ -374,10 +380,10 @@ def test_guard_registry_ids_are_unique():
     assert len(ids) == len(set(ids)), f"duplicate guard ids: {ids}"
 
 
-def test_guard_registry_has_73_rows():
+def test_guard_registry_has_74_rows():
     # Pinned count (rebuilt 2026-09-14 from the FINAL parts, G0 round-3
     # integration) so a future guard silently dropping out is itself caught.
-    assert len(GUARD_REGISTRY) == 73, f"expected 73 rows, got {len(GUARD_REGISTRY)}"
+    assert len(GUARD_REGISTRY) == 74, f"expected 74 rows, got {len(GUARD_REGISTRY)}"
 
 
 def test_guard_registry_rows_have_five_fields():

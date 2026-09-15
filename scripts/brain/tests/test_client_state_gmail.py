@@ -2150,3 +2150,74 @@ def test_a_named_sender_is_still_auto_created(tmp_path):
 
     assert csg.run(cfg, runner).exit_code == 0
     assert any(len(c) > 1 and "upsert-contact.py" in c[1] for c in runner.calls)
+
+
+# --- FINAL F-1 / F-2 (2026-09-15) ---------------------------------------------------
+
+def test_a_transport_failure_is_run_fatal_and_consumes_no_attempt(tmp_path):
+    """F-1: rc != 0 (credit balance, auth, 529) is an OUTAGE, not a rejected output:
+    exit 3, cause on the receipt, attempt budget untouched, nothing frozen; the next
+    sweep retries and files."""
+    cfg = _cfg(tmp_path, dry_run=False)
+    r1 = FakeRunner()
+    _lock_ok(r1, cfg.state_dir / "claims")
+    r1.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    r1.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+    _open_tasks_empty(r1)
+    r1.record(("claude",), rc=1, stdout="", stderr="Credit balance is too low")
+    result = csg.run(cfg, r1)
+    assert result.exit_code == 3
+    assert sum(1 for c in r1.calls if c and c[0] == "claude") == 1
+    receipt = json.loads((cfg.state_dir / "run-receipt.json").read_text())
+    assert "Credit balance" in receipt["error"]
+    from observation_ledger import read_extraction_attempts
+    assert read_extraction_attempts(cfg.state_dir) == {}
+    rows = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()] if (cfg.state_dir / "observations.jsonl").exists() else []
+    assert not any((row.get("extraction_attempt") or {}).get("frozen") for row in rows)
+
+    r2 = _extraction_runner(cfg, _claude_wrapper())
+    assert csg.run(cfg, r2).exit_code == 0
+    assert sum(1 for c in r2.calls if c and c[0] == "claude") == 1
+    rows = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
+    assert all(res["outcome"] == "filed" for res in rows[-1]["resolutions"])
+
+
+def test_a_frozen_message_writes_nothing_and_enumerates_nothing_on_later_sweeps(tmp_path):
+    """F-2: sweep N+1 after a freeze appends 0 rows, issues 0 list-tasks reads and 0
+    claude calls, exits 0, and the receipt still lists the frozen identity."""
+    cfg = _cfg(tmp_path, dry_run=False)
+    r1 = _extraction_runner(cfg, _invalid_wrapper())
+    r1.record(("claude",), rc=0, stdout=_invalid_wrapper())
+    assert csg.run(cfg, r1).exit_code == 0
+    rows_after_freeze = len((cfg.state_dir / "observations.jsonl").read_text().splitlines())
+
+    r2 = _extraction_runner(cfg, None)
+    result2 = csg.run(cfg, r2)
+    assert result2.exit_code == 0
+    assert len((cfg.state_dir / "observations.jsonl").read_text().splitlines()) == rows_after_freeze
+    assert sum(1 for c in r2.calls if c and c[0] == "claude") == 0
+    assert sum(1 for c in r2.calls if c[:3] == ["cortextos", "bus", "list-tasks"]) == 0
+    receipt = json.loads((cfg.state_dir / "run-receipt.json").read_text())
+    assert [f["source_ref"] for f in receipt["extraction_failures"]] == ["gmail:m1"]
+    assert receipt["extraction_failures"][0]["frozen"] is True
+
+
+def test_retry_frozen_gives_a_frozen_identity_a_fresh_budget(tmp_path):
+    """F-1: the named un-freeze path. --retry-frozen clears the budget, the next call
+    is made, and a usable result files the message."""
+    cfg = _cfg(tmp_path, dry_run=False)
+    r1 = _extraction_runner(cfg, _invalid_wrapper())
+    r1.record(("claude",), rc=0, stdout=_invalid_wrapper())
+    assert csg.run(cfg, r1).exit_code == 0
+
+    import dataclasses
+    cfg_retry = dataclasses.replace(cfg, retry_frozen=True)
+    r2 = _extraction_runner(cfg_retry, _claude_wrapper())
+    result = csg.run(cfg_retry, r2)
+    assert result.exit_code == 0
+    assert any(p.startswith("retry-frozen: cleared 1") for p in result.previews), result.previews
+    assert sum(1 for c in r2.calls if c and c[0] == "claude") == 1
+    rows = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
+    assert all(res["outcome"] == "filed" for res in rows[-1]["resolutions"])
+    from observation_ledger import read_extraction_attempts
+    assert read_extraction_attempts(cfg.state_dir) == {}

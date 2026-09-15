@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -80,11 +81,20 @@ class ContextItem:
 
 
 class ExtractionError(Exception):
-    """claude rc != 0, or the model's JSON failed to parse or validate."""
+    """The model's rc-0 output failed to parse or validate (a REJECTED output —
+    the attempt budget applies: one retry, then freeze)."""
 
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
         self.reason = reason
+
+
+class ExtractionTransportError(ExtractionError):
+    """claude produced no result at all: rc != 0 (auth, credit balance, 529,
+    network) or a runner timeout. FINAL F-1 (2026-09-15): this is NOT a rejected
+    output — the sweep must fail closed (exit 3, cause on the receipt) and the
+    attempt budget must not be consumed, or one fleet-wide outage freezes every
+    message in the window and reports success."""
 
 
 class BudgetExceeded(Exception):
@@ -264,9 +274,12 @@ def extract(
     `slugs: list[str]` — see Task 10.
     """
     prompt = build_prompt(msg, context)
-    proc = runner.run(list(CLAUDE_ARGV), input=prompt)  # G-EXT-2
+    try:
+        proc = runner.run(list(CLAUDE_ARGV), input=prompt)  # G-EXT-2
+    except subprocess.TimeoutExpired as exc:
+        raise ExtractionTransportError(f"claude timeout after {exc.timeout}s") from exc
     if proc.returncode != 0:
-        raise ExtractionError(_claude_failure_reason(proc))
+        raise ExtractionTransportError(_claude_failure_reason(proc))  # G-EXT-7
     try:
         model_obj, wrapper = _parse_claude_stdout(proc.stdout)
         validate_email_extraction(model_obj, len(context))

@@ -200,7 +200,8 @@ def plan_digest_line(row: ObservationRow) -> list[str]:
         reason = str(attempt.get("last_error") or "").strip()
         lines.append(
             f"- extraction failed twice — manual re-run: {row.source_ref}"
-            + (f" ({reason})" if reason else "") + tag
+            + (f" ({reason})" if reason else "")
+            + " — client_state_gmail.py --retry-frozen" + tag
         )
     return lines
 

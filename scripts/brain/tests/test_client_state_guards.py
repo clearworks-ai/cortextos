@@ -205,10 +205,10 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "scripts/brain/tests/test_client_state_gmail.py::test_a_filed_prior_resolution_is_carried_verbatim_not_re_evaluated",
      r's/if old is not None and old\.outcome == "filed":  # G-MERGE-1/if False:  # G-MERGE-1 (mutated)/'),
     ("G-ESC-1", "scripts/brain/client_state_gmail.py",
-     "escalation fires at most once per (source_ref, content_digest) via ledger.escalated_for - marked at both the "
-     "no-pending and the has-pending escalation branches",
+     "escalation fires at most once per (source_ref, content_digest) via the esc_state['already'] verdict that "
+     "ledger.escalated_for produced - marked at both the no-pending and the has-pending escalation branches",
      "scripts/brain/tests/test_client_state_gmail.py::test_ambiguous_message_escalates_once_then_stays_silent",
-     r's/if escalated and not ledger\.escalated_for\(source_ref, digest\):  # G-ESC-1/if False:  # G-ESC-1 (mutated)/g'),
+     r's/if escalated and not esc_state\["already"\]:  # G-ESC-1/if False:  # G-ESC-1 (mutated)/g'),
     ("G-QUERY-1", "scripts/brain/client_state_gmail.py",
      "run() passes cfg.query through to gmail_source.sweep as extra_query - the manual backfill query never bypasses the "
      "exclusion filter or date bounds",

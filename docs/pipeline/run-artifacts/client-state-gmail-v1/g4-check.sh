@@ -179,6 +179,17 @@ doc = json.load(open(sys.argv[1]))
 bad = []
 if doc.get('vault_porcelain', None) != '':
     bad.append('vault_porcelain not empty: ' + repr(doc.get('vault_porcelain')))
+# G2r2-12: porcelain alone is NOT proof the vault was untouched. `*.md.lock` is
+# gitignored, so the dry run's advisory-lock file (created and truncated INSIDE
+# the vault) never showed up in `git status --porcelain`. The no-prod-writes
+# evidence must therefore also carry a RECURSIVE FILE-LISTING diff of the vault
+# copy, taken before and after the run, and it must be empty. A missing key is a
+# FAILURE, not a pass: evidence that was never gathered proves nothing.
+if 'vault_tree_diff' not in doc:
+    bad.append('vault_tree_diff missing - a recursive vault file-listing diff is required '
+               'because porcelain cannot see gitignored artifacts such as *.md.lock')
+elif doc.get('vault_tree_diff') != '':
+    bad.append('vault_tree_diff not empty: ' + repr(doc.get('vault_tree_diff')))
 for key in ('contacts_json', 'interactions_jsonl'):
     row = doc.get('crm', {}).get(key, {})
     if not row.get('sha_before') or row.get('sha_before') != row.get('sha_after'):
@@ -349,7 +360,7 @@ check_4_no_prod_writes() {
   local out
   out=$(python3 "$PYLIB/check3.py" "$f")
   if [ "$out" = "OK" ]; then
-    record "4-no-prod-writes.json" 0 "porcelain empty, sha pairs match, no forbidden verbs"
+    record "4-no-prod-writes.json" 0 "porcelain + recursive tree diff empty, sha pairs match, no forbidden verbs"
   else
     record "4-no-prod-writes.json" 1 "$out"
   fi
@@ -552,6 +563,7 @@ EOF
     cat > "$dir/no-prod-writes.json" <<'EOF'
 {
   "vault_porcelain": "",
+  "vault_tree_diff": "",
   "crm": {
     "contacts_json": {"sha_before": "aaa", "sha_after": "aaa"},
     "interactions_jsonl": {"sha_before": "bbb", "sha_after": "bbb"}
@@ -655,6 +667,8 @@ EOF
     "4-no-prod-writes.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/no-prod-writes.json'));d['gws_argv_verbs']=['+draft'];json.dump(d,open('DIR/no-prod-writes.json','w'))\""
     "4-no-prod-writes.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/no-prod-writes.json'));d['shim_forbidden_verbs']=['create-task'];json.dump(d,open('DIR/no-prod-writes.json','w'))\""
     "4-no-prod-writes.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/no-prod-writes.json'));d['crm']['contacts_json']['sha_after']='zzz';json.dump(d,open('DIR/no-prod-writes.json','w'))\""
+    "4-no-prod-writes.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/no-prod-writes.json'));d['vault_tree_diff']='+ clients/acme.md.lock';json.dump(d,open('DIR/no-prod-writes.json','w'))\""
+    "4-no-prod-writes.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/no-prod-writes.json'));d.pop('vault_tree_diff');json.dump(d,open('DIR/no-prod-writes.json','w'))\""
     "5-idempotency.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/idempotency.json'));d.pop('third_run_receipt_byte_identical');json.dump(d,open('DIR/idempotency.json','w'))\""
     "5-idempotency.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/idempotency.json'));d['third_run_receipt_byte_identical']=False;json.dump(d,open('DIR/idempotency.json','w'))\""
     "5-idempotency.json"$'\t'"python3 -c \"import json;d=json.load(open('DIR/idempotency.json'));d.pop('third_run_lock_refusal');json.dump(d,open('DIR/idempotency.json','w'))\""

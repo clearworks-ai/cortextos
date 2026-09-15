@@ -171,7 +171,11 @@ def main() -> int:
     # BYTE-IDENTICAL and the cause must land in last-lock-refusal.json.
     receipt_before_third = (cfg.state_dir / "run-receipt.json").read_bytes()
     r3 = FakeRunner()
-    r3.record(("cortextos", "bus", "meeting-brief-claim"), rc=1, stdout="", stderr="held by pid 4242")
+    # G2A-3: only a REAL already-claimed verdict is contention; any other
+    # non-zero rc is now an operational failure (exit 3), so the fixture has to
+    # speak the CLI's actual refusal language.
+    r3.record(("cortextos", "bus", "meeting-brief-claim"), rc=1, stdout="",
+              stderr="Already claimed client-state-gmail (already-claimed)")
     result3 = csg.run(cfg, r3)
     receipt_after_third = (cfg.state_dir / "run-receipt.json").read_bytes()
     refusal = json.loads((cfg.state_dir / "last-lock-refusal.json").read_text())
@@ -179,7 +183,8 @@ def main() -> int:
     # stale lock: the claim CLI reports stale-cleared, single_flight retries once and wins
     cfg4 = _cfg(scratch / "run4", now)
     r4 = FakeRunner()
-    r4.record(("cortextos", "bus", "meeting-brief-claim"), rc=1, stdout="", stderr="stale-cleared")
+    r4.record(("cortextos", "bus", "meeting-brief-claim"), rc=1, stdout="",
+              stderr="Already claimed client-state-gmail (stale-cleared)")
     r4.record(("cortextos", "bus", "meeting-brief-claim"), rc=0, stdout="ok")
     r4.record(("cortextos", "bus", "meeting-brief-release"), rc=0, stdout="ok")
     lock4 = single_flight.lock_path(cfg4.state_dir / "claims", "client-state-gmail")

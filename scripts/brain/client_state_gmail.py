@@ -78,6 +78,9 @@ class _RunState:
     """Mutable per-run accumulator -- cost is the only thing shared across
     messages (the --max-usd cap is a whole-run budget, not per-message)."""
     cost: float = 0.0
+    # LIVE-1: rejected extractions are per-message events the run survives; the
+    # success receipt lists them so the digest (FR-009) has a named reader.
+    extraction_failures: list = field(default_factory=list)
 
 
 # --- FR-010 read-only reuse of the meeting pipeline's advisory file lock -----
@@ -417,50 +420,68 @@ def _file_message(
     # second failure the identity FREEZES and says so in the digest, instead of
     # billing quietly until someone notices.
     identity = extract_email.extraction_identity(source_ref, digest, slugs)
-    if ledger.cached_extraction(identity) is None:
-        attempts, last_error = extraction_attempt_state(cfg.state_dir, identity)
-        if attempts >= EXTRACTION_MAX_ATTEMPTS:
+    # LIVE-1 (2026-09-15, first live dry-run): a REJECTED model output is a
+    # per-message event. The single automatic retry runs IN THIS SWEEP, and the
+    # freeze that follows a second rejection writes the frozen row and lets the
+    # sweep CONTINUE -- one malformed output must never abort the other 80
+    # messages in the window (the live run lost 84 of 119 to one open_question
+    # carrying `matches_open_item`). Run-fatal exit 3 stays for transport, lock
+    # and writer errors.
+    # The loop is bounded LOCALLY as well as by the persisted counter: a counter
+    # that fails to advance (a bad write, a mutated increment) must freeze the
+    # message, never spin on paid calls (a mutation-check arm hung here once).
+    in_run_calls = 0
+    while True:
+        if ledger.cached_extraction(identity) is None:
+            attempts, last_error = extraction_attempt_state(cfg.state_dir, identity)
+            if attempts >= EXTRACTION_MAX_ATTEMPTS or in_run_calls >= EXTRACTION_MAX_ATTEMPTS:
+                for r in resolutions:
+                    if r.outcome == "pending":
+                        r.outcome = "partial"
+                ledger.append(ObservationRow(
+                    source_ref=source_ref, thread_id=msg.thread_id, content_digest=digest,
+                    observed_at=cfg.now.isoformat(), resolutions=resolutions,
+                    reason=f"extraction frozen after {attempts} attempts: {last_error}",
+                    revision_of=revision_of, simulated=cfg.dry_run, partial=True,
+                    extraction_attempt={
+                        "identity": identity, "attempt": attempts,
+                        "last_error": last_error, "frozen": True,
+                    },
+                ))
+                state.extraction_failures.append({
+                    "source_ref": source_ref, "identity": identity,
+                    "attempts": attempts, "last_error": last_error,
+                })
+                return 0, len(escalated), len(ignored)
+            record_extraction_attempt(cfg.state_dir, identity)
+            in_run_calls += 1
+        try:
+            extraction, called = extract_email.cached_or_extract(
+                ledger, msg, context, slugs, runner, max_usd=cfg.max_usd, spent_usd=state.cost,
+            )
+        except extract_email.ExtractionError as exc:
+            record_extraction_failure(cfg.state_dir, identity, str(exc))
+            continue  # G-EXT-6: retry once in-run, then the freeze branch above ends this message
+        except extract_email.BudgetExceeded as exc:
+            # G0B3-2 / FR-001 (at most ONE LLM call per source_ref+digest+slugs):
+            # the call has ALREADY been paid for and stamped. Persist it here, as a
+            # non-terminal row, BEFORE the run exits 12 -- run()'s own handler only
+            # ever saw the receipt, so the cache was lost and the next run paid
+            # again for an identical message. The stamped extraction carries its own
+            # `identity`, `bound_slugs` and `context` mapping, so the retry's
+            # cached_or_extract matches it and rebinds against the fresh context.
             for r in resolutions:
                 if r.outcome == "pending":
                     r.outcome = "partial"
-            ledger.append(ObservationRow(
+            ledger.append(ObservationRow(  # G-BUDGET-2
                 source_ref=source_ref, thread_id=msg.thread_id, content_digest=digest,
                 observed_at=cfg.now.isoformat(), resolutions=resolutions,
-                reason=f"extraction frozen after {attempts} attempts: {last_error}",
-                revision_of=revision_of, simulated=cfg.dry_run, partial=True,
-                extraction_attempt={
-                    "identity": identity, "attempt": attempts,
-                    "last_error": last_error, "frozen": True,
-                },
+                reason=f"budget: {exc}", extraction=exc.extraction, writes=[],
+                revision_of=revision_of, partial=True,
+                simulated=cfg.dry_run,  # G-LEDGER-6: a dry-run budget row is a PREVIEW, not a real run
             ))
-            return 0, len(escalated), len(ignored)
-        record_extraction_attempt(cfg.state_dir, identity)
-    try:
-        extraction, called = extract_email.cached_or_extract(
-            ledger, msg, context, slugs, runner, max_usd=cfg.max_usd, spent_usd=state.cost,
-        )
-    except extract_email.ExtractionError as exc:
-        record_extraction_failure(cfg.state_dir, identity, str(exc))
-        raise
-    except extract_email.BudgetExceeded as exc:
-        # G0B3-2 / FR-001 (at most ONE LLM call per source_ref+digest+slugs):
-        # the call has ALREADY been paid for and stamped. Persist it here, as a
-        # non-terminal row, BEFORE the run exits 12 -- run()'s own handler only
-        # ever saw the receipt, so the cache was lost and the next run paid
-        # again for an identical message. The stamped extraction carries its own
-        # `identity`, `bound_slugs` and `context` mapping, so the retry's
-        # cached_or_extract matches it and rebinds against the fresh context.
-        for r in resolutions:
-            if r.outcome == "pending":
-                r.outcome = "partial"
-        ledger.append(ObservationRow(  # G-BUDGET-2
-            source_ref=source_ref, thread_id=msg.thread_id, content_digest=digest,
-            observed_at=cfg.now.isoformat(), resolutions=resolutions,
-            reason=f"budget: {exc}", extraction=exc.extraction, writes=[],
-            revision_of=revision_of, partial=True,
-            simulated=cfg.dry_run,  # G-LEDGER-6: a dry-run budget row is a PREVIEW, not a real run
-        ))
-        raise
+            raise
+        break
     if called:
         state.cost += float(extraction.get("cost_usd", 0.0))
         clear_extraction_attempts(cfg.state_dir, identity)  # a usable result retires the budget
@@ -809,6 +830,7 @@ def run(cfg: Config, runner) -> RunResult:
         receipt = {
             "last_success_at": cfg.now.isoformat(), "window_days": cfg.days,
             "message_count": len(messages_raw), "truncation": truncation, "cost_usd": state.cost,
+            "extraction_failures": state.extraction_failures,  # LIVE-1
         }
         write_receipt(cfg.state_dir, receipt)  # persisted in BOTH dry-run and live (C7/G0A-3)
         result.cost_usd = state.cost

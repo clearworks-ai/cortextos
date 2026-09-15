@@ -570,3 +570,20 @@ def test_cached_matches_are_rebound_against_the_current_context(tmp_path):
     assert out2["commitments"][0]["matches_open_item"] is None
     # the cached row itself is never mutated in place
     assert cached["commitments"][0]["matches_open_item"] == 2
+
+
+def test_prompt_pins_per_section_key_rules():
+    """LIVE-1 (2026-09-15): the live model put `matches_open_item` on an
+    open_question; the schema rejected it and the sweep died. The prompt now
+    states the per-section keys explicitly, and the validator still rejects
+    the stray key."""
+    from extract_email import EMAIL_PROMPT_TEMPLATE, validate_email_extraction
+    assert "Each decisions entry and each open_questions entry has EXACTLY two keys: text and quote." in EMAIL_PROMPT_TEMPLATE
+    assert "matches_open_item exists ONLY on commitments entries" in EMAIL_PROMPT_TEMPLATE
+    bad = {
+        "schema": "brain.email_extraction/1", "summary": "Evelyn asks Josh to call about a duplicate payment.",
+        "decisions": [], "commitments": [],
+        "open_questions": [{"text": "duplicate payment?", "quote": "duplicate payment", "matches_open_item": None}],
+    }
+    with pytest.raises(ValueError, match="matches_open_item"):
+        validate_email_extraction(bad, 0)

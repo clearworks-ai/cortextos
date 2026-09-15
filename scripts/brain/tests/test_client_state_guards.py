@@ -183,6 +183,12 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "(G2r3-7); other sites: the freeze branch and the clear-on-success in client_state_gmail",
      "scripts/brain/tests/test_client_state_gmail.py::test_an_invalid_extraction_is_retried_exactly_once_then_frozen",
      r's/    row\["attempt"\] = int\(row\.get\("attempt"\) or 0\) \+ 1  # G-EXT-5/    row["attempt"] = 0  # G-EXT-5 (mutated)/'),
+    ("G-EXT-6", "scripts/brain/client_state_gmail.py",
+     "a REJECTED extraction is a per-message event: the single retry runs in the same sweep and a second rejection "
+     "freezes the identity and the sweep CONTINUES (LIVE-1, first live dry-run 2026-09-15: one stray key aborted "
+     "84 of 119 messages); run-fatal exit 3 stays for transport/lock/writer errors",
+     "scripts/brain/tests/test_client_state_gmail.py::test_a_rejected_extraction_does_not_abort_the_sweep",
+     r's/            continue  # G-EXT-6: retry once in-run, then the freeze branch above ends this message/            raise  # G-EXT-6 (mutated)/'),
     ("G-INV-1", "scripts/brain/client_state_digest.py",
      "compute_invariants keys domain_multi on the FULL domain - never a registrable_label collapse (example.com/example.org must not collide)",
      "scripts/brain/tests/test_client_state_digest.py::test_compute_invariants_does_not_confuse_different_tlds",
@@ -486,7 +492,7 @@ def test_guard_registry_ids_are_unique():
 def test_guard_registry_has_90_rows():
     # Pinned count (rebuilt 2026-09-14 from the FINAL parts, G0 round-3
     # integration) so a future guard silently dropping out is itself caught.
-    assert len(GUARD_REGISTRY) == 90, f"expected 90 rows, got {len(GUARD_REGISTRY)}"
+    assert len(GUARD_REGISTRY) == 91, f"expected 91 rows, got {len(GUARD_REGISTRY)}"
 
 
 def test_guard_registry_rows_have_five_fields():

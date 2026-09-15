@@ -1994,23 +1994,17 @@ def _extraction_runner(cfg, claude_stdout):
 
 
 def test_an_invalid_extraction_is_retried_exactly_once_then_frozen(tmp_path):
+    """G2r3-7 as refined by LIVE-1 (first live dry-run, 2026-09-15): the ONE
+    automatic retry happens IN THE SAME SWEEP; a second rejection freezes the
+    identity, writes the frozen row, lists it on the receipt, and the sweep
+    finishes with exit 0. It never aborts the run."""
     cfg = _cfg(tmp_path, dry_run=False)
 
-    # attempt 1: rejected
     r1 = _extraction_runner(cfg, _invalid_wrapper())
-    assert csg.run(cfg, r1).exit_code == 3
-    assert sum(1 for c in r1.calls if c and c[0] == "claude") == 1
-
-    # attempt 2 (the ONE automatic retry): rejected again
-    r2 = _extraction_runner(cfg, _invalid_wrapper())
-    assert csg.run(cfg, r2).exit_code == 3
-    assert sum(1 for c in r2.calls if c and c[0] == "claude") == 1
-
-    # attempt 3: FROZEN — no further automatic calls, and the digest says so
-    r3 = _extraction_runner(cfg, None)
-    result3 = csg.run(cfg, r3)
-    assert result3.exit_code == 0
-    assert sum(1 for c in r3.calls if c and c[0] == "claude") == 0
+    r1.record(("claude",), rc=0, stdout=_invalid_wrapper())  # the retry is rejected too
+    result1 = csg.run(cfg, r1)
+    assert result1.exit_code == 0
+    assert sum(1 for c in r1.calls if c and c[0] == "claude") == 2
 
     rows = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
     frozen = rows[-1]
@@ -2019,6 +2013,18 @@ def test_an_invalid_extraction_is_retried_exactly_once_then_frozen(tmp_path):
     assert frozen["extraction_attempt"]["last_error"]
     assert frozen["partial"] is True
 
+    receipt = json.loads((cfg.state_dir / "run-receipt.json").read_text())
+    assert receipt["last_success_at"]
+    assert len(receipt["extraction_failures"]) == 1
+    assert receipt["extraction_failures"][0]["source_ref"] == "gmail:m1"
+    assert receipt["extraction_failures"][0]["attempts"] == 2
+
+    # the next sweep: FROZEN -- no further automatic calls, and the digest says so
+    r2 = _extraction_runner(cfg, None)
+    result2 = csg.run(cfg, r2)
+    assert result2.exit_code == 0
+    assert sum(1 for c in r2.calls if c and c[0] == "claude") == 0
+
     import client_state_projections as _proj
     from observation_ledger import _row_from_dict
 
@@ -2026,28 +2032,59 @@ def test_an_invalid_extraction_is_retried_exactly_once_then_frozen(tmp_path):
     assert any("extraction failed twice — manual re-run" in ln for ln in lines), lines
 
 
+def test_a_rejected_extraction_does_not_abort_the_sweep(tmp_path):
+    """LIVE-1: message m1's output is rejected twice; m2 (a different body,
+    same known sender) must still be extracted and filed in the SAME run."""
+    cfg = _cfg(tmp_path, dry_run=False)
+    r = FakeRunner()
+    _lock_ok(r, cfg.state_dir / "claims")
+    r.record(("gws", "gmail", "+triage"), rc=0,
+             stdout=json.dumps([{"id": "m1", "threadId": "t1"}, {"id": "m2", "threadId": "t2"}]))
+    r.record(("gws", "gmail", "+read", "--id", "m1"), rc=0, stdout=json.dumps(_gmail_payload()))
+    r.record(("gws", "gmail", "+read", "--id", "m2"), rc=0,
+             stdout=json.dumps(_gmail_payload(mid="m2", subject="Invoice",
+                                              body="Please confirm the invoice total. Thanks.")))
+    _open_tasks_empty(r)
+    r.record(("claude",), rc=0, stdout=_invalid_wrapper())
+    r.record(("claude",), rc=0, stdout=_invalid_wrapper())
+    r.record(("claude",), rc=0, stdout=_claude_wrapper(summary="Marcos asked to confirm the invoice total."))
+    r.record(("python3", str(cfg.crm_dir / "upsert-contact.py")), rc=0, stdout="c1\n")
+    r.record(("python3", str(cfg.crm_dir / "add-interaction.py")), rc=0,
+             stdout=_interaction_stdout(source_ref="gmail:m2"))
+
+    result = csg.run(cfg, r)
+    assert result.exit_code == 0, (result.previews, json.loads((cfg.state_dir / "run-receipt.json").read_text()))
+    assert sum(1 for c in r.calls if c and c[0] == "claude") == 3
+
+    rows = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
+    by_ref = {row["source_ref"]: row for row in rows}
+    assert by_ref["gmail:m1"]["extraction_attempt"]["frozen"] is True
+    assert all(res["outcome"] == "filed" for res in by_ref["gmail:m2"]["resolutions"]), by_ref["gmail:m2"]
+    receipt = json.loads((cfg.state_dir / "run-receipt.json").read_text())
+    assert [f["source_ref"] for f in receipt["extraction_failures"]] == ["gmail:m1"]
+
+
 def test_a_successful_extraction_clears_the_attempt_budget(tmp_path):
     """One rejected output must not spend the budget of the NEXT message state:
-    a success clears the counter, and the cached success is never re-invoked."""
+    the in-run retry's success clears the counter, and the cached success is
+    never re-invoked."""
     cfg = _cfg(tmp_path, dry_run=False)
 
     r1 = _extraction_runner(cfg, _invalid_wrapper())
-    assert csg.run(cfg, r1).exit_code == 3
-
-    r2 = _extraction_runner(cfg, _claude_wrapper())
-    assert csg.run(cfg, r2).exit_code == 0
-    assert sum(1 for c in r2.calls if c and c[0] == "claude") == 1
+    r1.record(("claude",), rc=0, stdout=_claude_wrapper())  # the retry succeeds
+    assert csg.run(cfg, r1).exit_code == 0
+    assert sum(1 for c in r1.calls if c and c[0] == "claude") == 2
 
     from observation_ledger import read_extraction_attempts
     assert read_extraction_attempts(cfg.state_dir) == {}
+    receipt = json.loads((cfg.state_dir / "run-receipt.json").read_text())
+    assert receipt["extraction_failures"] == []
 
     # and the cached success is never re-invoked
     r3 = _extraction_runner(cfg, None)
     assert csg.run(cfg, r3).exit_code == 0
     assert sum(1 for c in r3.calls if c and c[0] == "claude") == 0
 
-
-# --- G2r3-8: never synthesise a contact name from the address ----------------
 
 def _nameless_payload():
     return _gmail_payload(from_email="marcos@acme.org", from_name="")

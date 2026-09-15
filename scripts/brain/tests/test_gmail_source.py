@@ -16,7 +16,7 @@ TESTS_DIR = Path(__file__).resolve().parent
 if str(TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(TESTS_DIR))
 
-from helpers_client_state import FakeRunner  # noqa: E402
+from helpers_client_state import FakeRunner, email_row, ensure_gmail_fixtures  # noqa: E402
 
 FIXTURES = TESTS_DIR / "fixtures" / "client_state"
 
@@ -268,3 +268,129 @@ def test_read_message_nonzero_rc_raises_gmail_source_error() -> None:
     runner = FakeRunner([(["gws", "gmail", "+read"], _err(3, "gws timeout"))])
     with pytest.raises(GmailSourceError, match="gws timeout"):
         read_message(runner, "m001")
+# --- appended for Task 5 (reuses the TESTS_DIR sys.path insert + FakeRunner import above) ---
+
+
+def test_sweep_under_cap_returns_messages_and_no_truncation() -> None:
+    ensure_gmail_fixtures()
+    from gmail_source import full_window_query, sweep
+
+    today = date(2026, 9, 14)
+    days = 3
+    payload = json.loads((FIXTURES / "triage_3.json").read_text())
+    runner = FakeRunner([(_triage_argv(full_window_query(days, today)), _ok(json.dumps(payload)))])
+
+    messages, truncation = sweep(runner, days, today)
+
+    assert len(messages) == 3
+    assert truncation == []
+    assert runner.calls == [_triage_argv(full_window_query(days, today))]
+
+
+def test_sweep_at_cap_day_sweeps_every_day_unions_by_id_and_reports_full_days() -> None:
+    # G-SWEEP-2 / G-SWEEP-3
+    ensure_gmail_fixtures()
+    from gmail_source import full_window_query, sweep, window_queries
+
+    today = date(2026, 9, 14)
+    days = 3
+    full_payload = json.loads((FIXTURES / "triage_50.json").read_text())
+    responses = [(_triage_argv(full_window_query(days, today)), _ok(json.dumps(full_payload)))]
+
+    for label, query in window_queries(days, today):
+        if label == "2026-09-13":
+            rows = [email_row(f"d13-{i:03d}", "t13", "a@abundowealth.com", "2026-09-13T00:00:00Z") for i in range(50)]
+        elif label == "2026-09-12":
+            rows = [email_row("d12-001", "t12", "b@abundowealth.com", "2026-09-12T00:00:00Z")]
+        else:
+            rows = [email_row("d14-001", "t14", "c@abundowealth.com", "2026-09-14T00:00:00Z")]
+        responses.append((_triage_argv(query), _ok(json.dumps({"total": len(rows), "emails": rows}))))
+
+    runner = FakeRunner(responses)
+    messages, truncation = sweep(runner, days, today)
+
+    ids = {m["id"] for m in messages}
+    assert "d13-000" in ids
+    assert "d13-049" in ids
+    assert "d12-001" in ids
+    assert "d14-001" in ids
+    assert len(ids) == 52
+    assert truncation == [{"day": "2026-09-13", "count": 50}]
+    assert len(runner.calls) == 4
+
+
+def test_sweep_propagates_gmail_source_error_from_a_day_query() -> None:
+    ensure_gmail_fixtures()
+    from gmail_source import GmailSourceError, full_window_query, sweep, window_queries
+
+    today = date(2026, 9, 14)
+    days = 3
+    full_payload = json.loads((FIXTURES / "triage_50.json").read_text())
+    responses = [(_triage_argv(full_window_query(days, today)), _ok(json.dumps(full_payload)))]
+    first_label, first_query = window_queries(days, today)[0]
+    responses.append((_triage_argv(first_query), _err(3, "gws timeout")))
+    runner = FakeRunner(responses)
+
+    with pytest.raises(GmailSourceError, match="gws timeout"):
+        sweep(runner, days, today)
+
+
+def test_sweep_extra_query_present_in_full_and_every_day_query() -> None:
+    # G-SWEEP-9 (C5 / G0B-5): the manual backfill's --query clause composes as
+    # <extra_query> <date ops> <EXCLUSION_QUERY> into BOTH the full-window query and
+    # every per-day query; the 50-cap day-sweep still triggers on this path.
+    ensure_gmail_fixtures()
+    from gmail_source import EXCLUSION_QUERY, sweep
+
+    today = date(2026, 9, 14)
+    days = 3
+    extra = "from:dana@svaraworks.com"
+
+    full_query = f"{extra} after:2026/09/12 before:2026/09/15 {EXCLUSION_QUERY}"
+    full_payload = json.loads((FIXTURES / "triage_50.json").read_text())
+    responses = [(_triage_argv(full_query), _ok(json.dumps(full_payload)))]
+
+    day_bounds = [
+        ("2026-09-12", "2026/09/12", "2026/09/13"),
+        ("2026-09-13", "2026/09/13", "2026/09/14"),
+        ("2026-09-14", "2026/09/14", "2026/09/15"),
+    ]
+    for label, after, before in day_bounds:
+        composed = f"{extra} after:{after} before:{before} {EXCLUSION_QUERY}"
+        rows = [email_row(f"{label}-001", "t", "z@abundowealth.com", f"{label}T00:00:00Z")]
+        responses.append((_triage_argv(composed), _ok(json.dumps({"total": 1, "emails": rows}))))
+
+    runner = FakeRunner(responses)
+    messages, truncation = sweep(runner, days, today, extra_query=extra)
+
+    assert len(runner.calls) == 4  # full query (50-cap) + one per day
+    for call in runner.calls:
+        query = call[4]
+        assert query.startswith(extra + " ")
+        assert query.endswith(EXCLUSION_QUERY)
+    assert truncation == []
+    assert len(messages) == 3
+
+
+def test_read_hostile_fixture_parses_verbatim_no_sanitization() -> None:
+    # gmail_source only transports/parses; injection defenses live in extract_email
+    # (FR-005/G-12, S-05). Proves the ONE recorded hostile fixture (C5/G0A-17) round-
+    # trips unmodified through parse_message, the same path Task 11 uses.
+    ensure_gmail_fixtures()
+    from gmail_source import parse_message
+
+    payload = json.loads((FIXTURES / "read_hostile.json").read_text())
+    msg = parse_message(payload)
+    assert "Ignore previous instructions" in msg.body_text
+    assert msg.from_email == "dana@svaraworks.com"
+
+
+def test_read_m001_fixture_parses_and_strips_quoted_tail() -> None:
+    ensure_gmail_fixtures()
+    from gmail_source import parse_message
+
+    payload = json.loads((FIXTURES / "read_m001.json").read_text())
+    msg = parse_message(payload)
+    assert msg.id == "m001"
+    assert "wrote:" not in msg.body_text
+    assert not any(line.lstrip().startswith(">") for line in msg.body_text.splitlines())

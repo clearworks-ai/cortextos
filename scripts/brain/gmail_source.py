@@ -1,7 +1,8 @@
 """FR-002/FR-003 Gmail source: exclusion query, day-window queries, gws transport,
-message parsing. Every external effect goes through an injectable Runner; this module
-imports Runner ONLY under typing.TYPE_CHECKING because S-02 is not blocked by S-01 and
-must import cleanly whether or not scripts/brain/runner.py exists yet."""
+message parsing, and the 50-cap day-sweep. Every external effect goes through an
+injectable Runner; this module imports Runner ONLY under typing.TYPE_CHECKING because
+S-02 is not blocked by S-01 and must import cleanly whether or not
+scripts/brain/runner.py exists yet."""
 from __future__ import annotations
 
 import base64
@@ -242,3 +243,37 @@ def read_message(runner: "Runner", message_id: str) -> Message:
     except json.JSONDecodeError as exc:
         raise GmailSourceError(f"gws gmail +read returned invalid JSON: {exc}") from exc  # G-SWEEP-6
     return parse_message(obj)
+
+
+def sweep(
+    runner: "Runner", days: int, today: date, extra_query: str | None = None
+) -> tuple[list[dict], list[dict]]:
+    """Runs the full-window query first (composed as <extra_query> <date ops>
+    <EXCLUSION_QUERY> per C5 — the manual backfill's --query clause never bypasses the
+    exclusion filter or date bounds). WHEN it returns fewer than 50 rows THE window is
+    complete and no sweep is needed. WHEN it returns exactly 50 (G-SWEEP-2) THE SYSTEM
+    day-sweeps the FULL window (one query per calendar day, each composed the same way,
+    not a narrowed tail), unions rows by id, and reports every day that itself returned
+    50 ({"day": label, "count": 50}) while still including that day's 50 rows
+    (G-SWEEP-3) — bounded, reported loss on a freak day, never an uncovered remainder."""
+    start = today - timedelta(days=days - 1)
+    end = today + timedelta(days=1)
+    full_query = _compose_query(_date_ops(start, end), extra_query)
+    full = list_messages(runner, full_query, max_results=50)
+    if len(full) < 50:
+        return full, []
+
+    seen: dict[str, dict] = {}
+    truncation: list[dict] = []
+    for offset in range(days - 1, -1, -1):  # G-SWEEP-2
+        day = today - timedelta(days=offset)
+        label = day.strftime("%Y-%m-%d")
+        query = _compose_query(_date_ops(day, day + timedelta(days=1)), extra_query)
+        rows = list_messages(runner, query, max_results=50)
+        if len(rows) == 50:
+            truncation.append({"day": label, "count": 50})  # G-SWEEP-3
+        for row in rows:
+            mid = str(row.get("id", ""))
+            if mid and mid not in seen:
+                seen[mid] = row
+    return list(seen.values()), truncation

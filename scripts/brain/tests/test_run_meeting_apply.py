@@ -1280,6 +1280,63 @@ def test_apply_runs_phase3_rollup_status_filed_before_commit(tmp_path):
     assert f"fireflies:{mid}" in filed_log
 
 
+def test_live_apply_completes_phase3_without_any_sign_marker(tmp_path):
+    """Josh 2026-09-14 ("remove that sign, of course I don't want that"): a
+    single LIVE meeting — no --batch, no --backfill — must run FR-007 ->
+    FR-011 -> FR-013 -> commit and write its receipt with NO d09-signed.json
+    at all. On 2026-09-14 the webhook-driven apply wrote pages, tasks and the
+    recap draft, then died at the phase-3 re-check ("d09-signed.json
+    missing", rc 15) because that one check stayed unconditional after the
+    2026-09-13 change exempted live meetings from the pre/post-fetch checks.
+    Same seed as test_apply_runs_phase3_rollup_status_filed_before_commit,
+    minus the sign_dry_run.py step."""
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    proj = vault / "raw/areas/clearworks/org-brain/projects"
+    (proj / "alloi-01.md").write_text(
+        "# Client: Alloi — Managed Services\n\n## Node\nid: alloi-01\nkind: engagement\n"
+        "client: alloi\nparent:\ntitle: Managed Services\ndomains: alloi.us\ndelivery_state: active\n\n"
+        "## Reporting\ncadence: weekly\nchannel: email\ncontact: marcos@alloi.us\nlast_update:\n\n"
+        "## History (dated, newest first)\n\n## Open Items\n",
+        encoding="utf-8",
+    )
+    alloi03 = proj / "alloi-03.md"
+    text = alloi03.read_text(encoding="utf-8")
+    if "## Reporting" not in text:
+        text = text.replace("## History", "## Reporting\ncadence:\nchannel:\ncontact:\nlast_update:\n\n## History", 1)
+        alloi03.write_text(text, encoding="utf-8")
+    _git(vault, "add", "-A")
+    _git(vault, "commit", "-q", "-m", "seed phase3 (unsigned live)")
+
+    bindir = _install_fakes(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    node_bin = shutil.which("node", path=_ORIGINAL_PATH)
+    if node_bin:
+        env["PATH"] = f"{env['PATH']}:{os.path.dirname(node_bin)}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+
+    marker = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}" / "d09-signed.json"
+    assert not marker.exists()
+
+    r = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply"],
+        capture_output=True, text=True, env=env,
+    )
+    assert r.returncode == 0, r.stderr + r.stdout
+    assert "FAILED at sign-check" not in r.stderr
+    assert not marker.exists()  # nothing minted a signature behind Josh's back
+
+    state = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}"
+    prog = json.loads((state / "progress.json").read_text(encoding="utf-8"))
+    assert prog["rollup"]["done"] is True
+    assert prog["filed"]["done"] is True
+    assert (state / "receipt.json").exists()
+    filed_log = (vault / "raw/areas/clearworks/org-brain/_filed.log").read_text(encoding="utf-8")
+    assert f"fireflies:{mid}" in filed_log
+
+
 def test_apply_force_commits_phase3_writes_when_commit_step_already_done(tmp_path):
     """Josh sign-off 2026-09-06: the production acceptance meeting had been
     R2-applied (progress `commit` done, vault_sha recorded) before phase 3

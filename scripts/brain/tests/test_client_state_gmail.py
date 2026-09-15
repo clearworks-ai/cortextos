@@ -1535,3 +1535,104 @@ def test_recovery_row_after_every_effect_landed_is_terminal(tmp_path):
     assert rows[0]["partial"] is False
     from observation_ledger import Ledger as _L
     assert _L(cfg.state_dir / "observations.jsonl").is_terminal("gmail:m1", rows[0]["content_digest"]) is True
+
+
+# --- G2r2-9 (G2B-3): a landed effect is credited to EVERY resolution that needs it
+
+def test_a_shared_crm_contact_credits_both_resolutions(tmp_path):
+    """One CRM contact reachable at two addresses that bind to two DIFFERENT
+    pages. The interaction row is written once (global crm:<id> dedup), but the
+    second resolution never had the key copied onto it, so it could never be
+    `filed` — the message stayed partial and every unchanged re-check appended
+    another observation."""
+    contacts = [{"id": "c1", "name": "Marcos", "emails": ["marcos@acme.org", "marcos@alloi.us"]}]
+    cfg = _cfg(tmp_path, dry_run=False, contacts=contacts)
+    payload = _gmail_payload(from_email="marcos@acme.org", to=["marcos@alloi.us"])
+
+    runner = FakeRunner()
+    _lock_ok(runner, cfg.state_dir / "claims")
+    runner.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(payload))
+    _open_tasks_empty(runner)
+    runner.record(("claude",), rc=0, stdout=_claude_wrapper())
+    runner.record(("python3", str(cfg.crm_dir / "add-interaction.py")), rc=0, stdout=_interaction_stdout())
+
+    result = csg.run(cfg, runner)
+
+    assert result.exit_code == 0
+    rows = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
+    assert len(rows) == 1
+    assert {r["slug"] for r in rows[0]["resolutions"]} == {"acme", "alloi"}
+    assert [r["outcome"] for r in rows[0]["resolutions"]] == ["filed", "filed"]
+    assert all("crm:c1" in r["effects"] for r in rows[0]["resolutions"])
+    assert rows[0]["partial"] is False
+    # exactly ONE interaction row was written for the shared contact
+    assert sum(1 for c in runner.calls if len(c) > 1 and "add-interaction.py" in c[1]) == 1
+
+    # and the message is terminal, so an unchanged re-check appends NOTHING
+    runner2 = FakeRunner()
+    _lock_ok(runner2, cfg.state_dir / "claims")
+    runner2.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner2.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(payload))
+    assert csg.run(cfg, runner2).exit_code == 0
+    rows2 = (cfg.state_dir / "observations.jsonl").read_text().splitlines()
+    assert len(rows2) == 1
+
+
+def test_a_late_resolution_on_an_already_written_page_is_credited(tmp_path):
+    """G2B-3's page case: the History entry for a page is written once. A
+    counterparty that only resolves on a LATER run and binds to that SAME page
+    must inherit the landed page key, instead of waiting forever for a second
+    entry that correctly never comes — the message stayed partial and every
+    re-check appended another observation."""
+    cfg = _cfg(tmp_path, dry_run=False, contacts=[])
+    # let a CRM `company` bind to the acme page, the way alloi.md already does
+    acme = _page_path(cfg, "acme")
+    acme.write_text(acme.read_text(encoding="utf-8").replace(
+        "domains: acme.org", "domains: acme.org\n\n- CRM org name: Acme Corp"), encoding="utf-8")
+    payload = _gmail_payload(from_email="marcos@acme.org", to=["dana@zorp.example"])
+    contacts_json = cfg.crm_dir / "contacts.json"
+    wrapper = _claude_wrapper(commitments=[
+        {"text": "Send the updated MSA", "owner_name": "Josh", "deadline_iso": None,
+         "quote": "send the updated MSA", "matches_open_item": None},
+    ])
+
+    # run 1: the sender's CRM row and the acme page land; the task creation dies,
+    # so the row is PARTIAL and dana (unknown) produces no resolution at all.
+    r1 = FakeRunner()
+    _lock_ok(r1, cfg.state_dir / "claims")
+    r1.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    r1.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(payload))
+    _open_tasks_empty(r1)
+    r1.record(("claude",), rc=0, stdout=wrapper)
+    r1.record(("python3", str(cfg.crm_dir / "upsert-contact.py")), rc=0, stdout="c-marcos\n")
+    r1.record(("python3", str(cfg.crm_dir / "add-interaction.py")), rc=0,
+              stdout=_interaction_stdout(contact_id="c-marcos"))
+    r1.record(("cortextos", "bus", "create-task"), rc=1, stdout="", stderr="bus down")
+    assert csg.run(cfg, r1).exit_code == 3
+    assert acme.read_text(encoding="utf-8").count("[source: gmail:m1]") == 1
+
+    # run 2: dana turns up in the CRM bound to the SAME page
+    contacts_json.write_text(json.dumps({"contacts": [
+        {"id": "c-marcos", "name": "Marcos", "emails": ["marcos@acme.org"], "company": "Acme Corp"},
+        {"id": "c-dana", "name": "Dana", "emails": ["dana@zorp.example"], "company": "Acme Corp"},
+    ], "source": "test", "version": 1}), encoding="utf-8")
+    cfg2 = _cfg(tmp_path, dry_run=False, vault=cfg.vault, crm_dir=cfg.crm_dir, state_dir=cfg.state_dir)
+    r2 = FakeRunner()
+    _lock_ok(r2, cfg2.state_dir / "claims")
+    r2.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    r2.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(payload))
+    _open_tasks_empty(r2)
+    r2.record(("python3", str(cfg2.crm_dir / "add-interaction.py"), "--contact-id", "c-dana"), rc=0,
+              stdout=_interaction_stdout(contact_id="c-dana"))
+    r2.record(("cortextos", "bus", "create-task"), rc=0, stdout="task_1757800000_00000001\n")
+    assert csg.run(cfg2, r2).exit_code == 0
+
+    rows = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
+    dana = next(r for r in rows[-1]["resolutions"] if r["email"] == "dana@zorp.example")
+    assert dana["outcome"] == "filed", rows[-1]["resolutions"]
+    assert any(e.startswith("page:") for e in dana["effects"])
+    assert all(r["outcome"] == "filed" for r in rows[-1]["resolutions"])
+    assert rows[-1]["partial"] is False
+    # the page still carries exactly ONE entry for this message
+    assert acme.read_text(encoding="utf-8").count("[source: gmail:m1]") == 1

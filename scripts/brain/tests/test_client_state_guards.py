@@ -5,12 +5,12 @@ writer's landed part, materialised via
 swept with the SAME regex test_no_unregistered_guard below uses (a G-ID
 token anywhere after a '#' on its line -- docstring/prose mentions of a
 G-ID, which several modules still carry alongside their real marker, do NOT
-count). 77 rows: LEDGER x8, RECEIPT x2, LOCK x9, LOCKREF x1, SWEEP x10, RES x2,
+count). 78 rows: LEDGER x8, RECEIPT x2, LOCK x9, LOCKREF x1, SWEEP x10, RES x2,
 EXT x4, INV x2, BASE x2, SUPER x1, DIG x4, BUS x4 (TS), IDEMP x2, MERGE x3,
 SIM x1, ESC x3, QUERY x1, FAIL x1, BUDGET x2, CRM x2, HIST x2, PARITY x2,
-WRITER x2, OWNER x1, TASK x2, DEDUP x1, EFFECT x2, REV x1.
+WRITER x2, OWNER x1, TASK x2, DEDUP x1, EFFECT x3, REV x1.
 
-The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10; the G2 round-2 wave (2026-09-15) added G-ESC-3, G-LOCK-9, G-BUS-4, G-DIG-4 and G-LEDGER-8.
+The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10; the G2 round-2 wave (2026-09-15) added G-ESC-3, G-LOCK-9, G-BUS-4, G-DIG-4, G-LEDGER-8 and G-EFFECT-3.
 
 The last 8 rows (G-MERGE-2/3, G-EFFECT-1, G-BUDGET-2, G-REV-1, G-PARITY-2,
 G-LOCK-7/8) were added by the post-cap adjudication wave (2026-09-15) that
@@ -22,7 +22,7 @@ sed_expr). module_path is either a scripts/brain/*.py file (sed_expr is a
 BSD `sed -E` expression) or src/bus/task.ts (the four G-BUS-* rows). A marker
 appearing at MULTIPLE operative sites (G-ESC-1 x2, G-ESC-2 x3, G-ESC-3 x2, G-EXT-2 x2,
 G-LEDGER-6 x4, G-LEDGER-7 x2, G-LOCK-6 x2, G-LOCKREF-1 x2, G-OWNER-1 x2,
-G-PARITY-1 x2, G-SUPER-1 x2, G-SWEEP-6 x4, G-SWEEP-7 x2, G-SWEEP-10 x2, G-WRITER-1 x3,
+G-PARITY-1 x2, G-SUPER-1 x2, G-SWEEP-6 x4, G-SWEEP-7 x2, G-SWEEP-10 x2, G-EFFECT-3 x3, G-WRITER-1 x3,
 G-WRITER-2 x3) gets ONE row whose
 sed_expr mutates the FIRST site (file/definition order); the description
 names every other site so a reviewer can find them without re-deriving this
@@ -367,6 +367,13 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "write or append a duplicate History entry (G2a finding 2)",
      "scripts/brain/tests/test_client_state_gmail.py::test_oserror_on_the_history_write_persists_the_landed_crm_effect",
      r's/except Exception as exc:  # noqa: BLE001 -- G-EFFECT-2: ANY escape persists landed effects/except (client_state_writes.WriterError, EscalationError) as exc:  # G-EFFECT-2 (mutated)/'),
+    ("G-EFFECT-3", "scripts/brain/client_state_gmail.py",
+     "an effect that ALREADY landed for the message is credited to every current resolution that requires it before "
+     "the skip, since the completeness check is per-resolution - a shared CRM contact or a late resolution onto an "
+     "already-written page stayed `partial` forever and re-appended a row on every unchanged re-check (G2B-3); "
+     "other sites: the History-page skip and the per-message task skip",
+     "scripts/brain/tests/test_client_state_gmail.py::test_a_shared_crm_contact_credits_both_resolutions",
+     r's/                mark\(key, \[resolution\]\)/                pass  # G-EFFECT-3 (mutated)/'),
     ("G-BUDGET-2", "scripts/brain/client_state_gmail.py",
      "a BudgetExceeded exit persists the extraction it ALREADY paid for as a non-terminal partial row before exit 12, so the retry is a cache hit and makes zero further claude calls (ruling B / G0B3-2, FR-001)",
      "scripts/brain/tests/test_client_state_gmail.py::test_budget_exit_persists_the_paid_extraction_so_the_retry_pays_nothing",
@@ -398,10 +405,10 @@ def test_guard_registry_ids_are_unique():
     assert len(ids) == len(set(ids)), f"duplicate guard ids: {ids}"
 
 
-def test_guard_registry_has_77_rows():
+def test_guard_registry_has_78_rows():
     # Pinned count (rebuilt 2026-09-14 from the FINAL parts, G0 round-3
     # integration) so a future guard silently dropping out is itself caught.
-    assert len(GUARD_REGISTRY) == 77, f"expected 77 rows, got {len(GUARD_REGISTRY)}"
+    assert len(GUARD_REGISTRY) == 78, f"expected 78 rows, got {len(GUARD_REGISTRY)}"
 
 
 def test_guard_registry_rows_have_five_fields():

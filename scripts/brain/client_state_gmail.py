@@ -476,6 +476,13 @@ def _do_writes(
         if contact_id is not None:  # G-CRM-2
             key = f"crm:{contact_id}"
             if landed(key):
+                # G-EFFECT-3: the effect landed once, for the message -- but the
+                # completeness check is PER RESOLUTION, so the key has to be
+                # credited to THIS one too. Skipping without crediting left a
+                # counterparty that shares a contact (or, below, a page) with an
+                # already-satisfied one permanently `partial`, and every
+                # unchanged re-check appended another observation row.
+                mark(key, [resolution])
                 continue
             argv = projections.plan_add_interaction_argv(cfg.crm_dir, contact_id, msg, extraction)
             if cfg.dry_run:
@@ -498,6 +505,7 @@ def _do_writes(
         page_key_for[resolution.slug] = key
         owners = [r for r in pending if r.slug == resolution.slug]
         if landed(key):
+            mark(key, owners)  # G-EFFECT-3
             continue
         entry = projections.plan_history_entry(msg, extraction, source_ref, revision_of)  # G-PARITY-1
         # G0B-13: hold the SAME advisory lock the meeting pipeline uses across
@@ -531,6 +539,7 @@ def _do_writes(
         key = f"task:{plan.title}"
         if landed(key):
             task_lines.append(f"  task: {plan.title} (already created on an earlier run)")
+            mark(key, pending)  # G-EFFECT-3: tasks are per MESSAGE, so every resolution owes this key
             continue
         if cfg.dry_run:
             argv = projections.plan_task_create_argv(plan)

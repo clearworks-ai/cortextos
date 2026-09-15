@@ -59,7 +59,9 @@ def plan_upsert_contact_argv(crm_dir: Path, from_name: str, from_email: str) -> 
     never auto-created through this function."""
     return [
         "python3", str(Path(crm_dir) / "upsert-contact.py"),
-        "--name", from_name or from_email,
+        # G-CRM-3: the display NAME, never a fallback to the address -- callers
+        # must skip auto-create entirely when the From header carries no name.
+        "--name", from_name,
         "--email", from_email,
         "--match-email",
         "--source-ref", "gmail:auto",

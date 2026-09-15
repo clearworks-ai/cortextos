@@ -578,6 +578,17 @@ def _do_writes(
             existing = _find_contact_in_list(contacts, resolution.email)
             if existing is not None:
                 contact_id = str(existing["id"])
+            elif not (msg.from_name or "").strip():
+                # G-CRM-3 (G2r3-8): auto-create is justified ONLY by a real
+                # header-only fact -- the sender's display NAME. With no display
+                # name the only thing left is the address, and a contact row
+                # named after its own email is CRM noise a human then has to
+                # clean up. The page History entry is written either way, so the
+                # observation is not lost; the row and the preview both say why
+                # no contact was made.
+                resolution.reason = "crm: skipped (no display name)"
+                crm_lines.append("  CRM: skipped (no display name)")
+                contact_id = None
             elif cfg.dry_run:
                 argv = projections.plan_upsert_contact_argv(cfg.crm_dir, msg.from_name, msg.from_email)
                 crm_lines.append(f"  CRM: would create contact argv={argv}")

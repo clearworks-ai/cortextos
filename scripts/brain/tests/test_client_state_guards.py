@@ -5,12 +5,12 @@ writer's landed part, materialised via
 swept with the SAME regex test_no_unregistered_guard below uses (a G-ID
 token anywhere after a '#' on its line -- docstring/prose mentions of a
 G-ID, which several modules still carry alongside their real marker, do NOT
-count). 88 rows: LEDGER x9, RECEIPT x2, LOCK x10, LOCKREF x1, SWEEP x12, RES x2,
+count). 89 rows: LEDGER x9, RECEIPT x2, LOCK x10, LOCKREF x1, SWEEP x12, RES x2,
 EXT x5, INV x3, BASE x2, SUPER x1, DIG x4, BUS x4 (TS), IDEMP x2, MERGE x3,
-SIM x1, ESC x4, QUERY x1, FAIL x1, BUDGET x3, CRM x2, HIST x3, PARITY x2,
+SIM x1, ESC x4, QUERY x1, FAIL x1, BUDGET x3, CRM x3, HIST x3, PARITY x2,
 WRITER x2, OWNER x1, TASK x2, DEDUP x1, EFFECT x3, REV x1, DRY x1.
 
-The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10; the G2 round-2 wave (2026-09-15) added G-ESC-3, G-LOCK-9, G-BUS-4, G-DIG-4, G-LEDGER-8, G-EFFECT-3, G-LOCK-10, G-DRY-1, G-BUDGET-3 and G-INV-3; the G2 round-3 wave added G-ESC-4, G-LEDGER-9, G-HIST-3, G-SWEEP-11, G-SWEEP-12 and G-EXT-5.
+The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10; the G2 round-2 wave (2026-09-15) added G-ESC-3, G-LOCK-9, G-BUS-4, G-DIG-4, G-LEDGER-8, G-EFFECT-3, G-LOCK-10, G-DRY-1, G-BUDGET-3 and G-INV-3; the G2 round-3 wave added G-ESC-4, G-LEDGER-9, G-HIST-3, G-SWEEP-11, G-SWEEP-12, G-EXT-5 and G-CRM-3.
 
 The last 8 rows (G-MERGE-2/3, G-EFFECT-1, G-BUDGET-2, G-REV-1, G-PARITY-2,
 G-LOCK-7/8) were added by the post-cap adjudication wave (2026-09-15) that
@@ -253,6 +253,13 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "contact auto-create fires ONLY for the message SENDER, never a recipient",
      "scripts/brain/tests/test_client_state_gmail.py::test_recipient_without_contact_never_auto_created",
      r's/if contact_id is None and is_sender:  # G-CRM-1/if False:  # G-CRM-1 (mutated)/'),
+    ("G-CRM-3", "scripts/brain/client_state_gmail.py",
+     "a sender with NO From display name is never auto-created - the only header-only fact justifying a contact is "
+     "the name, and a contact row named after its own email address is CRM noise a human has to clean up (G2r3-8); "
+     "the row and the preview both record 'crm: skipped (no display name)' and the page History entry is still "
+     "written - second site: plan_upsert_contact_argv's name argument, which no longer falls back to the address",
+     "scripts/brain/tests/test_client_state_gmail.py::test_a_sender_with_no_display_name_is_not_auto_created",
+     r's/            elif not \(msg\.from_name or ""\)\.strip\(\):/            elif False:  # G-CRM-3 (mutated)/'),
     ("G-CRM-2", "scripts/brain/client_state_gmail.py",
      "an add-interaction CRM row is written only when a contact_id is actually resolved (known or just auto-created)",
      "scripts/brain/tests/test_client_state_gmail.py::test_two_known_contacts_same_page_one_history_two_crm_rows",
@@ -468,10 +475,10 @@ def test_guard_registry_ids_are_unique():
     assert len(ids) == len(set(ids)), f"duplicate guard ids: {ids}"
 
 
-def test_guard_registry_has_88_rows():
+def test_guard_registry_has_89_rows():
     # Pinned count (rebuilt 2026-09-14 from the FINAL parts, G0 round-3
     # integration) so a future guard silently dropping out is itself caught.
-    assert len(GUARD_REGISTRY) == 88, f"expected 88 rows, got {len(GUARD_REGISTRY)}"
+    assert len(GUARD_REGISTRY) == 89, f"expected 89 rows, got {len(GUARD_REGISTRY)}"
 
 
 def test_guard_registry_rows_have_five_fields():

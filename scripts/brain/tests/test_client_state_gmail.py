@@ -2045,3 +2045,71 @@ def test_a_successful_extraction_clears_the_attempt_budget(tmp_path):
     r3 = _extraction_runner(cfg, None)
     assert csg.run(cfg, r3).exit_code == 0
     assert sum(1 for c in r3.calls if c and c[0] == "claude") == 0
+
+
+# --- G2r3-8: never synthesise a contact name from the address ----------------
+
+def _nameless_payload():
+    return _gmail_payload(from_email="marcos@acme.org", from_name="")
+
+
+def test_a_sender_with_no_display_name_is_not_auto_created(tmp_path):
+    """A contact row whose name is just the email address is CRM noise that a
+    human then has to clean up. With no From display name there is no
+    header-only fact worth creating a contact from — the page History entry is
+    written either way."""
+    cfg = _cfg(tmp_path, dry_run=False, contacts=[])
+    page = _page_path(cfg, "acme")
+    runner = FakeRunner()
+    _lock_ok(runner, cfg.state_dir / "claims")
+    runner.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_nameless_payload()))
+    _open_tasks_empty(runner)
+    runner.record(("claude",), rc=0, stdout=_claude_wrapper())
+
+    result = csg.run(cfg, runner)
+
+    assert result.exit_code == 0
+    assert result.filed == 1
+    assert not any(len(c) > 1 and "upsert-contact.py" in c[1] for c in runner.calls)
+    assert not any(len(c) > 1 and "add-interaction.py" in c[1] for c in runner.calls)
+    assert page.read_text(encoding="utf-8").count("[source: gmail:m1]") == 1
+
+    rows = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
+    res = rows[-1]["resolutions"][0]
+    assert res["outcome"] == "filed"
+    assert res["contact_id"] is None
+    assert res["reason"] == "crm: skipped (no display name)"
+
+
+def test_the_dry_run_preview_says_the_contact_was_skipped(tmp_path):
+    cfg = _cfg(tmp_path, dry_run=True, contacts=[])
+    runner = FakeRunner()
+    _lock_ok(runner, cfg.state_dir / "claims")
+    runner.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_nameless_payload()))
+    _open_tasks_empty(runner)
+    runner.record(("claude",), rc=0, stdout=_claude_wrapper())
+
+    result = csg.run(cfg, runner)
+
+    assert result.exit_code == 0
+    block = "\n".join(result.previews)
+    assert "CRM: skipped (no display name)" in block
+    assert "would create contact" not in block
+    assert "page diff for" in block          # the page write is still previewed
+
+
+def test_a_named_sender_is_still_auto_created(tmp_path):
+    cfg = _cfg(tmp_path, dry_run=False, contacts=[])
+    runner = FakeRunner()
+    _lock_ok(runner, cfg.state_dir / "claims")
+    runner.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+    _open_tasks_empty(runner)
+    runner.record(("claude",), rc=0, stdout=_claude_wrapper())
+    runner.record(("python3", str(cfg.crm_dir / "upsert-contact.py")), rc=0, stdout="c1\n")
+    runner.record(("python3", str(cfg.crm_dir / "add-interaction.py")), rc=0, stdout=_interaction_stdout())
+
+    assert csg.run(cfg, runner).exit_code == 0
+    assert any(len(c) > 1 and "upsert-contact.py" in c[1] for c in runner.calls)

@@ -1,30 +1,44 @@
-#!/usr/bin/env python3
-"""Client State v1 -- Gmail poller skeleton (Task 8 / C7). Acquires the FR-002
-single-flight lock, sweeps the window (or a manual --query backfill, through the
-SAME sweep() so FR-003's exclusion clause and FR-002's 50-cap day-sweep are never
-bypassed -- G0A-5), resolves each message, merges the fresh resolution set against
-the latest same-digest ledger row so an already-filed resolution is never
-re-processed (G0B-3), and files every not-yet-filed resolution as a STUB write
-(writes=[], no extraction/CRM/History/task calls yet -- Task 15 replaces
-_file_message's body with the real pipeline). Every failure path persists its
-cause via observation_ledger.record_failure (G0A-4/G0A-6/G0B-6/G0B-18)."""
+"""Client State v1 -- Gmail orchestrator (FR-001..FR-009, C7). Supersedes Task 8's
+poller skeleton: `_file_message` now runs the real pipeline -- cached_or_extract,
+CRM contact auto-create (sender only, G0B-10) + interaction rows (per contact_id,
+G0B-9), the append-only History write (under the SAME advisory file lock the
+meeting pipeline uses, G0B-13), FR-008 task dedup/creation, and the FR-003
+escalate-once Telegram text. Every preview AND every live write is derived from
+client_state_projections' pure plan_* functions -- dry-run calls them and stops;
+live calls them and then executes (G-PARITY-1). Dry-run still persists the ledger
+row, the extraction cache, and the run receipt to --state-dir (a scratch dir by
+construction) -- ONLY the irreversible transports (create-task, send-telegram, the
+CRM subprocesses, the real vault page write) are skipped in dry-run (G0A-3/G0B-1)."""
 from __future__ import annotations
 
 import argparse
+import difflib
+import importlib.util
+import os
 import sys
+import tempfile
+import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
+import client_state_projections as projections
+import client_state_writes
+import extract_email
 import gmail_source
 import resolve_email
 import single_flight
+import writeback_email
 from gmail_source import GmailSourceError
-from observation_ledger import Ledger, ObservationRow, Resolution, content_digest, record_failure, write_receipt
+from observation_ledger import (
+    Ledger, ObservationRow, Resolution, content_digest, read_receipt,
+    record_failure, record_lease_release_failure, record_lock_refusal, write_receipt,
+)
 from resolve_meeting import load_closed_sets
 
 
@@ -40,6 +54,7 @@ class Config:
     max_usd: float
     today: date
     now: datetime
+    clock: "Callable[[], float]" = time.monotonic   # monotonic source for the lease heartbeat (injectable for tests)
 
 
 @dataclass
@@ -54,8 +69,53 @@ class RunResult:
     previews: list[str] = field(default_factory=list)
 
 
-def _resolution_key(r: Resolution) -> tuple[str, str | None, str]:
-    return (r.slug, r.contact_id, r.email)
+@dataclass
+class _RunState:
+    """Mutable per-run accumulator -- cost is the only thing shared across
+    messages (the --max-usd cap is a whole-run budget, not per-message)."""
+    cost: float = 0.0
+
+
+# --- FR-010 read-only reuse of the meeting pipeline's advisory file lock -----
+# orgs/clearworksai/agents/pa/scripts/meeting_writeback.py is on the shared-file
+# READ-ONLY allowlist; loaded by path (never imported as a package) so this
+# module has no hard dependency on the pa/ agent's own package layout.
+_MEETING_WRITEBACK_PATH = (
+    Path(__file__).resolve().parents[2] / "orgs" / "clearworksai" / "agents" / "pa" / "scripts" / "meeting_writeback.py"
+)
+
+
+def _load_client_file_lock():
+    spec = importlib.util.spec_from_file_location("_client_state_meeting_writeback", _MEETING_WRITEBACK_PATH)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module.client_file_lock
+
+
+client_file_lock = _load_client_file_lock()
+
+
+class EscalationError(Exception):
+    """FR-003: the Telegram send failed. The row must NOT record an escalated
+    outcome that `escalated_for` would then use to suppress the retry, so the
+    whole message aborts and the next run escalates again (G0B-4)."""
+
+
+def _send_escalation(runner, text: str) -> None:
+    proc = runner.run(["cortextos", "bus", "send-telegram", projections.TELEGRAM_CHAT_ID, text])
+    if proc.returncode != 0:  # G-ESC-2
+        raise EscalationError(
+            f"send-telegram failed rc={proc.returncode}: {(proc.stderr or '').strip()}"
+        )
+
+
+def _resolution_key(r: Resolution) -> tuple[str, str]:
+    """G0B3-1: merge identity is (slug, normalized email) — NOT contact_id.
+    A sender whose contact is auto-created changes contact_id from None to the
+    new id between runs, so keying on it made the same counterparty look like a
+    different resolution and lost its carried-forward `filed`/`effects`."""
+    return (r.slug, (r.email or "").strip().lower())
 
 
 def _resolution_signature(resolutions: list[Resolution]) -> frozenset:
@@ -63,68 +123,405 @@ def _resolution_signature(resolutions: list[Resolution]) -> frozenset:
 
 
 def _merge_resolutions(prior_same_digest: ObservationRow | None, fresh: list[Resolution]) -> list[Resolution]:
-    """G0B-3: carry forward every resolution ALREADY filed on the prior row for
-    this exact digest (never re-process it); re-evaluate everything else afresh
-    (an escalated/ignored resolution is re-checked every run per FR-001 -- a
-    cheap closed-sets re-check, no LLM call)."""
+    """G0B-3 / G0B3-1: carry forward every resolution ALREADY filed on the prior
+    row for this exact digest -- never re-process it. For one NOT yet filed,
+    carry its LANDED EFFECT KEYS (and any contact_id it earned) onto the fresh
+    resolution, so the retry completes only what is still missing and never
+    replays a landed effect. Everything else is re-evaluated afresh: an
+    escalated/ignored resolution is re-checked every run (a cheap closed-sets
+    re-check, no LLM call), and a genuinely new counterparty is 'pending'."""
     if prior_same_digest is None:
         return fresh
     prior_by_key = {_resolution_key(r): r for r in prior_same_digest.resolutions}
     merged: list[Resolution] = []
+    seen: set[tuple[str, str]] = set()
     for r in fresh:
-        old = prior_by_key.get(_resolution_key(r))
+        key = _resolution_key(r)
+        seen.add(key)
+        old = prior_by_key.get(key)
         if old is not None and old.outcome == "filed":  # G-MERGE-1
             merged.append(old)
-        else:
-            merged.append(r)
+            continue
+        if old is not None:
+            r.effects = list(old.effects)  # G-MERGE-2: landed effects survive the retry
+            if old.contact_id and not r.contact_id:
+                r.contact_id = old.contact_id
+        merged.append(r)
+    for key, old in prior_by_key.items():
+        # G-MERGE-3: a counterparty the resolver no longer produces (a contact
+        # removed from the CRM, a page whose domains line changed) but which we
+        # ALREADY filed must stay on the row -- dropping it would make the row
+        # look complete-but-smaller and lose the record of a real write.
+        if key not in seen and old.outcome == "filed":  # G-MERGE-3
+            merged.append(old)
     return merged
 
 
-def _file_message_stub(cfg: Config, ledger: Ledger, msg, resolver, previews: list[str]) -> tuple[int, int, int]:
-    """Task 8's placeholder filing: marks every not-yet-filed resolution 'filed'
-    with NO real CRM/History/task writes (writes=[]) -- proves the lock/sweep/
-    merge/escalation/ledger/receipt scaffolding before Task 15 wires in the real
-    extraction+writes pipeline."""
+def _required_effects(resolution: Resolution, page_key: str | None, task_keys: list[str]) -> list[str]:
+    """Every effect key that must LAND before this resolution can be `filed`
+    (G0B3-1). CRM only when a contact id resolved; the History page for its
+    bound slug; and every task this message creates (tasks are per-message, so
+    a resolution is not complete while a commitment task is still missing)."""
+    required: list[str] = []
+    if resolution.contact_id:
+        required.append(f"crm:{resolution.contact_id}")
+    if page_key:
+        required.append(page_key)
+    required.extend(task_keys)
+    return required
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".csw-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _open_email_titles_still_open(ledger: Ledger, open_tasks: list[dict]) -> list[str]:
+    """C8: join ledger.open_email_tasks() ids against the CURRENTLY open task
+    list (list_open_tasks) and keep only titles for tasks still open -- a
+    completed/cancelled email-sourced task must never keep suppressing a fresh
+    commitment (G0B-8)."""
+    open_ids = {t.get("id") for t in open_tasks}
+    return [t["title"] for t in ledger.open_email_tasks() if t.get("id") in open_ids]
+
+
+def _find_contact_in_list(contacts: list[dict], email: str) -> dict | None:
+    target = (email or "").strip().lower()
+    for c in contacts:
+        emails = [e for e in c.get("emails", []) if isinstance(e, str)]
+        if any((e or "").strip().lower() == target for e in emails):
+            return c
+    return None
+
+
+def _diff_preview(page: Path, old_text: str, new_text: str) -> str:
+    diff = "".join(
+        difflib.unified_diff(
+            old_text.splitlines(keepends=True), new_text.splitlines(keepends=True),
+            fromfile=f"a/{page}", tofile=f"b/{page}",
+        )
+    )
+    return f"  page diff for {page}:\n{diff}" if diff else f"  page diff for {page}: (no change)"
+
+
+def _file_message(
+    cfg: Config, runner, ledger: Ledger, resolver: "resolve_email.EmailResolver",
+    msg, contacts: list[dict], previews: list[str], state: _RunState,
+) -> tuple[int, int, int]:
+    """Files every not-yet-filed resolution on `msg`. Returns (filed, escalated,
+    ignored) counts for THIS run's reporting. A resolution already 'filed' on a
+    same-digest prior row is carried forward untouched (G0B-3); a NEW digest
+    (edited/re-sent message) always re-files fresh regardless of what the old
+    digest's row said."""
     source_ref = f"gmail:{msg.id}"
     digest = content_digest(msg.subject, msg.body_text, msg.from_email)
     prior = ledger.latest(source_ref)
     same_digest_prior = prior if (prior is not None and prior.content_digest == digest) else None
     revision_of = prior.content_digest if (prior is not None and prior.content_digest != digest) else None
 
+    # G0A2-2: the extraction CACHE may be reused across a dry-run -> live pair
+    # (the call was really paid for and stamped), but a SIMULATED row's `filed`
+    # outcomes must NEVER be carried forward into a live run -- nothing was
+    # actually written, so the live run has to do all of it. A second DRY run
+    # does carry them forward, which is what makes the repeat preview free.
+    merge_prior = same_digest_prior
+    if merge_prior is not None and merge_prior.simulated and not cfg.dry_run:
+        merge_prior = None  # G-SIM-1
+    if same_digest_prior is not None and (same_digest_prior.simulated or same_digest_prior.partial):
+        # G0B3-3 / D-02: a dry-run (or a part-way) row for THIS digest already
+        # recorded which digest this message supersedes. Because that row is the
+        # `latest` one, `prior.content_digest == digest` and the plain rule above
+        # computes revision_of=None -- so the later REAL run wrote an unmarked
+        # History entry and lost the supersede link. Carry it forward.
+        revision_of = revision_of or same_digest_prior.revision_of  # G-REV-1
+
     fresh = resolver.resolve_message(msg)
-    resolutions = _merge_resolutions(same_digest_prior, fresh)
+    resolutions = _merge_resolutions(merge_prior, fresh)
 
     pending = [r for r in resolutions if r.outcome == "pending"]
     escalated = [r for r in resolutions if r.outcome == "escalated"]
     ignored = [r for r in resolutions if r.outcome == "ignored"]
 
-    if same_digest_prior is not None and not pending:
-        if _resolution_signature(resolutions) == _resolution_signature(same_digest_prior.resolutions):  # G-IDEMP-2
-            return 0, len(escalated), len(ignored)  # no-change re-check: write nothing
+    # FR-001: a same-digest re-check that changes nothing writes nothing.
+    if merge_prior is not None and not pending:
+        if _resolution_signature(resolutions) == _resolution_signature(merge_prior.resolutions):  # G-IDEMP-2
+            return 0, len(escalated), len(ignored)
+
+    if not pending:
+        # Every resolution is escalated/ignored (possibly a changed set since
+        # the prior run) -- still record the row once, and escalate exactly
+        # once per (source_ref, digest) if warranted.
+        escalation_text = None
+        if escalated and not ledger.escalated_for(source_ref, digest):  # G-ESC-1
+            escalation_text = projections.plan_escalation(msg, resolutions)
+            if not cfg.dry_run:
+                _send_escalation(runner, escalation_text)  # G-ESC-2: rc checked
+        row = ObservationRow(
+            source_ref=source_ref, thread_id=msg.thread_id, content_digest=digest,
+            observed_at=cfg.now.isoformat(), resolutions=resolutions, revision_of=revision_of,
+            simulated=cfg.dry_run,  # G-LEDGER-6
+        )
+        ledger.append(row)
+        if cfg.dry_run:
+            previews.append(projections.plan_message_preview(
+                msg, resolutions, None, cached=False, crm_lines=[], page_diffs=[], task_lines=[],
+                escalation_text=escalation_text, digest_lines=projections.plan_digest_line(row),
+            ))
+        return 0, len(escalated), len(ignored)
+
+    # At least one newly-fileable resolution -- extract (cached across a matching
+    # (source_ref, digest, sorted bound slugs) identity) with the WIDENED slug set
+    # (filed + newly fileable), and enumerate open tasks ONCE for both the
+    # extraction context and the dedup check below.
+    slugs = sorted({r.slug for r in resolutions if r.slug})
+    open_tasks = client_state_writes.list_open_tasks(runner)  # TaskEnumerationError propagates to run()
+    open_email_titles = _open_email_titles_still_open(ledger, open_tasks)
+    context = extract_email.build_context(
+        extract_email.open_items_for(cfg.vault, slugs), open_email_titles,
+    )
+    try:
+        extraction, called = extract_email.cached_or_extract(
+            same_digest_prior, msg, context, slugs, runner, max_usd=cfg.max_usd, spent_usd=state.cost,
+        )
+    except extract_email.BudgetExceeded as exc:
+        # G0B3-2 / FR-001 (at most ONE LLM call per source_ref+digest+slugs):
+        # the call has ALREADY been paid for and stamped. Persist it here, as a
+        # non-terminal row, BEFORE the run exits 12 -- run()'s own handler only
+        # ever saw the receipt, so the cache was lost and the next run paid
+        # again for an identical message. The stamped extraction carries its own
+        # `identity`, `bound_slugs` and `context` mapping, so the retry's
+        # cached_or_extract matches it and rebinds against the fresh context.
+        for r in resolutions:
+            if r.outcome == "pending":
+                r.outcome = "partial"
+        ledger.append(ObservationRow(  # G-BUDGET-2
+            source_ref=source_ref, thread_id=msg.thread_id, content_digest=digest,
+            observed_at=cfg.now.isoformat(), resolutions=resolutions,
+            reason=f"budget: {exc}", extraction=exc.extraction, writes=[],
+            revision_of=revision_of, partial=True,
+        ))
+        raise
+    if called:
+        state.cost += float(extraction.get("cost_usd", 0.0))
+
+    from_email_norm = (msg.from_email or "").strip().lower()
+    crm_lines: list[str] = []
+    page_diffs: list[str] = []
+    writes: list[str] = []          # REAL effects (live only)
+    planned_writes: list[str] = []  # what a dry-run WOULD write (G0B2-4)
+
+    def _persist_partial(exc: Exception) -> None:
+        """G0B-11: a mid-message failure must not throw away the writes that
+        DID land. Persist a `partial` row carrying them plus the resolutions
+        already marked filed; `is_terminal` refuses partial rows, so the next
+        run re-resolves and `_merge_resolutions` carries the filed ones forward
+        untouched -- the remainder is finished, nothing is written twice.
+
+        It also preserves the extraction this message ALREADY PAID FOR (G0B-6):
+        the row is the extraction cache, so without it the next run re-spends
+        on an identical message. Persisted whenever an extraction exists, even
+        when zero writes landed.
+
+        EVERY resolution is persisted, each carrying the effect keys that DID
+        land for it (G0B3-1). A resolution whose effects are incomplete is
+        stamped "partial" -- a persisted outcome; only "pending" is transient.
+        Dropping the incomplete ones (the pre-adjudication behaviour) threw the
+        landed-effect record away, so the retry replayed what had landed and
+        never finished what had not."""
+        if cfg.dry_run or extraction is None:
+            return
+        for r in resolutions:
+            if r.outcome == "pending":
+                r.outcome = "partial"
+        ledger.append(ObservationRow(
+            source_ref=source_ref, thread_id=msg.thread_id, content_digest=digest,
+            observed_at=cfg.now.isoformat(), resolutions=resolutions,
+            reason=f"partial: {exc}", extraction=extraction, writes=writes,
+            revision_of=revision_of, partial=True,  # G-LEDGER-7
+        ))
+
+    try:
+        return _do_writes(
+            cfg, runner, ledger, msg, contacts, previews, extraction, called,
+            resolutions, pending, escalated, ignored, context, open_tasks,
+            source_ref, digest, revision_of, from_email_norm,
+            crm_lines, page_diffs, writes, planned_writes,
+        )
+    except (client_state_writes.WriterError, EscalationError) as exc:
+        _persist_partial(exc)
+        raise
+
+
+def _do_writes(
+    cfg, runner, ledger, msg, contacts, previews, extraction, called,
+    resolutions, pending, escalated, ignored, context, open_tasks,
+    source_ref, digest, revision_of, from_email_norm,
+    crm_lines, page_diffs, writes, planned_writes,
+):
+    """Executes (or, in dry-run, previews) every effect this message owes, then
+    marks a resolution `filed` ONLY once every effect REQUIRED for it has landed
+    (G0B3-1). Each landed effect is recorded as a key on its owning
+    resolution(s) -- `crm:<contact_id>`, `page:<vault-relative path>`,
+    `task:<title>` -- and an effect whose key is already present is SKIPPED, so
+    a retry after a mid-message failure completes exactly the missing work and
+    replays nothing."""
+    # Task plans are pure, so they are computed FIRST: a resolution is not
+    # complete while a commitment task this message owes is still missing, and
+    # the required-effect set has to be known before anything is marked filed.
+    task_plans = client_state_writes.plan_tasks(extraction, context, open_tasks, source_ref)
+    task_keys = [f"task:{plan.title}" for plan in task_plans if plan.dedup is None]
+
+    def landed(key: str) -> bool:
+        """Has this effect already landed, on THIS message, in any run? History
+        is per distinct page and tasks are per message, so one resolution's
+        record of them counts for all."""
+        return any(key in r.effects for r in resolutions)
+
+    def mark(key: str, owners) -> None:
+        for r in owners:
+            if key not in r.effects:
+                r.effects.append(key)
+
+    page_key_for: dict[str, str] = {}
+
+    # --- CRM: one interaction row per resolved contact_id ---------------------
+    for resolution in pending:
+        is_sender = resolution.email == from_email_norm
+        contact_id = resolution.contact_id
+        if contact_id is None and is_sender:  # G-CRM-1
+            # G0B-10: auto-create ONLY the sender, from From-header facts.
+            existing = _find_contact_in_list(contacts, resolution.email)
+            if existing is not None:
+                contact_id = str(existing["id"])
+            elif cfg.dry_run:
+                argv = projections.plan_upsert_contact_argv(cfg.crm_dir, msg.from_name, msg.from_email)
+                crm_lines.append(f"  CRM: would create contact argv={argv}")
+                # G0A2-9/G0B-2: keep previewing the interaction the live run
+                # would write, against a clearly-marked prospective id -- a
+                # dry-run over a new-but-domain-matched sender must not hide
+                # the CRM row it is going to create.
+                contact_id = f"<new:{resolution.email}>"
+            else:
+                contact_id = client_state_writes.ensure_contact(runner, cfg.crm_dir, msg.from_name, msg.from_email, contacts)
+        # G0B3-1: the auto-created id is assigned BACK onto the resolution before
+        # anything is persisted, so the row records which contact this
+        # counterparty actually became.
+        resolution.contact_id = contact_id
+        # A recipient with no existing contact row is NEVER auto-created here
+        # (contact_id stays None) -- their page still gets a History entry below.
+        if contact_id is not None:  # G-CRM-2
+            key = f"crm:{contact_id}"
+            if landed(key):
+                continue
+            argv = projections.plan_add_interaction_argv(cfg.crm_dir, contact_id, msg, extraction)
+            if cfg.dry_run:
+                crm_lines.append(f"  CRM row: contact={contact_id} argv={argv}")
+                planned_writes.append(key)
+            else:
+                client_state_writes.write_interaction(runner, cfg.crm_dir, contact_id, msg, extraction)
+                writes.append(key)
+            mark(key, [resolution])
+
+    # --- History: one write per DISTINCT bound page (G0B-9) -------------------
+    seen_slugs: set[str] = set()
+    for resolution in pending:
+        if not resolution.slug or resolution.slug in seen_slugs:
+            continue
+        seen_slugs.add(resolution.slug)
+        page = writeback_email.page_path_for(cfg.vault, resolution.slug, resolution.kind)
+        rel_page = str(page.relative_to(cfg.vault))
+        key = f"page:{rel_page}"
+        page_key_for[resolution.slug] = key
+        owners = [r for r in pending if r.slug == resolution.slug]
+        if landed(key):
+            continue
+        entry = projections.plan_history_entry(msg, extraction, source_ref, revision_of)  # G-PARITY-1
+        # G0B-13: hold the SAME advisory lock the meeting pipeline uses across
+        # read + render + write, so a concurrent meeting-writeback filing to the
+        # same page can never interleave with this read-modify-write.
+        with client_file_lock(page):  # G-HIST-2
+            old_text = page.read_text(encoding="utf-8") if page.exists() else ""
+            new_text = writeback_email.apply_history(old_text, entry)
+            if cfg.dry_run:
+                page_diffs.append(_diff_preview(page, old_text, new_text))  # G-PARITY-2
+                planned_writes.append(rel_page)
+            else:
+                _atomic_write_text(page, new_text)
+                writes.append(rel_page)
+        mark(key, owners)
+    for resolution in pending:
+        # a slug whose page write was carried forward from a prior run still
+        # needs its key recorded for the completeness check below
+        if resolution.slug and resolution.slug not in page_key_for:
+            page = writeback_email.page_path_for(cfg.vault, resolution.slug, resolution.kind)
+            page_key_for[resolution.slug] = f"page:{str(page.relative_to(cfg.vault))}"
+
+    # --- Tasks: per MESSAGE ---------------------------------------------------
+    task_lines: list[str] = []
+    suppressed: list[dict] = []
+    for plan in task_plans:
+        if plan.dedup is not None:
+            suppressed.append({"title": plan.title, "tier": plan.dedup["tier"], "match": plan.dedup["match"]})
+            task_lines.append(f"  task: {plan.title} (suppressed tier {plan.dedup['tier']} match: {plan.dedup['match']})")
+            continue
+        key = f"task:{plan.title}"
+        if landed(key):
+            task_lines.append(f"  task: {plan.title} (already created on an earlier run)")
+            continue
+        if cfg.dry_run:
+            argv = projections.plan_task_create_argv(plan)
+            task_lines.append(f"  task: {plan.title} (create) argv={argv}")
+            planned_writes.append(f"task:<new>|{plan.title}")
+        else:
+            task_id = client_state_writes.create_task(runner, plan)
+            writes.append(f"task:{task_id}|{plan.title}")
+        mark(key, pending)
 
     escalation_text = None
     if escalated and not ledger.escalated_for(source_ref, digest):  # G-ESC-1
-        escalation_text = (
-            f"Client State: ambiguous Gmail message from {msg.from_name} <{msg.from_email}> "
-            f"subject={msg.subject!r} — gmail:{msg.id}"
-        )
-        if cfg.dry_run:
-            previews.append(escalation_text)
+        escalation_text = projections.plan_escalation(msg, resolutions)
+        if not cfg.dry_run:
+            _send_escalation(runner, escalation_text)  # G-ESC-2: rc checked
 
-    for r in pending:
-        r.outcome = "filed"
+    # --- completion: `filed` only when EVERY required effect landed ----------
+    filed_now = 0
+    for resolution in pending:
+        required = _required_effects(resolution, page_key_for.get(resolution.slug), task_keys)
+        if all(key in resolution.effects for key in required):  # G-EFFECT-1
+            resolution.outcome = "filed"
+            filed_now += 1
+        else:
+            # G0B3-1: NOT filed. "partial" is a persisted outcome (it carries the
+            # landed effect keys); only "pending" is transient.
+            resolution.outcome = "partial"
 
     row = ObservationRow(
         source_ref=source_ref, thread_id=msg.thread_id, content_digest=digest,
-        observed_at=cfg.now.isoformat(), resolutions=resolutions, revision_of=revision_of,
+        observed_at=cfg.now.isoformat(), resolutions=resolutions,
+        extraction=extraction, writes=writes, revision_of=revision_of, suppressed=suppressed,
+        simulated=cfg.dry_run, planned_writes=planned_writes,  # G-LEDGER-6
+        partial=any(r.outcome != "filed" for r in pending),
     )
-    ledger.append(row)  # persisted in BOTH dry-run and live -- C7
+    ledger.append(row)  # persisted in BOTH dry-run and live (C7/G0A-3)
 
     if cfg.dry_run:
-        if pending or not resolutions:
-            previews.append(f"[dry-run] {source_ref}: filed={len(pending)} escalated={len(escalated)} ignored={len(ignored)}")
+        previews.append(projections.plan_message_preview(
+            msg, resolutions, extraction, cached=not called, crm_lines=crm_lines,
+            page_diffs=page_diffs, task_lines=task_lines, escalation_text=escalation_text,
+            digest_lines=projections.plan_digest_line(row),  # C6 "digest preview" consumer
+        ))
 
-    return len(pending), len(escalated), len(ignored)
+    return filed_now, len(escalated), len(ignored)
 
 
 def run(cfg: Config, runner) -> RunResult:
@@ -132,14 +529,27 @@ def run(cfg: Config, runner) -> RunResult:
     claims_dir = cfg.state_dir / "claims"
     lease = single_flight.acquire(runner, claims_dir, "client-state-gmail", ttl_min=60)
     if lease is None:
-        # C11: single_flight.acquire retries once internally on a stale-cleared
-        # claim (Task 2) -- a None here means the lock is genuinely held by a
-        # live holder, not a stale one.
-        record_failure(cfg.state_dir, "lock-held")
+        # G0A2-16 / binding goal G4 item 5 (amended 2026-09-14): a lock-held
+        # refusal leaves run-receipt.json BYTE-IDENTICAL and writes its cause to
+        # last-lock-refusal.json. record_failure is for the gws/extraction/
+        # writer/budget/catch-all paths, which the goal still wants on the
+        # receipt; a fail-closed halt must not falsify the success receipt.
+        record_lock_refusal(cfg.state_dir, holder_pid=os.getpid(), detail=str(claims_dir))  # G-LOCKREF-1
         return RunResult(exit_code=2, previews=["lock held — another run is in progress"])
 
     result = RunResult(exit_code=0)
     ledger = Ledger(cfg.state_dir / "observations.jsonl")
+    state = _RunState()
+    messages_raw: list[dict] = []
+    truncation: list[dict] = []
+
+    # G0B3-6 / A2: heartbeat the lease for the WHOLE acquired interval, not once
+    # per message. Wrapping the runner puts a tick on every call boundary the
+    # run has — each sweep query, each `gws +read`, the `claude` call, and every
+    # CRM/bus write — so neither a 14-day backfill sweep nor one slow extraction
+    # can let a live run's lock go stale.
+    heartbeat = single_flight.Heartbeat(lease, clock=cfg.clock)
+    runner = single_flight.HeartbeatRunner(runner, heartbeat)  # G-LOCK-8
 
     try:
         messages_raw, truncation = gmail_source.sweep(runner, cfg.days, cfg.today, extra_query=cfg.query)  # G-QUERY-1
@@ -150,7 +560,11 @@ def run(cfg: Config, runner) -> RunResult:
         resolver = resolve_email.EmailResolver(closed, contacts)
 
         for raw in messages_raw:
-            lease.touch()
+            # G0B2-13: one more liveness check at the message boundary. The
+            # heartbeat wrapper already ticks on every runner call; this makes
+            # the stop condition explicit at the point where the next message's
+            # effects would begin, and raises LeaseLost if the lock is gone.
+            heartbeat.tick()
             message_id = raw.get("id") or raw.get("messageId")
             if not message_id:
                 continue
@@ -162,27 +576,61 @@ def run(cfg: Config, runner) -> RunResult:
                 result.skipped_terminal += 1
                 continue
 
-            filed, escalated, ignored = _file_message_stub(cfg, ledger, msg, resolver, result.previews)
+            filed, escalated, ignored = _file_message(cfg, runner, ledger, resolver, msg, contacts, result.previews, state)
             result.filed += filed
             result.escalated += escalated
             result.ignored += ignored
 
         receipt = {
             "last_success_at": cfg.now.isoformat(), "window_days": cfg.days,
-            "message_count": len(messages_raw), "truncation": truncation, "cost_usd": result.cost_usd,
+            "message_count": len(messages_raw), "truncation": truncation, "cost_usd": state.cost,
         }
-        write_receipt(cfg.state_dir, receipt)  # persisted in BOTH dry-run and live -- C7
+        write_receipt(cfg.state_dir, receipt)  # persisted in BOTH dry-run and live (C7/G0A-3)
+        result.cost_usd = state.cost
         return result
-    except GmailSourceError as exc:
-        record_failure(cfg.state_dir, str(exc))  # G-FAIL-1
+    except extract_email.BudgetExceeded as exc:
+        # G0B-6: the exception's own already-paid extraction (cost/model_receipt/
+        # cache) must not be discarded -- add its cost and persist a receipt that
+        # carries the REAL partial cost, never falsely claiming success.
+        state.cost += float(exc.extraction.get("cost_usd", 0.0))  # G-BUDGET-1
+        record_failure(
+            cfg.state_dir, "budget", cost_usd=state.cost,
+            message_count=len(messages_raw), truncation=truncation,
+            model_receipt=exc.extraction.get("model_receipt"),  # G0B-6
+        )
+        result.exit_code = 12
+        result.cost_usd = state.cost
+        result.previews.append(f"budget exceeded: {exc}")
+        return result
+    except (
+        GmailSourceError, extract_email.ExtractionError, client_state_writes.WriterError,
+        client_state_writes.TaskEnumerationError, EscalationError, single_flight.LeaseLost,
+    ) as exc:
+        # G0B-6: a failure receipt carries the partial progress this run made
+        # (messages seen, truncation, cost already paid) alongside the error.
+        record_failure(cfg.state_dir, str(exc), cost_usd=state.cost, message_count=len(messages_raw), truncation=truncation)  # G-FAIL-1
         result.exit_code = 3
+        result.cost_usd = state.cost
         return result
     except Exception as exc:  # noqa: BLE001 -- catch-all per C7: record_failure + exit 3
-        record_failure(cfg.state_dir, str(exc))
+        record_failure(
+            cfg.state_dir, str(exc), cost_usd=state.cost,
+            message_count=len(messages_raw), truncation=truncation,
+        )
         result.exit_code = 3
+        result.cost_usd = state.cost
         return result
     finally:
-        lease.release()
+        try:
+            lease.release()  # G-LOCK-6: a no-op once the lease is lost
+        except single_flight.LeaseReleaseError as exc:
+            # G0B3-11: the work may well have succeeded, but the lock is still
+            # held — every later poll will refuse. Surface it as exit 3 with its
+            # own diagnostic, and DO NOT touch the receipt: `last_success_at`
+            # describes the work, which really did happen.
+            record_lease_release_failure(cfg.state_dir, str(exc))  # G-LOCK-7
+            result.exit_code = 3
+            result.previews.append(f"lease release failed: {exc}")
 
 
 def main(argv: list[str] | None = None) -> int:

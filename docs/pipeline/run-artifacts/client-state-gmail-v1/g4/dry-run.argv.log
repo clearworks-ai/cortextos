@@ -1,0 +1,146 @@
+{"argv": ["cortextos", "bus", "meeting-brief-claim", "client-state-gmail", "--claims-dir", "/private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-env/state-efc90b57/claims", "--ttl-min", "60"], "returncode": 0}
+{"argv": ["gws", "gmail", "+triage", "--query", "after:2026/09/13 before:2026/09/16 -in:sent -in:drafts -category:promotions -category:social -from:notify.railway.app -from:notifications@github.com -from:noreply -from:no-reply -from:donotreply -from:do-not-reply -from:mailer-daemon -subject:\"Accepted:\" -subject:\"Declined:\" -subject:\"Tentative:\" -subject:\"out of office\" -subject:\"auto-reply\"", "--format", "json", "--max", "50"], "returncode": 0}
+{"argv": ["gws", "gmail", "+triage", "--query", "after:2026/09/13 before:2026/09/14 -in:sent -in:drafts -category:promotions -category:social -from:notify.railway.app -from:notifications@github.com -from:noreply -from:no-reply -from:donotreply -from:do-not-reply -from:mailer-daemon -subject:\"Accepted:\" -subject:\"Declined:\" -subject:\"Tentative:\" -subject:\"out of office\" -subject:\"auto-reply\"", "--format", "json", "--max", "50"], "returncode": 0}
+{"argv": ["gws", "gmail", "+triage", "--query", "after:2026/09/14 before:2026/09/15 -in:sent -in:drafts -category:promotions -category:social -from:notify.railway.app -from:notifications@github.com -from:noreply -from:no-reply -from:donotreply -from:do-not-reply -from:mailer-daemon -subject:\"Accepted:\" -subject:\"Declined:\" -subject:\"Tentative:\" -subject:\"out of office\" -subject:\"auto-reply\"", "--format", "json", "--max", "50"], "returncode": 0}
+{"argv": ["gws", "gmail", "+triage", "--query", "after:2026/09/15 before:2026/09/16 -in:sent -in:drafts -category:promotions -category:social -from:notify.railway.app -from:notifications@github.com -from:noreply -from:no-reply -from:donotreply -from:do-not-reply -from:mailer-daemon -subject:\"Accepted:\" -subject:\"Declined:\" -subject:\"Tentative:\" -subject:\"out of office\" -subject:\"auto-reply\"", "--format", "json", "--max", "50"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a09d3655d130bd6", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a09d356d7844ff3", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a09d10cdb6bb8df", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a09d051c8483592", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a09d04f9c3f19be", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a09ce69c317fcdc", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a09c5765086e070", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a09b2f263a47ecc", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a09abf8be9d2910", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a09aa5ca987b90e", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a09964a9a12731a", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a09962f1c0305d5", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a099288efd958cd", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0990020fcd3fcb", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a098b582dd860f8", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a098a6d7b39841d", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a098a04a1370185", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0981cd68a90c6a", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a25c946c1375a", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a25c777c0b30a", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a2510db863287", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a225e5c7dcc75", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a21f1b466c83a", "--format", "json"], "returncode": 0}
+{"argv": ["cortextos", "bus", "list-tasks", "--open", "--class", "human", "--format", "json", "--limit", "200"], "returncode": 0}
+{"argv": ["cortextos", "bus", "list-tasks", "--open", "--class", "build", "--format", "json", "--limit", "200"], "returncode": 0}
+{"argv": ["claude", "-p", "--setting-sources", "", "--disallowedTools", "*", "--model", "sonnet", "--output-format", "json", "--max-turns", "1"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a20fcff8f0300", "--format", "json"], "returncode": 0}
+{"argv": ["cortextos", "bus", "list-tasks", "--open", "--class", "human", "--format", "json", "--limit", "200"], "returncode": 0}
+{"argv": ["cortextos", "bus", "list-tasks", "--open", "--class", "build", "--format", "json", "--limit", "200"], "returncode": 0}
+{"argv": ["claude", "-p", "--setting-sources", "", "--disallowedTools", "*", "--model", "sonnet", "--output-format", "json", "--max-turns", "1"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a1f99d4263e24", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a1f775cc97d2f", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a1f41798da434", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a1e822317ac3f", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a1cdc531b1cf7", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a1c22482aad2c", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a1bcecd588ce3", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a1ba34d4e86c4", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a1b4e8606af96", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a1992595a9727", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a185d4c67fc63", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a18385aaf0ee7", "--format", "json"], "returncode": 0}
+{"argv": ["cortextos", "bus", "list-tasks", "--open", "--class", "human", "--format", "json", "--limit", "200"], "returncode": 0}
+{"argv": ["cortextos", "bus", "list-tasks", "--open", "--class", "build", "--format", "json", "--limit", "200"], "returncode": 0}
+{"argv": ["claude", "-p", "--setting-sources", "", "--disallowedTools", "*", "--model", "sonnet", "--output-format", "json", "--max-turns", "1"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a1778c8588bb7", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a16cb56610db1", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a1677a2fd14f6", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a1530232c577f", "--format", "json"], "returncode": 0}
+{"argv": ["cortextos", "bus", "list-tasks", "--open", "--class", "human", "--format", "json", "--limit", "200"], "returncode": 0}
+{"argv": ["cortextos", "bus", "list-tasks", "--open", "--class", "build", "--format", "json", "--limit", "200"], "returncode": 0}
+{"argv": ["claude", "-p", "--setting-sources", "", "--disallowedTools", "*", "--model", "sonnet", "--output-format", "json", "--max-turns", "1"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a1446fe04e70e", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a1411b1dadfe6", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a13a7cb82548d", "--format", "json"], "returncode": 0}
+{"argv": ["cortextos", "bus", "list-tasks", "--open", "--class", "human", "--format", "json", "--limit", "200"], "returncode": 0}
+{"argv": ["cortextos", "bus", "list-tasks", "--open", "--class", "build", "--format", "json", "--limit", "200"], "returncode": 0}
+{"argv": ["claude", "-p", "--setting-sources", "", "--disallowedTools", "*", "--model", "sonnet", "--output-format", "json", "--max-turns", "1"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a114d56543906", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a112e47c170b3", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a10342ffe3ed6", "--format", "json"], "returncode": 0}
+{"argv": ["cortextos", "bus", "list-tasks", "--open", "--class", "human", "--format", "json", "--limit", "200"], "returncode": 0}
+{"argv": ["cortextos", "bus", "list-tasks", "--open", "--class", "build", "--format", "json", "--limit", "200"], "returncode": 0}
+{"argv": ["claude", "-p", "--setting-sources", "", "--disallowedTools", "*", "--model", "sonnet", "--output-format", "json", "--max-turns", "1"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a0dc5818f1e1a", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a0dc4639ff9aa", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a0abba5861d20", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a0721f92f99a2", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a02525131f916", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a0038688a2b15", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a002bccf93fef", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a09fabd1700c1d4", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a09f61710eb9185", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a09e5500b1a8bfc", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a09e475e80b1f52", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a09e2413f4dd97c", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a09e23f30c4a47a", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a09ddcc78f2d753", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a09ddbc6443e2c0", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a6dea0fca2c25", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a6cec9544fa3e", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a6bfe1d3f4e4a", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a6b6cc5011284", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a6b41c1c802c9", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a6b3ae5bb7dc3", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a6a015db33ded", "--format", "json"], "returncode": 0}
+{"argv": ["cortextos", "bus", "list-tasks", "--open", "--class", "human", "--format", "json", "--limit", "200"], "returncode": 0}
+{"argv": ["cortextos", "bus", "list-tasks", "--open", "--class", "build", "--format", "json", "--limit", "200"], "returncode": 0}
+{"argv": ["claude", "-p", "--setting-sources", "", "--disallowedTools", "*", "--model", "sonnet", "--output-format", "json", "--max-turns", "1"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a69673c288776", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a68fe8e67999c", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a662bb053f495", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a65a3a704d1ab", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a65732979c4c1", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a656561059877", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a655cd604fc9d", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a648d6cf7ede7", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a644b4989f10f", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a63fef16cb7d9", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a63b0bde261bc", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a6341653c8960", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a60c716785b25", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a60c31240b475", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a5ff84722a72f", "--format", "json"], "returncode": 0}
+{"argv": ["cortextos", "bus", "list-tasks", "--open", "--class", "human", "--format", "json", "--limit", "200"], "returncode": 0}
+{"argv": ["cortextos", "bus", "list-tasks", "--open", "--class", "build", "--format", "json", "--limit", "200"], "returncode": 0}
+{"argv": ["claude", "-p", "--setting-sources", "", "--disallowedTools", "*", "--model", "sonnet", "--output-format", "json", "--max-turns", "1"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a5e0551d5e6bf", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a5e0534c6731d", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a5d7bb2b66f25", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a5d2e198f366d", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a5cc718dd5b6b", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a5cbc972cdf96", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a5cb7732c254a", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a5bda7bf58524", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a5a39232c0670", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a59d294bbfab6", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a59579d6fe03c", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a5954436deb37", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a594fa00ec383", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a565166339aad", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a55ee4df40652", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a55421e70d5fc", "--format", "json"], "returncode": 0}
+{"argv": ["cortextos", "bus", "list-tasks", "--open", "--class", "human", "--format", "json", "--limit", "200"], "returncode": 0}
+{"argv": ["cortextos", "bus", "list-tasks", "--open", "--class", "build", "--format", "json", "--limit", "200"], "returncode": 0}
+{"argv": ["claude", "-p", "--setting-sources", "", "--disallowedTools", "*", "--model", "sonnet", "--output-format", "json", "--max-turns", "1"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a4f148f3aab18", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a45a6a5d78ff2", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a4558260162cb", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a3020cdffabab", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a2db52e115da5", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a2db496844e4a", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a2db33cd90004", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a2d3177d2c4ef", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a2b281843d924", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a2af1e2ed8771", "--format", "json"], "returncode": 0}
+{"argv": ["gws", "gmail", "+read", "--id", "1a0a274373f244f1", "--format", "json"], "returncode": 0}
+{"argv": ["cortextos", "bus", "list-tasks", "--open", "--class", "human", "--format", "json", "--limit", "200"], "returncode": 0}
+{"argv": ["cortextos", "bus", "list-tasks", "--open", "--class", "build", "--format", "json", "--limit", "200"], "returncode": 0}
+{"argv": ["claude", "-p", "--setting-sources", "", "--disallowedTools", "*", "--model", "sonnet", "--output-format", "json", "--max-turns", "1"], "returncode": 0}
+{"argv": ["cortextos", "bus", "meeting-brief-release", "client-state-gmail", "--claims-dir", "/private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-env/state-efc90b57/claims"], "returncode": 0}

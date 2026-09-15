@@ -1,0 +1,23 @@
+Verification floor — client-state-gmail-v1 R1 BUILD — candidate efc90b570123b63347323917219b0d84b00c2d24 (product tree c7cda35bb968)
+
+Layer 1 — deterministic
+- g4/gate-G1-suite.json — record-gate G1-suite exit 0 at efc90b57 (count delta vs 9f443129 capture; g4/g1-record.json + g4/suite.json)
+- g4/G0-review-opus.verify.json — verify-review-artifact exit 0 for G0 (plan sha)
+- g4/FINAL-review-fable.verify.json — verify-review-artifact exit 0 for FINAL at efc90b57
+- g4/py-guards.json + g4/bus-guards.json — mutation-check 95/95 rows green on this tree
+- g4/gate-invocations.json — every gate's cmd / exit / model_requested / model_receipt
+- g4-check.sh efc90b570123b63347323917219b0d84b00c2d24 — this checker, items 1-8
+
+Layer 2 — honest substitute (no deployed staging): live READ-ONLY Gmail dry-runs on copies
+- g4/dry-run-2026-09-15.txt + .ledger.jsonl + run-receipt.json — 3-day window at efc90b57: 10 filed / 3 escalated / 97 ignored, 0 extraction failures
+- g4/no-prod-writes.json — vault porcelain + recursive tree diff empty; CRM sha pairs equal; forbidden verbs []; event-dedup 0; gws +triage/+read only
+- g4/idempotency.json — repeat run inert; lock-held exit 2 + byte-identical receipt; stale-cleared refusal; next acquire wins (real runner + real claim CLI)
+- g4/digest-dry-run.txt — Gmail section + invariants OK with the Fireflies section failing independently
+- g4/ESCALATION-CASE.md + g4/ambiguity-scan.txt — the one declared CRM-copy edit behind the escalated block
+- live/ — the first two live runs (run 1 found LIVE-1; run 2 clean)
+
+Layer 3 — second opinions in fresh contexts
+- g4/G0-review-opus.json — Opus G0a empirical (3 rounds, cap, adjudicated)
+- g4/G2-codex-review.stdout.log + g4/G2-codex-challenge.stdout.log — codex review round 2 stdout; codex independent verifier r2 JSON + r1 stdout
+- g4/FINAL-review-fable.json (+ -r1, -r2) — Fable FINAL, three rounds, all findings closed
+- Grok gates: skipped-by-Josh (not run; never recorded clean)

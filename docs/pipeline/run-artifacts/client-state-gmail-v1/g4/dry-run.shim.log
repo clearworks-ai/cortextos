@@ -1,0 +1,22 @@
+2026-09-15T21:08:24Z 75300 75298 cortextos bus meeting-brief-claim client-state-gmail --claims-dir /private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-env/state-efc90b57/claims --ttl-min 60
+2026-09-15T21:08:53Z 77616 75298 cortextos bus list-tasks --open --class human --format json --limit 200
+2026-09-15T21:08:53Z 77636 75298 cortextos bus list-tasks --open --class build --format json --limit 200
+2026-09-15T21:09:09Z 78726 75298 cortextos bus list-tasks --open --class human --format json --limit 200
+2026-09-15T21:09:09Z 78733 75298 cortextos bus list-tasks --open --class build --format json --limit 200
+2026-09-15T21:09:37Z 81040 75298 cortextos bus list-tasks --open --class human --format json --limit 200
+2026-09-15T21:09:37Z 81050 75298 cortextos bus list-tasks --open --class build --format json --limit 200
+2026-09-15T21:09:43Z 81590 75298 cortextos bus list-tasks --open --class human --format json --limit 200
+2026-09-15T21:09:43Z 81598 75298 cortextos bus list-tasks --open --class build --format json --limit 200
+2026-09-15T21:09:49Z 82159 75298 cortextos bus list-tasks --open --class human --format json --limit 200
+2026-09-15T21:09:50Z 82192 75298 cortextos bus list-tasks --open --class build --format json --limit 200
+2026-09-15T21:10:00Z 83029 75298 cortextos bus list-tasks --open --class human --format json --limit 200
+2026-09-15T21:10:00Z 83048 75298 cortextos bus list-tasks --open --class build --format json --limit 200
+2026-09-15T21:10:13Z 84029 75298 cortextos bus list-tasks --open --class human --format json --limit 200
+2026-09-15T21:10:13Z 84039 75298 cortextos bus list-tasks --open --class build --format json --limit 200
+2026-09-15T21:10:20Z 84629 75298 cortextos bus list-tasks --open --class human --format json --limit 200
+2026-09-15T21:10:20Z 84662 75298 cortextos bus list-tasks --open --class build --format json --limit 200
+2026-09-15T21:10:26Z 85089 75298 cortextos bus list-tasks --open --class human --format json --limit 200
+2026-09-15T21:10:26Z 85101 75298 cortextos bus list-tasks --open --class build --format json --limit 200
+2026-09-15T21:10:33Z 85899 75298 cortextos bus list-tasks --open --class human --format json --limit 200
+2026-09-15T21:10:33Z 85920 75298 cortextos bus list-tasks --open --class build --format json --limit 200
+2026-09-15T21:10:47Z 86961 75298 cortextos bus meeting-brief-release client-state-gmail --claims-dir /private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-env/state-efc90b57/claims

@@ -90,7 +90,11 @@ for block in blocks:
     outcomes_seen.add(outcome)
     # Required of EVERY block, whatever its outcome.
     common = {
-        'sender': r'^From: .+ <[^>]+@[^>]+>$',
+        # G4 run at efc90b57 (2026-09-15): a real inbox carries NAMELESS senders
+        # ("From:  <billing@withmoxie.com>") -- G2r3-8 even rules on them. The
+        # sender line must exist with a bracketed address; the display name is
+        # optional. The negative fixture (no From line at all) still bites.
+        'sender': r'^From: (.*\s)?<[^>]+@[^>]+>$',
         'subject': r'^Subject: .+$',
         'resolution': r"^  resolution: slug=.* kind=.* method=.* outcome=.* reason=.* contact_id=.* email=.*$",
         # G0B3-4: every section is STATED, present or absent. An ignored message
@@ -472,8 +476,15 @@ check_8_floor() {
     label="${entry#*|}"
     base="$(basename "$rel")"
     if ! grep -q "$base" "$f"; then uncited+=("$base ($label)"); continue; fi
-    if [ ! -e "$dir/$rel" ]; then absent+=("$rel ($label)"); continue; fi
-    if [ ! -s "$dir/$rel" ]; then empty+=("$rel ($label)"); fi
+    # The evidence dir IS the g4/ dir (run_all_checks "$G4_DIR"), so a required
+    # artifact lives at "$dir/<basename>"; the selftest fixture nests a g4/ dir
+    # under its scratch root, so both layouts are accepted (2026-09-15).
+    local hit=""
+    for cand in "$dir/$rel" "$dir/$base"; do
+      if [ -e "$cand" ]; then hit="$cand"; break; fi
+    done
+    if [ -z "$hit" ]; then absent+=("$rel ($label)"); continue; fi
+    if [ ! -s "$hit" ]; then empty+=("$rel ($label)"); fi
   done
   if [ ${#uncited[@]} -gt 0 ]; then
     record "8-floor.txt" 1 "floor.txt does not cite required evidence: ${uncited[*]}"

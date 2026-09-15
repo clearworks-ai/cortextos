@@ -1,0 +1,192 @@
+{
+  "reviewer": "claude-fable-5-1",
+  "model_requested": "fable",
+  "gate": "FINAL-review",
+  "reviewed": {
+    "range": "600e05f3..9f443129706f7a66e6c1cb4c685c7b53e5f882d1",
+    "sha": "9f443129706f7a66e6c1cb4c685c7b53e5f882d1",
+    "spec": "/Users/joshweiss/code/cortextos/state/specs/2026-09-14-client-state-gmail-v1-spec.md",
+    "artifacts": [
+      "/Users/joshweiss/code/cortextos/docs/pipeline/goals/2026-09-14-client-state-gmail-v1-build-goal.md",
+      "/Users/joshweiss/code/cortextos/docs/pipeline/ledgers/2026-09-14-client-state-gmail-v1-goal-client-state-gmail-v1-build.md",
+      "/Users/joshweiss/code/cortextos/state/specs/2026-09-15-client-state-gmail-v1-patch1-spec.md (FR-010 lines only)",
+      "<merge-tree>/scripts/brain/client_state_gmail.py",
+      "<merge-tree>/scripts/brain/observation_ledger.py",
+      "<merge-tree>/scripts/brain/single_flight.py",
+      "<merge-tree>/scripts/brain/extract_email.py",
+      "<merge-tree>/scripts/brain/email_extraction.schema.json (via extract_email validator)",
+      "<merge-tree>/scripts/brain/resolve_email.py",
+      "<merge-tree>/scripts/brain/gmail_source.py",
+      "<merge-tree>/scripts/brain/client_state_writes.py",
+      "<merge-tree>/scripts/brain/client_state_projections.py",
+      "<merge-tree>/scripts/brain/writeback_email.py",
+      "<merge-tree>/scripts/brain/client_state_digest.py",
+      "<merge-tree>/scripts/brain/runner.py",
+      "<merge-tree>/scripts/brain/meeting_loop_watch.py (diff 600e05f3..9f443129)",
+      "<merge-tree>/scripts/brain/resolve_meeting.py:290-352 (load_closed_sets, read-only anchor)",
+      "<merge-tree>/scripts/brain/writeback_render.py:55-145 (read-only anchor)",
+      "<merge-tree>/src/bus/task.ts, src/cli/bus.ts, src/bus/multica/poll.ts (diff) + src/bus/meeting-brief.ts:335-430",
+      "<merge-tree>/scripts/brain/tests/test_client_state_gmail.py (lines 1-90, 1974-2125), helpers_client_state.py, conftest.py, test_no_network.py, test_client_state_guards.py (registry rows)",
+      "<merge-tree>/tests/unit/bus/task-human-type.test.ts + tests/unit/cli/bus-create-task-type.test.ts (case names)",
+      "<merge-tree>/docs/pipeline/run-artifacts/client-state-gmail-v1/{g4-check.sh,shims/cortextos,test-ops-shims.sh,G0-review-opus.json,G0-adjudication.json,gate-G0-review.json,orch-verify-final.json}",
+      "<merge-tree>/docs/pipeline/run-artifacts/client-state-gmail-v1/live/{dry-run-3d-r1-FAILED.receipt.json,dry-run-3d-r2.receipt.json,dry-run-3d-r2.txt,dry-run-3d-r2.shim.log}",
+      "<scratchpad>/g4-out/{dry-run-2026-09-15.txt,dry-run-2026-09-15.ledger.jsonl,run-receipt.json,no-prod-writes.json,idempotency.json,shim-tests.log,suite.json,g1-record.json,gate-G1-suite.json,gate-invocations.json,bus-guards.json,digest-dry-run.txt,ESCALATION-CASE.md,ambiguity-scan.txt}",
+      "<scratchpad>/g4-env/state-g4/argv.log (verb counts only) and <scratchpad>/g4-env/vault/raw/areas/clearworks/org-brain/{projects,clients}/*.md (domain lines, kadre.md History)",
+      "<scratchpad>/final-review/probe/{repro.py,repro_c.py} (my own reproduction probes; outputs quoted in claims_verified)",
+      "READ-ONLY: /Users/joshweiss/code/cortextos/orgs/clearworksai/agents/crm/crm/{contacts.json,interactions.jsonl} (sha256 + grep for the 10 dry-run filed ids; nothing written)"
+    ]
+  },
+  "claims_verified": [
+    {
+      "claim": "Goal G4 item 4 / external-write boundary: the G4 dry-run wrote nothing to the production CRM or vault",
+      "how": "g4-out/no-prod-writes.json (sha before==after, porcelain '', tree diff ''), g4-env/state-g4/argv.log verb census (10 claude, 25 cortextos = 1 claim + 20 list-tasks + 1 release + 3 shim-logged only, 216 gws; ZERO add-interaction.py / upsert-contact.py argv), and a read-only grep of prod interactions.jsonl for the 10 filed ids: 4 hits exist but carry comms-backfill shape ('RECEIVED: ...' summaries, contact ids dt/mbermudez, ts 2026-09-14T20:48Z..2026-09-15T16:50Z, all BEFORE the 20:04Z dry-run) - not the dry-run's extraction summaries. Prod sha256 differs NOW from sha_after only because the 4h comms-backfill kept writing after the run",
+      "result": "holds"
+    },
+    {
+      "claim": "FR-003 escalate-once per (source_ref, content_digest) with the clientstate: send-side key, silent on re-evaluation",
+      "how": "probe repro_c.py: contact marcos@acme.org with CRM company Alloy vs page-domain acme -> escalated; 3 consecutive live sweeps -> send-telegram called exactly once, argv tail ['6690120787', <text>, '--kind','comms','--source-key','clientstate:gmail.m1.5a1a81e1'], ledger stays at 1 row; client_state_gmail.py:350-403 + observation_ledger.py:209-227 (simulated rows never count as delivered)",
+      "result": "holds"
+    },
+    {
+      "claim": "FR-002 single-flight: stale lock never wins in band; heartbeat touches mtime which meeting-brief.ts treats as authoritative",
+      "how": "single_flight.py:205-229 (no retry, rc-0 only produces a Lease), src/bus/meeting-brief.ts:335-353 claimAgeMs = max(mtime, content) and :396-412 stale-cleared without reclaim; Heartbeat interval 300s < 10 min (A2) at single_flight.py:97; g4-out/idempotency.json stale_discovering_run_exit_code=2 reason stale-cleared, next acquire wins, third_run_receipt_byte_identical=true",
+      "result": "holds"
+    },
+    {
+      "claim": "FR-003/A1 exclusion query is the comms-check clause verbatim; INBOUND_ONLY kept separate",
+      "how": "python compare of orgs/clearworksai/skills/comms-check-worker/SKILL.md:26 substring '-category:promotions ... -subject:\"auto-reply\"' == gmail_source.EXCLUSION_QUERY -> True; gmail_source.py:37,83 composes '<extra> <date ops> -in:sent -in:drafts <EXCLUSION>'",
+      "result": "holds"
+    },
+    {
+      "claim": "FR-008 tier-1 ratio STRICTLY > 0.75 with casefolded/aliased owner match; tasks are human-routed only",
+      "how": "client_state_writes.py:195-203 (ratio > 0.75, normalize_owner both sides); probe: ratio 0.556 -> False, 0.778 -> True, same text/different owner -> False; mutation row G-DEDUP-1 (>= mutation) in test_client_state_guards.py:321; plan_task_create_argv -> '--assignee human --type human' (client_state_projections.py:86-95) and every dry-run task line in g4-out/dry-run-2026-09-15.txt carries it; no create-task ever executed (shim_forbidden_verbs [])",
+      "result": "holds"
+    },
+    {
+      "claim": "FR-004 full-domain keys only and None/'' guards; FR-006 no contact without a From display name, header-only facts",
+      "how": "resolve_email.py:92-104 (company '' -> no _norm_title call; '' slug from duplicate-suppressed name -> no match; domain_to_slug.get(full domain)); client_state_gmail.py:597-620 (auto-create sender only, skipped when from_name empty; test_a_sender_with_no_display_name_is_not_auto_created); plan_upsert_contact_argv uses only from_name/from_email",
+      "result": "holds"
+    },
+    {
+      "claim": "FR-001 identity: at most one paid call per (source_ref, digest, sorted bound slugs), widen-and-rerun, cache searched across full history; dry-run repeat is free",
+      "how": "extract_email.py:142-145,359-384; observation_ledger.py:191-207; client_state_gmail.py:409,422,435; g4-out/idempotency.json second_run_claude_calls=0, second_run_rows_added=0; test_second_identical_dry_run_zero_new_claude_calls",
+      "result": "holds"
+    },
+    {
+      "claim": "FR-010 allowlist for THIS release (PR two-parent diff 9f443129^1..9f443129, docs/ excluded)",
+      "how": "git diff --name-only 9f443129^1 9f443129: .gitignore (+1 line state/client-state/), scripts/brain/meeting_loop_watch.py, src/bus/task.ts, src/cli/bus.ts, new scripts/brain/*.py + tests, new vitest files, AND src/bus/multica/poll.ts. scripts/brain/run_meeting.py + meeting_loop_retry.py in the pinned range come from main hotfix #390 via the integration branch, not this release",
+      "result": "does not hold (see F-3: poll.ts is outside the R1 allowlist as written)"
+    },
+    {
+      "claim": "Bus guards: create-task --type human persists type, claimTask refuses human-exempt unless force, no claimant-name exemption, multica passes force",
+      "how": "src/bus/task.ts:199-205 (isHumanExemptTask includes type==='human'), :1163-1167 guard before both idempotent return paths, src/cli/bus.ts:685-695, src/bus/multica/poll.ts:179; only two claimTask call sites in src; g4-out/bus-guards.json 4 rows control-green/mutated-red with applied diffs",
+      "result": "holds"
+    },
+    {
+      "claim": "G4 item 2 (no real transport reached from the suites) is non-vacuous",
+      "how": "g4-out/shim-tests.log carries ONLY the positive-control section (empty before-marker section; g4-check.sh check_2 passes on '0 trap lines before marker'), which by itself cannot distinguish 'ran under traps' from 'did not run'. The non-vacuous proof lives in the suite instead: scripts/brain/tests/test_no_network.py runs the focused slice under the trap PATH and asserts zero TRAP lines, with a separate positive control - both part of the 783 passed in suite.json",
+      "result": "holds (via test_no_network.py; the log artifact alone is weaker than item 2's wording)"
+    },
+    {
+      "claim": "LIVE-1 in-run retry loop is bounded and a rejected output never aborts the sweep",
+      "how": "client_state_gmail.py:433-464 (persisted counter EXTRACTION_MAX_ATTEMPTS=2 AND local in_run_calls), probe repro.py A run1: 2 claude calls, exit 0, frozen row; mutation rows G-EXT-5/G-EXT-6",
+      "result": "holds - but see F-1/F-2 for what the loop does to transport failures and to later sweeps"
+    },
+    {
+      "claim": "Comment claim at client_state_gmail.py:428-429 'Run-fatal exit 3 stays for transport, lock and writer errors' (and the LIVE-1 ledger ruling text)",
+      "how": "extract_email.py:268-269 raises ExtractionError on claude rc!=0; client_state_gmail.py:462-464 catches it and retries/freezes; probe repro.py B: claude rc=1 stderr 'Credit balance is too low' -> 2 calls, message FROZEN, run exit 0, run-receipt.json has last_success_at and NO error; next sweep after the outage makes 0 claude calls and files nothing. The except ExtractionError arm in run() (:852-853) is unreachable",
+      "result": "does not hold (F-1)"
+    },
+    {
+      "claim": "FR-001 'WHEN a re-check changes nothing THE SYSTEM SHALL write nothing' for a frozen message",
+      "how": "probe repro.py A: after the freeze, sweeps 2..5 each append one more frozen row (rows 1->5), each re-enumerates list-tasks (2 bus reads), and client_state_digest.gmail_section over 24h emits one 'extraction failed twice - manual re-run' line per row (5 lines from 5 sweeps; 144/day at the */10 cadence)",
+      "result": "does not hold (F-2)"
+    }
+  ],
+  "findings": [
+    {
+      "id": "F-1",
+      "severity": "Critical",
+      "title": "A claude transport/credit failure (rc != 0, or a runner timeout) is consumed as a 'rejected output': the message is frozen permanently, the sweep reports SUCCESS, and an outage strands the whole window",
+      "file": "scripts/brain/extract_email.py:268-269; scripts/brain/client_state_gmail.py:458-464, 433-455, 852-853",
+      "evidence": "extract() raises ExtractionError for proc.returncode != 0 (auth/credit/529/network), the LIVE-1 loop catches it (:462-464), stamps the attempt budget and freezes after the second call. Reproduced (final-review/probe/repro.py, probe B): claude rc=1 stderr 'Credit balance is too low' -> 2 calls, frozen row, exit 0, receipt {last_success_at set, no error, extraction_failures:[...]}; the post-outage sweep makes ZERO claude calls and files nothing - only a hand edit of extraction-attempts.json un-freezes it (no CLI exists; the digest says 'manual re-run' but names no command). In a fleet-wide outage (the 2026-09-14 meeting-loop 'Credit balance is too low' incident) every filed-eligible message in the window (~10-100) freezes in ONE sweep. A subprocess.TimeoutExpired (runner.py default 120s for the claude call) is the mirror case: attempt stamped, escapes the loop to run()'s catch-all -> exit 3 aborting the rest of the sweep, twice, then frozen. This contradicts the LIVE-1 ruling text and the in-code claim (:428-429 'Run-fatal exit 3 stays for transport ... errors'), the goal STANDING RULE 'fail-closed halts persist the cause' (the SUCCESS receipt is written, so FR-002 gap detection and the FR-009 poller-health line stay green through a dead extractor), and makes run()'s except ExtractionError arm (:852-853) dead code.",
+      "spec_ref": "FR-002 (run receipt = the artifact gap detection reads), FR-001/FR-005 (at-most-once is about a USABLE result - ledger ruling G2r3-7/LIVE-1), goal STANDING RULES 'Fail-closed halts persist the cause'",
+      "recommended_fix": "Split the failure classes: raise a distinct ExtractionTransportError for rc != 0 / TimeoutExpired and let it take the existing run-fatal exit-3 path (record_failure, no attempt consumed, next sweep retries), keeping the attempt budget ONLY for parse/schema/quote-gate rejections of an rc-0 result. Add a named un-freeze path (e.g. --retry-frozen or --clear-attempts <source_ref>) and have the digest line name it. Pin with a test feeding rc=1 and asserting exit 3 + receipt.error + zero attempts stamped.",
+      "disposition": "open"
+    },
+    {
+      "id": "F-2",
+      "severity": "Critical",
+      "title": "A frozen message is re-processed on every sweep: one new frozen ledger row and one duplicate digest line per 10-minute tick, plus two bus reads",
+      "file": "scripts/brain/client_state_gmail.py:435-455 (freeze branch), :363-365 (no-change check requires `not pending`), :410 (list_open_tasks before the freeze check); scripts/brain/client_state_projections.py:195-204",
+      "evidence": "A frozen row persists its resolutions as 'partial', so the next sweep re-resolves them to 'pending', skips the G-IDEMP-2 no-change return (it only fires when nothing is pending), enumerates list-tasks (2 shim/bus calls), finds the cache empty and attempts >= 2, and appends ANOTHER frozen row. Reproduced (probe A): rows 1 -> 2 -> 3 -> 4 -> 5 across 5 sweeps with 0 claude calls; gmail_section over 24h rendered 5 'extraction failed twice - manual re-run' lines (one per row). At */10 that is 144 rows and 144 digest lines per frozen message per day for as long as it stays in the 3-day window, and the Ledger rewrites the whole JSONL on every append (O(n) per row). Combined with F-1 an outage turns the daily digest into thousands of identical lines (4096-char splits), which is exactly the 'train Josh to skim past the one channel D-03 depends on' failure FR-009 round 2 removed for fireflies refs, and the ~432-re-page pattern FR-003 round 2 removed for escalations.",
+      "spec_ref": "FR-001 ('WHEN a re-check changes nothing THE SYSTEM SHALL write nothing'), FR-009 (digest legibility / one line per state change), FR-008 (deliberate enumeration - not 288 list-tasks reads per frozen message per day)",
+      "recommended_fix": "Before enumerating tasks, if the latest same-digest row already carries extraction_attempt.frozen for this identity and the fresh resolution signature equals that row's, return without writing (and without list_open_tasks); keep the receipt's extraction_failures entry so the digest can still surface the frozen set from the receipt (once per day) rather than from repeated rows. Pin with a test asserting sweep N+1 after a freeze appends 0 rows and issues 0 list-tasks calls.",
+      "disposition": "open"
+    },
+    {
+      "id": "F-3",
+      "severity": "Important",
+      "title": "src/bus/multica/poll.ts is modified by this release but is outside the R1 FR-010 allowlist as written (spec FR-010 + goal STANDING RULES); the G2r3-9 ruling amended the code, not the allowlist's source of truth",
+      "file": "src/bus/multica/poll.ts:175-179; docs/pipeline/goals/2026-09-14-client-state-gmail-v1-build-goal.md:390-401; state/specs/2026-09-14-client-state-gmail-v1-spec.md:326-331",
+      "evidence": "git diff --name-only 9f443129^1 9f443129 includes src/bus/multica/poll.ts. The binding R1 spec FR-010 permits only meeting_loop_watch.py, src/bus/task.ts, src/cli/bus.ts (+ crm cron prompt, not touched) and says 'No other shared file changes'; the goal's mechanical rule says the diff minus the allowlist 'must be empty or a Critical'. The ledger's G2 round-3 ruling adds poll.ts ('FR-010 allowlist gains that file via the spec patch'), but the patch-1 spec (2026-09-15, FR-010 lines 251-258) governs the NEXT release, so R1's own allowlist still excludes the file. The change itself is a one-line, necessary consequence of removing the claimant-name exemption (G2r3-9) and is covered by tests; severity is Important because the code is right and the gap is the allowlist record.",
+      "spec_ref": "FR-010 (R1); goal STANDING RULES 'FR-010 file allowlist (mechanical)'; ledger 'G2 ROUND 3 (CAP)' row '--agent human bypass'",
+      "recommended_fix": "Record the R1 allowlist amendment where the allowlist lives (goal STANDING RULES line + a spec FR-010 note or a dated ledger amendment naming poll.ts and the G2r3-9 ruling) so the mechanical check has a source of truth; disposition confirmed-code-kept is appropriate once that record exists.",
+      "disposition": "open"
+    },
+    {
+      "id": "F-4",
+      "severity": "Important",
+      "title": "FR-006's dedup assumption (same source_ref + same contact_id as the existing comms-backfill writer) is false for at least 2 of the 10 live-filed senders: the two writers resolve the same sender to DIFFERENT contact ids, so the 7-day parallel run will double interaction rows",
+      "file": "scripts/brain/client_state_gmail.py:594-647 (contact_id from resolve_email / contacts.json); docs/pipeline/run-artifacts/client-state-gmail-v1/coverage-diff.py",
+      "evidence": "Read-only probe of production interactions.jsonl: the existing writer already holds rows for gmail:1a0a21f1b466c83a, gmail:1a0a18385aaf0ee7, gmail:1a0a55421e70d5fc under contact_id 'dt' and gmail:1a0a274373f244f1 under 'mbermudez', while the G4 dry-run resolves the same senders to 'douglas-teiger' and 'marcela-bermudez-mbermudez-lmdarchitecture-com' (g4-out/dry-run-2026-09-15.txt CRM row previews). add-interaction.py dedups on (source_ref, contact_id), so during the SUBSUME parallel run each such email yields two interaction rows for one message. This is newly observed from the produced artifacts (not in the spec, not in the coverage-diff tool's exclusion classes: sent mail / automated sender / unknown entity), it is the CRM-dup-contact carry the memory index already names, and it reaches production only in the activate goal - hence Important, with the activate goal's parallel run as the verification trigger.",
+      "spec_ref": "FR-006 (dedup key source_ref+contact_id; SUBSUME gated on the 7-day coverage diff)",
+      "recommended_fix": "Extend coverage-diff.py with a 'contact-id divergence' class (same gmail: source_ref present from both writers under different contact ids) so the activate goal's 7-day diff reports the doubles instead of hiding them behind the dedup key; and/or resolve the sender through the same email->contact match upsert-contact.py uses before choosing contact_id, with the duplicate-contact merge (dt vs douglas-teiger) as a named activate-goal precondition.",
+      "disposition": "open"
+    }
+  ],
+  "locked_decision_rejections": [
+    {
+      "would_be_finding": "The */10 fixed-window poll trigger re-reads every in-window message (104 x '+read' per tick) instead of an event/webhook trigger",
+      "row": "FR-002 (R1) - superseded for the NEXT release by patch-1 FR-002 (Josh 2026-09-15)",
+      "why_rejected": "Locked for R1 and already superseded by design; explicitly excluded from this review's scope."
+    },
+    {
+      "would_be_finding": "Known CRM contacts whose company maps to no page (e.g. valerie-jimenez, amy, andreh-marouti in the G4 dry-run) are recorded ignored/no-known-entity and never filed, even though FR-003's first bullet says a CRM-contact-email match proceeds",
+      "row": "D-11 + FR-004 ('empty/missing company ... treat as NO match') - superseded by patch-1 FR-003 real-person predicate",
+      "why_rejected": "Known-entities-only is a locked R1 decision and the patch spec replaces it; not a finding here."
+    },
+    {
+      "would_be_finding": "`summary` is not quote-grounded and a hostile body's own words survive the quote gate (read_hostile.json fixture: the 'wire $5000' sentence is a grounded quote)",
+      "row": "FR-005 'Known gate behaviors carried knowingly' + INJECTION SURFACE bounds",
+      "why_rejected": "Carried by design; the bounds (no tools, one turn, schema, human-routed tasks, digest visibility) are implemented as specified (extract_email.py:30-71, :214-236)."
+    },
+    {
+      "would_be_finding": "Tier-1 threshold 0.75 is unvalidated for cross-source commitment text",
+      "row": "§Accepted assumptions (owner Josh); FR-008",
+      "why_rejected": "Owned assumption; reviewer restatement is out of scope."
+    },
+    {
+      "would_be_finding": "A suppressed duplicate does not attach the new source_ref to the existing bus task",
+      "row": "FR-008 ('v1 does NOT mutate the existing task') / Non-goals",
+      "why_rejected": "Explicit non-goal; evidence lands on the ledger row and the digest (client_state_gmail.py:702-707, plan_digest_line)."
+    },
+    {
+      "would_be_finding": "Email History entries are appended at the END of a section headed 'History (dated, newest first)'",
+      "row": "FR-007 (append-only, marked revisions) / FR-010 (writeback_render read-only)",
+      "why_rejected": "The existing meeting renderer already appends and the live pages are already unordered (g4-env vault kadre.md History: 08-24, 08-20, 07-27, 08-11 ...); FR-007 mandates append-only semantics, not position. Consistent with the read-only sibling."
+    },
+    {
+      "would_be_finding": "Domains declared only on a PROJECT page get a bare-label key in load_closed_sets (resolve_meeting.py:346-347), so FR-004's full-domain lookup can never match them",
+      "row": "FR-010 (load_closed_sets is imported, never edited) / FR-004",
+      "why_rejected": "Latent, not live: every project-page domain in the vault copy (alloi-01/02/03 -> alloi.us) is also declared on clients/alloi.md, and the imported piece is read-only under FR-010. Worth a note for the patch release's page-creation work, not a finding against this diff."
+    },
+    {
+      "would_be_finding": "Escalations for three separate messages from one ambiguous sender each page Josh (3 escalation blocks in the G4 dry-run)",
+      "row": "FR-003 'EXACTLY ONCE per (source_ref, content_digest)'",
+      "why_rejected": "Per-message once-ness is the locked unit; the dry-run's escalated case was deliberately induced by one declared CRM-copy edit (ESCALATION-CASE.md) because the real inbox has zero ambiguous senders (ambiguity-scan.txt)."
+    }
+  ],
+  "verdict": "findings",
+  "summary": "Boundary, lock, escalate-once, identity/cache, tier-1, FR-004/FR-006 guards and the bus guards all hold on code and artifacts (13 claims checked, 3 by my own reproduction probes). Two Critical defects in the LIVE-1 containment: (F-1) a claude transport/credit failure or timeout is treated as a rejected output, freezing every affected message permanently while the run writes a SUCCESS receipt, so an outage strands the whole window with gap detection green; (F-2) a frozen message then appends a new ledger row and a duplicate digest line on every 10-minute sweep (144/day each), violating FR-001's write-nothing rule and flooding the FR-009 digest. Important: poll.ts sits outside the R1 FR-010 allowlist as written (ruled G2r3-9, record not amended), and the live artifacts show the existing comms-backfill writer files the same senders under different contact ids, so FR-006's dedup key will not prevent double rows in the activate goal's parallel run. Note for the orchestrator: in the g4-out copy I read, floor.txt is absent and gate-invocations.json still has G4-matrix/FINAL exits null (expected to be filled after this review)."
+}

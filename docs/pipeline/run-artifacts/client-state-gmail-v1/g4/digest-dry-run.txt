@@ -1,0 +1,32 @@
+⚠️ Fireflies section error: no FIREFLIES_API_KEY
+
+Client state (Gmail) — last 24h
+- Escalated: gmail:1a09964a9a12731a — ambiguous:doug-teiger-consulting|alloi [simulated]
+- Escalated: gmail:1a09962f1c0305d5 — ambiguous:doug-teiger-consulting|alloi [simulated]
+- Escalated: gmail:1a0981cd68a90c6a — ambiguous:doug-teiger-consulting|alloi [simulated]
+- CRM: crm:douglas-teiger (gmail:1a0a21f1b466c83a) — Doug Teiger asked Josh to review his current AI usage and suggest system improvements, following up on Josh's earlier reply about scheduling and consulting rates. [simulated]
+- Page: raw/areas/clearworks/org-brain/orgs/doug-teiger-consulting.md (gmail:1a0a21f1b466c83a) — Doug Teiger asked Josh to review his current AI usage and suggest system improvements, following up on Josh's earlier reply about scheduling and consulting rates. [simulated]
+- Task created: Josh will confirm his morning appointment on Thursday or Friday and then let Doug know a meeting time. (gmail:1a0a21f1b466c83a) [simulated]
+- CRM: crm:marcela-bermudez-mbermudez-lmdarchitecture-com (gmail:1a0a20fcff8f0300) — Marcela reports progress on her firm playbook, adopting a one-new-tool-per-meeting learning approach, adding the Gemini Task Observer and 2FA/passkey, while two LMD employees attend an AI seminar in San Diego this weekend. [simulated]
+- Page: raw/areas/clearworks/org-brain/clients/lmd-architecture.md (gmail:1a0a20fcff8f0300) — Marcela reports progress on her firm playbook, adopting a one-new-tool-per-meeting learning approach, adding the Gemini Task Observer and 2FA/passkey, while two LMD employees attend an AI seminar in San Diego this weekend. [simulated]
+- CRM: crm:douglas-teiger (gmail:1a0a18385aaf0ee7) — Douglas Teiger asks Josh to schedule a 2-3 hour screen share work session to dial in his AI setups, proposing time options and requesting cost information. [simulated]
+- Page: raw/areas/clearworks/org-brain/orgs/doug-teiger-consulting.md (gmail:1a0a18385aaf0ee7) — Douglas Teiger asks Josh to schedule a 2-3 hour screen share work session to dial in his AI setups, proposing time options and requesting cost information. [simulated]
+- Task created: Let Douglas Teiger know the cost so he is aware of expectations. (gmail:1a0a18385aaf0ee7) [simulated]
+- CRM: crm:joe (gmail:1a0a1530232c577f) — Joe Chang asks whether there is an attachment or if he can instead have Claude run it directly. [simulated]
+- Page: raw/areas/clearworks/org-brain/clients/alloi.md (gmail:1a0a1530232c577f) — Joe Chang asks whether there is an attachment or if he can instead have Claude run it directly. [simulated]
+- CRM: crm:joe (gmail:1a0a13a7cb82548d) — Joe Chang reported recurring errors, shown in two attached screenshots, and is asking Josh to help resolve them. [simulated]
+- Page: raw/areas/clearworks/org-brain/clients/alloi.md (gmail:1a0a13a7cb82548d) — Joe Chang reported recurring errors, shown in two attached screenshots, and is asking Josh to help resolve them. [simulated]
+- CRM: crm:ivette (gmail:1a0a10342ffe3ed6) — Ivette reports an error message when running the CN tacticals after installing the new skill, and is also unable to reconnect the Slack imager connector. [simulated]
+- Page: raw/areas/clearworks/org-brain/clients/alloi.md (gmail:1a0a10342ffe3ed6) — Ivette reports an error message when running the CN tacticals after installing the new skill, and is also unable to reconnect the Slack imager connector. [simulated]
+- CRM: crm:nerin-kadribegovic (gmail:1a0a6a015db33ded) — Nerin asks Josh to send something to review before his 3pm call with Doug. [simulated]
+- Page: raw/areas/clearworks/org-brain/clients/kadre.md (gmail:1a0a6a015db33ded) — Nerin asks Josh to send something to review before his 3pm call with Doug. [simulated]
+- Task created: Send Nerin something to review before his 3pm call with Doug. (gmail:1a0a6a015db33ded) [simulated]
+- CRM: crm:douglas-teiger (gmail:1a0a5ff84722a72f) — Douglas Teiger confirms he now sees the calendar invite Josh Weiss added him to and looks forward to the meeting. [simulated]
+- Page: raw/areas/clearworks/org-brain/orgs/doug-teiger-consulting.md (gmail:1a0a5ff84722a72f) — Douglas Teiger confirms he now sees the calendar invite Josh Weiss added him to and looks forward to the meeting. [simulated]
+- CRM: crm:douglas-teiger (gmail:1a0a55421e70d5fc) — Douglas Teiger tells Josh Weiss he has not yet received the Thursday meeting invite that Josh said he would send. [simulated]
+- Page: raw/areas/clearworks/org-brain/orgs/doug-teiger-consulting.md (gmail:1a0a55421e70d5fc) — Douglas Teiger tells Josh Weiss he has not yet received the Thursday meeting invite that Josh said he would send. [simulated]
+- Task created: Send Douglas Teiger the invite for Thursday's meeting. (gmail:1a0a55421e70d5fc) [simulated]
+- CRM: crm:marcela-bermudez-mbermudez-lmdarchitecture-com (gmail:1a0a274373f244f1) — Marcela commits to posting a Google review for Josh and asks what tool she could use to record herself completing a task and auto-generate step-by-step onboarding documentation for Monograph setup. [simulated]
+- Page: raw/areas/clearworks/org-brain/clients/lmd-architecture.md (gmail:1a0a274373f244f1) — Marcela commits to posting a Google review for Josh and asks what tool she could use to record herself completing a task and auto-generate step-by-step onboarding documentation for Monograph setup. [simulated]
+- ignored (no-known-entity): 97 messages from 52 senders — top: getshinepay.com (10), hello.clearworks.ai (9), mailchimp.com (8), mail.beehiiv.com (6), fireflies.ai (5)
+- invariants: OK

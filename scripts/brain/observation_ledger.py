@@ -166,15 +166,24 @@ class Ledger:
         return tasks
 
     def escalated_for(self, source_ref: str, digest: str) -> bool:
-        """True once a REAL (non-simulated) run has already sent the FR-003
-        escalation for this exact (source_ref, digest). A dry-run row must not
-        suppress the live Telegram send (G0A2-2)."""
-        row = self.latest(source_ref)
-        if row is None or row.content_digest != digest:
-            return False
-        if row.simulated:  # G-LEDGER-6
-            return False
-        return any(r.outcome == "escalated" for r in row.resolutions)  # G-LEDGER-5
+        """True once a REAL (non-simulated) run has already DELIVERED the FR-003
+        escalation for this exact (source_ref, digest).
+
+        MONOTONIC (G2B-5): the search covers EVERY row for that pair, not just
+        the latest. A resolution set that cycles -- ambiguous, then ignored when
+        the contact momentarily stops matching, then ambiguous again -- used to
+        forget the delivered alert as soon as any later row landed, and Josh got
+        a second Telegram for the same message. An 'escalated' outcome is only
+        ever persisted AFTER a successful send (G-ESC-3), so it is proof of
+        delivery. A dry-run row is not (G0A2-2)."""
+        for row in self._read_rows():
+            if row.source_ref != source_ref or row.content_digest != digest:
+                continue
+            if row.simulated:  # G-LEDGER-6
+                continue
+            if any(r.outcome == "escalated" for r in row.resolutions):  # G-LEDGER-5
+                return True
+        return False
 
 
 def write_receipt(state_dir: Path, receipt: dict) -> None:

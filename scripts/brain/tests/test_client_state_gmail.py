@@ -656,8 +656,47 @@ def test_escalation_send_failure_exits_3_and_never_records_escalated(tmp_path):
     assert result.exit_code == 3  # G-ESC-2
     ledger_path = cfg.state_dir / "observations.jsonl"
     rows = [json.loads(l) for l in ledger_path.read_text().splitlines()] if ledger_path.exists() else []
-    assert rows == []
+    # G-ESC-3: the row IS persisted (so the cost/record of the attempt is not
+    # lost) but NOTHING on it is marked escalated -- escalated_for must not read
+    # an undelivered alert as proof of delivery.
+    assert len(rows) == 1
+    assert rows[0]["partial"] is True
+    assert not any(r["outcome"] == "escalated" for r in rows[0]["resolutions"])
     assert "telegram down" in json.loads((cfg.state_dir / "run-receipt.json").read_text())["error"]
+
+
+def test_failed_escalation_send_is_retried_by_the_next_run(tmp_path):
+    """G2A-1/G2B-5: the first run's send fails. The next run must SEND AGAIN --
+    the failed attempt may not be recorded as an escalation."""
+    contacts = [{"id": "c1", "name": "Marcos", "emails": ["marcos@acme.org"], "company": "Alloy"}]
+    cfg = _cfg(tmp_path, dry_run=False, contacts=contacts)
+    payload = _gmail_payload(from_email="marcos@acme.org", from_name="Marcos")
+
+    runner = FakeRunner()
+    _lock_ok(runner, cfg.state_dir / "claims")
+    runner.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(payload))
+    runner.record(("cortextos", "bus", "send-telegram"), rc=1, stdout="", stderr="telegram down")
+    assert csg.run(cfg, runner).exit_code == 3
+
+    runner2 = FakeRunner()
+    _lock_ok(runner2, cfg.state_dir / "claims")
+    runner2.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner2.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(payload))
+    runner2.record(("cortextos", "bus", "send-telegram"), rc=0, stdout="sent")
+    result2 = csg.run(cfg, runner2)
+
+    assert result2.exit_code == 0
+    assert result2.escalated == 1
+    assert [c for c in runner2.calls if c[:3] == ["cortextos", "bus", "send-telegram"]]
+
+    # third run: delivery happened, so no resend
+    runner3 = FakeRunner()
+    _lock_ok(runner3, cfg.state_dir / "claims")
+    runner3.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner3.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(payload))
+    assert csg.run(cfg, runner3).exit_code == 0
+    assert not any(c[:3] == ["cortextos", "bus", "send-telegram"] for c in runner3.calls)
 
 
 def test_lost_lease_mid_run_stops_and_never_releases_the_replacement(tmp_path):

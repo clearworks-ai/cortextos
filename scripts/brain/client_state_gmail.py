@@ -252,6 +252,29 @@ def _file_message(
     escalated = [r for r in resolutions if r.outcome == "escalated"]
     ignored = [r for r in resolutions if r.outcome == "ignored"]
 
+    # G-ESC-3 (G2A-1/G2B-5): the RESOLVER produces `escalated` to mean "this
+    # needs an alert", but `escalated_for` reads a persisted `escalated` outcome
+    # as PROOF the alert was delivered. Those two meanings must not share a
+    # value on disk: a send that failed (or never ran because the message blew
+    # up first) would gate the retry forever and Josh would never hear about the
+    # ambiguity. `delivered` starts true only when a previous real run already
+    # sent this exact (source_ref, digest) -- or in a dry-run, which sends
+    # nothing and whose row is simulated anyway -- and becomes true the instant
+    # a send returns rc 0. Any row persisted while it is false demotes the
+    # undelivered escalations back to `pending`, which is not terminal, so the
+    # next run resolves the same ambiguity and sends.
+    esc_state = {
+        "already": ledger.escalated_for(source_ref, digest),
+        "delivered": cfg.dry_run,
+    }
+
+    def _demote_undelivered_escalations() -> None:
+        if esc_state["already"] or esc_state["delivered"]:
+            return
+        for r in resolutions:
+            if r.outcome == "escalated":
+                r.outcome = "pending"  # G-ESC-3
+
     # FR-001: a same-digest re-check that changes nothing writes nothing.
     if merge_prior is not None and not pending:
         if _resolution_signature(resolutions) == _resolution_signature(merge_prior.resolutions):  # G-IDEMP-2
@@ -262,10 +285,23 @@ def _file_message(
         # the prior run) -- still record the row once, and escalate exactly
         # once per (source_ref, digest) if warranted.
         escalation_text = None
-        if escalated and not ledger.escalated_for(source_ref, digest):  # G-ESC-1
+        if escalated and not esc_state["already"]:  # G-ESC-1
             escalation_text = projections.plan_escalation(msg, resolutions)
             if not cfg.dry_run:
-                _send_escalation(runner, escalation_text)  # G-ESC-2: rc checked
+                try:
+                    _send_escalation(runner, escalation_text)  # G-ESC-2: rc checked
+                except Exception:
+                    # G-ESC-3: delivery did not happen. Persist the attempt as a
+                    # NON-terminal row with the escalations demoted, so the next
+                    # run re-sends instead of reading this row as proof.
+                    _demote_undelivered_escalations()
+                    ledger.append(ObservationRow(
+                        source_ref=source_ref, thread_id=msg.thread_id, content_digest=digest,
+                        observed_at=cfg.now.isoformat(), resolutions=resolutions,
+                        revision_of=revision_of, partial=True,
+                    ))
+                    raise
+                esc_state["delivered"] = True
         row = ObservationRow(
             source_ref=source_ref, thread_id=msg.thread_id, content_digest=digest,
             observed_at=cfg.now.isoformat(), resolutions=resolutions, revision_of=revision_of,
@@ -340,6 +376,7 @@ def _file_message(
         never finished what had not."""
         if cfg.dry_run or extraction is None:
             return
+        _demote_undelivered_escalations()  # G-ESC-3
         for r in resolutions:
             if r.outcome == "pending":
                 r.outcome = "partial"
@@ -355,7 +392,7 @@ def _file_message(
             cfg, runner, ledger, msg, contacts, previews, extraction, called,
             resolutions, pending, escalated, ignored, context, open_tasks,
             source_ref, digest, revision_of, from_email_norm,
-            crm_lines, page_diffs, writes, planned_writes,
+            crm_lines, page_diffs, writes, planned_writes, esc_state,
         )
     except Exception as exc:  # noqa: BLE001 -- G-EFFECT-2: ANY escape persists landed effects
         # G0B-11 only covered WriterError/EscalationError, so an OSError out of
@@ -377,7 +414,7 @@ def _do_writes(
     cfg, runner, ledger, msg, contacts, previews, extraction, called,
     resolutions, pending, escalated, ignored, context, open_tasks,
     source_ref, digest, revision_of, from_email_norm,
-    crm_lines, page_diffs, writes, planned_writes,
+    crm_lines, page_diffs, writes, planned_writes, esc_state,
 ):
     """Executes (or, in dry-run, previews) every effect this message owes, then
     marks a resolution `filed` ONLY once every effect REQUIRED for it has landed
@@ -499,10 +536,14 @@ def _do_writes(
         mark(key, pending)
 
     escalation_text = None
-    if escalated and not ledger.escalated_for(source_ref, digest):  # G-ESC-1
+    if escalated and not esc_state["already"]:  # G-ESC-1
         escalation_text = projections.plan_escalation(msg, resolutions)
         if not cfg.dry_run:
+            # A raise here reaches _file_message's handler, which persists a
+            # partial row through _persist_partial -- and that demotes the
+            # undelivered escalations (G-ESC-3) before the row is written.
             _send_escalation(runner, escalation_text)  # G-ESC-2: rc checked
+            esc_state["delivered"] = True
 
     # --- completion: `filed` only when EVERY required effect landed ----------
     filed_now = 0

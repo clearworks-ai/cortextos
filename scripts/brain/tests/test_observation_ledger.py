@@ -118,8 +118,12 @@ def test_is_terminal_false_when_latest_row_has_a_different_digest(tmp_path) -> N
     assert ledger.is_terminal("gmail:m1", "digest-b") is False
 
 
-def test_escalated_for_matches_latest_row_same_digest_only(tmp_path) -> None:
-    # G-LEDGER-5
+def test_escalated_for_is_monotonic_across_every_row_for_the_pair(tmp_path) -> None:
+    """G-LEDGER-5 / G2B-5: escalate-once is MONOTONIC. Once a real run has
+    delivered the alert for a (source_ref, digest), a later ignored or filed row
+    for that same pair must not make the system forget it and send a second
+    one -- so the search covers the WHOLE history for the pair, never just the
+    latest row."""
     path = tmp_path / "observations.jsonl"
     ledger = OL.Ledger(path)
     ledger.append(_row("gmail:m1", "digest-a", ["escalated"]))
@@ -127,7 +131,21 @@ def test_escalated_for_matches_latest_row_same_digest_only(tmp_path) -> None:
     assert ledger.escalated_for("gmail:m1", "digest-b") is False
     assert ledger.escalated_for("gmail:nope", "digest-a") is False
 
+    ledger.append(_row("gmail:m1", "digest-a", ["ignored"]))
+    assert ledger.escalated_for("gmail:m1", "digest-a") is True
     ledger.append(_row("gmail:m1", "digest-a", ["filed"]))
+    assert ledger.escalated_for("gmail:m1", "digest-a") is True
+    # a DIFFERENT digest (edited message) is a fresh alert, never suppressed
+    assert ledger.escalated_for("gmail:m1", "digest-b") is False
+
+
+def test_escalated_for_ignores_simulated_rows_anywhere_in_history(tmp_path) -> None:
+    path = tmp_path / "observations.jsonl"
+    ledger = OL.Ledger(path)
+    sim = _row("gmail:m1", "digest-a", ["escalated"])
+    sim.simulated = True
+    ledger.append(sim)
+    ledger.append(_row("gmail:m1", "digest-a", ["ignored"]))
     assert ledger.escalated_for("gmail:m1", "digest-a") is False
 
 

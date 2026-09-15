@@ -5,12 +5,12 @@ writer's landed part, materialised via
 swept with the SAME regex test_no_unregistered_guard below uses (a G-ID
 token anywhere after a '#' on its line -- docstring/prose mentions of a
 G-ID, which several modules still carry alongside their real marker, do NOT
-count). 72 rows: LEDGER x7, RECEIPT x2, LOCK x8, LOCKREF x1, SWEEP x10, RES x2,
+count). 73 rows: LEDGER x7, RECEIPT x2, LOCK x8, LOCKREF x1, SWEEP x10, RES x2,
 EXT x4, INV x2, BASE x2, SUPER x1, DIG x3, BUS x3 (TS), IDEMP x2, MERGE x3,
-SIM x1, ESC x2, QUERY x1, FAIL x1, BUDGET x2, CRM x2, HIST x2, PARITY x2,
+SIM x1, ESC x3, QUERY x1, FAIL x1, BUDGET x2, CRM x2, HIST x2, PARITY x2,
 WRITER x2, OWNER x1, TASK x2, DEDUP x1, EFFECT x2, REV x1.
 
-The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10.
+The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10; the G2 round-2 wave (2026-09-15) added G-ESC-3.
 
 The last 8 rows (G-MERGE-2/3, G-EFFECT-1, G-BUDGET-2, G-REV-1, G-PARITY-2,
 G-LOCK-7/8) were added by the post-cap adjudication wave (2026-09-15) that
@@ -20,7 +20,7 @@ marker in that wave so this sweep sees them.
 Every row is (guard_id, module_path, mutation_description, test_node_id,
 sed_expr). module_path is either a scripts/brain/*.py file (sed_expr is a
 BSD `sed -E` expression) or src/bus/task.ts (the three G-BUS-* rows). A marker
-appearing at MULTIPLE operative sites (G-ESC-1 x2, G-ESC-2 x3, G-EXT-2 x2,
+appearing at MULTIPLE operative sites (G-ESC-1 x2, G-ESC-2 x3, G-ESC-3 x2, G-EXT-2 x2,
 G-LEDGER-6 x4, G-LEDGER-7 x2, G-LOCK-6 x2, G-LOCKREF-1 x2, G-OWNER-1 x2,
 G-PARITY-1 x2, G-SUPER-1 x2, G-SWEEP-6 x4, G-SWEEP-7 x2, G-SWEEP-10 x2, G-WRITER-1 x3,
 G-WRITER-2 x3) gets ONE row whose
@@ -52,9 +52,10 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "scripts/brain/tests/test_observation_ledger.py::test_open_email_tasks_parses_task_writes_entries",
      r's/if not entry\.startswith\("task:"\) or "\|" not in entry:/if True:/'),
     ("G-LEDGER-5", "scripts/brain/observation_ledger.py",
-     "escalated_for is true only against the LATEST row for the SAME digest (FR-003 escalate-once)",
-     "scripts/brain/tests/test_observation_ledger.py::test_escalated_for_matches_latest_row_same_digest_only",
-     r's/return any\(r\.outcome == "escalated" for r in row\.resolutions\)  # G-LEDGER-5/return False  # G-LEDGER-5 (mutated)/'),
+     "escalated_for is true when ANY real row for the exact (source_ref, digest) pair carries an escalated outcome - "
+     "monotonic, so a later ignored/filed row cannot forget a delivered alert and send a second one (G2B-5)",
+     "scripts/brain/tests/test_observation_ledger.py::test_escalated_for_is_monotonic_across_every_row_for_the_pair",
+     r's/if any\(r\.outcome == "escalated" for r in row\.resolutions\):  # G-LEDGER-5/if False:  # G-LEDGER-5 (mutated)/'),
     ("G-RECEIPT-1", "scripts/brain/observation_ledger.py",
      "record_failure starts from the PREVIOUS receipt so last_success_at survives unless partial explicitly overrides it",
      "scripts/brain/tests/test_observation_ledger.py::test_record_failure_preserves_previous_last_success_at",
@@ -275,6 +276,12 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "gate the retry forever) - 2 further sites: both _send_escalation call sites",
      "scripts/brain/tests/test_client_state_gmail.py::test_escalation_send_failure_exits_3_and_never_records_escalated",
      r's/if proc\.returncode != 0:  # G-ESC-2/if False:  # G-ESC-2 (mutated)/'),
+    ("G-ESC-3", "scripts/brain/client_state_gmail.py",
+     "an 'escalated' outcome is persisted ONLY after send-telegram returned rc 0; an undelivered one is demoted to "
+     "'pending' before any row is written, so the non-terminal row makes the next run re-send (G2A-1/G2B-5) - "
+     "other sites: the _persist_partial call and the no-pending branch's failed-send row",
+     "scripts/brain/tests/test_client_state_gmail.py::test_escalation_send_failure_exits_3_and_never_records_escalated",
+     r's/r\.outcome = "pending"  # G-ESC-3/pass  # G-ESC-3 (mutated)/'),
     ("G-EXT-4", "scripts/brain/extract_email.py",
      "a CACHED extraction's matches_open_item indices are re-resolved against THIS invocation's context through the "
      "mapping stored with the cache - never applied blindly to a rebuilt list",
@@ -367,10 +374,10 @@ def test_guard_registry_ids_are_unique():
     assert len(ids) == len(set(ids)), f"duplicate guard ids: {ids}"
 
 
-def test_guard_registry_has_72_rows():
+def test_guard_registry_has_73_rows():
     # Pinned count (rebuilt 2026-09-14 from the FINAL parts, G0 round-3
     # integration) so a future guard silently dropping out is itself caught.
-    assert len(GUARD_REGISTRY) == 72, f"expected 72 rows, got {len(GUARD_REGISTRY)}"
+    assert len(GUARD_REGISTRY) == 73, f"expected 73 rows, got {len(GUARD_REGISTRY)}"
 
 
 def test_guard_registry_rows_have_five_fields():

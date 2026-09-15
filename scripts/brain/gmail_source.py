@@ -271,10 +271,25 @@ def list_messages(runner: "Runner", query: str, max_results: int = 50) -> list[d
     except json.JSONDecodeError as exc:
         raise GmailSourceError(f"gws gmail +triage returned invalid JSON: {exc}") from exc  # G-SWEEP-6
     if isinstance(obj, list):
-        return obj
-    if isinstance(obj, dict):
-        return list(obj.get("messages") or obj.get("emails") or [])  # G-SWEEP-8
-    return []
+        rows = list(obj)
+        envelope: dict = {}
+    elif isinstance(obj, dict):
+        rows = list(obj.get("messages") or obj.get("emails") or [])  # G-SWEEP-8
+        envelope = obj
+    else:
+        rows, envelope = [], {}
+    if not rows:
+        # G-SWEEP-11: an EMPTY result is only believable when nothing else says
+        # otherwise. The deployed `gws` routes this call to gws-dwd, whose
+        # triage() turns a Gmail HTTP error into {"emails": [], "total": 0} with
+        # exit code 0 -- so an auth or quota outage arrived looking exactly like
+        # a quiet inbox, run() wrote a fresh SUCCESS receipt, and the digest's
+        # poller-health line stayed green through a dead poller. Fail closed on
+        # an error envelope or on anything at all on stderr.
+        detail = str(envelope.get("error") or "").strip() or (proc.stderr or "").strip()
+        if detail:
+            raise GmailSourceError(f"gws gmail +triage returned no rows and reported: {detail}")
+    return rows
 
 
 def read_message(runner: "Runner", message_id: str) -> Message:

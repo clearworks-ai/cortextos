@@ -458,3 +458,49 @@ def test_parse_message_flat_shape_normalises_rfc2822_too():
         "subject": "Renewal", "date": "Sun, 14 Sep 2026 03:00:00 -0700", "body": "hi",
     }
     assert gmail_source.parse_message(payload).date_iso == "2026-09-14T10:00:00Z"
+
+
+# --- G2r3-5: an API failure must never look like an empty inbox --------------
+# The deployed `gws` routes this call to gws-dwd, whose triage() converts a
+# Gmail HTTP error into {"emails": [], "total": 0} with exit code 0. Accepting
+# that as "no mail" let an auth/quota outage write a fresh SUCCESS receipt, and
+# the poller-health line in the digest stayed green through a dead poller.
+
+def test_list_messages_rejects_an_empty_result_with_stderr():
+    import gmail_source
+
+    runner = FakeRunner()
+    runner.record(("gws", "gmail", "+triage"), rc=0, stdout='{"emails": [], "total": 0}',
+                  stderr="HttpError 401: Invalid Credentials")
+    with pytest.raises(gmail_source.GmailSourceError) as exc:
+        gmail_source.list_messages(runner, "q")
+    assert "Invalid Credentials" in str(exc.value)
+
+
+def test_list_messages_rejects_an_error_envelope():
+    import gmail_source
+
+    runner = FakeRunner()
+    runner.record(("gws", "gmail", "+triage"), rc=0,
+                  stdout='{"emails": [], "total": 0, "error": "quota exceeded"}')
+    with pytest.raises(gmail_source.GmailSourceError) as exc:
+        gmail_source.list_messages(runner, "q")
+    assert "quota exceeded" in str(exc.value)
+
+
+def test_list_messages_accepts_a_genuinely_empty_day():
+    import gmail_source
+
+    runner = FakeRunner()
+    runner.record(("gws", "gmail", "+triage"), rc=0, stdout='{"emails": [], "total": 0}', stderr="")
+    assert gmail_source.list_messages(runner, "q") == []
+
+
+def test_list_messages_ignores_stderr_when_rows_came_back():
+    """A warning on stderr alongside real rows is not an outage."""
+    import gmail_source
+
+    runner = FakeRunner()
+    runner.record(("gws", "gmail", "+triage"), rc=0,
+                  stdout='{"emails": [{"id": "m1"}], "total": 1}', stderr="warning: slow response")
+    assert gmail_source.list_messages(runner, "q") == [{"id": "m1"}]

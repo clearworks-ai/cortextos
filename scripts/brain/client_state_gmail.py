@@ -581,16 +581,25 @@ def _do_writes(
             mark(key, owners)  # G-EFFECT-3
             continue
         entry = projections.plan_history_entry(msg, extraction, source_ref, revision_of)  # G-PARITY-1
-        # G0B-13: hold the SAME advisory lock the meeting pipeline uses across
-        # read + render + write, so a concurrent meeting-writeback filing to the
-        # same page can never interleave with this read-modify-write.
-        with _page_lock(page, _heartbeat_of(runner), clock=cfg.clock):  # G-HIST-2
+        if cfg.dry_run:  # G-DRY-1: no vault lock, so no vault mutation at all
+            # A dry run mutates NOTHING in the vault -- not even the
+            # sibling <page>.md.lock the advisory lock creates and truncates
+            # (G2B-6). It is also not needed: there is no read-modify-WRITE to
+            # serialise here, only a read and a rendered preview, and a preview
+            # raced by a concurrent writeback is merely slightly stale, never
+            # corrupt. `*.md.lock` is gitignored, so this mutation was invisible
+            # to a porcelain check.
             old_text = page.read_text(encoding="utf-8") if page.exists() else ""
             new_text = writeback_email.apply_history(old_text, entry)
-            if cfg.dry_run:
-                page_diffs.append(_diff_preview(page, old_text, new_text))  # G-PARITY-2
-                planned_writes.append(rel_page)
-            else:
+            page_diffs.append(_diff_preview(page, old_text, new_text))  # G-PARITY-2
+            planned_writes.append(rel_page)
+        else:
+            # G0B-13: hold the SAME advisory lock the meeting pipeline uses across
+            # read + render + write, so a concurrent meeting-writeback filing to the
+            # same page can never interleave with this read-modify-write.
+            with _page_lock(page, _heartbeat_of(runner), clock=cfg.clock):  # G-HIST-2
+                old_text = page.read_text(encoding="utf-8") if page.exists() else ""
+                new_text = writeback_email.apply_history(old_text, entry)
                 _atomic_write_text(page, new_text)
                 writes.append(rel_page)
         mark(key, owners)

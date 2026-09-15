@@ -1713,3 +1713,49 @@ def test_the_page_lock_is_taken_and_released_when_free(tmp_path):
     assert page.read_text(encoding="utf-8").count("[source: gmail:m1]") == 1
     # the lockfile path is byte-identical to meeting_writeback.client_file_lock's
     assert csg._page_lock_path(page) == page.with_name(page.name + ".lock")
+
+
+# --- G2r2-11 (G2B-6): a dry run mutates NOTHING in the vault ------------------
+
+def _vault_snapshot(vault: Path) -> dict[str, bytes]:
+    """Every file under the vault with its bytes — a recursive listing, not just
+    `git status --porcelain`, so a .gitignored artifact (which `*.md.lock` is)
+    cannot hide."""
+    return {
+        str(p.relative_to(vault)): p.read_bytes()
+        for p in sorted(vault.rglob("*")) if p.is_file()
+    }
+
+
+def test_dry_run_leaves_the_vault_byte_identical(tmp_path):
+    """G2B-6: the dry-run branch sat INSIDE the advisory page lock, whose
+    context manager mkdir's and opens <page>.md.lock with mode 'w' — creating or
+    truncating a file inside the vault on a run that promises to write nothing.
+    `*.md.lock` is gitignored, so porcelain alone would never have caught it."""
+    import subprocess as _sp
+
+    cfg = _cfg(tmp_path, dry_run=True)
+    vault = cfg.vault
+    _sp.run(["git", "init", "-q"], cwd=vault, check=True)
+    _sp.run(["git", "add", "-A"], cwd=vault, check=True)
+    _sp.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "fixture"],
+            cwd=vault, check=True)
+
+    before = _vault_snapshot(vault)
+
+    runner = FakeRunner()
+    _lock_ok(runner, cfg.state_dir / "claims")
+    runner.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+    _open_tasks_empty(runner)
+    runner.record(("claude",), rc=0, stdout=_claude_wrapper())
+
+    result = csg.run(cfg, runner)
+
+    assert result.exit_code == 0
+    assert any("page diff for" in p for p in result.previews)   # it DID preview the write
+    assert _vault_snapshot(vault) == before                      # ... and changed nothing
+    assert not list(vault.rglob("*.md.lock"))
+    porcelain = _sp.run(["git", "status", "--porcelain"], cwd=vault,
+                        capture_output=True, text=True, check=True).stdout
+    assert porcelain == "", porcelain

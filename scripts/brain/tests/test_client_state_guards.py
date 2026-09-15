@@ -5,12 +5,12 @@ writer's landed part, materialised via
 swept with the SAME regex test_no_unregistered_guard below uses (a G-ID
 token anywhere after a '#' on its line -- docstring/prose mentions of a
 G-ID, which several modules still carry alongside their real marker, do NOT
-count). 79 rows: LEDGER x8, RECEIPT x2, LOCK x10, LOCKREF x1, SWEEP x10, RES x2,
+count). 80 rows: LEDGER x8, RECEIPT x2, LOCK x10, LOCKREF x1, SWEEP x10, RES x2,
 EXT x4, INV x2, BASE x2, SUPER x1, DIG x4, BUS x4 (TS), IDEMP x2, MERGE x3,
 SIM x1, ESC x3, QUERY x1, FAIL x1, BUDGET x2, CRM x2, HIST x2, PARITY x2,
-WRITER x2, OWNER x1, TASK x2, DEDUP x1, EFFECT x3, REV x1.
+WRITER x2, OWNER x1, TASK x2, DEDUP x1, EFFECT x3, REV x1, DRY x1.
 
-The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10; the G2 round-2 wave (2026-09-15) added G-ESC-3, G-LOCK-9, G-BUS-4, G-DIG-4, G-LEDGER-8, G-EFFECT-3 and G-LOCK-10.
+The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10; the G2 round-2 wave (2026-09-15) added G-ESC-3, G-LOCK-9, G-BUS-4, G-DIG-4, G-LEDGER-8, G-EFFECT-3, G-LOCK-10 and G-DRY-1.
 
 The last 8 rows (G-MERGE-2/3, G-EFFECT-1, G-BUDGET-2, G-REV-1, G-PARITY-2,
 G-LOCK-7/8) were added by the post-cap adjudication wave (2026-09-15) that
@@ -235,6 +235,12 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "render_history_entry appends a '(revision of <digest8>)' suffix on the first line when e.revision_of is set",
      "scripts/brain/tests/test_writeback_email.py::test_render_history_entry_revision_marker",
      r's/if e\.revision_of:  # G-HIST-1/if False:  # G-HIST-1 (mutated)/'),
+    ("G-DRY-1", "scripts/brain/client_state_gmail.py",
+     "the dry-run page preview does NOT enter the vault's advisory page lock, whose context manager creates and "
+     "truncates a sibling <page>.md.lock INSIDE the vault - a run that promises to write nothing must write nothing, "
+     "and `*.md.lock` is gitignored so porcelain alone never caught it (G2B-6)",
+     "scripts/brain/tests/test_client_state_gmail.py::test_dry_run_leaves_the_vault_byte_identical",
+     r's/if cfg\.dry_run:  # G-DRY-1: no vault lock, so no vault mutation at all/if False:  # G-DRY-1 (mutated)/'),
     ("G-HIST-2", "scripts/brain/client_state_gmail.py",
      "the page read + apply_history render + atomic write for a bound page all happen under the SAME advisory "
      "sibling <page>.lock the meeting pipeline uses, so a concurrent meeting-writeback filing can never interleave",
@@ -411,10 +417,10 @@ def test_guard_registry_ids_are_unique():
     assert len(ids) == len(set(ids)), f"duplicate guard ids: {ids}"
 
 
-def test_guard_registry_has_79_rows():
+def test_guard_registry_has_80_rows():
     # Pinned count (rebuilt 2026-09-14 from the FINAL parts, G0 round-3
     # integration) so a future guard silently dropping out is itself caught.
-    assert len(GUARD_REGISTRY) == 79, f"expected 79 rows, got {len(GUARD_REGISTRY)}"
+    assert len(GUARD_REGISTRY) == 80, f"expected 80 rows, got {len(GUARD_REGISTRY)}"
 
 
 def test_guard_registry_rows_have_five_fields():

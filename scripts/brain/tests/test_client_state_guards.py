@@ -133,10 +133,10 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "scripts/brain/tests/test_gmail_source.py::test_list_messages_parses_dict_with_emails_key",
      r's/obj\.get\("messages"\) or obj\.get\("emails"\) or \[\]/obj.get("messages") or []/'),
     ("G-SWEEP-9", "scripts/brain/gmail_source.py",
-     "C5: sweep's --query path composes <extra_query> <date ops> <EXCLUSION_QUERY> - the manual backfill query "
-     "never bypasses the exclusion filter or date bounds",
+     "C5: sweep's --query path composes <extra_query> <date ops> <INBOUND_ONLY> <EXCLUSION_QUERY> - the manual "
+     "backfill query never bypasses the exclusion filter, the inbound-only constraint, or the date bounds",
      "scripts/brain/tests/test_gmail_source.py::test_sweep_extra_query_present_in_full_and_every_day_query",
-     r's/parts = \[p for p in \(extra_query, date_ops, EXCLUSION_QUERY\) if p\]/parts = [p for p in (extra_query, date_ops) if p]/'),
+     r's/parts = \[p for p in \(extra_query, date_ops, INBOUND_ONLY, EXCLUSION_QUERY\) if p\]  # G-SWEEP-13/parts = [p for p in (extra_query, date_ops, INBOUND_ONLY) if p]/'),
     ("G-SWEEP-12", "scripts/brain/gmail_source.py",
      "the flat +read shape's To/Cc are read from a top-level key of ANY capitalisation or from a nested `headers` "
      "list/mapping - the deployed gws-dwd read_email() omits the Cc header, so a counterparty who appears only in Cc "
@@ -341,7 +341,7 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "a lock-held refusal writes last-lock-refusal.json and leaves run-receipt.json BYTE-IDENTICAL (binding goal G4 "
      "item 5, amended 2026-09-14) - second site: observation_ledger.record_lock_refusal's own path",
      "scripts/brain/tests/test_client_state_gmail.py::test_lock_held_exit_2_leaves_receipt_byte_identical_and_writes_refusal_file",
-     r's/record_lock_refusal\(cfg\.state_dir, holder_pid=os\.getpid\(\), detail=str\(claims_dir\)\)  # G-LOCKREF-1/record_failure(cfg.state_dir, "lock-held")  # G-LOCKREF-1 (mutated)/'),
+     r's/record_lock_refusal\(cfg\.state_dir, holder_pid=os\.getpid\(\), detail=str\(claims_dir\), reason=reason\)  # G-LOCKREF-1/record_failure(cfg.state_dir, "lock-held")  # G-LOCKREF-1 (mutated)/'),
     ("G-LOCK-6", "scripts/brain/single_flight.py",
      "a lease whose lock file disappeared is never released (the lock under our name may now belong to the run that "
      "reclaimed it) - second site: client_state_gmail.run's finally-block release",

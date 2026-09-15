@@ -766,9 +766,7 @@ def run(cfg: Config, runner) -> RunResult:
             # writer/budget/catch-all paths, which the goal still wants on the
             # receipt; a fail-closed halt must not falsify the success receipt.
             reason = refusal.get("reason", "already-claimed")
-            record_lock_refusal(
-                cfg.state_dir, holder_pid=os.getpid(), detail=str(claims_dir), reason=reason,  # G-LOCKREF-1
-            )
+            record_lock_refusal(cfg.state_dir, holder_pid=os.getpid(), detail=str(claims_dir), reason=reason)  # G-LOCKREF-1
             return RunResult(exit_code=2, previews=[f"lock not acquired ({reason}) — refusing this run"])
 
         # G0B3-6 / A2: heartbeat the lease for the WHOLE acquired interval, not once

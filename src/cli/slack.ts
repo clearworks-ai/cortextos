@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { SlackAPI, loadSlackIdentity, type PostMessageRequest } from '../slack/index.js';
 import { resolveEnv, loadEnvFileInto } from '../utils/env.js';
+import { recordVerificationReceipt } from '../utils/verification-receipt.js';
 import { join } from 'path';
 
 export interface TestSendOptions {
@@ -9,10 +10,12 @@ export interface TestSendOptions {
   agent?: string;
   channel: string;
   text: string;
+  ctxRoot?: string;
+  receiptAgent?: string;
 }
 
 /** Pure function — testable without process exit. */
-export async function runTestSend(opts: TestSendOptions, api: SlackAPI): Promise<void> {
+export async function runTestSend(opts: TestSendOptions, api: SlackAPI) {
   const req: PostMessageRequest = { channel: opts.channel, text: opts.text };
   if (opts.agent) {
     const id = loadSlackIdentity(opts.frameworkRoot, opts.org, opts.agent);
@@ -21,7 +24,15 @@ export async function runTestSend(opts: TestSendOptions, api: SlackAPI): Promise
     if (id.icon_emoji) req.icon_emoji = id.icon_emoji;
     if (id.icon_url) req.icon_url = id.icon_url;
   }
-  await api.postMessage(req);
+  const response = await api.postMessage(req);
+  const receiptAgent = opts.receiptAgent ?? opts.agent;
+  if (opts.ctxRoot && receiptAgent) {
+    recordVerificationReceipt(opts.ctxRoot, receiptAgent, {
+      kind: 'external-send',
+      ref: `slack:${response.channel}:${response.ts}`,
+    });
+  }
+  return response;
 }
 
 function requireToken(): string {
@@ -57,12 +68,16 @@ const testSendCommand = new Command('test-send')
   .description('Post a test message to a Slack channel')
   .action(async (channel: string, text: string, options: { as?: string; org?: string }) => {
     const api = new SlackAPI(requireToken());
+    const env = resolveEnv();
     const frameworkRoot =
       process.env.CTX_FRAMEWORK_ROOT || process.env.CTX_PROJECT_ROOT || process.cwd();
     const org = requireOrg(options.org);
     try {
-      await runTestSend({ frameworkRoot, org, agent: options.as, channel, text }, api);
-      console.log('sent');
+      const receipt = await runTestSend({
+        frameworkRoot, org, agent: options.as, channel, text,
+        ctxRoot: env.ctxRoot, receiptAgent: options.as ?? env.agentName,
+      }, api);
+      console.log(`sent channel=${receipt.channel} ts=${receipt.ts}`);
     } catch (err) {
       console.error(`Error: ${(err as Error).message}`);
       process.exit(1);
@@ -81,12 +96,16 @@ const sendCommand = new Command('send')
   .description('Send a Slack message (used by the inbound reply path)')
   .action(async (channel: string, text: string, options: { as?: string; org?: string }) => {
     const api = new SlackAPI(requireToken());
+    const env = resolveEnv();
     const frameworkRoot =
       process.env.CTX_FRAMEWORK_ROOT || process.env.CTX_PROJECT_ROOT || process.cwd();
     const org = requireOrg(options.org);
     try {
-      await runTestSend({ frameworkRoot, org, agent: options.as, channel, text }, api);
-      console.log('sent');
+      const receipt = await runTestSend({
+        frameworkRoot, org, agent: options.as, channel, text,
+        ctxRoot: env.ctxRoot, receiptAgent: options.as ?? env.agentName,
+      }, api);
+      console.log(`sent channel=${receipt.channel} ts=${receipt.ts}`);
     } catch (err) {
       console.error(`Error: ${(err as Error).message}`);
       process.exit(1);

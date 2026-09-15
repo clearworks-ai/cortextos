@@ -448,7 +448,14 @@ def _file_message(
         Dropping the incomplete ones (the pre-adjudication behaviour) threw the
         landed-effect record away, so the retry replayed what had landed and
         never finished what had not."""
-        if cfg.dry_run or extraction is None:
+        # G-BUDGET-3: a DRY run's extraction was really called and really
+        # billed, so FR-001's at-most-one-call guarantee binds it too. This used
+        # to return early on cfg.dry_run, so a dry run that paid for the
+        # extraction and then blew up downstream kept no row and no cache, and
+        # the next run paid again for identical input. The row it persists is
+        # `simulated` (never terminal, never mistaken for real work) and carries
+        # NO planned_writes -- nothing was previewed to completion.
+        if extraction is None:
             return
         _demote_undelivered_escalations()  # G-ESC-3
         for r in resolutions:
@@ -458,7 +465,7 @@ def _file_message(
             source_ref=source_ref, thread_id=msg.thread_id, content_digest=digest,
             observed_at=cfg.now.isoformat(), resolutions=resolutions,
             reason=f"partial: {exc}", extraction=extraction, writes=writes,
-            revision_of=revision_of,
+            revision_of=revision_of, simulated=cfg.dry_run,  # G-LEDGER-6
             # G-LEDGER-7: DERIVED, never a blanket True. If the failure landed
             # after every effect and every resolution was already filed, there
             # is nothing left to finish -- flagging it partial made the message

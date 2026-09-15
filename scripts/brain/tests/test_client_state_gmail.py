@@ -1759,3 +1759,65 @@ def test_dry_run_leaves_the_vault_byte_identical(tmp_path):
     porcelain = _sp.run(["git", "status", "--porcelain"], cwd=vault,
                         capture_output=True, text=True, check=True).stdout
     assert porcelain == "", porcelain
+
+
+# --- G2r2-13: a PAID dry-run extraction survives a downstream failure --------
+
+def test_dry_run_failure_after_extraction_persists_the_paid_extraction(tmp_path):
+    """FR-001 is binding for dry runs too: the claude call was really made and
+    really billed. _persist_partial returned early on cfg.dry_run, so a dry run
+    that paid for the extraction and then blew up downstream kept NO row and no
+    cache — and the next run paid again for identical input."""
+    cfg = _cfg(tmp_path, dry_run=True)
+    runner = FakeRunner()
+    _lock_ok(runner, cfg.state_dir / "claims")
+    runner.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+    _open_tasks_empty(runner)
+    runner.record(("claude",), rc=0, stdout=_claude_wrapper(cost_usd=0.07))
+
+    real_apply = csg.writeback_email.apply_history
+
+    def _boom(page_text, entry):
+        raise OSError(5, "Input/output error")
+
+    csg.writeback_email.apply_history = _boom
+    try:
+        result = csg.run(cfg, runner)
+    finally:
+        csg.writeback_email.apply_history = real_apply
+
+    assert result.exit_code == 3
+    assert sum(1 for c in runner.calls if c and c[0] == "claude") == 1
+
+    rows = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
+    assert len(rows) == 1
+    assert rows[0]["simulated"] is True          # a PREVIEW, never a real run
+    assert rows[0]["partial"] is True            # and never terminal
+    assert rows[0]["writes"] == []
+    assert rows[0]["planned_writes"] == []       # nothing was previewed to completion
+    assert rows[0]["extraction"]["identity"]
+    assert rows[0]["extraction"]["cost_usd"] == 0.07
+    from observation_ledger import Ledger as _L
+    assert _L(cfg.state_dir / "observations.jsonl").is_terminal("gmail:m1", rows[0]["content_digest"]) is False
+
+    # the retry — dry OR live — is a cache hit and makes ZERO claude calls
+    runner2 = FakeRunner()
+    _lock_ok(runner2, cfg.state_dir / "claims")
+    runner2.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner2.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+    _open_tasks_empty(runner2)
+    assert csg.run(cfg, runner2).exit_code == 0
+    assert sum(1 for c in runner2.calls if c and c[0] == "claude") == 0
+
+    cfg_live = _cfg(tmp_path, dry_run=False, vault=cfg.vault, crm_dir=cfg.crm_dir, state_dir=cfg.state_dir)
+    runner3 = FakeRunner()
+    _lock_ok(runner3, cfg_live.state_dir / "claims")
+    runner3.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner3.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+    _open_tasks_empty(runner3)
+    runner3.record(("python3", str(cfg_live.crm_dir / "upsert-contact.py")), rc=0, stdout="c1\n")
+    runner3.record(("python3", str(cfg_live.crm_dir / "add-interaction.py")), rc=0, stdout=_interaction_stdout())
+    assert csg.run(cfg_live, runner3).exit_code == 0
+    assert sum(1 for c in runner3.calls if c and c[0] == "claude") == 0
+    assert _page_path(cfg_live).read_text(encoding="utf-8").count("[source: gmail:m1]") == 1

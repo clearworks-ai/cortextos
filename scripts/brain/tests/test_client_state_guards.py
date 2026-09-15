@@ -5,12 +5,12 @@ writer's landed part, materialised via
 swept with the SAME regex test_no_unregistered_guard below uses (a G-ID
 token anywhere after a '#' on its line -- docstring/prose mentions of a
 G-ID, which several modules still carry alongside their real marker, do NOT
-count). 80 rows: LEDGER x8, RECEIPT x2, LOCK x10, LOCKREF x1, SWEEP x10, RES x2,
+count). 81 rows: LEDGER x8, RECEIPT x2, LOCK x10, LOCKREF x1, SWEEP x10, RES x2,
 EXT x4, INV x2, BASE x2, SUPER x1, DIG x4, BUS x4 (TS), IDEMP x2, MERGE x3,
-SIM x1, ESC x3, QUERY x1, FAIL x1, BUDGET x2, CRM x2, HIST x2, PARITY x2,
+SIM x1, ESC x3, QUERY x1, FAIL x1, BUDGET x3, CRM x2, HIST x2, PARITY x2,
 WRITER x2, OWNER x1, TASK x2, DEDUP x1, EFFECT x3, REV x1, DRY x1.
 
-The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10; the G2 round-2 wave (2026-09-15) added G-ESC-3, G-LOCK-9, G-BUS-4, G-DIG-4, G-LEDGER-8, G-EFFECT-3, G-LOCK-10 and G-DRY-1.
+The G2a review-fix wave (2026-09-14) added G-DIG-3, G-EFFECT-2, G-BUS-3 and G-SWEEP-10; the G2 round-2 wave (2026-09-15) added G-ESC-3, G-LOCK-9, G-BUS-4, G-DIG-4, G-LEDGER-8, G-EFFECT-3, G-LOCK-10, G-DRY-1 and G-BUDGET-3.
 
 The last 8 rows (G-MERGE-2/3, G-EFFECT-1, G-BUDGET-2, G-REV-1, G-PARITY-2,
 G-LOCK-7/8) were added by the post-cap adjudication wave (2026-09-15) that
@@ -390,6 +390,12 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "a BudgetExceeded exit persists the extraction it ALREADY paid for as a non-terminal partial row before exit 12, so the retry is a cache hit and makes zero further claude calls (ruling B / G0B3-2, FR-001)",
      "scripts/brain/tests/test_client_state_gmail.py::test_budget_exit_persists_the_paid_extraction_so_the_retry_pays_nothing",
      r's/ledger\.append\(ObservationRow\(  # G-BUDGET-2/_ = (ObservationRow(  # G-BUDGET-2 (mutated)/'),
+    ("G-BUDGET-3", "scripts/brain/client_state_gmail.py",
+     "_persist_partial persists a DRY run's paid extraction too (as a simulated, non-terminal row with no "
+     "planned_writes), so a dry run that blew up downstream does not make the next run pay claude again for "
+     "identical input - FR-001 binds dry runs, whose call was really billed (G2r2-13)",
+     "scripts/brain/tests/test_client_state_gmail.py::test_dry_run_failure_after_extraction_persists_the_paid_extraction",
+     r's/        if extraction is None:/        if cfg.dry_run or extraction is None:  # G-BUDGET-3 (mutated)/'),
     ("G-REV-1", "scripts/brain/client_state_gmail.py",
      "a simulated or partial same-digest prior hands its `revision_of` forward, so the later live run still writes the supersede marker and the live row keeps the link (ruling C / G0B3-3, D-02)",
      "scripts/brain/tests/test_client_state_gmail.py::test_dry_run_revision_then_live_revision_keeps_the_supersede_marker",
@@ -417,10 +423,10 @@ def test_guard_registry_ids_are_unique():
     assert len(ids) == len(set(ids)), f"duplicate guard ids: {ids}"
 
 
-def test_guard_registry_has_80_rows():
+def test_guard_registry_has_81_rows():
     # Pinned count (rebuilt 2026-09-14 from the FINAL parts, G0 round-3
     # integration) so a future guard silently dropping out is itself caught.
-    assert len(GUARD_REGISTRY) == 80, f"expected 80 rows, got {len(GUARD_REGISTRY)}"
+    assert len(GUARD_REGISTRY) == 81, f"expected 81 rows, got {len(GUARD_REGISTRY)}"
 
 
 def test_guard_registry_rows_have_five_fields():

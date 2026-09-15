@@ -1,0 +1,335 @@
+{
+  "reviewer": "codex",
+  "round": 3,
+  "reviewed": {
+    "plan": "docs/pipeline/plans/2026-09-14-client-state-gmail-v1-build.md",
+    "plan_sha256": "8ac1ca58847cf0991c0ba3a114592921b2d7cede91257adcff0a02701f3c1bad"
+  },
+  "dispositions": [
+    {
+      "id": "G0B-1",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:110-114,9237-9422,9681-9682,9748-9809,11884-11895. Simulated rows keep writes=[] and planned_writes, while effective_writes/plan_digest_line render tagged simulated effects. Pinned by test_client_state_digest.py::test_gmail_section_renders_simulated_rows_from_planned_writes and the recorded fresh 693-pass materialisation."
+    },
+    {
+      "id": "G0B-2",
+      "disposition": "still-open",
+      "evidence": "Plan:9368-9422 now emits complete fields for a filed message, but plan:9655-9659 invokes it for ignored/escalated messages with extraction=None and empty CRM/page/task lists. Those real producer blocks omit extraction receipt, summary, grounding quote, CRM preview, page diff and task line, while g4-check requires all of them for every block at 13299-13313. A legitimate non-filed message therefore fails G4 item 3."
+    },
+    {
+      "id": "G0B-3",
+      "disposition": "still-open",
+      "evidence": "Plan:9567-9578 keys merge identity by mutable (slug, contact_id, email), but after sender auto-creation plan:9745 obtains contact_id without assigning it back to resolution.contact_id before persisting at 9803-9809. A later partial retry sees the same sender with its new contact_id and reclassifies the already-filed resolution as pending. _merge_resolutions also iterates only fresh rows, so prior filed rows absent from fresh are discarded."
+    },
+    {
+      "id": "G0B-4",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:9532-9544 checks send-telegram rc and raises EscalationError; both send sites at 9645-9648 and 9797-9801 call it before the terminal row is appended. Pinned by test_client_state_gmail.py::test_escalation_send_failure_exits_3_and_never_records_escalated."
+    },
+    {
+      "id": "G0B-5",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:2854-3168 implements sweep(extra_query) over the full query and each daily query with EXCLUSION_QUERY; run passes cfg.query at 9841. Pinned by test_backfill_query_composes_exclusion_and_day_sweep and test_sweep_extra_query_present_in_full_and_every_day_query."
+    },
+    {
+      "id": "G0B-6",
+      "disposition": "still-open",
+      "evidence": "Failure receipts now preserve last_success_at and partial counts, and WriterError paths can append extraction-bearing partial rows at plan:9684-9708. However BudgetExceeded is raised before _file_message receives extraction; plan:9880-9893 records only cost/model_receipt in run-receipt.json and never appends exc.extraction to the ledger. The next identical run therefore pays for extraction again, contrary to the exception contract and FR-001's at-most-one-call identity."
+    },
+    {
+      "id": "G0B-7",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:8060-8068 reads commitments[].owner_name, matching the schema and extraction fixtures. Pinned by test_plan_tasks_ours_vs_theirs_and_owner_name_field."
+    },
+    {
+      "id": "G0B-8",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:8098-8134 enumerates --open human and build tasks at limit 200 and raises on failures; plan:8003-8031 maps human/user to Josh and uses each task's assigned_to. The orchestrator joins ledger task IDs to current open IDs at 9583-9589. Pinned by test_tier1_dedups_against_the_human_assigned_task_this_release_creates."
+    },
+    {
+      "id": "G0B-9",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:3472-3684 retains one resolution per known counterparty. Plan:9728-9756 writes CRM per pending contact, while 9758-9779 separately deduplicates History by slug. Pinned by test_two_known_contacts_same_page_one_history_two_crm_rows."
+    },
+    {
+      "id": "G0B-10",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:9728-9748 gates auto-creation on contact_id is None and is_sender, using only msg.from_name/msg.from_email; unresolved recipients are not created. Pinned by test_recipient_without_contact_never_auto_created."
+    },
+    {
+      "id": "G0B-11",
+      "disposition": "still-open",
+      "evidence": "Plan:7951-8157 now checks subprocess rc and output shapes, but write_interaction verifies contact_id only and never verifies parsed source_ref equals gmail:<msg.id>. More seriously, plan:9756 marks every resolution filed immediately after the CRM phase; a later History/task/escalation failure persists those filed outcomes at 9684-9708. On retry merge removes them from pending, so missing page/task effects are never completed. The current partial test checks only that the successful CRM call is not replayed, not that every downstream effect completes."
+    },
+    {
+      "id": "G0B-12",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:6450-6515 walks the actual schema for required keys, primitive/null types and additionalProperties before single-line and range checks. Pinned by wrong-deadline-type, nested-extra-key, non-string-quote and matches-range tests in test_extract_email.py."
+    },
+    {
+      "id": "G0B-13",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:9500-9521 loads the existing meeting_writeback.client_file_lock by repository-relative path; 9770-9779 holds it across page read, render and atomic replacement. Real file verification: meeting_writeback.py:52-69 defines the sibling .lock flock and :647-656 holds it across planned_files/read/write."
+    },
+    {
+      "id": "G0B-14",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:11712-12050 requires explicit write-baseline and reports missing/corrupt baseline. new_violations compares duplicate page sets and missing refs by (ref,page). Pinned by test_new_violations_flags_page_added_to_existing_duplicate and test_new_violations_flags_the_same_ref_missing_from_a_different_page."
+    },
+    {
+      "id": "G0B-15",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:11831-11844 scans full ledger history from the epoch sentinel; 11865-11880 joins superseded IDs to currently open list-tasks results. Pinned by test_gmail_section_renders_each_change_line_type."
+    },
+    {
+      "id": "G0B-16",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:12347-12384 guards the complete Fireflies body; 12387-12405 independently guards Gmail; 12419-12428 always composes both. Pinned by the raising-list_transcripts and Gmail-error tests in test_meeting_loop_watch_sections.py."
+    },
+    {
+      "id": "G0B-17",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:9339-9366 renders extraction summaries through shared plan_digest_line; gmail_section consumes it at 11873-11895. Pinned by test_gmail_section_renders_each_change_line_type and test_digest_line_parity_preview_equals_real_digest_section."
+    },
+    {
+      "id": "G0B-18",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Task 8's cfg deletion defect is absent, and its --through-8 gate is recorded as 6 passed at plan:4500-4510. The sticky FakeRunner needed by Task 8 is present before Task 8 via Task 7 at 3804-3880."
+    },
+    {
+      "id": "G0B-19",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Task 15 supplies whole, syntactically valid final tests at plan:8431-9220 with real payload/wrapper shapes and complete claim/list/write fixtures. Task 15 retires test_client_state_gmail_task8.py at plan:9995. The recorded final collection is 693 passed, 0 failed, 1 gated live-bus skip."
+    },
+    {
+      "id": "G0B-20",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Final shared FakeRunner at plan:3804-3880 normalizes dict and pair-list containers, preserving insertion order. Task 5 uses this shared fake. The prior incompatible mapping iteration is gone."
+    },
+    {
+      "id": "G0B-21",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Task 2 tests age both stored timestamp and mtime and prove stale-cleared then acquisition; final acquire retries exactly once at plan:1129-1159. Real meeting-brief.ts:336-353 confirms max(mtime,content timestamp), and :398-412 confirms stale-cleared does not win in-band."
+    },
+    {
+      "id": "G0B-22",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:12827-12871 parses only actual FAIL records; 12944-12978 captures all runner rc values and HEAD; 12980-13010 requires a resolvable base_sha and successful diff; 13050-13072 reconciles rc with parsed failures and enforces overlap. The integration log records five selftest OK lines."
+    },
+    {
+      "id": "G0B-23",
+      "disposition": "still-open",
+      "evidence": "Several checks improved, but item 1 at plan:13255-13277 never requires g1-record.json to carry or match the merge SHA; its positive fixture deliberately omits that SHA. Item 8 at 13599-13633 accepts the strings Layer 1/Layer 3 plus any three operational filenames, without requiring the named G0, Codex review/challenge, FINAL/Fable, verify-review-artifact or gate-invocation evidence mandated by the goal. Item 3 is also incompatible with legitimate ignored/escalated producer blocks."
+    },
+    {
+      "id": "G0B-24",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:15212-15477 drives the real orchestrator dry/live and compares preview output to executed CRM/task/Telegram argv, persisted page output and real gmail_section output. No parity case is skipped. Task 23's final gate runs all seven tests."
+    },
+    {
+      "id": "G0B-25",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Task 17 restores exact mktemp backups rather than HEAD. The general harness calls backup_target in the parent shell at plan:15142-15144 and registers targets at 15059-15074. The integration run records 60/60 rows and clean restoration; the remaining final-trap failure-status issue is reported separately as G0B3-9."
+    },
+    {
+      "id": "G0B-26",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Canonical interfaces at plan:89-254 distinguish transient pending, include slugs and cached rebinding, planned_writes and partial. Task 11 no longer imports a later task planner; projection implementations precede their consumers. The final task graph is dependency-consistent."
+    },
+    {
+      "id": "G0B2-1",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Final FakeRunner semantics are implemented at plan:3817-3880: first matching prefix, consume only if an identical prefix follows, last response sticky. The same-page, sweep and stale-then-win multi-call tests all pass in the recorded materialisation."
+    },
+    {
+      "id": "G0B2-2",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Task 8 cases are absorbed into the shipped test_client_state_gmail.py at plan:8932-9005, and plan:9995 retires the incompatible intermediate test file before final discovery. The file map identifies the retired lifecycle."
+    },
+    {
+      "id": "G0B2-3",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:15212-15477 uses final Task-15 signatures and shared FakeRunner, exercises actual write/send/digest consumers, and runs seven parity tests in Task 23's 13-test gate."
+    },
+    {
+      "id": "G0B2-4",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:1470-1506 persists simulated/planned_writes; 9334-9366 renders effective writes; 11873-11895 consumes them in the digest. Pinned by the simulated-row digest test. Revision metadata across the dry-run-to-live transition remains a separate new defect, G0B3-3."
+    },
+    {
+      "id": "G0B2-5",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Producer header at plan:9386 is exactly === source_ref=gmail:<id> thread_id=<tid> ===; checker parses that at 13289-13298. g4-gen-fixture.py runs the actual orchestrator/digest functions rather than hand-writing the positive fixture."
+    },
+    {
+      "id": "G0B2-6",
+      "disposition": "fixed-and-reverified",
+      "evidence": "The amended shim at plan:12727-12773 passes only meeting-brief-claim, meeting-brief-release and list-tasks while trapping create-task, send-telegram, add-cron and comms-filter. test-ops-shims verifies all directions; integration recorded 18 PASS rows."
+    },
+    {
+      "id": "G0B2-7",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:1632-1669 writes lock refusal only to last-lock-refusal.json. run uses it at 9824-9832, leaving the receipt untouched. G4 item 5 checks third_run_receipt_byte_identical and the diagnostic object at 13407-13419, while correctly not requiring ordinary second-run receipt identity."
+    },
+    {
+      "id": "G0B2-8",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:15059-15074 registers backups in parent-shell arrays and publishes LAST_BACKUP; run_one_row calls it without command substitution at 15142-15144. The recorded mutation run restored all 60 rows. A final EXIT-trap restoration failure can still exit successfully; see G0B3-9."
+    },
+    {
+      "id": "G0B2-9",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:14597-15005 contains the rebuilt 60-row registry with corrected node IDs and operative mutations. Task 23 records all 60 rows as control_green, mutation_applied, diff_applied and mutated_red."
+    },
+    {
+      "id": "G0B2-10",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:8003-8031 maps human/user to Josh while retaining other agent identities. Pinned by test_tier1_dedups_against_the_human_assigned_task_this_release_creates using bus-shaped assigned_to data."
+    },
+    {
+      "id": "G0B2-11",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:6580-6634 stamps the original extraction context and rebinds cached matches by original (text,source), clearing missing entries; cached_or_extract invokes it at 6655-6669 without a new model call. Pinned by test_cached_matches_are_rebound_against_the_current_context."
+    },
+    {
+      "id": "G0B2-12",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:14338-14374 compares old rows by exact (source_ref,contact_id) against real, non-simulated CRM write tokens across all ledger history. The test covers ignored, different-contact and dry-run-only cases as losses."
+    },
+    {
+      "id": "G0B2-13",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:1074-1096 marks Lease.lost on missing lock and suppresses release; run stops before reading the next message at 9848-9856. Pinned by test_lost_lease_mid_run_stops_and_never_releases_the_replacement."
+    },
+    {
+      "id": "G0B2-14",
+      "disposition": "still-open",
+      "evidence": "Plan:13264-13276 fixes None==None count acceptance but does not bind g1-record.json to the merge SHA. Plan:13599-13633 checks only layer-name strings and any three G4 filenames rather than the goal's named Layer-1/Layer-3 review and gate evidence. Its positive g1-record fixture omits sha, proving this omission is currently certified. Item 3 also rejects legitimate ignored/escalated blocks while its one-filed-message positive fixture never exercises them."
+    },
+    {
+      "id": "G0B2-15",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Plan:12966-13010 captures and requires base_sha and fails on rev-parse/diff errors; 13050-13072 evaluates vitest_rc, pytest_rc and node_rc. Selftests cover missing SHA, unresolvable SHA and rc/log disagreement."
+    }
+  ],
+  "findings": [
+    {
+      "id": "G0B3-1",
+      "severity": "Critical",
+      "title": "Partial recovery marks a whole resolution filed before History and task effects complete",
+      "location": "docs/pipeline/plans/2026-09-14-client-state-gmail-v1-build.md:9684",
+      "evidence": "Every pending resolution becomes filed at plan:9756 immediately after the CRM phase. History runs at 9758-9779 and tasks at 9781-9795. If create_task or escalation later fails, _persist_partial stores all those filed resolutions at 9702-9708. The retry merges them as complete and computes pending=[], returning at 9635-9638, so missing tasks are never created. If the second CRM contact fails, the first contact's distinct page can likewise be skipped forever. The existing test only proves the first CRM call is not replayed; it never asserts completion of all page/task effects."
+      "fix": "Track completion per effect or per resolution-stage, not with one filed bit set before downstream effects. Persist landed CRM/page/task tokens and retry every absent required effect idempotently; add failures after distinct-page History and after the first task, then assert the next run completes every missing effect without duplicating landed ones."
+    },
+    {
+      "id": "G0B3-2",
+      "severity": "Critical",
+      "title": "Budget exit records spend but discards the paid extraction cache",
+      "location": "docs/pipeline/plans/2026-09-14-client-state-gmail-v1-build.md:9880",
+      "evidence": "extract raises BudgetExceeded carrying the stamped extraction, but the handler at 9880-9893 writes only cost_usd and model_receipt into run-receipt.json. No ObservationRow is appended with exc.extraction. A retry with the same source_ref/digest/slugs cannot find the cache and makes another paid call, violating FR-001 and the interface comment that paid extraction is persisted first."
+      "fix": "Carry the active message identity, resolutions and context into the budget handler or catch BudgetExceeded inside _file_message; append a non-terminal partial ledger row containing exc.extraction before returning exit 12. Add a retry test asserting zero additional Claude calls."
+    },
+    {
+      "id": "G0B3-3",
+      "severity": "Critical",
+      "title": "A simulated revision loses revision_of on the later real run",
+      "location": "docs/pipeline/plans/2026-09-14-client-state-gmail-v1-build.md:9615",
+      "evidence": "On the dry-run of a changed digest, revision_of is the old digest and the simulated row records it. On the later live run, ledger.latest is that simulated row with the new digest, so plan:9616 makes same_digest_prior non-null and 9617 sets revision_of=None. The live History entry at 9765 is therefore unmarked, and the real ledger row at 9803-9808 loses supersede propagation. The dry/live test covers only a first filing, not a revision."
+      "fix": "When same_digest_prior is simulated or partial, carry forward its revision_of. Add dry-run revision -> live revision coverage asserting the actual page and live ledger retain the old digest marker."
+    },
+    {
+      "id": "G0B3-4",
+      "severity": "Critical",
+      "title": "The G4 item-3 checker rejects legitimate producer blocks",
+      "location": "docs/pipeline/plans/2026-09-14-client-state-gmail-v1-build.md:13289",
+      "evidence": "The checker requires extraction, quote, CRM, page, task and digest lines for every preview block at 13299-13313. The actual ignored/escalated path calls plan_message_preview with extraction=None and empty effect lists at 9655-9659. A normal real-inbox dry-run containing any unknown or ambiguous sender therefore fails G4 despite correct behavior. Valid filed extractions with no decisions/commitments/questions also lack a quote and task line. The real-producer positive fixture contains only one specially rich filed message, so it does not expose this mismatch."
+      "fix": "Make the preview contract explicit for absent sections, such as extraction: n/a, CRM: none, page: none and task: none, or condition checker requirements on resolution outcome. Generate positive fixtures containing filed-with-empty-items, ignored and escalated messages, and require all to pass."
+    },
+    {
+      "id": "G0B3-5",
+      "severity": "Critical",
+      "title": "G4 still accepts an unbound G1 record and an unevidenced verification floor",
+      "location": "docs/pipeline/plans/2026-09-14-client-state-gmail-v1-build.md:13255",
+      "evidence": "check1 validates suite.sha only; it never requires rec.sha/base_sha or equality with the tested tree. The positive g1-record fixture deliberately has no SHA. check_8_floor at 13599-13633 accepts Layer 1/Layer 3 text plus any three operational filenames and never requires the Opus G0 artifact, Codex review/challenge artifacts, FINAL/Fable artifact, verify-review-artifact results or gate-invocation records named by the goal. This can produce a false GREEN release matrix."
+      "fix": "Require the G1 record's measured tree SHA and bind it to an immutable tree-equivalent commit/merge receipt. Define and validate the exact required Layer-1 and Layer-3 artifact paths and successful gate records, with one negative fixture per required artifact."
+    },
+    {
+      "id": "G0B3-6",
+      "severity": "Critical",
+      "title": "The lease heartbeat is not time-bounded during sweep or message processing",
+      "location": "docs/pipeline/plans/2026-09-14-client-state-gmail-v1-build.md:9840",
+      "evidence": "The binding A2 decision requires heartbeat touch every 10 minutes or less, especially for backfills. The only touch is once before each message at 9848-9850. gmail_source.sweep runs first with no heartbeat and may perform a full query plus up to 14 daily calls, each through a runner whose default timeout is 120 seconds. A single message's read, extraction and multiple writes also have no periodic heartbeat. The 60-minute lease can therefore be declared stale while the original run is active."
+      "fix": "Add a real periodic heartbeat covering the entire acquired interval, including sweep and long per-message work, and stop immediately if it detects loss. Test with a controllable clock/heartbeat callback across a simulated long sweep and long extraction."
+    },
+    {
+      "id": "G0B3-7",
+      "severity": "Critical",
+      "title": "coverage-diff treats a missing old-path input as zero historical coverage",
+      "location": "docs/pipeline/plans/2026-09-14-client-state-gmail-v1-build.md:14398",
+      "evidence": "load_jsonl returns [] when its path does not exist, and main at 14424-14442 then writes a successful report with zero candidates. FR-006 makes this report the prerequisite for deleting the old ingest path; accepting a missing source file can falsely certify no coverage losses."
+      "fix": "Fail nonzero when --old-interactions, the ledger, or required CRM inputs are missing/unreadable or malformed. Add a missing-input negative test and require a non-empty/explicitly-accounted old-path window before the activation gate can pass."
+    },
+    {
+      "id": "G0B3-8",
+      "severity": "Critical",
+      "title": "write_interaction accepts proof for the wrong Gmail source",
+      "location": "docs/pipeline/plans/2026-09-14-client-state-gmail-v1-build.md:7992",
+      "evidence": "The validator requires source_ref to exist and verifies contact_id, but never compares parsed source_ref with gmail:<msg.id>. A stale or malformed success object for the correct contact but another message is accepted and the orchestrator records the current effect as filed."
+      "fix": "Require parsed['source_ref'] == f'gmail:{msg.id}' as well as the expected contact_id. Add a wrong-source regression and point a mutation row at the equality guard."
+    },
+    {
+      "id": "G0B3-9",
+      "severity": "Important",
+      "title": "Mutation cleanup can finish green after final restoration fails",
+      "location": "docs/pipeline/plans/2026-09-14-client-state-gmail-v1-build.md:15030",
+      "evidence": "restore_all detects failed copies and preserves backups, but returns 0 at 15040-15045. If every mutation row passed and only the EXIT-trap restoration fails, the prior exit status is zero and the harness may still report success while leaving a target mutated. This contradicts the stated fail-closed discipline."
+      "fix": "Make restoration failure override the final status, for example with an EXIT handler that captures the original rc, performs restore, and exits nonzero if any restore failed. Add an intentional restore-failure selftest."
+    },
+    {
+      "id": "G0B3-10",
+      "severity": "Important",
+      "title": "Task 1 still materialises the superseded FakeRunner contract",
+      "location": "docs/pipeline/plans/2026-09-14-client-state-gmail-v1-build.md:576",
+      "evidence": "The Task-1 block at 576-634 says every matching response is consumed and executes del self.responses[i]. The corrected consume-only-if-followed implementation does not appear until Task 7 at 3804-3880, although the canonical interface says Task 1 owns this fake. The final tree is correct and downstream gates pass, but an implementation stopped or reviewed at Task 1 receives a contract-violating module."
+      "fix": "Put the corrected FakeRunner implementation in Task 1 and repeat that same version in Task 7's whole-file restatement. Re-run the through-1 and through-2 task gates."
+    },
+    {
+      "id": "G0B3-11",
+      "severity": "Important",
+      "title": "Lease release failures are silently reported as successful runs",
+      "location": "docs/pipeline/plans/2026-09-14-client-state-gmail-v1-build.md:1088",
+      "evidence": "Lease.release invokes meeting-brief-release but ignores returncode. run writes a success receipt and returns exit 0 before finally calling release at 9912-9913. A failed release leaves the lock active for up to its TTL while the receipt claims success, causing subsequent polls to refuse without surfacing the original release failure."
+      "fix": "Check release rc and persist a dedicated failure diagnostic or convert the run to exit 3 without overwriting the last successful timestamp. Add nonzero-release and timeout tests."
+    }
+  ],
+  "rejected_as_locked": [
+    "FakeRunner consume-only-if-followed, last-response-sticky semantics are the integrator's locked C1 decision; no finding reopens that behavior.",
+    "Simulated rows with planned_writes are intentionally non-terminal and do not count as real CRM coverage; this is the locked dry-run decision.",
+    "Cached matches are re-resolved through the stored extraction context without triggering a new LLM call; the at-most-one-call identity remains locked.",
+    "Lease loss is intentionally a stop condition and release becomes a no-op after loss; no finding requests fail-open continuation.",
+    "CLIENT_STATE_REPO_ROOT being mandatory for G1 and mutation-check is locked and correctly fail-closed.",
+    "The cortextos shim's exact pass-through set is meeting-brief-claim, meeting-brief-release and read-only list-tasks; requesting that list-tasks be trapped would contradict the amended goal.",
+    "A lock-held run intentionally leaves run-receipt.json byte-identical and writes last-lock-refusal.json; requiring the ordinary second successful run's receipt to remain unchanged is rejected.",
+    "G4 selftest positives may use real producer functions with FakeRunner at irreversible transport boundaries; requiring live Gmail/provider access inside the selftest contradicts the accepted producer-fixture decision.",
+    "The task:<new> and crm:<new:email> values are deliberate simulated planned-write placeholders and are not accepted as live write receipts.",
+    "FR-010 existing-file modifications are exactly .gitignore, scripts/brain/meeting_loop_watch.py, src/bus/task.ts and src/cli/bus.ts; all four are allowlisted."
+  ],
+  "verified_line_cites": [
+    "scripts/brain/extract_meeting.py:358-371 ok — exact bounded claude argv.",
+    "scripts/brain/resolve_meeting.py:312-313 ok — registrable label plus full-domain map writes.",
+    "src/bus/task.ts:89 ok — LIST_TASKS_MAX_LIMIT=200.",
+    "src/bus/task.ts:701 ok — createTask declaration.",
+    "src/bus/task.ts:1111 ok — claimTask declaration.",
+    "src/bus/meeting-brief.ts:336-353 ok — claimAgeMs uses the newer of mtime and stored timestamp.",
+    "src/bus/meeting-brief.ts:398-412 ok — stale claim is removed and returns stale-cleared without winning in-band.",
+    "orgs/clearworksai/agents/pa/scripts/meeting_writeback.py:52-69 ok — client_file_lock uses sibling .lock plus flock.",
+    "orgs/clearworksai/agents/pa/scripts/meeting_writeback.py:647-656 ok — lock covers read/planned_files and atomic page write.",
+    "scripts/brain/brain_rollup.py:184-197 ok — _open_rows returns item/owner/deadline/source/status.",
+    "scripts/brain/brain_rollup.py:205-210 ok — _section_text implementation.",
+    "scripts/brain/extract_meeting.py:178-180 ok — _require_single_line rejects control characters but does not itself reject non-strings.",
+    "docs plan cites src/cli/bus.ts:552 for create-task stdout: WRONG — current console.log(taskId) is line 544.",
+    "docs plan cites src/bus/task.ts:781 for task ID construction: WRONG — current construction is line 779; the broader cited range 775-781 is valid.",
+    "docs plan cites src/cli/bus.ts:513 for create-task: ok as the command-chain start; .command('create-task') is line 514.",
+    "Integration-record counts are internally consistent: fresh materialisation records pytest 693 passed/0 failed/1 skipped, Task 15 records 32 focused passes, Task 23 records 13 passes, mutation 60/60 and tsc rc 0."
+  ]
+}

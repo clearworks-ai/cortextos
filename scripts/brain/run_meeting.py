@@ -575,7 +575,8 @@ def _run_apply(meeting_id, vault, repo, source_dir, *, force, backfill=False,
         print(f"FAILED at adapt: rc={adapt_rc}", file=sys.stderr)
         return 12
 
-    return _apply_writes(meeting_id, vault, repo, source_dir, prior_receipt=prior_receipt, backfill=backfill)
+    return _apply_writes(meeting_id, vault, repo, source_dir, prior_receipt=prior_receipt, backfill=backfill,
+                         needs_signature=needs_signature)
 
 
 def _writeback_env(vault: Path) -> dict[str, str]:
@@ -616,8 +617,10 @@ def resolve_engagement(resolution: dict, nodes: dict) -> tuple[str, str]:
 
 def _apply_writes(
     meeting_id: str, vault: Path, repo: Path, source_dir: Path, *, prior_receipt: dict | None,
-    backfill: bool = False,
+    backfill: bool = False, needs_signature: bool = True,
 ) -> int:
+    # needs_signature defaults to True so any caller that does not pass the
+    # _requires_d09_signature verdict keeps the human gate (fail-closed).
     # R2-F-1 (fold, rev3): CRM_SYNC/FANOUT_SCRIPT are fixed CODE_ROOT
     # constants (defined alongside WRITEBACK/RECAP) — the shared checkout's
     # copies of meeting-crm-sync.py/meeting-fanout.py are pre-R2 (no
@@ -917,8 +920,17 @@ def _apply_writes(
     # Phase 3 (spec §12, FR-012 line 327): D-09 phase-3 re-sign check (Task
     # 5) -> FR-007 -> FR-011 -> FR-013, after FR-008 (draft), before the
     # receipt/acceptance-minimums/commit block.
+    # 2026-09-14 (Josh: "remove that sign, of course I don't want that"): the
+    # phase-3 re-check was the ONE signature gate left unconditional when the
+    # 2026-09-13 change exempted single live meetings above — so every
+    # webhook-driven --apply still died here with "d09-signed.json missing"
+    # after writing pages, tasks, and drafts, and never wrote its receipt.
+    # Same rule as the pre/post-fetch checks: bulk runs keep the human gate,
+    # a single live meeting auto-applies.
     phase3_marker = sign_marker_path(vault, "fireflies", meeting_id)
-    phase3_sign_failure = progress.validate_phase3_capture(phase3_marker)
+    phase3_sign_failure = (
+        progress.validate_phase3_capture(phase3_marker) if needs_signature else None
+    )
     if phase3_sign_failure:
         print(f"FAILED at sign-check: {phase3_sign_failure}", file=sys.stderr)
         return 15

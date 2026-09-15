@@ -153,15 +153,21 @@ def new_violations(current: dict[str, Any], baseline: dict[str, Any]) -> dict[st
     part of the identity on both sides)."""
     out: dict[str, list[dict[str, Any]]] = {}
     for section, key_name in (("org_name_multi", "name"), ("domain_multi", "domain")):
-        base_canon = {
-            (item[key_name], tuple(sorted(item.get("pages", []))))
-            for item in baseline.get(section, [])
-        }
-        out[section] = [
-            item
-            for item in current.get(section, [])
-            if (item[key_name], tuple(sorted(item.get("pages", [])))) not in base_canon
-        ]
+        # Grandfathered PAGES per key, not the exact page-set tuple. Requiring
+        # set equality made a REPAIR look like a new violation: a baseline group
+        # of A/B/C, with the declaration removed from C, no longer matched and
+        # was reported -- an alert for reducing a known problem, which is how a
+        # reader learns to skim the section (G2r3-12). A page the baseline never
+        # knew about still fires, which is what G0B-14 asked for.
+        base_pages: dict[str, set[str]] = {}
+        for item in baseline.get(section, []):
+            base_pages.setdefault(item[key_name], set()).update(item.get("pages", []))
+        flagged: list[dict[str, Any]] = []
+        for item in current.get(section, []):
+            known = base_pages.get(item[key_name])
+            if known is None or any(page not in known for page in item.get("pages", [])):
+                flagged.append(item)
+        out[section] = flagged
     base_refs = {(item["ref"], item.get("page")) for item in baseline.get("missing_gmail_refs", [])}
     out["missing_gmail_refs"] = [
         item

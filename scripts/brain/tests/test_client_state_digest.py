@@ -575,3 +575,37 @@ def test_compute_invariants_missing_ref_names_the_full_page_path(tmp_path):
           history=("- 2026-09-10 — post-epoch email (email) [source: gmail:post456]",))
     inv = cs_digest.compute_invariants(vault, _empty_ledger(tmp_path), "2026-09-05")
     assert [r["page"] for r in inv["missing_gmail_refs"]] == ["orgs/ref-page.md"]
+
+
+def test_new_violations_does_not_flag_a_shrinking_duplicate_set(tmp_path):
+    """G2r3-12: a grandfathered violation across pages A/B/C, partly REPAIRED so
+    only A/B remain, is not a new violation — alerting on someone reducing a
+    known problem trains Josh to skim past the section."""
+    baseline = {
+        "org_name_multi": [{"name": "Acme Corp", "pages": ["clients/a.md", "clients/b.md", "clients/c.md"]}],
+        "domain_multi": [{"domain": "shared.com", "pages": ["clients/x.md", "clients/y.md", "clients/z.md"]}],
+        "missing_gmail_refs": [],
+    }
+    current = {
+        "org_name_multi": [{"name": "Acme Corp", "pages": ["clients/a.md", "clients/b.md"]}],
+        "domain_multi": [{"domain": "shared.com", "pages": ["clients/x.md", "clients/y.md"]}],
+        "missing_gmail_refs": [],
+    }
+    nv = cs_digest.new_violations(current, baseline)
+    assert nv["org_name_multi"] == []
+    assert nv["domain_multi"] == []
+
+
+def test_new_violations_still_flags_a_page_added_to_a_shrunk_set(tmp_path):
+    """...but a page the baseline never knew about still fires, even when the
+    set also lost one."""
+    baseline = {
+        "org_name_multi": [{"name": "Acme Corp", "pages": ["clients/a.md", "clients/b.md", "clients/c.md"]}],
+        "domain_multi": [], "missing_gmail_refs": [],
+    }
+    current = {
+        "org_name_multi": [{"name": "Acme Corp", "pages": ["clients/a.md", "clients/b.md", "orgs/new.md"]}],
+        "domain_multi": [], "missing_gmail_refs": [],
+    }
+    nv = cs_digest.new_violations(current, baseline)
+    assert [r["name"] for r in nv["org_name_multi"]] == ["Acme Corp"]

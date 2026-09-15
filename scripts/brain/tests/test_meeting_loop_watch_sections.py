@@ -94,3 +94,25 @@ def test_main_dry_run_renders_both_sections_when_fireflies_raises(tmp_path, monk
     assert rc == 0
     assert "⚠️ Fireflies section error: RuntimeError: fireflies API down" in out
     assert "Client state (Gmail) OK" in out
+
+
+def test_main_dry_run_unreadable_secrets_file_still_renders_the_gmail_section(tmp_path, monkeypatch, capsys):
+    """G2A-6: orgs/clearworksai/secrets.env is the FIREFLIES section's input and
+    nothing else's. main() read it before either section ran, so a missing or
+    unreadable file crashed the whole watch and the Gmail digest — which needs
+    no secrets at all — never rendered."""
+    def _boom(path):
+        raise FileNotFoundError(2, "No such file or directory", str(path))
+
+    monkeypatch.setattr(mlw.envparse, "parse_env_file", _boom)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    state_dir, vault_dir = _seed_state(tmp_path, last_success_iso=now_iso)
+    monkeypatch.setenv("CLIENT_STATE_DIR", str(state_dir))
+    monkeypatch.setenv("CLIENT_STATE_VAULT", str(vault_dir))
+
+    rc = mlw.main(["--dry-run"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "⚠️ Fireflies section error: FileNotFoundError" in out
+    assert "Client state (Gmail) OK" in out

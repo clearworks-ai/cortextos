@@ -112,24 +112,38 @@ def send_telegram(text: str) -> bool:
         return False
 
 
-def fireflies_section(args: argparse.Namespace, secrets: dict[str, str]) -> tuple[list[str], str | None]:
+def fireflies_section(args: argparse.Namespace) -> tuple[list[str], str | None]:
     """The original meeting-loop watch, logic byte-identical, now wrapped so
     EVERY failure (missing key, list_transcripts raising, anything else)
     returns ([], err) instead of exiting main() early (G-07 / G0B-16)."""
-    api_key = secrets.get("FIREFLIES_API_KEY")
-    if not api_key:
-        return [], "no FIREFLIES_API_KEY"
-
     try:
+        # G-DIG-4 (G2A-6): the secrets file is THIS section's input and nothing
+        # else's, so it is read inside this section's own guard. main() used to
+        # read it before either section ran, so a missing or unreadable
+        # orgs/clearworksai/secrets.env crashed the whole watch and the Gmail
+        # digest -- which needs no secrets at all -- never rendered.
+        secrets = envparse.parse_env_file(brain_paths.secrets_path(REPO))
+        api_key = secrets.get("FIREFLIES_API_KEY")
+        if not api_key:
+            return [], "no FIREFLIES_API_KEY"
+
         rows = list_transcripts(api_key, throttle_s=1.0)
         cutoff = datetime.now(timezone.utc) - timedelta(days=args.days)
         recent = [r for r in rows if _occurred(r) >= cutoff]
         have = {p.name for p in ENVELOPES.iterdir() if p.is_dir()} if ENVELOPES.is_dir() else set()
 
-        missing, empty = [], []
+        missing, empty, incomplete = [], [], []
         for row in sorted(recent, key=_occurred):
             mid = str(row.get("id"))
             if mid in have:
+                # 2026-09-14 (ported from main 8c956a0b): an envelope dir only
+                # proves FETCH happened. The receipt is written last, after
+                # extract -> resolve -> file -> phase 3; a run that died at any
+                # step (extract "Credit balance is too low", or the phase-3
+                # sign-check) leaves the envelope and no receipt, and this watch
+                # used to call that "filed". Key on the receipt instead.
+                if not (STATE / f"fireflies-{mid}" / "receipt.json").exists():
+                    incomplete.append((_occurred(row).date().isoformat(), mid, str(row.get("title") or "")[:48]))
                 continue
             reason = _not_ready_reason(mid)
             count = _sentence_count(reason)
@@ -140,9 +154,9 @@ def fireflies_section(args: argparse.Namespace, secrets: dict[str, str]) -> tupl
         transport_ok = hub == "ok" and bridge == "ok"
         newest = max((_occurred(r) for r in rows), default=None)
 
-        if not missing and transport_ok:
+        if not missing and not incomplete and transport_ok:
             lines = [
-                f"Meeting loop OK — {len(recent)} transcript(s) in the last {args.days}d, all filed.",
+                f"Meeting loop OK — {len(recent)} transcript(s) in the last {args.days}d, all filed (receipts present).",
                 f"Newest: {newest.date().isoformat() if newest else 'none'} · hub {hub} · bridge {bridge}",
             ]
             if empty:
@@ -152,6 +166,10 @@ def fireflies_section(args: argparse.Namespace, secrets: dict[str, str]) -> tupl
             if missing:
                 lines.append(f"\n{len(missing)} transcript(s) NOT in the vault and not empty:")
                 lines += [f"- {d} {t} ({m})" for d, m, t, _ in missing[:10]]
+            if incomplete:
+                lines.append(f"\n{len(incomplete)} transcript(s) fetched but NOT processed (no receipt — "
+                             "the run died after fetch; re-run run_meeting.py --apply for each):")
+                lines += [f"- {d} {t} ({m})" for d, m, t in incomplete[:10]]
             if not transport_ok:
                 lines.append(f"\nTransport: hub {hub} · bridge {bridge}")
             lines.append("\nEvery failure in this chain has been silent — check the hub logs "
@@ -188,12 +206,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--days", type=int, default=7, help="how far back to look (Fireflies)")
     args = parser.parse_args(argv)
 
-    secrets = envparse.parse_env_file(brain_paths.secrets_path(REPO))
-
     # G0B-16: each section body is independently exception-guarded (inside
     # fireflies_section / gmail_section_lines) -- neither call here can take
-    # the other section down with it.
-    ff_lines, ff_err = fireflies_section(args, secrets)
+    # the other section down with it, and main() itself now reads NOTHING that
+    # either section could fail on (G-DIG-4).
+    ff_lines, ff_err = fireflies_section(args)
     gm_lines, gm_err = gmail_section_lines(args)
 
     sections: list[str] = []

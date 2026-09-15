@@ -25,6 +25,33 @@ from sign_dry_run import marker_path
 _ORIGINAL_PATH = os.environ.get("PATH", "")
 
 
+# 2026-09-15: the recap step now composes the customer email with one `claude -p` call
+# (meeting_recap_draft.compose_customer_email). Extraction must still NEVER reach claude
+# in these tests (the R2 idempotency invariant), so the fake answers ONLY a compose
+# prompt (recognised by its JSON contract line) with a valid approved-shape body, and
+# exits 99 for anything else.
+FAKE_CLAUDE_SH = r"""#!/bin/sh
+case "$2" in
+  *'Return ONLY a JSON object: {"body"'*)
+    PROMPT="$2" python3 - <<'PY'
+import json, os, re
+prompt = os.environ["PROMPT"]
+m = re.search(r"sends to ([A-Za-z][A-Za-z-]*)", prompt)
+name = m.group(1) if m else "there"
+body = (f"{name} — good talking today. Quick recap so nothing gets lost:\n\n"
+        "What I'm doing\n- Getting the first piece over to you this week so it sits in one place.\n"
+        "- Turning the rest around once your side lands.\n\n"
+        "What I need from you\n- A quick read of what I send and a note on anything that reads differently than you remember.\n\n"
+        "Next step: I get the first piece out, you flag anything that needs a decision before we move.\n\nJosh")
+print(json.dumps({"type": "result", "subtype": "success", "result": json.dumps({"body": body})}))
+PY
+    exit 0 ;;
+esac
+echo 'claude must never be invoked for extraction by an R2 test' >&2
+exit 99
+"""
+
+
 @pytest.fixture(autouse=True)
 def _no_live_daemon(monkeypatch):
     """G0 hard rule: tests must never shell out to a real cortextos or gws
@@ -339,7 +366,7 @@ def _install_fakes(tmp_path: Path) -> Path:
     # of silently placing a real, network-dependent LLM call.
     claude = bindir / "claude"
     claude.write_text(
-        "#!/bin/sh\necho 'claude must never be invoked by an R2 test' >&2\nexit 99\n"
+        FAKE_CLAUDE_SH
     )
     claude.chmod(0o755)
     # G0a F-5 defense in depth: `_status_plan_argv` prefers the repo's own
@@ -496,7 +523,7 @@ def test_apply_recovers_task_map_from_bus_when_fanout_dedup_skips_after_lost_che
     (bindir / "gws").write_text("#!/bin/sh\nexit 0\n")
     (bindir / "gws").chmod(0o755)
     claude = bindir / "claude"
-    claude.write_text("#!/bin/sh\necho 'claude must never be invoked by an R2 test' >&2\nexit 99\n")
+    claude.write_text(FAKE_CLAUDE_SH)
     claude.chmod(0o755)
 
     env = os.environ.copy()
@@ -544,7 +571,7 @@ def test_apply_exits_8_when_fanout_dedup_skips_and_bus_has_no_matching_task(tmp_
     (bindir / "gws").write_text("#!/bin/sh\nexit 0\n")
     (bindir / "gws").chmod(0o755)
     claude = bindir / "claude"
-    claude.write_text("#!/bin/sh\necho 'claude must never be invoked by an R2 test' >&2\nexit 99\n")
+    claude.write_text(FAKE_CLAUDE_SH)
     claude.chmod(0o755)
 
     env = os.environ.copy()
@@ -599,7 +626,7 @@ def test_apply_partial_task_map_recovers_only_the_still_unmapped_commitment(tmp_
     (bindir / "gws").write_text("#!/bin/sh\nexit 0\n")
     (bindir / "gws").chmod(0o755)
     claude = bindir / "claude"
-    claude.write_text("#!/bin/sh\necho 'claude must never be invoked by an R2 test' >&2\nexit 99\n")
+    claude.write_text(FAKE_CLAUDE_SH)
     claude.chmod(0o755)
 
     env = os.environ.copy()

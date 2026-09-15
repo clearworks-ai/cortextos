@@ -41,8 +41,6 @@ export interface CloseEpicResult {
 }
 
 const SYSTEM_TASK_CREATOR_RE = /^(transcript-scanner|comms-check|session-save|heartbeat)-/;
-/** Claimants the human-exempt barrier does not apply to — they ARE the human. */
-const HUMAN_CLAIMANTS: ReadonlySet<string> = new Set(['human', 'user']);
 const HUMAN_TITLE_RE = /^(\[HUMAN\]|Josh:|Decide:)/i;
 const RECLAIM_HUMAN_TITLE_RE = /^\[HUMAN\]/i;
 const SYSTEM_TITLE_RE = /^cron:/i;
@@ -1158,10 +1156,12 @@ export function claimTask(
     // agent that once force-claimed a human task could re-claim it silently
     // forever through the leftover claim file.
     //
-    // HUMAN_CLAIMANTS are exempt from the barrier: it exists to stop AGENTS
-    // taking Josh's work, and Multica's writeback assigns such a task to Josh
-    // with exactly `claimTask(paths, taskId, 'human')` (src/bus/multica/poll.ts).
-    if (isHumanExemptTask(task) && !opts?.force && !HUMAN_CLAIMANTS.has(agent)) {
+    // There is NO exemption by claimant NAME (G2r3-9): `agent` is
+    // caller-controlled, so exempting 'human'/'user' made the barrier
+    // bypassable by anyone willing to pass --agent human. The ONE deliberate
+    // synchronization caller — Multica's writeback, src/bus/multica/poll.ts —
+    // passes { force: true } instead, which is auditable at its call site.
+    if (isHumanExemptTask(task) && !opts?.force) {
       throw new Error(
         `Task ${taskId} is human-exempt (type=${task.type}, assigned_to=${task.assigned_to}); pass --force-claim to promote it deliberately`,
       );

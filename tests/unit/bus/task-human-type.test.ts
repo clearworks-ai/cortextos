@@ -197,19 +197,26 @@ describe('claimTask human-exempt guard placement (G-BUS-2)', () => {
     JSON.parse(readFileSync(join(paths.taskDir, `${taskId}.json`), 'utf-8')) as Task
   );
 
-  it("lets Multica's claimTask(paths, id, 'human') through without force", () => {
-    // src/bus/multica/poll.ts:175 assigns a pending human task to Josh with
-    // exactly this call. The claimant IS the human, so the barrier does not apply.
+  it("refuses claimTask(paths, id, 'human') without force (G2r3-9)", () => {
+    // The claimant name is caller-controlled, so exempting 'human'/'user' made
+    // the barrier bypassable by any caller willing to pass --agent human. The
+    // ONE deliberate synchronization caller (src/bus/multica/poll.ts) passes
+    // { force: true } instead, which is auditable at the call site.
     const taskId = createTask(paths, 'paul', 'acme', 'Decide pricing', { type: 'human', assignee: 'human' });
-    const task = claimTask(paths, taskId, 'human');
-    expect(task.status).toBe('in_progress');
-    expect(readTaskJson(taskId).status).toBe('in_progress');
-    expect(readTaskJson(taskId).assigned_to).toBe('human');
+    expect(() => claimTask(paths, taskId, 'human')).toThrow(/is human-exempt/);
+    expect(readTaskJson(taskId).status).toBe('pending');
   });
 
-  it("lets the 'user' claimant through without force", () => {
+  it("refuses the 'user' claimant without force too", () => {
     const taskId = createTask(paths, 'paul', 'acme', 'Decide pricing', { type: 'human', assignee: 'human' });
-    expect(claimTask(paths, taskId, 'user').status).toBe('in_progress');
+    expect(() => claimTask(paths, taskId, 'user')).toThrow(/is human-exempt/);
+  });
+
+  it("lets Multica's deliberate { force: true } claim through", () => {
+    const taskId = createTask(paths, 'paul', 'acme', 'Decide pricing', { type: 'human', assignee: 'human' });
+    const task = claimTask(paths, taskId, 'human', { force: true });
+    expect(task.status).toBe('in_progress');
+    expect(readTaskJson(taskId).assigned_to).toBe('human');
   });
 
   it('refuses an agent re-claim through the existing same-owner claim file', () => {

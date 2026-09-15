@@ -389,10 +389,11 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      'tests/unit/bus/task-human-type.test.ts::persists type "human" on disk when options.type is "human"',
      r"s/type: taskType, \/\/ G-BUS-1/type: 'agent', \/\/ G-BUS-1 (mutated)/"),
     ("G-BUS-2", "src/bus/task.ts",
-     "claimTask refuses a human-exempt task (isHumanExemptTask) unless opts.force is passed or the claimant is the "
-     "human itself - evaluated BEFORE every successful return path, including the same-owner claim-file branch (G2B-7)",
+     "claimTask refuses a human-exempt task (isHumanExemptTask) unless opts.force is passed - no exemption by "
+     "claimant NAME, which is caller-controlled (G2r3-9) - evaluated BEFORE every successful return path, including "
+     "the same-owner claim-file branch (G2B-7)",
      "tests/unit/bus/task-human-type.test.ts::throws the exact human-exempt message and leaves the task pending with no claim file",
-     r"s/if \(isHumanExemptTask\(task\) && !opts\?\.force && !HUMAN_CLAIMANTS\.has\(agent\)\) \{/if (false) {/"),
+     r"s/if \(isHumanExemptTask\(task\) && !opts\?\.force\) \{/if (false) {/"),
     ("G-BUS-4", "src/bus/task.ts",
      "createTask's PROVISIONAL classifyTask (the one that picks the default due date) is given `type`, so a direct "
      "createTask(..., {type:'human'}) whose assignee/project/title imply nothing gets the human-class 2-day cap "

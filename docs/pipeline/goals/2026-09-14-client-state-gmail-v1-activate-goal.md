@@ -24,7 +24,15 @@ ENTRY GATE (HALT until ALL hold — quote the evidence on the ledger before any 
   message in this session or in the chain's channel saying to activate / turn it on /
   install the cron). Approval for the build goal, or "yes" to anything else, does NOT
   count. Absent E3 this goal reports E1/E2 status and stops.
-No production write of any kind before E1–E3 hold. This is HALT clause (2)-style: a
+- E4. (Amended 2026-09-15, patch-1 spec.) `goal-client-state-gmail-v1-delta` is `done`
+  and its G3 merge is in the promoted range — activation installs the EVENT trigger
+  (listener under launchd via `pa-codex/scripts/com.clearworks.gmail-push-listener.plist`,
+  its queue + detached drain) plus the 2-hour retry-sweep cron per the delta goal's
+  `activation-r2.md`, NOT a 10-minute poll cron. The `*/10` poll in this file's RELEASES
+  block is SUPERSEDED by D-12; where this file says "the cron", read "the listener load
+  + the retry cron". Tier B (`goal-client-state-gmail-v1-tierb`) is NOT required for
+  activation; its lane stays shadow until its own manifest is green.
+No production write of any kind before E1–E4 hold. This is HALT clause (2)-style: a
 checkpoint the loop cannot pass alone.
 
 MODEL MAP

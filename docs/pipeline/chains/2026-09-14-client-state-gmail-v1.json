@@ -5,7 +5,7 @@
   "repo_root": "/Users/joshweiss/code/cortextos",
   "status": "running",
   "created": "2026-09-14",
-  "updated": "2026-09-15T17:25:09.939Z",
+  "updated": "2026-09-15T17:33:29.532Z",
   "graphify_root": "graphify-out/graph.json",
   "ledger_root": "docs/pipeline/ledgers",
   "staging_mutex_group": "cortextos-staging",
@@ -62,7 +62,7 @@
       "type": "goal",
       "status": "running",
       "path": "docs/pipeline/goals/2026-09-14-client-state-gmail-v1-build-goal.md",
-      "title": "R1 BUILD — Gmail thin slice built, staged, proven on copies (zero prod writes)",
+      "title": "R1 BUILD \u2014 Gmail thin slice built, staged, proven on copies (zero prod writes)",
       "depends_on": [
         "goalify"
       ],
@@ -110,9 +110,10 @@
       "type": "goal",
       "status": "blocked",
       "path": "docs/pipeline/goals/2026-09-14-client-state-gmail-v1-activate-goal.md",
-      "title": "R2 ACTIVATE — live cron + first production writes (entry gate: Josh promote + explicit go)",
+      "title": "R2 ACTIVATE \u2014 live cron + first production writes (entry gate: Josh promote + explicit go)",
       "depends_on": [
-        "goal-client-state-gmail-v1-build"
+        "goal-client-state-gmail-v1-build",
+        "goal-client-state-gmail-v1-delta"
       ],
       "chars": 26685,
       "ledger_path": "docs/pipeline/ledgers/2026-09-14-client-state-gmail-v1-goal-client-state-gmail-v1-activate.md",
@@ -150,7 +151,9 @@
       "title": "Human /promote decision",
       "depends_on": [
         "goal-client-state-gmail-v1-build",
-        "goal-client-state-gmail-v1-activate"
+        "goal-client-state-gmail-v1-activate",
+        "goal-client-state-gmail-v1-delta",
+        "goal-client-state-gmail-v1-tierb"
       ],
       "error": null
     },
@@ -186,14 +189,99 @@
     {
       "id": "goalify-2",
       "type": "goalify",
-      "status": "ready",
+      "status": "done",
       "path": null,
       "title": "Create /goal conditions",
       "depends_on": [
         "spec-client-state-gmail-v1-patch1-spec"
       ],
       "error": null,
-      "meta": {}
+      "meta": {
+        "goal_ids": [
+          "goal-client-state-gmail-v1-delta",
+          "goal-client-state-gmail-v1-tierb"
+        ]
+      }
+    },
+    {
+      "id": "goal-client-state-gmail-v1-delta",
+      "type": "goal",
+      "status": "blocked",
+      "path": "docs/pipeline/goals/2026-09-15-client-state-gmail-v1-delta-goal.md",
+      "title": "R2 DELTA: event trigger + real-person relevance (proven on copies)",
+      "depends_on": [
+        "goalify-2",
+        "goal-client-state-gmail-v1-build"
+      ],
+      "chars": 42895,
+      "ledger_path": "docs/pipeline/ledgers/2026-09-14-client-state-gmail-v1-goal-client-state-gmail-v1-delta.md",
+      "staging_mutex_group": "cortextos-staging",
+      "stage_shas": [],
+      "promote_blockers": [],
+      "watch_items": [],
+      "error": null,
+      "meta": {
+        "branch": "feat/client-state-gmail-v1-delta",
+        "staging_mutex_group": "cortextos-staging",
+        "workflow_pack": "fast-release",
+        "artifacts": [
+          {
+            "path": "state/specs/2026-09-14-client-state-gmail-v1-spec.md",
+            "sha256": "16facac4ea332bcb5601b07ad5c791561166e5fe09173b71f265bc6fdac23381",
+            "role": "spec"
+          },
+          {
+            "path": "state/specs/2026-09-15-client-state-gmail-v1-patch1-spec.md",
+            "sha256": "22f0e75e18ad9d85b838782c199ebc5a03fa96591186b91adc287976dcc41a99",
+            "role": "spec"
+          },
+          {
+            "path": "docs/pipeline/goals/2026-09-15-client-state-gmail-v1-delta-goal.md",
+            "sha256": "2c4907f18490ee41ce38d9cfab372b9aa2a319d686d0bf00d82f5135c171a4d2",
+            "role": "condition"
+          }
+        ]
+      }
+    },
+    {
+      "id": "goal-client-state-gmail-v1-tierb",
+      "type": "goal",
+      "status": "blocked",
+      "path": "docs/pipeline/goals/2026-09-15-client-state-gmail-v1-tierb-goal.md",
+      "title": "R3 TIER B: Gmail push infrastructure (human-gated: Josh provisions Pub/Sub)",
+      "depends_on": [
+        "goal-client-state-gmail-v1-delta"
+      ],
+      "chars": 8649,
+      "ledger_path": "docs/pipeline/ledgers/2026-09-14-client-state-gmail-v1-goal-client-state-gmail-v1-tierb.md",
+      "staging_mutex_group": "cortextos-staging",
+      "stage_shas": [],
+      "promote_blockers": [],
+      "watch_items": [],
+      "error": null,
+      "meta": {
+        "branch": "feat/client-state-gmail-v1-tierb",
+        "staging_mutex_group": "cortextos-staging",
+        "human_gate": "ENTRY GATE E2 explicit go + E3 provisioning receipt",
+        "workflow_pack": "fast-release",
+        "artifacts": [
+          {
+            "path": "state/specs/2026-09-14-client-state-gmail-v1-spec.md",
+            "sha256": "16facac4ea332bcb5601b07ad5c791561166e5fe09173b71f265bc6fdac23381",
+            "role": "spec"
+          },
+          {
+            "path": "state/specs/2026-09-15-client-state-gmail-v1-patch1-spec.md",
+            "sha256": "22f0e75e18ad9d85b838782c199ebc5a03fa96591186b91adc287976dcc41a99",
+            "role": "spec"
+          },
+          {
+            "path": "docs/pipeline/goals/2026-09-15-client-state-gmail-v1-tierb-goal.md",
+            "sha256": "3237489d4e3b013962f35eb8b52cbd1d90edf49a5b67719007e0fe1755074748",
+            "role": "condition"
+          }
+        ]
+      }
     }
   ]
 }

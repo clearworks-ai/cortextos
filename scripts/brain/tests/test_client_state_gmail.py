@@ -1216,3 +1216,112 @@ def test_write_interaction_rejects_a_record_for_a_different_message(tmp_path):
     assert result.exit_code == 3
     err = json.loads((cfg.state_dir / "run-receipt.json").read_text())["error"]
     assert "SOME-OTHER-MESSAGE" in err and "gmail:m1" in err
+
+
+# --- G2a-2: partial progress survives ANY exception on the write path --------
+# _persist_partial used to run only for WriterError/EscalationError. An OSError
+# from page I/O (or client_file_lock), or a runner timeout, escaping AFTER an
+# earlier CRM/page effect had landed skipped partial persistence entirely, so
+# the retry re-resolved from nothing and replayed the landed effect -- a second
+# CRM interaction row and a duplicate History entry.
+
+def test_oserror_on_the_history_write_persists_the_landed_crm_effect(tmp_path):
+    cfg = _cfg(tmp_path, dry_run=False)
+    runner = FakeRunner()
+    _lock_ok(runner, cfg.state_dir / "claims")
+    runner.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+    _open_tasks_empty(runner)
+    runner.record(("claude",), rc=0, stdout=_claude_wrapper())
+    runner.record(("python3", str(cfg.crm_dir / "upsert-contact.py")), rc=0, stdout="c1\n")
+    runner.record(("python3", str(cfg.crm_dir / "add-interaction.py")), rc=0, stdout=_interaction_stdout())
+
+    real_apply = csg.writeback_email.apply_history
+
+    def _boom(page_text, entry):
+        raise OSError(28, "No space left on device")
+
+    csg.writeback_email.apply_history = _boom
+    try:
+        result = csg.run(cfg, runner)
+    finally:
+        csg.writeback_email.apply_history = real_apply
+
+    assert result.exit_code == 3
+    rows = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
+    assert len(rows) == 1, rows
+    assert rows[0]["partial"] is True
+    assert rows[0]["resolutions"][0]["outcome"] == "partial"
+    assert "crm:c1" in rows[0]["resolutions"][0]["effects"]          # the CRM row DID land
+    assert not any(e.startswith("page:") for e in rows[0]["resolutions"][0]["effects"])
+    assert rows[0]["writes"] == ["crm:c1"]
+
+    # retry: the CRM write is NOT replayed, the extraction is cached, the page completes
+    runner2 = FakeRunner()
+    _lock_ok(runner2, cfg.state_dir / "claims")
+    runner2.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner2.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+    _open_tasks_empty(runner2)
+    result2 = csg.run(cfg, runner2)
+
+    assert result2.exit_code == 0
+    assert sum(1 for c in runner2.calls if c and c[0] == "claude") == 0
+    assert not any(len(c) > 1 and "add-interaction.py" in c[1] for c in runner2.calls)
+    rows2 = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
+    assert rows2[-1]["partial"] is False
+    assert all(r["outcome"] == "filed" for r in rows2[-1]["resolutions"])
+    assert _page_path(cfg).read_text(encoding="utf-8").count("[source: gmail:m1]") == 1
+
+
+def test_runner_timeout_on_create_task_persists_the_landed_page_effect(tmp_path):
+    """A subprocess.TimeoutExpired escaping the Runner on `bus create-task`
+    after the CRM row and the History page have landed must still persist
+    them, or the retry writes a SECOND History entry for the same message."""
+    import subprocess as _sp
+
+    cfg = _cfg(tmp_path, dry_run=False)
+
+    class _TimeoutOnCreateTask(FakeRunner):
+        def run(self, argv, **kw):
+            if argv[:3] == ["cortextos", "bus", "create-task"]:
+                self.calls.append(list(argv))
+                raise _sp.TimeoutExpired(cmd=argv, timeout=120)
+            return super().run(argv, **kw)
+
+    runner = _TimeoutOnCreateTask()
+    _lock_ok(runner, cfg.state_dir / "claims")
+    runner.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+    _open_tasks_empty(runner)
+    runner.record(("claude",), rc=0, stdout=_claude_wrapper(commitments=[
+        {"text": "Send the updated MSA", "owner_name": "Josh", "deadline_iso": None,
+         "quote": "send the updated MSA", "matches_open_item": None},
+    ]))
+    runner.record(("python3", str(cfg.crm_dir / "upsert-contact.py")), rc=0, stdout="c1\n")
+    runner.record(("python3", str(cfg.crm_dir / "add-interaction.py")), rc=0, stdout=_interaction_stdout())
+
+    result = csg.run(cfg, runner)
+
+    assert result.exit_code == 3
+    rows = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
+    assert len(rows) == 1, rows
+    assert rows[0]["partial"] is True
+    effects = rows[0]["resolutions"][0]["effects"]
+    assert "crm:c1" in effects
+    assert any(e.startswith("page:") for e in effects)
+    assert not any(e.startswith("task:") for e in effects)      # the timed-out task never landed
+
+    # retry: only the missing task is created; the page keeps ONE entry
+    runner2 = FakeRunner()
+    _lock_ok(runner2, cfg.state_dir / "claims")
+    runner2.record(("gws", "gmail", "+triage"), rc=0, stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    runner2.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+    _open_tasks_empty(runner2)
+    runner2.record(("cortextos", "bus", "create-task"), rc=0, stdout="task_1757800000_00000001\n")
+    result2 = csg.run(cfg, runner2)
+
+    assert result2.exit_code == 0
+    assert not any(len(c) > 1 and "add-interaction.py" in c[1] for c in runner2.calls)
+    assert _page_path(cfg).read_text(encoding="utf-8").count("[source: gmail:m1]") == 1
+    rows2 = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
+    assert all(r["outcome"] == "filed" for r in rows2[-1]["resolutions"])

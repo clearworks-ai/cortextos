@@ -357,7 +357,18 @@ def _file_message(
             source_ref, digest, revision_of, from_email_norm,
             crm_lines, page_diffs, writes, planned_writes,
         )
-    except (client_state_writes.WriterError, EscalationError) as exc:
+    except Exception as exc:  # noqa: BLE001 -- G-EFFECT-2: ANY escape persists landed effects
+        # G0B-11 only covered WriterError/EscalationError, so an OSError out of
+        # page I/O or client_file_lock, or a subprocess.TimeoutExpired escaping
+        # the Runner, threw away the record of the CRM/page/task effects that
+        # HAD already landed -- and the retry, re-resolving from nothing,
+        # replayed them (a duplicate History entry, a second CRM interaction
+        # row). Partial persistence is about what LANDED, which is independent
+        # of which exception type ended the message, so every escape takes the
+        # same path. _persist_partial never marks an un-landed effect filed
+        # (G-EFFECT-1 still decides that), and the exception is re-raised
+        # unchanged, so run()'s own handlers classify the exit exactly as
+        # before.
         _persist_partial(exc)
         raise
 

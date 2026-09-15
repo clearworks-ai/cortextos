@@ -5,12 +5,12 @@ writer's landed part, materialised via
 swept with the SAME regex test_no_unregistered_guard below uses (a G-ID
 token anywhere after a '#' on its line -- docstring/prose mentions of a
 G-ID, which several modules still carry alongside their real marker, do NOT
-count). 69 rows: LEDGER x7, RECEIPT x2, LOCK x8, LOCKREF x1, SWEEP x9, RES x2,
+count). 70 rows: LEDGER x7, RECEIPT x2, LOCK x8, LOCKREF x1, SWEEP x9, RES x2,
 EXT x4, INV x2, BASE x2, SUPER x1, DIG x3, BUS x2 (TS), IDEMP x2, MERGE x3,
 SIM x1, ESC x2, QUERY x1, FAIL x1, BUDGET x2, CRM x2, HIST x2, PARITY x2,
-WRITER x2, OWNER x1, TASK x2, DEDUP x1, EFFECT x1, REV x1.
+WRITER x2, OWNER x1, TASK x2, DEDUP x1, EFFECT x2, REV x1.
 
-The G2a review-fix wave (2026-09-14) added G-DIG-3.
+The G2a review-fix wave (2026-09-14) added G-DIG-3 and G-EFFECT-2.
 
 The last 8 rows (G-MERGE-2/3, G-EFFECT-1, G-BUDGET-2, G-REV-1, G-PARITY-2,
 G-LOCK-7/8) were added by the post-cap adjudication wave (2026-09-15) that
@@ -318,6 +318,12 @@ GUARD_REGISTRY: list[tuple[str, str, str, str, str]] = [
      "`filed` is set ONLY when every required effect key (CRM + History page + each task) landed for that resolution; anything short is persisted as `partial` (ruling A / G0B3-1)",
      "scripts/brain/tests/test_client_state_gmail.py::test_failure_after_the_first_task_completes_the_second_task_next_run",
      r's/if all\(key in resolution\.effects for key in required\):  # G-EFFECT-1/if False:  # G-EFFECT-1 (mutated)/'),
+    ("G-EFFECT-2", "scripts/brain/client_state_gmail.py",
+     "ANY exception escaping the write path persists the landed effects as a partial row - not just WriterError/"
+     "EscalationError - so an OSError from page I/O or a runner timeout cannot make the retry replay a landed CRM "
+     "write or append a duplicate History entry (G2a finding 2)",
+     "scripts/brain/tests/test_client_state_gmail.py::test_oserror_on_the_history_write_persists_the_landed_crm_effect",
+     r's/except Exception as exc:  # noqa: BLE001 -- G-EFFECT-2: ANY escape persists landed effects/except (client_state_writes.WriterError, EscalationError) as exc:  # G-EFFECT-2 (mutated)/'),
     ("G-BUDGET-2", "scripts/brain/client_state_gmail.py",
      "a BudgetExceeded exit persists the extraction it ALREADY paid for as a non-terminal partial row before exit 12, so the retry is a cache hit and makes zero further claude calls (ruling B / G0B3-2, FR-001)",
      "scripts/brain/tests/test_client_state_gmail.py::test_budget_exit_persists_the_paid_extraction_so_the_retry_pays_nothing",
@@ -349,10 +355,10 @@ def test_guard_registry_ids_are_unique():
     assert len(ids) == len(set(ids)), f"duplicate guard ids: {ids}"
 
 
-def test_guard_registry_has_69_rows():
+def test_guard_registry_has_70_rows():
     # Pinned count (rebuilt 2026-09-14 from the FINAL parts, G0 round-3
     # integration) so a future guard silently dropping out is itself caught.
-    assert len(GUARD_REGISTRY) == 69, f"expected 69 rows, got {len(GUARD_REGISTRY)}"
+    assert len(GUARD_REGISTRY) == 70, f"expected 70 rows, got {len(GUARD_REGISTRY)}"
 
 
 def test_guard_registry_rows_have_five_fields():

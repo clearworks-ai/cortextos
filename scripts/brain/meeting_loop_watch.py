@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
-"""Daily watch on the Fireflies -> vault meeting loop.
+"""Daily watch on the Fireflies -> vault meeting loop, plus the Gmail client-state digest.
 
-Every failure in this chain has been SILENT. On 2026-09-13 a single session found
-five, the oldest two months old: webhook-hub deploying from a `main` frozen since
-July, BRIDGE_URL pointing at a dead ephemeral tunnel, a mismatched bridge secret,
-the bridge wanting a signature the hub never sent, and a 374-sentence transcript
-rejected because its `duration` was null. None of them logged anything anyone saw.
+Every failure in the Fireflies chain has been SILENT. On 2026-09-13 a single session found
+five, the oldest two months old: webhook-hub deploying from a `main` frozen since July,
+BRIDGE_URL pointing at a dead ephemeral tunnel, a mismatched bridge secret, the bridge
+wanting a signature the hub never sent, and a 374-sentence transcript rejected because its
+`duration` was null. None of them logged anything anyone saw.
 
-The one check that would have caught ALL of them in a day: compare what Fireflies
-has against what landed in the vault, and say so out loud.
+The one check that would have caught ALL of them in a day: compare what Fireflies has
+against what landed in the vault, and say so out loud.
 
-Sends Josh one Telegram a day either way — a one-line heartbeat when clean, detail
-when not. Silent-when-clean was the alternative and was rejected deliberately: a
-watcher nobody hears from is indistinguishable from a watcher that has itself died.
+FR-009 INDEPENDENCE (G-07, G0B-16): this used to be one linear main() that returned
+before ANY notification when FIREFLIES_API_KEY was missing, AND a later exception from
+list_transcripts() (or anything else in the Fireflies body) was UNGUARDED and would still
+crash before the Gmail digest ran. Both sections now catch their own exceptions
+independently and main() always composes both result/error lines before sending.
+
+Sends Josh one Telegram a day either way — a one-line heartbeat when clean, detail when
+not. Silent-when-clean was the alternative and was rejected deliberately: a watcher nobody
+hears from is indistinguishable from a watcher that has itself died.
 
   python3 meeting_loop_watch.py [--dry-run] [--days N]
 """
@@ -47,6 +53,10 @@ MIN_SENTENCES = 20
 
 HUB_HEALTH = "https://webhook-hub-production-0194.up.railway.app/healthz"
 BRIDGE_HEALTH = "https://bridge.clearworks.ai/healthz"
+
+# FR-002 default lookback window for the Gmail client-state poller — distinct
+# from --days above, which is the Fireflies watch's own lookback.
+GMAIL_POLL_WINDOW_DAYS = 3
 
 
 def _occurred(row: dict) -> datetime:
@@ -102,55 +112,95 @@ def send_telegram(text: str) -> bool:
         return False
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dry-run", action="store_true", help="print, do not send")
-    parser.add_argument("--days", type=int, default=7, help="how far back to look")
-    args = parser.parse_args()
-
-    secrets = envparse.parse_env_file(brain_paths.secrets_path(REPO))
+def fireflies_section(args: argparse.Namespace, secrets: dict[str, str]) -> tuple[list[str], str | None]:
+    """The original meeting-loop watch, logic byte-identical, now wrapped so
+    EVERY failure (missing key, list_transcripts raising, anything else)
+    returns ([], err) instead of exiting main() early (G-07 / G0B-16)."""
     api_key = secrets.get("FIREFLIES_API_KEY")
     if not api_key:
-        print("no FIREFLIES_API_KEY", file=sys.stderr)
-        return 2
+        return [], "no FIREFLIES_API_KEY"
 
-    rows = list_transcripts(api_key, throttle_s=1.0)
-    cutoff = datetime.now(timezone.utc) - timedelta(days=args.days)
-    recent = [r for r in rows if _occurred(r) >= cutoff]
-    have = {p.name for p in ENVELOPES.iterdir() if p.is_dir()} if ENVELOPES.is_dir() else set()
+    try:
+        rows = list_transcripts(api_key, throttle_s=1.0)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=args.days)
+        recent = [r for r in rows if _occurred(r) >= cutoff]
+        have = {p.name for p in ENVELOPES.iterdir() if p.is_dir()} if ENVELOPES.is_dir() else set()
 
-    missing, empty = [], []
-    for row in sorted(recent, key=_occurred):
-        mid = str(row.get("id"))
-        if mid in have:
-            continue
-        reason = _not_ready_reason(mid)
-        count = _sentence_count(reason)
-        entry = (_occurred(row).date().isoformat(), mid, str(row.get("title") or "")[:48], count)
-        (empty if count is not None and count < MIN_SENTENCES else missing).append(entry)
+        missing, empty = [], []
+        for row in sorted(recent, key=_occurred):
+            mid = str(row.get("id"))
+            if mid in have:
+                continue
+            reason = _not_ready_reason(mid)
+            count = _sentence_count(reason)
+            entry = (_occurred(row).date().isoformat(), mid, str(row.get("title") or "")[:48], count)
+            (empty if count is not None and count < MIN_SENTENCES else missing).append(entry)
 
-    hub, bridge = _probe(HUB_HEALTH), _probe(BRIDGE_HEALTH)
-    transport_ok = hub == "ok" and bridge == "ok"
-    newest = max((_occurred(r) for r in rows), default=None)
+        hub, bridge = _probe(HUB_HEALTH), _probe(BRIDGE_HEALTH)
+        transport_ok = hub == "ok" and bridge == "ok"
+        newest = max((_occurred(r) for r in rows), default=None)
 
-    if not missing and transport_ok:
-        lines = [
-            f"Meeting loop OK — {len(recent)} transcript(s) in the last {args.days}d, all filed.",
-            f"Newest: {newest.date().isoformat() if newest else 'none'} · hub {hub} · bridge {bridge}",
-        ]
-        if empty:
-            lines.append(f"({len(empty)} empty recording(s) skipped, which is correct.)")
-    else:
-        lines = ["⚠️ Meeting loop needs a look."]
-        if missing:
-            lines.append(f"\n{len(missing)} transcript(s) NOT in the vault and not empty:")
-            lines += [f"- {d} {t} ({m})" for d, m, t, _ in missing[:10]]
-        if not transport_ok:
-            lines.append(f"\nTransport: hub {hub} · bridge {bridge}")
-        lines.append("\nEvery failure in this chain has been silent — check the hub logs "
-                     "(railway logs --service webhook-hub) for relay_failed.")
+        if not missing and transport_ok:
+            lines = [
+                f"Meeting loop OK — {len(recent)} transcript(s) in the last {args.days}d, all filed.",
+                f"Newest: {newest.date().isoformat() if newest else 'none'} · hub {hub} · bridge {bridge}",
+            ]
+            if empty:
+                lines.append(f"({len(empty)} empty recording(s) skipped, which is correct.)")
+        else:
+            lines = ["⚠️ Meeting loop needs a look."]
+            if missing:
+                lines.append(f"\n{len(missing)} transcript(s) NOT in the vault and not empty:")
+                lines += [f"- {d} {t} ({m})" for d, m, t, _ in missing[:10]]
+            if not transport_ok:
+                lines.append(f"\nTransport: hub {hub} · bridge {bridge}")
+            lines.append("\nEvery failure in this chain has been silent — check the hub logs "
+                         "(railway logs --service webhook-hub) for relay_failed.")
+        return lines, None
+    except Exception as exc:  # noqa: BLE001 — G0B-16: sections fail independently
+        return [], f"{type(exc).__name__}: {exc}"
 
-    message = "\n".join(lines)
+
+def gmail_section_lines(args: argparse.Namespace) -> tuple[list[str], str | None]:
+    """FR-009's client-state digest. Imports client_state_digest lazily and
+    catches every Exception (G-DIG-2) so a Gmail-side failure — a bad vault
+    path, a corrupt ledger, anything — never takes the Fireflies section down
+    with it (the reverse of the old G-07 bug)."""
+    try:
+        import client_state_digest
+        from observation_ledger import Ledger
+        from runner import SubprocessRunner
+
+        state_dir = Path(os.environ.get("CLIENT_STATE_DIR", REPO / "state/client-state"))
+        vault = Path(os.environ.get("CLIENT_STATE_VAULT", VAULT))
+        ledger = Ledger(state_dir / "observations.jsonl")
+        lines = client_state_digest.gmail_section(
+            state_dir, vault, ledger, datetime.now(timezone.utc), GMAIL_POLL_WINDOW_DAYS, SubprocessRunner()
+        )
+        return lines, None
+    except Exception as exc:  # noqa: BLE001 — G-DIG-2 sections fail independently
+        return [], f"{type(exc).__name__}: {exc}"
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dry-run", action="store_true", help="print, do not send")
+    parser.add_argument("--days", type=int, default=7, help="how far back to look (Fireflies)")
+    args = parser.parse_args(argv)
+
+    secrets = envparse.parse_env_file(brain_paths.secrets_path(REPO))
+
+    # G0B-16: each section body is independently exception-guarded (inside
+    # fireflies_section / gmail_section_lines) -- neither call here can take
+    # the other section down with it.
+    ff_lines, ff_err = fireflies_section(args, secrets)
+    gm_lines, gm_err = gmail_section_lines(args)
+
+    sections: list[str] = []
+    sections.append(f"⚠️ Fireflies section error: {ff_err}" if ff_err else "\n".join(ff_lines))
+    sections.append(f"⚠️ Gmail section error: {gm_err}" if gm_err else "\n".join(gm_lines))
+
+    message = "\n\n".join(sections)
     print(message)
     if args.dry_run:
         return 0

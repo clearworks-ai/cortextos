@@ -5,7 +5,7 @@
   "repo_root": "/Users/joshweiss/code/cortextos",
   "status": "running",
   "created": "2026-09-14",
-  "updated": "2026-09-14T17:30:36.614Z",
+  "updated": "2026-09-15T04:25:51.457Z",
   "graphify_root": "graphify-out/graph.json",
   "ledger_root": "docs/pipeline/ledgers",
   "staging_mutex_group": "cortextos-staging",
@@ -89,8 +89,19 @@
             "path": "docs/pipeline/goals/2026-09-14-client-state-gmail-v1-build-goal.md",
             "sha256": "4d53258128638acc98c06cf1401026273f918b5e93ccfe06688a8f2e981d5489",
             "role": "condition"
+          },
+          {
+            "path": "docs/pipeline/plans/2026-09-14-client-state-gmail-v1-build.md",
+            "sha256": "62ec29c51775a43d7530ee1cf413e84cf09bfefb8e27fd254e28a548627c381a",
+            "role": "plan"
           }
-        ]
+        ],
+        "plan_artifact": {
+          "path": "docs/pipeline/plans/2026-09-14-client-state-gmail-v1-build.md",
+          "sha256": "62ec29c51775a43d7530ee1cf413e84cf09bfefb8e27fd254e28a548627c381a",
+          "kind": "plan",
+          "hashed_at": "2026-09-15T04:25:51.457Z"
+        }
       },
       "claim": "stage"
     },

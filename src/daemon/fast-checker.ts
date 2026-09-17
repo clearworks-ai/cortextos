@@ -16,6 +16,7 @@ import { KEYS } from '../pty/inject.js';
 import { stripControlChars, sanitizeForPtyInjection, wrapFenceSafe } from '../utils/validate.js';
 import { agentHoldsContextHandoffLease, releaseContextHandoffLease, requestContextHandoffLease } from './context-handoff-lease.js';
 import { readCurrentSessionId, readLastTurnAtMs } from './turn-activity.js';
+import { detectAuthChange, readAuthAccountId, readAuthBaseline, writeAuthBaseline, defaultCodexHome } from './auth-staleness.js';
 import {
   detectWedge,
   DEFAULT_WEDGE_HEARTBEAT_FRESH_MS,
@@ -586,6 +587,7 @@ export class FastChecker {
     // Wedge watchdog: detect a stuck REPL (stale conversation buffer while the
     // heartbeat stays fresh + pending inbox work) and force ONE recovery restart.
     this.checkWedge();
+      this.checkAuthAccount();
   }
 
   /**
@@ -904,6 +906,56 @@ export class FastChecker {
    * research) must not be executed for taking its time. The alert names the agent
    * so a human or the chief-of-staff agent can decide.
    */
+  /**
+   * Restart an agent that is running on a superseded login.
+   *
+   * codex reads ~/.codex/auth.json once at spawn and holds those tokens for the
+   * life of the process, so re-authenticating reaches nothing that is already
+   * running: every agent keeps presenting the old credentials and keeps failing
+   * with "You've hit your usage limit" until restarted by hand. Observed
+   * 2026-09-15 across the whole fleet.
+   *
+   * This is one of the few places an AUTOMATIC restart is right rather than an
+   * alert. A wedge verdict is a heuristic and can be wrong; this is a recorded
+   * fact — the account this process loaded is not the account in auth.json —
+   * and restarting is the only thing that can fix it.
+   *
+   * The account, not the file, is the signal: codex rewrites auth.json on every
+   * routine token refresh, so watching mtime would restart the fleet on every
+   * refresh interval.
+   */
+  private checkAuthAccount(): void {
+    try {
+      if (this.agent.getConfig().runtime !== 'codex-app-server') return;
+      if (!this.agent.isRunning() || this.agent.isRestartInFlight()) return;
+
+      const current = readAuthAccountId(defaultCodexHome());
+      const decision = detectAuthChange({
+        startedWithAccountId: readAuthBaseline(this.paths.stateDir),
+        currentAccountId: current,
+      });
+      if (!decision.changed) return;
+
+      // Don't interrupt a turn in flight; the next cycle will catch it.
+      const sessionId = readCurrentSessionId(this.paths.stateDir);
+      const lastTurn = sessionId
+        ? readLastTurnAtMs(join(this.paths.logDir, 'codex-tokens.jsonl'), sessionId)
+        : null;
+      if (lastTurn !== null && Date.now() - lastTurn < 60_000) return;
+
+      const msg = `${this.agent.name} is running on a superseded ChatGPT login — restarting to pick up the new one.`;
+      this.log(msg);
+      if (this.telegramApi && this.chatId) {
+        this.telegramApi.sendMessage(this.chatId, msg).catch(() => {});
+      }
+      // Re-baseline BEFORE the restart so a slow or failed restart cannot loop.
+      writeAuthBaseline(this.paths.stateDir, current);
+      this.agent.sessionRefresh().catch(err => this.log(`Auth restart failed: ${err}`));
+    } catch (err) {
+      this.log(`Auth account check error (ignored): ${err}`);
+    }
+  }
+
   private reportWedge(reason: string): void {
     // Stamp immediately so the storm guard suppresses repeat alerts for the same
     // stall on every subsequent poll cycle.

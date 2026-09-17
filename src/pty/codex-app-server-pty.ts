@@ -10,6 +10,7 @@ import { resolvePaths } from '../utils/paths.js';
 import { logEvent } from '../bus/event.js';
 import { WsUnixJsonRpcClient, type JsonRpcResponse } from '../utils/ws-unix-client.js';
 import { hostSpawn } from './pty-host-client.js';
+import { writeAuthBaseline, readAuthAccountId, defaultCodexHome } from '../daemon/auth-staleness.js';
 
 interface IPty {
   pid: number;
@@ -579,6 +580,16 @@ export class CodexAppServerPTY {
         // 2026-07-28). hostSpawn is async; Promise.resolve tolerates sync test fns.
         this._spawnFn = hostSpawn;
       }
+
+      // Record which ChatGPT account this process is about to load. codex reads
+      // auth.json once, here, and holds those tokens for the life of the
+      // process — so after a re-login every running agent keeps presenting the
+      // OLD credentials until it is restarted. Recording the account lets the
+      // watchdog notice that and recover without a manual fleet restart.
+      try {
+        const stateDir = join(this._env.ctxRoot, 'state', this._env.agentName);
+        writeAuthBaseline(stateDir, readAuthAccountId(defaultCodexHome()));
+      } catch { /* never block a spawn on bookkeeping */ }
 
       const spawnFn = this._spawnFn!;
       Promise.resolve(spawnFn('codex', [

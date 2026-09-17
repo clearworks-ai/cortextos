@@ -1522,6 +1522,26 @@ describe('CodexAppServerPTY kill-during-spawn race (RW-7)', () => {
     expect(fakePty.onExit).toHaveBeenCalledTimes(1);
   });
 
+  it('passes the configured model and reasoning effort to app-server', async () => {
+    const pty = new CodexAppServerPTY(mockEnv, { model: 'gpt-5.6-luna', reasoning_effort: 'xhigh' });
+    const inner = pty as unknown as {
+      _alive: boolean;
+      _spawnFn: ReturnType<typeof vi.fn>;
+      startAppServer(): Promise<void>;
+    };
+    inner._alive = true;
+    const fakePty = makeFakePty();
+    inner._spawnFn = vi.fn().mockResolvedValue(fakePty);
+    fsMocks.existsSync.mockReturnValue(true);
+
+    await inner.startAppServer();
+
+    expect(inner._spawnFn).toHaveBeenCalledWith('codex', expect.arrayContaining([
+      'app-server', '-c', 'model="gpt-5.6-luna"',
+      'model_reasoning_effort="xhigh"', '--enable', 'goals',
+    ]), expect.any(Object));
+  });
+
   it('does not respawn on a dead adapter from the retry loop', async () => {
     const pty = new CodexAppServerPTY(mockEnv, {});
     const inner = pty as unknown as {

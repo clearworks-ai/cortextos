@@ -45,7 +45,7 @@ Apps and repos (all at `clearworks-ai` on GitHub, local at `~/code/`):
 
 **Stack (locked):** Node.js + TypeScript strict, Express 5 (REST only), React 18 + Vite + TanStack Query v5, Drizzle ORM + PostgreSQL, Shadcn/ui + Radix + Tailwind (semantic tokens only), express-session + connect-pg-simple.
 
-**LLM:** Anthropic primary (`claude-3-5-sonnet`). OpenAI only for embeddings (`text-embedding-3-small`).
+**LLM:** No chat model is pinned here. Embedding providers are the project-specific paths in the Clearpath Intelligence section below.
 
 **Hosting:** Railway auto-deploy on push to main. Never create `railway.json`/`railway.toml` in Clearpath — custom healthcheck config blocks all deploys. Deploy via `git push` to main only.
 

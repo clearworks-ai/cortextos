@@ -70,12 +70,8 @@ const LIVE_LINKS = {
 };
 const KADRE = "/Users/joshweiss/code/Clients/kadre";
 const USER_SKILLS = "/Users/joshweiss/.agents/skills";
-const CATALOG_PROBES = [
-  "/Users/joshweiss/agent-config-audit-wXignS/cleanup/discovery-bare-recheck.json",
-  "/Users/joshweiss/agent-config-audit-wXignS/cleanup/discovery-roles-a.json",
-  "/Users/joshweiss/agent-config-audit-wXignS/cleanup/discovery-roles-b.json",
-  "/Users/joshweiss/agent-config-audit-wXignS/cleanup/discovery-roles-humanizer-recheck.json",
-];
+const PROBE_SCRIPT = "/Users/joshweiss/agent-config-audit-wXignS/cleanup/probe_skill_discovery.mjs";
+const PROBE_TIMEOUT_MS = 70000;
 const ROLE_ROOTS = [
   ["auditmaster-codex", "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/auditmaster-codex"],
   ["builddifferentprod-codex", "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/builddifferentprod-codex"],
@@ -248,6 +244,7 @@ function evaluate(input) {
   }
 
   const catalogErrors = input.catalogErrors;
+  const catalogCounts = input.catalogCounts || { bare: 0, roles: {} };
   if (input.catalogProblem) drift.push(input.catalogProblem);
   if (catalogErrors > 0) drift.push(`catalog errors ${catalogErrors}`);
 
@@ -305,6 +302,7 @@ function evaluate(input) {
     fields: {
       policyLinks,
       catalogErrors,
+      catalogCounts,
       corePresent,
       forbiddenDefaultSkills: sortNames([...forbidden]),
       bareMcp,
@@ -329,15 +327,20 @@ function loadFixture(dir) {
   let catalogErrors = 0;
   let bareSkills = new Set();
   const roleSkills = {};
+  const catalogCounts = { bare: 0, roles: {} };
   if (catalogRead.status !== "ok" || !catalogRead.value || typeof catalogRead.value !== "object" || Array.isArray(catalogRead.value)) {
     catalogProblem = catalogRead.status === "missing" ? "catalog missing" : "catalog invalid";
   } else {
     const bare = catalogRead.value.bare;
-    bareSkills = new Set(normalizeSkills(bare && bare.skills));
+    const bareList = bare && bare.skills;
+    bareSkills = new Set(normalizeSkills(bareList));
+    catalogCounts.bare = Array.isArray(bareList) ? bareList.length : 0;
     catalogErrors += errorCount(bare && bare.errors);
     const roles = catalogRead.value.roles && typeof catalogRead.value.roles === "object" ? catalogRead.value.roles : {};
     for (const role of Object.keys(roles)) {
-      roleSkills[role] = new Set(normalizeSkills(roles[role] && roles[role].skills));
+      const list = roles[role] && roles[role].skills;
+      roleSkills[role] = new Set(normalizeSkills(list));
+      catalogCounts.roles[role] = Array.isArray(list) ? list.length : 0;
       catalogErrors += errorCount(roles[role] && roles[role].errors);
     }
   }
@@ -373,6 +376,7 @@ function loadFixture(dir) {
   return evaluate({
     policyLinks,
     catalogErrors,
+    catalogCounts,
     catalogProblem,
     bareSkills,
     roleSkills,
@@ -483,50 +487,80 @@ function readGrokMcps(text) {
   return found;
 }
 
-function loadLiveCatalog() {
-  const extraDrift = [];
-  const byCwd = new Map();
-  const bareCwds = new Set();
-  let sawProbe = false;
-  CATALOG_PROBES.forEach((file, index) => {
-    const read = readJson(file);
-    if (read.status === "missing") return;
-    sawProbe = true;
-    if (read.status !== "ok" || !read.value || typeof read.value !== "object" || !Array.isArray(read.value.data)) {
-      extraDrift.push(`catalog probe invalid ${path.basename(file)}`);
-      return;
-    }
-    for (const row of read.value.data) {
-      if (!row || typeof row !== "object" || typeof row.cwd !== "string") continue;
-      byCwd.set(row.cwd, row);
-      if (index === 0) bareCwds.add(row.cwd);
-    }
-  });
+function isKadreCwd(cwd) {
+  return path.resolve(cwd) === path.resolve(KADRE) || path.basename(cwd) === "kadre";
+}
 
-  const bareSkills = new Set();
-  const roleSkills = {};
-  const roleErrors = new Map();
+function runCatalogProbe(outputName, cwds) {
+  const outFile = path.join(path.dirname(PROBE_SCRIPT), outputName);
+  let res;
+  try {
+    res = spawnSync(process.execPath, [PROBE_SCRIPT, outputName, ...cwds], {
+      cwd: path.dirname(PROBE_SCRIPT),
+      encoding: "utf8",
+      timeout: PROBE_TIMEOUT_MS,
+      maxBuffer: 10 * 1024 * 1024,
+      env: process.env,
+    });
+  } catch {
+    return null;
+  }
+  if (!res || res.error || res.status !== 0) return null;
+  const read = readJson(outFile);
+  if (read.status !== "ok" || !read.value || typeof read.value !== "object" || !Array.isArray(read.value.data)) return null;
+  return read.value.data;
+}
+
+function consumeCatalogRows(rows, kind, bareSkills, roleSkills, catalogCounts) {
   let catalogErrors = 0;
   let sawBare = false;
-  for (const [cwd, row] of byCwd) {
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || typeof row.cwd !== "string") continue;
     const names = normalizeSkills(row.skills);
+    const count = Array.isArray(row.skills) ? row.skills.length : 0;
     const errors = errorCount(row.errors);
-    if (bareCwds.has(cwd) || path.basename(cwd) === "kadre") {
+    if (kind === "bare") {
+      if (!isKadreCwd(row.cwd)) continue;
       sawBare = true;
       for (const name of names) bareSkills.add(name);
+      catalogCounts.bare = count;
       catalogErrors += errors;
       continue;
     }
-    const role = path.basename(cwd);
+    const role = path.basename(row.cwd);
     roleSkills[role] = new Set(names);
-    roleErrors.set(role, errors);
+    catalogCounts.roles[role] = count;
+    catalogErrors += errors;
   }
-  for (const errors of roleErrors.values()) catalogErrors += errors;
+  return { catalogErrors, sawBare };
+}
 
-  let catalogProblem = null;
-  if (!sawProbe) catalogProblem = "catalog missing";
-  else if (!sawBare) extraDrift.push("catalog bare missing");
-  return { catalogProblem, catalogErrors, bareSkills, roleSkills, extraDrift };
+function loadLiveCatalog() {
+  const extraDrift = [];
+  const bareSkills = new Set();
+  const roleSkills = {};
+  const catalogCounts = { bare: 0, roles: {} };
+  let catalogErrors = 0;
+  let sawBare = false;
+  let bareProbeOk = false;
+  const probes = [
+    ["discovery-doctor-live-bare.json", [KADRE], "bare"],
+    ["discovery-doctor-live-roles-a.json", ROLE_ROOTS.slice(0, 6).map(([, root]) => root), "roles"],
+    ["discovery-doctor-live-roles-b.json", ROLE_ROOTS.slice(6).map(([, root]) => root), "roles"],
+  ];
+  for (const [outputName, cwds, kind] of probes) {
+    const rows = runCatalogProbe(outputName, cwds);
+    if (!rows) {
+      extraDrift.push(`catalog probe failed ${outputName}`);
+      continue;
+    }
+    if (kind === "bare") bareProbeOk = true;
+    const consumed = consumeCatalogRows(rows, kind, bareSkills, roleSkills, catalogCounts);
+    catalogErrors += consumed.catalogErrors;
+    if (consumed.sawBare) sawBare = true;
+  }
+  if (bareProbeOk && !sawBare) extraDrift.push("catalog bare missing");
+  return { catalogProblem: null, catalogErrors, bareSkills, roleSkills, extraDrift, catalogCounts };
 }
 
 function loadLiveFlags(extraDrift) {
@@ -616,6 +650,7 @@ function loadLive() {
   return evaluate({
     policyLinks,
     catalogErrors: catalog.catalogErrors,
+    catalogCounts: catalog.catalogCounts,
     catalogProblem: catalog.catalogProblem,
     bareSkills: catalog.bareSkills,
     roleSkills: catalog.roleSkills,

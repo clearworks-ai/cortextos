@@ -131,6 +131,9 @@ test("clean fixture reports no drift and the core skill set", () => {
     assert.deepEqual(report.drift, []);
     assert.equal(report.fields.corePresent, true);
     assert.equal(report.fields.catalogErrors, 0);
+    const catalog = JSON.parse(fs.readFileSync(path.join(dir, "catalog.json"), "utf8"));
+    assert.equal(report.fields.catalogCounts.bare, catalog.bare.skills.length);
+    assert.equal(report.fields.catalogCounts.roles["pa-codex"], catalog.roles["pa-codex"].skills.length);
     assert.deepEqual(report.fields.forbiddenDefaultSkills, []);
     assert.deepEqual(report.fields.brokenSymlinks, []);
     assert.deepEqual(report.fields.projectionDrift, []);

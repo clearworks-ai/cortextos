@@ -156,6 +156,74 @@ test("clean fixture reports no drift and the core skill set", () => {
   }
 });
 
+const USER_SKILLS = "/Users/joshweiss/.agents/skills";
+const SKILLIFY_SKILL = "/Users/joshweiss/code/bones-dev-skills/skillify/SKILL.md";
+const SKILL_LINK_ROOTS = [
+  USER_SKILLS,
+  "/Users/joshweiss/.codex/skills",
+  "/Users/joshweiss/.codex/skills/.system",
+  "/Users/joshweiss/.claude/skills",
+  "/Users/joshweiss/.grok/skills",
+  "/Users/joshweiss/.config/opencode/skills",
+];
+
+function shippedCoreNames() {
+  const source = fs.readFileSync(doctor, "utf8");
+  const block = source.match(/const CORE = \[([\s\S]*?)\];/);
+  assert.ok(block, "doctor CORE array missing");
+  return [...block[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+}
+
+function frontmatter(name, text) {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
+  assert.ok(match, `${name} has no SKILL.md frontmatter`);
+  return match[1];
+}
+
+function modelInvocationDisabled(frontmatterText) {
+  return /^disable-model-invocation:\s*["']?true["']?\s*$/m.test(frontmatterText);
+}
+
+function readLinkedSkill(name) {
+  for (const root of SKILL_LINK_ROOTS) {
+    const dir = path.join(root, name);
+    try {
+      fs.lstatSync(dir);
+    } catch {
+      continue;
+    }
+    try {
+      return fs.readFileSync(fs.realpathSync(path.join(dir, "SKILL.md")), "utf8");
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+test("skillify stays in core and is the only model-hidden core skill", () => {
+  const shipped = shippedCoreNames();
+  assert.ok(shipped.includes("skillify"));
+  assert.deepEqual(shipped, CORE);
+
+  const skillify = fs.readFileSync(SKILLIFY_SKILL, "utf8");
+  assert.equal(modelInvocationDisabled(frontmatter("skillify", skillify)), true);
+
+  const missing = [];
+  const hidden = [];
+  for (const name of CORE) {
+    if (name === "skillify") continue;
+    const text = readLinkedSkill(name);
+    if (text === null) {
+      missing.push(name);
+      continue;
+    }
+    if (modelInvocationDisabled(frontmatter(name, text))) hidden.push(name);
+  }
+  assert.deepEqual(missing, [], `${missing.join(", ")} has no SKILL.md`);
+  assert.deepEqual(hidden, []);
+});
+
 test("a broken symlink is drift and stdout stays free of secrets", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-env-doctor-"));
   try {

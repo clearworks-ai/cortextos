@@ -79,7 +79,6 @@ const ROLE_ROOTS = [
   ["frank2-codex", "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/frank2-codex"],
   ["knox-codex", "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/knox-codex"],
   ["larry-codex", "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/larry-codex"],
-  ["maven-codex", "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/maven-codex"],
   ["pa-codex", "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/pa-codex"],
   ["sage-codex", "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/sage-codex"],
   ["scout-codex", "/Users/joshweiss/code/cortextos/orgs/clearworksai/agents/scout-codex"],

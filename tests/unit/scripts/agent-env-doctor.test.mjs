@@ -113,6 +113,7 @@ function runDoctor(dir) {
   const res = spawnSync(process.execPath, [doctor, "--fixture", dir], {
     cwd: repoRoot,
     encoding: "utf8",
+    env: { ...process.env, DOCTOR_PROBE_SCRIPT: path.join(dir, "not-the-live-probe.mjs") },
   });
   const combined = `${res.stdout || ""}\n${res.stderr || ""}`;
   assert.equal(res.status, 0, combined);
@@ -222,6 +223,65 @@ test("skillify stays in core and is the only model-hidden core skill", () => {
   }
   assert.deepEqual(missing, [], `${missing.join(", ")} has no SKILL.md`);
   assert.deepEqual(hidden, []);
+});
+
+const BARE_CWD = "/Users/joshweiss/code/Clients/kadre";
+
+function writeFakeProbe(probePath) {
+  fs.writeFileSync(
+    probePath,
+    `import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const output = process.argv[2];
+const cwds = process.argv.slice(3);
+const bareCwd = ${JSON.stringify(BARE_CWD)};
+const data = cwds.map((cwd) => {
+  const bare = path.resolve(cwd) === path.resolve(bareCwd);
+  const skills = bare
+    ? [{ name: "sentinel-a" }, { name: "sentinel-b" }, { name: "sentinel-c" }]
+    : [{ name: "sentinel-role" }, { name: "sentinel-extra" }];
+  return { cwd, skills, errors: [] };
+});
+fs.writeFileSync(path.join(here, output), JSON.stringify({ data }));
+`,
+  );
+}
+
+function assertNoSecretTokens(stdout) {
+  const visible = stdout.replaceAll("task-observer", "");
+  assert.doesNotMatch(visible, /sk-[A-Za-z0-9_-]{8,}/);
+  assert.doesNotMatch(visible, /Bearer\s+\S+/);
+  assert.doesNotMatch(visible, /eyJ[A-Za-z0-9_-]{10,}/);
+}
+
+test("live catalog counts come from DOCTOR_PROBE_SCRIPT", { timeout: 190000 }, () => {
+  const probeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-env-doctor-probe-"));
+  const probePath = path.join(probeDir, "fake-probe.mjs");
+  try {
+    writeFakeProbe(probePath);
+    const res = spawnSync(process.execPath, [doctor, "--live"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 180000,
+      maxBuffer: 10 * 1024 * 1024,
+      env: { ...process.env, DOCTOR_PROBE_SCRIPT: probePath },
+    });
+    const detail = `status ${res.status} signal ${res.signal || ""}\n${res.stderr || ""}`;
+    assert.equal(res.status, 0, detail);
+    assert.equal(res.stdout.trim().startsWith("{"), true, detail);
+    assert.doesNotMatch(res.stdout, /the-humanizer/);
+    assertNoSecretTokens(res.stdout);
+    const report = JSON.parse(res.stdout);
+    assert.equal(report.fields.catalogCounts.bare, 3);
+    assert.equal(report.fields.catalogCounts.roles["pa-codex"], 2);
+    assert.ok(report.drift.includes("missing core skill bonesify in bare"), report.drift.join("\n"));
+    assert.ok(report.drift.includes("missing core skill bonesify in pa-codex"), report.drift.join("\n"));
+  } finally {
+    fs.rmSync(probeDir, { recursive: true, force: true });
+  }
 });
 
 test("a broken symlink is drift and stdout stays free of secrets", () => {

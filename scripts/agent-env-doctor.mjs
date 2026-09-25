@@ -491,12 +491,20 @@ function isKadreCwd(cwd) {
   return path.resolve(cwd) === path.resolve(KADRE) || path.basename(cwd) === "kadre";
 }
 
+function probeScript() {
+  const override = process.env.DOCTOR_PROBE_SCRIPT;
+  if (typeof override === "string" && override.trim()) return path.resolve(override.trim());
+  return PROBE_SCRIPT;
+}
+
 function runCatalogProbe(outputName, cwds) {
-  const outFile = path.join(path.dirname(PROBE_SCRIPT), outputName);
+  const script = probeScript();
+  const probeDir = path.dirname(script);
+  const outFile = path.join(probeDir, outputName);
   let res;
   try {
-    res = spawnSync(process.execPath, [PROBE_SCRIPT, outputName, ...cwds], {
-      cwd: path.dirname(PROBE_SCRIPT),
+    res = spawnSync(process.execPath, [script, outputName, ...cwds], {
+      cwd: probeDir,
       encoding: "utf8",
       timeout: PROBE_TIMEOUT_MS,
       maxBuffer: 10 * 1024 * 1024,

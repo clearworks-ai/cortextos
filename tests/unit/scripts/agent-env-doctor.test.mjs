@@ -1,0 +1,300 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const doctor = path.join(repoRoot, "scripts/agent-env-doctor.mjs");
+
+const CORE = [
+  "agent-browser",
+  "bonesify",
+  "codebase-reference",
+  "coding-standards",
+  "debugify",
+  "detailify",
+  "goalify",
+  "graphify",
+  "grilling",
+  "impeccable",
+  "implementify",
+  "mapify",
+  "mergify",
+  "optional-capability",
+  "planify",
+  "ponytail",
+  "researchify",
+  "reviewify",
+  "skill-creator",
+  "skillify",
+  "specify",
+  "systematic-debugging",
+  "task-observer",
+  "tddify",
+  "verify",
+];
+
+const BARE_MCP = ["codebase-memory-mcp", "context7", "playwright"];
+const BLOTATO_SKILLS = [
+  "brand-brief",
+  "content-coach",
+  "generate",
+  "post-grader",
+  "post-scheduler",
+  "post-writer",
+  "repurpose",
+  "viral-hooks",
+];
+
+function writeJson(file, value) {
+  fs.writeFileSync(file, JSON.stringify(value));
+}
+
+function linkTo(target, dest) {
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  const rel = path.relative(path.dirname(dest), target);
+  fs.symlinkSync(rel, dest);
+}
+
+function skillList(extra = []) {
+  return CORE.map((name) => (name === "impeccable" ? "impeccable:impeccable" : name)).concat(extra);
+}
+
+function makeCleanFixture(dir) {
+  const policy = path.join(dir, "policy", "CODING.md");
+  fs.mkdirSync(path.dirname(policy), { recursive: true });
+  fs.writeFileSync(
+    policy,
+    "coding policy\nBearer super-secret-token\nsk-testSecretKey12\neyJhbGciOiJIUzI1NiJ9\n",
+  );
+  linkTo(policy, path.join(dir, "clients/codex/AGENTS.md"));
+  linkTo(policy, path.join(dir, "clients/claude/CLAUDE.md"));
+  linkTo(policy, path.join(dir, "clients/opencode/AGENTS.md"));
+  linkTo(policy, path.join(dir, "clients/grok/AGENTS.md"));
+  fs.mkdirSync(path.join(dir, "links"), { recursive: true });
+  linkTo(policy, path.join(dir, "links/ok"));
+
+  const plain = skillList();
+  const blotato = skillList(BLOTATO_SKILLS);
+  writeJson(path.join(dir, "catalog.json"), {
+    bare: { errors: 0, skills: plain },
+    roles: {
+      "auditmaster-codex": { errors: 0, skills: plain },
+      "builddifferentprod-codex": { errors: 0, skills: blotato },
+      "crm-codex": { errors: 0, skills: plain },
+      "knox-codex": { errors: 0, skills: blotato },
+      "larry-codex": { errors: 0, skills: plain },
+      "pa-codex": { errors: 0, skills: plain },
+    },
+  });
+  writeJson(path.join(dir, "mcp.json"), {
+    bare: [...BARE_MCP],
+    roles: {
+      "auditmaster-codex": [...BARE_MCP],
+      "builddifferentprod-codex": [...BARE_MCP, "blotato"],
+      "crm-codex": [...BARE_MCP, "moxie"],
+      "knox-codex": [...BARE_MCP, "blotato"],
+      "larry-codex": [...BARE_MCP],
+      "pa-codex": [...BARE_MCP, "moxie"],
+    },
+  });
+  writeJson(path.join(dir, "flags.json"), {
+    syncClaudeAiSkills: false,
+    syncClaudeAiPlugins: false,
+    grokClaudeMcps: false,
+    disableClaudeAiConnectors: true,
+  });
+}
+
+function runDoctor(dir) {
+  const res = spawnSync(process.execPath, [doctor, "--fixture", dir], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: { ...process.env, DOCTOR_PROBE_SCRIPT: path.join(dir, "not-the-live-probe.mjs") },
+  });
+  const combined = `${res.stdout || ""}\n${res.stderr || ""}`;
+  assert.equal(res.status, 0, combined);
+  assert.doesNotMatch(res.stdout, /sk-[A-Za-z0-9_-]{8,}/);
+  assert.doesNotMatch(res.stdout, /Bearer\s+\S+/);
+  assert.doesNotMatch(res.stdout, /eyJ[A-Za-z0-9_-]{10,}/);
+  assert.equal(res.stdout.trim().startsWith("{"), true);
+  return JSON.parse(res.stdout);
+}
+
+test("clean fixture reports no drift and the core skill set", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-env-doctor-"));
+  try {
+    makeCleanFixture(dir);
+    const report = runDoctor(dir);
+    assert.deepEqual(report.drift, []);
+    assert.equal(report.fields.corePresent, true);
+    assert.equal(report.fields.catalogErrors, 0);
+    const catalog = JSON.parse(fs.readFileSync(path.join(dir, "catalog.json"), "utf8"));
+    assert.equal(report.fields.catalogCounts.bare, catalog.bare.skills.length);
+    assert.equal(report.fields.catalogCounts.roles["pa-codex"], catalog.roles["pa-codex"].skills.length);
+    assert.deepEqual(report.fields.forbiddenDefaultSkills, []);
+    assert.deepEqual(report.fields.brokenSymlinks, []);
+    assert.deepEqual(report.fields.projectionDrift, []);
+    assert.deepEqual(report.fields.policyLinks, {
+      codex: true,
+      claude: true,
+      opencode: true,
+      grok: true,
+    });
+    assert.deepEqual(report.fields.bareMcp, ["codebase-memory-mcp", "context7", "playwright"]);
+    assert.deepEqual(report.fields.roleMcp["pa-codex"], ["codebase-memory-mcp", "context7", "moxie", "playwright"]);
+    assert.deepEqual(report.fields.flags, {
+      syncClaudeAiSkills: false,
+      syncClaudeAiPlugins: false,
+      grokClaudeMcps: false,
+      disableClaudeAiConnectors: true,
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+const USER_SKILLS = "/Users/joshweiss/.agents/skills";
+const SKILLIFY_SKILL = "/Users/joshweiss/code/bones-dev-skills/skillify/SKILL.md";
+const SKILL_LINK_ROOTS = [
+  USER_SKILLS,
+  "/Users/joshweiss/.codex/skills",
+  "/Users/joshweiss/.codex/skills/.system",
+  "/Users/joshweiss/.claude/skills",
+  "/Users/joshweiss/.grok/skills",
+  "/Users/joshweiss/.config/opencode/skills",
+];
+
+function shippedCoreNames() {
+  const source = fs.readFileSync(doctor, "utf8");
+  const block = source.match(/const CORE = \[([\s\S]*?)\];/);
+  assert.ok(block, "doctor CORE array missing");
+  return [...block[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+}
+
+function frontmatter(name, text) {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
+  assert.ok(match, `${name} has no SKILL.md frontmatter`);
+  return match[1];
+}
+
+function modelInvocationDisabled(frontmatterText) {
+  return /^disable-model-invocation:\s*["']?true["']?\s*$/m.test(frontmatterText);
+}
+
+function readLinkedSkill(name) {
+  for (const root of SKILL_LINK_ROOTS) {
+    const dir = path.join(root, name);
+    try {
+      fs.lstatSync(dir);
+    } catch {
+      continue;
+    }
+    try {
+      return fs.readFileSync(fs.realpathSync(path.join(dir, "SKILL.md")), "utf8");
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+test("skillify stays in core and is the only model-hidden core skill", () => {
+  const shipped = shippedCoreNames();
+  assert.ok(shipped.includes("skillify"));
+  assert.deepEqual(shipped, CORE);
+
+  const skillify = fs.readFileSync(SKILLIFY_SKILL, "utf8");
+  assert.equal(modelInvocationDisabled(frontmatter("skillify", skillify)), true);
+
+  const missing = [];
+  const hidden = [];
+  for (const name of CORE) {
+    if (name === "skillify") continue;
+    const text = readLinkedSkill(name);
+    if (text === null) {
+      missing.push(name);
+      continue;
+    }
+    if (modelInvocationDisabled(frontmatter(name, text))) hidden.push(name);
+  }
+  assert.deepEqual(missing, [], `${missing.join(", ")} has no SKILL.md`);
+  assert.deepEqual(hidden, []);
+});
+
+const BARE_CWD = "/Users/joshweiss/code/Clients/kadre";
+
+function writeFakeProbe(probePath) {
+  fs.writeFileSync(
+    probePath,
+    `import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const output = process.argv[2];
+const cwds = process.argv.slice(3);
+const bareCwd = ${JSON.stringify(BARE_CWD)};
+const data = cwds.map((cwd) => {
+  const bare = path.resolve(cwd) === path.resolve(bareCwd);
+  const skills = bare
+    ? [{ name: "sentinel-a" }, { name: "sentinel-b" }, { name: "sentinel-c" }]
+    : [{ name: "sentinel-role" }, { name: "sentinel-extra" }];
+  return { cwd, skills, errors: [] };
+});
+fs.writeFileSync(path.join(here, output), JSON.stringify({ data }));
+`,
+  );
+}
+
+function assertNoSecretTokens(stdout) {
+  const visible = stdout.replaceAll("task-observer", "");
+  assert.doesNotMatch(visible, /sk-[A-Za-z0-9_-]{8,}/);
+  assert.doesNotMatch(visible, /Bearer\s+\S+/);
+  assert.doesNotMatch(visible, /eyJ[A-Za-z0-9_-]{10,}/);
+}
+
+test("live catalog counts come from DOCTOR_PROBE_SCRIPT", { timeout: 190000 }, () => {
+  const probeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-env-doctor-probe-"));
+  const probePath = path.join(probeDir, "fake-probe.mjs");
+  try {
+    writeFakeProbe(probePath);
+    const res = spawnSync(process.execPath, [doctor, "--live"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 180000,
+      maxBuffer: 10 * 1024 * 1024,
+      env: { ...process.env, DOCTOR_PROBE_SCRIPT: probePath },
+    });
+    const detail = `status ${res.status} signal ${res.signal || ""}\n${res.stderr || ""}`;
+    assert.equal(res.status, 0, detail);
+    assert.equal(res.stdout.trim().startsWith("{"), true, detail);
+    assert.doesNotMatch(res.stdout, /the-humanizer/);
+    assertNoSecretTokens(res.stdout);
+    const report = JSON.parse(res.stdout);
+    assert.equal(report.fields.catalogCounts.bare, 3);
+    assert.equal(report.fields.catalogCounts.roles["pa-codex"], 2);
+    assert.ok(report.drift.includes("missing core skill bonesify in bare"), report.drift.join("\n"));
+    assert.ok(report.drift.includes("missing core skill bonesify in pa-codex"), report.drift.join("\n"));
+  } finally {
+    fs.rmSync(probeDir, { recursive: true, force: true });
+  }
+});
+
+test("a broken symlink is drift and stdout stays free of secrets", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-env-doctor-"));
+  try {
+    makeCleanFixture(dir);
+    fs.symlinkSync("missing-target", path.join(dir, "links", "dangling-skill"));
+    const report = runDoctor(dir);
+    assert.ok(report.drift.length > 0);
+    assert.ok(report.drift.some((item) => item.includes("dangling-skill")));
+    assert.ok(report.fields.brokenSymlinks.some((item) => item.includes("dangling-skill")));
+    assert.equal(report.fields.corePresent, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -45,7 +45,7 @@ Apps and repos (all at `clearworks-ai` on GitHub, local at `~/code/`):
 
 **Stack (locked):** Node.js + TypeScript strict, Express 5 (REST only), React 18 + Vite + TanStack Query v5, Drizzle ORM + PostgreSQL, Shadcn/ui + Radix + Tailwind (semantic tokens only), express-session + connect-pg-simple.
 
-**LLM:** Anthropic primary (`claude-3-5-sonnet`). OpenAI only for embeddings (`text-embedding-3-small`).
+**LLM:** No chat model is pinned here. Embedding providers are the project-specific paths in the Clearpath Intelligence section below.
 
 **Hosting:** Railway auto-deploy on push to main. Never create `railway.json`/`railway.toml` in Clearpath — custom healthcheck config blocks all deploys. Deploy via `git push` to main only.
 
@@ -126,7 +126,7 @@ Source: frank-cc memory (`reference_clearpath_org_ids.md`), 2026-04-10.
 ## Decisions Log
 
 - **2026-03-30** — Stack locked: Clearworks apps use Node + TS strict, Express 5, React 18 + Vite + TanStack Query v5, Drizzle + Postgres, Shadcn + Tailwind semantic tokens only.
-- **2026-03-30** — LLM: Anthropic primary, OpenAI embeddings only. Hosting: Railway auto-deploy on push to main.
+- **2026-03-30** — Historical LLM note: Anthropic primary, OpenAI embeddings only. Superseded by Technical and Clearpath Intelligence above (no pinned chat model; intelligence embeddings are Gemini; other Clearpath paths stay OpenAI). Hosting: Railway auto-deploy on push to main.
 - **2026-03-30** — MUSE owns all content. Frank / other agents do not draft LinkedIn or newsletter posts directly.
 - **2026-03-30** — Todoist is authoritative for tasks, not markdown files. Query the API for status.
 - **2026-04-05** — Never create `railway.json`/`railway.toml` in Clearpath. Custom healthcheck config blocks deploys. Deploy via `git push` to main only.

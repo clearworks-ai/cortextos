@@ -1,8 +1,32 @@
 # Clearworks AEC authority system - master checklist
 
 Date: 2026-09-25
-Status: active working checklist
+Status: active working checklist; research and private content package complete, production measurement gates still open
 Governing task: `task_1790398044100_06722606`
+
+## Current state - 2026-09-26
+
+The authority strategy is ready to move into reviewed content production. The measurement implementation is not yet live, and no Google-ranking claim is supported.
+
+| Layer | State | Governing evidence or gate |
+|---|---|---|
+| Open-source tool decision | Complete | OneGlanse: do not deploy as-is; preserve a later choice between a hardened disposable lab and adapting the safe concepts. SerpBear: private loopback pilot only after hardening; not a Maps or AI-answer tracker. |
+| Buyer-prompt baseline | Complete, directional | Gemini + Google Search grounding run `gemini-api-google-search-20260925-r1`: 25/25 successful prompts, 114 grounding queries, 324 citation records, raw receipts preserved. One run is not a visibility score. |
+| Returned-site intelligence | Complete for first sample | Ten recurring provider entities and ten influential source/page profiles inspected with 49 live links. |
+| Public keyword/SERP study | Complete with limits | 35 query rows and 18 provisional opportunities. Accessible volume is broad-category evidence; generic web-search ordering is discovery only, never Google/Bing rank. |
+| Google/Search Console truth | Blocked | Human task `task_1790406824361_93723891` for read-only Search Console access or export. Josh's manual Google check did not show Clearworks for one exact query; that is a bounded observation, not a universal absence claim. |
+| GA4-to-lead proof-loop code | Implemented and reviewed off-production | Site branch through `f34c23778c91936d37759161567bd6669edb95f1`; receiver reliability commit `410b54d676bda7a23bd5e0d80d615624b83dff43`. Production cutover remains separate and gated. |
+| Zcal lifecycle receiver | Release slice PASS, not deployed | Immutable SHA `8889f81cf2b8c29dc5f8b5f3fa9e885c6b9ae05a`; 18/18 tests, 28-page build, exact route/config/manifest checks. Blocked on `approval_1790437084_k0r60` before D1, secret, binding, subscriber, or deploy mutation. |
+| Private authority content package | Complete and independently reviewed | Five briefs at governing content commit `48b8ce37f127cef17572801b9d7e764492d72d06`; checklist receipt `150ed081`. No publication has occurred. |
+
+### Next dependency-ordered actions
+
+1. Obtain the Search Console export/access and freeze the pre-publication Google baseline.
+2. Resolve the explicit Zcal production decision. If approved, deploy only immutable SHA `8889f81...` through its gated release procedure and verify create/reschedule/cancel plus the unchanged lead route.
+3. Reconcile the broader lead/CRM cutover only through its own production gate; do not infer it from Zcal approval.
+4. Select the first canonical page from the five reviewed briefs and publish through a separately reviewed site branch.
+5. Record indexation, retrieval/citation, multi-asset engagement, qualified conversations, and booked outcomes as separate measures.
+6. At the tool-choice gate, present Josh with the explicit OneGlanse choice: hardened disposable lab, safe-concept adaptation, or acceptance of the documented account/policy/maintenance risk. Do not silently drop the tool.
 
 ## Outcome
 
@@ -223,7 +247,7 @@ Acceptance:
 
 ## Workstream 8 - Authority dashboard and operating cadence
 
-- [ ] Decide `USE`, `ADAPT`, or `REJECT` for OneGlanse and SerpBear.
+- [x] Issue engineering verdicts for OneGlanse and SerpBear while preserving Josh's final product-choice gate; see `open-source-tool-verdicts.md`.
 - [ ] Define one durable observation schema spanning prompt, engine, answer/result, cited source, entity, test conditions, and raw receipt.
 - [ ] Keep Google rank, local result, AI mention, AI citation, site behavior, and CRM outcome as separate measures.
 - [ ] Build weekly comparisons without overwriting prior runs.

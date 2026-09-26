@@ -1,0 +1,273 @@
+# Clearworks AEC authority system - master checklist
+
+Date: 2026-09-25
+Status: active working checklist
+Governing task: `task_1790398044100_06722606`
+
+## Outcome
+
+Build a reliable loop that can answer five questions every week:
+
+1. What do real AEC buyers ask Google and AI answer engines?
+2. Which companies, pages, people, and sources are returned now?
+3. Why are those sources retrieved, cited, or ranked?
+4. Where does Clearworks have a defensible evidence advantage or content gap?
+5. Which content and proof should Clearworks publish next, and did it produce qualified attention or pipeline?
+
+Content production starts only after the baseline, measurement, and buyer-journey instrumentation are usable.
+
+## Non-negotiable boundaries
+
+- Separate originating awareness from web acquisition and assisted validation.
+- Never claim person-level identity from an anonymous analytics sequence without a deterministic join.
+- Never send names or email addresses to GA4.
+- No new cookie/analytics-consent popup in the current build. GA browser client/session identifiers are deferred; the durable proof loop must not depend on them.
+- Treat AI-answer output as sampled, volatile evidence, not a stable rank.
+- Do not create city or neighborhood doorway pages without real local evidence and demand.
+- Do not publish generated provider rankings before the methodology, disclosure, and source ledger exist.
+- Install third-party open-source tools in isolation before granting credentials or production access.
+- Production code changes require a dedicated branch/worktree, tests, a pushed PR, and explicit merge/deploy authorization.
+
+## Workstream 0 - Evidence and ownership
+
+- [x] Create the governing task and mark it in progress.
+- [x] Create a dedicated cortextOS worktree and branch for durable artifacts.
+- [x] Preserve the verified Justin Garner journey boundary: warm referral origin, Google/site validation, later booking.
+- [x] Preserve the GA4 audit and its exact failure matrix.
+- [ ] Record every repository, license, version, commit, container image, and external service used.
+- [ ] Define owners for analytics, site publishing, CRM mapping, weekly measurement, and content approval.
+- [ ] Create a secrets inventory without copying secret values into artifacts.
+
+Acceptance:
+
+- Every subsequent checklist item points to a source, owner, test, or explicit blocker.
+
+## Workstream 1 - OneGlanse source audit and isolated proof
+
+Interim safety gate: do not connect any real provider account. Source review found plaintext browser session-state storage, consumer-UI automation that conflicts with multiple provider restrictions, contaminated Gemini sampling through conversation reuse, and an unresolved scheduler defect. Continue only credential-free local checks and assess reusable architecture rather than deployment.
+
+- [x] Pull the complete OneGlanse source and record the inspected commit.
+- [x] Confirm license and dependency licenses.
+- [x] Map its services, queues, databases, browser workers, schedulers, authentication, and retention model.
+- [x] Inspect how provider sessions and credentials are stored and refreshed.
+- [x] Inspect whether browser automation violates or materially risks provider accounts or terms.
+- [x] Confirm prompt scheduling, retries, rate limits, concurrency, failure capture, screenshots/raw responses, and dedupe.
+- [x] Confirm whether location, locale, login state, and personalization can be controlled and recorded.
+- [x] Confirm exports/API access and whether observations remain reproducible outside its UI.
+- [x] Run a credential-free local boot/build in an isolated directory.
+- [x] Run unit/static checks available in the repository.
+- [x] Run safe synthetic authentication/readiness behavior with mocked state.
+- [x] Document CPU, memory, storage, browser, database, and operational requirements.
+- [x] Issue a `USE`, `ADAPT`, or `REJECT` verdict with source locations: **REJECT deployment; ADAPT selected API-first data and UI concepts.**
+
+Acceptance:
+
+- The service boots without production credentials.
+- A synthetic observation can be scheduled, stored, retrieved, and exported.
+- Account and policy risks are explicit before any real provider login is introduced.
+
+## Workstream 2 - SerpBear source audit and isolated proof
+
+Interim safety gate: conditional private pilot only. Do not expose publicly or connect valuable credentials until authentication defects, vulnerable dependencies, and failing tests are resolved. SerpBear covers conventional organic ranks only; it does not measure Maps/local packs or AI-answer citations.
+
+- [x] Pull the complete SerpBear source and record the inspected commit.
+- [x] Confirm license and dependency licenses.
+- [x] Map database, authentication, scheduler, scraping/provider, proxy, and Search Console paths.
+- [x] Verify keyword, location, language, device, domain, and competitor dimensions.
+- [x] Determine whether local-pack results are observed or only conventional web rankings.
+- [x] Determine the real requirement and cost for SERP APIs or proxies.
+- [x] Inspect rate-limit handling, retries, history retention, export, and backup.
+- [x] Verify Google Search Console permissions and data boundaries.
+- [x] Install dependencies and complete a credential-free production build in isolation.
+- [x] Run repository tests: build passed; upstream tests failed 15 of 39; dependency audit found 32 production vulnerabilities.
+- [x] Issue a `USE`, `ADAPT`, or `REJECT` verdict with source locations: **conditional loopback pilot only; ADAPT provider/GSC concepts rather than deploy publicly.**
+
+Acceptance:
+
+- The application boots locally, persists a test project and keyword, and proves one update cycle without touching production.
+- The limits of local-intent measurement are explicit.
+
+## Workstream 3 - Prompt and query universe
+
+- [x] Define the buyer roles: principal/executive, operations leader, technology/BIM leader, engineering leader, contractor/design-build leader, and investor/portfolio operator.
+- [x] Define intent clusters:
+  - local/category discovery;
+  - problem diagnosis;
+  - use-case discovery;
+  - trust and proof;
+  - partner selection;
+  - training vs strategy vs implementation;
+  - build vs buy vs connect;
+  - cost/timeline/commercial shape;
+  - security/governance/professional judgment;
+  - ongoing adoption and administration.
+- [x] Research real vocabulary from recent practitioner discussions, CRM questions, AEC sites, and public sources; Search Console/AIA/internal refresh remains a quarterly input.
+- [x] Create a broad candidate set without inventing search volume.
+- [x] Select a frozen 25-prompt weekly core with clear inclusion criteria.
+- [x] Maintain an extended rotating set for exploration and content research.
+- [x] Record exact prompt text, engine, account state, locale, location, date/time, model/mode, and personalization state.
+- [x] Define when prompt changes create a new series rather than rewriting history.
+
+Acceptance:
+
+- Every core prompt maps to a buyer, intent, commercial decision, and potential Clearworks page or proof source.
+- Prompt wording and test conditions are versioned.
+
+## Workstream 4 - Baseline capture across Google and AI answers
+
+- [x] Complete the first directional Gemini API + Google Search grounding run: 25/25 prompts succeeded, with 114 grounding queries, 324 citation records, and raw receipts preserved. This is one repetition, not a visibility score.
+- [ ] Capture Google organic results for the frozen query set with locale, device, and location controls.
+- [ ] Capture Google local/map results separately where the query triggers them.
+- [ ] Capture Google AI Overview or AI Mode only when shown; record `not triggered` separately from `not cited`.
+- [ ] Export the dedicated Search Console Generative AI performance report before content changes and retain its page/country/device/date baseline.
+- [ ] Confirm whether the dedicated Generative AI report is available through an API; until proven, treat the documented UI export as the authoritative extraction path.
+- [ ] Capture ChatGPT Search, Gemini, and Perplexity outputs under controlled test conditions.
+- [ ] Preserve the full answer, citations, ordering, recommendation language, and screenshots/raw receipts where permitted.
+- [ ] Repeat a subset to measure same-day volatility before interpreting ranks.
+- [ ] Score independently:
+  - Clearworks mention;
+  - Clearworks citation;
+  - citation prominence;
+  - recommendation/shortlist status;
+  - accurate category description;
+  - competitor mention/citation share;
+  - source diversity;
+  - answer stability.
+- [ ] Never collapse Google rank and AI-answer visibility into one score.
+
+Acceptance:
+
+- The same frozen prompt can be rerun and compared without losing its test conditions or raw evidence.
+- Baseline uncertainty and provider failures remain visible.
+
+## Workstream 5 - Returned-company and source-site intelligence
+
+- [x] Complete a first live inspection of 10 recurring provider entities and 10 influential cited source/page profiles from the Gemini baseline, with 49 live source links and explicit source classifications.
+For every organization or source returned often enough to matter:
+
+- [ ] Normalize entity, domain, URL, page title, result type, and engine.
+- [ ] Distinguish service provider, software vendor, association, publication, directory, academic source, and social/community source.
+- [ ] Inspect the cited/ranking page and its surrounding content cluster.
+- [ ] Record category language, audience, geography, offer, CTA, proof, named clients, case studies, credentials, reviews, authorship, reviewed dates, citations, and disclosures.
+- [ ] Inspect crawlability, canonicalization, internal links, sitemaps, robots directives, and supported structured data.
+- [ ] Inspect local entity consistency: Business Profile, address/service area, association pages, directories, reviews, local links, and event/speaking evidence.
+- [ ] Inspect conversion path: direct contact, booking, lead magnet, newsletter, assessment, or product trial.
+- [ ] Record why the page may have earned retrieval or ranking as an evidence-based hypothesis, not fact.
+- [ ] Tag tactics Clearworks can ethically adapt and tactics to avoid.
+
+Acceptance:
+
+- Every competitive conclusion links to an inspected page and a dated observation.
+- Provider size, evidence, and category fit are not inferred from marketing language alone.
+
+## Workstream 6 - AEO/GEO field research
+
+- [x] Run `/last30days` on open-source and low-cost niche-brand SEO/GEO practice.
+- [x] Review official Google guidance on AI features, local visibility, structured data, crawlability, and measurement.
+- [x] Review official OpenAI crawler/search-publisher guidance.
+- [x] Review primary empirical GEO research and separate replicated findings from unvalidated claims.
+- [ ] Document platform volatility, personalization, query fan-out, citation selection, and citation absorption.
+- [ ] Document what schema can clarify and what it cannot guarantee.
+- [ ] Compare open-source tools for AI visibility, rank tracking, technical SEO, plagiarism, analytics, and content briefs.
+- [ ] Identify where conventional SEO remains the governing mechanism.
+- [ ] Produce a claim ledger with `official`, `empirical`, `practitioner`, `vendor`, or `hypothesis` evidence classes.
+
+Acceptance:
+
+- Recommendations cite primary or direct sources.
+- No tactic is presented as proven solely because a GEO vendor says it works.
+
+## Workstream 7 - GA4 -> lead -> CRM -> booking proof loop
+
+### Client and attribution
+
+- [ ] Import shared `SiteAnalytics` on the standalone homepage.
+- [ ] Verify every homepage booking link emits exactly one `booking_link_click`.
+- [ ] Generate one stable UUID `submission_id` per form attempt.
+- [ ] Persist immutable first-touch fields and refreshed last-touch fields.
+- [ ] Carry landing URL, referrer, UTM fields, current URL, and timestamps into the private lead record.
+- [ ] Deferred: consider carrying GA pseudonymous client/session identifiers privately only after a separate privacy/consent decision; never send PII to GA4.
+
+### Server and delivery truth
+
+- [ ] Replace timestamp/email pseudo-dedupe with `lead:submission:${submission_id}` idempotency.
+- [ ] Return the same receipt on replay.
+- [ ] Store an append-only lead record and per-leg receipts for KV, Mailchimp, notification, and CRM relay.
+- [ ] Track attempts, last error, retry/dead-letter state, and final delivery status.
+- [ ] Distinguish browser/API `accepted` from `all_downstreams_delivered`.
+
+### CRM and booking
+
+- [ ] Store `origin_source` independently from web acquisition and assist sources.
+- [ ] Preserve human-reported referral detail without letting GA last-click overwrite it.
+- [ ] Add a Zcal webhook/callback for booked, rescheduled, and cancelled events. Official capability is verified; authenticated account configuration remains unverified because trusted-browser access requires a new grant.
+- [x] Verify observed Zcal reschedule lineage: three independent historical pairs retained the same event ID before and after rescheduling. Treat this as strong account-history evidence, not a universal schema guarantee.
+- [ ] Persist stable booking ID and reschedule lineage in the proof loop after account webhook access is confirmed.
+- [ ] Join booking to submission/lead receipt where possible; label email-based matching as CRM matching, not GA proof.
+
+### GA reporting and tests
+
+- [ ] Register low-cardinality event-scoped custom dimensions after the Analytics Admin API is available.
+- [ ] Keep high-cardinality URLs and identifiers out of standard dimensions.
+- [ ] Test homepage booking clicks, form lifecycle, accepted vs delivered states, idempotent replay, downstream retry, booking joins, reschedules, cancellations, and duplicate-deal prevention.
+- [ ] Verify rendered events, network requests, durable records, CRM state, and failure behavior end to end.
+- [ ] Push a dedicated branch and open a PR; do not merge or deploy without explicit authorization.
+
+Acceptance:
+
+- A test journey can be followed from first touch through resource delivery and booking with stable receipts.
+- Replaying a submission or webhook creates no duplicate lead, relay, or opportunity.
+- Each attribution statement carries its evidence class and confidence.
+
+## Workstream 8 - Authority dashboard and operating cadence
+
+- [ ] Decide `USE`, `ADAPT`, or `REJECT` for OneGlanse and SerpBear.
+- [ ] Define one durable observation schema spanning prompt, engine, answer/result, cited source, entity, test conditions, and raw receipt.
+- [ ] Keep Google rank, local result, AI mention, AI citation, site behavior, and CRM outcome as separate measures.
+- [ ] Build weekly comparisons without overwriting prior runs.
+- [ ] Add source/tool health indicators so silence cannot be mistaken for no visibility.
+- [ ] Define the weekly operator checklist and monthly strategy review.
+- [ ] Define alert thresholds for new citations, lost citations, material rank movement, crawl/indexing problems, and qualified conversions.
+
+Acceptance:
+
+- A weekly run can be executed by someone other than its author using the written procedure.
+- Tool failure is distinguishable from a real zero result.
+
+## Workstream 9 - Content decision gate
+
+Do not begin bulk production until workstreams 3 through 7 have usable baselines.
+
+- [x] Rank the first six content opportunities by buyer decision, prompt gap, Clearworks evidence advantage, and conversion relevance in `first-content-batch.md`.
+- [ ] Prefer original evidence: AIA/TAP sessions, implementation work, audits, research, buyer questions, and explicit operating lessons.
+- [ ] Choose one canonical page per buyer decision; avoid keyword-variant duplication.
+- [ ] Create a source/evidence packet before each draft.
+- [ ] Include direct answer, real AEC language, proof, limitations, authorship/review date, adjacent questions, and one matching CTA.
+- [ ] Publish through reviewed branches only.
+- [ ] Adapt each canonical item to Google Business Profile, LinkedIn, newsletter, and AIA surfaces without copy-pasting.
+- [ ] Measure indexation, retrieval/citation, qualified engagement, assisted journeys, and booked conversations.
+
+Acceptance:
+
+- Each content brief exists because of a measured buyer question or evidence-backed authority opportunity.
+- Each published page can be tied to one intended buyer decision and one observable outcome.
+
+## Initial build order
+
+1. Complete source audits and isolated boots for OneGlanse and SerpBear.
+2. Freeze prompt methodology and the 25-prompt core.
+3. Capture the pre-content baseline and returned-site corpus.
+4. Implement and verify the analytics/CRM/booking repair on a dedicated site branch.
+5. Select the authority-stack components from verified results.
+6. Produce the gap-ranked content brief backlog.
+7. Begin the publishing cadence only after the baseline is preserved.
+
+## Current evidence
+
+- Google states that standard SEO fundamentals remain applicable to AI Overviews and AI Mode, and that no special AI schema or machine-readable file is required.
+- Google states that AI features may use query fan-out, so related subtopics and source coverage matter even when the literal prompt is unchanged.
+- Google now exposes a dedicated Search Console Generative AI performance report for AI Overviews and AI Mode, globally available as of 2026-08-31. It reports impressions by page, country, device, and date and supports a UI export. The data is also included in the overall Web performance report. A supported API path for the dedicated view has not yet been verified.
+- OpenAI states that OAI-SearchBot access is required for content to be discovered and cited in ChatGPT search, while GPTBot controls potential training access separately.
+- The current Clearworks resource-page analytics emit useful events, but the complete journey is not deterministically joinable and the homepage/booking/dedupe paths remain incomplete.
+
+These facts support building the measurement and proof loop first. They do not prove that any specific content tactic will cause rankings or citations.

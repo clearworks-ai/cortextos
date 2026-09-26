@@ -155,9 +155,12 @@ This is a different flywheel from a directory. The moat is not the number of too
 
 ## Demand and traffic boundary
 
-The current evidence does **not** establish monthly search volume for the firm-transition framework or the targeted AEC AI service queries.
+The current evidence establishes meaningful broad-topic demand but does **not** establish material monthly search volume for the exact firm-transition framework or most targeted AEC AI service queries.
 
 - The first directional Gemini grounding run showed competitors and influential sources being returned, but Clearworks appeared in zero of 25 prompts. That demonstrates an authority gap, not market size.
+- A dated Google Ads-derived public dataset reported US monthly volume of approximately 1,900 for `AI in construction`, 720 for `AI for architects`, 590 for `AI in architecture`, 140 for `AI tools for architects`, 720 for `architecture project management software`, and 5,400 for `software for architects`. Those broad categories carry harder and frequently wrong intent.
+- The same source reported zero for most exact consultant, audit, local, and firm-size phrases. Treat that as zero reported/below the source's threshold, not proof that nobody searches.
+- Sampled live results already placed Clearworks first for `where should an architecture firm start with AI`, `which AI tools should an architecture firm standardize`, and `Modern AEC Firm Playbook`. AEC Hub appeared alongside Clearworks on the first two. This proves coexistence and precise-query visibility are possible; it does not prove monthly traffic.
 - Directory-scale traffic is neither required nor necessarily desirable for a boutique, high-value service.
 - The working commercial hypothesis is low-to-moderate traffic with high value per qualified visit; this must be tested rather than asserted.
 

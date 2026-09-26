@@ -116,6 +116,7 @@ Acceptance:
 ## Workstream 4 - Baseline capture across Google and AI answers
 
 - [x] Complete the first directional Gemini API + Google Search grounding run: 25/25 prompts succeeded, with 114 grounding queries, 324 citation records, and raw receipts preserved. This is one repetition, not a visibility score.
+- [x] Complete a neutral public live-SERP demand study across 35 query rows and rank 18 achievable opportunities. This is a current directional sample, not a controlled rank-tracker series.
 - [ ] Capture Google organic results for the frozen query set with locale, device, and location controls.
 - [ ] Capture Google local/map results separately where the query triggers them.
 - [ ] Capture Google AI Overview or AI Mode only when shown; record `not triggered` separately from `not cited`.
@@ -166,6 +167,7 @@ Acceptance:
 - [x] Review official Google guidance on AI features, local visibility, structured data, crawlability, and measurement.
 - [x] Review official OpenAI crawler/search-publisher guidance.
 - [x] Review primary empirical GEO research and separate replicated findings from unvalidated claims.
+- [x] Run a dated public keyword/SERP study with verified-volume, zero-reported, and unknown evidence classes. Broad demand exists; most exact consultant/audit/local/size phrases reported zero in the accessible Google Ads-derived source.
 - [ ] Document platform volatility, personalization, query fan-out, citation selection, and citation absorption.
 - [ ] Document what schema can clarify and what it cannot guarantee.
 - [ ] Compare open-source tools for AI visibility, rank tracking, technical SEO, plagiarism, analytics, and content briefs.
@@ -239,6 +241,7 @@ Acceptance:
 Do not begin bulk production until workstreams 3 through 7 have usable baselines.
 
 - [x] Rank the first six content opportunities by buyer decision, prompt gap, Clearworks evidence advantage, and conversion relevance in `first-content-batch.md`.
+- [x] Rank 18 SEO/SERP opportunities from current live results and public demand evidence in `clearworks-aec-seo-serp-demand-2026-09-25.md`.
 - [ ] Prefer original evidence: AIA/TAP sessions, implementation work, audits, research, buyer questions, and explicit operating lessons.
 - [ ] Choose one canonical page per buyer decision; avoid keyword-variant duplication.
 - [ ] Create a source/evidence packet before each draft.
@@ -269,5 +272,8 @@ Acceptance:
 - Google now exposes a dedicated Search Console Generative AI performance report for AI Overviews and AI Mode, globally available as of 2026-08-31. It reports impressions by page, country, device, and date and supports a UI export. The data is also included in the overall Web performance report. A supported API path for the dedicated view has not yet been verified.
 - OpenAI states that OAI-SearchBot access is required for content to be discovered and cited in ChatGPT search, while GPTBot controls potential training access separately.
 - The current Clearworks resource-page analytics emit useful events, but the complete journey is not deterministically joinable and the homepage/booking/dedupe paths remain incomplete.
+- The accessible Google Ads-derived dataset reports meaningful broad US demand (`AI in construction` 1,900/month; `AI for architects` 720; `AI in architecture` 590; `AI tools for architects` 140), while most exact AEC consultant/audit/local/size phrases returned zero reported volume. Zero reported is not proof of zero searches.
+- In the sampled live results, Clearworks appears first for `where should an architecture firm start with AI`, `which AI tools should an architecture firm standardize`, and `Modern AEC Firm Playbook`; AEC Hub appears alongside it on the first two. This proves coexistence on precise decision questions, not monthly traffic.
+- Google blocked the isolated localized inspection, so local-pack visibility remains unknown pending Search Console/GBP or an authorized local-rank data source.
 
 These facts support building the measurement and proof loop first. They do not prove that any specific content tactic will cause rankings or citations.

@@ -6,7 +6,7 @@ Governing task: `task_1790398044100_06722606`
 
 ## Current state - 2026-09-26
 
-The authority strategy is ready to move into reviewed content production. The measurement implementation is not yet live, and no Google-ranking claim is supported.
+The authority strategy is ready to move into reviewed content production. The Zcal lifecycle endpoint is live; the broader attribution/measurement cutover is not. No Google-ranking claim is supported.
 
 | Layer | State | Governing evidence or gate |
 |---|---|---|
@@ -15,18 +15,20 @@ The authority strategy is ready to move into reviewed content production. The me
 | Returned-site intelligence | Complete for first sample | Ten recurring provider entities and ten influential source/page profiles inspected with 49 live links. |
 | Public keyword/SERP study | Complete with limits | 35 query rows and 18 provisional opportunities. Accessible volume is broad-category evidence; generic web-search ordering is discovery only, never Google/Bing rank. |
 | Google/Search Console truth | Blocked | Human task `task_1790406824361_93723891` for read-only Search Console access or export. Josh's manual Google check did not show Clearworks for one exact query; that is a bounded observation, not a universal absence claim. |
+| Search Console analysis assistant | Candidate after access | SEOMonster is a useful read-only pilot for query/page opportunity analysis across Search Console, GA4, and PageSpeed. It does not prove fixed rank, local-pack visibility, or complete AEO/GEO coverage. Withhold Indexing, sitemap, Cloudflare, IndexNow, and other write credentials during the pilot. |
 | GA4-to-lead proof-loop code | Implemented and reviewed off-production | Site branch through `f34c23778c91936d37759161567bd6669edb95f1`; receiver reliability commit `410b54d676bda7a23bd5e0d80d615624b83dff43`. Production cutover remains separate and gated. |
-| Zcal lifecycle receiver | Release slice PASS, not deployed | Immutable SHA `8889f81cf2b8c29dc5f8b5f3fa9e885c6b9ae05a`; 18/18 tests, 28-page build, exact route/config/manifest checks. Blocked on `approval_1790437084_k0r60` before D1, secret, binding, subscriber, or deploy mutation. |
+| Zcal lifecycle receiver | Endpoint live and synthetic-verified | Deployment `a8b36df3-ccb0-4b15-a795-95cfb8bc860b`, final release SHA `30eebbc641a42e8ffcad2a8a3e80a35a3a65af76`. Invalid signature, create, replay, conflict, reschedule, cancel, D1 state, unchanged `/api/lead`, and site baseline passed. Subscriber configuration and a Zcal-native/real lifecycle test remain blocked on human task `task_1790458200312_03073302`. |
 | Private authority content package | Complete and independently reviewed | Five briefs at governing content commit `48b8ce37f127cef17572801b9d7e764492d72d06`; checklist receipt `150ed081`. No publication has occurred. |
 
 ### Next dependency-ordered actions
 
 1. Obtain the Search Console export/access and freeze the pre-publication Google baseline.
-2. Resolve the explicit Zcal production decision. If approved, deploy only immutable SHA `8889f81...` through its gated release procedure and verify create/reschedule/cancel plus the unchanged lead route.
-3. Reconcile the broader lead/CRM cutover only through its own production gate; do not infer it from Zcal approval.
-4. Select the first canonical page from the five reviewed briefs and publish through a separately reviewed site branch.
-5. Record indexation, retrieval/citation, multi-asset engagement, qualified conversations, and booked outcomes as separate measures.
-6. At the tool-choice gate, present Josh with the explicit OneGlanse choice: hardened disposable lab, safe-concept adaptation, or acceptance of the documented account/policy/maintenance risk. Do not silently drop the tool.
+2. After access, audit and pin SEOMonster, then run a read-only pilot with no indexing or infrastructure write credentials; compare its output to direct first-party exports.
+3. After trusted-browser access, configure the Zcal subscriber for created/rescheduled/cancelled, run Zcal's Test Endpoint and a real lifecycle, and verify D1 receipts. The endpoint deployment itself is complete.
+4. Reconcile the broader lead/CRM cutover only through its own production gate; do not infer it from Zcal approval.
+5. Select the first canonical page from the five reviewed briefs and publish through a separately reviewed site branch.
+6. Record indexation, retrieval/citation, multi-asset engagement, qualified conversations, and booked outcomes as separate measures.
+7. At the tool-choice gate, present Josh with the explicit OneGlanse choice: hardened disposable lab, safe-concept adaptation, or acceptance of the documented account/policy/maintenance risk. Do not silently drop the tool.
 
 ## Outcome
 
@@ -248,6 +250,8 @@ Acceptance:
 ## Workstream 8 - Authority dashboard and operating cadence
 
 - [x] Issue engineering verdicts for OneGlanse and SerpBear while preserving Josh's final product-choice gate; see `open-source-tool-verdicts.md`.
+- [x] Inspect SEOMonster's public workflow and classify it as a post-access read-only Search Console/GA4 opportunity-analysis candidate, not a rank oracle, local tracker, or complete GEO platform.
+- [ ] After Search Console access, pin and audit the SEOMonster package/version, grant read-only scopes only, and compare its opportunity output with direct Search Console and GA4 exports before retention.
 - [ ] Define one durable observation schema spanning prompt, engine, answer/result, cited source, entity, test conditions, and raw receipt.
 - [ ] Keep Google rank, local result, AI mention, AI citation, site behavior, and CRM outcome as separate measures.
 - [ ] Build weekly comparisons without overwriting prior runs.

@@ -242,6 +242,7 @@ Do not begin bulk production until workstreams 3 through 7 have usable baselines
 
 - [x] Rank the first six content opportunities by buyer decision, prompt gap, Clearworks evidence advantage, and conversion relevance in `first-content-batch.md`.
 - [x] Rank 18 SEO/SERP opportunities from current live results and public demand evidence in `clearworks-aec-seo-serp-demand-2026-09-25.md`.
+- [x] Produce and independently review five private implementation briefs: AI operations and implementation, AEC Busywork Audit, project reporting automation, existing-resource upgrades, and the Modern AEC Firm canonical hub. Governing brief commit: `48b8ce37f127cef17572801b9d7e764492d72d06`.
 - [ ] Prefer original evidence: AIA/TAP sessions, implementation work, audits, research, buyer questions, and explicit operating lessons.
 - [ ] Choose one canonical page per buyer decision; avoid keyword-variant duplication.
 - [ ] Create a source/evidence packet before each draft.
@@ -273,7 +274,7 @@ Acceptance:
 - OpenAI states that OAI-SearchBot access is required for content to be discovered and cited in ChatGPT search, while GPTBot controls potential training access separately.
 - The current Clearworks resource-page analytics emit useful events, but the complete journey is not deterministically joinable and the homepage/booking/dedupe paths remain incomplete.
 - The accessible Google Ads-derived dataset reports meaningful broad US demand (`AI in construction` 1,900/month; `AI for architects` 720; `AI in architecture` 590; `AI tools for architects` 140), while most exact AEC consultant/audit/local/size phrases returned zero reported volume. Zero reported is not proof of zero searches.
-- In a generic web-search sample, Clearworks was returned prominently for `where should an architecture firm start with AI`, `which AI tools should an architecture firm standardize`, and `Modern AEC Firm Playbook`; AEC Hub was also returned on the first two. This is not Google rank evidence. A user-run Google search on 2026-09-26 did not show Clearworks for the first query.
+- A generic web-search discovery tool returned Clearworks pages for `where should an architecture firm start with AI`, `which AI tools should an architecture firm standardize`, and `Modern AEC Firm Playbook`; AEC Hub pages were also returned for the first two. The provider and ordering are abstracted, so this is page-discovery evidence only—not Google/Bing rank, ordering, or coexistence proof. A user-run Google search on 2026-09-26 did not show Clearworks for the first query.
 - Google blocked the isolated localized inspection, so local-pack visibility remains unknown pending Search Console/GBP or an authorized local-rank data source.
 
 These facts support building the measurement and proof loop first. They do not prove that any specific content tactic will cause rankings or citations.

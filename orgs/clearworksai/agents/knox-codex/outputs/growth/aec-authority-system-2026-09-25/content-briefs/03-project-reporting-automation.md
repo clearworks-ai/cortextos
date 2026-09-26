@@ -150,12 +150,19 @@ This page should not masquerade as a software comparison or compete for those pr
    - Level 3: role-specific visibility across projects, staffing, finance, and growth.
    - Give fit criteria, not a maturity score.
 
-9. **Evidence and example**
+9. **Firm-size transition context; planning cues, not benchmarks**
+   - Solo/5: establish one report owner, source checklist, review point, and accepted destination before adding integrations.
+   - 5 → 15: replace person-dependent assembly with shared definitions, named inputs, and a repeatable exception path.
+   - 15 → 50: connect project reporting to staffing and finance only after project-state definitions are stable.
+   - 50 → 150: create a shared reporting layer while preserving discipline, office, and project-level judgment.
+   - Link to the Modern AEC Firm hub for the complete transition model. Do not present these cues as prevalence, maturity thresholds, or a required headcount sequence.
+
+10. **Evidence and example**
    - Anonymized Monday rebuild example.
    - Redacted before/after source map when approved.
    - Clearly state what remains unmeasured.
 
-10. **How Clearworks would approach it**
+11. **How Clearworks would approach it**
     - Baseline current cycle time and rework.
     - Trace the real sources and handoffs.
     - Define accepted state and review.
@@ -163,7 +170,7 @@ This page should not masquerade as a software comparison or compete for those pr
     - Observe four live cycles.
     - Keep, revise, or stop.
 
-11. **FAQ**
+12. **FAQ**
     - Is this a dashboard or a report?
     - Can it work with our existing project software?
     - Can AI read email or chat safely?
@@ -172,8 +179,11 @@ This page should not masquerade as a software comparison or compete for those pr
     - Who is responsible for the final report?
     - What should we measure before and after?
 
-12. **Final CTA**
+13. **Final CTA and routing**
     - `Bring the report your team rebuilds every week.`
+    - Offer the free project-report source-map worksheet as the immediate public action.
+    - Route a single bounded reporting workflow to a Blueprint or 30-minute conversation.
+    - Route a problem spanning several systems, functions, or ownership boundaries to the Busywork Audit.
 
 ## Original data, quotation, and proof still needed
 
@@ -215,25 +225,33 @@ This page should not masquerade as a software comparison or compete for those pr
 
 **Support copy:** `We will trace the sources, review points, and accepted destination before recommending an automation or dashboard.`
 
-**Secondary:** a downloadable project-report source-map worksheet. It should be useful without submitting contact information; an optional emailed copy can create a separate consented lead path.
+**Secondary:** `Download the free project-report source-map worksheet.` It should be useful without submitting contact information; an optional emailed copy can create a separate consented lead path. The worksheet routes a single bounded workflow to a Blueprint or 30-minute conversation and a multi-system or multi-function problem to the Busywork Audit.
 
 ## Measurement plan
 
-### Pre-publication
+### Available now: aggregate and sampled baselines
 
 - Preserve 28 days of Search Console data for the Workflow Atlas, State of AI report, Modern AEC Firm Playbook, and `/starter`.
 - Record baseline AI prompts U01, P02, C04, I02 and reporting-specific extended prompts across defined repetitions.
 - Preserve the one directional Gemini baseline separately; do not retroactively turn it into a visibility score.
 - Record existing conversations in which project reporting was named, with CRM source and evidence class.
+- Add CRM self-report for originating awareness and the page/resource reviewed before booking.
+- Page, download, lead, booking, and CRM totals remain separate aggregate counts; they are not a joined journey.
 
-### Page measures
+### Available now after publication
 
 - Indexation and canonical selection.
 - Search Console query families and impressions; exact demand remains unknown until first-party data appears.
 - AI named mention, citation, correct mechanism description, and human-review accuracy.
 - Internal entry source: Workflow Atlas, Modern AEC Firm, service page, or other.
-- Source-map download/use, CTA clicks, accepted leads, booked conversations, and project-reporting-qualified opportunities.
-- CRM outcome and eventual engagement type.
+- Source-map downloads, aggregate CTA clicks, accepted leads, booked conversations, and project-reporting-qualified opportunities, each reported separately. Do not claim worksheet use from a download event.
+- CRM self-report, CRM outcome, and eventual engagement type without inferring the page caused them.
+
+### Blocked until journey instrumentation is verified
+
+- Joined source-map download or CTA → accepted lead → booking → project-reporting-qualified opportunity attribution requires stable submission and booking receipts plus a deterministic lead/booking join.
+- Until the path is implemented and verified end to end, do not publish page-level conversion, assisted-journey, or causal pipeline claims.
+- Even after a join exists, keep originating awareness, web acquisition, site validation, download, and booking as distinct attribution fields.
 
 ### Workflow outcome measures if implemented
 
@@ -252,6 +270,10 @@ This page should not masquerade as a software comparison or compete for those pr
 - Eight-week keep/revise decision.
 - Do not claim causal pipeline impact without a deterministic lead/page join and corroborating CRM evidence.
 - Do not split into dashboard/open-loop/field-report pages until distinct demand or links exist.
+
+## Publication gate from the master checklist
+
+Keep this brief and any draft private until the pre-content baseline is preserved and workstreams 3–7 in `master-checklist.md` have usable baselines. Publication additionally requires a source/evidence packet, one canonical buyer decision, limitations, authorship/review date, a matching CTA, and a reviewed site branch. Do not claim joined lead-to-booking impact until the GA4 → lead → CRM → booking path is implemented and verified; aggregate event counts are not a substitute.
 
 ## Why this is not a directory or listicle
 

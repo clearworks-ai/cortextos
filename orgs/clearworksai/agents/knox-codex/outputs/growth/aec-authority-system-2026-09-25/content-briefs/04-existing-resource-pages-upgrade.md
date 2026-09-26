@@ -20,7 +20,7 @@ Preserve all three canonical URLs. Each page already answers a distinct buyer de
 2. **Which tools to standardize:** choose the smallest maintainable environment and decide whether to use, configure, buy, connect, build, defer, or leave alone.
 3. **Modern AEC Firm Playbook:** understand which operating capability and transition needs attention as the firm grows.
 
-The upgrade should strengthen evidence, decision usefulness, internal-link architecture, and CTA fit without turning the pages into overlapping “AI for architecture firms” articles.
+The upgrade should strengthen evidence, decision usefulness, internal-link architecture, and CTA fit without turning the pages into overlapping “AI for architecture firms” articles. Diagnosis comes first: establish Search Console query/page baselines, confirm canonical/indexation/rendered state, and test whether the observed query fits the page’s actual buyer decision before changing copy. A generic discovery result alone is not a rewrite brief.
 
 ## Evidence boundary across all three pages
 
@@ -50,7 +50,7 @@ What is the smallest useful first AI move for our architecture firm, how do we c
 - No visible evidence or source section.
 - No explicit explanation of why the recommendation differs by Solo/5/15/50/150 firm stage.
 - No example showing the difference between a candidate workflow and an accepted result.
-- No explicit first-30/60/90-day sequence.
+- No bounded-test sequence tied to a baseline and repeated live use.
 - No direct link to the service path most appropriate after the reader chooses a workflow.
 - No measurement worksheet or baseline example.
 - The page does not state that the generic discovery result is not rank evidence; that statement belongs in internal reporting, not necessarily page copy, but measurement must remain bounded.
@@ -103,10 +103,12 @@ Verified volume for the exact first-step phrases is unknown or zero reported. Th
    - reviewable by a named person;
    - accepted result has a clear home.
 3. Add “do not start here” counterexamples: consequential professional decisions, inconsistent source records, rare one-off work, or no internal owner.
-4. Add a 30/60/90-day sequence:
-   - 0–30: observe and baseline;
-   - 31–60: run a bounded version on real records;
-   - 61–90: compare evidence and keep/revise/stop.
+4. Add a diagnosis-first implementation sequence:
+   - preserve the baseline and define the buyer question;
+   - run one bounded test on real records;
+   - observe four live cycles;
+   - compare the result with the baseline and keep, revise, or stop.
+   - Do not force this into a generic calendar sequence. A dated timeline may appear only as an optional example backed by evidence from an actual implementation.
 5. Add size-specific notes from Solo/5/15/50/150 without duplicating the full playbook.
 6. Add one labeled case/example.
 7. Add a printable first-workflow worksheet.
@@ -240,114 +242,25 @@ Which shared AI environment can our firm actually govern, support, and use on re
 
 # Page C — Modern AEC Firm Playbook
 
-## Buyer question
+Brief 05, `05-modern-aec-firm-canonical-hub.md`, is the sole controller for this page’s buyer question, claim ledger, protected-value layers, information architecture, proof plan, CTAs, and measurement design. This section is only the live-page audit and staging dependency; it must not become a second hub specification.
 
-As our firm grows, which operating capability is failing first, what foundation did we skip, and what should we strengthen next without copying the systems of a much larger firm?
+**Controlled buyer question:** Use the exact buyer question in Brief 05; do not restate or fork it here.
 
-## What the live page already does well
+## Audit summary
 
-- Defines seven connected pillars across five size archetypes.
-- Explicitly says headcount is a proxy and the size bands are not official industry categories.
-- Gives a 35-cell 7×5 matrix with concrete operating moves.
-- Explains the distinct constraint at Solo, 5, 15, 50, and 150 people.
-- Provides a five-stage modernization sequence.
-- Provides a seven-question scorecard.
-- Connects the page to the larger Clearworks resource universe.
-- Includes first-party and institutional sources plus `TechArticle` and `ItemList` structure.
-- Keeps software/tool choices out of the durable framework.
+- **Preserve:** the canonical URL, seven connected pillars, five explicit operating archetypes, crawlable 7×5 matrix, modernization sequence, seven-question scorecard, source list, authorship/review dates, and current structured data.
+- **Diagnose before editing:** export the page’s Search Console queries and indexation/canonical state, inspect query fit against the hub’s buyer decision, preserve current rendered/raw versions, and record prompt observations as sampled evidence rather than rank.
+- **Correct:** put the “planning archetype, not benchmark or maturity score” method note beside the matrix and scorecard; make transition navigation more visible; route scorecard output to a relevant public resource; separate public guidance from Book, Community, and Audit+Implementation value; and link canonical commercial pages when they exist.
+- **Do not claim:** industry-standard size bands, measured prevalence by size, a validated score, universal headcount transitions, Google/Bing rank or coexistence, or a universally correct stack.
+- **Evidence boundary:** AIA firm-size research may establish that operating context differs by scale, but it does not validate the Clearworks bands. Clearworks field observations remain directional until the sample and method support a benchmark.
+- **Demand boundary:** exact size-transition demand is unknown or zero reported. Keep one hub; do not create thin size pages without distinct first-party query, link, or buyer-decision evidence.
 
-## Current gaps
+## Staging dependency and controller pointer
 
-- The five size bands need a visible methodology note explaining that they are planning archetypes derived from Clearworks synthesis, not survey categories.
-- The page needs a stronger transition-oriented navigation: “what changes from 5 to 15,” not only static size columns.
-- The public scorecard asks good questions but does not produce a durable output or route the reader to the right next resource.
-- The free/public boundary versus the forthcoming book/community should be clearer.
-- The page lacks original benchmark data by size; it must not imply that the cells are measured prevalence.
-- The universe section should link to canonical commercial pages once the service and Busywork Audit pages exist.
-- The downloadable discussion kit needs defined measurement and consent handling.
-
-## Exact evidence available
-
-| Evidence | Use on page | Boundary |
-|---|---|---|
-| AIA firm research cited on the page found different day-to-day AI use by firm size. | Show that operating context differs by scale. | The Clearworks five bands are not AIA categories. |
-| Clearworks field evidence includes smaller firms, transition pressures, and recurring ownership/system gaps. | Add labeled field notes. | Not representative prevalence by size. |
-| The strategy ladder documents the book’s durable differentiator: size-first transitions across seven whole-firm capabilities. | Strengthen the canonical hub role. | This is Clearworks IP/positioning, not a validated market category. |
-| Exact size-query demand is unverified or zero reported; 50/150 modifiers did not create distinct discovery samples. | Keep one canonical hub rather than thin size pages. | Split only after first-party evidence. |
-| The generic discovery tool returned the page for its navigational phrase. | Protect the URL and measure it. | Not Google/Bing rank ownership. |
-
-## Claims allowed
-
-- The seven pillars and five size bands are Clearworks operating models.
-- Headcount is a planning lens, not a maturity score.
-- A useful way to read the model is one size backward for skipped foundations and one forward for likely next pressure.
-- Workflows, technology, knowledge, finance, leadership, positioning, and business development affect one another.
-- Firms at different scales should not maintain the same operating architecture.
-
-## Claims not allowed
-
-- The five sizes are industry-standard categories.
-- Every firm hits the same problem at the same headcount.
-- The scorecard is statistically validated or predicts performance.
-- The page ranks for “Modern AEC Firm,” owns the term, or coexists with specific competitors on Google/Bing.
-- A named technology stack is universally correct for a size band.
-- Clearworks benchmark results by size until the sample and methodology support them.
-
-## Likely query/prompt families
-
-- Modern AEC Firm Playbook
-- technology stack for a 5-person architecture firm
-- technology stack for a 15-person architecture firm
-- what changes when an architecture firm grows from 5 to 15 people
-- architecture firm operating model
-- architecture firm systems and processes
-- architecture firm capacity, finance, workflow, and growth systems
-- solo architecture firm minimum viable operating stack
-- first AI workflow by architecture-firm size
-- how should a 50-person architecture firm manage AI and technology
-
-Demand for the size-transition framework remains unknown. Broader software and project-management terms have demand but are not the hub’s intended buyer decision.
-
-## Recommended information architecture
-
-1. Preserve the current hero, seven pillars, five sizes, matrix, sequence, scorecard, and source list.
-2. Add `Choose your path` navigation:
-   - by current firm size;
-   - by transition;
-   - by operating problem/pillar.
-3. Add transition summaries:
-   - Solo → 5;
-   - 5 → 15;
-   - 15 → 50;
-   - 50 → 150.
-4. Add “what not to build yet” in each transition.
-5. Add visible methodology/evidence note near the matrix.
-6. Add selected public field observations with explicit evidence classes.
-7. Turn the seven-question scorecard into a useful output that points to one resource, not a maturity grade.
-8. Add canonical links to service, Busywork Audit, project reporting, Workflow Atlas, State of AI, first-workflow, tool-standardization, FAQ, and glossary.
-9. Clarify the value ladder:
-   - public hub = organizing map and selected evidence;
-   - book = full durable synthesis, tradeoffs, and cases;
-   - community = application and updates;
-   - audit/implementation = firm-specific evidence and change.
-10. CTA: `Find the operating connection holding your firm back.`
-
-## Proof still needed
-
-- A published methodology note for the seven pillars and five archetypes.
-- Permissioned and anonymized transition observations by firm size.
-- Sufficient benchmark sample before publishing any prevalence table.
-- Scorecard response schema, privacy boundary, and outcome-routing logic.
-- One approved quote from an owner at each available transition; absence should remain visible rather than filled with composites.
-- Search Console baseline for the canonical URL.
-
-## CTA
-
-**Primary:** `Use the seven-question scorecard.`
-
-**Commercial follow-on:** `Bring the weak connection to a conversation` or `See the Busywork Audit.`
-
-The public answer must remain useful without downloading the book or submitting a form.
+1. Preserve the current baseline and diagnose indexation/query fit before making a material edit.
+2. Implement shared internal-link changes only after the destination service, Busywork Audit, project-reporting, FAQ, or glossary page exists and has a canonical URL.
+3. Upgrade one bounded hub element at a time where practical, then observe four live measurement cycles before keep/revise/stop.
+4. Apply every hub-specific content, proof, value-layer, CTA, and measurement decision from Brief 05. If this audit summary and Brief 05 conflict, Brief 05 controls.
 
 # Cross-page internal-link architecture
 
@@ -376,27 +289,35 @@ Modern AEC Firm
   → Implementation Partnership
 ```
 
-Every page should have one canonical job. Avoid repeating the same 90-day sequence, decision table, proof block, and scorecard in full on all three pages.
+Every page should have one canonical job. Avoid repeating the same bounded-test sequence, decision table, proof block, and scorecard in full on all three pages. Brief 05 alone controls the Modern AEC Firm hub.
 
 # Shared measurement plan
 
-## Before any edit
+## Available now: diagnosis and aggregate baselines
 
 - Export 28 days of Search Console page/query data for all three URLs.
 - Export the dedicated Generative AI performance view for these pages if available.
 - Preserve existing page content and screenshot/raw HTML.
-- Record current internal-link sources and crawl/indexation state.
+- Record current internal-link sources, canonical selection, crawl/indexation state, rendered content, and whether the observed queries fit each page’s intended buyer decision.
 - Record the frozen prompt baseline relevant to each page.
-- Record current resource events, download submissions, CTA clicks, accepted lead receipts, bookings, and CRM disposition.
+- Record current resource events, downloads, CTA clicks, accepted lead receipts, bookings, and CRM disposition as separate aggregate counts.
+- Add CRM self-report for originating awareness and resources reviewed before booking.
+- Aggregate page, lead, booking, and CRM counts are not joined journeys and cannot establish page-level attribution.
 
-## After each staged upgrade
+## Available now after each staged upgrade
 
 - Publish one page at a time so changes are interpretable.
 - Confirm canonical selection, indexation, crawlability, structured-data validity, and rendered content.
 - Monitor Search Console queries/impressions/clicks/average position by page.
 - Track generative-answer mention, citation, accurate-category description, and citation support separately.
-- Track internal-entry source, engagement, download/use, CTA, accepted lead, booking, and qualified opportunity separately.
+- Track internal-entry source, engagement, downloads, CTA clicks, accepted leads, bookings, and qualified opportunities as separate aggregates; a download event does not prove use.
 - Preserve originating awareness and subsequent site validation as different attribution fields.
+
+## Blocked until journey instrumentation is verified
+
+- Joined resource/CTA → accepted lead → booking → qualified opportunity attribution requires stable submission and booking receipts plus a deterministic lead/booking join.
+- Until that path is implemented and verified end to end, do not publish page-level conversion, assisted-journey, or causal pipeline claims.
+- Even after the join exists, preserve origin, web acquisition, internal validation, download, and booking as distinct evidence fields.
 
 ## Decision rules
 
@@ -404,7 +325,11 @@ Every page should have one canonical job. Avoid repeating the same 90-day sequen
 - Do not split size/tool/workflow variants into new URLs based only on a keyword list.
 - A rise in impressions without qualified engagement is not sufficient evidence to expand.
 - A qualified conversation can justify a low-traffic page, but one anecdote does not establish demand.
-- Review each change at four and eight weeks; keep original data exports and prompt receipts.
+- Use baseline → bounded live test → four live measurement cycles → keep/revise/stop. Calendar timing may be added only as an optional evidence-backed example; keep original data exports and prompt receipts.
+
+# Publication gate from the master checklist
+
+Keep these briefs and drafts private until the pre-content baseline is preserved and workstreams 3–7 in `master-checklist.md` have usable baselines. Publication additionally requires a source/evidence packet, one canonical buyer decision per page, limitations, authorship/review date, a matching CTA, and a reviewed site branch. Do not claim joined lead-to-booking impact until the GA4 → lead → CRM → booking path is implemented and verified; aggregate event counts are not a substitute.
 
 # Why the upgrade is not a directory or listicle
 

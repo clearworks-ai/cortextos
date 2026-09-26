@@ -123,7 +123,7 @@ These families are strategic hypotheses; exact demand remains unknown unless not
 
 The hub should answer the relationships among these problems, then route to one canonical specialist page. It should not attempt to be the final answer for every query.
 
-## Public value versus protected value
+## Public and protected value layers
 
 ### Publish freely on the hub
 
@@ -136,16 +136,29 @@ The hub should answer the relationships among these problems, then route to one 
 - Public benchmark tables only when the sample supports them.
 - Definitions, source notes, and links to current companion resources.
 
-### Reserve for the book/community/engagement
+### Book
 
-- Complete transition roadmap and full narrative synthesis.
-- Detailed stack recommendations and update history.
+- Full durable narrative across the seven capabilities and five operating archetypes.
+- Deeper transition tradeoffs, cases, counterexamples, and explanations of what not to build yet.
+- Reusable owner-facing questions and durable worksheets that do not reveal the proprietary engagement engine.
+- Add a transactional book CTA only after the book offer, delivery state, price, and fulfillment path actually exist. Until then, describe the forthcoming book without presenting it as available.
+
+### Community
+
+- Application discussions, current examples, peer interpretation, office hours, and accountable follow-through.
+- Dated updates to public tools/products and practitioner lessons that would age faster than the book.
+- Shared learning artifacts that do not disclose a member’s or client’s confidential operating evidence.
+
+### Audit + Implementation
+
 - Proprietary evidence taxonomy, reconciliation, scoring, and confidence model.
-- Interview/project-file extraction method.
+- Interview and project-file extraction method.
 - Opportunity-by-readiness prioritization.
-- Solution sequencing and acceptance gates.
-- Firm-specific conclusions, implementation designs, and client evidence.
-- Community facilitation, worked examples, and accountability.
+- Detailed firm-specific stack recommendations and decision history.
+- Solution sequencing, acceptance gates, and implementation controls.
+- Firm-specific conclusions, designs, client evidence, and managed improvement.
+
+The proprietary taxonomy, reconciliation, scoring, extraction, prioritization, firm-specific conclusions, and implementation designs belong only in Audit + Implementation—not in the public hub, Book, Community, or public companion/download.
 
 ## Proposed direct answer
 
@@ -222,12 +235,15 @@ The hub should answer the relationships among these problems, then route to one 
     - Busywork Audit and Implementation Partnership.
 
 12. **Value ladder**
-    - Hub → book → community → audit → implementation → managed improvement.
+    - Hub → public companion/download → Book when its offer exists → Community → Audit + Implementation → managed improvement.
     - Explain what each provides and does not provide.
+    - Keep proprietary taxonomy, reconciliation, scoring, extraction, prioritization, firm-specific conclusions, and implementation designs inside Audit + Implementation.
 
 13. **CTA**
-    - `Find the operating connection holding your firm back.`
-    - Link to scorecard and Busywork Audit.
+    - Public: `Use the seven-question scorecard.`
+    - Public companion/download: `Download the Modern AEC Firm discussion kit.`
+    - Commercial: `See the AEC Busywork Audit` or `Bring the weak operating connection to a 30-minute conversation.`
+    - Add a book CTA only when a real book offer and fulfillment path exist.
 
 14. **Methodology and sources**
     - Maintain public-source list.
@@ -268,7 +284,7 @@ The benchmark should become the hub’s public evidence product, but only after 
 - Transition quotes from Solo, 5, 15, 50, and 150-person contexts when permissioned; gaps stay gaps.
 - A reviewed Solo technology-budget model methodology before using the approximately $20,200 first-year planning figure.
 - Scorecard response and privacy design.
-- Book/community offer details and release state before adding transactional language.
+- Book offer details and release state before adding a transactional book CTA; public companion/download and Community terms remain separately labeled.
 - Baseline Search Console and resource-conversion data for the existing URL.
 - A corrections/update owner and annual review date.
 
@@ -301,30 +317,42 @@ The benchmark should become the hub’s public evidence product, but only after 
 
 **Primary public action:** `Use the seven-question scorecard.`
 
-**Primary commercial action:** `Find the operating connection holding your firm back.` → Busywork Audit.
+**Public companion/download action:** `Download the Modern AEC Firm discussion kit.` This is the existing gated/public companion path; do not label it the book.
 
-**Book action:** `Get the Playbook + discussion kit` remains distinct from a consulting CTA and must explain what information is collected and what follow-up is optional.
+**Primary commercial action:** `See the AEC Busywork Audit.`
+
+**Conversation alternative:** `Bring the weak operating connection to a 30-minute conversation.`
+
+**Future book action:** Add only when the book offer, availability, price, delivery, and fulfillment are real. Keep it distinct from the public companion/download and consulting CTA.
 
 ## Measurement plan
 
-### Before any upgrade
+### Available now: aggregate and sampled baselines
 
 - Export 28 days of Search Console page/query data.
 - Export dedicated Search Console Generative AI page-level data if available.
 - Preserve the current rendered page, raw HTML, structured data, headings, and internal links.
-- Record current downloads/submissions, CTA clicks, accepted lead receipts, bookings, and CRM outcomes.
+- Record current downloads/submissions, CTA clicks, accepted lead receipts, bookings, and CRM outcomes as separate aggregate counts.
 - Record navigational and framework prompt observations separately from commercial service prompts.
+- Add CRM self-report for originating awareness and resources reviewed before booking.
+- Aggregate scorecard, download, lead, booking, and CRM totals are not a joined journey and cannot establish page-level attribution.
 
-### Hub performance
+### Available now after publication
 
 - Indexation, canonical selection, and structured-data validity.
 - Search Console query families by navigational, size-transition, pillar, and problem intent.
 - Internal-link-assisted discovery of specialist pages.
 - Scorecard starts/completions and selected weak connection in aggregate.
-- Playbook/download requests, with consent and delivery state.
+- Public companion/download requests, with consent and delivery state; a download does not prove use.
 - Named AI mention/citation of the framework, accurate explanation of the five bands, and cited source pages.
-- Qualified conversations that reference a transition, pillar, scorecard, or book concept.
-- CRM-reported originating awareness versus site validation.
+- Aggregate qualified conversations that reference a transition, pillar, scorecard, public companion, or book concept.
+- CRM-reported originating awareness and site validation, kept as distinct self-reported fields.
+
+### Blocked until journey instrumentation is verified
+
+- Joined scorecard or public-companion action → accepted lead → booking → qualified opportunity attribution requires stable submission and booking receipts plus a deterministic lead/booking join.
+- Until the path is implemented and verified end to end, do not publish page-level conversion, assisted-journey, or causal pipeline claims.
+- Even after a join exists, keep originating awareness, web acquisition, hub validation, scorecard/download action, and booking as separate evidence fields.
 
 ### Original-data quality
 
@@ -341,6 +369,10 @@ The benchmark should become the hub’s public evidence product, but only after 
 - Do not call scorecard submissions representative.
 - Do not infer book/community demand from anonymous page engagement alone.
 - Review four and eight weeks after material changes, then quarterly; conduct a full evidence review annually.
+
+## Publication gate from the master checklist
+
+Keep this brief and any draft private until the pre-content baseline is preserved and workstreams 3–7 in `master-checklist.md` have usable baselines. Publication additionally requires a source/evidence packet, one canonical buyer decision, limitations, authorship/review date, a matching CTA, and a reviewed site branch. Do not claim joined lead-to-booking impact until the GA4 → lead → CRM → booking path is implemented and verified; aggregate event counts are not a substitute.
 
 ## Why this is not a directory or listicle
 

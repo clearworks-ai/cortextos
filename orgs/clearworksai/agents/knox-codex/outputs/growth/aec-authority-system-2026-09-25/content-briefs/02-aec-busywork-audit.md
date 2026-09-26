@@ -91,7 +91,7 @@ Cost, duration, and price-shape prompts belong in the research set even though v
    - H1: `Find the work your firm keeps rebuilding.`
    - Category line: `A Busywork Audit for architecture, engineering, and construction firms.`
    - Explain 3–4 weeks/up to 15 interviews only after commercial confirmation.
-   - CTA: `Talk through the firm-wide picture.`
+   - CTA: `Bring the work that keeps coming back to a 30-minute conversation.`
 
 2. **When an audit is the right first step**
    - Repeated reporting or reconciliation.
@@ -160,7 +160,8 @@ Cost, duration, and price-shape prompts belong in the research set even though v
     - What does implementation cost after the audit?
 
 11. **Final CTA**
-    - `Bring the work that keeps coming back. We will decide whether one workflow or the firm-wide picture is the right place to start.`
+    - `Bring the work that keeps coming back to a 30-minute conversation.`
+    - Secondary: `Start with one workflow instead` → Blueprint.
 
 ## Original data, quotation, and proof still needed
 
@@ -200,7 +201,7 @@ Cost, duration, and price-shape prompts belong in the research set even though v
 
 ## CTA
 
-**Primary:** `Talk through the firm-wide picture.`
+**Primary:** `Bring the work that keeps coming back to a 30-minute conversation.`
 
 **Support copy:** `Bring the workflows, handoffs, or systems that feel harder than they should. No solution decision is required.`
 
@@ -210,22 +211,30 @@ Do not gate the core explanation or the proof ledger. Any downloadable checklist
 
 ## Measurement plan
 
-### Before publication
+### Available now: aggregate and sampled baselines
 
 - Preserve 28 days of Search Console page/query data for the homepage service anchor, `/starter`, and related case/resource pages.
 - Record prompt baseline observations for P01–P04, X02, I01, I03, T01–T03, and audit/cost/timeline extensions.
-- Record calculator completions, report requests, service CTA clicks, accepted leads, booked conversations, and CRM disposition separately.
+- Record calculator completions, report requests, service CTA clicks, accepted leads, booked conversations, and CRM disposition as separate aggregate counts.
 - Record the number of qualified conversations already using audit/assessment language from CRM notes without inferring search origin.
+- Add CRM self-report for originating awareness and the resource or proof reviewed before booking.
+- Aggregate page, lead, booking, and CRM counts are not a joined journey and cannot establish page-level attribution.
 
-### After publication
+### Available now after publication
 
 - Indexation and canonical selection.
 - Search Console impressions/clicks/average position for audit, workflow, assessment, and architecture-firm variants.
 - AI answer named mention, shortlist, citation, accurate-offer description, and evidence-label accuracy.
-- CTA click → accepted lead → booked → audit-qualified opportunity.
-- Blueprint versus Audit self-selection and eventual disposition.
+- Aggregate CTA clicks, accepted leads, bookings, and audit-qualified opportunities, reported separately.
+- Blueprint versus Audit self-selection and eventual disposition in aggregate.
 - Which proof block was viewed before a CTA, only as anonymous aggregate unless a deterministic consented join exists.
 - CRM self-report: “How did you first hear about Clearworks?” and “What did you review before booking?”
+
+### Blocked until journey instrumentation is verified
+
+- Joined CTA click → accepted lead → booking → audit-qualified opportunity attribution requires stable submission and booking receipts plus a deterministic lead/booking join.
+- Until the path is implemented and verified end to end, do not publish page-level conversion rates, assisted-journey claims, or causal pipeline claims.
+- Preserve origin, web acquisition, site validation, offer self-selection, and booking as distinct evidence fields even after a join exists.
 
 ### Decision rules
 
@@ -233,6 +242,10 @@ Do not gate the core explanation or the proof ledger. Any downloadable checklist
 - Treat a qualified Audit conversation as more meaningful than broad pageview growth.
 - Do not attribute an opportunity to the page from temporal proximity alone.
 - Review at four and eight weeks, then quarterly because exact demand is low.
+
+## Publication gate from the master checklist
+
+Keep this brief and any draft private until the pre-content baseline is preserved and workstreams 3–7 in `master-checklist.md` have usable baselines. Publication additionally requires a source/evidence packet, one canonical buyer decision, limitations, authorship/review date, a matching CTA, and a reviewed site branch. Do not claim joined lead-to-booking impact until the GA4 → lead → CRM → booking path is implemented and verified; aggregate event counts are not a substitute.
 
 ## Why this is not a directory or listicle
 

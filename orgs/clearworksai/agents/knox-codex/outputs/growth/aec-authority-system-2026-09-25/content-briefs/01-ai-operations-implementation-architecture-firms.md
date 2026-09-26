@@ -36,7 +36,7 @@ The upgrade should make `/starter` the canonical answer for the category phrase 
 |---|---|---|---|
 | The corrected demand report found `0` reported US monthly volume for exact phrases including `AEC AI consultant`, `AI consultant for architecture firms`, `AI implementation for AEC firms`, `AI adoption architecture firms`, and related local terms. | Google Ads-derived public dataset, dated | This is a high-fit but small or below-threshold commercial category; optimize for qualified conversations, not traffic scale. | “0 reported,” never “nobody searches.” |
 | Broader demand was reported for `AI for architects` (720), `AI in architecture` (590), `AI tools for architects` (140), and `AI in AEC` (90). | Google Ads-derived public dataset, dated | There is broader informational interest, but those phrases carry mixed intent and should not define the service page. | Cite source/date; do not imply the service page can capture all broad demand. |
-| The first Gemini + Google Search grounding run returned Clearworks in 0 of 25 prompts and repeatedly returned providers with literal AEC category language, visible offers, named workflows, proof, and direct CTAs. | Directional one-run baseline | The current gap is entity/service clarity on that sampled surface, not demonstrated market absence. | “One directional repetition,” not a visibility score. |
+| The first Gemini + Google Search grounding run returned Clearworks in 0 of 25 prompts and repeatedly returned providers with literal AEC category language, visible offers, named workflows, proof, and direct CTAs. | Directional one-run baseline | Entity/service clarity is one working hypothesis to test alongside authority, indexing, citation eligibility, source selection, and ordinary retrieval variance. The run does not diagnose the cause or demonstrate market absence. | “One directional repetition,” not a visibility score or causal finding. |
 | `/starter` currently promises workflows, automations, integrations, internal tools, training, administration, and ongoing improvement. | First-party live page | Clearworks can describe hands-on implementation and the ongoing working layer. | Present-tense capability claim. |
 | Studio PCH is a 25-person Venice architecture and hospitality design firm. Its case page labels 30% rework and 20 weekly hours of manual finance work as observed, and $150–200K as potential annual opportunity identified. | Named first-party case evidence | Architecture-firm fluency, audit evidence, and the path from operating friction to a prioritized roadmap. | Preserve `Observed` and `Identified`; never convert to realized savings. |
 | Alloi’s founder called Clearworks “the process doctor,” cited Josh’s experience working with architects, and the public homepage says Clearworks mapped the work, built one recurring workflow live, and continues releasing workflows, training, and system updates. | Named client quotation and first-party delivery description | Architecture/design-build credibility and audit-to-implementation continuity. | Separate client quote, implemented workflow, and ongoing work. |
@@ -210,22 +210,30 @@ Use descriptive anchors. Do not create repeated exact-match anchors solely to ma
 
 ## Measurement plan
 
-### Pre-publication baseline
+### Available now: aggregate and sampled baselines
 
 - Record the existing `/starter` Search Console query/page data for 28 days.
 - Preserve the dedicated Search Console Generative AI performance export if available.
 - Record the frozen AI-answer prompt observations for C01–C04, P01–P04, I01–I03, T01–T03, and X01.
-- Record existing `/starter` sessions, engaged sessions, CTA clicks, accepted lead receipts, booked conversations, and CRM disposition separately.
+- Record existing `/starter` sessions, engaged sessions, CTA clicks, accepted lead receipts, booked conversations, and CRM disposition as separate aggregate counts.
+- Add CRM self-report for originating awareness and material pages/resources reviewed before booking.
+- Treat these aggregate totals as separate observations. They are not a joined visitor → lead → booking journey and cannot establish that the page caused a booking.
 
-### Post-upgrade measures
+### Available now after publication
 
 - Indexation and canonical selection.
 - Search Console impressions/clicks/average position by query and page; do not describe this as “rank won” without the observed data.
 - Generative-AI report impressions by page where available.
 - Clearworks named mention, shortlist, citation, and accurate-category rates in repeated prompt runs.
 - Citation pages and source diversity; citation selection and answer absorption remain separate.
-- CTA click → accepted lead → booked → qualified opportunity, using deterministic joins where available.
-- Origin source, site validation, and later booking remain separate attribution classes.
+- Aggregate CTA clicks, accepted leads, bookings, and qualified opportunities, reported separately.
+- CRM self-report for origin, site validation, and the decision/problem named by the buyer.
+
+### Blocked until journey instrumentation is verified
+
+- Joined CTA click → accepted lead → booking → qualified opportunity attribution requires stable submission and booking receipts plus a deterministic lead/booking join.
+- Origin source, web acquisition, site validation, and later booking remain separate attribution classes even after the join exists.
+- Until that path is implemented and verified end to end, do not publish page-level lead-to-booking conversion, assisted-journey, or causal pipeline claims.
 
 ### Review points
 
@@ -233,6 +241,10 @@ Use descriptive anchors. Do not create repeated exact-match anchors solely to ma
 - Four-week evidence review.
 - Eight-week keep/revise/consolidate decision.
 - Do not create additional service variants unless query or conversion evidence demonstrates a different buyer decision.
+
+## Publication gate from the master checklist
+
+Keep this brief and any draft private until the pre-content baseline is preserved and workstreams 3–7 in `master-checklist.md` have usable baselines. Publication additionally requires a source/evidence packet, one canonical buyer decision, limitations, authorship/review date, a matching CTA, and a reviewed site branch. Do not claim joined lead-to-booking impact until the GA4 → lead → CRM → booking path is implemented and verified; aggregate event counts are not a substitute.
 
 ## Why this is not a directory or listicle
 

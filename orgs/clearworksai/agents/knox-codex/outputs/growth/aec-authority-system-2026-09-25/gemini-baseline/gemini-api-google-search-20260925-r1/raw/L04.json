@@ -1,0 +1,577 @@
+{
+  "attempts": [
+    {
+      "duration_ms": 8950,
+      "http_status": 200,
+      "model": "gemini-2.5-flash",
+      "response": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "To recommend a local advisor for your architecture firm's AI strategy, workflow audit, and implementation, I need to know your firm's location. Without this information, I can offer general guidance on the types of advisors to seek and how to find them.\n\nYou should look for advisors or consulting firms with expertise in:\n*   **Artificial Intelligence (AI) and Machine Learning (ML):** They should understand various AI applications, including generative design, predictive analytics, automation, and data analysis relevant to architecture.\n*   **Architectural Workflows and Technology:** Experience in architectural practice, BIM (Building Information Modeling), and common architectural software is crucial to understanding your firm's specific needs and challenges.\n*   **Business Strategy and Digital Transformation:** The advisor should be able to help integrate AI into your overall business strategy and guide your firm through digital transformation.\n\nHere are some general search queries you can use, along with your specific location, to find a local advisor:\n\n"
+                },
+                {
+                  "text": "Several firms and consultants specialize in AI strategy, workflow optimization, and implementation for architecture firms, some with a focus on specific regions or offering remote services.\n\nFor general guidance on AI in architecture and workflow optimization, here are some examples of what's available:\n\n*   **Reope** specializes in tailored software solutions, BIM coordination, and AI/ML implementations for AEC professionals, including architecture firms. They help firms discover, implement, and master AI tools, guiding them through the AI transformation journey. Reope offers services such as AI Tool Selection & Evaluation, Workflow Automation, and Team Training & Adoption, and operates remotely, serving the US & Global markets.\n*   **AI in AEC** is a platform dedicated to empowering professionals in the AEC industry by integrating AI into their workflows. They offer courses, workshops, and consulting, with a focus on AI Training & Education and AEC AI Tool Discovery. They also operate globally and remotely.\n*   **Strategic Micro Systems** offers AI solutions for architecture practices, including design assistance and iteration, automated code compliance checking, project documentation automation, and 3D model analysis and optimization. They integrate AI with common CAD tools like Revit, ArchiCAD, and Rhino. They specifically mention configuring AI with New Jersey building code, local zoning ordinances, and accessibility standards, indicating a regional focus for some services.\n*   **Mark Cijo (AI Agents for Architecture Firms)** focuses on building agent systems to automate operational tasks for architecture firms, such as RFP preparation, project coordination, and permit tracking.\n*   **Symetri Consultancy** has over 30 years of experience partnering with companies in the AECO industry, helping them evaluate, implement, and adopt digital technology. They offer services like design automation, design production efficiency gains, design review and integration workflows, and companywide assessments. Symetri supports architects across the U.S. in embracing digital innovation.\n*   **Active AI** provides custom AI solutions for architecture firms, including generative design capabilities, integrated sustainability analysis, automated documentation systems, and code compliance checking. They aim to reduce design development time and documentation time, and increase project capacity. Their AI solutions are designed to work with major platforms like Revit, AutoCAD, Rhino, and SketchUp.\n\nFor workflow optimization specifically, companies like **Applied Architecture Group** offer consulting services to map priority workflows and provide written plans for clearer ownership and fewer manual steps. **Align & Innovate, LLC** helps small businesses streamline workflows through an audit and implementation process, focusing on optimizing the workflow before automating it.\n\nTo find a local advisor, you should include your city and state in your search queries. For example:\n*   \"AI consultant for architecture firm [Your City, State]\"\n*   \"Workflow optimization architecture firm AI [Your City, State]\"\n*   \"AI implementation strategy architecture [Your City, State]\"\n\nSome consulting firms specialize in broader digital transformation or enterprise architecture, which could also be relevant. For instance, **EpitomiOne** offers digital transformation strategy consulting and enterprise architecture consulting, covering areas like cloud architecture, application modernization, AI, and data. **Covenant Technology Solutions** provides IT architectural consulting services, including infrastructure and solution architecture, for businesses in the Pacific Northwest.\n\nRemember that the architectural profession is adopting AI strategically, focusing on purposeful integration rather than rapid adoption to enhance design while preserving human creativity. Many firms are moving beyond AI hype to real implementation, exploring its use in rendering, research, QAQC, and automation."
+                }
+              ],
+              "role": "model"
+            },
+            "finishReason": "STOP",
+            "groundingMetadata": {
+              "groundingChunks": [
+                {
+                  "web": {
+                    "title": "aechub.org",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGDCNSW_rGI1qC_MBxGhqU7fgI3__VY6rHby3Fp4kAlKTUyAvmCn37E3a25MG-DsNyzDk0Gigd0cJedcNGj11TZmOzsKaPbq56waDiYqOILktTfDt8Rdzj7GmHS9L4="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "stmicro.net",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFp7nhbTYt4Pa3emd9FDzA9xMya7llIM4uHXmJx9j4kyfa2l35tsuQNeqCKmJuL_FDLSx-JTB3aTcaIy9dojqK_YOH7OU6ebkG7UkCsjhfcfIVsBQljcUQWPPhG_4MoPej00qkJf0rCYdQXIdna"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "markcijo.ai",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEInWJ24cUuSa9zFS8OiJ3607P4AbJRxI0FxOUA9EDvnNUrtPAA7gKjDTbhgrbAQwfquIJ88xU8We5OaaCWLRtF35Ajjz7CpufEGH9KDe8UI3QqH3Ziajc6H-rqZPrL5eFGxm2Bo6X0LoeT9IPMcw=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "symetri.us",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHjy9QLeR3W9SIM8yxaiwG5sejC36h2NDL5AHCG4kncI8MfXuhN6kGBwP1no9gOrf3e4M1CSVtvvWnEioBqxoWyAnTwudU2b7nbh00egOzQQ21nlgbIqdfVBb5WlYfVZmHcqdu4JPcRwilKE2sShCGOag1rLaJTrk4="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "beactive.ai",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE4VcMCcJ6KiXSwD1iPB2dclyWXjxsRHqKHrQgFd5YGfaADeswOoHHFCBrc74ZU9PwPIffDR_a8TTeH1-jAgV-5HNkOm57vDg5W7ri_1oee5iUYhgg58qcPeeftNTLMevdc2SrqOgkkYaFfhGY="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "appliedarchitecturegroup.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEYChrYp9spKkgRft5SwAx4ti7Hu0fFPeD8f9pyJoeELD6CflMojjymiKVwR1ns6akrfebob9BusucLV6gVqFPjLh2VfSUMVwnsjgzeLVkCx1rq1qBI3aFUW6g3t4QjCQOWs9dqn3ifzDrvpB1uOrG68e0jAjZcbpiD4kqpG6Fs"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aligninnovate.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEHqV7-hrONOAVflTbvlLDUbkeZQa9ib2kXHnE8UCT40KdtlbHNmSFMGYu4Y_JJtRytHD48Jlv0HzxUy60GulPrJvvI1vdcVVWzB2Vp6-I-X8cUEeR3MMZjxtDF6r1KmTMT6J_NcfwZ-3qcQLs8mCM0eL71"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "epitomione.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFr6qqFfHzW0tr-Pl_1NKZHSV-npvG2m9-FsGg-b7f7cNakQj8GA5CDqs8GUrJgy5Q1modg5d0fektUAHnlAv3sNLPsjmo8jDfdDqQ9itjo83SpFBENcOgLNT05C2s1XhH0zX1s0I3Gj4YsDXaWsoEKB47RJdDlKyI3nJshiTrzEFl3ke3km_BbgfhnLcyWlWBvtTOSk-HpRh4SAWwlrabiKnZJDRso64K4J-1lk_AskuAk3RqTAmlEieP30gIZhCI3FQ=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "covenant-tech.net",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFGPLcZ1mj8f1oZ1t_eA_qFc2ZxxWw3-iDSL6X3RJ7-iffFX0F2A1UEVzPXwqfgcLhlpu-hTbE6f_tmB6N9on_UcY_gd9JhmPsOypP1WbjABw0xy3v7KU3ujxaxbFeQLck74oTULC2YfZyqzAXJNyLOVoA6XHBlNrMFs7GS5y9zBRj8JxdCRm8SFL-rBpSmaHTF"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aia.org",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG74enZkFa5LVeJR_Luk21Z3dB76V8nqG2ovRPXJPML_F1_Xcmma-bNnfR7jir6VYdJ1fz-TvyE85JceE_A-2NW4ltIIW0Eqwjt7oXuJWA1Lf5v61jmagDIgitprGFi4kl6HB7v2wgnVf2wBQSi-s0HFHTJYnSBwkuY9VTsOj0PgKZCJ5uYv1hocEHXWF7StN5BZSGFPSqs0WfM1C0JdQ=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "youtube.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFULzis_UBDvXohhgDU_0Llw3PlsTY3VTlMdt-kOmmoaD80tOYQs7i0Iuuvy6yAfv_Llp8L4wEolnjLOll7gN1j_G35--nhwcDF9XAaMH01i00UJ_NJIXLS1JZK2CGqJhQHsDMBFhk="
+                  }
+                }
+              ],
+              "groundingSupports": [
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 1811,
+                    "startIndex": 1643,
+                    "text": "Reope offers services such as AI Tool Selection & Evaluation, Workflow Automation, and Team Training & Adoption, and operates remotely, serving the US & Global markets."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 2096,
+                    "startIndex": 2056,
+                    "text": "They also operate globally and remotely."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 2402,
+                    "startIndex": 2330,
+                    "text": "They integrate AI with common CAD tools like Revit, ArchiCAD, and Rhino."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 2575,
+                    "startIndex": 2403,
+                    "text": "They specifically mention configuring AI with New Jersey building code, local zoning ordinances, and accessibility standards, indicating a regional focus for some services."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    2
+                  ],
+                  "segment": {
+                    "endIndex": 2784,
+                    "startIndex": 2576,
+                    "text": "*   **Mark Cijo (AI Agents for Architecture Firms)** focuses on building agent systems to automate operational tasks for architecture firms, such as RFP preparation, project coordination, and permit tracking."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 3106,
+                    "startIndex": 2957,
+                    "text": "They offer services like design automation, design production efficiency gains, design review and integration workflows, and companywide assessments."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 3183,
+                    "startIndex": 3107,
+                    "text": "Symetri supports architects across the U.S. in embracing digital innovation."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    4
+                  ],
+                  "segment": {
+                    "endIndex": 3493,
+                    "startIndex": 3396,
+                    "text": "They aim to reduce design development time and documentation time, and increase project capacity."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    4
+                  ],
+                  "segment": {
+                    "endIndex": 3596,
+                    "startIndex": 3494,
+                    "text": "Their AI solutions are designed to work with major platforms like Revit, AutoCAD, Rhino, and SketchUp."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    5
+                  ],
+                  "segment": {
+                    "endIndex": 3807,
+                    "startIndex": 3598,
+                    "text": "For workflow optimization specifically, companies like **Applied Architecture Group** offer consulting services to map priority workflows and provide written plans for clearer ownership and fewer manual steps."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    6
+                  ],
+                  "segment": {
+                    "endIndex": 3980,
+                    "startIndex": 3808,
+                    "text": "**Align & Innovate, LLC** helps small businesses streamline workflows through an audit and implementation process, focusing on optimizing the workflow before automating it."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    7
+                  ],
+                  "segment": {
+                    "endIndex": 4602,
+                    "startIndex": 4403,
+                    "text": "For instance, **EpitomiOne** offers digital transformation strategy consulting and enterprise architecture consulting, covering areas like cloud architecture, application modernization, AI, and data."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    8
+                  ],
+                  "segment": {
+                    "endIndex": 4776,
+                    "startIndex": 4603,
+                    "text": "**Covenant Technology Solutions** provides IT architectural consulting services, including infrastructure and solution architecture, for businesses in the Pacific Northwest."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    9
+                  ],
+                  "segment": {
+                    "endIndex": 4965,
+                    "startIndex": 4778,
+                    "text": "Remember that the architectural profession is adopting AI strategically, focusing on purposeful integration rather than rapid adoption to enhance design while preserving human creativity."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    10
+                  ],
+                  "segment": {
+                    "endIndex": 5090,
+                    "startIndex": 4966,
+                    "text": "Many firms are moving beyond AI hype to real implementation, exploring its use in rendering, research, QAQC, and automation."
+                  }
+                }
+              ],
+              "searchEntryPoint": {
+                "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGlI6t6lCC_mzVtNl9cT8ZcMFz5wbRHyOgUKVaq-hAR2hbFmGvLKK7a-sTzTOUof6hK5vU0sbFq38OxgHsVTC7FoDc-bfNxPooF7JGT9fXCd2bzOUWiiN1aeL6JuIX3sq3veOhK2m7as5glWCbgjI_DGYAqRTjjtMSOSFRI187n_VNuvcmRaBY8bwpVqT3wbRWw9pOQ2Gdkh-5QCyZlPS1KP-MFPgX0IctFHyBIpG0YnAGcpl6K-OcN2yZSpjAGGwkGM0wYwH7MUIcYYzmQJJs=\">workflow optimization consultant architecture [Your City, State/Region]</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH6fr3yZg8UO_zAZcYEmC1RAS0_SUKNbAhLWF0nvVinfUi6-TIISy9HqGkd3wvi5Xu0jomy97TwuYflDkN09Q-jj0rO5utJLWYgqGiIesWsXqMBVHCoVygVFPXo1rgN4AmaCNtrNRhiSasPgeEnMdopzRaW5iViCYPxxfKEqvSmAatMWksXFajukp7xI7aDdUURrUH6wu-R3_VpWkbx6CbbqRvITUJR0XGEmIaXmtyYdOZYkimGOF73hNbdkj1gKBieplWRgw==\">AI consultant for architecture firm [Your City, State/Region]</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEaw60doJCk_9XRst5yziqs_zYyZqzBLo4ogt6srDKov-P1vtTxajUYb3uwtcqJfKP6qPUCUKh2tenIuTSh1rrVgBFUHlQm5RGOw_CZTJUuLZOUw4VoRb8B-aQfHB_TTx9yIyaD625Lggy8toAfA3BjEGBtN64hU-iHEifR9-lJqjEneEsCjSNf88nvUJci4u1wjWRXW5p1Zd6iB-OJztfMecgtXHuKBJGCr_VEWXxIvwafP9b4D_p_jFt519VrHXvCV73kvefqxG3tL9eH-ffkS-llK3Q=\">architecture firm digital transformation consultant [Your City, State/Region]</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHqMhZ5N_RFohk3y3G7k5Y5qHqj7vTmJv4PMuSeFFTs8drDOhamyzshO_9cS8JJJ7SWrI4P3XZEU8UD3uKI4d_axLe6oeYsvCGpCCCtd7826rGpLgVX7r0C0IBaN35Dfqtds9ZMH9c3zWXnP-J8CBRj_AXFu0V5qrUN0ZtFy2i4FhWZ7tcMuNzYjwK90qyp5dETC6oO4k4X4-KDlCse9JKC1oLZ8CxEjVqpICSwM03j7v6VAaAgZamJdQON_MrW1-ZzdguAW9Sr6nQaeg3ktId53cGK\">AI strategy implementation architectural practice [Your City, State/Region]</a>\n  </div>\n</div>\n"
+              },
+              "webSearchQueries": [
+                "AI consultant for architecture firm [Your City, State/Region]",
+                "architecture firm digital transformation consultant [Your City, State/Region]",
+                "workflow optimization consultant architecture [Your City, State/Region]",
+                "AI strategy implementation architectural practice [Your City, State/Region]"
+              ]
+            },
+            "index": 0
+          }
+        ],
+        "modelVersion": "gemini-2.5-flash",
+        "responseId": "kle3arDJCOKCz7IPj5jtiA4",
+        "usageMetadata": {
+          "candidatesTokenCount": 974,
+          "promptTokenCount": 19,
+          "promptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 19
+            }
+          ],
+          "serviceTier": "standard",
+          "thoughtsTokenCount": 445,
+          "toolUsePromptTokenCount": 728,
+          "toolUsePromptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 728
+            }
+          ],
+          "totalTokenCount": 2166
+        }
+      },
+      "technical_status": "success",
+      "timestamp": "2026-09-26T05:26:42.004507Z"
+    }
+  ],
+  "final_response": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "To recommend a local advisor for your architecture firm's AI strategy, workflow audit, and implementation, I need to know your firm's location. Without this information, I can offer general guidance on the types of advisors to seek and how to find them.\n\nYou should look for advisors or consulting firms with expertise in:\n*   **Artificial Intelligence (AI) and Machine Learning (ML):** They should understand various AI applications, including generative design, predictive analytics, automation, and data analysis relevant to architecture.\n*   **Architectural Workflows and Technology:** Experience in architectural practice, BIM (Building Information Modeling), and common architectural software is crucial to understanding your firm's specific needs and challenges.\n*   **Business Strategy and Digital Transformation:** The advisor should be able to help integrate AI into your overall business strategy and guide your firm through digital transformation.\n\nHere are some general search queries you can use, along with your specific location, to find a local advisor:\n\n"
+            },
+            {
+              "text": "Several firms and consultants specialize in AI strategy, workflow optimization, and implementation for architecture firms, some with a focus on specific regions or offering remote services.\n\nFor general guidance on AI in architecture and workflow optimization, here are some examples of what's available:\n\n*   **Reope** specializes in tailored software solutions, BIM coordination, and AI/ML implementations for AEC professionals, including architecture firms. They help firms discover, implement, and master AI tools, guiding them through the AI transformation journey. Reope offers services such as AI Tool Selection & Evaluation, Workflow Automation, and Team Training & Adoption, and operates remotely, serving the US & Global markets.\n*   **AI in AEC** is a platform dedicated to empowering professionals in the AEC industry by integrating AI into their workflows. They offer courses, workshops, and consulting, with a focus on AI Training & Education and AEC AI Tool Discovery. They also operate globally and remotely.\n*   **Strategic Micro Systems** offers AI solutions for architecture practices, including design assistance and iteration, automated code compliance checking, project documentation automation, and 3D model analysis and optimization. They integrate AI with common CAD tools like Revit, ArchiCAD, and Rhino. They specifically mention configuring AI with New Jersey building code, local zoning ordinances, and accessibility standards, indicating a regional focus for some services.\n*   **Mark Cijo (AI Agents for Architecture Firms)** focuses on building agent systems to automate operational tasks for architecture firms, such as RFP preparation, project coordination, and permit tracking.\n*   **Symetri Consultancy** has over 30 years of experience partnering with companies in the AECO industry, helping them evaluate, implement, and adopt digital technology. They offer services like design automation, design production efficiency gains, design review and integration workflows, and companywide assessments. Symetri supports architects across the U.S. in embracing digital innovation.\n*   **Active AI** provides custom AI solutions for architecture firms, including generative design capabilities, integrated sustainability analysis, automated documentation systems, and code compliance checking. They aim to reduce design development time and documentation time, and increase project capacity. Their AI solutions are designed to work with major platforms like Revit, AutoCAD, Rhino, and SketchUp.\n\nFor workflow optimization specifically, companies like **Applied Architecture Group** offer consulting services to map priority workflows and provide written plans for clearer ownership and fewer manual steps. **Align & Innovate, LLC** helps small businesses streamline workflows through an audit and implementation process, focusing on optimizing the workflow before automating it.\n\nTo find a local advisor, you should include your city and state in your search queries. For example:\n*   \"AI consultant for architecture firm [Your City, State]\"\n*   \"Workflow optimization architecture firm AI [Your City, State]\"\n*   \"AI implementation strategy architecture [Your City, State]\"\n\nSome consulting firms specialize in broader digital transformation or enterprise architecture, which could also be relevant. For instance, **EpitomiOne** offers digital transformation strategy consulting and enterprise architecture consulting, covering areas like cloud architecture, application modernization, AI, and data. **Covenant Technology Solutions** provides IT architectural consulting services, including infrastructure and solution architecture, for businesses in the Pacific Northwest.\n\nRemember that the architectural profession is adopting AI strategically, focusing on purposeful integration rather than rapid adoption to enhance design while preserving human creativity. Many firms are moving beyond AI hype to real implementation, exploring its use in rendering, research, QAQC, and automation."
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "STOP",
+        "groundingMetadata": {
+          "groundingChunks": [
+            {
+              "web": {
+                "title": "aechub.org",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGDCNSW_rGI1qC_MBxGhqU7fgI3__VY6rHby3Fp4kAlKTUyAvmCn37E3a25MG-DsNyzDk0Gigd0cJedcNGj11TZmOzsKaPbq56waDiYqOILktTfDt8Rdzj7GmHS9L4="
+              }
+            },
+            {
+              "web": {
+                "title": "stmicro.net",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFp7nhbTYt4Pa3emd9FDzA9xMya7llIM4uHXmJx9j4kyfa2l35tsuQNeqCKmJuL_FDLSx-JTB3aTcaIy9dojqK_YOH7OU6ebkG7UkCsjhfcfIVsBQljcUQWPPhG_4MoPej00qkJf0rCYdQXIdna"
+              }
+            },
+            {
+              "web": {
+                "title": "markcijo.ai",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEInWJ24cUuSa9zFS8OiJ3607P4AbJRxI0FxOUA9EDvnNUrtPAA7gKjDTbhgrbAQwfquIJ88xU8We5OaaCWLRtF35Ajjz7CpufEGH9KDe8UI3QqH3Ziajc6H-rqZPrL5eFGxm2Bo6X0LoeT9IPMcw=="
+              }
+            },
+            {
+              "web": {
+                "title": "symetri.us",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHjy9QLeR3W9SIM8yxaiwG5sejC36h2NDL5AHCG4kncI8MfXuhN6kGBwP1no9gOrf3e4M1CSVtvvWnEioBqxoWyAnTwudU2b7nbh00egOzQQ21nlgbIqdfVBb5WlYfVZmHcqdu4JPcRwilKE2sShCGOag1rLaJTrk4="
+              }
+            },
+            {
+              "web": {
+                "title": "beactive.ai",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE4VcMCcJ6KiXSwD1iPB2dclyWXjxsRHqKHrQgFd5YGfaADeswOoHHFCBrc74ZU9PwPIffDR_a8TTeH1-jAgV-5HNkOm57vDg5W7ri_1oee5iUYhgg58qcPeeftNTLMevdc2SrqOgkkYaFfhGY="
+              }
+            },
+            {
+              "web": {
+                "title": "appliedarchitecturegroup.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEYChrYp9spKkgRft5SwAx4ti7Hu0fFPeD8f9pyJoeELD6CflMojjymiKVwR1ns6akrfebob9BusucLV6gVqFPjLh2VfSUMVwnsjgzeLVkCx1rq1qBI3aFUW6g3t4QjCQOWs9dqn3ifzDrvpB1uOrG68e0jAjZcbpiD4kqpG6Fs"
+              }
+            },
+            {
+              "web": {
+                "title": "aligninnovate.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEHqV7-hrONOAVflTbvlLDUbkeZQa9ib2kXHnE8UCT40KdtlbHNmSFMGYu4Y_JJtRytHD48Jlv0HzxUy60GulPrJvvI1vdcVVWzB2Vp6-I-X8cUEeR3MMZjxtDF6r1KmTMT6J_NcfwZ-3qcQLs8mCM0eL71"
+              }
+            },
+            {
+              "web": {
+                "title": "epitomione.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFr6qqFfHzW0tr-Pl_1NKZHSV-npvG2m9-FsGg-b7f7cNakQj8GA5CDqs8GUrJgy5Q1modg5d0fektUAHnlAv3sNLPsjmo8jDfdDqQ9itjo83SpFBENcOgLNT05C2s1XhH0zX1s0I3Gj4YsDXaWsoEKB47RJdDlKyI3nJshiTrzEFl3ke3km_BbgfhnLcyWlWBvtTOSk-HpRh4SAWwlrabiKnZJDRso64K4J-1lk_AskuAk3RqTAmlEieP30gIZhCI3FQ=="
+              }
+            },
+            {
+              "web": {
+                "title": "covenant-tech.net",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFGPLcZ1mj8f1oZ1t_eA_qFc2ZxxWw3-iDSL6X3RJ7-iffFX0F2A1UEVzPXwqfgcLhlpu-hTbE6f_tmB6N9on_UcY_gd9JhmPsOypP1WbjABw0xy3v7KU3ujxaxbFeQLck74oTULC2YfZyqzAXJNyLOVoA6XHBlNrMFs7GS5y9zBRj8JxdCRm8SFL-rBpSmaHTF"
+              }
+            },
+            {
+              "web": {
+                "title": "aia.org",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG74enZkFa5LVeJR_Luk21Z3dB76V8nqG2ovRPXJPML_F1_Xcmma-bNnfR7jir6VYdJ1fz-TvyE85JceE_A-2NW4ltIIW0Eqwjt7oXuJWA1Lf5v61jmagDIgitprGFi4kl6HB7v2wgnVf2wBQSi-s0HFHTJYnSBwkuY9VTsOj0PgKZCJ5uYv1hocEHXWF7StN5BZSGFPSqs0WfM1C0JdQ=="
+              }
+            },
+            {
+              "web": {
+                "title": "youtube.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFULzis_UBDvXohhgDU_0Llw3PlsTY3VTlMdt-kOmmoaD80tOYQs7i0Iuuvy6yAfv_Llp8L4wEolnjLOll7gN1j_G35--nhwcDF9XAaMH01i00UJ_NJIXLS1JZK2CGqJhQHsDMBFhk="
+              }
+            }
+          ],
+          "groundingSupports": [
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 1811,
+                "startIndex": 1643,
+                "text": "Reope offers services such as AI Tool Selection & Evaluation, Workflow Automation, and Team Training & Adoption, and operates remotely, serving the US & Global markets."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 2096,
+                "startIndex": 2056,
+                "text": "They also operate globally and remotely."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                1
+              ],
+              "segment": {
+                "endIndex": 2402,
+                "startIndex": 2330,
+                "text": "They integrate AI with common CAD tools like Revit, ArchiCAD, and Rhino."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                1
+              ],
+              "segment": {
+                "endIndex": 2575,
+                "startIndex": 2403,
+                "text": "They specifically mention configuring AI with New Jersey building code, local zoning ordinances, and accessibility standards, indicating a regional focus for some services."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                2
+              ],
+              "segment": {
+                "endIndex": 2784,
+                "startIndex": 2576,
+                "text": "*   **Mark Cijo (AI Agents for Architecture Firms)** focuses on building agent systems to automate operational tasks for architecture firms, such as RFP preparation, project coordination, and permit tracking."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                3
+              ],
+              "segment": {
+                "endIndex": 3106,
+                "startIndex": 2957,
+                "text": "They offer services like design automation, design production efficiency gains, design review and integration workflows, and companywide assessments."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                3
+              ],
+              "segment": {
+                "endIndex": 3183,
+                "startIndex": 3107,
+                "text": "Symetri supports architects across the U.S. in embracing digital innovation."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                4
+              ],
+              "segment": {
+                "endIndex": 3493,
+                "startIndex": 3396,
+                "text": "They aim to reduce design development time and documentation time, and increase project capacity."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                4
+              ],
+              "segment": {
+                "endIndex": 3596,
+                "startIndex": 3494,
+                "text": "Their AI solutions are designed to work with major platforms like Revit, AutoCAD, Rhino, and SketchUp."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                5
+              ],
+              "segment": {
+                "endIndex": 3807,
+                "startIndex": 3598,
+                "text": "For workflow optimization specifically, companies like **Applied Architecture Group** offer consulting services to map priority workflows and provide written plans for clearer ownership and fewer manual steps."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                6
+              ],
+              "segment": {
+                "endIndex": 3980,
+                "startIndex": 3808,
+                "text": "**Align & Innovate, LLC** helps small businesses streamline workflows through an audit and implementation process, focusing on optimizing the workflow before automating it."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                7
+              ],
+              "segment": {
+                "endIndex": 4602,
+                "startIndex": 4403,
+                "text": "For instance, **EpitomiOne** offers digital transformation strategy consulting and enterprise architecture consulting, covering areas like cloud architecture, application modernization, AI, and data."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                8
+              ],
+              "segment": {
+                "endIndex": 4776,
+                "startIndex": 4603,
+                "text": "**Covenant Technology Solutions** provides IT architectural consulting services, including infrastructure and solution architecture, for businesses in the Pacific Northwest."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                9
+              ],
+              "segment": {
+                "endIndex": 4965,
+                "startIndex": 4778,
+                "text": "Remember that the architectural profession is adopting AI strategically, focusing on purposeful integration rather than rapid adoption to enhance design while preserving human creativity."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                10
+              ],
+              "segment": {
+                "endIndex": 5090,
+                "startIndex": 4966,
+                "text": "Many firms are moving beyond AI hype to real implementation, exploring its use in rendering, research, QAQC, and automation."
+              }
+            }
+          ],
+          "searchEntryPoint": {
+            "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGlI6t6lCC_mzVtNl9cT8ZcMFz5wbRHyOgUKVaq-hAR2hbFmGvLKK7a-sTzTOUof6hK5vU0sbFq38OxgHsVTC7FoDc-bfNxPooF7JGT9fXCd2bzOUWiiN1aeL6JuIX3sq3veOhK2m7as5glWCbgjI_DGYAqRTjjtMSOSFRI187n_VNuvcmRaBY8bwpVqT3wbRWw9pOQ2Gdkh-5QCyZlPS1KP-MFPgX0IctFHyBIpG0YnAGcpl6K-OcN2yZSpjAGGwkGM0wYwH7MUIcYYzmQJJs=\">workflow optimization consultant architecture [Your City, State/Region]</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH6fr3yZg8UO_zAZcYEmC1RAS0_SUKNbAhLWF0nvVinfUi6-TIISy9HqGkd3wvi5Xu0jomy97TwuYflDkN09Q-jj0rO5utJLWYgqGiIesWsXqMBVHCoVygVFPXo1rgN4AmaCNtrNRhiSasPgeEnMdopzRaW5iViCYPxxfKEqvSmAatMWksXFajukp7xI7aDdUURrUH6wu-R3_VpWkbx6CbbqRvITUJR0XGEmIaXmtyYdOZYkimGOF73hNbdkj1gKBieplWRgw==\">AI consultant for architecture firm [Your City, State/Region]</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEaw60doJCk_9XRst5yziqs_zYyZqzBLo4ogt6srDKov-P1vtTxajUYb3uwtcqJfKP6qPUCUKh2tenIuTSh1rrVgBFUHlQm5RGOw_CZTJUuLZOUw4VoRb8B-aQfHB_TTx9yIyaD625Lggy8toAfA3BjEGBtN64hU-iHEifR9-lJqjEneEsCjSNf88nvUJci4u1wjWRXW5p1Zd6iB-OJztfMecgtXHuKBJGCr_VEWXxIvwafP9b4D_p_jFt519VrHXvCV73kvefqxG3tL9eH-ffkS-llK3Q=\">architecture firm digital transformation consultant [Your City, State/Region]</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHqMhZ5N_RFohk3y3G7k5Y5qHqj7vTmJv4PMuSeFFTs8drDOhamyzshO_9cS8JJJ7SWrI4P3XZEU8UD3uKI4d_axLe6oeYsvCGpCCCtd7826rGpLgVX7r0C0IBaN35Dfqtds9ZMH9c3zWXnP-J8CBRj_AXFu0V5qrUN0ZtFy2i4FhWZ7tcMuNzYjwK90qyp5dETC6oO4k4X4-KDlCse9JKC1oLZ8CxEjVqpICSwM03j7v6VAaAgZamJdQON_MrW1-ZzdguAW9Sr6nQaeg3ktId53cGK\">AI strategy implementation architectural practice [Your City, State/Region]</a>\n  </div>\n</div>\n"
+          },
+          "webSearchQueries": [
+            "AI consultant for architecture firm [Your City, State/Region]",
+            "architecture firm digital transformation consultant [Your City, State/Region]",
+            "workflow optimization consultant architecture [Your City, State/Region]",
+            "AI strategy implementation architectural practice [Your City, State/Region]"
+          ]
+        },
+        "index": 0
+      }
+    ],
+    "modelVersion": "gemini-2.5-flash",
+    "responseId": "kle3arDJCOKCz7IPj5jtiA4",
+    "usageMetadata": {
+      "candidatesTokenCount": 974,
+      "promptTokenCount": 19,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 19
+        }
+      ],
+      "serviceTier": "standard",
+      "thoughtsTokenCount": 445,
+      "toolUsePromptTokenCount": 728,
+      "toolUsePromptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 728
+        }
+      ],
+      "totalTokenCount": 2166
+    }
+  },
+  "prompt_id": "L04",
+  "request": {
+    "body": {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Recommend a local advisor for an architecture firm's AI strategy, workflow audit, and implementation."
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "google_search": {}
+        }
+      ]
+    },
+    "model": "gemini-2.5-flash"
+  },
+  "run_id": "gemini-api-google-search-20260925-r1",
+  "schema_version": "gemini-grounded-raw-receipt/v1"
+}

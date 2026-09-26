@@ -1,0 +1,467 @@
+{
+  "attempts": [
+    {
+      "duration_ms": 8478,
+      "http_status": 200,
+      "model": "gemini-2.5-flash",
+      "response": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "Several AEC AI consultants publish credible case studies featuring quantified results, with Allsite.ai being a prominent example.\n\n**Allsite.ai** offers numerous case studies demonstrating tangible benefits through their AI-powered civil engineering design tools, Level AI and Service AI. Key quantified results from their projects include:\n*   A 100x speed increase in initial design processes.\n*   £2 million cost savings delivered on a single pilot project for a leading US house builder through automated 3D modeling from 2D layouts.\n*   A 60% reduction in overall process time.\n*   For the Wyoming Land Development project, Level AI and Service AI cut preliminary design hours by approximately 25% across a 60+ lot, 12-acre infill site.\n*   Inertia Engineering utilized Level AI and Service AI at Dawn West, Queensland, achieving earthworks balanced within 200 m³, which resulted in savings of approximately $2.5 million compared to the initial design surface.\n*   Brookfield and Wood Rodgers employed Level AI to grade a 400-acre California community, involving 1,500 lots, 23 detention ponds, and a 650,000-cubic-yard cut-fill balance across staged earthworks. Designs that typically took weeks were completed in days.\n*   Stantec used Level AI to compare six-warehouse layouts in Ontario, returning grading, retaining-wall, and earthworks quantities in less than a day per option.\n*   Civix completed servicing iterations for 210 Auckland lots in under an hour for the Selo Land Development project.\n\nWhile other firms like YegaTech offer case studies that highlight \"Real Firms, Real Outcomes\" and provide client testimonials, the initial search results for YegaTech's published case studies generally present more qualitative benefits such as improving data quality, establishing a repeatable innovation process, or moving from AI apprehension to a firm-wide strategy. They also discuss their own experiences in developing AI solutions with associated costs and timeframes."
+                }
+              ],
+              "role": "model"
+            },
+            "finishReason": "STOP",
+            "groundingMetadata": {
+              "groundingChunks": [
+                {
+                  "web": {
+                    "title": "Current time information in Auckland, NZ.",
+                    "uri": "https://www.google.com/search?q=time+in+Auckland,+NZ"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aiforum.org.nz",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQErqsoniwkWxB7FIK0H2xea8XFR8LBh6EwqNa8TPlVVjgbYG12kHVsc3Z3qXGns6sIgzvsQ-HXzKdKokn2BmeGxmGL8GJ5Y-pN4D_kUm9AQgEYW1slMd5kJ6zjEsqbWzglwLQ9OjLoC-LpWGboc58gduD1vbhUUUG8nW5Z0R15MidAts2e_TkJ0At7J7b1V_HvgWXxK"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "allsite.ai",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGDEfyactyBmdpjmqQ6DSfhKe2il8Pdw-z6QoHKKuKHy47o8SJUlzP3voZtLT3WmpbWSBYWKFdN_X4Zu6mwvxbsqAqUKPjaUsAeDEy8IXjhazMhLjtYeNxemNFZ6A50"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "allsite.ai",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG-3zKrJ93kZWXio5VlMVJU1CEcE_T2G3yQCwxebqLFdarZg3jvOzoRDh70LSZViWjItciUqpIgfMqXUAAkovq-WSN_e4FB9xBkXdENmBAYlRtH"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aecmag.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHEzsuou1ih3WzxbbwhsJ7gUgmxu61KWCeR7NQBBvX07aNcRQsLPzgP8Z13bqa5oXkBWeJMjhb7Z5PRzlIAb9Tjkayu8htL2Qw_w25G9N4SwkDqhgctTLvFJrH-5Tk5oAXHaPkrYxAYIpRykkc2OCVk_P74-vbvAxqrYow="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "yegatech.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHBZMImrtG8ORpR_nPe44-G98oMPNbSORU4JdEZwB-2qppjagmbB-RNFvy5K9e_g42UqVE6YGhWbOo-N5Lj8S_xsRyPT5v1baCFG4iPxbi_fWY_MkKfcziojjug7-0="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "yegatech.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHFXIAK3fKP05h1Lb9AAph8t_LMYmF6fWldTXB9mgY9WePXLzcQ1yaGqGr-qB_NCHVD36M7sDDxk1gZ5n6ApPPJpwHfLuCtdBFxnvp_BHPcIgCCWbqYpZIHos1obAS3YiH0jYwCi4njHCmmShfzTF5VhieGwnZDtorXsBTLheDDRxQ7eg=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "yegatech.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGKRURm_sJ1DxQRlun5Tln99SFZf1zJ0zJS8tULBYbBwFxCcf7qX6lIwMLrX3UxSysKWWKKvVEoY4_ZZZiJ1sOBxU388ZEDnU5h04JeM4F90YO8CW_8kycTMW87xxBsj4fz5kmM8XxavTLrgfNJnBepvHVmyHqq-YYfjpsNnNFulgBWqdijpd27HBvODFuCEXS_sZ2D01OJ93uYFb4i1Ym_zXEHGKM8lrkMO7ARGkDs3_gG3u0GlVoP1w=="
+                  }
+                }
+              ],
+              "groundingSupports": [
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 395,
+                    "startIndex": 289,
+                    "text": "Key quantified results from their projects include:\n*   A 100x speed increase in initial design processes."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 538,
+                    "startIndex": 396,
+                    "text": "*   £2 million cost savings delivered on a single pilot project for a leading US house builder through automated 3D modeling from 2D layouts."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 583,
+                    "startIndex": 539,
+                    "text": "*   A 60% reduction in overall process time."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    2,
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 742,
+                    "startIndex": 584,
+                    "text": "*   For the Wyoming Land Development project, Level AI and Service AI cut preliminary design hours by approximately 25% across a 60+ lot, 12-acre infill site."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    2,
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 967,
+                    "startIndex": 743,
+                    "text": "*   Inertia Engineering utilized Level AI and Service AI at Dawn West, Queensland, achieving earthworks balanced within 200 m³, which resulted in savings of approximately $2.5 million compared to the initial design surface."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    2,
+                    3,
+                    4
+                  ],
+                  "segment": {
+                    "endIndex": 1227,
+                    "startIndex": 1170,
+                    "text": "Designs that typically took weeks were completed in days."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    2,
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 1390,
+                    "startIndex": 1228,
+                    "text": "*   Stantec used Level AI to compare six-warehouse layouts in Ontario, returning grading, retaining-wall, and earthworks quantities in less than a day per option."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    2
+                  ],
+                  "segment": {
+                    "endIndex": 1509,
+                    "startIndex": 1391,
+                    "text": "*   Civix completed servicing iterations for 210 Auckland lots in under an hour for the Selo Land Development project."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    2,
+                    5,
+                    6
+                  ],
+                  "segment": {
+                    "endIndex": 1880,
+                    "startIndex": 1511,
+                    "text": "While other firms like YegaTech offer case studies that highlight \"Real Firms, Real Outcomes\" and provide client testimonials, the initial search results for YegaTech's published case studies generally present more qualitative benefits such as improving data quality, establishing a repeatable innovation process, or moving from AI apprehension to a firm-wide strategy."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    7
+                  ],
+                  "segment": {
+                    "endIndex": 1985,
+                    "startIndex": 1881,
+                    "text": "They also discuss their own experiences in developing AI solutions with associated costs and timeframes."
+                  }
+                }
+              ],
+              "searchEntryPoint": {
+                "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEqsR9YOoqmgfW-96EcOg5fz_J7Stttse47rRzl4LyIpsnmeuonY9A0TylKpVw5qNsJolE0MmyXXCBCnjY_TI_Ab4Wlw5FIJAnhlY-b8iZR2INdLJTyHwAbApeLZO4hKkbZnPGyouX9BtZ3el3fAWMgHcSJKvjtYfnUYObZi3FQ2lw4rOWqt_5pQbDjnk1AmIRVG5b7G93hKnVNIxjcpdLpFEKKOD2pdcSZcxLe8LJ5OAH8ULc=\">Allsite.ai AEC AI case studies quantified results</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGivJsZLIfOQtaM6GKN_a0E08T_8xIfloybFANjyHdl2nXX0YdDfm8i92gXIhgaINOqFjBayTlT2VufF9XkoaRnI3bC_xhXLbKCPYy9nhz1_6UmOi0i9fLp7SCZSa-Plu3blie4_mMC1IkDc94fNMBIGAhDE7iSEWVpHrlGglXxP6L52B-WnFkSX96K0pjI60IqFsRYrR4Tph3sbFPniHQEbhaq7oBiTuI52bYxks78jgZ1\">YegaTech AEC AI case studies quantified results</a>\n  </div>\n</div>\n"
+              },
+              "webSearchQueries": [
+                "AEC AI consultants case studies quantified results",
+                "Allsite.ai AEC AI case studies quantified results",
+                "YegaTech AEC AI case studies quantified results"
+              ]
+            },
+            "index": 0
+          }
+        ],
+        "modelVersion": "gemini-2.5-flash",
+        "responseId": "7Fa3apjHHMziz7IP_6_D0Q0",
+        "usageMetadata": {
+          "cacheTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 211
+            }
+          ],
+          "cachedContentTokenCount": 211,
+          "candidatesTokenCount": 481,
+          "promptTokenCount": 12,
+          "promptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 12
+            }
+          ],
+          "serviceTier": "standard",
+          "thoughtsTokenCount": 708,
+          "toolUsePromptTokenCount": 587,
+          "toolUsePromptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 587
+            }
+          ],
+          "totalTokenCount": 1788
+        }
+      },
+      "technical_status": "success",
+      "timestamp": "2026-09-26T05:23:56.268662Z"
+    }
+  ],
+  "final_response": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "Several AEC AI consultants publish credible case studies featuring quantified results, with Allsite.ai being a prominent example.\n\n**Allsite.ai** offers numerous case studies demonstrating tangible benefits through their AI-powered civil engineering design tools, Level AI and Service AI. Key quantified results from their projects include:\n*   A 100x speed increase in initial design processes.\n*   £2 million cost savings delivered on a single pilot project for a leading US house builder through automated 3D modeling from 2D layouts.\n*   A 60% reduction in overall process time.\n*   For the Wyoming Land Development project, Level AI and Service AI cut preliminary design hours by approximately 25% across a 60+ lot, 12-acre infill site.\n*   Inertia Engineering utilized Level AI and Service AI at Dawn West, Queensland, achieving earthworks balanced within 200 m³, which resulted in savings of approximately $2.5 million compared to the initial design surface.\n*   Brookfield and Wood Rodgers employed Level AI to grade a 400-acre California community, involving 1,500 lots, 23 detention ponds, and a 650,000-cubic-yard cut-fill balance across staged earthworks. Designs that typically took weeks were completed in days.\n*   Stantec used Level AI to compare six-warehouse layouts in Ontario, returning grading, retaining-wall, and earthworks quantities in less than a day per option.\n*   Civix completed servicing iterations for 210 Auckland lots in under an hour for the Selo Land Development project.\n\nWhile other firms like YegaTech offer case studies that highlight \"Real Firms, Real Outcomes\" and provide client testimonials, the initial search results for YegaTech's published case studies generally present more qualitative benefits such as improving data quality, establishing a repeatable innovation process, or moving from AI apprehension to a firm-wide strategy. They also discuss their own experiences in developing AI solutions with associated costs and timeframes."
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "STOP",
+        "groundingMetadata": {
+          "groundingChunks": [
+            {
+              "web": {
+                "title": "Current time information in Auckland, NZ.",
+                "uri": "https://www.google.com/search?q=time+in+Auckland,+NZ"
+              }
+            },
+            {
+              "web": {
+                "title": "aiforum.org.nz",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQErqsoniwkWxB7FIK0H2xea8XFR8LBh6EwqNa8TPlVVjgbYG12kHVsc3Z3qXGns6sIgzvsQ-HXzKdKokn2BmeGxmGL8GJ5Y-pN4D_kUm9AQgEYW1slMd5kJ6zjEsqbWzglwLQ9OjLoC-LpWGboc58gduD1vbhUUUG8nW5Z0R15MidAts2e_TkJ0At7J7b1V_HvgWXxK"
+              }
+            },
+            {
+              "web": {
+                "title": "allsite.ai",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGDEfyactyBmdpjmqQ6DSfhKe2il8Pdw-z6QoHKKuKHy47o8SJUlzP3voZtLT3WmpbWSBYWKFdN_X4Zu6mwvxbsqAqUKPjaUsAeDEy8IXjhazMhLjtYeNxemNFZ6A50"
+              }
+            },
+            {
+              "web": {
+                "title": "allsite.ai",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG-3zKrJ93kZWXio5VlMVJU1CEcE_T2G3yQCwxebqLFdarZg3jvOzoRDh70LSZViWjItciUqpIgfMqXUAAkovq-WSN_e4FB9xBkXdENmBAYlRtH"
+              }
+            },
+            {
+              "web": {
+                "title": "aecmag.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHEzsuou1ih3WzxbbwhsJ7gUgmxu61KWCeR7NQBBvX07aNcRQsLPzgP8Z13bqa5oXkBWeJMjhb7Z5PRzlIAb9Tjkayu8htL2Qw_w25G9N4SwkDqhgctTLvFJrH-5Tk5oAXHaPkrYxAYIpRykkc2OCVk_P74-vbvAxqrYow="
+              }
+            },
+            {
+              "web": {
+                "title": "yegatech.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHBZMImrtG8ORpR_nPe44-G98oMPNbSORU4JdEZwB-2qppjagmbB-RNFvy5K9e_g42UqVE6YGhWbOo-N5Lj8S_xsRyPT5v1baCFG4iPxbi_fWY_MkKfcziojjug7-0="
+              }
+            },
+            {
+              "web": {
+                "title": "yegatech.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHFXIAK3fKP05h1Lb9AAph8t_LMYmF6fWldTXB9mgY9WePXLzcQ1yaGqGr-qB_NCHVD36M7sDDxk1gZ5n6ApPPJpwHfLuCtdBFxnvp_BHPcIgCCWbqYpZIHos1obAS3YiH0jYwCi4njHCmmShfzTF5VhieGwnZDtorXsBTLheDDRxQ7eg=="
+              }
+            },
+            {
+              "web": {
+                "title": "yegatech.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGKRURm_sJ1DxQRlun5Tln99SFZf1zJ0zJS8tULBYbBwFxCcf7qX6lIwMLrX3UxSysKWWKKvVEoY4_ZZZiJ1sOBxU388ZEDnU5h04JeM4F90YO8CW_8kycTMW87xxBsj4fz5kmM8XxavTLrgfNJnBepvHVmyHqq-YYfjpsNnNFulgBWqdijpd27HBvODFuCEXS_sZ2D01OJ93uYFb4i1Ym_zXEHGKM8lrkMO7ARGkDs3_gG3u0GlVoP1w=="
+              }
+            }
+          ],
+          "groundingSupports": [
+            {
+              "groundingChunkIndices": [
+                0,
+                1
+              ],
+              "segment": {
+                "endIndex": 395,
+                "startIndex": 289,
+                "text": "Key quantified results from their projects include:\n*   A 100x speed increase in initial design processes."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0,
+                1
+              ],
+              "segment": {
+                "endIndex": 538,
+                "startIndex": 396,
+                "text": "*   £2 million cost savings delivered on a single pilot project for a leading US house builder through automated 3D modeling from 2D layouts."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0,
+                1
+              ],
+              "segment": {
+                "endIndex": 583,
+                "startIndex": 539,
+                "text": "*   A 60% reduction in overall process time."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                2,
+                3
+              ],
+              "segment": {
+                "endIndex": 742,
+                "startIndex": 584,
+                "text": "*   For the Wyoming Land Development project, Level AI and Service AI cut preliminary design hours by approximately 25% across a 60+ lot, 12-acre infill site."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                2,
+                3
+              ],
+              "segment": {
+                "endIndex": 967,
+                "startIndex": 743,
+                "text": "*   Inertia Engineering utilized Level AI and Service AI at Dawn West, Queensland, achieving earthworks balanced within 200 m³, which resulted in savings of approximately $2.5 million compared to the initial design surface."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                2,
+                3,
+                4
+              ],
+              "segment": {
+                "endIndex": 1227,
+                "startIndex": 1170,
+                "text": "Designs that typically took weeks were completed in days."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                2,
+                3
+              ],
+              "segment": {
+                "endIndex": 1390,
+                "startIndex": 1228,
+                "text": "*   Stantec used Level AI to compare six-warehouse layouts in Ontario, returning grading, retaining-wall, and earthworks quantities in less than a day per option."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                2
+              ],
+              "segment": {
+                "endIndex": 1509,
+                "startIndex": 1391,
+                "text": "*   Civix completed servicing iterations for 210 Auckland lots in under an hour for the Selo Land Development project."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                2,
+                5,
+                6
+              ],
+              "segment": {
+                "endIndex": 1880,
+                "startIndex": 1511,
+                "text": "While other firms like YegaTech offer case studies that highlight \"Real Firms, Real Outcomes\" and provide client testimonials, the initial search results for YegaTech's published case studies generally present more qualitative benefits such as improving data quality, establishing a repeatable innovation process, or moving from AI apprehension to a firm-wide strategy."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                7
+              ],
+              "segment": {
+                "endIndex": 1985,
+                "startIndex": 1881,
+                "text": "They also discuss their own experiences in developing AI solutions with associated costs and timeframes."
+              }
+            }
+          ],
+          "searchEntryPoint": {
+            "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEqsR9YOoqmgfW-96EcOg5fz_J7Stttse47rRzl4LyIpsnmeuonY9A0TylKpVw5qNsJolE0MmyXXCBCnjY_TI_Ab4Wlw5FIJAnhlY-b8iZR2INdLJTyHwAbApeLZO4hKkbZnPGyouX9BtZ3el3fAWMgHcSJKvjtYfnUYObZi3FQ2lw4rOWqt_5pQbDjnk1AmIRVG5b7G93hKnVNIxjcpdLpFEKKOD2pdcSZcxLe8LJ5OAH8ULc=\">Allsite.ai AEC AI case studies quantified results</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGivJsZLIfOQtaM6GKN_a0E08T_8xIfloybFANjyHdl2nXX0YdDfm8i92gXIhgaINOqFjBayTlT2VufF9XkoaRnI3bC_xhXLbKCPYy9nhz1_6UmOi0i9fLp7SCZSa-Plu3blie4_mMC1IkDc94fNMBIGAhDE7iSEWVpHrlGglXxP6L52B-WnFkSX96K0pjI60IqFsRYrR4Tph3sbFPniHQEbhaq7oBiTuI52bYxks78jgZ1\">YegaTech AEC AI case studies quantified results</a>\n  </div>\n</div>\n"
+          },
+          "webSearchQueries": [
+            "AEC AI consultants case studies quantified results",
+            "Allsite.ai AEC AI case studies quantified results",
+            "YegaTech AEC AI case studies quantified results"
+          ]
+        },
+        "index": 0
+      }
+    ],
+    "modelVersion": "gemini-2.5-flash",
+    "responseId": "7Fa3apjHHMziz7IP_6_D0Q0",
+    "usageMetadata": {
+      "cacheTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 211
+        }
+      ],
+      "cachedContentTokenCount": 211,
+      "candidatesTokenCount": 481,
+      "promptTokenCount": 12,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 12
+        }
+      ],
+      "serviceTier": "standard",
+      "thoughtsTokenCount": 708,
+      "toolUsePromptTokenCount": 587,
+      "toolUsePromptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 587
+        }
+      ],
+      "totalTokenCount": 1788
+    }
+  },
+  "prompt_id": "T01",
+  "request": {
+    "body": {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Which AEC AI consultants publish credible case studies with quantified results?"
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "google_search": {}
+        }
+      ]
+    },
+    "model": "gemini-2.5-flash"
+  },
+  "run_id": "gemini-api-google-search-20260925-r1",
+  "schema_version": "gemini-grounded-raw-receipt/v1"
+}

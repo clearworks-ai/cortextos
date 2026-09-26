@@ -227,11 +227,11 @@ Do not gate the core explanation or the proof ledger. Any downloadable checklist
 - AI answer named mention, shortlist, citation, accurate-offer description, and evidence-label accuracy.
 - Aggregate CTA clicks, accepted leads, bookings, and audit-qualified opportunities, reported separately.
 - Blueprint versus Audit self-selection and eventual disposition in aggregate.
-- Which proof block was viewed before a CTA, only as anonymous aggregate unless a deterministic consented join exists.
 - CRM self-report: “How did you first hear about Clearworks?” and “What did you review before booking?”
 
 ### Blocked until journey instrumentation is verified
 
+- Analysis of which proof block was viewed before a CTA is blocked until the page has stable proof-block IDs, a section-view event, a CTA event, documented session and deduplication rules, and a verified GA4 report. Report this only in aggregate; it must not imply identity or a person-level journey.
 - Joined CTA click → accepted lead → booking → audit-qualified opportunity attribution requires stable submission and booking receipts plus a deterministic lead/booking join.
 - Until the path is implemented and verified end to end, do not publish page-level conversion rates, assisted-journey claims, or causal pipeline claims.
 - Preserve origin, web acquisition, site validation, offer self-selection, and booking as distinct evidence fields even after a join exists.

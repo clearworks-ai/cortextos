@@ -133,7 +133,6 @@ The hub should answer the relationships among these problems, then route to one 
 - Seven-question scorecard.
 - High-level build/buy/configure/connect/defer/leave-alone principles.
 - Selected anonymized observations with evidence labels.
-- Public benchmark tables only when the sample supports them.
 - Definitions, source notes, and links to current companion resources.
 
 ### Book
@@ -143,10 +142,18 @@ The hub should answer the relationships among these problems, then route to one 
 - Reusable owner-facing questions and durable worksheets that do not reveal the proprietary engagement engine.
 - Add a transactional book CTA only after the book offer, delivery state, price, and fulfillment path actually exist. Until then, describe the forthcoming book without presenting it as available.
 
+### Dated companion
+
+- Current stacks, tools, and products.
+- Prices, cost ranges, and dated planning assumptions.
+- Product or approach comparisons and maintained external links.
+- Regulatory and policy changes.
+- Annual benchmark tables, only when the sample and methodology support publication.
+- Every item carries an as-of date, source, review owner, and update/retirement policy so time-sensitive material does not leak into the durable Book or hub.
+
 ### Community
 
-- Application discussions, current examples, peer interpretation, office hours, and accountable follow-through.
-- Dated updates to public tools/products and practitioner lessons that would age faster than the book.
+- Application discussions, peer examples, Office Hours, clinics, current-tool discussion, and accountable follow-through.
 - Shared learning artifacts that do not disclose a member’s or client’s confidential operating evidence.
 
 ### Audit + Implementation
@@ -158,7 +165,7 @@ The hub should answer the relationships among these problems, then route to one 
 - Solution sequencing, acceptance gates, and implementation controls.
 - Firm-specific conclusions, designs, client evidence, and managed improvement.
 
-The proprietary taxonomy, reconciliation, scoring, extraction, prioritization, firm-specific conclusions, and implementation designs belong only in Audit + Implementation—not in the public hub, Book, Community, or public companion/download.
+The proprietary taxonomy, reconciliation, scoring, extraction, prioritization, firm-specific conclusions, and implementation designs belong only in Audit + Implementation—not in the public hub, Book, Dated companion, Community, or public companion/download.
 
 ## Proposed direct answer
 
@@ -235,7 +242,7 @@ The proprietary taxonomy, reconciliation, scoring, extraction, prioritization, f
     - Busywork Audit and Implementation Partnership.
 
 12. **Value ladder**
-    - Hub → public companion/download → Book when its offer exists → Community → Audit + Implementation → managed improvement.
+    - Hub → public companion/download → Book when available → Dated companion → Community → Audit + Implementation → managed improvement.
     - Explain what each provides and does not provide.
     - Keep proprietary taxonomy, reconciliation, scoring, extraction, prioritization, firm-specific conclusions, and implementation designs inside Audit + Implementation.
 
@@ -284,7 +291,7 @@ The benchmark should become the hub’s public evidence product, but only after 
 - Transition quotes from Solo, 5, 15, 50, and 150-person contexts when permissioned; gaps stay gaps.
 - A reviewed Solo technology-budget model methodology before using the approximately $20,200 first-year planning figure.
 - Scorecard response and privacy design.
-- Book offer details and release state before adding a transactional book CTA; public companion/download and Community terms remain separately labeled.
+- Book offer details and release state before adding a transactional book CTA; public companion/download, Dated companion, and Community terms remain separately labeled.
 - Baseline Search Console and resource-conversion data for the existing URL.
 - A corrections/update owner and annual review date.
 

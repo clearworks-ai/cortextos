@@ -1,12 +1,12 @@
 # Clearworks AEC authority system - master checklist
 
 Date: 2026-09-25
-Status: active working checklist; research and private content package complete, production measurement gates still open
+Status: active working checklist; research, first-party Search Console baseline, sitemap submission, and private content package complete; production proof-loop gates still open
 Governing task: `task_1790398044100_06722606`
 
 ## Current state - 2026-09-26
 
-The authority strategy is ready to move into reviewed content production. The Zcal lifecycle endpoint is live; the broader attribution/measurement cutover is not. No Google-ranking claim is supported.
+The authority strategy is ready to move into reviewed content production. Search Console is live under `josh@clearworks.ai`, its pre-publication baseline is frozen, and the sitemap is now submitted successfully. The Zcal lifecycle endpoint is live; the broader attribution/measurement cutover is not. No broad non-branded Google-ranking claim is supported.
 
 | Layer | State | Governing evidence or gate |
 |---|---|---|
@@ -14,21 +14,25 @@ The authority strategy is ready to move into reviewed content production. The Zc
 | Buyer-prompt baseline | Complete, directional | Gemini + Google Search grounding run `gemini-api-google-search-20260925-r1`: 25/25 successful prompts, 114 grounding queries, 324 citation records, raw receipts preserved. One run is not a visibility score. |
 | Returned-site intelligence | Complete for first sample | Ten recurring provider entities and ten influential source/page profiles inspected with 49 live links. |
 | Public keyword/SERP study | Complete with limits | 35 query rows and 18 provisional opportunities. Accessible volume is broad-category evidence; generic web-search ordering is discovery only, never Google/Bing rank. |
-| Google/Search Console truth | Blocked | Human task `task_1790406824361_93723891` for read-only Search Console access or export. Josh's manual Google check did not show Clearworks for one exact query; that is a bounded observation, not a universal absence claim. |
-| Search Console analysis assistant | Candidate after access | SEOMonster is a useful read-only pilot for query/page opportunity analysis across Search Console, GA4, and PageSpeed. It does not prove fixed rank, local-pack visibility, or complete AEO/GEO coverage. Withhold Indexing, sitemap, Cloudflare, IndexNow, and other write credentials during the pilot. |
+| Google/Search Console truth | Live baseline complete | Existing URL-prefix property accessed under `josh@clearworks.ai`. Aug 23-Sep 24 baseline: 20 clicks, 380 impressions, 5.3% CTR, 5.1 average position; visible queries are overwhelmingly branded. Page Indexing snapshot: 6 indexed, 1 redirect exclusion. Receipt: `search-console-access-baseline.md`. |
+| Sitemap discovery | Corrected and verified | `/sitemap.xml` was absent from Submitted sitemaps, then submitted Sep 26 and read back `Success`, 20 discovered pages, 0 videos. Indexing remains asynchronous and must be rechecked. |
+| Search Console analysis assistant | Candidate after direct baseline | SEOMonster is a useful read-only pilot for query/page opportunity analysis across Search Console, GA4, and PageSpeed. It does not prove fixed rank, local-pack visibility, or complete AEO/GEO coverage. Withhold Indexing, sitemap, Cloudflare, IndexNow, and other write credentials during the pilot. |
+| Qualified authority-directory gaps | Complete for first pass | Prioritize AEC Hub's consultant directory, aec+tech's service-company directory, AIA|LA member/Speakers Bureau surfaces, and a free Clutch profile. Pursue AEC Hub AI Voices, AEC Magazine, and AEC IT Leaders as earned-authority targets after a sustained evidence-led publishing cadence. Do not force Clearworks into software-tool directories. |
 | GA4-to-lead proof-loop code | Implemented and reviewed off-production | Site branch through `f34c23778c91936d37759161567bd6669edb95f1`; receiver reliability commit `410b54d676bda7a23bd5e0d80d615624b83dff43`. Production cutover remains separate and gated. |
 | Zcal lifecycle receiver | Endpoint live and synthetic-verified | Deployment `a8b36df3-ccb0-4b15-a795-95cfb8bc860b`, final release SHA `30eebbc641a42e8ffcad2a8a3e80a35a3a65af76`. Invalid signature, create, replay, conflict, reschedule, cancel, D1 state, unchanged `/api/lead`, and site baseline passed. Subscriber configuration and a Zcal-native/real lifecycle test remain blocked on human task `task_1790458200312_03073302`. |
 | Private authority content package | Complete and independently reviewed | Five briefs at governing content commit `48b8ce37f127cef17572801b9d7e764492d72d06`; checklist receipt `150ed081`. No publication has occurred. |
 
 ### Next dependency-ordered actions
 
-1. Obtain the Search Console export/access and freeze the pre-publication Google baseline.
-2. After access, audit and pin SEOMonster, then run a read-only pilot with no indexing or infrastructure write credentials; compare its output to direct first-party exports.
-3. After trusted-browser access, configure the Zcal subscriber for created/rescheduled/cancelled, run Zcal's Test Endpoint and a real lifecycle, and verify D1 receipts. The endpoint deployment itself is complete.
-4. Reconcile the broader lead/CRM cutover only through its own production gate; do not infer it from Zcal approval.
-5. Select the first canonical page from the five reviewed briefs and publish through a separately reviewed site branch.
-6. Record indexation, retrieval/citation, multi-asset engagement, qualified conversations, and booked outcomes as separate measures.
-7. At the tool-choice gate, present Josh with the explicit OneGlanse choice: hardened disposable lab, safe-concept adaptation, or acceptance of the documented account/policy/maintenance risk. Do not silently drop the tool.
+1. Recheck sitemap processing and Page Indexing after Google has had time to refresh its September 20 snapshot; preserve the current baseline rather than overwriting it.
+2. Export the dedicated Search Console Generative AI report if the property exposes usable rows; record a true zero separately from unavailable or withheld data.
+3. Audit and pin SEOMonster, then run a read-only pilot with no indexing or infrastructure write credentials; compare its output to direct first-party exports.
+4. Prepare the reusable public evidence kit, then submit the free/qualified service and expert listings in a separately authorized external-action batch. Do not use software-product directories.
+5. After trusted-browser access, configure the Zcal subscriber for created/rescheduled/cancelled, run Zcal's Test Endpoint and a real lifecycle, and verify D1 receipts. The endpoint deployment itself is complete.
+6. Reconcile the broader lead/CRM cutover only through its own production gate; do not infer it from Zcal approval.
+7. Select the first canonical page from the five reviewed briefs and publish through a separately reviewed site branch.
+8. Record indexation, retrieval/citation, multi-asset engagement, qualified conversations, and booked outcomes as separate measures.
+9. At the tool-choice gate, present Josh with the explicit OneGlanse choice: hardened disposable lab, safe-concept adaptation, or acceptance of the documented account/policy/maintenance risk. Do not silently drop the tool.
 
 ## Outcome
 
@@ -146,6 +150,8 @@ Acceptance:
 - [ ] Capture Google organic results for the frozen query set with locale, device, and location controls.
 - [ ] Capture Google local/map results separately where the query triggers them.
 - [ ] Capture Google AI Overview or AI Mode only when shown; record `not triggered` separately from `not cited`.
+- [x] Capture the direct Search Console Web baseline before content changes: 20 clicks, 380 impressions, 5.3% CTR, 5.1 average position for Aug 23-Sep 24; preserve query/page rows and evidence limitations in `search-console-access-baseline.md`.
+- [x] Submit `/sitemap.xml` to the existing property and independently verify `Success`, 20 discovered pages, and 0 videos.
 - [ ] Export the dedicated Search Console Generative AI performance report before content changes and retain its page/country/device/date baseline.
 - [ ] Confirm whether the dedicated Generative AI report is available through an API; until proven, treat the documented UI export as the authoritative extraction path.
 - [ ] Capture ChatGPT Search, Gemini, and Perplexity outputs under controlled test conditions.
@@ -181,6 +187,9 @@ For every organization or source returned often enough to matter:
 - [ ] Inspect conversion path: direct contact, booking, lead magnet, newsletter, assessment, or product trial.
 - [ ] Record why the page may have earned retrieval or ranking as an evidence-based hypothesis, not fact.
 - [ ] Tag tactics Clearworks can ethically adapt and tactics to avoid.
+- [x] Classify first directory/authority gaps by entity type: service-company directories, consultant directories, individual expert rosters, earned editorial/speaking surfaces, and software-product directories.
+- [x] Prioritize AEC Hub consultant directory, aec+tech company directory, AIA|LA member/Speakers Bureau, and free Clutch profile; defer paid tiers until referral traffic is measurable.
+- [x] Exclude AEC Hub's tool directory, AEC Magazine AI Spotlight, and AI in AEC's tool hub unless Clearworks later has a genuine standalone product that satisfies their listing criteria.
 
 Acceptance:
 
@@ -303,6 +312,8 @@ Acceptance:
 - The current Clearworks resource-page analytics emit useful events, but the complete journey is not deterministically joinable and the homepage/booking/dedupe paths remain incomplete.
 - The accessible Google Ads-derived dataset reports meaningful broad US demand (`AI in construction` 1,900/month; `AI for architects` 720; `AI in architecture` 590; `AI tools for architects` 140), while most exact AEC consultant/audit/local/size phrases returned zero reported volume. Zero reported is not proof of zero searches.
 - A generic web-search discovery tool returned Clearworks pages for `where should an architecture firm start with AI`, `which AI tools should an architecture firm standardize`, and `Modern AEC Firm Playbook`; AEC Hub pages were also returned for the first two. The provider and ordering are abstracted, so this is page-discovery evidence only—not Google/Bing rank, ordering, or coexistence proof. A user-run Google search on 2026-09-26 did not show Clearworks for the first query.
+- Direct Search Console truth is narrower: the Aug 23-Sep 24 window recorded 20 clicks and 380 impressions, but the visible query table was overwhelmingly branded. `clearworks` produced 5 clicks/139 impressions; `ai consultant` produced 0 clicks/1 impression. The homepage produced all 20 recorded clicks. This supports publishing and measuring non-branded AEC decision pages; it does not establish current generic visibility.
+- Search Console initially contained no submitted sitemap. The live `/sitemap.xml` was submitted Sep 26 and read back `Success` with 20 discovered pages. The Sep 20 Page Indexing snapshot (6 indexed, 1 redirect exclusion) predates that submission and must not be treated as the new steady state.
 - Google blocked the isolated localized inspection, so local-pack visibility remains unknown pending Search Console/GBP or an authorized local-rank data source.
 
 These facts support building the measurement and proof loop first. They do not prove that any specific content tactic will cause rankings or citations.

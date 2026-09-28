@@ -430,7 +430,7 @@ Expected result: one auditable merge commit with upstream as its second parent, 
 
 - [ ] Run `reviewify` against parent 1 of the merge. Review must check scope, conflict resolutions, local invariant preservation, upstream behavior coverage, and any silent dropped assertions.
 - [ ] Repair findings on the same task branch, rerun affected tests and the full gate, and obtain a clean independent re-review.
-- [ ] Push the task branch and open a PR; never push directly to `main`:
+- [ ] Push the task branch and open a PR; never push directly to `main`. PR body is the consolidated final verification ledger (historical Task 8 / review-repair ledgers stay on disk and are not the `--body-file`):
 
 ```bash
 git push -u origin integrate/upstream-6f938380-20260928
@@ -439,7 +439,7 @@ gh pr create \
   --base main \
   --head integrate/upstream-6f938380-20260928 \
   --title "merge(upstream): catch up through 6f938380" \
-  --body-file docs/pipeline/evidence/2026-09-28-upstream-merge-verification.md
+  --body-file docs/pipeline/evidence/2026-09-28-upstream-final-verification.md
 ```
 
 - [ ] Require Build & Type Check, Unit Tests, Codex parity, Dashboard Build, and Operational-leak scan to pass on the immutable PR SHA.

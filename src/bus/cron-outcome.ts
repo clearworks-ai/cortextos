@@ -82,8 +82,35 @@ function hmacId(key: Buffer, prefix: 'agent' | 'cron' | 'run', value: string): s
   return prefix + '_v1_' + createHmac('sha256', key).update(value).digest('hex').slice(0, 32);
 }
 
+function isRawIdentity(value: unknown): value is string {
+  return typeof value === 'string' && value.length >= 1 && value.length <= 1024;
+}
+
 function assertRawIdentity(value: string): void {
-  if (typeof value !== 'string' || value.length < 1 || value.length > 1024) throw new Error('invalid cron receipt identity');
+  if (!isRawIdentity(value)) throw new Error('invalid cron receipt identity');
+}
+
+function groupKey(agentId: string, cronId: string): string {
+  return agentId + '\u0000' + cronId;
+}
+
+function groupNonterminalLocked(index: CronOutcomeIndex): Map<string, CronOutcomeReceipt[]> {
+  const groups = new Map<string, CronOutcomeReceipt[]>();
+  for (const row of Object.values(index.nonterminal)) {
+    const key = groupKey(row.agent, row.cron);
+    const group = groups.get(key);
+    if (group) group.push(row);
+    else groups.set(key, [row]);
+  }
+  for (const group of groups.values()) {
+    group.sort((left, right) => left.scheduled_at.localeCompare(right.scheduled_at) || left.at.localeCompare(right.at));
+  }
+  return groups;
+}
+
+function pickActiveOutcome(matches: CronOutcomeReceipt[] | undefined): CronOutcomeReceipt | undefined {
+  if (!matches?.length) return undefined;
+  return matches.find(row => row.state === 'scheduled' || row.state === 'started') ?? matches[0];
 }
 
 export function cronRunId(stateDir: string, agent: string, cron: string, scheduledAt: string): string {
@@ -291,7 +318,7 @@ function lookupActiveOutcomeLocked(
   const matches = Object.values(index.nonterminal)
     .filter(row => row.agent === agentId && row.cron === cronId)
     .sort((left, right) => left.scheduled_at.localeCompare(right.scheduled_at) || left.at.localeCompare(right.at));
-  return matches.find(row => row.state === 'scheduled' || row.state === 'started') ?? matches[0];
+  return pickActiveOutcome(matches);
 }
 
 export function getActiveCronOutcome(stateDir: string, agent: string, cron: string): CronOutcomeReceipt | undefined {
@@ -312,16 +339,17 @@ export function getActiveCronOutcomes(
   crons: readonly string[],
 ): Map<string, CronOutcomeReceipt | undefined> {
   assertRawIdentity(agent);
-  for (const cron of crons) assertRawIdentity(cron);
-  if (crons.length === 0) return new Map();
+  const valid = crons.filter(isRawIdentity);
+  if (valid.length === 0) return new Map();
   return withCronOutcomeLock(stateDir, () => {
     const index = readIndexLocked(stateDir);
     recoverJournalLocked(stateDir, index);
     const key = readOrCreateSecretLocked(stateDir);
     const agentId = hmacId(key, 'agent', agent);
+    const groups = groupNonterminalLocked(index);
     const out = new Map<string, CronOutcomeReceipt | undefined>();
-    for (const cron of crons) {
-      out.set(cron, lookupActiveOutcomeLocked(index, key, agent, cron, agentId));
+    for (const cron of valid) {
+      out.set(cron, pickActiveOutcome(groups.get(groupKey(agentId, hmacId(key, 'cron', cron)))));
     }
     return out;
   });

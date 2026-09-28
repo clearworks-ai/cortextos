@@ -139,10 +139,19 @@ jobs:
 
       - name: Sanitized coverage receipt
         if: always()
-        run: |
-          node -e 'console.log(JSON.stringify({job:"lifecycle-connectors",node:process.version,platform:process.platform,result:process.env.RESULT||"ran"}))'
         env:
           RESULT: ${{ job.status }}
+        run: |
+          mkdir -p ci-receipts
+          node -e 'const fs=require("fs"); fs.writeFileSync("ci-receipts/lifecycle-connectors.json", JSON.stringify({job:"lifecycle-connectors",sha:process.env.GITHUB_SHA||"",node:process.version,platform:process.platform,result:process.env.RESULT||"unknown"})+"\n")'
+
+      - name: Upload sanitized coverage receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lifecycle-connectors-node${{ matrix.node }}-${{ github.sha }}
+          path: ci-receipts/lifecycle-connectors.json
+          if-no-files-found: error
 
   lifecycle-connectors-100x:
     name: Lifecycle/connector 100x (Node 24)
@@ -170,8 +179,17 @@ jobs:
 
       - name: Sanitized 100x receipt
         if: always()
-        run: |
-          node -e 'console.log(JSON.stringify({job:"lifecycle-connectors-100x",node:process.version,repeat:Number(process.env.REPEAT),result:process.env.RESULT}))'
         env:
           RESULT: ${{ job.status }}
           REPEAT: '100'
+        run: |
+          mkdir -p ci-receipts
+          node -e 'const fs=require("fs"); fs.writeFileSync("ci-receipts/lifecycle-connectors-100x.json", JSON.stringify({job:"lifecycle-connectors-100x",sha:process.env.GITHUB_SHA||"",node:process.version,repeat:Number(process.env.REPEAT),result:process.env.RESULT||"unknown"})+"\n")'
+
+      - name: Upload sanitized 100x receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lifecycle-connectors-100x-${{ github.sha }}
+          path: ci-receipts/lifecycle-connectors-100x.json
+          if-no-files-found: error

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { randomUUID } from 'crypto';
+import { createHmac, randomUUID } from 'crypto';
 import {
   appendEventReceipt,
   canonicalEventId,
@@ -162,6 +162,51 @@ describe('event and cron receipt foundation', () => {
     const batched = getActiveCronOutcomes(stateDir, 'larry', ['ordered', 'missing']);
     expect(batched.get('ordered')?.run_id).toBe(newerRun);
     expect(batched.get('missing')).toBeUndefined();
+  });
+
+  it('recovers a valid pending outcome when a sibling cron name is invalid', () => {
+    const at = '2026-08-07T00:00:00.000Z';
+    const runId = cronRunId(stateDir, 'larry', 'good', at);
+    appendCronOutcome(stateDir, { run_id: runId, attempt: 1, agent: 'larry', cron: 'good', state: 'scheduled', at, scheduled_at: at });
+    const batched = getActiveCronOutcomes(stateDir, 'larry', ['', 'good']);
+    expect(batched.has('')).toBe(false);
+    expect(batched.get('good')?.run_id).toBe(runId);
+  });
+
+  it('looks up a populated 2000-cron pending backlog under the 5s bound', () => {
+    const key = Buffer.from('0'.repeat(64), 'hex');
+    const hmac = (prefix: 'agent' | 'cron', value: string) =>
+      prefix + '_v1_' + createHmac('sha256', key).update(value).digest('hex').slice(0, 32);
+    const agentId = hmac('agent', 'larry');
+    const at = '2026-08-07T00:00:00.000Z';
+    const names = Array.from({ length: 2000 }, (_, index) => `cron-${index}`);
+    const runIds = names.map((_, index) => 'cron_v1_' + index.toString(16).padStart(32, '0'));
+    const latest: Record<string, object> = {};
+    const nonterminal: Record<string, object> = {};
+    for (let index = 0; index < names.length; index += 1) {
+      const row = {
+        version: 2,
+        receipt_id: `00000000-0000-4000-8000-${index.toString(16).padStart(12, '0')}`,
+        run_id: runIds[index],
+        attempt: 1,
+        agent: agentId,
+        cron: hmac('cron', names[index]),
+        state: 'scheduled',
+        at,
+        scheduled_at: at,
+      };
+      latest[row.run_id] = row;
+      nonterminal[row.run_id] = row;
+    }
+    writeFileSync(join(stateDir, 'cron-outcome-secret'), '0'.repeat(64));
+    writeFileSync(join(stateDir, 'cron-outcome-index.json'), JSON.stringify({ version: 1, latest, nonterminal, idempotent: {} }));
+    const started = Date.now();
+    const batched = getActiveCronOutcomes(stateDir, 'larry', names);
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(batched.size).toBe(2000);
+    for (let index = 0; index < names.length; index += 1) {
+      expect(batched.get(names[index])?.run_id).toBe(runIds[index]);
+    }
   });
 
   it('prunes completed cron runs when the idempotency index reaches its bound', () => {

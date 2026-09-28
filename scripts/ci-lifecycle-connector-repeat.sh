@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# Repeat race-sensitive lifecycle + connector files. A single failure exits.
-# Bounded: REPEAT clamped to 1–100; two globs only; counts-only stdout summary.
+# Reviewed 100x manifest of selected race-sensitive lifecycle files from
+# docs/pipeline/plans/2026-09-28-upstream-catchup.md Task 5.
+# Named set only — not exhaustive of all daemon/PTY tests:
+#   map-entry race, eviction round4, Hermes force-fresh timing,
+#   PTY disposal, connector tests.
+# Bounded: REPEAT clamped to 1–100; counts-only stdout summary.
 set -euo pipefail
 
 n="${REPEAT:-100}"
@@ -11,6 +15,9 @@ fi
 
 files=(
   tests/unit/daemon/agent-manager-map-entry-race.test.ts
+  tests/unit/daemon/agent-manager-eviction-race-round4.test.ts
+  tests/unit/daemon/agent-process-hermes.test.ts
+  tests/unit/pty/pty-host-dispose.test.ts
   tests/unit/connectors
 )
 

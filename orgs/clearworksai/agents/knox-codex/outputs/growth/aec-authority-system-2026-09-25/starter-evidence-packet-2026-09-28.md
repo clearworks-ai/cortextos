@@ -1,8 +1,11 @@
 # `/starter` evidence packet
 
-Date: 2026-09-28  
-Governing task: `task_1790398044100_06722606`  
-Canonical page: `https://clearworks.ai/starter`  
+Date: 2026-09-28
+
+Governing task: `task_1790398044100_06722606`
+
+Canonical page: `https://clearworks.ai/starter`
+
 Status: internal evidence assembly; **not approved for drafting or publication**
 
 ## Decision
@@ -36,7 +39,8 @@ No additional broad SEO, AEO, GEO, competitor, or tool-directory research is req
 
 ### Current public page
 
-`/Users/joshweiss/code/clearworks-sites/site/src/pages/starter.astro`  
+`/Users/joshweiss/code/clearworks-sites/site/src/pages/starter.astro`
+
 SHA-256: `c64814e1ebc82cb4dfadbb98e91ab89c026c69232f941e14faa6036632be91ea`
 
 The current page already supports:
@@ -53,7 +57,8 @@ It does not yet specify the first engagement, client inputs, acceptance, scope-c
 
 ### Publication brief
 
-`content-briefs/01-ai-operations-implementation-architecture-firms.md`  
+`content-briefs/01-ai-operations-implementation-architecture-firms.md`
+
 SHA-256: `14994e1bd653311ded68d16d1e7ae9753faee80350fcafc027552027539bdaad`
 
 The brief owns the buyer decision, allowed and prohibited claims, proposed page architecture, internal links, CTA, and measurement contract. It remains a private planning brief.
@@ -122,4 +127,3 @@ These private records prove a real problem and a bounded working proof. They do 
 ## Gate result
 
 `/starter` is ready for **bounded evidence production**, not page drafting. The fastest path is to close items 1, 5, 7, and 8 internally while preparing item 2 as two permission alternatives. Items 3, 4, and 6 then become a short approval packet instead of a new research project.
-

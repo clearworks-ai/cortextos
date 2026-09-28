@@ -133,6 +133,10 @@ This lane does **not** need another broad strategy memo. The next bounded work i
 
 External directory submissions, public page publication, production analytics changes, and the Zcal subscriber lifecycle test remain separately authorized actions.
 
+### Evidence-assembly receipt — 2026-09-28
+
+The nine-item `/starter` packet has been reconciled in `starter-evidence-packet-2026-09-28.md`. Current result: one usable baseline, four partial inputs, three permission/approval gates, and the downstream site-branch gate still closed. The packet corrects the Alloi burden to the direct evidence—approximately six hours / one working day per week—and treats “30 hours per month” as an unapproved derived shorthand. No site branch or publication action is authorized by this receipt.
+
 ## Governing sources
 
 - `first-content-batch.md`

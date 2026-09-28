@@ -126,4 +126,14 @@ These private records prove a real problem and a bounded working proof. They do 
 
 ## Gate result
 
-`/starter` is ready for **bounded evidence production**, not page drafting. The fastest path is to close items 1, 5, 7, and 8 internally while preparing item 2 as two permission alternatives. Items 3, 4, and 6 then become a short approval packet instead of a new research project.
+`/starter` is ready for **bounded evidence production**, not page drafting. The fastest path is to advance items 1, 5, 7, and 8 internally while preparing item 2 as two permission alternatives. Closure still requires the named content, specialist, commercial, and public-example approvals. Items 3, 4, and 6 then become a short approval packet instead of a new research project.
+
+## Evidence-production receipt — 2026-09-28
+
+Three internal seams now have concrete review artifacts:
+
+- item 1: `starter-workflow-diagram-spec-2026-09-28.md`;
+- item 5: `starter-data-security-boundary-draft-2026-09-28.md`;
+- item 7: `starter-commercial-terms-matrix-2026-09-28.md`.
+
+They remain drafts. The diagram needs content approval and a permissioned example; the boundary needs named specialist review; the commercial matrix exposes the unresolved Audit-first Partnership versus separately scoped bounded-build routing decision plus price, term, scope-change, handoff, and exit decisions. Their existence does not open the site branch.

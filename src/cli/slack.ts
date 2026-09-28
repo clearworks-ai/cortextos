@@ -98,10 +98,8 @@ const discoverChannelsCommand = new Command('discover-channels')
   .action(async () => {
     const api = new SlackAPI(requireToken());
     const channels = await api.listChannels();
-    const visible = channels.filter((c) => c.is_member !== false);
-    for (const c of visible) {
-      const prefix = c.is_private ? '🔒' : '#';
-      console.log(`${c.id}\t${prefix}${c.name}`);
+    for (const c of channels) {
+      console.log(`${c.id}\t#${c.name}`);
     }
   });
 

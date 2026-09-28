@@ -9,6 +9,8 @@ import { migrateCronsForAgent } from './cron-migration.js';
 import type { CronDefinition } from '../types/index.js';
 import { TelegramAPI } from '../telegram/api.js';
 import { TelegramPoller } from '../telegram/poller.js';
+import { TelegramConnector, NullConnector } from '../connectors/index.js';
+import type { MessageConnector } from '../connectors/index.js';
 import { SlackAPI } from '../slack/api.js';
 import { SlackSocketModeClient } from '../slack/socket-mode.js';
 import { dispatchSlackMessage, makeUserNameResolver, type DispatchTarget } from '../slack/dispatcher.js';
@@ -916,6 +918,9 @@ export class AgentManager {
 
       if (entry.poller) entry.poller.stop();
       if (entry.activityPoller) entry.activityPoller.stop();
+      if (typeof entry.process.getConnector === 'function') {
+        void entry.process.getConnector()?.stopPolling();
+      }
       for (const buzzEntry of this.buzzClients.values()) {
         buzzEntry.dispatcher.unregister(name);
       }
@@ -990,6 +995,9 @@ export class AgentManager {
     entry.stopped = true;
     if (entry.poller) entry.poller.stop();
     if (entry.activityPoller) entry.activityPoller.stop();
+    if (typeof entry.process.getConnector === 'function') {
+      void entry.process.getConnector()?.stopPolling();
+    }
     for (const buzzEntry of this.buzzClients.values()) {
       buzzEntry.dispatcher.unregister(name);
     }
@@ -1166,6 +1174,11 @@ export class AgentManager {
           : null;
         try { stale.poller?.stop(); } catch { /* best-effort */ }
         try { stale.activityPoller?.stop(); } catch { /* best-effort */ }
+        try {
+          if (typeof stale.process.getConnector === 'function') {
+            void stale.process.getConnector()?.stopPolling();
+          }
+        } catch { /* best-effort */ }
         try { stale.checker.stop(); } catch { /* best-effort */ }
         // process.stop() sets status='stopped', which neutralizes any pending
         // crash-backoff setTimeout on the old AgentProcess (its `if (status ===
@@ -1281,8 +1294,11 @@ export class AgentManager {
     let chatId: string | undefined;
     let allowedUserId: string | undefined;
     let botToken: string | undefined;
+    let connector: MessageConnector | null = null;
 
-    if (existsSync(agentEnvFile)) {
+    if (config.connector === 'none') {
+      connector = new NullConnector();
+    } else if (existsSync(agentEnvFile)) {
       // stripBom: Windows tooling writes .env with a UTF-8 BOM that breaks
       // /^BOT_TOKEN=/m when BOT_TOKEN is on line 1 (2026-05-16 silent
       // smith-not-receiving-Telegram incident). See src/utils/strip-bom.ts.
@@ -1330,7 +1346,14 @@ export class AgentManager {
       }
 
       if (botToken && chatId) {
-        telegramApi = new TelegramAPI(botToken);
+        // Shared TelegramAPI: construct the connector first, then extract its
+        // internal API for legacy poller/handle paths (Codex M2.cr).
+        connector = new TelegramConnector(agentDir, {
+          BOT_TOKEN: botToken,
+          CHAT_ID: chatId,
+          ALLOWED_USER: allowedUserId ?? '',
+        });
+        telegramApi = (connector as TelegramConnector).rawTelegramApi();
         // Don't log sensitive user IDs — just indicate the gate is enabled
         log(`Telegram configured (chat_id: ****${String(chatId).slice(-4)}, allowed_user: enabled)`);
       }
@@ -1342,6 +1365,9 @@ export class AgentManager {
     // claude-code / hermes runtimes — those still use fast-checker.
     if (telegramApi && chatId) {
       agentProcess.setTelegramHandle(telegramApi, chatId);
+    }
+    if (connector) {
+      agentProcess.setConnector(connector);
     }
 
     // Task 2.5 Step 1: one AgentLifecycleSupervisor per canonical identity,
@@ -1364,6 +1390,7 @@ export class AgentManager {
       // FastChecker only needs the first ID for its single-recipient typing
       // indicator / quick-checks. Multi-user is enforced by the gates above.
       allowedUserId: allowedUserId ? parseInt(allowedUserId.split(',')[0].trim(), 10) : undefined,
+      connector: connector ?? undefined,
       // Task 3.3: same pairing AgentProcess already gets above (Task 2.5) —
       // the supervisor is always constructed, but `pollCycle`'s durable-
       // acceptance-before-ACK path is only exercised when this agent is
@@ -2184,6 +2211,9 @@ export class AgentManager {
 
       if (entry.poller) entry.poller.stop();
       if (entry.activityPoller) entry.activityPoller.stop();
+      if (typeof entry.process.getConnector === 'function') {
+        void entry.process.getConnector()?.stopPolling();
+      }
       // Unregister from every org's Buzz dispatcher — harmless no-op for orgs
       // this agent was never registered in. We don't track which org this
       // agent belongs to on the entry itself, so this sweeps all of them

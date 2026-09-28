@@ -49,14 +49,12 @@ describe('AgentManager.inspectAgentOp — issue #346 (DEDUPED vs NOT_FOUND)', ()
     // Simulate an in-flight start by injecting an entry into the private map.
     // This is the exact precondition that triggers the BUG-011 dedup branch
     // in startAgent — we need to confirm it surfaces as DEDUPED, not NOT_FOUND.
-    // The entry must report a LIVE pid so inspectAgentOp's dead-registry
-    // reconciliation keeps it (a phantom/dead entry would be reaped, turning
-    // this into a legitimate NOT_FOUND — a different case).
+    // DEDUP requires a genuinely-alive entry (process.kill(pid, 0) succeeds)
+    // plus checker.stop for teardown fakes used elsewhere in this file.
     (am as unknown as { agents: Map<string, unknown> }).agents.set('alice', {
-      process: { getStatus: () => ({ status: 'running', pid: 1234 }) },
+      process: { getStatus: () => ({ name: 'alice', status: 'running', pid: process.pid }) },
       checker: { stop() {} },
     } as unknown);
-    vi.spyOn(process, 'kill').mockImplementation(() => undefined as unknown as true);
 
     const r = am.inspectAgentOp('start', 'alice');
     expect(r.ok).toBe(false);

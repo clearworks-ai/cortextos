@@ -30,6 +30,7 @@ vi.mock('../../../src/daemon/agent-process.js', () => ({
     onExit() { /* no-op */ }
     onStatusChanged() { /* no-op */ }
     setTelegramHandle() { /* no-op */ }
+    setConnector() { /* no-op */ }
   },
 }));
 vi.mock('../../../src/daemon/fast-checker.js', () => ({

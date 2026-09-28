@@ -104,6 +104,10 @@ function baseEnv(ctx: CliContext): NodeJS.ProcessEnv {
     CTX_AGENT_NAME: AGENT,
     CTX_ORG: ORG,
     BOT_TOKEN: '123456:test-token',
+    // D-04 Happy Eyeballs uses node:https and bypasses this preload's fetch
+    // mock. This test proves dedup TOCTOU, not transport; use the supported
+    // opt-out so send-telegram stays on mocked fetch.
+    CORTEXTOS_TELEGRAM_UNPOOLED_HTTPS: '0',
     NODE_OPTIONS: `--require ${ctx.preloadPath}`,
   };
 }

@@ -8,12 +8,13 @@ vi.mock('../../../src/bus/system.js', async (importActual) => ({
   ...(await importActual<typeof import('../../../src/bus/system.js')>()),
   hardRestart: vi.fn(),
 }));
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync, utimesSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync, mkdirSync, existsSync, utimesSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { createHash } from 'crypto';
 import { FastChecker } from '../../../src/daemon/fast-checker';
 import { hardRestart } from '../../../src/bus/system.js';
+import { acquireLock, releaseLock } from '../../../src/utils/lock';
 import type { BusPaths, TelegramCallbackQuery } from '../../../src/types';
 import { LifecycleStateStore } from '../../../src/daemon/lifecycle/state-store';
 import { AgentLifecycleSupervisor, type RuntimeAdapter } from '../../../src/daemon/lifecycle/supervisor';
@@ -26,6 +27,7 @@ function createMockAgent(name = 'test-agent', ctxRoot = '/tmp/framework') {
     isBootstrapped: vi.fn().mockReturnValue(true),
     isRunning: vi.fn().mockReturnValue(true),
     injectMessage: vi.fn().mockReturnValue(true),
+    injectMessageDetailed: vi.fn().mockReturnValue({ ok: true }),
     write: vi.fn(),
     getEnvironment: vi.fn().mockReturnValue({
       instanceId: 'test-instance',
@@ -1187,6 +1189,25 @@ describe('FastChecker', () => {
       expect(checker.isDuplicate('msg-5099')).toBe(true); // still in window
     }, 30000);
   });
+  describe('inbox lock failure visibility', () => {
+    it('logs the failure instead of treating the inbox as empty', async () => {
+      const log = vi.fn();
+      const checker = new FastChecker(createMockAgent(), paths, '/tmp/framework', { log }) as any;
+      // Hold the inbox lock from "another process" so checkInbox's acquire is refused.
+      const lockHandle = acquireLock(paths.inbox);
+      expect(lockHandle).not.toBe(false);
+
+      try {
+        await checker.pollCycle();
+      } finally {
+        if (lockHandle) releaseLock(lockHandle);
+      }
+
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('Inbox check failed'));
+      expect(log).toHaveBeenCalledWith(expect.stringContaining(paths.inbox));
+    });
+  });
+
 });
 
 describe('FastChecker pending Telegram queue persistence', () => {

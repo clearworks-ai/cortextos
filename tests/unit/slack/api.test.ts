@@ -74,7 +74,7 @@ describe('SlackAPI', () => {
           }),
         });
       const api = new SlackAPI('xoxb-abc');
-      const channels = await api.listChannels();
+      const channels = await api.listChannels(false);
       expect(channels.map((c) => c.id)).toEqual(['C1', 'C2']);
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });

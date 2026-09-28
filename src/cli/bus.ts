@@ -14,7 +14,7 @@ import { selfRestart, hardRestart, autoCommit, checkGoalStaleness, postActivity 
 import { createExperiment, runExperiment, evaluateExperiment, listExperiments, gatherContext, manageCycle, loadExperimentConfig } from '../bus/experiment.js';
 import { sweepExperiments } from '../bus/experiment-sweep.js';
 import { browseCatalog, installCommunityItem, prepareSubmission, submitCommunityItem } from '../bus/catalog.js';
-import { collectMetrics, parseUsageOutput, storeUsageData, checkUpstream, collectTelegramCommands, registerTelegramCommands } from '../bus/metrics.js';
+import { collectMetrics, parseUsageOutput, storeUsageData, checkUpstream, checkMergeGateMetrics, collectTelegramCommands, registerTelegramCommands } from '../bus/metrics.js';
 import { createApproval, updateApproval } from '../bus/approval.js';
 import { createReminder, listReminders, ackReminder, pruneReminders } from '../bus/reminders.js';
 import { updateCronFire, parseDurationMs, readCronState } from '../bus/cron-state.js';
@@ -483,7 +483,7 @@ busCommand
       process.exit(1);
     }
     try {
-      logEvent(paths, env.agentName, env.org, 'message', 'agent_message_sent', 'info', JSON.stringify({ to, priority, msg_id: msgId, reply_to: effectiveReplyTo ?? null }));
+      logEvent(paths, env.agentName, env.org, 'message', 'agent_message_sent', 'info', JSON.stringify({ to, priority, msg_id: msgId, reply_to: effectiveReplyTo ?? null }), { refreshHeartbeat: true });
     } catch { /* non-fatal */ }
     console.log(msgId);
   });
@@ -493,8 +493,15 @@ busCommand
   .action(() => {
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
-    const messages = checkInbox(paths);
-    console.log(JSON.stringify(messages));
+    // An unavailable inbox lock must exit nonzero with an error — printing []
+    // would be indistinguishable from a successfully-read empty inbox.
+    try {
+      const messages = checkInbox(paths);
+      console.log(JSON.stringify(messages));
+    } catch (err) {
+      console.error(`check-inbox failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+    }
   });
 
 busCommand
@@ -505,7 +512,7 @@ busCommand
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
     ackInbox(paths, id);
     try {
-      logEvent(paths, env.agentName, env.org, 'message', 'inbox_ack', 'info', JSON.stringify({ msg_id: id }));
+      logEvent(paths, env.agentName, env.org, 'message', 'inbox_ack', 'info', JSON.stringify({ msg_id: id }), { refreshHeartbeat: true });
     } catch { /* non-fatal */ }
     console.log(`ACK'd ${id}`);
   });
@@ -964,7 +971,7 @@ busCommand
     }
     const env = resolveEnv();
     const paths = resolvePaths(env.agentName, env.instanceId, env.org);
-    logEvent(paths, env.agentName, env.org, category as EventCategory, event, severity as EventSeverity, opts.meta);
+    logEvent(paths, env.agentName, env.org, category as EventCategory, event, severity as EventSeverity, opts.meta, { refreshHeartbeat: true });
     console.log(`Logged ${category}/${event} (${severity})`);
   });
 
@@ -1972,6 +1979,16 @@ busCommand
   });
 
 busCommand
+  .command('collect-merge-gate-metrics')
+  .description('Report gated_queue_depth/oldest_gated_age_days from the gh merge-ready label (canonical source; label lifecycle is operator-owned, this only reads)')
+  .argument('<repo>', 'GitHub repo in owner/name form')
+  .option('--label <name>', 'Label marking review-PASS+bake-elapsed PRs', 'merge-ready')
+  .action((repo: string, opts: { label?: string }) => {
+    const result = checkMergeGateMetrics(repo, { label: opts.label });
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+busCommand
   .command('register-telegram-commands')
   .description('Register skills as Telegram bot commands')
   .argument('<bot-token>', 'Telegram bot token')
@@ -2287,7 +2304,7 @@ busCommand
         try {
           const paths = resolvePaths(env.agentName, env.instanceId, env.org);
           const preview = message.length > 120 ? message.slice(0, 120) + '…' : message;
-          logEvent(paths, env.agentName, env.org, 'message', 'telegram_sent', 'info', JSON.stringify({ chat_id: chatId, message_id: sentMessageId, preview }));
+          logEvent(paths, env.agentName, env.org, 'message', 'telegram_sent', 'info', JSON.stringify({ chat_id: chatId, message_id: sentMessageId, preview }), { refreshHeartbeat: true });
         } catch { /* non-fatal */ }
       }
 
@@ -4888,7 +4905,7 @@ busCommand
                 line: trimmed,
                 session: sessionName,
                 high_signal: isHighSignal,
-              });
+              }, { refreshHeartbeat: true });
             } catch { /* Never fail the stream */ }
           } else {
             logLine(`[event] ${trimmed}`);
@@ -5080,6 +5097,100 @@ busCommand
     }
   });
 
+busCommand
+  .command('send-slack')
+  .description('Send a message to a Slack channel')
+  .argument('<channel>', 'Slack channel ID (e.g. C1234567890) or name (e.g. #general)')
+  .argument('<message>', 'Message text')
+  .action(async (channel: string, message: string) => {
+    const env = resolveEnv();
+    let slackToken = '';
+
+    if (env.agentDir) {
+      const { readFileSync, existsSync } = require('fs');
+      const { join } = require('path');
+      const agentEnv = join(env.agentDir, '.env');
+      if (existsSync(agentEnv)) {
+        const content = readFileSync(agentEnv, 'utf-8') as string;
+        const match = content.match(/^SLACK_BOT_TOKEN=(.+)$/m);
+        if (match?.[1]?.trim()) slackToken = match[1].trim();
+      }
+    }
+
+    if (!slackToken) slackToken = process.env.SLACK_BOT_TOKEN ?? '';
+
+    if (!slackToken) {
+      console.error('Warning: SLACK_BOT_TOKEN not set. Skipping Slack message. Set it in your agent .env file or as SLACK_BOT_TOKEN env var.');
+      process.exit(0);
+    }
+
+    const { SlackAPI } = await import('../slack/api.js');
+    const api = new SlackAPI(slackToken);
+    try {
+      await api.postMessage(channel, message, await resolveSlackDisplayIdentity(env));
+      console.log(`Slack message sent to ${channel}`);
+    } catch (err) {
+      console.error(`Failed to send Slack message: ${err}`);
+      process.exit(1);
+    }
+  });
+
+/** D4 display identity from the agent's slack.json, when present — GATED.
+ * The persona gate is structural: only gateSlackDisplayIdentity can produce a
+ * value postMessage accepts, and it permits nothing but the agent's plain
+ * functional name (custom names/icons loudly suppressed) until the
+ * brand/persona review exists as an authority. */
+async function resolveSlackDisplayIdentity(
+  env: ReturnType<typeof resolveEnv>,
+): Promise<import('../slack/slack-routing.js').GatedDisplayIdentity | undefined> {
+  if (!env.frameworkRoot || !env.org || !env.agentName) return undefined;
+  const { resolveGatedDisplayIdentity } = await import('../slack/slack-routing.js');
+  return resolveGatedDisplayIdentity(env.frameworkRoot, env.org, env.agentName, (line) =>
+    console.error(line),
+  );
+}
+
+/** Shared Slack token resolution: agent .env first, then process env — the
+ * same flow as send-slack so all three commands act as the same identity. */
+function resolveSlackBotToken(env: ReturnType<typeof resolveEnv>): string {
+  if (env.agentDir) {
+    const { readFileSync, existsSync } = require('fs');
+    const { join } = require('path');
+    const agentEnv = join(env.agentDir, '.env');
+    if (existsSync(agentEnv)) {
+      const content = readFileSync(agentEnv, 'utf-8') as string;
+      const match = content.match(/^SLACK_BOT_TOKEN=(.+)$/m);
+      if (match?.[1]?.trim()) return match[1].trim();
+    }
+  }
+  return process.env.SLACK_BOT_TOKEN ?? '';
+}
+
+busCommand
+  .command('slack-test-send')
+  .description('Post a test message to a Slack channel and print the outcome (config verification aid)')
+  .argument('<channel>', 'Slack channel ID (e.g. C1234567890)')
+  .argument('[message]', 'Test message text', 'cortextos slack test message')
+  .action(async (channel: string, message: string) => {
+    const env = resolveEnv();
+    const slackToken = resolveSlackBotToken(env);
+    if (!slackToken) {
+      console.error('Error: SLACK_BOT_TOKEN not set (agent .env or environment).');
+      process.exit(1);
+    }
+    const { SlackAPI } = await import('../slack/api.js');
+    try {
+      await new SlackAPI(slackToken)
+        .postMessage(channel, message, await resolveSlackDisplayIdentity(env));
+      console.log(`OK: test message posted to ${channel}`);
+    } catch (err) {
+      // Unlike send-slack's soft-skip, a TEST send failing is the answer the
+      // operator asked for — exit nonzero with the API's reason.
+      console.error(`FAIL: ${err instanceof Error ? err.message : err}`);
+      process.exit(1);
+    }
+  });
+
 // WS10 R8: memory-correctness — verify file/symbol/wikilink claims in MEMORY.md.
 busCommand
   .command('memory-correctness')
@@ -5143,6 +5254,33 @@ busCommand
       if (hardFails.length > 0) {
         process.exit(1);
       }
+    }
+  });
+
+busCommand
+  .command('slack-discover-channels')
+  .description('List Slack channels the bot is a member of, with ids (slack.json authoring aid)')
+  .option('--all', 'Include channels the bot is NOT a member of', false)
+  .action(async (opts: { all?: boolean }) => {
+    const env = resolveEnv();
+    const slackToken = resolveSlackBotToken(env);
+    if (!slackToken) {
+      console.error('Error: SLACK_BOT_TOKEN not set (agent .env or environment).');
+      process.exit(1);
+    }
+    const { SlackAPI } = await import('../slack/api.js');
+    try {
+      const channels = await new SlackAPI(slackToken).listChannels(!opts.all);
+      if (channels.length === 0) {
+        console.log(opts.all ? 'No channels visible to this bot.' : 'Bot is not a member of any channel. Invite it, or use --all to list visible channels.');
+        return;
+      }
+      for (const c of channels) {
+        console.log(`${c.id}\t${c.name}${c.isMember ? '' : '\t(not a member)'}`);
+      }
+    } catch (err) {
+      console.error(`FAIL: ${err instanceof Error ? err.message : err}`);
+      process.exit(1);
     }
   });
 

@@ -62,7 +62,7 @@ export class BuzzRelayClient {
   private eoseSeen = new Set<string>();
 
   private pendingOks = new Map<string, PendingOk>();
-  private pendingAuthChallenge: { resolve: (challenge: string) => void; timer: ReturnType<typeof setTimeout> } | null = null;
+  private pendingAuthChallenge: { resolve: (challenge: string) => void; reject: (reason: string) => void; timer: ReturnType<typeof setTimeout> } | null = null;
 
   /** Why the client last stopped. Read by daemon supervision to decide whether to restart. */
   lastExitReason: string = '';
@@ -102,6 +102,11 @@ export class BuzzRelayClient {
    * orchestrator boot.
    */
   async start(): Promise<void> {
+    if (typeof WebSocket === 'undefined') {
+      this.log('WARN: native WebSocket not available — Buzz requires Node 22+; adapter inactive.');
+      this.lastExitReason = 'websocket-unavailable';
+      return;
+    }
     this.running = true;
     this.lastExitReason = '';
     while (this.running) {
@@ -233,6 +238,10 @@ export class BuzzRelayClient {
           clearTimeout(timer);
           resolve(challenge);
         },
+        reject: (reason: string) => {
+          clearTimeout(timer);
+          reject(new Error(reason));
+        },
         timer,
       };
     });
@@ -333,7 +342,7 @@ export class BuzzRelayClient {
     }
     this.pendingOks.clear();
     if (this.pendingAuthChallenge) {
-      clearTimeout(this.pendingAuthChallenge.timer);
+      this.pendingAuthChallenge.reject(reason);
       this.pendingAuthChallenge = null;
     }
   }

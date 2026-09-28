@@ -100,7 +100,12 @@ export async function dispatchSlackMessage(
  * connection itself.
  */
 export function makeUserNameResolver(
-  fetchUserInfo: (userId: string) => Promise<{ real_name?: string; name?: string } | null>,
+  fetchUserInfo: (userId: string) => Promise<{
+    real_name?: string;
+    name?: string;
+    handle?: string | null;
+    displayName?: string;
+  } | null>,
   ttlMs = 10 * 60 * 1000,
 ): UserNameResolver {
   const cache = new Map<string, { name: string; expiresAt: number }>();
@@ -110,7 +115,7 @@ export function makeUserNameResolver(
     let name = userId; // fall back to the raw id if the lookup fails
     try {
       const info = await fetchUserInfo(userId);
-      if (info) name = info.real_name || info.name || userId;
+      if (info) name = info.real_name || info.displayName || info.name || info.handle || userId;
     } catch {
       /* fall back to raw id — never block delivery on a display-name lookup */
     }

@@ -203,7 +203,7 @@ Each entry should answer: **"if my context was wiped right now, what would I nee
 
 **Mid-work inline notes - write immediately, don't wait for heartbeat:**
 ```bash
-echo "NOTE $(date -u +%H:%M UTC): <key decision / discovery / user preference / non-obvious thing>" >> "memory/$TODAY.md"
+echo "NOTE $(date -u +'%H:%M UTC'): <key decision / discovery / user preference / non-obvious thing>" >> "memory/$TODAY.md"
 ```
 Use this when: you make a significant decision, learn something about the user, hit a non-obvious situation, or encounter anything you would want the next session to know. One line is enough. The heartbeat is for structured summaries - inline notes capture the moment.
 

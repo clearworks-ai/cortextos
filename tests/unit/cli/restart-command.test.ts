@@ -5,7 +5,30 @@
  * pins the command-level wiring (name, required argument, --instance
  * option, description) instead of duplicating the marker-write tests.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// disable-resurrection fix: capture the IPC requests restart's action sends so
+// we can assert the stop-agent request carries userInitiated:false. The
+// stop-agent IPC handler is fire-and-forget, so restart's follow-up start races
+// in and queues a pendingRestart — userInitiated:false is what lets that queued
+// restart be honored (a hardcoded/absent true would DROP it, leaving the agent
+// down: the CI-invisible regression this test guards).
+const sentRequests: Array<Record<string, unknown>> = [];
+vi.mock('../../../src/daemon/ipc-server.js', () => ({
+  IPCClient: class {
+    constructor(_instance: string) { /* no-op */ }
+    async isDaemonRunning() { return true; }
+    async send(req: Record<string, unknown>) {
+      sentRequests.push(req);
+      return { success: true, data: `ok:${req.type}` };
+    }
+  },
+}));
+vi.mock('../../../src/cli/stop.js', () => ({
+  writeStopMarker: vi.fn(),
+  waitForAgentSettled: vi.fn().mockResolvedValue({ settled: true, last: { status: 'running' } }),
+}));
+
 import { restartCommand, requestSerializedRestart } from '../../../src/cli/restart';
 
 describe('issue #328: cortextos restart <agent>', () => {
@@ -53,5 +76,17 @@ describe('issue #328: cortextos restart <agent>', () => {
       agent: 'alice',
       source: 'cortextos restart',
     });
+  });
+});
+
+describe('disable-resurrection vs fork serialized restart (D-06)', () => {
+  beforeEach(() => { sentRequests.length = 0; });
+
+  it('sends one restart-agent request (not stop+start) and waits for running', async () => {
+    await restartCommand.parseAsync(['alice'], { from: 'user' });
+
+    expect(sentRequests).toEqual([
+      { type: 'restart-agent', agent: 'alice', source: 'cortextos restart' },
+    ]);
   });
 });

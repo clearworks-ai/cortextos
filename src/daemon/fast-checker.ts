@@ -4,7 +4,7 @@ import { join, dirname, basename } from 'path';
 import { createHash } from 'crypto';
 import { hardRestart } from '../bus/system.js';
 import type { InboxMessage, BusPaths, TelegramMessage, TelegramCallbackQuery } from '../types/index.js';
-import { checkInbox, ackInbox, sendMessage } from '../bus/message.js';
+import { checkInbox, ackInbox, sendMessage, InboxLockUnavailableError } from '../bus/message.js';
 import { updateApproval } from '../bus/approval.js';
 import { AgentProcess } from './agent-process.js';
 import type { AgentLifecycleSupervisor } from './lifecycle/supervisor.js';
@@ -137,6 +137,9 @@ export class FastChecker {
   private telegramApi?: TelegramAPI;
   private chatId?: string;
   private allowedUserId?: number;
+  // PR1: held alongside legacy telegramApi for connector-aware callers. Outbound
+  // sendMessage sites stay Telegram-direct until PR2.
+  private connector?: import('../connectors/index.js').MessageConnector;
 
   // Task 3.3: constructor-injected lifecycle supervisor (mirrors how
   // `AgentProcess` is already injected into this constructor). Only ever
@@ -242,6 +245,7 @@ export class FastChecker {
       telegramApi?: TelegramAPI;
       chatId?: string;
       allowedUserId?: number;
+      connector?: import('../connectors/index.js').MessageConnector;
       supervisor?: AgentLifecycleSupervisor;
       supervised?: boolean;
     } = {},
@@ -254,6 +258,7 @@ export class FastChecker {
     this.telegramApi = options.telegramApi;
     this.chatId = options.chatId;
     this.allowedUserId = options.allowedUserId;
+    this.connector = options.connector;
     this.supervisor = options.supervisor;
     this.supervised = options.supervised === true;
 
@@ -503,8 +508,15 @@ export class FastChecker {
     // below needs one acceptBatch input per source item, not one opaque
     // blob. Building this array costs nothing on the unsupervised path: it
     // is simply never read there.
-    const inboxMessages = checkInbox(this.paths);
     const inboxFormatted: Array<{ id: string; formatted: string }> = [];
+    let inboxMessages: InboxMessage[] = [];
+    try {
+      inboxMessages = checkInbox(this.paths);
+    } catch (err) {
+      // D-05: a refused inbox lock is a failure, never a silent empty inbox.
+      const detail = err instanceof InboxLockUnavailableError ? err.message : String(err);
+      this.log(`Inbox check failed: ${detail} (${this.paths.inbox})`);
+    }
     for (const msg of inboxMessages) {
       const formatted = this.formatInboxMessage(msg);
       messageBlock += formatted;

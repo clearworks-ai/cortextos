@@ -1,4 +1,4 @@
-import { appendFileSync, closeSync, existsSync, openSync, readFileSync, readSync, statSync, unlinkSync, writeFileSync } from 'fs';
+import { appendFileSync, closeSync, existsSync, openSync, readFileSync, readSync, renameSync, statSync, unlinkSync, writeFileSync } from 'fs';
 import { join, sep } from 'path';
 import { homedir } from 'os';
 import type { AgentConfig, AgentStatus, CtxEnv } from '../types/index.js';
@@ -8,6 +8,8 @@ import { HermesPTY, hermesDbExists } from '../pty/hermes-pty.js';
 import { OpencodePTY, opencodeSessionExists } from '../pty/opencode-pty.js';
 import { MessageDedup, injectMessage as injectMessageIntoPty } from '../pty/inject.js';
 import type { TelegramAPI } from '../telegram/api.js';
+import type { MessageConnector } from '../connectors/index.js';
+import { TelegramConnector } from '../connectors/index.js';
 import { ensureDir } from '../utils/atomic.js';
 import { writeCortextosEnv } from '../utils/env.js';
 import { getOverdueReminders } from '../bus/reminders.js';
@@ -20,11 +22,7 @@ import { snapshotDescendants, killSnapshotSurvivors } from '../utils/process-tre
 import type { ProcessSnapshotEntry, UnresolvedSurvivor } from '../utils/process-tree.js';
 import { randomUUID } from 'crypto';
 import {
-  importFreshRequest,
-  consumeFreshRequest,
-  restoreFreshRequest,
   projectSessionRefreshMarker,
-  type ImportedFreshRequest,
 } from './lifecycle/legacy-compat.js';
 import { canonicalAgentId } from './lifecycle/types.js';
 import type { DispatchResult, EffectToken, GenerationToken, LifecycleRequest, RequestCause, RequestReceipt, StartMode } from './lifecycle/types.js';
@@ -314,6 +312,9 @@ export class AgentProcess {
   // (each start() recreates the PTY, but the Telegram handle persists).
   private telegramApi: TelegramAPI | null = null;
   private telegramChatId: string | null = null;
+  // PR1 of pluggable connectors: populated via setConnector() from agent-manager.
+  // One-way mirror onto telegramApi/telegramChatId when the connector is Telegram.
+  private connector: MessageConnector | null = null;
   // Issue #392: tracks whether the most recently built startup prompt consumed
   // a handoff doc marker. start() reads this after spawn to decide whether the
   // daemon should fire runtime-owned lifecycle Telegram directly.
@@ -426,12 +427,12 @@ export class AgentProcess {
       writeCortextosEnv(this.env.agentDir, this.env);
     }
 
-    // Determine start mode. Task 2.2: `shouldContinue()` also IMPORTS
-    // (reserves-by-rename) any pending `.force-fresh` request; `freshRequest`
-    // is threaded through to the spawn's success/failure outcome below so a
-    // failed spawn restores it instead of losing the fresh-boot intent.
-    const { continueSession, freshRequest } = this.shouldContinue();
-    const mode = continueSession ? 'continue' : 'fresh';
+    // CONSUME ONLY WHAT YOU HONOURED (D-06 / upstream 31af138b): one probe
+    // feeds the decision, the same observation authorises the post-spawn
+    // delete, and the delete is gated on that observation having selected
+    // `fresh`. Probe is non-destructive; a failed spawn leaves the marker.
+    const observedForceFresh = this.probeForceFreshMarker();
+    const mode = this.shouldContinue(observedForceFresh) ? 'continue' : 'fresh';
     // D4 mission-anchor restore: on a FRESH (crash) restart the --continue
     // conversation history is gone, so recover the live mission from the
     // conversation buffer into state/current-mission.txt (best-effort, no-op
@@ -454,6 +455,12 @@ export class AgentProcess {
     // (e.g. if the previous stop() timed out before the PTY actually exited).
     // We're starting fresh — the new PTY has no pending stop.
     this.stopRequested = false;
+    // D-06: a fresh start means this agent is (re-)enabled. Clear a lingering
+    // .user-disable marker so handleExit's crash-recovery gate can fire again.
+    try {
+      const disableMarker = join(this.env.ctxRoot, 'state', this.name, '.user-disable');
+      if (existsSync(disableMarker)) unlinkSync(disableMarker);
+    } catch { /* best effort */ }
     // BUG-040 fix: bump generation. The onExit closure below captures THIS
     // value and uses it to detect "I'm an old PTY whose exit fired after a
     // new lifecycle began" — in which case it bails out without touching
@@ -558,22 +565,17 @@ export class AgentProcess {
       // or call getPid() on null in that window.
       if (!this.pty) {
         this.log('PTY exited during spawn — handleExit will recover');
-        // The spawn itself did not throw — mode was honored (a fresh process
-        // really was started with the fresh prompt) even though it exited
-        // immediately after. Consume: whatever recovery handleExit schedules
-        // next (e.g. its own armForceFresh() re-arm) is a separate, later
-        // request this consume never touches.
-        if (freshRequest) consumeFreshRequest(freshRequest);
+        // Do not consume .force-fresh here: handleExit may re-arm recovery,
+        // and the next start must still see the request (Hermes tests pin this).
         return;
       }
       this.status = 'running';
       this.sessionStart = new Date();
       this.log(`Running (pid: ${this.pty.getPid()})`);
 
-      // Task 2.2: consume the imported fresh request ONLY now that the spawn
-      // has succeeded — a spawn failure below (in the catch) restores it
-      // instead, so the fresh-boot intent survives a failed attempt.
-      if (freshRequest) consumeFreshRequest(freshRequest);
+      // Consume only after successful spawn, and only if this probe selected
+      // `fresh`. A marker that did not select fresh was never honoured.
+      if (mode === 'fresh' && observedForceFresh) this.deleteForceFreshMarker(observedForceFresh);
 
       this.maybeSendRuntimeLifecycleNotification();
 
@@ -584,10 +586,6 @@ export class AgentProcess {
     } catch (err) {
       this.log(`Failed to start: ${err}`);
       this.status = 'crashed';
-      // Task 2.2: the spawn failed — restore the imported fresh request so
-      // the next attempt still starts fresh instead of silently reverting to
-      // `--continue` (the exact defect upstream `31af138b` fixed).
-      if (freshRequest) restoreFreshRequest(freshRequest);
       this.notifyStatusChange();
     }
   }
@@ -1207,6 +1205,10 @@ export class AgentProcess {
       sessionStart: this.sessionStart?.toISOString(),
       crashCount: this.crashCount,
       model: this.config.model,
+      awaitingConfirmation:
+        this.pty && 'isAwaitingInteractiveConfirmation' in this.pty
+          ? this.pty.isAwaitingInteractiveConfirmation()
+          : false,
     };
   }
 
@@ -1259,6 +1261,27 @@ export class AgentProcess {
     if (this.config.runtime === 'codex-app-server' && this.pty) {
       (this.pty as CodexAppServerPTY).setTelegramHandle(api, chatId);
     }
+  }
+
+  /**
+   * Wire the agent's MessageConnector. Coexists with setTelegramHandle.
+   * If `c` is a TelegramConnector, legacy telegram fields are populated from
+   * the shared TelegramAPI instance (one-way mirror). Other kinds leave those
+   * fields untouched.
+   */
+  setConnector(c: MessageConnector): void {
+    this.connector = c;
+    if (c instanceof TelegramConnector) {
+      this.telegramApi = c.rawTelegramApi();
+      this.telegramChatId = c.getChatId();
+      if (this.config.runtime === 'codex-app-server' && this.pty) {
+        (this.pty as CodexAppServerPTY).setTelegramHandle(this.telegramApi, this.telegramChatId);
+      }
+    }
+  }
+
+  getConnector(): MessageConnector | null {
+    return this.connector;
   }
 
   /**
@@ -1363,6 +1386,11 @@ export class AgentProcess {
    * during crash storms. The try/catch below stays as defense in depth.
    */
   private isDisabled(): boolean {
+    try {
+      if (existsSync(join(this.env.ctxRoot, 'state', this.name, '.user-disable'))) {
+        return true;
+      }
+    } catch { /* fail-open on marker read */ }
     if (this.config.enabled === false) {
       return true;
     }
@@ -1648,50 +1676,72 @@ export class AgentProcess {
   }
 
   /**
-   * Task 2.2: decides continue-vs-fresh AND imports (reserves-by-rename) any
-   * pending `.force-fresh` request in the same pass — but the import is a
-   * PURE reservation, never a consume. `startImpl()` threads the returned
-   * `freshRequest` through to the spawn's success/failure outcome, so a
-   * failed spawn can restore it (see `legacy-compat.ts`'s
-   * `restoreFreshRequest`) instead of silently losing the fresh-boot intent.
-   *
-   * The `importFreshRequest` call is deliberately ABOVE the Hermes
-   * early-return (moved there relative to the pre-Task-2.2 code, which
-   * checked the marker only after the Hermes branch): a `.force-fresh`
-   * marker armed on a Hermes agent is now always reserved — so it no longer
-   * leaks in the state dir indefinitely — even though Hermes's own
-   * continue/fresh DECISION below is intentionally left unchanged (per
-   * PHASES.md Task 2.2's explicit ruling): it still comes exclusively from
-   * `hermesDbExists()`, never from the marker. The reservation is still
-   * consumed/restored against this spawn attempt's outcome purely for audit
-   * bookkeeping consistency in that case.
+   * Probe for the `.force-fresh` marker WITHOUT consuming it, returning the
+   * identity of the file observed. Upstream consume-after-success: a later
+   * `deleteForceFreshMarker` only removes this exact file.
    */
-  private shouldContinue(): { continueSession: boolean; freshRequest: ImportedFreshRequest | null } {
-    const stateDir = join(this.env.ctxRoot, 'state', this.name);
-    const freshRequest = importFreshRequest(stateDir);
+  private probeForceFreshMarker(): { ino: number; mtimeMs: number; size: number } | null {
+    try {
+      const stat = statSync(join(this.env.ctxRoot, 'state', this.name, '.force-fresh'));
+      return { ino: Number(stat.ino), mtimeMs: stat.mtimeMs, size: stat.size };
+    } catch {
+      return null;
+    }
+  }
 
-    // Hermes: session continuity is determined by whether the SQLite DB exists.
-    // HERMES_HOME env var overrides the default ~/.hermes path. Unaffected by
-    // `freshRequest` — see the doc comment above.
+  /**
+   * Consume the `.force-fresh` marker after a successful spawn. Reserves by
+   * rename to `.consumed.*`, then unlinks only if identity matches the probe.
+   * A replacement written mid-spawn is restored. TOCTOU-safe vs check-then-unlink.
+   */
+  private deleteForceFreshMarker(observed: { ino: number; mtimeMs: number; size: number }): void {
+    const markerPath = join(this.env.ctxRoot, 'state', this.name, '.force-fresh');
+    const reservePath = `${markerPath}.consumed.${process.pid}.${Date.now().toString(36)}`;
+    try {
+      renameSync(markerPath, reservePath);
+    } catch {
+      return;
+    }
+
+    let reserved: { ino: number; mtimeMs: number; size: number } | null = null;
+    try {
+      const st = statSync(reservePath);
+      reserved = { ino: Number(st.ino), mtimeMs: st.mtimeMs, size: st.size };
+    } catch { /* restore-or-drop below */ }
+
+    if (
+      reserved &&
+      reserved.ino === observed.ino &&
+      reserved.mtimeMs === observed.mtimeMs &&
+      reserved.size === observed.size
+    ) {
+      try { unlinkSync(reservePath); } catch { /* inert leftover */ }
+      return;
+    }
+
+    this.log('.force-fresh changed during spawn — preserving the newer request for the next start');
+    try {
+      if (existsSync(markerPath)) unlinkSync(reservePath);
+      else renameSync(reservePath, markerPath);
+    } catch { /* best effort — a stray reserve file is inert */ }
+  }
+
+  /**
+   * D-06: force-fresh probe wins for every runtime, including Hermes.
+   * Non-Hermes continue/fresh still uses fork session-identity rules.
+   */
+  private shouldContinue(
+    observedForceFresh: { ino: number; mtimeMs: number; size: number } | null,
+  ): boolean {
+    if (observedForceFresh) {
+      return false;
+    }
+
     if (this.config.runtime === 'hermes') {
       const hermesHome = process.env['HERMES_HOME'];
-      return { continueSession: hermesDbExists(hermesHome), freshRequest };
+      return hermesDbExists(hermesHome);
     }
 
-    // A reserved force-fresh request forces `fresh` mode (all non-Hermes
-    // runtimes honor it). Reserving here does NOT consume it — only
-    // `startImpl()`'s post-spawn success/failure branches do that.
-    if (freshRequest) {
-      return { continueSession: false, freshRequest };
-    }
-
-    // codex-app-server: session continuity is tracked by the adapter's own
-    // codex-app-server-thread.json under ctxRoot/state/<agent>/. The Claude
-    // JSONL check below is meaningless for the codex runtime, and a stale
-    // Claude JSONL left over from a prior Claude-runtime tenure caused
-    // continue-mode → thread/resume timeout → exit_code=0 crash loop
-    // (testorg codex-agent crashed 3x with this signature on 2026-05-09,
-    // 05-14, and 05-16 before backoff drained the pending resume RPC).
     if (this.config.runtime === 'codex-app-server') {
       const threadStatePath = join(
         this.env.ctxRoot,
@@ -1699,23 +1749,16 @@ export class AgentProcess {
         this.name,
         'codex-app-server-thread.json',
       );
-      return { continueSession: existsSync(threadStatePath), freshRequest };
+      return existsSync(threadStatePath);
     }
 
-    // opencode: do not inspect Claude JSONL history. The OpencodePTY adapter
-    // writes a lightweight marker after a successful spawn; that marker is the
-    // only signal that the next boot should pass `opencode --continue`.
     if (this.config.runtime === 'opencode') {
-      return { continueSession: opencodeSessionExists(this.env.ctxRoot, this.name), freshRequest };
+      return opencodeSessionExists(this.env.ctxRoot, this.name);
     }
 
-    // Default (Claude runtime): existing conversation = JSONL files present.
     const launchDir = this.config.working_directory || this.env.agentDir;
-    if (!launchDir) return { continueSession: false, freshRequest };
+    if (!launchDir) return false;
 
-    // Claude projects dir uses the absolute path with all separators replaced by dashes
-    // e.g. /Users/foo/agents/boss -> -Users-foo-agents-boss (leading sep becomes -)
-    // Use homedir() for cross-platform compatibility (HOME is not set on Windows).
     const convDir = join(
       homedir(),
       '.claude',
@@ -1725,9 +1768,9 @@ export class AgentProcess {
 
     try {
       const files = require('fs').readdirSync(convDir);
-      return { continueSession: files.some((f: string) => f.endsWith('.jsonl')), freshRequest };
+      return files.some((f: string) => f.endsWith('.jsonl'));
     } catch {
-      return { continueSession: false, freshRequest };
+      return false;
     }
   }
 

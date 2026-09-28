@@ -16,6 +16,7 @@ export default defineConfig({
   test: {
     globals: true,
     testTimeout: 10000,
+    globalSetup: './tests/setup/worktree-guard-setup.ts',
     setupFiles: ['./tests/setup/clear-ctx-env.ts'],
     include: [
       'tests/**/*.test.ts',

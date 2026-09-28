@@ -69,10 +69,6 @@ const API_TIMEOUT_MS = 10_000;
 export interface PostMessageRequest {
   channel: string;
   text: string;
-  /** Per-agent visual identity override; requires chat:write.customize scope. */
-  username?: string;
-  icon_emoji?: string;
-  icon_url?: string;
   thread_ts?: string;
   /** Block Kit blocks; SP3c uses these for interactive approvals. */
   blocks?: unknown[];
@@ -143,7 +139,14 @@ export class SlackAPI {
     identity?: GatedDisplayIdentity,
   ): Promise<PostMessageResponse | void> {
     if (typeof channelOrReq === 'object') {
-      const req = { ...channelOrReq, text: redactSSN(channelOrReq.text) };
+      // Object-form is payload-only. Never spread the request (or an identity
+      // object assigned onto it): username/icon_* must not reach chat.postMessage.
+      const req: Record<string, unknown> = {
+        channel: channelOrReq.channel,
+        text: redactSSN(channelOrReq.text),
+      };
+      if (channelOrReq.thread_ts !== undefined) req.thread_ts = channelOrReq.thread_ts;
+      if (channelOrReq.blocks !== undefined) req.blocks = channelOrReq.blocks;
       const data = await this.requestJson<PostMessageResponse & { ok: boolean; error?: string }>('chat.postMessage', {
         method: 'POST',
         headers: {

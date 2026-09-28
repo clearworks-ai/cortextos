@@ -236,6 +236,37 @@ describe('authority-forgery casualties (round 3) — the four seat bypasses', ()
   });
 });
 
+describe('object-form postMessage — identity fields never reach the payload', () => {
+  it('username/icon on the object-form request are dropped before fetch', async () => {
+    const SlackAPI = await freshSlackAPI(AGENT);
+    await new SlackAPI('xoxb-test').postMessage({
+      channel: 'C1',
+      text: 'hello',
+      username: 'CEO',
+      icon_emoji: ':crown:',
+      icon_url: 'https://example.com/ceo.png',
+    } as never);
+    const body = sentBodies[sentBodies.length - 1];
+    expect(body).toEqual({ channel: 'C1', text: 'hello' });
+    expect(JSON.stringify(body)).not.toContain('CEO');
+    expect(JSON.stringify(body)).not.toContain('crown');
+    expect(JSON.stringify(body)).not.toContain('example.com');
+  });
+
+  it('spreading a gated identity onto object-form still cannot put username in the payload', async () => {
+    const SlackAPI = await freshSlackAPI(AGENT);
+    const identity = { username: 'CEO', icon_emoji: ':crown:' };
+    await new SlackAPI('xoxb-test').postMessage({
+      channel: 'C1',
+      text: 'hello',
+      ...identity,
+    } as never);
+    const body = sentBodies[sentBodies.length - 1];
+    expect(body).toEqual({ channel: 'C1', text: 'hello' });
+    expect(Object.prototype.hasOwnProperty.call(body, 'username')).toBe(false);
+  });
+});
+
 describe('gateSlackDisplayIdentity unit behavior', () => {
   it('null config yields no identity; icons-only config yields the functional name but still warns', () => {
     expect(gateSlackDisplayIdentity(null, AGENT, log)).toBeUndefined();

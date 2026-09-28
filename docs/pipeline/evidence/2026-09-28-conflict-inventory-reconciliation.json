@@ -1,0 +1,16 @@
+{
+  "kind": "conflict-inventory-reconciliation",
+  "reviewed_merge_sha": "24280d2e239eee5d1855aaff089c2b3cb6d467be",
+  "first_parent": "bba3fefb9e83963d50ea1df8737ff75be347b953",
+  "second_parent": "6f9383809f7b87a15e9819f83f9a7f147b202883",
+  "merge_base": "a15baad45cde344f97468ce1b8fe1d012125a415",
+  "plan_predicted_textual_conflicts": 46,
+  "live_unmerged_at_merge_open": 44,
+  "auto_merged_still_d07": [
+    "templates/agent/CLAUDE.md",
+    "templates/orchestrator/CLAUDE.md"
+  ],
+  "unmerged_after_tasks_3_4": 24,
+  "unmerged_after_tasks_5_7": 0,
+  "note": "24 = 44 - 20 staged in tasks 3-4. Not a third predicted set."
+}

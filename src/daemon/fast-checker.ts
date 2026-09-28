@@ -39,6 +39,61 @@ export function handoffGraceMs(runtime: string | undefined): number {
 }
 
 /**
+ * Parent-env keys the heartbeat watchdog child may inherit. PATH/HOME/locale
+ * plus Windows path/temp keys required to exec `cortextos`. No USER/SHELL/TZ,
+ * no credential-shaped names, nothing else from process.env.
+ */
+export const HEARTBEAT_WATCHDOG_ENV_KEYS = [
+  'PATH',
+  'HOME',
+  'TMPDIR',
+  'TMP',
+  'TEMP',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'PATHEXT',
+  'SYSTEMROOT',
+  'COMSPEC',
+  'HOMEDRIVE',
+  'HOMEPATH',
+] as const;
+
+export interface HeartbeatWatchdogTarget {
+  agentName: string;
+  agentDir: string;
+  org: string;
+  ctxRoot: string;
+  instanceId: string;
+  frameworkRoot: string;
+  projectRoot: string;
+  timezone?: string;
+  orchestrator?: string;
+}
+
+/** Build the watchdog child env from an explicit allowlist plus CTX_* pin. */
+export function buildHeartbeatWatchdogEnv(
+  processEnv: NodeJS.ProcessEnv,
+  target: HeartbeatWatchdogTarget,
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of HEARTBEAT_WATCHDOG_ENV_KEYS) {
+    const value = processEnv[key];
+    if (value !== undefined) env[key] = value;
+  }
+  env.CTX_AGENT_NAME = target.agentName;
+  env.CTX_AGENT_DIR = target.agentDir;
+  env.CTX_ORG = target.org;
+  env.CTX_ROOT = target.ctxRoot;
+  env.CTX_INSTANCE_ID = target.instanceId;
+  env.CTX_FRAMEWORK_ROOT = target.frameworkRoot;
+  env.CTX_PROJECT_ROOT = target.projectRoot;
+  env.CTX_TIMEZONE = target.timezone ?? '';
+  env.CTX_ORCHESTRATOR = target.orchestrator ?? '';
+  return env;
+}
+
+/**
  * Task 4.1 (OPTIONAL, non-release-blocking; PRD §5 Open Question 3): percentage
  * points of context growth beyond the generation-keyed baseline that count as
  * real work-fill. Below this margin, a generation born at/above the handoff
@@ -318,18 +373,7 @@ export class FastChecker {
     if (target.agentName !== this.agent.name || !target.agentDir || target.ctxRoot !== this.paths.ctxRoot) {
       this.log(`Heartbeat watchdog target-context mismatch for ${this.agent.name} — not starting an ambiguously attributed watchdog`);
     } else {
-      const watchdogEnv: NodeJS.ProcessEnv = {
-        ...process.env,
-        CTX_AGENT_NAME: target.agentName,
-        CTX_AGENT_DIR: target.agentDir,
-        CTX_ORG: target.org,
-        CTX_ROOT: target.ctxRoot,
-        CTX_INSTANCE_ID: target.instanceId,
-        CTX_FRAMEWORK_ROOT: target.frameworkRoot,
-        CTX_PROJECT_ROOT: target.projectRoot,
-        CTX_TIMEZONE: target.timezone ?? '',
-        CTX_ORCHESTRATOR: target.orchestrator ?? '',
-      };
+      const watchdogEnv = buildHeartbeatWatchdogEnv(process.env, target);
       this.heartbeatTimer = setInterval(() => {
         if (!this.running || !this.agent.isRunning()) return;
         const ts = new Date().toISOString();

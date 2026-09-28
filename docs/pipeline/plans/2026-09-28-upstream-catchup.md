@@ -34,7 +34,7 @@ Current divergence from the merge base:
 - Upstream `main`: 49 unique commits and 235 changed paths.
 - Paths changed on both sides: 125.
 - Upstream-only paths: 110.
-- Predicted textual conflicts from read-only `git merge-tree`: 46 files; 34 additional files changed on both sides merge cleanly.
+- Predicted textual conflicts from read-only `git merge-tree`: 46 files (see inventory reconciliation: live unmerged at merge-open was **44**; two template `CLAUDE.md` paths auto-merged and were still reviewed under D-07); 34 additional files changed on both sides merge cleanly.
 
 The prior April conflict map is obsolete: it used a different merge base, only 31 upstream commits, and predicted 14 conflicts.
 
@@ -90,6 +90,15 @@ Decisions: D-01 through D-09 · settled_by: detailify · 2026-09-28.
 ## File map
 
 ### Exact predicted textual conflicts (46)
+
+Plan-time `git merge-tree` listed 46 paths. **Live `git merge --no-ff --no-commit` unmerged set was 44.** The two-path drift is not a missing resolution:
+
+| Path | Plan (46) | Live merge-open |
+|---|---|---|
+| `templates/agent/CLAUDE.md` | textual conflict | auto-merged; reviewed under D-07 (fork policy kept, portable quoting ported) |
+| `templates/orchestrator/CLAUDE.md` | textual conflict | auto-merged; same D-07 treatment |
+
+The other 44 match the baseline ledger (`docs/pipeline/evidence/2026-09-28-upstream-baseline.md`). After Tasks 3–4 staged 20 of those 44, **24** remained unmerged (handoff arithmetic: 44 − 20 = 24) until Tasks 5–7 resolved them. Acceptance “all 46” means: 44 explicit conflict resolutions + 2 auto-merged CLAUDE.md files still checked under D-07. Evidence: `docs/pipeline/evidence/2026-09-28-conflict-inventory-reconciliation.md`.
 
 **Root/state safety (2):** `.gitignore`, `src/utils/atomic.ts`
 
@@ -180,7 +189,7 @@ git diff --name-only --diff-filter=U | sort > /tmp/cortextos-upstream-unmerged.t
 test "$(wc -l < /tmp/cortextos-upstream-unmerged.txt | tr -d ' ')" = 46
 ```
 
-- [ ] Compare `/tmp/cortextos-upstream-unmerged.txt` byte-for-byte with the plan's 46-file inventory. Any drift stops the run for replanning.
+- [ ] Compare `/tmp/cortextos-upstream-unmerged.txt` with the plan inventory. **Live pin: 44 unmerged paths**, not 46. The two extras (`templates/agent/CLAUDE.md`, `templates/orchestrator/CLAUDE.md`) auto-merge; still apply D-07. Unexpected extra or missing paths stop the run for replanning.
 - [ ] Do not commit. The merge remains one atomic transaction until Task 8.
 
 Expected result: upstream-only and cleanly merged changes are staged automatically; 46 known files remain unresolved.
@@ -464,7 +473,7 @@ If any lands before Task 1, repin upstream and regenerate the conflict ledger ra
 ## Acceptance criteria
 
 1. The merge commit has exactly two parents; parent 2 is `6f938380`.
-2. All 46 predicted conflicts have an explicit resolution and no conflict markers remain.
+2. All 46 planned conflict paths have an explicit resolution or a recorded auto-merge + D-07 review (live unmerged = 44; two CLAUDE.md auto-merged). No conflict markers remain.
 3. Upstream connector, state-safety, lifecycle, CLI, metrics, dashboard, migration, diagnosis, and usage-script behavior is present.
 4. Fork task semantics, policy, Herdr receipts, transport topology, supervisor recovery, and product/tenant boundaries remain present.
 5. Full CI and leak guard pass on the immutable PR SHA under Linux; Node 20 is mandatory and Node 24 lifecycle/connector coverage also passes.

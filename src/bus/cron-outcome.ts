@@ -280,6 +280,20 @@ export function getCronOutcome(stateDir: string, runId: string): CronOutcomeRece
   });
 }
 
+function lookupActiveOutcomeLocked(
+  index: CronOutcomeIndex,
+  key: Buffer,
+  agent: string,
+  cron: string,
+  agentId = hmacId(key, 'agent', agent),
+): CronOutcomeReceipt | undefined {
+  const cronId = hmacId(key, 'cron', cron);
+  const matches = Object.values(index.nonterminal)
+    .filter(row => row.agent === agentId && row.cron === cronId)
+    .sort((left, right) => left.scheduled_at.localeCompare(right.scheduled_at) || left.at.localeCompare(right.at));
+  return matches.find(row => row.state === 'scheduled' || row.state === 'started') ?? matches[0];
+}
+
 export function getActiveCronOutcome(stateDir: string, agent: string, cron: string): CronOutcomeReceipt | undefined {
   assertRawIdentity(agent);
   assertRawIdentity(cron);
@@ -287,12 +301,29 @@ export function getActiveCronOutcome(stateDir: string, agent: string, cron: stri
     const index = readIndexLocked(stateDir);
     recoverJournalLocked(stateDir, index);
     const key = readOrCreateSecretLocked(stateDir);
+    return lookupActiveOutcomeLocked(index, key, agent, cron);
+  });
+}
+
+/** One lock/index/secret read for many cron names. Same lookup rules as getActiveCronOutcome. */
+export function getActiveCronOutcomes(
+  stateDir: string,
+  agent: string,
+  crons: readonly string[],
+): Map<string, CronOutcomeReceipt | undefined> {
+  assertRawIdentity(agent);
+  for (const cron of crons) assertRawIdentity(cron);
+  if (crons.length === 0) return new Map();
+  return withCronOutcomeLock(stateDir, () => {
+    const index = readIndexLocked(stateDir);
+    recoverJournalLocked(stateDir, index);
+    const key = readOrCreateSecretLocked(stateDir);
     const agentId = hmacId(key, 'agent', agent);
-    const cronId = hmacId(key, 'cron', cron);
-    const matches = Object.values(index.nonterminal)
-      .filter(row => row.agent === agentId && row.cron === cronId)
-      .sort((left, right) => left.scheduled_at.localeCompare(right.scheduled_at) || left.at.localeCompare(right.at));
-    return matches.find(row => row.state === 'scheduled' || row.state === 'started') ?? matches[0];
+    const out = new Map<string, CronOutcomeReceipt | undefined>();
+    for (const cron of crons) {
+      out.set(cron, lookupActiveOutcomeLocked(index, key, agent, cron, agentId));
+    }
+    return out;
   });
 }
 

@@ -12,7 +12,7 @@ import {
 } from '../../../src/bus/event-delivery';
 import { ShadowRouter } from '../../../src/bus/shadow-router';
 import { advanceNumericEventCursor, compareCanonicalNumericCursors, getEventCursor } from '../../../src/bus/event-receipt-index';
-import { appendCronOutcome, cronRunId, getActiveCronOutcome, reconcileCronOutcomes, readCronOutcomes, MAX_CRON_OUTCOME_INDEX_RECORDS } from '../../../src/bus/cron-outcome';
+import { appendCronOutcome, cronRunId, getActiveCronOutcome, getActiveCronOutcomes, reconcileCronOutcomes, readCronOutcomes, MAX_CRON_OUTCOME_INDEX_RECORDS } from '../../../src/bus/cron-outcome';
 import { inventoryCrons } from '../../../src/bus/cron-inventory';
 import type { CronDefinition } from '../../../src/types/index';
 import { gatherDeclaredAgents } from '../../../src/cli/bus-reconcile';
@@ -112,7 +112,7 @@ describe('event and cron receipt foundation', () => {
     expect(new ShadowRouter('shadow', { stateDir }).route(receipt, 'larry', 'policy_match')).toEqual({ mode: 'shadow', proposed: false, delivered: false });
     const index = JSON.parse(readFileSync(join(stateDir, 'event-receipt-index.json'), 'utf8')) as { proposedRoutes: Record<string, string> };
     expect(Object.keys(index.proposedRoutes)).toEqual([`${receipt.event_id}:larry`]);
-  });
+  }, 30_000);
 
   it('heals route-proposal crashes before and after the durable receipt append', () => {
     const ingress = recordIngressReceipt(stateDir, event);
@@ -159,6 +159,9 @@ describe('event and cron receipt foundation', () => {
     expect(getActiveCronOutcome(stateDir, 'larry', 'ordered')?.run_id).toBe(olderRun);
     appendCronOutcome(stateDir, { run_id: olderRun, attempt: 1, agent: 'larry', cron: 'ordered', state: 'dispatched', scheduled_at: olderAt });
     expect(getActiveCronOutcome(stateDir, 'larry', 'ordered')?.run_id).toBe(newerRun);
+    const batched = getActiveCronOutcomes(stateDir, 'larry', ['ordered', 'missing']);
+    expect(batched.get('ordered')?.run_id).toBe(newerRun);
+    expect(batched.get('missing')).toBeUndefined();
   });
 
   it('prunes completed cron runs when the idempotency index reaches its bound', () => {

@@ -42,15 +42,34 @@ describe('SlackAPI', () => {
       );
     });
 
-    it('passes through username and icon_emoji overrides', async () => {
+    it('object-form strips username/icon fields — they never reach the payload', async () => {
       fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, channel: 'C1', ts: '1' }) });
       const api = new SlackAPI('xoxb-abc');
       await api.postMessage({
-        channel: 'C1', text: 'hi', username: 'boss', icon_emoji: ':robot_face:',
-      });
+        channel: 'C1',
+        text: 'hi',
+        username: 'boss',
+        icon_emoji: ':robot_face:',
+        icon_url: 'https://example.com/x.png',
+      } as never);
       const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-      expect(body.username).toBe('boss');
-      expect(body.icon_emoji).toBe(':robot_face:');
+      expect(body).toEqual({ channel: 'C1', text: 'hi' });
+      expect(JSON.stringify(body)).not.toContain('boss');
+      expect(JSON.stringify(body)).not.toContain('robot_face');
+      expect(JSON.stringify(body)).not.toContain('example.com');
+    });
+
+    it('inherited identity fields on the object-form request never reach the payload', async () => {
+      fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, channel: 'C1', ts: '1' }) });
+      const api = new SlackAPI('xoxb-abc');
+      const req = Object.assign(Object.create({ username: 'CEO', icon_emoji: ':crown:', icon_url: 'https://evil.example' }), {
+        channel: 'C1',
+        text: 'hi',
+      });
+      await api.postMessage(req);
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(body).toEqual({ channel: 'C1', text: 'hi' });
+      expect(Object.keys(body).sort()).toEqual(['channel', 'text']);
     });
   });
 

@@ -56,6 +56,11 @@ vi.mock('../../src/bus/cron-outcome.js', () => ({
   appendCronOutcome: (...args: unknown[]) => mockAppendCronOutcome(...args),
   cronRunId: () => 'cron_v1_0123456789abcdef0123456789abcdef',
   getActiveCronOutcome: (...args: unknown[]) => mockGetActiveCronOutcome(...args),
+  getActiveCronOutcomes: (dir: unknown, agent: unknown, names: unknown) => {
+    const map = new Map();
+    for (const name of names as string[]) map.set(name, mockGetActiveCronOutcome(dir, agent, name));
+    return map;
+  },
 }));
 
 // eslint-disable-next-line import/first

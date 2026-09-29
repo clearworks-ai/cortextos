@@ -1,7 +1,7 @@
 # Clearworks AEC authority system - master checklist
 
 Date: 2026-09-25
-Status: active working checklist; research, first-party Search Console baseline, sitemap submission, and private content package complete; production proof-loop gates still open
+Status: active working checklist; research, first-party Search Console baseline, sitemap submission, private content package, and current provenance/ownership inventory complete; production proof-loop gates still open
 Governing task: `task_1790398044100_06722606`
 
 ## Current state - 2026-09-26
@@ -64,9 +64,9 @@ Content production starts only after the baseline, measurement, and buyer-journe
 - [x] Create a dedicated cortextOS worktree and branch for durable artifacts.
 - [x] Preserve the verified Justin Garner journey boundary: warm referral origin, Google/site validation, later booking.
 - [x] Preserve the GA4 audit and its exact failure matrix.
-- [ ] Record every repository, license, version, commit, container image, and external service used.
-- [ ] Define owners for analytics, site publishing, CRM mapping, weekly measurement, and content approval.
-- [ ] Create a secrets inventory without copying secret values into artifacts.
+- [x] Record every repository, license, version, commit, container image, and external service used in the current run. See `provenance-ownership-and-secrets-inventory.md`; future additions must be recorded before use.
+- [x] Define accountable owners for analytics, site publishing, CRM mapping, weekly measurement, and content approval. The current Zcal release names its execution owner; every future implementation/release owner remains an explicit gate rather than a standing assignment.
+- [x] Create a secrets inventory without copying secret values into artifacts.
 
 Acceptance:
 

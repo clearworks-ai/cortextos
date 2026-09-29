@@ -1,0 +1,417 @@
+{
+  "attempts": [
+    {
+      "duration_ms": 7591,
+      "http_status": 200,
+      "model": "gemini-2.5-flash",
+      "response": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "Several consulting firms specialize in helping small and mid-size Architecture, Engineering, and Construction (AEC) firms move beyond AI experiments to implement working systems. These consultants often focus on practical application, workflow integration, and measurable outcomes tailored to the specific needs and resources of smaller firms.\n\nKey consultants in this space include:\n\n*   **Advisor Labs** is a strong choice for design practices, engineering consultancies, and contractors with revenues between $20M and $500M and lean IT departments. They offer a \"Pilot-as-a-Service\" designed to deliver a working automation in four weeks, with an engagement path aimed at establishing an internal AI Enablement Team to ensure long-term ownership of the tools. Advisor Labs focuses on workflows that impact margin, such as RFP response, RFI triage, submittal review, and conceptual estimating.\n*   **YegaTech** is an AEC-only technology consultancy whose AI practice covers strategy, governance, and adoption. They explicitly position themselves against \"pilot purgatory,\" with engagements focused on achieving measurable production use rather than stalled demonstrations. Their consultants possess deep industry knowledge of BIM environments, project delivery methods, and design technology stacks.\n*   **AI in AEC**, led by Stjepan Mikulic, concentrates on the human aspect of AI adoption through training, workshops, and programs that aim to move architecture and engineering teams from initial curiosity to daily use. They emphasize turning scattered experiments into implementation that genuinely changes how work is performed within AEC firms.\n*   **AEC Hub** assists AEC firms in discovering, implementing, and mastering AI tools to save time, boost productivity, and modernize workflows, all without the typical enterprise price tag.\n*   **Woden Tech**, founded by fire protection engineers, emphasizes building and deploying production-ready AI products rather than just creating strategic presentations. They offer product discovery and strategy, custom AI product development, and deployment and integration services, ensuring clients own the intellectual property.\n*   **Zweig Group** provides tailored guidance, consulting, and training to AEC firms, helping them identify areas for AI implementation and develop a roadmap for successful adoption. Their approach is customized to each firm's unique needs, resources, and organizational culture.\n\nOther firms like RTS Labs and AI Smart Ventures also cater to mid-sized companies across various industries, focusing on practical AI guidance, automating routine tasks, and offering boutique approaches for faster time-to-value and lower costs. Similarly, MidMarket AI specifically helps mid-sized businesses adopt and implement AI tools to enhance performance and integrate solutions into existing operational systems. These consultants understand the need for flexible, cost-effective solutions that can be rapidly deployed and integrated without extensive disruption for small and mid-sized businesses."
+                }
+              ],
+              "role": "model"
+            },
+            "finishReason": "STOP",
+            "groundingMetadata": {
+              "groundingChunks": [
+                {
+                  "web": {
+                    "title": "bestaiconsultingfirm.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGd1hYXzABxG1Hzk9ZHuNSjy2Y9NVGA5CoylRoqwNyhT4Ce5NpjcGmqeAOjRNxRtQWiIsNMx4kjLPFKpmbPlLq7bduZjXXlwRqpLZKiCePwxMSZXh3vm4-Rtlm7nD6uF4__IxYepQyWsXMoY_sDB25m2LdM"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aiinaec.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGesmw1q2MoWlnbArjc9dB0Z2wm-GypXTERGDaETLrHpWOtkjDtx9Q3vfn773P8O5NXb9Ur2N0BrSnOvoV0deE7WaJdiplb1yN-OptLjHddHxdb5nGjvWXJ8z4l"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aechub.org",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFjB_oLNRHIpklUAKu-265hYa2N7HA93WAk65mjIa5D2urb5sojOTHGnycK4nC6fjp68pJ2bNqTe2AFL_JG4I2kdMWG8Bns97sYN4VJgKJHSudT4WtTaTFfXf6ZtOw="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "wodentechnologies.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHDLJt8G5D8nuPz-JfQQNcyLVqa84g0Dtmh0WTYM1DsM0dOS8Wc9Qbckwt0fxT-wF7DHkVijDUanfGXanGZaVJMYPWqzD4arVdpwOznzZl2J4T4tbkobZmyhukxphpH0N2U"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "zweiggroup.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF5O-IO7haB9ysa5Yn4NZUWXjq_KG1hmDGZVsnw8AQT9_gNyl0935cNyig1wrahGbGaOKrtfGJ_iGhbF9CfwIDPfvV3XmxQmkle0gHK7BqzB4sIAib1KKcCwVfih50cJvGEnNEBl68I5OTEwvSG2eM="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "xcelacore.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQETWMIH7_F_DYkpYn6VjjZXT3TTeqiRnoiltr6xbBB_3USvqwa7fJFqMZKxwBLSfofuhCWmkwPSHYkTOExssKXM_D6cnOVT6ugCi667QWxV_v8YOSfrkAcvi1dJqDJidDMYpon1OcBy2y9stRKYxUwsk49ugnqSasE="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "effectivesoft.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGtpi2AR_txBqyxvRzkCyowGGmFhml2Cf5pqQ93GbVLMmFksb7_QFZHpAYSvhAwB5CHvm1Ke93oQ8fNuIjy4hGRpih-u9Nb-3YGIchrlrsoMXbCmtCWwxRpv_oIxg0JnAd4dsCJhu1SPVx3WRGcENZFJ_Z9X3XFI5sv4be9cYFQfSZT"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "tfsfventures.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGp4d8y09QKpL5xNv5Gc14tVG1v-08gegI14Zqspc7Cs-Jvp3gGPV5LyMBFfged-aHyrWH7Ze3alUcJZhi66T9qNMU7Ii9XviUwBCUK9O0_0LaTxcwsRxIQATGqyfsU1z7yo3COs81sRDUwpuXTAd5J7H4gGCH_dayjGgy5aH6OA0WRbcQPCbHRzyHViRrNnTUkxsvIkro-mhV4lfVkV0xIajWEeI85KGUsYfyoq_BsZBgZgEAsaqd5cbL3wYu5yR4WaHE="
+                  }
+                }
+              ],
+              "groundingSupports": [
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 895,
+                    "startIndex": 763,
+                    "text": "Advisor Labs focuses on workflows that impact margin, such as RFP response, RFI triage, submittal review, and conceptual estimating."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 1301,
+                    "startIndex": 1175,
+                    "text": "Their consultants possess deep industry knowledge of BIM environments, project delivery methods, and design technology stacks."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 1651,
+                    "startIndex": 1524,
+                    "text": "They emphasize turning scattered experiments into implementation that genuinely changes how work is performed within AEC firms."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    2
+                  ],
+                  "segment": {
+                    "endIndex": 1843,
+                    "startIndex": 1652,
+                    "text": "*   **AEC Hub** assists AEC firms in discovering, implementing, and mastering AI tools to save time, boost productivity, and modernize workflows, all without the typical enterprise price tag."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 2178,
+                    "startIndex": 2016,
+                    "text": "They offer product discovery and strategy, custom AI product development, and deployment and integration services, ensuring clients own the intellectual property."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    4
+                  ],
+                  "segment": {
+                    "endIndex": 2459,
+                    "startIndex": 2363,
+                    "text": "Their approach is customized to each firm's unique needs, resources, and organizational culture."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    5
+                  ],
+                  "segment": {
+                    "endIndex": 2705,
+                    "startIndex": 2461,
+                    "text": "Other firms like RTS Labs and AI Smart Ventures also cater to mid-sized companies across various industries, focusing on practical AI guidance, automating routine tasks, and offering boutique approaches for faster time-to-value and lower costs."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    6
+                  ],
+                  "segment": {
+                    "endIndex": 2880,
+                    "startIndex": 2706,
+                    "text": "Similarly, MidMarket AI specifically helps mid-sized businesses adopt and implement AI tools to enhance performance and integrate solutions into existing operational systems."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    7
+                  ],
+                  "segment": {
+                    "endIndex": 3066,
+                    "startIndex": 2881,
+                    "text": "These consultants understand the need for flexible, cost-effective solutions that can be rapidly deployed and integrated without extensive disruption for small and mid-sized businesses."
+                  }
+                }
+              ],
+              "searchEntryPoint": {
+                "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG0XpMufmR_K-m2tJDMcUdFYzRqaxi1rYRFW8FCDy_Ao7_ma8KQgJWn_O1FUO5d-qDmfp3eB9l_I3ACeV8WW1nzk-CUDSADHF4-YJ50lYzoq3KFzDof1li_jlGXmL4ABeH-E352xikvJMUkhi1dP5080IR-o8uGPJCRobNzJA_heFiG8KaK8WqGy_WRh5RIXpDYPLZplvrB7TDBpIauLOXeuttbPgsUUL8xMT-1iDpG9yH8fopePXmdG20=\">AI implementation consultants small mid-size AEC firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEFh8YYl-BaPAgYieJKwC7ymEv4Xa1p1ko2i0u61rtTvx0G6L0FksWzhtXYVKhp1oPIH3s0h-e_NtKLHzUhEgzHUAz-yhy81lqwCAm1D0I4-xuBTi65eu_V18io_-egoOju3rr7dxWGG1oJqdOPNh1WxC8Ueu8OdTXg5BPztvetXFiLoQtX0sxO0xoJo8Laeo8idBTFYoAjlv3WkaGjVO2y2C1fJXzN5tZsJA==\">AI consultants small mid-size AEC firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFLrnEZ2kyNVQywroMGfUHpa2sQbksh6X20NaJ8qVllp9YiNLOmZAvlOi0YPhhDWzGf39WpTufARo57PjTlS69eqtmastBjIwMC8iTGM6W9PouGWwxtVdVZluEoYqjgd98VIdZSZR5VjTznQ7uqH48pBKVpIH90nfAil49sxFb9O99tc3GNqaZYMQpCTL1Bw1kPTpwuoZOcSyVGVpFEHEPlKOjz5A==\">AEC firms AI adoption specialists</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFVZUDKTFajW363lq9Kb71MDXWVnz0aQcvK0RPQArOieE5vqh-SsMFE7a4huGVGEp-d7WvHvLbi2ABqfx_76hyudCLYaBDyydLIkJPe-jJ5ZtBpq7KdFYGyU7_bY2B-FlupESmmLPyLhJjTKp-h7cwy24-Jb0ZZ7FwrgpywTVuuQ_D-1EgMOODsHU_njJ-jRvIzCB6atwJYtW8rcOIYtPwukfkAb3jWdqAadcOvXmo6SWa-u91nzuoWmFZF2rJ6qx3Aq2evUr5JX4W00-UA\">consultants helping AEC firms move from AI experiments to working systems</a>\n  </div>\n</div>\n"
+              },
+              "webSearchQueries": [
+                "AI consultants small mid-size AEC firms",
+                "AI implementation consultants small mid-size AEC firms",
+                "AEC firms AI adoption specialists",
+                "consultants helping AEC firms move from AI experiments to working systems"
+              ]
+            },
+            "index": 0
+          }
+        ],
+        "modelVersion": "gemini-2.5-flash",
+        "responseId": "vla3av3ZFNqlqtsPtcmAoQY",
+        "usageMetadata": {
+          "candidatesTokenCount": 609,
+          "promptTokenCount": 18,
+          "promptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 18
+            }
+          ],
+          "serviceTier": "standard",
+          "thoughtsTokenCount": 491,
+          "toolUsePromptTokenCount": 225,
+          "toolUsePromptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 225
+            }
+          ],
+          "totalTokenCount": 1343
+        }
+      },
+      "technical_status": "success",
+      "timestamp": "2026-09-26T05:23:10.162015Z"
+    }
+  ],
+  "final_response": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "Several consulting firms specialize in helping small and mid-size Architecture, Engineering, and Construction (AEC) firms move beyond AI experiments to implement working systems. These consultants often focus on practical application, workflow integration, and measurable outcomes tailored to the specific needs and resources of smaller firms.\n\nKey consultants in this space include:\n\n*   **Advisor Labs** is a strong choice for design practices, engineering consultancies, and contractors with revenues between $20M and $500M and lean IT departments. They offer a \"Pilot-as-a-Service\" designed to deliver a working automation in four weeks, with an engagement path aimed at establishing an internal AI Enablement Team to ensure long-term ownership of the tools. Advisor Labs focuses on workflows that impact margin, such as RFP response, RFI triage, submittal review, and conceptual estimating.\n*   **YegaTech** is an AEC-only technology consultancy whose AI practice covers strategy, governance, and adoption. They explicitly position themselves against \"pilot purgatory,\" with engagements focused on achieving measurable production use rather than stalled demonstrations. Their consultants possess deep industry knowledge of BIM environments, project delivery methods, and design technology stacks.\n*   **AI in AEC**, led by Stjepan Mikulic, concentrates on the human aspect of AI adoption through training, workshops, and programs that aim to move architecture and engineering teams from initial curiosity to daily use. They emphasize turning scattered experiments into implementation that genuinely changes how work is performed within AEC firms.\n*   **AEC Hub** assists AEC firms in discovering, implementing, and mastering AI tools to save time, boost productivity, and modernize workflows, all without the typical enterprise price tag.\n*   **Woden Tech**, founded by fire protection engineers, emphasizes building and deploying production-ready AI products rather than just creating strategic presentations. They offer product discovery and strategy, custom AI product development, and deployment and integration services, ensuring clients own the intellectual property.\n*   **Zweig Group** provides tailored guidance, consulting, and training to AEC firms, helping them identify areas for AI implementation and develop a roadmap for successful adoption. Their approach is customized to each firm's unique needs, resources, and organizational culture.\n\nOther firms like RTS Labs and AI Smart Ventures also cater to mid-sized companies across various industries, focusing on practical AI guidance, automating routine tasks, and offering boutique approaches for faster time-to-value and lower costs. Similarly, MidMarket AI specifically helps mid-sized businesses adopt and implement AI tools to enhance performance and integrate solutions into existing operational systems. These consultants understand the need for flexible, cost-effective solutions that can be rapidly deployed and integrated without extensive disruption for small and mid-sized businesses."
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "STOP",
+        "groundingMetadata": {
+          "groundingChunks": [
+            {
+              "web": {
+                "title": "bestaiconsultingfirm.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGd1hYXzABxG1Hzk9ZHuNSjy2Y9NVGA5CoylRoqwNyhT4Ce5NpjcGmqeAOjRNxRtQWiIsNMx4kjLPFKpmbPlLq7bduZjXXlwRqpLZKiCePwxMSZXh3vm4-Rtlm7nD6uF4__IxYepQyWsXMoY_sDB25m2LdM"
+              }
+            },
+            {
+              "web": {
+                "title": "aiinaec.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGesmw1q2MoWlnbArjc9dB0Z2wm-GypXTERGDaETLrHpWOtkjDtx9Q3vfn773P8O5NXb9Ur2N0BrSnOvoV0deE7WaJdiplb1yN-OptLjHddHxdb5nGjvWXJ8z4l"
+              }
+            },
+            {
+              "web": {
+                "title": "aechub.org",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFjB_oLNRHIpklUAKu-265hYa2N7HA93WAk65mjIa5D2urb5sojOTHGnycK4nC6fjp68pJ2bNqTe2AFL_JG4I2kdMWG8Bns97sYN4VJgKJHSudT4WtTaTFfXf6ZtOw="
+              }
+            },
+            {
+              "web": {
+                "title": "wodentechnologies.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHDLJt8G5D8nuPz-JfQQNcyLVqa84g0Dtmh0WTYM1DsM0dOS8Wc9Qbckwt0fxT-wF7DHkVijDUanfGXanGZaVJMYPWqzD4arVdpwOznzZl2J4T4tbkobZmyhukxphpH0N2U"
+              }
+            },
+            {
+              "web": {
+                "title": "zweiggroup.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF5O-IO7haB9ysa5Yn4NZUWXjq_KG1hmDGZVsnw8AQT9_gNyl0935cNyig1wrahGbGaOKrtfGJ_iGhbF9CfwIDPfvV3XmxQmkle0gHK7BqzB4sIAib1KKcCwVfih50cJvGEnNEBl68I5OTEwvSG2eM="
+              }
+            },
+            {
+              "web": {
+                "title": "xcelacore.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQETWMIH7_F_DYkpYn6VjjZXT3TTeqiRnoiltr6xbBB_3USvqwa7fJFqMZKxwBLSfofuhCWmkwPSHYkTOExssKXM_D6cnOVT6ugCi667QWxV_v8YOSfrkAcvi1dJqDJidDMYpon1OcBy2y9stRKYxUwsk49ugnqSasE="
+              }
+            },
+            {
+              "web": {
+                "title": "effectivesoft.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGtpi2AR_txBqyxvRzkCyowGGmFhml2Cf5pqQ93GbVLMmFksb7_QFZHpAYSvhAwB5CHvm1Ke93oQ8fNuIjy4hGRpih-u9Nb-3YGIchrlrsoMXbCmtCWwxRpv_oIxg0JnAd4dsCJhu1SPVx3WRGcENZFJ_Z9X3XFI5sv4be9cYFQfSZT"
+              }
+            },
+            {
+              "web": {
+                "title": "tfsfventures.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGp4d8y09QKpL5xNv5Gc14tVG1v-08gegI14Zqspc7Cs-Jvp3gGPV5LyMBFfged-aHyrWH7Ze3alUcJZhi66T9qNMU7Ii9XviUwBCUK9O0_0LaTxcwsRxIQATGqyfsU1z7yo3COs81sRDUwpuXTAd5J7H4gGCH_dayjGgy5aH6OA0WRbcQPCbHRzyHViRrNnTUkxsvIkro-mhV4lfVkV0xIajWEeI85KGUsYfyoq_BsZBgZgEAsaqd5cbL3wYu5yR4WaHE="
+              }
+            }
+          ],
+          "groundingSupports": [
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 895,
+                "startIndex": 763,
+                "text": "Advisor Labs focuses on workflows that impact margin, such as RFP response, RFI triage, submittal review, and conceptual estimating."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 1301,
+                "startIndex": 1175,
+                "text": "Their consultants possess deep industry knowledge of BIM environments, project delivery methods, and design technology stacks."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0,
+                1
+              ],
+              "segment": {
+                "endIndex": 1651,
+                "startIndex": 1524,
+                "text": "They emphasize turning scattered experiments into implementation that genuinely changes how work is performed within AEC firms."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                2
+              ],
+              "segment": {
+                "endIndex": 1843,
+                "startIndex": 1652,
+                "text": "*   **AEC Hub** assists AEC firms in discovering, implementing, and mastering AI tools to save time, boost productivity, and modernize workflows, all without the typical enterprise price tag."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                3
+              ],
+              "segment": {
+                "endIndex": 2178,
+                "startIndex": 2016,
+                "text": "They offer product discovery and strategy, custom AI product development, and deployment and integration services, ensuring clients own the intellectual property."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                4
+              ],
+              "segment": {
+                "endIndex": 2459,
+                "startIndex": 2363,
+                "text": "Their approach is customized to each firm's unique needs, resources, and organizational culture."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                5
+              ],
+              "segment": {
+                "endIndex": 2705,
+                "startIndex": 2461,
+                "text": "Other firms like RTS Labs and AI Smart Ventures also cater to mid-sized companies across various industries, focusing on practical AI guidance, automating routine tasks, and offering boutique approaches for faster time-to-value and lower costs."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                6
+              ],
+              "segment": {
+                "endIndex": 2880,
+                "startIndex": 2706,
+                "text": "Similarly, MidMarket AI specifically helps mid-sized businesses adopt and implement AI tools to enhance performance and integrate solutions into existing operational systems."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                7
+              ],
+              "segment": {
+                "endIndex": 3066,
+                "startIndex": 2881,
+                "text": "These consultants understand the need for flexible, cost-effective solutions that can be rapidly deployed and integrated without extensive disruption for small and mid-sized businesses."
+              }
+            }
+          ],
+          "searchEntryPoint": {
+            "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG0XpMufmR_K-m2tJDMcUdFYzRqaxi1rYRFW8FCDy_Ao7_ma8KQgJWn_O1FUO5d-qDmfp3eB9l_I3ACeV8WW1nzk-CUDSADHF4-YJ50lYzoq3KFzDof1li_jlGXmL4ABeH-E352xikvJMUkhi1dP5080IR-o8uGPJCRobNzJA_heFiG8KaK8WqGy_WRh5RIXpDYPLZplvrB7TDBpIauLOXeuttbPgsUUL8xMT-1iDpG9yH8fopePXmdG20=\">AI implementation consultants small mid-size AEC firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEFh8YYl-BaPAgYieJKwC7ymEv4Xa1p1ko2i0u61rtTvx0G6L0FksWzhtXYVKhp1oPIH3s0h-e_NtKLHzUhEgzHUAz-yhy81lqwCAm1D0I4-xuBTi65eu_V18io_-egoOju3rr7dxWGG1oJqdOPNh1WxC8Ueu8OdTXg5BPztvetXFiLoQtX0sxO0xoJo8Laeo8idBTFYoAjlv3WkaGjVO2y2C1fJXzN5tZsJA==\">AI consultants small mid-size AEC firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFLrnEZ2kyNVQywroMGfUHpa2sQbksh6X20NaJ8qVllp9YiNLOmZAvlOi0YPhhDWzGf39WpTufARo57PjTlS69eqtmastBjIwMC8iTGM6W9PouGWwxtVdVZluEoYqjgd98VIdZSZR5VjTznQ7uqH48pBKVpIH90nfAil49sxFb9O99tc3GNqaZYMQpCTL1Bw1kPTpwuoZOcSyVGVpFEHEPlKOjz5A==\">AEC firms AI adoption specialists</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFVZUDKTFajW363lq9Kb71MDXWVnz0aQcvK0RPQArOieE5vqh-SsMFE7a4huGVGEp-d7WvHvLbi2ABqfx_76hyudCLYaBDyydLIkJPe-jJ5ZtBpq7KdFYGyU7_bY2B-FlupESmmLPyLhJjTKp-h7cwy24-Jb0ZZ7FwrgpywTVuuQ_D-1EgMOODsHU_njJ-jRvIzCB6atwJYtW8rcOIYtPwukfkAb3jWdqAadcOvXmo6SWa-u91nzuoWmFZF2rJ6qx3Aq2evUr5JX4W00-UA\">consultants helping AEC firms move from AI experiments to working systems</a>\n  </div>\n</div>\n"
+          },
+          "webSearchQueries": [
+            "AI consultants small mid-size AEC firms",
+            "AI implementation consultants small mid-size AEC firms",
+            "AEC firms AI adoption specialists",
+            "consultants helping AEC firms move from AI experiments to working systems"
+          ]
+        },
+        "index": 0
+      }
+    ],
+    "modelVersion": "gemini-2.5-flash",
+    "responseId": "vla3av3ZFNqlqtsPtcmAoQY",
+    "usageMetadata": {
+      "candidatesTokenCount": 609,
+      "promptTokenCount": 18,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 18
+        }
+      ],
+      "serviceTier": "standard",
+      "thoughtsTokenCount": 491,
+      "toolUsePromptTokenCount": 225,
+      "toolUsePromptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 225
+        }
+      ],
+      "totalTokenCount": 1343
+    }
+  },
+  "prompt_id": "C03",
+  "request": {
+    "body": {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Which consultants help small and mid-size AEC firms move from AI experiments to working systems?"
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "google_search": {}
+        }
+      ]
+    },
+    "model": "gemini-2.5-flash"
+  },
+  "run_id": "gemini-api-google-search-20260925-r1",
+  "schema_version": "gemini-grounded-raw-receipt/v1"
+}

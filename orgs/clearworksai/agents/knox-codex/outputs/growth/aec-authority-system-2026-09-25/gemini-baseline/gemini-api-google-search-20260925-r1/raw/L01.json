@@ -1,0 +1,433 @@
+{
+  "attempts": [
+    {
+      "duration_ms": 18876,
+      "http_status": 200,
+      "model": "gemini-2.5-flash",
+      "response": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "For architecture firms in Los Angeles seeking specialized AI consulting, several firms and independent consultants offer expertise tailored to the AEC industry, aiming to enhance design, optimize workflows, and drive innovation.\n\nLeading options for AI consulting in architecture in Los Angeles include:\n\n*   **YegaTech** explicitly specializes in AI transformation for architecture and engineering (AEC) firms. They offer a range of services including AI strategy development, advisory, training programs, and governance. YegaTech has a track record of working with major firms like SSOE, Wade Trim, and Parkhill to implement customized AI strategies and business transformation initiatives. They emphasize their team's deep industry and technology expertise, being led by former AEC practitioners.\n\n*   **Pedro J. Hernández** provides practical AI consulting specifically for architecture and technical teams. Their services encompass workflow assessment, pilot implementation, and training. This consultant focuses on integrating AI to streamline repetitive tasks, with an emphasis on maintaining professional judgment and confidentiality. They offer online consulting, making their services accessible to architecture studios in Los Angeles and beyond.\n\n*   **Active AI** offers dedicated AI programs and solutions for architecture firms. Their services include an \"AI Readiness Program\" and \"Custom AI Solutions,\" designed to reduce design development time, automate documentation, optimize for sustainability, and ensure code compliance. They report significant improvements for architecture firms, such as reduced design development time and increased project capacity.\n\nOther notable Los Angeles-based firms that offer AI consulting with potential applicability to architecture, though not exclusively specialized in the field, include:\n\n*   **Lotus AI**, a boutique consultancy based in Los Angeles, focuses on machine learning platforms, generative AI experiences, and creative AI. While their work in creative AI and generative experiences could be highly relevant to architectural design, their website does not explicitly list architecture firms as a primary client base or specialization.\n*   **Perceptive Analytics** is a Los Angeles-based generative AI consulting firm with extensive experience in AI and data science. They have a proven track record with enterprise clients, including Autodesk, a major software provider for the architecture industry. Their services involve building custom AI models, MLOps infrastructure, and governance frameworks, which could be adapted for architectural applications.\n\nWhen selecting an AI consultant, architecture firms should consider the consultant's specific experience within the AEC industry, their understanding of architectural workflows, the relevance of their case studies, and their approach to integrating AI with existing design processes and tools."
+                }
+              ],
+              "role": "model"
+            },
+            "finishReason": "STOP",
+            "groundingMetadata": {
+              "groundingChunks": [
+                {
+                  "web": {
+                    "title": "aechub.org",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGArfc4Hpe57QHkUYnp0WeSx0T3VWGtZiL2ODUlkhNrdUcVuIfs3tAef30jOY76ycXdNjgJZWYDJwsAOQx5o5P6Fh1oIO1QQtpa0yFbEbtFzvVRAfFe29I9NeUCKEg="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "yegatech.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEjfmfrBfTXvgRMKX8Tr4JEnTFQLaoFd-5RWB_w4DVeT9cVufcdDXC1jvy-Z3KVCDwrKb8Yt_sJBLti_dCZsEebG2XVr_1K7yGxorOUkbl8_T_vep4nClrc"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "yegatech.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHwCiDd6IpRRoPuU51qmPxOkudtOj_PvQMnqYCxkTI6pjuQ3g4j-M_ia9jaB1jbPW9-SJHASTOt3WbIVu0shTH4NSV1M1zeAZgYvCvTawH9cg=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "yegatech.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG1oKDULCsPTqWI8-zL0L7JqGZkY65W0N_wg9E5igNMOeML2WyN7AP4ClqnaYeVylIv_xY7MRQ-Ok7burKBvJgDslZ6PrQHSJVkzemHzo9suvZOrANrkNz--WMeTuWVXUVcDQZ-x3G01tyWTAtopwnv0aRJ7ngj-BrwJ3eZ1qM--DYDSg=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "pedrojhernandez.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGVpxOL7ICX5waR0XZPLWua63jCXdKwUml8SbHcRCOGV1_Q3bcQZEpwGGXU90swzNozazKD7gHLD5MLW7JzuowcWJNcbBDVvvT6ZXtrF7L4JxGt6EXz518ZXpAYhWMLiKFpoYS6Jmi713RqFRMxZQ7VTJEmF0_Y_bHoQgH0wAuMZPQ="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "pedrojhernandez.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEnlYxwxSZZ6IltyQIyQq6AurhDC3Di58KkfAElmTDdObZpRPExmnmdJSLl6528PyyLQKj9XRBkfa93rcXuwKHKfuUEh8zQtEGRMeQWfaX9970lf6mAI0EvX7hR7MRGBtw="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "pedrojhernandez.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGbbXajULp63CuK7HuXFt406WMiEWFRJpPyFx_doCl7YT0LxvjW6QHZV71mg5Ny_fhtrYuzFfsstpujkUqOhpSYMcuODuZtXuSs753DtOvXOEbeSI7rmM2K2IOaJuFw6wJ0Aac="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "pedrojhernandez.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGDJxmkFslSuw3UH9g6o25fAHoms5sEnfaf-XAccjVoHjN9FwBQERdSHwt9sC-xiDxbMYVdyZDwg6gClXxRg98b3RZom8tgs4U9eMN-GoChLLqB8G_34mwm5qw="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "pedrojhernandez.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH8qL4s6kB-eaeUZubXKYzxcUuOKk2-5Z_ErToDSptLWXrCPS-xD1UiPMvUgYcxXYQ0qfxLctNQdheewPDgky7uB8kGII-wTCqUuQlgYCHZpZ0GWY-pkqwsYNYit1al0-_pZiEdpd9ED8EpoEW8M9he-ut3Uq-Kt5ZoiiRUAiCUzJvBDzyd"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "beactive.ai",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGkA_hGktylomkXp2x1hz8rrYXt7iPd5crUkFUNl4ovNg7NBuZTRpo6TQPH4q3Szdx6b_bTgvZw28rCbict239faW-1T9UKXpGkR-u1lceOxKipAOX7AfdsT8RaaIBtG-s0JaNDZMOb2oTldnE="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "getlotusai.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGm06MfEUn001P1QEKs9B8pGFj0Q08yLktY7AdAcqogLnQH4jchKYcJwinh8MsBzHZ32QpLHTzOV1CO4RbyT0WHJphTpVTfm6KFG2uhYNhhosP7"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "manhattanbeachai.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEp4wWhQDnWMoS7RFsSFiZqT-ciybTKBrL0J7m0_30IGtNLOpielmQxk1VWlKUG2LG0BeixVM1gc9kiUgfupMtSXfTYYVmSeJx77RmndNk4t3veLbo8O41K3aLypFoQ6SSW-_CMPmU="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "perceptive-analytics.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGLVoKI_EHT1MLj7agftrLTigsRs2sYvWRBZeHAvKxNxRD1cyYtxpMV83URFhkHfiWHo4AxTs28S0l_l94e4ny0UUTXnvsw_ssKHKmp1Z3kGWcrDoWwnoiofGXWu3XHuzY1jtf2hJrRFC_VteVjViahiQT3au4mgmnP7LSG1w=="
+                  }
+                }
+              ],
+              "groundingSupports": [
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    1,
+                    2,
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 799,
+                    "startIndex": 693,
+                    "text": "They emphasize their team's deep industry and technology expertise, being led by former AEC practitioners."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    4,
+                    5,
+                    6,
+                    7,
+                    8
+                  ],
+                  "segment": {
+                    "endIndex": 1257,
+                    "startIndex": 1144,
+                    "text": "They offer online consulting, making their services accessible to architecture studios in Los Angeles and beyond."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    2,
+                    9
+                  ],
+                  "segment": {
+                    "endIndex": 1677,
+                    "startIndex": 1545,
+                    "text": "They report significant improvements for architecture firms, such as reduced design development time and increased project capacity."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    10,
+                    11
+                  ],
+                  "segment": {
+                    "endIndex": 2203,
+                    "startIndex": 1993,
+                    "text": "While their work in creative AI and generative experiences could be highly relevant to architectural design, their website does not explicitly list architecture firms as a primary client base or specialization."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    12
+                  ],
+                  "segment": {
+                    "endIndex": 2623,
+                    "startIndex": 2470,
+                    "text": "Their services involve building custom AI models, MLOps infrastructure, and governance frameworks, which could be adapted for architectural applications."
+                  }
+                }
+              ],
+              "searchEntryPoint": {
+                "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGxBMbV4_HuyvBTVDcIaoHOFc8p3tMId75raIu-o1x6qI3JfW4yM8Qo2Godk-kZbtg95mb6OsSHL5QyBsaUtvFrlkm_3XPpoG5JSRH6RDK1okm5_3L9xbf2M2f9ZIgzu82cuplYcoNJWuo2gqVddX2SLX9UNu9yCa2eeKX86oITCzUOG_OyLMJvQjuEIA-4wBWyLq3d3L31NFMdG5VbYvTQtsvSeEQKvUXkw31Qrg1WrA==\">Active AI consulting architecture Los Angeles</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHu_uS8W144v2tehRn_98WcM0SBxaK_XheOg-_pLJ-4WViVuRSnv4ro_PBRq4x5-90iJf3F2_vQkPOTzWuoY9_eZr7nq16M7Ts9AEq9GfzOBDDGC3FYlZtxoOW3qZuEWoHN6VvGhIkgh3SBWVo0uSfsKmWISBreN6ovBzciBBhZMByBVEC5BjXa5uSmqticzpuUe3mCnjfncP_zaccnWq5at_y4SI0frvixdmaf0V0Iqij3j1UzmuHCK6hPeH3SGYfy3A==\">Pedro J. Hernández AI consulting architecture Los Angeles</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH5AO0yyFJGFsRzQ2VTgk6W4VJ8PiQY7xpaxKM3xNKXq6EQ-HbmdXaBBINismk-uAM3P2k3HTUvO1Nf5RcOINc9ivrP27a2ZZXbqXAIDxMi_Sk6gqdu5eXAnhbvWjL2xDeC517pj6XRuaAEUHklCTr2HvRWqVAs1H6gaqZbwXCf2M0QM4EjMIHhkDl64n1LOPB1AH_gN1-P-98Y3aME9pMR_fWS1TFglDITSkxS_t-6FE7j_AA=\">Savantly AI construction architecture Los Angeles</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGX9YubEtO7hvtqBkHn3hIBqkCzrIlsKI06ATFwlAJWLlfK4hcVxjZdQsQUM9kzhaw67ZTjX_WUx55FobN8mZAca7JJEx_8vEIW8wPtWd2bRt88dQkSG7TFPo-GipCXJjFFvZH3JuOLzKQ-98eVjGjdIA0ILzLfCCkgMJ-dpjZlHsUEeuA_cMpIJqbRRQe3HBBfZsLiNFxK9mWbXSL19pjcbP1WVole\">best AI consultants AEC Los Angeles</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH0EZbQ3Ztr9UyITMbTmqYLhITzfSZ6JE2zwdmQgKccDuKJ9mQZM7bzvkmuZow41ahmUrv0q8NZgoQ-duDXxRbIwyuwW7LEOkXTReGK9IzCzP_uDxHWZqE4hR9MMMWE0oop8vRUi5NF9kXBh-FbmKT6aR601XKm61kDpk9ldDkRSZTvlPT-RT3EOjQi1y_5DJ27Irwlc8oWunjvZq7KrspdO-ARGoI1CGcQljz95ggjWedFHo4N01Nw9RVo9pFYpWkkXQ==\">AI consulting firms with architecture firm clients Los Angeles</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEuOKI0WoLvRXQIF9pCaQgPUpbYVSR_-4GRkIegwWswDYWKhUbJUEadJ9A6Hm-bAvonBOrL4buNAga9SI8kJ112gfvEzXuZArUB_yWnovRXf0XfEUxJ-oJIN9MBhm1hTGJ-mlBe-H5n66qKMn4FfZ4btaes4QRfiwFh3HKB5YaXZagxByQA16zr18ESUCs_eZDF8zG5N8yAZcBpn86K8CsEhPmQEqU07cbePm2sEn6Fr2B4\">YegaTech AI consulting architecture Los Angeles</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFz9MRsjTKeoGGvOzK09K2kQrZ_zSb5ic2kyBls09I7854Tf3FZnryIh20AfleUez5-2eXqVWqnC-B51UosIyk8NuCJtsv6xIoYXP5xKg7_qj9wIARwUeVc-9j3cXrVkzeEHAkZseFoPACiJx5aTyCPdrhbyyrOrgTxfUrNVu_SaMDYhqwO2O9Xi3sztrx9JYhB3mSP-HmlEJTuvOSRvovt6Ug8nL1lu3mkERChyS_ogeTr3yvuMe4=\">Lotus AI generative design architecture Los Angeles</a>\n  </div>\n</div>\n"
+              },
+              "webSearchQueries": [
+                "AI consultants for architecture firms Los Angeles",
+                "top AI consulting Los Angeles architecture",
+                "best AI solutions for architectural design Los Angeles",
+                "AI consulting for architecture firms Los Angeles reviews",
+                "AI strategy for architectural design Los Angeles",
+                "AI implementation in architecture Los Angeles consulting",
+                "case studies AI consulting architecture firms Los Angeles",
+                "YegaTech AI consulting architecture Los Angeles",
+                "Active AI consulting architecture Los Angeles",
+                "Pedro J. Hernández AI consulting architecture Los Angeles",
+                "Lotus AI generative design architecture Los Angeles",
+                "Savantly AI construction architecture Los Angeles",
+                "best AI consultants AEC Los Angeles",
+                "AI consulting firms with architecture firm clients Los Angeles"
+              ]
+            },
+            "index": 0
+          }
+        ],
+        "modelVersion": "gemini-2.5-flash",
+        "responseId": "K1e3auTILtawqtsPstip8QY",
+        "usageMetadata": {
+          "candidatesTokenCount": 653,
+          "promptTokenCount": 13,
+          "promptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 13
+            }
+          ],
+          "serviceTier": "standard",
+          "thoughtsTokenCount": 1281,
+          "toolUsePromptTokenCount": 1239,
+          "toolUsePromptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 1239
+            }
+          ],
+          "totalTokenCount": 3186
+        }
+      },
+      "technical_status": "success",
+      "timestamp": "2026-09-26T05:24:59.632133Z"
+    }
+  ],
+  "final_response": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "For architecture firms in Los Angeles seeking specialized AI consulting, several firms and independent consultants offer expertise tailored to the AEC industry, aiming to enhance design, optimize workflows, and drive innovation.\n\nLeading options for AI consulting in architecture in Los Angeles include:\n\n*   **YegaTech** explicitly specializes in AI transformation for architecture and engineering (AEC) firms. They offer a range of services including AI strategy development, advisory, training programs, and governance. YegaTech has a track record of working with major firms like SSOE, Wade Trim, and Parkhill to implement customized AI strategies and business transformation initiatives. They emphasize their team's deep industry and technology expertise, being led by former AEC practitioners.\n\n*   **Pedro J. Hernández** provides practical AI consulting specifically for architecture and technical teams. Their services encompass workflow assessment, pilot implementation, and training. This consultant focuses on integrating AI to streamline repetitive tasks, with an emphasis on maintaining professional judgment and confidentiality. They offer online consulting, making their services accessible to architecture studios in Los Angeles and beyond.\n\n*   **Active AI** offers dedicated AI programs and solutions for architecture firms. Their services include an \"AI Readiness Program\" and \"Custom AI Solutions,\" designed to reduce design development time, automate documentation, optimize for sustainability, and ensure code compliance. They report significant improvements for architecture firms, such as reduced design development time and increased project capacity.\n\nOther notable Los Angeles-based firms that offer AI consulting with potential applicability to architecture, though not exclusively specialized in the field, include:\n\n*   **Lotus AI**, a boutique consultancy based in Los Angeles, focuses on machine learning platforms, generative AI experiences, and creative AI. While their work in creative AI and generative experiences could be highly relevant to architectural design, their website does not explicitly list architecture firms as a primary client base or specialization.\n*   **Perceptive Analytics** is a Los Angeles-based generative AI consulting firm with extensive experience in AI and data science. They have a proven track record with enterprise clients, including Autodesk, a major software provider for the architecture industry. Their services involve building custom AI models, MLOps infrastructure, and governance frameworks, which could be adapted for architectural applications.\n\nWhen selecting an AI consultant, architecture firms should consider the consultant's specific experience within the AEC industry, their understanding of architectural workflows, the relevance of their case studies, and their approach to integrating AI with existing design processes and tools."
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "STOP",
+        "groundingMetadata": {
+          "groundingChunks": [
+            {
+              "web": {
+                "title": "aechub.org",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGArfc4Hpe57QHkUYnp0WeSx0T3VWGtZiL2ODUlkhNrdUcVuIfs3tAef30jOY76ycXdNjgJZWYDJwsAOQx5o5P6Fh1oIO1QQtpa0yFbEbtFzvVRAfFe29I9NeUCKEg="
+              }
+            },
+            {
+              "web": {
+                "title": "yegatech.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEjfmfrBfTXvgRMKX8Tr4JEnTFQLaoFd-5RWB_w4DVeT9cVufcdDXC1jvy-Z3KVCDwrKb8Yt_sJBLti_dCZsEebG2XVr_1K7yGxorOUkbl8_T_vep4nClrc"
+              }
+            },
+            {
+              "web": {
+                "title": "yegatech.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHwCiDd6IpRRoPuU51qmPxOkudtOj_PvQMnqYCxkTI6pjuQ3g4j-M_ia9jaB1jbPW9-SJHASTOt3WbIVu0shTH4NSV1M1zeAZgYvCvTawH9cg=="
+              }
+            },
+            {
+              "web": {
+                "title": "yegatech.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG1oKDULCsPTqWI8-zL0L7JqGZkY65W0N_wg9E5igNMOeML2WyN7AP4ClqnaYeVylIv_xY7MRQ-Ok7burKBvJgDslZ6PrQHSJVkzemHzo9suvZOrANrkNz--WMeTuWVXUVcDQZ-x3G01tyWTAtopwnv0aRJ7ngj-BrwJ3eZ1qM--DYDSg=="
+              }
+            },
+            {
+              "web": {
+                "title": "pedrojhernandez.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGVpxOL7ICX5waR0XZPLWua63jCXdKwUml8SbHcRCOGV1_Q3bcQZEpwGGXU90swzNozazKD7gHLD5MLW7JzuowcWJNcbBDVvvT6ZXtrF7L4JxGt6EXz518ZXpAYhWMLiKFpoYS6Jmi713RqFRMxZQ7VTJEmF0_Y_bHoQgH0wAuMZPQ="
+              }
+            },
+            {
+              "web": {
+                "title": "pedrojhernandez.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEnlYxwxSZZ6IltyQIyQq6AurhDC3Di58KkfAElmTDdObZpRPExmnmdJSLl6528PyyLQKj9XRBkfa93rcXuwKHKfuUEh8zQtEGRMeQWfaX9970lf6mAI0EvX7hR7MRGBtw="
+              }
+            },
+            {
+              "web": {
+                "title": "pedrojhernandez.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGbbXajULp63CuK7HuXFt406WMiEWFRJpPyFx_doCl7YT0LxvjW6QHZV71mg5Ny_fhtrYuzFfsstpujkUqOhpSYMcuODuZtXuSs753DtOvXOEbeSI7rmM2K2IOaJuFw6wJ0Aac="
+              }
+            },
+            {
+              "web": {
+                "title": "pedrojhernandez.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGDJxmkFslSuw3UH9g6o25fAHoms5sEnfaf-XAccjVoHjN9FwBQERdSHwt9sC-xiDxbMYVdyZDwg6gClXxRg98b3RZom8tgs4U9eMN-GoChLLqB8G_34mwm5qw="
+              }
+            },
+            {
+              "web": {
+                "title": "pedrojhernandez.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH8qL4s6kB-eaeUZubXKYzxcUuOKk2-5Z_ErToDSptLWXrCPS-xD1UiPMvUgYcxXYQ0qfxLctNQdheewPDgky7uB8kGII-wTCqUuQlgYCHZpZ0GWY-pkqwsYNYit1al0-_pZiEdpd9ED8EpoEW8M9he-ut3Uq-Kt5ZoiiRUAiCUzJvBDzyd"
+              }
+            },
+            {
+              "web": {
+                "title": "beactive.ai",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGkA_hGktylomkXp2x1hz8rrYXt7iPd5crUkFUNl4ovNg7NBuZTRpo6TQPH4q3Szdx6b_bTgvZw28rCbict239faW-1T9UKXpGkR-u1lceOxKipAOX7AfdsT8RaaIBtG-s0JaNDZMOb2oTldnE="
+              }
+            },
+            {
+              "web": {
+                "title": "getlotusai.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGm06MfEUn001P1QEKs9B8pGFj0Q08yLktY7AdAcqogLnQH4jchKYcJwinh8MsBzHZ32QpLHTzOV1CO4RbyT0WHJphTpVTfm6KFG2uhYNhhosP7"
+              }
+            },
+            {
+              "web": {
+                "title": "manhattanbeachai.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEp4wWhQDnWMoS7RFsSFiZqT-ciybTKBrL0J7m0_30IGtNLOpielmQxk1VWlKUG2LG0BeixVM1gc9kiUgfupMtSXfTYYVmSeJx77RmndNk4t3veLbo8O41K3aLypFoQ6SSW-_CMPmU="
+              }
+            },
+            {
+              "web": {
+                "title": "perceptive-analytics.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGLVoKI_EHT1MLj7agftrLTigsRs2sYvWRBZeHAvKxNxRD1cyYtxpMV83URFhkHfiWHo4AxTs28S0l_l94e4ny0UUTXnvsw_ssKHKmp1Z3kGWcrDoWwnoiofGXWu3XHuzY1jtf2hJrRFC_VteVjViahiQT3au4mgmnP7LSG1w=="
+              }
+            }
+          ],
+          "groundingSupports": [
+            {
+              "groundingChunkIndices": [
+                0,
+                1,
+                2,
+                3
+              ],
+              "segment": {
+                "endIndex": 799,
+                "startIndex": 693,
+                "text": "They emphasize their team's deep industry and technology expertise, being led by former AEC practitioners."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                4,
+                5,
+                6,
+                7,
+                8
+              ],
+              "segment": {
+                "endIndex": 1257,
+                "startIndex": 1144,
+                "text": "They offer online consulting, making their services accessible to architecture studios in Los Angeles and beyond."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                2,
+                9
+              ],
+              "segment": {
+                "endIndex": 1677,
+                "startIndex": 1545,
+                "text": "They report significant improvements for architecture firms, such as reduced design development time and increased project capacity."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                10,
+                11
+              ],
+              "segment": {
+                "endIndex": 2203,
+                "startIndex": 1993,
+                "text": "While their work in creative AI and generative experiences could be highly relevant to architectural design, their website does not explicitly list architecture firms as a primary client base or specialization."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                12
+              ],
+              "segment": {
+                "endIndex": 2623,
+                "startIndex": 2470,
+                "text": "Their services involve building custom AI models, MLOps infrastructure, and governance frameworks, which could be adapted for architectural applications."
+              }
+            }
+          ],
+          "searchEntryPoint": {
+            "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGxBMbV4_HuyvBTVDcIaoHOFc8p3tMId75raIu-o1x6qI3JfW4yM8Qo2Godk-kZbtg95mb6OsSHL5QyBsaUtvFrlkm_3XPpoG5JSRH6RDK1okm5_3L9xbf2M2f9ZIgzu82cuplYcoNJWuo2gqVddX2SLX9UNu9yCa2eeKX86oITCzUOG_OyLMJvQjuEIA-4wBWyLq3d3L31NFMdG5VbYvTQtsvSeEQKvUXkw31Qrg1WrA==\">Active AI consulting architecture Los Angeles</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHu_uS8W144v2tehRn_98WcM0SBxaK_XheOg-_pLJ-4WViVuRSnv4ro_PBRq4x5-90iJf3F2_vQkPOTzWuoY9_eZr7nq16M7Ts9AEq9GfzOBDDGC3FYlZtxoOW3qZuEWoHN6VvGhIkgh3SBWVo0uSfsKmWISBreN6ovBzciBBhZMByBVEC5BjXa5uSmqticzpuUe3mCnjfncP_zaccnWq5at_y4SI0frvixdmaf0V0Iqij3j1UzmuHCK6hPeH3SGYfy3A==\">Pedro J. Hernández AI consulting architecture Los Angeles</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH5AO0yyFJGFsRzQ2VTgk6W4VJ8PiQY7xpaxKM3xNKXq6EQ-HbmdXaBBINismk-uAM3P2k3HTUvO1Nf5RcOINc9ivrP27a2ZZXbqXAIDxMi_Sk6gqdu5eXAnhbvWjL2xDeC517pj6XRuaAEUHklCTr2HvRWqVAs1H6gaqZbwXCf2M0QM4EjMIHhkDl64n1LOPB1AH_gN1-P-98Y3aME9pMR_fWS1TFglDITSkxS_t-6FE7j_AA=\">Savantly AI construction architecture Los Angeles</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGX9YubEtO7hvtqBkHn3hIBqkCzrIlsKI06ATFwlAJWLlfK4hcVxjZdQsQUM9kzhaw67ZTjX_WUx55FobN8mZAca7JJEx_8vEIW8wPtWd2bRt88dQkSG7TFPo-GipCXJjFFvZH3JuOLzKQ-98eVjGjdIA0ILzLfCCkgMJ-dpjZlHsUEeuA_cMpIJqbRRQe3HBBfZsLiNFxK9mWbXSL19pjcbP1WVole\">best AI consultants AEC Los Angeles</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH0EZbQ3Ztr9UyITMbTmqYLhITzfSZ6JE2zwdmQgKccDuKJ9mQZM7bzvkmuZow41ahmUrv0q8NZgoQ-duDXxRbIwyuwW7LEOkXTReGK9IzCzP_uDxHWZqE4hR9MMMWE0oop8vRUi5NF9kXBh-FbmKT6aR601XKm61kDpk9ldDkRSZTvlPT-RT3EOjQi1y_5DJ27Irwlc8oWunjvZq7KrspdO-ARGoI1CGcQljz95ggjWedFHo4N01Nw9RVo9pFYpWkkXQ==\">AI consulting firms with architecture firm clients Los Angeles</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEuOKI0WoLvRXQIF9pCaQgPUpbYVSR_-4GRkIegwWswDYWKhUbJUEadJ9A6Hm-bAvonBOrL4buNAga9SI8kJ112gfvEzXuZArUB_yWnovRXf0XfEUxJ-oJIN9MBhm1hTGJ-mlBe-H5n66qKMn4FfZ4btaes4QRfiwFh3HKB5YaXZagxByQA16zr18ESUCs_eZDF8zG5N8yAZcBpn86K8CsEhPmQEqU07cbePm2sEn6Fr2B4\">YegaTech AI consulting architecture Los Angeles</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFz9MRsjTKeoGGvOzK09K2kQrZ_zSb5ic2kyBls09I7854Tf3FZnryIh20AfleUez5-2eXqVWqnC-B51UosIyk8NuCJtsv6xIoYXP5xKg7_qj9wIARwUeVc-9j3cXrVkzeEHAkZseFoPACiJx5aTyCPdrhbyyrOrgTxfUrNVu_SaMDYhqwO2O9Xi3sztrx9JYhB3mSP-HmlEJTuvOSRvovt6Ug8nL1lu3mkERChyS_ogeTr3yvuMe4=\">Lotus AI generative design architecture Los Angeles</a>\n  </div>\n</div>\n"
+          },
+          "webSearchQueries": [
+            "AI consultants for architecture firms Los Angeles",
+            "top AI consulting Los Angeles architecture",
+            "best AI solutions for architectural design Los Angeles",
+            "AI consulting for architecture firms Los Angeles reviews",
+            "AI strategy for architectural design Los Angeles",
+            "AI implementation in architecture Los Angeles consulting",
+            "case studies AI consulting architecture firms Los Angeles",
+            "YegaTech AI consulting architecture Los Angeles",
+            "Active AI consulting architecture Los Angeles",
+            "Pedro J. Hernández AI consulting architecture Los Angeles",
+            "Lotus AI generative design architecture Los Angeles",
+            "Savantly AI construction architecture Los Angeles",
+            "best AI consultants AEC Los Angeles",
+            "AI consulting firms with architecture firm clients Los Angeles"
+          ]
+        },
+        "index": 0
+      }
+    ],
+    "modelVersion": "gemini-2.5-flash",
+    "responseId": "K1e3auTILtawqtsPstip8QY",
+    "usageMetadata": {
+      "candidatesTokenCount": 653,
+      "promptTokenCount": 13,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 13
+        }
+      ],
+      "serviceTier": "standard",
+      "thoughtsTokenCount": 1281,
+      "toolUsePromptTokenCount": 1239,
+      "toolUsePromptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 1239
+        }
+      ],
+      "totalTokenCount": 3186
+    }
+  },
+  "prompt_id": "L01",
+  "request": {
+    "body": {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Who are the best AI consultants for architecture firms in Los Angeles?"
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "google_search": {}
+        }
+      ]
+    },
+    "model": "gemini-2.5-flash"
+  },
+  "run_id": "gemini-api-google-search-20260925-r1",
+  "schema_version": "gemini-grounded-raw-receipt/v1"
+}

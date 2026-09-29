@@ -1,0 +1,625 @@
+{
+  "attempts": [
+    {
+      "duration_ms": 6991,
+      "http_status": 200,
+      "model": "gemini-2.5-flash",
+      "response": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "Yes, an AEC (Architecture, Engineering, and Construction) AI consultant can significantly help in fixing disconnected project, staffing, financial, and pipeline information systems. AI solutions are specifically designed to integrate disparate data, automate workflows, and provide comprehensive insights across an organization in the AEC sector.\n\nHere's how an AEC AI consultant can address your challenges:\n\n*   **Data Integration and Silo Breaking:** AI can be instrumental in integrating various disconnected business systems commonly used in AEC firms, such as Geospatial Information Systems (GIS), Computer-Aided Design and Drafting (CADD) tools, Building Information Modeling (BIM) platforms, project management software, and asset management systems. Consultants focus on making your enterprise data \"AI-ready\" by breaking down silos and structuring information, which is crucial for AI to have a holistic view. This allows for real-time, integrated access to project information across different departments and even supply chains. AI can also work with unstructured information like drawings and field observations, reducing friction between systems.\n\n*   **Workflow Automation and Optimization:** AI specialists empower firms with intelligent automation and workflow optimization. This means automating repetitive tasks like data entry, document classification, and progress reporting, freeing up your team to focus on higher-value work. AI can also identify bottlenecks and suggest optimal workflows, leading to increased efficiency and reduced manual errors.\n\n*   **Enhanced Decision-Making with Predictive Analytics:** By analyzing vast amounts of historical and real-time project data, AI can provide predictive analytics. This enables better project forecasting, identifying potential bottlenecks, predicting scheduling risks and cost overruns, and suggesting corrective actions before issues escalate. This data-driven insight improves decision-making across all stages of a project, from planning and resource allocation to risk management.\n\n*   **Improved Project, Staffing, and Financial Management:** AI can enhance project planning and management through improved predictive analytics, resource optimization, and cost estimation. For staffing, AI can help with workforce allocation and identifying inefficiencies. For financial information, by integrating data from various sources, AI can provide a clearer, more accurate picture, leading to better budget management and cost savings.\n\n*   **Customized Solutions and Implementation Roadmap:** AEC AI consultants offer tailored guidance and training to help firms leverage AI effectively. They work to understand your specific business processes and technology infrastructure to recommend solutions that align with your goals and develop a roadmap for successful AI adoption.\n\nBy integrating these disconnected systems with AI, AEC firms can achieve increased efficiency, cost savings, improved decision-making, and enhanced safety, ultimately leading to higher-quality projects and a competitive edge."
+                }
+              ],
+              "role": "model"
+            },
+            "finishReason": "STOP",
+            "groundingMetadata": {
+              "groundingChunks": [
+                {
+                  "web": {
+                    "title": "advisorlabs.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFpopaha4qOUKaFJ-IJ1bIXfqla1bbhJNj9kip691rUevEZ0uJuhv6amv1Olsqe8OAZnspBo7zKVdK5ANYBrTQoj7SU1bLWtQkbt4NYvmm2u1bsINCzVzh2nChDVPBrYX3mktZZFqk="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aecfoundry.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGqQiAa9vCmU5SBnmSouVKZACKDoyWR0bPUg1Ls6E0JziJtcTa2C4-LEmJTnwzPrdyz24hXpJBfHB1a1Sl4n8JlDI5RJyQa1dvcCFLqPrjVFxyj1QZPiMpAYMTBYqz4oCBNH32RXQ0Ru0n1FyCMInDoZcyCEXiSMOTomq6ixyGkUzeTM_4dao0kWsf5d7Zvx01MrioaWF2pDcCEuw13YUFUV9eZ8_ofI2hB8rgr2t_V0f1b5R4V6sE="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "nxtaec.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGW8eqoxEqQmQEljvrP38UbpObfEBH2kQxjPn1j7EIQM9xxZ7oZ01g9n362RT2vLpl2ssiLgdsAHN7Dj831CzlP6kbIZeDv4zGwHNpJDObYUlZYbJxlaWMFSQ95KkbYU8s215PIrQ6oSiBoahj2pGBcg3MpRJf2BbCOtNjpTVLc5dATimoKvsCrGSBohGVojigGpqyh2fra9z2QGAM4l8yM5tn4-aS0rdlIvXgUEqA-u92ggzf-DwAGCgiq-g20J8SnM7YbqE6qzVld38oagRyeBkiqjAo="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "imaginit.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHweBvzRROx-dWEtGbAVmfYdwdTsMz4zYjCyO9ewTMPBCppMZRWj22pUVqpNIN69ztF-ex3tIVaVwlElTPv9PKWKRt3OAxlhYzCfteLXLAuBK4VvJVYSM3VazcdcuN5EnReakCeY9oHclwRAC-RvR7EsTIYEKgd_Of3DC_PY2v7lOsNs9pwqr3NUJb1Pm9K3aqCk1eOJSIdetwGSf4="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "mckinsey.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFh8_rv1fja5Lym2vT8W0KfrOjLxq3tWPWgN2LK1x7QluEtvJcMpwOzONJCnA0Zfgs3dNde5BIhj9QMFLvDjLDt1ENc5b9ppeO8bMhaIl7aWRK6Ugc35idyxZ8y8T9fMiTOvwil5ddvLAyzitNb5VUSRsuDpTIvLl8Z60-HStlgtfve9nQlI7k7J_bHS-J0ojw8D_nK6nV0AjovTztN5lwf-wVMzdyaJCq2Sg6RcWANVGd7N7XTvWEMEB68bGH9ZhcE2s7jP_U5QIBiYQQtL3k="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "unanet.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFt1HKr-QJap6c7OJzjBfU9HBoQVqivMTp3-mB7bIJ5h6McnfKivVE9_ss6GYO1Yl9VT4FliiwdnnmV-rNlOL3l9eNMVGTHriBvg6W0r7SxD7nvA-lzWcGJ0Ld0cU6pRIDvttToAlWX9iZvCWcaHFkjkZjuQ9BQ"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "trimble.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHKlbmBG9fATN0TUWng22H5AL23ZVyknX0CZcrww9bqYDtN27ShoKcVwPbgeQXoJAcHl6R2HpKSCLMmxyF5sDOpN9AINBAg4ERDFfGHo8U7H-dAFrmsqB04L8SYZTKanJSZbHd7diUFS_K5QgjO915Jhj-Dg42ILlIBrYrCmMJEBg5G2T1zst96NlJjZduVSk84FIrE4k2AyY7eMb6-hulBHdkZMfrIy-qbU2xG4pMe1lA2"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "theaecassociates.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHchojQI5aZl9UcvT1Xm5v5J7a2bQXDqzc-TYy_R4gIWntdxMyh99SzHoBkuiCqME4q9eZ6OLJcACV0qtGK822qH3tdv5qbdXgi31kjcml6-J16Xz-dGImT6DPD7PMj5ZxWKO1HqE0fb-Fsh1JRB80IKa-12w=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "zweiggroup.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGM7iXfrGIthHGXfbyQJ4r4CW54pw5exARHRTPCy5j4_W0zJ69ZS8mqf2o60gvEmpzF-9ZZYhzzO2iEeys8NiVKwFagZEMCaQ8qO_UVAb_2o6JZDlFWmlekkRz28rpHqxGeEkRt3ePpX5WSeJMykEo="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aiinaec.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGmW3DBX63m_SQzAq12zTFrfT6CizrnCWU24sUQyCb832OyOm3OcdOmDl_CjV4AjsHXsyOGZUZwJY7kf0w6kP5dAfGsrI5Hh1GEOiM6Dx4B6IozSA=="
+                  }
+                }
+              ],
+              "groundingSupports": [
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    1,
+                    2,
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 346,
+                    "startIndex": 182,
+                    "text": "AI solutions are specifically designed to integrate disparate data, automate workflows, and provide comprehensive insights across an organization in the AEC sector."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 758,
+                    "startIndex": 410,
+                    "text": "*   **Data Integration and Silo Breaking:** AI can be instrumental in integrating various disconnected business systems commonly used in AEC firms, such as Geospatial Information Systems (GIS), Computer-Aided Design and Drafting (CADD) tools, Building Information Modeling (BIM) platforms, project management software, and asset management systems."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 919,
+                    "startIndex": 759,
+                    "text": "Consultants focus on making your enterprise data \"AI-ready\" by breaking down silos and structuring information, which is crucial for AI to have a holistic view."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    2
+                  ],
+                  "segment": {
+                    "endIndex": 1040,
+                    "startIndex": 920,
+                    "text": "This allows for real-time, integrated access to project information across different departments and even supply chains."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    4
+                  ],
+                  "segment": {
+                    "endIndex": 1160,
+                    "startIndex": 1041,
+                    "text": "AI can also work with unstructured information like drawings and field observations, reducing friction between systems."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 1291,
+                    "startIndex": 1162,
+                    "text": "*   **Workflow Automation and Optimization:** AI specialists empower firms with intelligent automation and workflow optimization."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 1448,
+                    "startIndex": 1292,
+                    "text": "This means automating repetitive tasks like data entry, document classification, and progress reporting, freeing up your team to focus on higher-value work."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    5
+                  ],
+                  "segment": {
+                    "endIndex": 1571,
+                    "startIndex": 1449,
+                    "text": "AI can also identify bottlenecks and suggest optimal workflows, leading to increased efficiency and reduced manual errors."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    6
+                  ],
+                  "segment": {
+                    "endIndex": 1737,
+                    "startIndex": 1573,
+                    "text": "*   **Enhanced Decision-Making with Predictive Analytics:** By analyzing vast amounts of historical and real-time project data, AI can provide predictive analytics."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    7,
+                    5,
+                    6
+                  ],
+                  "segment": {
+                    "endIndex": 1918,
+                    "startIndex": 1738,
+                    "text": "This enables better project forecasting, identifying potential bottlenecks, predicting scheduling risks and cost overruns, and suggesting corrective actions before issues escalate."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    1,
+                    6
+                  ],
+                  "segment": {
+                    "endIndex": 2058,
+                    "startIndex": 1919,
+                    "text": "This data-driven insight improves decision-making across all stages of a project, from planning and resource allocation to risk management."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 2251,
+                    "startIndex": 2060,
+                    "text": "*   **Improved Project, Staffing, and Financial Management:** AI can enhance project planning and management through improved predictive analytics, resource optimization, and cost estimation."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    7,
+                    6
+                  ],
+                  "segment": {
+                    "endIndex": 2335,
+                    "startIndex": 2252,
+                    "text": "For staffing, AI can help with workforce allocation and identifying inefficiencies."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    7
+                  ],
+                  "segment": {
+                    "endIndex": 2507,
+                    "startIndex": 2336,
+                    "text": "For financial information, by integrating data from various sources, AI can provide a clearer, more accurate picture, leading to better budget management and cost savings."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    8
+                  ],
+                  "segment": {
+                    "endIndex": 2660,
+                    "startIndex": 2509,
+                    "text": "*   **Customized Solutions and Implementation Roadmap:** AEC AI consultants offer tailored guidance and training to help firms leverage AI effectively."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    8,
+                    9
+                  ],
+                  "segment": {
+                    "endIndex": 2847,
+                    "startIndex": 2661,
+                    "text": "They work to understand your specific business processes and technology infrastructure to recommend solutions that align with your goals and develop a roadmap for successful AI adoption."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 3074,
+                    "startIndex": 2849,
+                    "text": "By integrating these disconnected systems with AI, AEC firms can achieve increased efficiency, cost savings, improved decision-making, and enhanced safety, ultimately leading to higher-quality projects and a competitive edge."
+                  }
+                }
+              ],
+              "searchEntryPoint": {
+                "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGiH8fjUuCFCvC8aC0jR7XXE63r_Wy2W0Z8X2pklt4sMZXEi5Hpc04SMKFUG1PAoEaQnkEE2qzl9DWWzzBGKh32f01VfMasQtJEb3C_VN6iR2mmI1LekvFMrRBV3RZNiZpzMEUNJRczMYEYYoUSYwEnWn292RnL5x6sPLve-77ekRRhkz4ra_FQlMin1NSkZLU2-8LCGd3DeWrNjmR3fY-o1g==\">AEC AI consultant capabilities</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG1NXxfR0ucxiBEUdUMqEAdFbnZKlSM3IhdVDiRHsvj5LE4Kv8ijcYeXc78Ebf4tDKflP58DOF7evX-N-deQRtpRph_OtCYRq0VSeKTivcTfWEg1NHx5BT4HHStMyEqGFFaVqVOkToZRrf53faEkc39LGxkqbQUJcx9NJbNbOGC3ghLsovwcDwl3UPsO5UDMxlMWSEsx3c8E9GJppsfTwsMRwb3rkZ5XTWls5YDGQ==\">benefits of AI in AEC for data integration</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGz1pXPmNJpzXmsNOVroSUgy7lMYY3XQdDrmCpTeuR3SGUe9vG4VgGTSj2vUpnvEbk4ZYTre6rXTxRBWgrjCSG7hnW-9BkrgjB6OeiIYgyA-W6nYbEYUo1IAQBRPYoJqdRDcZB0_0C_u2S87wFbEzjpeDQSv9lS0F-_zX3_5WXGaNgno-kITF2xqsxSh5VVARROPJPAFquyT0pfZebaHavs4SZz0Bjj2_WzqaDBptDW_3Yx9Q==\">AEC AI consultant integrate disconnected systems</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHuG0Fk2kYelJGbUsT3QrOpQt2O2G5GAXAFxBsG4vjmnKVUZxe5gRK7tuou3yL6E0D-mxXHbV-8l1PGkZL3EZLCY6dbjEtGlbGFgDgukDs2VelAndWZkLhhEOTOCsWsWae9wkbgci7FnopNDFftGDsmiAnxmtnWk8jBLSDSiFby-6hsyV02Be9vi-i1r6Rd73KQFDfYWC7dixhTgBr2lM43W69rMZBXMZJx2SGT\">AI solutions for disconnected data in AEC</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGH1wq0CJzh6vHNW3G-cVHwGYNBGSBuRGmQ_LYiQECacj559uASabQFkYx5OKuJWDpzOUdgp1pjMnGDtuvBGMTIfGNQ0ZWm_x6xUNed3LISwitaWyhOHUyLQXFH87taG9Vdhr1ikdMNPOt4wyYRQULkK1SIVPGS1oa-xWfuwgvwMf5oG-BQsVs-JxL3D2MUpYQDh9_z_ILlmNCazeo_WDp0imXS-3s=\">how AI can solve data silos in AEC</a>\n  </div>\n</div>\n"
+              },
+              "webSearchQueries": [
+                "AEC AI consultant integrate disconnected systems",
+                "AI solutions for disconnected data in AEC",
+                "benefits of AI in AEC for data integration",
+                "AEC AI consultant capabilities",
+                "how AI can solve data silos in AEC"
+              ]
+            },
+            "index": 0
+          }
+        ],
+        "modelVersion": "gemini-2.5-flash",
+        "responseId": "iVe3ao2rO4-JqtsPztap6QY",
+        "usageMetadata": {
+          "candidatesTokenCount": 579,
+          "promptTokenCount": 23,
+          "promptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 23
+            }
+          ],
+          "serviceTier": "standard",
+          "thoughtsTokenCount": 442,
+          "toolUsePromptTokenCount": 142,
+          "toolUsePromptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 142
+            }
+          ],
+          "totalTokenCount": 1186
+        }
+      },
+      "technical_status": "success",
+      "timestamp": "2026-09-26T05:26:33.848005Z"
+    }
+  ],
+  "final_response": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "Yes, an AEC (Architecture, Engineering, and Construction) AI consultant can significantly help in fixing disconnected project, staffing, financial, and pipeline information systems. AI solutions are specifically designed to integrate disparate data, automate workflows, and provide comprehensive insights across an organization in the AEC sector.\n\nHere's how an AEC AI consultant can address your challenges:\n\n*   **Data Integration and Silo Breaking:** AI can be instrumental in integrating various disconnected business systems commonly used in AEC firms, such as Geospatial Information Systems (GIS), Computer-Aided Design and Drafting (CADD) tools, Building Information Modeling (BIM) platforms, project management software, and asset management systems. Consultants focus on making your enterprise data \"AI-ready\" by breaking down silos and structuring information, which is crucial for AI to have a holistic view. This allows for real-time, integrated access to project information across different departments and even supply chains. AI can also work with unstructured information like drawings and field observations, reducing friction between systems.\n\n*   **Workflow Automation and Optimization:** AI specialists empower firms with intelligent automation and workflow optimization. This means automating repetitive tasks like data entry, document classification, and progress reporting, freeing up your team to focus on higher-value work. AI can also identify bottlenecks and suggest optimal workflows, leading to increased efficiency and reduced manual errors.\n\n*   **Enhanced Decision-Making with Predictive Analytics:** By analyzing vast amounts of historical and real-time project data, AI can provide predictive analytics. This enables better project forecasting, identifying potential bottlenecks, predicting scheduling risks and cost overruns, and suggesting corrective actions before issues escalate. This data-driven insight improves decision-making across all stages of a project, from planning and resource allocation to risk management.\n\n*   **Improved Project, Staffing, and Financial Management:** AI can enhance project planning and management through improved predictive analytics, resource optimization, and cost estimation. For staffing, AI can help with workforce allocation and identifying inefficiencies. For financial information, by integrating data from various sources, AI can provide a clearer, more accurate picture, leading to better budget management and cost savings.\n\n*   **Customized Solutions and Implementation Roadmap:** AEC AI consultants offer tailored guidance and training to help firms leverage AI effectively. They work to understand your specific business processes and technology infrastructure to recommend solutions that align with your goals and develop a roadmap for successful AI adoption.\n\nBy integrating these disconnected systems with AI, AEC firms can achieve increased efficiency, cost savings, improved decision-making, and enhanced safety, ultimately leading to higher-quality projects and a competitive edge."
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "STOP",
+        "groundingMetadata": {
+          "groundingChunks": [
+            {
+              "web": {
+                "title": "advisorlabs.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFpopaha4qOUKaFJ-IJ1bIXfqla1bbhJNj9kip691rUevEZ0uJuhv6amv1Olsqe8OAZnspBo7zKVdK5ANYBrTQoj7SU1bLWtQkbt4NYvmm2u1bsINCzVzh2nChDVPBrYX3mktZZFqk="
+              }
+            },
+            {
+              "web": {
+                "title": "aecfoundry.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGqQiAa9vCmU5SBnmSouVKZACKDoyWR0bPUg1Ls6E0JziJtcTa2C4-LEmJTnwzPrdyz24hXpJBfHB1a1Sl4n8JlDI5RJyQa1dvcCFLqPrjVFxyj1QZPiMpAYMTBYqz4oCBNH32RXQ0Ru0n1FyCMInDoZcyCEXiSMOTomq6ixyGkUzeTM_4dao0kWsf5d7Zvx01MrioaWF2pDcCEuw13YUFUV9eZ8_ofI2hB8rgr2t_V0f1b5R4V6sE="
+              }
+            },
+            {
+              "web": {
+                "title": "nxtaec.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGW8eqoxEqQmQEljvrP38UbpObfEBH2kQxjPn1j7EIQM9xxZ7oZ01g9n362RT2vLpl2ssiLgdsAHN7Dj831CzlP6kbIZeDv4zGwHNpJDObYUlZYbJxlaWMFSQ95KkbYU8s215PIrQ6oSiBoahj2pGBcg3MpRJf2BbCOtNjpTVLc5dATimoKvsCrGSBohGVojigGpqyh2fra9z2QGAM4l8yM5tn4-aS0rdlIvXgUEqA-u92ggzf-DwAGCgiq-g20J8SnM7YbqE6qzVld38oagRyeBkiqjAo="
+              }
+            },
+            {
+              "web": {
+                "title": "imaginit.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHweBvzRROx-dWEtGbAVmfYdwdTsMz4zYjCyO9ewTMPBCppMZRWj22pUVqpNIN69ztF-ex3tIVaVwlElTPv9PKWKRt3OAxlhYzCfteLXLAuBK4VvJVYSM3VazcdcuN5EnReakCeY9oHclwRAC-RvR7EsTIYEKgd_Of3DC_PY2v7lOsNs9pwqr3NUJb1Pm9K3aqCk1eOJSIdetwGSf4="
+              }
+            },
+            {
+              "web": {
+                "title": "mckinsey.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFh8_rv1fja5Lym2vT8W0KfrOjLxq3tWPWgN2LK1x7QluEtvJcMpwOzONJCnA0Zfgs3dNde5BIhj9QMFLvDjLDt1ENc5b9ppeO8bMhaIl7aWRK6Ugc35idyxZ8y8T9fMiTOvwil5ddvLAyzitNb5VUSRsuDpTIvLl8Z60-HStlgtfve9nQlI7k7J_bHS-J0ojw8D_nK6nV0AjovTztN5lwf-wVMzdyaJCq2Sg6RcWANVGd7N7XTvWEMEB68bGH9ZhcE2s7jP_U5QIBiYQQtL3k="
+              }
+            },
+            {
+              "web": {
+                "title": "unanet.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFt1HKr-QJap6c7OJzjBfU9HBoQVqivMTp3-mB7bIJ5h6McnfKivVE9_ss6GYO1Yl9VT4FliiwdnnmV-rNlOL3l9eNMVGTHriBvg6W0r7SxD7nvA-lzWcGJ0Ld0cU6pRIDvttToAlWX9iZvCWcaHFkjkZjuQ9BQ"
+              }
+            },
+            {
+              "web": {
+                "title": "trimble.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHKlbmBG9fATN0TUWng22H5AL23ZVyknX0CZcrww9bqYDtN27ShoKcVwPbgeQXoJAcHl6R2HpKSCLMmxyF5sDOpN9AINBAg4ERDFfGHo8U7H-dAFrmsqB04L8SYZTKanJSZbHd7diUFS_K5QgjO915Jhj-Dg42ILlIBrYrCmMJEBg5G2T1zst96NlJjZduVSk84FIrE4k2AyY7eMb6-hulBHdkZMfrIy-qbU2xG4pMe1lA2"
+              }
+            },
+            {
+              "web": {
+                "title": "theaecassociates.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHchojQI5aZl9UcvT1Xm5v5J7a2bQXDqzc-TYy_R4gIWntdxMyh99SzHoBkuiCqME4q9eZ6OLJcACV0qtGK822qH3tdv5qbdXgi31kjcml6-J16Xz-dGImT6DPD7PMj5ZxWKO1HqE0fb-Fsh1JRB80IKa-12w=="
+              }
+            },
+            {
+              "web": {
+                "title": "zweiggroup.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGM7iXfrGIthHGXfbyQJ4r4CW54pw5exARHRTPCy5j4_W0zJ69ZS8mqf2o60gvEmpzF-9ZZYhzzO2iEeys8NiVKwFagZEMCaQ8qO_UVAb_2o6JZDlFWmlekkRz28rpHqxGeEkRt3ePpX5WSeJMykEo="
+              }
+            },
+            {
+              "web": {
+                "title": "aiinaec.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGmW3DBX63m_SQzAq12zTFrfT6CizrnCWU24sUQyCb832OyOm3OcdOmDl_CjV4AjsHXsyOGZUZwJY7kf0w6kP5dAfGsrI5Hh1GEOiM6Dx4B6IozSA=="
+              }
+            }
+          ],
+          "groundingSupports": [
+            {
+              "groundingChunkIndices": [
+                0,
+                1,
+                2,
+                3
+              ],
+              "segment": {
+                "endIndex": 346,
+                "startIndex": 182,
+                "text": "AI solutions are specifically designed to integrate disparate data, automate workflows, and provide comprehensive insights across an organization in the AEC sector."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 758,
+                "startIndex": 410,
+                "text": "*   **Data Integration and Silo Breaking:** AI can be instrumental in integrating various disconnected business systems commonly used in AEC firms, such as Geospatial Information Systems (GIS), Computer-Aided Design and Drafting (CADD) tools, Building Information Modeling (BIM) platforms, project management software, and asset management systems."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                1
+              ],
+              "segment": {
+                "endIndex": 919,
+                "startIndex": 759,
+                "text": "Consultants focus on making your enterprise data \"AI-ready\" by breaking down silos and structuring information, which is crucial for AI to have a holistic view."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                2
+              ],
+              "segment": {
+                "endIndex": 1040,
+                "startIndex": 920,
+                "text": "This allows for real-time, integrated access to project information across different departments and even supply chains."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                4
+              ],
+              "segment": {
+                "endIndex": 1160,
+                "startIndex": 1041,
+                "text": "AI can also work with unstructured information like drawings and field observations, reducing friction between systems."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 1291,
+                "startIndex": 1162,
+                "text": "*   **Workflow Automation and Optimization:** AI specialists empower firms with intelligent automation and workflow optimization."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                3
+              ],
+              "segment": {
+                "endIndex": 1448,
+                "startIndex": 1292,
+                "text": "This means automating repetitive tasks like data entry, document classification, and progress reporting, freeing up your team to focus on higher-value work."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0,
+                5
+              ],
+              "segment": {
+                "endIndex": 1571,
+                "startIndex": 1449,
+                "text": "AI can also identify bottlenecks and suggest optimal workflows, leading to increased efficiency and reduced manual errors."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0,
+                6
+              ],
+              "segment": {
+                "endIndex": 1737,
+                "startIndex": 1573,
+                "text": "*   **Enhanced Decision-Making with Predictive Analytics:** By analyzing vast amounts of historical and real-time project data, AI can provide predictive analytics."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                7,
+                5,
+                6
+              ],
+              "segment": {
+                "endIndex": 1918,
+                "startIndex": 1738,
+                "text": "This enables better project forecasting, identifying potential bottlenecks, predicting scheduling risks and cost overruns, and suggesting corrective actions before issues escalate."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0,
+                1,
+                6
+              ],
+              "segment": {
+                "endIndex": 2058,
+                "startIndex": 1919,
+                "text": "This data-driven insight improves decision-making across all stages of a project, from planning and resource allocation to risk management."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 2251,
+                "startIndex": 2060,
+                "text": "*   **Improved Project, Staffing, and Financial Management:** AI can enhance project planning and management through improved predictive analytics, resource optimization, and cost estimation."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                7,
+                6
+              ],
+              "segment": {
+                "endIndex": 2335,
+                "startIndex": 2252,
+                "text": "For staffing, AI can help with workforce allocation and identifying inefficiencies."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0,
+                7
+              ],
+              "segment": {
+                "endIndex": 2507,
+                "startIndex": 2336,
+                "text": "For financial information, by integrating data from various sources, AI can provide a clearer, more accurate picture, leading to better budget management and cost savings."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                8
+              ],
+              "segment": {
+                "endIndex": 2660,
+                "startIndex": 2509,
+                "text": "*   **Customized Solutions and Implementation Roadmap:** AEC AI consultants offer tailored guidance and training to help firms leverage AI effectively."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                8,
+                9
+              ],
+              "segment": {
+                "endIndex": 2847,
+                "startIndex": 2661,
+                "text": "They work to understand your specific business processes and technology infrastructure to recommend solutions that align with your goals and develop a roadmap for successful AI adoption."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 3074,
+                "startIndex": 2849,
+                "text": "By integrating these disconnected systems with AI, AEC firms can achieve increased efficiency, cost savings, improved decision-making, and enhanced safety, ultimately leading to higher-quality projects and a competitive edge."
+              }
+            }
+          ],
+          "searchEntryPoint": {
+            "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGiH8fjUuCFCvC8aC0jR7XXE63r_Wy2W0Z8X2pklt4sMZXEi5Hpc04SMKFUG1PAoEaQnkEE2qzl9DWWzzBGKh32f01VfMasQtJEb3C_VN6iR2mmI1LekvFMrRBV3RZNiZpzMEUNJRczMYEYYoUSYwEnWn292RnL5x6sPLve-77ekRRhkz4ra_FQlMin1NSkZLU2-8LCGd3DeWrNjmR3fY-o1g==\">AEC AI consultant capabilities</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG1NXxfR0ucxiBEUdUMqEAdFbnZKlSM3IhdVDiRHsvj5LE4Kv8ijcYeXc78Ebf4tDKflP58DOF7evX-N-deQRtpRph_OtCYRq0VSeKTivcTfWEg1NHx5BT4HHStMyEqGFFaVqVOkToZRrf53faEkc39LGxkqbQUJcx9NJbNbOGC3ghLsovwcDwl3UPsO5UDMxlMWSEsx3c8E9GJppsfTwsMRwb3rkZ5XTWls5YDGQ==\">benefits of AI in AEC for data integration</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGz1pXPmNJpzXmsNOVroSUgy7lMYY3XQdDrmCpTeuR3SGUe9vG4VgGTSj2vUpnvEbk4ZYTre6rXTxRBWgrjCSG7hnW-9BkrgjB6OeiIYgyA-W6nYbEYUo1IAQBRPYoJqdRDcZB0_0C_u2S87wFbEzjpeDQSv9lS0F-_zX3_5WXGaNgno-kITF2xqsxSh5VVARROPJPAFquyT0pfZebaHavs4SZz0Bjj2_WzqaDBptDW_3Yx9Q==\">AEC AI consultant integrate disconnected systems</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHuG0Fk2kYelJGbUsT3QrOpQt2O2G5GAXAFxBsG4vjmnKVUZxe5gRK7tuou3yL6E0D-mxXHbV-8l1PGkZL3EZLCY6dbjEtGlbGFgDgukDs2VelAndWZkLhhEOTOCsWsWae9wkbgci7FnopNDFftGDsmiAnxmtnWk8jBLSDSiFby-6hsyV02Be9vi-i1r6Rd73KQFDfYWC7dixhTgBr2lM43W69rMZBXMZJx2SGT\">AI solutions for disconnected data in AEC</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGH1wq0CJzh6vHNW3G-cVHwGYNBGSBuRGmQ_LYiQECacj559uASabQFkYx5OKuJWDpzOUdgp1pjMnGDtuvBGMTIfGNQ0ZWm_x6xUNed3LISwitaWyhOHUyLQXFH87taG9Vdhr1ikdMNPOt4wyYRQULkK1SIVPGS1oa-xWfuwgvwMf5oG-BQsVs-JxL3D2MUpYQDh9_z_ILlmNCazeo_WDp0imXS-3s=\">how AI can solve data silos in AEC</a>\n  </div>\n</div>\n"
+          },
+          "webSearchQueries": [
+            "AEC AI consultant integrate disconnected systems",
+            "AI solutions for disconnected data in AEC",
+            "benefits of AI in AEC for data integration",
+            "AEC AI consultant capabilities",
+            "how AI can solve data silos in AEC"
+          ]
+        },
+        "index": 0
+      }
+    ],
+    "modelVersion": "gemini-2.5-flash",
+    "responseId": "iVe3ao2rO4-JqtsPztap6QY",
+    "usageMetadata": {
+      "candidatesTokenCount": 579,
+      "promptTokenCount": 23,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 23
+        }
+      ],
+      "serviceTier": "standard",
+      "thoughtsTokenCount": 442,
+      "toolUsePromptTokenCount": 142,
+      "toolUsePromptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 142
+        }
+      ],
+      "totalTokenCount": 1186
+    }
+  },
+  "prompt_id": "P02",
+  "request": {
+    "body": {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Our project, staffing, financial, and pipeline information lives in disconnected systems. Can an AEC AI consultant fix this?"
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "google_search": {}
+        }
+      ]
+    },
+    "model": "gemini-2.5-flash"
+  },
+  "run_id": "gemini-api-google-search-20260925-r1",
+  "schema_version": "gemini-grounded-raw-receipt/v1"
+}

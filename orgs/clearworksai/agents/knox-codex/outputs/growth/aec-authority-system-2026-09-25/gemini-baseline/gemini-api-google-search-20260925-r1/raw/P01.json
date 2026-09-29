@@ -1,0 +1,649 @@
+{
+  "attempts": [
+    {
+      "duration_ms": 8764,
+      "http_status": 200,
+      "model": "gemini-2.5-flash",
+      "response": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "To address the inconsistent use of ChatGPT and other AI tools, along with the absence of ownership or a review process within your staff, you can seek help from AI governance and policy development consultants. These experts can guide your organization in establishing a structured and responsible approach to AI tool adoption.\n\nKey areas where external help or internal initiatives can focus include:\n\n*   **AI Governance Consulting** These services help organizations design and implement comprehensive frameworks for the responsible adoption and scaling of AI technology. This typically involves defining governance operating models, developing AI policies and standards, ensuring compliance with regulatory requirements, and establishing oversight processes throughout the AI lifecycle.\n*   **AI Policy Development** Consultants can assist in creating practical AI policies that provide clear guidelines for employees. Such policies should cover acceptable use, approved AI tools, handling of restricted or confidential data, standards for human review of AI output, guidance for vendor interactions, prohibited uses, and employee responsibilities. These policies are crucial for reducing risks like data exposure and inconsistent AI usage across different teams.\n*   **Responsible AI and Ethics** Implementing \"Responsible AI\" principles is vital to ensure that AI systems are developed, deployed, and used in an ethical, fair, transparent, and accountable manner. Consultants can help embed these ethical considerations into your AI strategy and workflows, and establish frameworks to manage potential risks such as bias and privacy violations.\n*   **AI Adoption Strategy and Training** To foster consistent and effective AI use, it's important to develop an AI adoption strategy. This includes aligning AI rollout with your organization's existing values, assigning clear ownership (an \"AI champion\"), providing comprehensive training tailored to employee needs, and refining the strategy as your organization's needs evolve. Transparency and involving employees in the process are crucial for successful integration and buy-in.\n\n**Who can help?**\n\nNumerous consulting firms and specialized AI companies offer these services:\n\n*   **Large Consulting Firms** Companies like Deloitte, PwC, EY, Accenture, KPMG, and IBM Consulting have dedicated AI governance and ethics practices. They offer expertise in policy development, risk management, regulatory compliance (e.g., NIST AI RMF alignment), and technical implementation of responsible AI tools.\n*   **Specialized AI Consulting Firms** Firms such as Xcelacore, Credo AI, Komodo Technologies, Nevada IT Support, IZZI, Every Consulting, ABS Group, Phos AI Labs, and Neoteric specialize in various aspects of AI strategy, governance, policy development, and implementation. Some offer platforms and tools to automate governance tasks and track compliance.\n*   **Internal Initiatives** While external consultants can provide expertise, organizations also benefit from establishing internal roles and processes. This includes appointing an \"AI champion\" to guide adoption and provide a central point for guidance, feedback, and ideas, and creating company-wide programs to integrate AI into workflows and build employee skills.\n\nBy engaging with these resources, your organization can develop clear policies, establish ownership, implement review processes, and ensure that AI tools like ChatGPT are used consistently, responsibly, and effectively."
+                }
+              ],
+              "role": "model"
+            },
+            "finishReason": "STOP",
+            "groundingMetadata": {
+              "groundingChunks": [
+                {
+                  "web": {
+                    "title": "centricconsulting.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEdiWtTGTSXXMQrPF_u0HNosX13naW3t3HVsEQhm4J80eJ0Do2-8x9AVNpEweiXVTqTsftgylxKARIPIzGD7LsmW9S36ho8SZS7aPtQSMUBcpJH-w3e0g7bv8KHzrBenuUflt7YRutTW-TtuLJ9hTWN_MjNF4gJZLjZR0znAnsRKgskhLRp17nnVv6fi3osPkoWRvN7kV41RlJdo2q3R4qlgGKzlzygN7ggSgDm5PpRlfJNng=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "rsmus.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFffILBKlPWFo5-cJwFhEvW99X4vy87ha2wf3XaSTWNpiuOR9egdSvuyt78k_JwwVk0EeLILkwMeuiBDClN_S88CtNyRmCN_N5s6fNgAbL77-OVuNqwHHokQG9zMy_sIk2bvlAVMJuOklYOrWzdLGn-lreMxuD2qOj5ee-Ssi-d1F-usF9FQLeQsyMMg_jc9rbOytYobts9"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "itsupportnv.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF4Khk9uDFYYnwF0eLCsOc0gCm9T0QgXmyuWgXpe9BoYkgS5CkNl9ek80UZGuZ8SBxcFvgnFmj2umwG3Kp1ikxghPjBYnYUIEceqEHhCwnY73dBsLX30lNyZMeE4mSLTUCBVmqBY5mif8Q="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "komodotech.io",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH1rfiFAVlUNjvC2KMH3HOyB_5UKEqwwE9T2orSZBFPlrzeGgMzq_YN7U1WIiC8rQemB7OroHvKKPqBqxMpADlJQQnJJgR514jroA_rPCFalnNu76oYoW3KzPEMBZT5v4khT6RqwXvaAlXx"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "izzidigital.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGiGCEK2U8gDk7IWhY0mLbB1bqk2hvQ_Y1Jz8CoS-NtaTWaH7QfnYy4DwIWjx1UXb23Unj9m7RrcAQzl3uX-yzHSeugRTwyqAJmdLvLi-jAQI-njOrugqwf1NSSNDm37UhCU7bi72JwM3cX2LB4dO0JtI0="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "nmsconsulting.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHZlr74NB62Wjs683ygLCI5ObdlEfpIiPM3-F0DFdsuf6LuKajcW0ryK_WiVpWP8hVEpeiByj8fIh1s1pmNKYrChZrPDBAcb0fSACzMTTCw9UOJiGR2p_f0ev6qp6rS6piPe0GU3RoJyrmYKjWJm4sabqzKEsYDwt4u"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "ibm.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH_N4wlsMy_McumzE7rDvTYmaaGzVUErXBTWTDQPOPImNpByy7xyGy_biFIPG9HKkjvECyN3kpmRWl01XYykLamIt8jNew6k_nUHwM5MhyqyzfDqjLrg6NmwX2CsyZ9v2krviaBdlwB1xRP"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "cloudsecurityalliance.org",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFdCurGtWWXGFDQEZlUr0CsylJ0WFEW6FjJ67j8snNaFjBfFvxYEURh-UrtDJjLODx82Wxqp7DBBcr1CRZStbB2cO-mAzQGoXDVSLmX_gp6LmVILYoGtgI2ID1nqc4iJN0woqYCWbKFqjFE_ddPqPUteIvVp_7ofB21M7WdM20SWwqOWcoRry1lycUIFTggIr0cAYtsbw71y2HXqbY9gvMmpi5nGy1wUq7CEtJp_g=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "syracuse.edu",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEQA3VszvUyrMU8JZmCm4fniEopQF9_RXRhvTaCCljCmH19-UDrRurb4_E4WMHpwbZ1qQPgh6tx-xRvu6ohHl56lMtIsDFcbxm0InxuZmMTdZ-6vf1RPaFYJ_EU-03USoY8AvLeWwazHObhk2CQlsg="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "dta.academy",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEd6OO8g5FA1xktjnhwWS9hGf7sD-qmEyYd9TJoxj9HflVIYzxEJknjedKTf_Kmj5jlonyVW2y85i_I475w3P9khGjHqtwY_VnJ7AxjiKnhZ4g9Kt1haNSYbzzUbPX5OU3Tz6-hzDvdqt-9udmwpZ6qukVuItuOQ0rTxzNErf8CNSO__ZgK2vhghqqGs8uSa5bq"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "otrs.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEZa1sa5ypLG8zqf6Ds6G4Is2hTXL9wtqaE2iJOVemJAMjqDG5Gq7VM_OcQVs6npKuA_d5dqny8w4QrRUgAos5Qy_xtUj_ycViOneh7fiHW2UZy3IuQWdHC0HF3eZJ5-FfuxC5RslOvNdCS9-Vya-5B0w=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "google.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE1tbrfC9tDmSL5OkhwYADOaQhe-CAS13JY4Fkz408WoCdtTg-W1C_W-dyJn7GXY7CcdJHs3zdQieJCJSDYFAwcBXrCobJbibZp-vxCfRBKfc74ejpjjxUVaerf8oV2In0caJ4UYi7PBexiNpPX1GEajwNFbWTBlqHAZRU8cUnC3sKX_P4XvryINCCDnu9f1QjT_kY1I6dswxMpP7_ekuRT"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "moveworks.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGf7Yb0yFZLAWOrBB9xdlA6JHN3A8D09XUVKcw2256JVetKTCWAds-JsdkBjqKr9KnLdaV433s003H7sJZxeWRZftoOFYRo8A5kgGHJcx7Y7MfUChX3N2HZefH8_J-A9FX7MxJHh0DVPvILDuyWVYPVINuWCKuKas3H08JKka2Olm0A8l1E7QYZfJrsn5pXjz08cY5ESRIDUBh0tsLK2A=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "du.edu",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEsBJjzx6dhRZFhtHR36SXo7HOJyz0SMnA16u-z9D5nvSEQAFzjlSadShAbIX4kF-MWaKWejJWdPKgNBDrs76zD7FkItEX0iPiHEHB69CiXJ5k1Ikijo2sDFngMaWfst7de05OayXy8d53yTHYCR5Or-4XihJhk3l_1Fv8m4LGgCzvgKuIYrLyqdmWqyL9DhjUPBZwprdGln4JYCnaWuw=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "xcelacore.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHlubjcDl9-DG8uj6v1l94WMiXu1A_10Or3TAMQQlt_8XwC6MNkFMqtq9gyvAnhQas-2687FQS-OcmBQjl55OO4Oi8riNhtWkj4DCX-DfbbZcaCw78LoPFKPCZTcgs9GILZujbdD0XGv6XQJ_0sPww5ZitRk0474g=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "ibm.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFBX2g3KLxBP8w1ynuEQ5J4EXiw2uqSpnF8vifA-4F-AInIjnX-7bLMGdomg0C6iS8FNA93lOlKRLd0TfXgovGYaaD06MqMXq8vU-aE8l-Ht0tV-uwZ7VWtXI590Q1P8FCeeYfOO0Fb"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "phosailabs.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHTOzapJTwWT2Sa8VBK7uJ5X0MtDLpX05kybIiTS5xuBjCvlCRyWuGiTZPW-G4oUQt5ekjAKFcIzaAXjnWJ3IHp6GFnuOCy8z2RM5rPbtjTWK3GFYJLuH75wAYSa3R4H7eTq8vQ9Q3o0xHeIsBbj1VjLA=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "iternal.ai",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHs1v7D7cJSoHm4dpLcBM2uQ8rRVJKiLWsn3Ttk2t6xQurggbdpfFZpKJU8y_SoGON88zSCzVnu4c___ptSiRoh4COpxI4ZNQsMA8d6xWWtAVIsquot36b4zg8rFnIOqMRejzGTyl8="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "codebridge.tech",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFhcyKEWyVNrYFUKLKvO3UGT6VHfHCdAKZnXPY5GOkmsWJGG-C2J_L_39nxSF0GlmAXotFrA3ZYzQUGorgRfugGTncGdf6QVYEg-cMBrpekFtixBsiaUIBpRdBt4uunyvKFgEQBnoEsLdVw7W3Mq_rq_0LzYPnuDllNLyZzDXtKsDYptFBjhPT0oE_ouYg="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "clutch.co",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG2FkJt0rPqW1WT12quUgR9qdI6ZjcQG8p3u2ItqbNx2y5drrpjtSmv7QfwioHlvkE1eu6s5gyKrCi6q9pC76xGpxiQak5Gp-MVbPj0akUMMy5hq2nkGon6i-0JGgX0fZ3CQh8="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "every.to",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH05tW8nRAuthaPYpQRbjBg5psrzGCASeDMyzaz-LkHWowcfTxxTnFglm_-0VKQrXzPe44Kkd8RwDKEdNIDoD06f1j2-kGoVrQHj48hd33Q_7SSxbpsYg=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "abs-group.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEM0ke3a7gCYRMeP73MwjBh8yokPAir6Jhe2NU4YpLYQ3efB8IRJIX4b5pm55Lt2kgblcO2dq2A0mfQLLPTV647FltX4WwmRMXCtDYAydbkmptVvTukSs1ACOxK0D1HisjwnafW0XxFth4CkYau4gquK4RTwyPwdJj9vGtrxgnPxewrRNEiPy4="
+                  }
+                }
+              ],
+              "groundingSupports": [
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 789,
+                    "startIndex": 575,
+                    "text": "This typically involves defining governance operating models, developing AI policies and standards, ensuring compliance with regulatory requirements, and establishing oversight processes throughout the AI lifecycle"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    2,
+                    3,
+                    4
+                  ],
+                  "segment": {
+                    "endIndex": 1266,
+                    "startIndex": 1153,
+                    "text": "These policies are crucial for reducing risks like data exposure and inconsistent AI usage across different teams"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    5,
+                    6,
+                    7,
+                    8,
+                    9
+                  ],
+                  "segment": {
+                    "endIndex": 1468,
+                    "startIndex": 1268,
+                    "text": "*   **Responsible AI and Ethics** Implementing \"Responsible AI\" principles is vital to ensure that AI systems are developed, deployed, and used in an ethical, fair, transparent, and accountable manner"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    5
+                  ],
+                  "segment": {
+                    "endIndex": 1649,
+                    "startIndex": 1470,
+                    "text": "Consultants can help embed these ethical considerations into your AI strategy and workflows, and establish frameworks to manage potential risks such as bias and privacy violations"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    10,
+                    11,
+                    12,
+                    13
+                  ],
+                  "segment": {
+                    "endIndex": 2031,
+                    "startIndex": 1787,
+                    "text": "This includes aligning AI rollout with your organization's existing values, assigning clear ownership (an \"AI champion\"), providing comprehensive training tailored to employee needs, and refining the strategy as your organization's needs evolve"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    10,
+                    12,
+                    13
+                  ],
+                  "segment": {
+                    "endIndex": 2134,
+                    "startIndex": 2033,
+                    "text": "Transparency and involving employees in the process are crucial for successful integration and buy-in"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    14,
+                    15,
+                    16
+                  ],
+                  "segment": {
+                    "endIndex": 2552,
+                    "startIndex": 2386,
+                    "text": "They offer expertise in policy development, risk management, regulatory compliance (e.g., NIST AI RMF alignment), and technical implementation of responsible AI tools"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    14,
+                    3,
+                    4,
+                    17,
+                    18,
+                    19,
+                    20,
+                    21,
+                    16
+                  ],
+                  "segment": {
+                    "endIndex": 2827,
+                    "startIndex": 2554,
+                    "text": "*   **Specialized AI Consulting Firms** Firms such as Xcelacore, Credo AI, Komodo Technologies, Nevada IT Support, IZZI, Every Consulting, ABS Group, Phos AI Labs, and Neoteric specialize in various aspects of AI strategy, governance, policy development, and implementation"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    14
+                  ],
+                  "segment": {
+                    "endIndex": 2909,
+                    "startIndex": 2829,
+                    "text": "Some offer platforms and tools to automate governance tasks and track compliance"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    11
+                  ],
+                  "segment": {
+                    "endIndex": 3279,
+                    "startIndex": 3065,
+                    "text": "This includes appointing an \"AI champion\" to guide adoption and provide a central point for guidance, feedback, and ideas, and creating company-wide programs to integrate AI into workflows and build employee skills"
+                  }
+                }
+              ],
+              "searchEntryPoint": {
+                "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE6r65PERgD7ldIhIoC-L-ZE1tkdarYTdl8rW-tu4BQzb-EaaO4vvh9VCnYnQjOc1EOAHTgBsZMDZdSAyOvyJYUx6Y-93830Bp8Hi151Jhnrtgc2ZTZ_fN6MZ1x1M4VDnjobJsNMYkXlq_Wg0JMk3AnhkB7MVjIb6vgxPm9f4rxMR7CCpG39fhrDo9MVH7T-MzUm0P9PhN1Sqq-DXcztrcpdsigCJyWDRtpJWKi3iymOr9sYHo=\">AI ethics and responsible AI use in organizations</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE478V1RgCdsRNocl0yQ6hr_dtQSqPQ-cbZCAkO6NbPGM4hvcA4jLfO-A__FXu2Q81qjKGQO9yU8GXFkvtqbCEosygMv5EEpUh-K5hn71zlyCYVdfpVxbU2lDCD95I8uYob79bf_snxU5YXf-nwdfTZ-4i9QLiNvoymECrPUjZ1-O-21aYVnP6MAhxJmlPoDZMN2Q5W5XuS1nC2c-A8bpyPSQ==\">AI policy development services</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFPVuQoRzAQiBP2xVoQkq7MixHZ_ul86PIEOOxMdaEsA89fvpoq5SyoBPF2v6FhV4hR3M6_ZnRX7UJFg2YGQEN230MQ9MYLjuU3PrYEMQjxVtzGOFKoqTPqC93ZmcnMMiQnLAhmwvOBJA-AI9qzM6r1-FONmERhOs6XUw68-2xvqGCqCdyaCXrcxKI8YV7H9HQn24ofwtY1xQvvGg==\">AI governance consulting</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHSm_gwuZhGVtnCw3UJo5NFmCjYgmzBxs249aoIx-AzS2_zuYZmaKDxkTmlrY9i3bWQxGT8c5va4dnuXFA6T6o8DqzfrbpAexDSytwcp8-D1JDRHiBxG8y5TK3ccJusCTlRAcg0A5xooXShF_HiabjKwB46NQOwhw6FfglPPvpJOeIwtrq23IWp-EyfGnGH7kVVxQv_j_TxkTJtEijH2jJo6vk=\">AI tool adoption best practices</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFTkVHCddC95yMr1mu7zV64akB0uR_Uo-ZMpqF0PY1qEQ6kzDPLIE721MjiZzbnt2QLt47EZilnOO6ffpsG0jeVZ2_0n9EsyTTdKugA0H3gCzyAeTBLul2v6j0_HBXqHtr0HcVyfbUyhmJlSNNDNtUFZWkjW46hShW5YgnyMZtVQuClRn_zHM0YmTPvct-xGexZ8orm4ZXuf6x4NXE9Db2bSbvu15LPuExfZfyPPz3zW0MyvZN-0AHH9sIvJw==\">Companies specializing in AI strategy and implementation</a>\n  </div>\n</div>\n"
+              },
+              "webSearchQueries": [
+                "AI governance consulting",
+                "AI policy development services",
+                "AI tool adoption best practices",
+                "AI ethics and responsible AI use in organizations",
+                "Companies specializing in AI strategy and implementation"
+              ]
+            },
+            "index": 0
+          }
+        ],
+        "modelVersion": "gemini-2.5-flash",
+        "responseId": "XVe3ar7ZIsek6dkPi6fqwQ0",
+        "usageMetadata": {
+          "candidatesTokenCount": 667,
+          "promptTokenCount": 22,
+          "promptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 22
+            }
+          ],
+          "serviceTier": "standard",
+          "thoughtsTokenCount": 628,
+          "toolUsePromptTokenCount": 191,
+          "toolUsePromptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 191
+            }
+          ],
+          "totalTokenCount": 1508
+        }
+      },
+      "technical_status": "success",
+      "timestamp": "2026-09-26T05:25:49.456414Z"
+    }
+  ],
+  "final_response": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "To address the inconsistent use of ChatGPT and other AI tools, along with the absence of ownership or a review process within your staff, you can seek help from AI governance and policy development consultants. These experts can guide your organization in establishing a structured and responsible approach to AI tool adoption.\n\nKey areas where external help or internal initiatives can focus include:\n\n*   **AI Governance Consulting** These services help organizations design and implement comprehensive frameworks for the responsible adoption and scaling of AI technology. This typically involves defining governance operating models, developing AI policies and standards, ensuring compliance with regulatory requirements, and establishing oversight processes throughout the AI lifecycle.\n*   **AI Policy Development** Consultants can assist in creating practical AI policies that provide clear guidelines for employees. Such policies should cover acceptable use, approved AI tools, handling of restricted or confidential data, standards for human review of AI output, guidance for vendor interactions, prohibited uses, and employee responsibilities. These policies are crucial for reducing risks like data exposure and inconsistent AI usage across different teams.\n*   **Responsible AI and Ethics** Implementing \"Responsible AI\" principles is vital to ensure that AI systems are developed, deployed, and used in an ethical, fair, transparent, and accountable manner. Consultants can help embed these ethical considerations into your AI strategy and workflows, and establish frameworks to manage potential risks such as bias and privacy violations.\n*   **AI Adoption Strategy and Training** To foster consistent and effective AI use, it's important to develop an AI adoption strategy. This includes aligning AI rollout with your organization's existing values, assigning clear ownership (an \"AI champion\"), providing comprehensive training tailored to employee needs, and refining the strategy as your organization's needs evolve. Transparency and involving employees in the process are crucial for successful integration and buy-in.\n\n**Who can help?**\n\nNumerous consulting firms and specialized AI companies offer these services:\n\n*   **Large Consulting Firms** Companies like Deloitte, PwC, EY, Accenture, KPMG, and IBM Consulting have dedicated AI governance and ethics practices. They offer expertise in policy development, risk management, regulatory compliance (e.g., NIST AI RMF alignment), and technical implementation of responsible AI tools.\n*   **Specialized AI Consulting Firms** Firms such as Xcelacore, Credo AI, Komodo Technologies, Nevada IT Support, IZZI, Every Consulting, ABS Group, Phos AI Labs, and Neoteric specialize in various aspects of AI strategy, governance, policy development, and implementation. Some offer platforms and tools to automate governance tasks and track compliance.\n*   **Internal Initiatives** While external consultants can provide expertise, organizations also benefit from establishing internal roles and processes. This includes appointing an \"AI champion\" to guide adoption and provide a central point for guidance, feedback, and ideas, and creating company-wide programs to integrate AI into workflows and build employee skills.\n\nBy engaging with these resources, your organization can develop clear policies, establish ownership, implement review processes, and ensure that AI tools like ChatGPT are used consistently, responsibly, and effectively."
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "STOP",
+        "groundingMetadata": {
+          "groundingChunks": [
+            {
+              "web": {
+                "title": "centricconsulting.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEdiWtTGTSXXMQrPF_u0HNosX13naW3t3HVsEQhm4J80eJ0Do2-8x9AVNpEweiXVTqTsftgylxKARIPIzGD7LsmW9S36ho8SZS7aPtQSMUBcpJH-w3e0g7bv8KHzrBenuUflt7YRutTW-TtuLJ9hTWN_MjNF4gJZLjZR0znAnsRKgskhLRp17nnVv6fi3osPkoWRvN7kV41RlJdo2q3R4qlgGKzlzygN7ggSgDm5PpRlfJNng=="
+              }
+            },
+            {
+              "web": {
+                "title": "rsmus.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFffILBKlPWFo5-cJwFhEvW99X4vy87ha2wf3XaSTWNpiuOR9egdSvuyt78k_JwwVk0EeLILkwMeuiBDClN_S88CtNyRmCN_N5s6fNgAbL77-OVuNqwHHokQG9zMy_sIk2bvlAVMJuOklYOrWzdLGn-lreMxuD2qOj5ee-Ssi-d1F-usF9FQLeQsyMMg_jc9rbOytYobts9"
+              }
+            },
+            {
+              "web": {
+                "title": "itsupportnv.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF4Khk9uDFYYnwF0eLCsOc0gCm9T0QgXmyuWgXpe9BoYkgS5CkNl9ek80UZGuZ8SBxcFvgnFmj2umwG3Kp1ikxghPjBYnYUIEceqEHhCwnY73dBsLX30lNyZMeE4mSLTUCBVmqBY5mif8Q="
+              }
+            },
+            {
+              "web": {
+                "title": "komodotech.io",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH1rfiFAVlUNjvC2KMH3HOyB_5UKEqwwE9T2orSZBFPlrzeGgMzq_YN7U1WIiC8rQemB7OroHvKKPqBqxMpADlJQQnJJgR514jroA_rPCFalnNu76oYoW3KzPEMBZT5v4khT6RqwXvaAlXx"
+              }
+            },
+            {
+              "web": {
+                "title": "izzidigital.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGiGCEK2U8gDk7IWhY0mLbB1bqk2hvQ_Y1Jz8CoS-NtaTWaH7QfnYy4DwIWjx1UXb23Unj9m7RrcAQzl3uX-yzHSeugRTwyqAJmdLvLi-jAQI-njOrugqwf1NSSNDm37UhCU7bi72JwM3cX2LB4dO0JtI0="
+              }
+            },
+            {
+              "web": {
+                "title": "nmsconsulting.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHZlr74NB62Wjs683ygLCI5ObdlEfpIiPM3-F0DFdsuf6LuKajcW0ryK_WiVpWP8hVEpeiByj8fIh1s1pmNKYrChZrPDBAcb0fSACzMTTCw9UOJiGR2p_f0ev6qp6rS6piPe0GU3RoJyrmYKjWJm4sabqzKEsYDwt4u"
+              }
+            },
+            {
+              "web": {
+                "title": "ibm.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH_N4wlsMy_McumzE7rDvTYmaaGzVUErXBTWTDQPOPImNpByy7xyGy_biFIPG9HKkjvECyN3kpmRWl01XYykLamIt8jNew6k_nUHwM5MhyqyzfDqjLrg6NmwX2CsyZ9v2krviaBdlwB1xRP"
+              }
+            },
+            {
+              "web": {
+                "title": "cloudsecurityalliance.org",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFdCurGtWWXGFDQEZlUr0CsylJ0WFEW6FjJ67j8snNaFjBfFvxYEURh-UrtDJjLODx82Wxqp7DBBcr1CRZStbB2cO-mAzQGoXDVSLmX_gp6LmVILYoGtgI2ID1nqc4iJN0woqYCWbKFqjFE_ddPqPUteIvVp_7ofB21M7WdM20SWwqOWcoRry1lycUIFTggIr0cAYtsbw71y2HXqbY9gvMmpi5nGy1wUq7CEtJp_g=="
+              }
+            },
+            {
+              "web": {
+                "title": "syracuse.edu",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEQA3VszvUyrMU8JZmCm4fniEopQF9_RXRhvTaCCljCmH19-UDrRurb4_E4WMHpwbZ1qQPgh6tx-xRvu6ohHl56lMtIsDFcbxm0InxuZmMTdZ-6vf1RPaFYJ_EU-03USoY8AvLeWwazHObhk2CQlsg="
+              }
+            },
+            {
+              "web": {
+                "title": "dta.academy",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEd6OO8g5FA1xktjnhwWS9hGf7sD-qmEyYd9TJoxj9HflVIYzxEJknjedKTf_Kmj5jlonyVW2y85i_I475w3P9khGjHqtwY_VnJ7AxjiKnhZ4g9Kt1haNSYbzzUbPX5OU3Tz6-hzDvdqt-9udmwpZ6qukVuItuOQ0rTxzNErf8CNSO__ZgK2vhghqqGs8uSa5bq"
+              }
+            },
+            {
+              "web": {
+                "title": "otrs.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEZa1sa5ypLG8zqf6Ds6G4Is2hTXL9wtqaE2iJOVemJAMjqDG5Gq7VM_OcQVs6npKuA_d5dqny8w4QrRUgAos5Qy_xtUj_ycViOneh7fiHW2UZy3IuQWdHC0HF3eZJ5-FfuxC5RslOvNdCS9-Vya-5B0w=="
+              }
+            },
+            {
+              "web": {
+                "title": "google.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE1tbrfC9tDmSL5OkhwYADOaQhe-CAS13JY4Fkz408WoCdtTg-W1C_W-dyJn7GXY7CcdJHs3zdQieJCJSDYFAwcBXrCobJbibZp-vxCfRBKfc74ejpjjxUVaerf8oV2In0caJ4UYi7PBexiNpPX1GEajwNFbWTBlqHAZRU8cUnC3sKX_P4XvryINCCDnu9f1QjT_kY1I6dswxMpP7_ekuRT"
+              }
+            },
+            {
+              "web": {
+                "title": "moveworks.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGf7Yb0yFZLAWOrBB9xdlA6JHN3A8D09XUVKcw2256JVetKTCWAds-JsdkBjqKr9KnLdaV433s003H7sJZxeWRZftoOFYRo8A5kgGHJcx7Y7MfUChX3N2HZefH8_J-A9FX7MxJHh0DVPvILDuyWVYPVINuWCKuKas3H08JKka2Olm0A8l1E7QYZfJrsn5pXjz08cY5ESRIDUBh0tsLK2A=="
+              }
+            },
+            {
+              "web": {
+                "title": "du.edu",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEsBJjzx6dhRZFhtHR36SXo7HOJyz0SMnA16u-z9D5nvSEQAFzjlSadShAbIX4kF-MWaKWejJWdPKgNBDrs76zD7FkItEX0iPiHEHB69CiXJ5k1Ikijo2sDFngMaWfst7de05OayXy8d53yTHYCR5Or-4XihJhk3l_1Fv8m4LGgCzvgKuIYrLyqdmWqyL9DhjUPBZwprdGln4JYCnaWuw=="
+              }
+            },
+            {
+              "web": {
+                "title": "xcelacore.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHlubjcDl9-DG8uj6v1l94WMiXu1A_10Or3TAMQQlt_8XwC6MNkFMqtq9gyvAnhQas-2687FQS-OcmBQjl55OO4Oi8riNhtWkj4DCX-DfbbZcaCw78LoPFKPCZTcgs9GILZujbdD0XGv6XQJ_0sPww5ZitRk0474g=="
+              }
+            },
+            {
+              "web": {
+                "title": "ibm.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFBX2g3KLxBP8w1ynuEQ5J4EXiw2uqSpnF8vifA-4F-AInIjnX-7bLMGdomg0C6iS8FNA93lOlKRLd0TfXgovGYaaD06MqMXq8vU-aE8l-Ht0tV-uwZ7VWtXI590Q1P8FCeeYfOO0Fb"
+              }
+            },
+            {
+              "web": {
+                "title": "phosailabs.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHTOzapJTwWT2Sa8VBK7uJ5X0MtDLpX05kybIiTS5xuBjCvlCRyWuGiTZPW-G4oUQt5ekjAKFcIzaAXjnWJ3IHp6GFnuOCy8z2RM5rPbtjTWK3GFYJLuH75wAYSa3R4H7eTq8vQ9Q3o0xHeIsBbj1VjLA=="
+              }
+            },
+            {
+              "web": {
+                "title": "iternal.ai",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHs1v7D7cJSoHm4dpLcBM2uQ8rRVJKiLWsn3Ttk2t6xQurggbdpfFZpKJU8y_SoGON88zSCzVnu4c___ptSiRoh4COpxI4ZNQsMA8d6xWWtAVIsquot36b4zg8rFnIOqMRejzGTyl8="
+              }
+            },
+            {
+              "web": {
+                "title": "codebridge.tech",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFhcyKEWyVNrYFUKLKvO3UGT6VHfHCdAKZnXPY5GOkmsWJGG-C2J_L_39nxSF0GlmAXotFrA3ZYzQUGorgRfugGTncGdf6QVYEg-cMBrpekFtixBsiaUIBpRdBt4uunyvKFgEQBnoEsLdVw7W3Mq_rq_0LzYPnuDllNLyZzDXtKsDYptFBjhPT0oE_ouYg="
+              }
+            },
+            {
+              "web": {
+                "title": "clutch.co",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG2FkJt0rPqW1WT12quUgR9qdI6ZjcQG8p3u2ItqbNx2y5drrpjtSmv7QfwioHlvkE1eu6s5gyKrCi6q9pC76xGpxiQak5Gp-MVbPj0akUMMy5hq2nkGon6i-0JGgX0fZ3CQh8="
+              }
+            },
+            {
+              "web": {
+                "title": "every.to",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH05tW8nRAuthaPYpQRbjBg5psrzGCASeDMyzaz-LkHWowcfTxxTnFglm_-0VKQrXzPe44Kkd8RwDKEdNIDoD06f1j2-kGoVrQHj48hd33Q_7SSxbpsYg=="
+              }
+            },
+            {
+              "web": {
+                "title": "abs-group.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEM0ke3a7gCYRMeP73MwjBh8yokPAir6Jhe2NU4YpLYQ3efB8IRJIX4b5pm55Lt2kgblcO2dq2A0mfQLLPTV647FltX4WwmRMXCtDYAydbkmptVvTukSs1ACOxK0D1HisjwnafW0XxFth4CkYau4gquK4RTwyPwdJj9vGtrxgnPxewrRNEiPy4="
+              }
+            }
+          ],
+          "groundingSupports": [
+            {
+              "groundingChunkIndices": [
+                0,
+                1
+              ],
+              "segment": {
+                "endIndex": 789,
+                "startIndex": 575,
+                "text": "This typically involves defining governance operating models, developing AI policies and standards, ensuring compliance with regulatory requirements, and establishing oversight processes throughout the AI lifecycle"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                2,
+                3,
+                4
+              ],
+              "segment": {
+                "endIndex": 1266,
+                "startIndex": 1153,
+                "text": "These policies are crucial for reducing risks like data exposure and inconsistent AI usage across different teams"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                5,
+                6,
+                7,
+                8,
+                9
+              ],
+              "segment": {
+                "endIndex": 1468,
+                "startIndex": 1268,
+                "text": "*   **Responsible AI and Ethics** Implementing \"Responsible AI\" principles is vital to ensure that AI systems are developed, deployed, and used in an ethical, fair, transparent, and accountable manner"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                5
+              ],
+              "segment": {
+                "endIndex": 1649,
+                "startIndex": 1470,
+                "text": "Consultants can help embed these ethical considerations into your AI strategy and workflows, and establish frameworks to manage potential risks such as bias and privacy violations"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                10,
+                11,
+                12,
+                13
+              ],
+              "segment": {
+                "endIndex": 2031,
+                "startIndex": 1787,
+                "text": "This includes aligning AI rollout with your organization's existing values, assigning clear ownership (an \"AI champion\"), providing comprehensive training tailored to employee needs, and refining the strategy as your organization's needs evolve"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                10,
+                12,
+                13
+              ],
+              "segment": {
+                "endIndex": 2134,
+                "startIndex": 2033,
+                "text": "Transparency and involving employees in the process are crucial for successful integration and buy-in"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                14,
+                15,
+                16
+              ],
+              "segment": {
+                "endIndex": 2552,
+                "startIndex": 2386,
+                "text": "They offer expertise in policy development, risk management, regulatory compliance (e.g., NIST AI RMF alignment), and technical implementation of responsible AI tools"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                14,
+                3,
+                4,
+                17,
+                18,
+                19,
+                20,
+                21,
+                16
+              ],
+              "segment": {
+                "endIndex": 2827,
+                "startIndex": 2554,
+                "text": "*   **Specialized AI Consulting Firms** Firms such as Xcelacore, Credo AI, Komodo Technologies, Nevada IT Support, IZZI, Every Consulting, ABS Group, Phos AI Labs, and Neoteric specialize in various aspects of AI strategy, governance, policy development, and implementation"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                14
+              ],
+              "segment": {
+                "endIndex": 2909,
+                "startIndex": 2829,
+                "text": "Some offer platforms and tools to automate governance tasks and track compliance"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                11
+              ],
+              "segment": {
+                "endIndex": 3279,
+                "startIndex": 3065,
+                "text": "This includes appointing an \"AI champion\" to guide adoption and provide a central point for guidance, feedback, and ideas, and creating company-wide programs to integrate AI into workflows and build employee skills"
+              }
+            }
+          ],
+          "searchEntryPoint": {
+            "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE6r65PERgD7ldIhIoC-L-ZE1tkdarYTdl8rW-tu4BQzb-EaaO4vvh9VCnYnQjOc1EOAHTgBsZMDZdSAyOvyJYUx6Y-93830Bp8Hi151Jhnrtgc2ZTZ_fN6MZ1x1M4VDnjobJsNMYkXlq_Wg0JMk3AnhkB7MVjIb6vgxPm9f4rxMR7CCpG39fhrDo9MVH7T-MzUm0P9PhN1Sqq-DXcztrcpdsigCJyWDRtpJWKi3iymOr9sYHo=\">AI ethics and responsible AI use in organizations</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE478V1RgCdsRNocl0yQ6hr_dtQSqPQ-cbZCAkO6NbPGM4hvcA4jLfO-A__FXu2Q81qjKGQO9yU8GXFkvtqbCEosygMv5EEpUh-K5hn71zlyCYVdfpVxbU2lDCD95I8uYob79bf_snxU5YXf-nwdfTZ-4i9QLiNvoymECrPUjZ1-O-21aYVnP6MAhxJmlPoDZMN2Q5W5XuS1nC2c-A8bpyPSQ==\">AI policy development services</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFPVuQoRzAQiBP2xVoQkq7MixHZ_ul86PIEOOxMdaEsA89fvpoq5SyoBPF2v6FhV4hR3M6_ZnRX7UJFg2YGQEN230MQ9MYLjuU3PrYEMQjxVtzGOFKoqTPqC93ZmcnMMiQnLAhmwvOBJA-AI9qzM6r1-FONmERhOs6XUw68-2xvqGCqCdyaCXrcxKI8YV7H9HQn24ofwtY1xQvvGg==\">AI governance consulting</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHSm_gwuZhGVtnCw3UJo5NFmCjYgmzBxs249aoIx-AzS2_zuYZmaKDxkTmlrY9i3bWQxGT8c5va4dnuXFA6T6o8DqzfrbpAexDSytwcp8-D1JDRHiBxG8y5TK3ccJusCTlRAcg0A5xooXShF_HiabjKwB46NQOwhw6FfglPPvpJOeIwtrq23IWp-EyfGnGH7kVVxQv_j_TxkTJtEijH2jJo6vk=\">AI tool adoption best practices</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFTkVHCddC95yMr1mu7zV64akB0uR_Uo-ZMpqF0PY1qEQ6kzDPLIE721MjiZzbnt2QLt47EZilnOO6ffpsG0jeVZ2_0n9EsyTTdKugA0H3gCzyAeTBLul2v6j0_HBXqHtr0HcVyfbUyhmJlSNNDNtUFZWkjW46hShW5YgnyMZtVQuClRn_zHM0YmTPvct-xGexZ8orm4ZXuf6x4NXE9Db2bSbvu15LPuExfZfyPPz3zW0MyvZN-0AHH9sIvJw==\">Companies specializing in AI strategy and implementation</a>\n  </div>\n</div>\n"
+          },
+          "webSearchQueries": [
+            "AI governance consulting",
+            "AI policy development services",
+            "AI tool adoption best practices",
+            "AI ethics and responsible AI use in organizations",
+            "Companies specializing in AI strategy and implementation"
+          ]
+        },
+        "index": 0
+      }
+    ],
+    "modelVersion": "gemini-2.5-flash",
+    "responseId": "XVe3ar7ZIsek6dkPi6fqwQ0",
+    "usageMetadata": {
+      "candidatesTokenCount": 667,
+      "promptTokenCount": 22,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 22
+        }
+      ],
+      "serviceTier": "standard",
+      "thoughtsTokenCount": 628,
+      "toolUsePromptTokenCount": 191,
+      "toolUsePromptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 191
+        }
+      ],
+      "totalTokenCount": 1508
+    }
+  },
+  "prompt_id": "P01",
+  "request": {
+    "body": {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Our staff use ChatGPT and other AI tools inconsistently, with no ownership or review process. Who can help?"
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "google_search": {}
+        }
+      ]
+    },
+    "model": "gemini-2.5-flash"
+  },
+  "run_id": "gemini-api-google-search-20260925-r1",
+  "schema_version": "gemini-grounded-raw-receipt/v1"
+}

@@ -1,0 +1,503 @@
+{
+  "attempts": [
+    {
+      "duration_ms": 6704,
+      "http_status": 200,
+      "model": "gemini-2.5-flash",
+      "response": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "Several firms specialize in AI operations consulting for architecture, engineering, and construction (AEC) companies, offering services to integrate AI into workflows, optimize processes, and enhance decision-making. These firms include:\n\n*   **Advisor Labs** is recognized for its dedicated AEC practice, assisting firms with lean IT departments. They focus on optimizing workflows in areas like RFP response, RFI triage, submittal review, and conceptual estimating support, aiming to decrease operational costs and increase efficiency through intelligent automation, predictive analytics, and workflow optimization.\n*   **YegaTech** is an AEC-only technology consultancy that provides AI strategy, governance, and adoption services. Their approach focuses on achieving measurable production use of AI rather than just pilot programs, and their consultants are deeply familiar with AEC industry specifics such as BIM environments and project delivery methods.\n*   **AI in AEC**, led by Stjepan Mikulic, specializes in the human element of AI adoption, offering training, workshops, and adoption programs to help architecture and engineering teams integrate AI into their daily work. They focus on workforce enablement and education to overcome the bottleneck of integrating AI and technical leadership within the industry.\n*   **McKinsey & Company** has a dedicated engineering, construction, and building materials practice. They provide capital-program-scale strategy, operating model redesign, and data science expertise for larger players in the industry, such as global contractors and infrastructure owners.\n*   **Slalom** assists large AEC and infrastructure organizations, particularly those challenged by managing extensive, scattered project data. They specialize in building cloud data platforms with partnerships across major cloud providers to make AI effective with historical data.\n*   **Zweig Group** offers tailored guidance, consulting, and training to AEC firms on leveraging AI for business operations. They help identify areas for AI implementation, develop adoption roadmaps, and provide end-to-end consulting from strategy to implementation.\n*   **AEC Hub** connects AEC firms with expert AI consultants who specialize in implementing AI tools to save time, boost productivity, and modernize workflows. They offer services from audit to optimization, including AI tool selection and evaluation, workflow automation, and team training.\n*   **e-verse** helps AEC companies identify, design, and implement AI solutions that align with their specific workflows, data, tools, and business goals. Their approach focuses on integrating practical AI solutions with existing software ecosystems like BIM platforms and project management tools.\n*   **AECforward** develops bespoke AI agents for the AEC industry, combining AI with computational design and AEC drawing miners to create custom AI solutions that integrate with existing workflows and streamline processes.\n*   **Reope** specializes in custom software development, BIM coordination services, and AI/ML implementations for AEC professionals, aiming to improve efficiency through technology, including Revit plugins and comprehensive BIM team support.\n*   **Conifer Advising** focuses on financial and operational excellence for architecture firms, using data and AI insights to improve operations, financial management, and business strategy for more profitable and sustainable practices.\n*   **Cove** is an architecture and design firm that leverages AI to create better real estate designs, combining traditional architectural expertise with AI technology for innovative and efficient solutions.\n\nOther firms and platforms also contribute to the AI landscape in AEC by offering specific AI-driven solutions, such as Spacemaker for design analysis, Digital Blue Foam for generative design, Sidewalk Labs with models like Delve for urban planning, Reconstruct.inc for site analysis and documentation, Helix for design documentation, Briq for AI-driven automation of business workflows, Ailytics for AI video analytics in safety and productivity, Nomic for organizing and analyzing unstructured data, Macadamia Labs for automating data-intensive engineering workflows, and Kyro AI for AI-powered field and project management."
+                }
+              ],
+              "role": "model"
+            },
+            "finishReason": "STOP",
+            "groundingMetadata": {
+              "groundingChunks": [
+                {
+                  "web": {
+                    "title": "advisorlabs.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEImJBk1zB3d_3jGzcjaWzRmokmBTmweC72M9g011_AN09oO4D7tsre2ybHG85BC_4GK6LtZDiHuQXwhixG-n-OWeE2e8WTo2UtRNVAf5oantG8dBnPZ4rUeVFGP-g7i7pPRSD2TSs="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "bestaiconsultingfirm.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFv2OncG4c6Dm-OkjJbsTSKTPExhAS4xX2R8Ud2L78DhknwtpiwKU-IaJOf0MkWnlzXZ_aOvPV6cosVVCUs0GCte6ohYbhE213YEG1re5mES2sPI70j3KKKR-NMYfTsr9xvySSHdMYEdz39JDBD22rYs3HN"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "yegatech.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE0lG9MZUrijs0jy101srbC-fIugN3HCeEAuO4ft9ScbZHZ5WsrJqXT8uHgrZMFAFm1U36RpopEx2PQbeQIyXQWsfo1qCSjUxAjHpMhJTX2mHqUprurbhW_yL2k5WU_8G6WAl2q4_orKMYCkZ7Mz5JoVwlu3nna0NcR73FN5JrV4ViBvQ=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aechub.org",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHfiZbel5ALBC98dmzdQPmE9fDNZwdJNTTKtzht3d0xz_4Lm1gAkPUKoSPL2Sk1UqOBZhzirU9xUZN7Q66URWRzuWTNZzkPqPTUT5di9u_xBDb5QObn6M9Sd02CvPw="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "zweiggroup.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEqzUe4KIxy220YUhToM_kr9YUnJeE7b4VRlJ62IBGaLGAQ7jKOGecnFTQz4dUewIlpZX2mmudFl8ms210FrVX_EI9Fo91bkvHd3odPKJVDhsYD9eERQecypbkO2bCu45yBvsiICLZGvG1vQShxKTw="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "e-verse.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQElZ1Jo3QEVvlqtHU_frbexsAEpOYxLyKclsHHTg9oz0VHkZ7LjZjcl4CrbgMuskkc76F6cR_wLIIqPGBVloActE1rKdh_on7jRFOUvbbP8EGOEdjltQG3Ng9c1lCR3lCcJ-ZuRVWh295oPce8_pJ_OfhAVJJhlXgpDGd0="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "re-thinkingthefuture.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEkXjRMFgMxa_-vtdcry5L-5QbaZD3HWjFykj_GcEV5Nvj9bWbxAyMhc-ClxsCV7eQ3iCeiXQJyaKveyDjdZjogREk5J9nqD03McNQ67LIj7X7CHJ1TEGQ6v2-iwKKyCaTPf5VsfXvGDcasFXMgVfo0US9KIkH-E6-5t40RbgdaxoaqQXuW-7enbEUVkc5xu0R59mODj1P-6mmJmsk_Uvd45hmkptod35ZSkeac89kAJKTpELU9WrQa234="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "builtworlds.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGxZ7um76pCV5nrSX7o00fW-Mnq4vwhGAUHRA6T-RcnlACwrNcZcUfyyNMbQeUa4yBG-0pbaY2Ro56woTcf_Yr30LmDXiFQ2u_5MyuTCr13Ge6HgMHOiic1srB3iREl3j0d7MXSkRpOLCOlFJaDUFy5S_lOzN8wPl4fugA0B3BQ6SHgGA=="
+                  }
+                }
+              ],
+              "groundingSupports": [
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 616,
+                    "startIndex": 348,
+                    "text": "They focus on optimizing workflows in areas like RFP response, RFI triage, submittal review, and conceptual estimating support, aiming to decrease operational costs and increase efficiency through intelligent automation, predictive analytics, and workflow optimization"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    1,
+                    2
+                  ],
+                  "segment": {
+                    "endIndex": 959,
+                    "startIndex": 735,
+                    "text": "Their approach focuses on achieving measurable production use of AI rather than just pilot programs, and their consultants are deeply familiar with AEC industry specifics such as BIM environments and project delivery methods"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    1,
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 1322,
+                    "startIndex": 1184,
+                    "text": "They focus on workforce enablement and education to overcome the bottleneck of integrating AI and technical leadership within the industry"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 1613,
+                    "startIndex": 1427,
+                    "text": "They provide capital-program-scale strategy, operating model redesign, and data science expertise for larger players in the industry, such as global contractors and infrastructure owners"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 1896,
+                    "startIndex": 1759,
+                    "text": "They specialize in building cloud data platforms with partnerships across major cloud providers to make AI effective with historical data"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    4
+                  ],
+                  "segment": {
+                    "endIndex": 2164,
+                    "startIndex": 2024,
+                    "text": "They help identify areas for AI implementation, develop adoption roadmaps, and provide end-to-end consulting from strategy to implementation"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 2457,
+                    "startIndex": 2327,
+                    "text": "They offer services from audit to optimization, including AI tool selection and evaluation, workflow automation, and team training"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    5
+                  ],
+                  "segment": {
+                    "endIndex": 2757,
+                    "startIndex": 2615,
+                    "text": "Their approach focuses on integrating practical AI solutions with existing software ecosystems like BIM platforms and project management tools"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 2982,
+                    "startIndex": 2759,
+                    "text": "*   **AECforward** develops bespoke AI agents for the AEC industry, combining AI with computational design and AEC drawing miners to create custom AI solutions that integrate with existing workflows and streamline processes"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 3225,
+                    "startIndex": 2984,
+                    "text": "*   **Reope** specializes in custom software development, BIM coordination services, and AI/ML implementations for AEC professionals, aiming to improve efficiency through technology, including Revit plugins and comprehensive BIM team support"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 3463,
+                    "startIndex": 3227,
+                    "text": "*   **Conifer Advising** focuses on financial and operational excellence for architecture firms, using data and AI insights to improve operations, financial management, and business strategy for more profitable and sustainable practices"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 3672,
+                    "startIndex": 3465,
+                    "text": "*   **Cove** is an architecture and design firm that leverages AI to create better real estate designs, combining traditional architectural expertise with AI technology for innovative and efficient solutions"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    6,
+                    7
+                  ],
+                  "segment": {
+                    "endIndex": 4299,
+                    "startIndex": 3936,
+                    "text": "inc for site analysis and documentation, Helix for design documentation, Briq for AI-driven automation of business workflows, Ailytics for AI video analytics in safety and productivity, Nomic for organizing and analyzing unstructured data, Macadamia Labs for automating data-intensive engineering workflows, and Kyro AI for AI-powered field and project management"
+                  }
+                }
+              ],
+              "searchEntryPoint": {
+                "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHz-6UbSAJAJn2S_iFWWu83tRey_Rd1EWAdaZ1rjxW5rsCPjXHbeeHn1YiJRE22lK5pCNWYLSWIjl4wQleqlPlIFxC2duZWoDDdRqe5LVPWSxse6wBAnxRFiaUGPTCuhBazyuR8NMPb8nH8avMa3fm2NKEs5wQhZe_iIrHQ-Xe4VNQRu-s5NEQyWOtgp-HljONFXsy6zypyeROsVM4Yq-eUVkCF4kakiNrnzhSWOw==\">firms specializing in AI in AEC operations</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFCs3ZvdApzEkbxdAmkbUlz6abz6k6HEOt6HLSCUPQHTu87m08OFtsBIYxCpMA5Q7CzOJwRAJJayCO9IKZ48PdlM4EN66Yd3qhUNZe_RDofxoz32q83AbzJcseWZ5aJQ6uWUm-cRl1Qr1Ibl1AkSYTcrIUI7ZWMB3yn910-Y6hD3b54XxBxRF6px9oxMlQeTBo5DYQ9pxu1sa_OiWXC34ioH_QtXyo38l33NmiGmuVtb5ao0BP7fYjAEvo1xu1dl7tvQrkFc0Bq-Q0H5fM=\">AI operations consulting for architecture engineering construction firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFNIWJ1QelgbKVI9EDu1dU1HMdx6bcN5sjtP2cJcgRp5aWZbwpyeYt9FnacF10xZsI3-WVFCWlSfyhirmqA1hHp2p766cD0u7cSAZziVgH78Oenz4cI9NrZxBohmg_2penJePGCl3apDlCcmrG1NWL5N3wxr5_bCBqZwHwAN_-Qlg1UVXM24jnWuH72bPKREVPpCNvc65nXXgZzPd7U7MQbzzwIUjcfUtSLMztW\">AI consulting for AEC industry operations</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHL8MFC1ip7k_KKghJMVSbI2PJI5ZgZ8gC2vXrGsBJaqkdK0m5p3WptuKd6bkG2O2PFor8xIysHUk7NZN9tqHUKraOfHG1gM-QCjTV3vVbc8HCMV_RFlLqqGuV8caxdAWIM1fB12ro3uZCCj_g7OPfwQBZlZqYsWkxO4v8Lr8_hBaCc66pIHdf3umHhhOBn5Wdqm2gWklo9ndNN8nwRXSJQ-ikTEGSWplnIxmUMRwg5AlcyreZSFqMUO1ZGWuj5M2CWXJkkO9GNJnKX3axHus7z\">artificial intelligence consulting for architecture engineering construction</a>\n  </div>\n</div>\n"
+              },
+              "webSearchQueries": [
+                "AI operations consulting for architecture engineering construction firms",
+                "AI consulting for AEC industry operations",
+                "firms specializing in AI in AEC operations",
+                "artificial intelligence consulting for architecture engineering construction"
+              ]
+            },
+            "index": 0
+          }
+        ],
+        "modelVersion": "gemini-2.5-flash",
+        "responseId": "qVe3aqOzOPedqtsPvLb02QY",
+        "usageMetadata": {
+          "candidatesTokenCount": 820,
+          "promptTokenCount": 16,
+          "promptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 16
+            }
+          ],
+          "serviceTier": "standard",
+          "thoughtsTokenCount": 122,
+          "toolUsePromptTokenCount": 133,
+          "toolUsePromptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 133
+            }
+          ],
+          "totalTokenCount": 1091
+        }
+      },
+      "technical_status": "success",
+      "timestamp": "2026-09-26T05:27:05.735791Z"
+    }
+  ],
+  "final_response": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "Several firms specialize in AI operations consulting for architecture, engineering, and construction (AEC) companies, offering services to integrate AI into workflows, optimize processes, and enhance decision-making. These firms include:\n\n*   **Advisor Labs** is recognized for its dedicated AEC practice, assisting firms with lean IT departments. They focus on optimizing workflows in areas like RFP response, RFI triage, submittal review, and conceptual estimating support, aiming to decrease operational costs and increase efficiency through intelligent automation, predictive analytics, and workflow optimization.\n*   **YegaTech** is an AEC-only technology consultancy that provides AI strategy, governance, and adoption services. Their approach focuses on achieving measurable production use of AI rather than just pilot programs, and their consultants are deeply familiar with AEC industry specifics such as BIM environments and project delivery methods.\n*   **AI in AEC**, led by Stjepan Mikulic, specializes in the human element of AI adoption, offering training, workshops, and adoption programs to help architecture and engineering teams integrate AI into their daily work. They focus on workforce enablement and education to overcome the bottleneck of integrating AI and technical leadership within the industry.\n*   **McKinsey & Company** has a dedicated engineering, construction, and building materials practice. They provide capital-program-scale strategy, operating model redesign, and data science expertise for larger players in the industry, such as global contractors and infrastructure owners.\n*   **Slalom** assists large AEC and infrastructure organizations, particularly those challenged by managing extensive, scattered project data. They specialize in building cloud data platforms with partnerships across major cloud providers to make AI effective with historical data.\n*   **Zweig Group** offers tailored guidance, consulting, and training to AEC firms on leveraging AI for business operations. They help identify areas for AI implementation, develop adoption roadmaps, and provide end-to-end consulting from strategy to implementation.\n*   **AEC Hub** connects AEC firms with expert AI consultants who specialize in implementing AI tools to save time, boost productivity, and modernize workflows. They offer services from audit to optimization, including AI tool selection and evaluation, workflow automation, and team training.\n*   **e-verse** helps AEC companies identify, design, and implement AI solutions that align with their specific workflows, data, tools, and business goals. Their approach focuses on integrating practical AI solutions with existing software ecosystems like BIM platforms and project management tools.\n*   **AECforward** develops bespoke AI agents for the AEC industry, combining AI with computational design and AEC drawing miners to create custom AI solutions that integrate with existing workflows and streamline processes.\n*   **Reope** specializes in custom software development, BIM coordination services, and AI/ML implementations for AEC professionals, aiming to improve efficiency through technology, including Revit plugins and comprehensive BIM team support.\n*   **Conifer Advising** focuses on financial and operational excellence for architecture firms, using data and AI insights to improve operations, financial management, and business strategy for more profitable and sustainable practices.\n*   **Cove** is an architecture and design firm that leverages AI to create better real estate designs, combining traditional architectural expertise with AI technology for innovative and efficient solutions.\n\nOther firms and platforms also contribute to the AI landscape in AEC by offering specific AI-driven solutions, such as Spacemaker for design analysis, Digital Blue Foam for generative design, Sidewalk Labs with models like Delve for urban planning, Reconstruct.inc for site analysis and documentation, Helix for design documentation, Briq for AI-driven automation of business workflows, Ailytics for AI video analytics in safety and productivity, Nomic for organizing and analyzing unstructured data, Macadamia Labs for automating data-intensive engineering workflows, and Kyro AI for AI-powered field and project management."
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "STOP",
+        "groundingMetadata": {
+          "groundingChunks": [
+            {
+              "web": {
+                "title": "advisorlabs.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEImJBk1zB3d_3jGzcjaWzRmokmBTmweC72M9g011_AN09oO4D7tsre2ybHG85BC_4GK6LtZDiHuQXwhixG-n-OWeE2e8WTo2UtRNVAf5oantG8dBnPZ4rUeVFGP-g7i7pPRSD2TSs="
+              }
+            },
+            {
+              "web": {
+                "title": "bestaiconsultingfirm.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFv2OncG4c6Dm-OkjJbsTSKTPExhAS4xX2R8Ud2L78DhknwtpiwKU-IaJOf0MkWnlzXZ_aOvPV6cosVVCUs0GCte6ohYbhE213YEG1re5mES2sPI70j3KKKR-NMYfTsr9xvySSHdMYEdz39JDBD22rYs3HN"
+              }
+            },
+            {
+              "web": {
+                "title": "yegatech.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE0lG9MZUrijs0jy101srbC-fIugN3HCeEAuO4ft9ScbZHZ5WsrJqXT8uHgrZMFAFm1U36RpopEx2PQbeQIyXQWsfo1qCSjUxAjHpMhJTX2mHqUprurbhW_yL2k5WU_8G6WAl2q4_orKMYCkZ7Mz5JoVwlu3nna0NcR73FN5JrV4ViBvQ=="
+              }
+            },
+            {
+              "web": {
+                "title": "aechub.org",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHfiZbel5ALBC98dmzdQPmE9fDNZwdJNTTKtzht3d0xz_4Lm1gAkPUKoSPL2Sk1UqOBZhzirU9xUZN7Q66URWRzuWTNZzkPqPTUT5di9u_xBDb5QObn6M9Sd02CvPw="
+              }
+            },
+            {
+              "web": {
+                "title": "zweiggroup.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEqzUe4KIxy220YUhToM_kr9YUnJeE7b4VRlJ62IBGaLGAQ7jKOGecnFTQz4dUewIlpZX2mmudFl8ms210FrVX_EI9Fo91bkvHd3odPKJVDhsYD9eERQecypbkO2bCu45yBvsiICLZGvG1vQShxKTw="
+              }
+            },
+            {
+              "web": {
+                "title": "e-verse.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQElZ1Jo3QEVvlqtHU_frbexsAEpOYxLyKclsHHTg9oz0VHkZ7LjZjcl4CrbgMuskkc76F6cR_wLIIqPGBVloActE1rKdh_on7jRFOUvbbP8EGOEdjltQG3Ng9c1lCR3lCcJ-ZuRVWh295oPce8_pJ_OfhAVJJhlXgpDGd0="
+              }
+            },
+            {
+              "web": {
+                "title": "re-thinkingthefuture.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEkXjRMFgMxa_-vtdcry5L-5QbaZD3HWjFykj_GcEV5Nvj9bWbxAyMhc-ClxsCV7eQ3iCeiXQJyaKveyDjdZjogREk5J9nqD03McNQ67LIj7X7CHJ1TEGQ6v2-iwKKyCaTPf5VsfXvGDcasFXMgVfo0US9KIkH-E6-5t40RbgdaxoaqQXuW-7enbEUVkc5xu0R59mODj1P-6mmJmsk_Uvd45hmkptod35ZSkeac89kAJKTpELU9WrQa234="
+              }
+            },
+            {
+              "web": {
+                "title": "builtworlds.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGxZ7um76pCV5nrSX7o00fW-Mnq4vwhGAUHRA6T-RcnlACwrNcZcUfyyNMbQeUa4yBG-0pbaY2Ro56woTcf_Yr30LmDXiFQ2u_5MyuTCr13Ge6HgMHOiic1srB3iREl3j0d7MXSkRpOLCOlFJaDUFy5S_lOzN8wPl4fugA0B3BQ6SHgGA=="
+              }
+            }
+          ],
+          "groundingSupports": [
+            {
+              "groundingChunkIndices": [
+                0,
+                1
+              ],
+              "segment": {
+                "endIndex": 616,
+                "startIndex": 348,
+                "text": "They focus on optimizing workflows in areas like RFP response, RFI triage, submittal review, and conceptual estimating support, aiming to decrease operational costs and increase efficiency through intelligent automation, predictive analytics, and workflow optimization"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                1,
+                2
+              ],
+              "segment": {
+                "endIndex": 959,
+                "startIndex": 735,
+                "text": "Their approach focuses on achieving measurable production use of AI rather than just pilot programs, and their consultants are deeply familiar with AEC industry specifics such as BIM environments and project delivery methods"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                1,
+                3
+              ],
+              "segment": {
+                "endIndex": 1322,
+                "startIndex": 1184,
+                "text": "They focus on workforce enablement and education to overcome the bottleneck of integrating AI and technical leadership within the industry"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                1
+              ],
+              "segment": {
+                "endIndex": 1613,
+                "startIndex": 1427,
+                "text": "They provide capital-program-scale strategy, operating model redesign, and data science expertise for larger players in the industry, such as global contractors and infrastructure owners"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                1
+              ],
+              "segment": {
+                "endIndex": 1896,
+                "startIndex": 1759,
+                "text": "They specialize in building cloud data platforms with partnerships across major cloud providers to make AI effective with historical data"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                4
+              ],
+              "segment": {
+                "endIndex": 2164,
+                "startIndex": 2024,
+                "text": "They help identify areas for AI implementation, develop adoption roadmaps, and provide end-to-end consulting from strategy to implementation"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                3
+              ],
+              "segment": {
+                "endIndex": 2457,
+                "startIndex": 2327,
+                "text": "They offer services from audit to optimization, including AI tool selection and evaluation, workflow automation, and team training"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                5
+              ],
+              "segment": {
+                "endIndex": 2757,
+                "startIndex": 2615,
+                "text": "Their approach focuses on integrating practical AI solutions with existing software ecosystems like BIM platforms and project management tools"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                3
+              ],
+              "segment": {
+                "endIndex": 2982,
+                "startIndex": 2759,
+                "text": "*   **AECforward** develops bespoke AI agents for the AEC industry, combining AI with computational design and AEC drawing miners to create custom AI solutions that integrate with existing workflows and streamline processes"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                3
+              ],
+              "segment": {
+                "endIndex": 3225,
+                "startIndex": 2984,
+                "text": "*   **Reope** specializes in custom software development, BIM coordination services, and AI/ML implementations for AEC professionals, aiming to improve efficiency through technology, including Revit plugins and comprehensive BIM team support"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                3
+              ],
+              "segment": {
+                "endIndex": 3463,
+                "startIndex": 3227,
+                "text": "*   **Conifer Advising** focuses on financial and operational excellence for architecture firms, using data and AI insights to improve operations, financial management, and business strategy for more profitable and sustainable practices"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                3
+              ],
+              "segment": {
+                "endIndex": 3672,
+                "startIndex": 3465,
+                "text": "*   **Cove** is an architecture and design firm that leverages AI to create better real estate designs, combining traditional architectural expertise with AI technology for innovative and efficient solutions"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                6,
+                7
+              ],
+              "segment": {
+                "endIndex": 4299,
+                "startIndex": 3936,
+                "text": "inc for site analysis and documentation, Helix for design documentation, Briq for AI-driven automation of business workflows, Ailytics for AI video analytics in safety and productivity, Nomic for organizing and analyzing unstructured data, Macadamia Labs for automating data-intensive engineering workflows, and Kyro AI for AI-powered field and project management"
+              }
+            }
+          ],
+          "searchEntryPoint": {
+            "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHz-6UbSAJAJn2S_iFWWu83tRey_Rd1EWAdaZ1rjxW5rsCPjXHbeeHn1YiJRE22lK5pCNWYLSWIjl4wQleqlPlIFxC2duZWoDDdRqe5LVPWSxse6wBAnxRFiaUGPTCuhBazyuR8NMPb8nH8avMa3fm2NKEs5wQhZe_iIrHQ-Xe4VNQRu-s5NEQyWOtgp-HljONFXsy6zypyeROsVM4Yq-eUVkCF4kakiNrnzhSWOw==\">firms specializing in AI in AEC operations</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFCs3ZvdApzEkbxdAmkbUlz6abz6k6HEOt6HLSCUPQHTu87m08OFtsBIYxCpMA5Q7CzOJwRAJJayCO9IKZ48PdlM4EN66Yd3qhUNZe_RDofxoz32q83AbzJcseWZ5aJQ6uWUm-cRl1Qr1Ibl1AkSYTcrIUI7ZWMB3yn910-Y6hD3b54XxBxRF6px9oxMlQeTBo5DYQ9pxu1sa_OiWXC34ioH_QtXyo38l33NmiGmuVtb5ao0BP7fYjAEvo1xu1dl7tvQrkFc0Bq-Q0H5fM=\">AI operations consulting for architecture engineering construction firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFNIWJ1QelgbKVI9EDu1dU1HMdx6bcN5sjtP2cJcgRp5aWZbwpyeYt9FnacF10xZsI3-WVFCWlSfyhirmqA1hHp2p766cD0u7cSAZziVgH78Oenz4cI9NrZxBohmg_2penJePGCl3apDlCcmrG1NWL5N3wxr5_bCBqZwHwAN_-Qlg1UVXM24jnWuH72bPKREVPpCNvc65nXXgZzPd7U7MQbzzwIUjcfUtSLMztW\">AI consulting for AEC industry operations</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHL8MFC1ip7k_KKghJMVSbI2PJI5ZgZ8gC2vXrGsBJaqkdK0m5p3WptuKd6bkG2O2PFor8xIysHUk7NZN9tqHUKraOfHG1gM-QCjTV3vVbc8HCMV_RFlLqqGuV8caxdAWIM1fB12ro3uZCCj_g7OPfwQBZlZqYsWkxO4v8Lr8_hBaCc66pIHdf3umHhhOBn5Wdqm2gWklo9ndNN8nwRXSJQ-ikTEGSWplnIxmUMRwg5AlcyreZSFqMUO1ZGWuj5M2CWXJkkO9GNJnKX3axHus7z\">artificial intelligence consulting for architecture engineering construction</a>\n  </div>\n</div>\n"
+          },
+          "webSearchQueries": [
+            "AI operations consulting for architecture engineering construction firms",
+            "AI consulting for AEC industry operations",
+            "firms specializing in AI in AEC operations",
+            "artificial intelligence consulting for architecture engineering construction"
+          ]
+        },
+        "index": 0
+      }
+    ],
+    "modelVersion": "gemini-2.5-flash",
+    "responseId": "qVe3aqOzOPedqtsPvLb02QY",
+    "usageMetadata": {
+      "candidatesTokenCount": 820,
+      "promptTokenCount": 16,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 16
+        }
+      ],
+      "serviceTier": "standard",
+      "thoughtsTokenCount": 122,
+      "toolUsePromptTokenCount": 133,
+      "toolUsePromptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 133
+        }
+      ],
+      "totalTokenCount": 1091
+    }
+  },
+  "prompt_id": "C01",
+  "request": {
+    "body": {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "What firms specialize in AI operations consulting for architecture, engineering, and construction companies?"
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "google_search": {}
+        }
+      ]
+    },
+    "model": "gemini-2.5-flash"
+  },
+  "run_id": "gemini-api-google-search-20260925-r1",
+  "schema_version": "gemini-grounded-raw-receipt/v1"
+}

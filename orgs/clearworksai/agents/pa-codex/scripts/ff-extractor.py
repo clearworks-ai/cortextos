@@ -1864,6 +1864,17 @@ def run(
         fresh = [t for t in recent if str(t.get("id") or "") == meeting_id]
     else:
         fresh = select_recent_transcripts(recent, watermark_timestamp, watermark_meeting_id, limit=limit)
+    activation_not_before_raw = os.environ.get("FF_ACTIVATION_NOT_BEFORE", "").strip()
+    if activation_not_before_raw:
+        activation_not_before = parse_transcript_datetime(activation_not_before_raw)
+        if activation_not_before is None:
+            raise ValueError("invalid FF_ACTIVATION_NOT_BEFORE timestamp")
+        fresh = [
+            transcript
+            for transcript in fresh
+            if (parse_transcript_datetime(transcript.get("date")) or datetime.fromtimestamp(0, UTC))
+            >= activation_not_before
+        ]
     if not fresh:
         print(
             json.dumps(

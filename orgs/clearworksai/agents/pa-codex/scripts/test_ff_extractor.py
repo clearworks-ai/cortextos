@@ -1,0 +1,1932 @@
+from __future__ import annotations
+
+import contextlib
+import importlib.util
+import io
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import urllib.error
+import unittest
+import unittest.mock
+from datetime import date
+from pathlib import Path
+
+
+MODULE_PATH = Path(__file__).with_name("ff-extractor.py")
+SPEC = importlib.util.spec_from_file_location("ff_extractor_script", MODULE_PATH)
+if SPEC is None or SPEC.loader is None:
+    raise RuntimeError("Unable to load ff-extractor.py for tests")
+MODULE = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = MODULE
+SPEC.loader.exec_module(MODULE)
+
+
+class FirefliesExtractorTests(unittest.TestCase):
+    def make_transcript(self, sentence: str, *, meeting_date: str = "2026-06-08T16:00:00Z") -> dict[str, object]:
+        return {
+            "id": "meeting_123",
+            "title": "Acme Follow Up",
+            "date": meeting_date,
+            "sentences": [
+                {
+                    "speaker_name": "Josh Weiss",
+                    "text": sentence,
+                }
+            ],
+        }
+
+    def test_action_prompt_preserves_imprecise_timeframes_and_rejects_casual_context(self) -> None:
+        prompt = " ".join(MODULE.ACTION_ITEMS_PROMPT.split())
+
+        self.assertIn('"a day or so"', prompt)
+        self.assertIn("never turn them into an exact calendar date", prompt)
+        self.assertIn("casual personal self-disclosures", prompt)
+        self.assertIn("learning more about coding", prompt)
+
+    def test_refine_keeps_due_based_first_person_commitment(self) -> None:
+        transcript = self.make_transcript("I'll send the proposal to Acme by Wednesday.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Send the proposal to Acme",
+                owner="Josh",
+                due_date="Wednesday",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].text, "Send the proposal to Acme (due 2026-06-10)")
+        self.assertEqual(commitments[0].id, MODULE.commitment_id("meeting_123", "Send the proposal to Acme"))
+        self.assertEqual(commitments[0].source, "ff")
+        self.assertEqual(commitments[0].source_ref, "meeting_123 · Acme Follow Up")
+
+    def test_refine_keeps_explicit_dated_generic_owner_as_needs_owner(self) -> None:
+        transcript = self.make_transcript("We'll send the revised scope to Acme by Friday.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Send the revised scope to Acme",
+                owner="we",
+                due_date="Friday",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].owner, "NEEDS-OWNER")
+        self.assertEqual(commitments[0].deadline, "2026-06-12")
+        self.assertEqual(commitments[0].source_quote, "We'll send the revised scope to Acme by Friday.")
+
+    def test_refine_drops_generic_owner_without_explicit_commitment(self) -> None:
+        transcript = self.make_transcript("We should send the revised scope to Acme by Friday.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Send the revised scope to Acme",
+                owner="we",
+                due_date="Friday",
+                status="pending",
+            )
+        ]
+
+        self.assertEqual(MODULE.refine_items(transcript, items), [])
+
+    def test_refine_keeps_named_counterparty_without_due(self) -> None:
+        transcript = self.make_transcript("Let me call Sara about the contract this afternoon.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Call Sara about the contract",
+                owner="Josh Weiss",
+                due_date="",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].text, "Call Sara about the contract")
+
+    def test_refine_keeps_possessive_counterparty_name(self) -> None:
+        transcript = self.make_transcript("I'll automate Wendy's spreadsheet process.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Automate Wendy's spreadsheet process",
+                owner="Josh",
+                due_date="",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].text, "Automate Wendy's spreadsheet process")
+
+    def test_refine_keeps_for_counterparty_name(self) -> None:
+        transcript = self.make_transcript("I'll build spreadsheet automation for Wendy.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Build spreadsheet automation for Wendy",
+                owner="Josh",
+                due_date="",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].text, "Build spreadsheet automation for Wendy")
+
+    def test_refine_keeps_llm_assigned_josh_owner_without_verbatim_first_person(self) -> None:
+        # We now trust the model's owner=Josh assignment rather than requiring a
+        # verbatim "I'll" sentence; a concrete Josh item with a due date is kept.
+        transcript = self.make_transcript("Josh should send the proposal to Acme by Wednesday.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Send the proposal to Acme",
+                owner="Josh",
+                due_date="Wednesday",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].text, "Send the proposal to Acme (due 2026-06-10)")
+
+    def test_refine_drops_already_handled_in_meeting(self) -> None:
+        transcript = self.make_transcript("I introduced Rachel to the cyber insurance contact just now.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Introduce Rachel to cyber insurance contacts",
+                owner="Josh",
+                due_date="During meeting (completed verbally)",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(commitments, [])
+
+    def test_refine_drops_vague_software_commitment(self) -> None:
+        transcript = self.make_transcript("I will improve the software by Friday.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Improve the software",
+                owner="Josh",
+                due_date="Friday",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(commitments, [])
+
+    def test_refine_drops_considering_mexico(self) -> None:
+        transcript = self.make_transcript("I'm considering Mexico for later this year.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Consider Mexico",
+                owner="Josh",
+                due_date="",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(commitments, [])
+
+    def test_refine_drops_casual_learning_self_disclosure(self) -> None:
+        transcript = self.make_transcript("I'll be learning more about coding in the next few weeks.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Learn more about coding",
+                owner="Josh",
+                due_date="next few weeks",
+                status="pending",
+            )
+        ]
+
+        self.assertEqual(MODULE.refine_items(transcript, items), [])
+
+    def test_refine_drops_casual_learning_wording_variant(self) -> None:
+        transcript = self.make_transcript("I'll be learning more about coding in the next few weeks.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Build coding skills",
+                owner="Josh",
+                due_date="next few weeks",
+                status="pending",
+            )
+        ]
+
+        self.assertEqual(MODULE.refine_items(transcript, items), [])
+
+    def test_refine_drops_non_commitment_thinking_statement(self) -> None:
+        transcript = self.make_transcript("I'm going to think about it.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Think about it",
+                owner="Josh",
+                due_date="next few weeks",
+                status="pending",
+            )
+        ]
+
+        self.assertEqual(MODULE.refine_items(transcript, items), [])
+
+    def test_refine_keeps_real_learning_commitment(self) -> None:
+        transcript = self.make_transcript("I'll learn coding standards for Acme by Friday.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Learn coding standards for Acme",
+                owner="Josh",
+                due_date="Friday",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].owner, "Josh")
+        self.assertEqual(commitments[0].deadline, "2026-06-12")
+
+    def test_refine_keeps_a_day_or_so_without_fabricating_deadline(self) -> None:
+        sentence = (
+            "It'll be a day or so, but I'm going to analyze the interviews "
+            "and send them both emails with Mark on copy."
+        )
+        transcript = self.make_transcript(sentence)
+        items = [
+            MODULE.ExtractedItem(
+                action="Analyze the interviews and send them both emails with Mark on copy",
+                owner="I'm going to",
+                due_date="a day or so",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].direction, "outbound")
+        self.assertEqual(commitments[0].owner, "Josh")
+        self.assertEqual(commitments[0].deadline, "")
+        self.assertNotIn("(due ", commitments[0].text)
+        self.assertEqual(commitments[0].source_quote, sentence)
+
+    def test_refine_discards_llm_date_invented_from_a_day_or_so(self) -> None:
+        sentence = "I'm going to analyze the interviews in a day or so."
+        transcript = self.make_transcript(sentence)
+        items = [
+            MODULE.ExtractedItem(
+                action="Analyze the interviews",
+                owner="I",
+                due_date="2026-06-09",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].owner, "Josh")
+        self.assertEqual(commitments[0].deadline, "")
+        self.assertNotIn("2026-06-09", commitments[0].text)
+
+    def test_refine_drops_unsupported_vague_due_phrase(self) -> None:
+        transcript = self.make_transcript("I'm going to analyze the interviews by Friday.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Analyze the interviews",
+                owner="I",
+                due_date="a day or so",
+                status="pending",
+            )
+        ]
+
+        self.assertEqual(MODULE.refine_items(transcript, items), [])
+
+    def test_refine_preserves_supported_friday_with_unrelated_vague_clause(self) -> None:
+        sentence = "It may take a day or so to review, but I'll send the report by Friday."
+        transcript = self.make_transcript(sentence)
+        items = [
+            MODULE.ExtractedItem(
+                action="Send the report",
+                owner="I",
+                due_date="Friday",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].owner, "Josh")
+        self.assertEqual(commitments[0].deadline, "2026-06-12")
+
+    def test_refine_keeps_unresolved_promise_as_needs_owner(self) -> None:
+        sentence = "I'm going to analyze the interviews in a day or so."
+        transcript = {
+            **self.make_transcript(sentence),
+            "sentences": [{"speaker_name": "", "text": sentence}],
+        }
+        items = [
+            MODULE.ExtractedItem(
+                action="Analyze the interviews",
+                owner="I",
+                due_date="a day or so",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].owner, "NEEDS-OWNER")
+        self.assertEqual(commitments[0].direction, "unassigned")
+        self.assertEqual(commitments[0].deadline, "")
+
+    def test_refine_drops_generic_owner_with_llm_invented_due_date(self) -> None:
+        transcript = self.make_transcript("We're going to analyze the interviews.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Analyze the interviews",
+                owner="we",
+                due_date="Friday",
+                status="pending",
+            )
+        ]
+
+        self.assertEqual(MODULE.refine_items(transcript, items), [])
+
+    def test_first_person_owner_uses_sentence_speaker_not_josh_default(self) -> None:
+        transcript = {
+            **self.make_transcript("I'll send the routing file by Friday."),
+            "sentences": [{"speaker_name": "Sarah Chen", "text": "I'll send the routing file by Friday."}],
+        }
+        items = [
+            MODULE.ExtractedItem(
+                action="Send the routing file",
+                owner="I",
+                due_date="Friday",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].direction, "inbound")
+        self.assertEqual(commitments[0].owner, "Sarah Chen")
+
+    def test_first_person_josh_speaker_remains_outbound(self) -> None:
+        transcript = self.make_transcript("I'll send the routing file by Friday.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Send the routing file",
+                owner="I'll",
+                due_date="Friday",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].direction, "outbound")
+        self.assertEqual(commitments[0].owner, "Josh")
+
+    def test_first_person_owner_uses_due_phrase_to_disambiguate_speaker(self) -> None:
+        transcript = {
+            **self.make_transcript("I'll send the routing file on Monday."),
+            "sentences": [
+                {"speaker_name": "Josh Weiss", "text": "I'll send the routing file on Monday."},
+                {"speaker_name": "Sarah Chen", "text": "I'll send the routing file on Friday."},
+            ],
+        }
+        items = [
+            MODULE.ExtractedItem(
+                action="Send the routing file",
+                owner="I",
+                due_date="Friday",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].direction, "inbound")
+        self.assertEqual(commitments[0].owner, "Sarah Chen")
+
+    def test_equal_first_person_evidence_stays_unassigned(self) -> None:
+        sentence = "I'll send the routing file by Friday."
+        transcript = {
+            **self.make_transcript(sentence),
+            "sentences": [
+                {"speaker_name": "Josh Weiss", "text": sentence},
+                {"speaker_name": "Sarah Chen", "text": sentence},
+            ],
+        }
+        items = [
+            MODULE.ExtractedItem(
+                action="Send the routing file",
+                owner="I",
+                due_date="Friday",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].owner, "NEEDS-OWNER")
+        self.assertEqual(commitments[0].direction, "unassigned")
+        self.assertNotEqual(commitments[0].direction, "inbound")
+
+    def test_commitment_id_is_deterministic_after_normalization(self) -> None:
+        first = MODULE.commitment_id("meeting_123", "Call Sara about the contract")
+        second = MODULE.commitment_id("meeting_123", "  call  Sara about the contract!!! ")
+
+        self.assertEqual(first, second)
+        self.assertRegex(first, r"^ff_meeting_123_[0-9a-f]{12}$")
+
+    def test_resolve_due_date_supports_relative_terms(self) -> None:
+        meeting_day = date(2026, 6, 8)
+
+        self.assertEqual(MODULE.resolve_due_date("tomorrow", meeting_day), "2026-06-09")
+        self.assertEqual(MODULE.resolve_due_date("Wednesday", meeting_day), "2026-06-10")
+        self.assertEqual(MODULE.resolve_due_date("next Wednesday", meeting_day), "2026-06-10")
+        self.assertIsNone(MODULE.resolve_due_date("later soon", meeting_day))
+        self.assertIsNone(MODULE.resolve_due_date("a day or so", meeting_day))
+
+    def test_outbound_metadata_unchanged(self) -> None:
+        transcript = self.make_transcript("I'll send the proposal to Acme by Wednesday.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Send the proposal to Acme",
+                owner="Josh",
+                due_date="Wednesday",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual(len(commitments), 1)
+        self.assertEqual(commitments[0].direction, "outbound")
+        self.assertEqual(commitments[0].source, "ff")
+        self.assertTrue(commitments[0].id.startswith("ff_"))
+        self.assertFalse(commitments[0].id.startswith("ffin_"))
+
+    def test_refine_drops_fuzzy_duplicate_against_open_backlog(self) -> None:
+        transcript = self.make_transcript("I'll send the proposal to Acme tomorrow.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Send the proposal to Acme",
+                owner="Josh",
+                due_date="tomorrow",
+                status="pending",
+            )
+        ]
+        client_record = {
+            "context": "This meeting maps to Acme. Open next action: Send proposal to Acme.",
+            "open_items": ["Send proposal to Acme"],
+            "relevance_fragments": ("Send proposal to Acme",),
+        }
+
+        commitments = MODULE.refine_items(transcript, items, client_record=client_record)
+
+        self.assertEqual(commitments, [])
+
+    def test_refine_caps_p0_at_three(self) -> None:
+        transcript = self.make_transcript("I'll send the follow-up items this week.")
+        items = [
+            MODULE.ExtractedItem(action="Send alpha proposal", owner="Josh", due_date="tomorrow", status="pending"),
+            MODULE.ExtractedItem(action="Send beta deck", owner="Josh", due_date="2026-06-09", status="pending"),
+            MODULE.ExtractedItem(action="Send gamma quote", owner="Josh", due_date="Wednesday", status="pending"),
+            MODULE.ExtractedItem(action="Send delta budget", owner="Josh", due_date="Thursday", status="pending"),
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        priorities = [commitment.priority for commitment in commitments]
+        self.assertEqual(priorities.count("P0"), 3)
+        self.assertEqual(priorities.count("P1"), 1)
+        self.assertEqual(
+            {commitment.action_text for commitment in commitments if commitment.priority == "P1"},
+            {"Send delta budget"},
+        )
+
+    def test_refine_drops_boundary_ties_to_next_priority(self) -> None:
+        transcript = self.make_transcript("I'll send the follow-up items tomorrow.")
+        items = [
+            MODULE.ExtractedItem(action="Send alpha proposal", owner="Josh", due_date="tomorrow", status="pending"),
+            MODULE.ExtractedItem(action="Send beta deck", owner="Josh", due_date="tomorrow", status="pending"),
+            MODULE.ExtractedItem(action="Send gamma quote", owner="Josh", due_date="tomorrow", status="pending"),
+            MODULE.ExtractedItem(action="Send delta budget", owner="Josh", due_date="tomorrow", status="pending"),
+        ]
+
+        commitments = MODULE.refine_items(transcript, items)
+
+        self.assertEqual([commitment.priority for commitment in commitments].count("P0"), 0)
+        self.assertEqual([commitment.priority for commitment in commitments].count("P1"), 4)
+
+    def test_commitment_entries_include_priority_and_relevance(self) -> None:
+        transcript = self.make_transcript("I'll send the findings deck to Mark.")
+        items = [
+            MODULE.ExtractedItem(
+                action="Send findings deck to Mark",
+                owner="Josh",
+                due_date="",
+                status="pending",
+            )
+        ]
+        client_record = {
+            "context": "This meeting maps to MSIA. Open next action: send findings deck to Mark.",
+            "open_items": [],
+            "relevance_fragments": ("Send findings deck to Mark",),
+        }
+
+        commitments = MODULE.refine_items(transcript, items, client_record=client_record)
+        entries = MODULE.commitment_entries(commitments, enriched=True)
+
+        self.assertEqual(entries[0]["priority"], "P1")
+        self.assertGreater(entries[0]["relevanceScore"], 0.9)
+
+
+class FakeResponse:
+    def __init__(self, body: bytes, status: int = 200) -> None:
+        self._body = body
+        self.status = status
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self) -> "FakeResponse":
+        return self
+
+    def __exit__(self, *args: object) -> bool:
+        return False
+
+
+class InboundDirectionTests(unittest.TestCase):
+    def make_transcript(self) -> dict[str, object]:
+        return {
+            "id": "meeting_123",
+            "title": "Acme Follow Up",
+            "date": "2026-06-08T16:00:00Z",
+            "sentences": [
+                {
+                    "speaker_name": "Josh Weiss",
+                    "text": "Sounds good, send it over when it's ready.",
+                }
+            ],
+        }
+
+    def test_inbound_kept_for_named_client_committing_to_josh(self) -> None:
+        items = [
+            MODULE.ExtractedItem(
+                action="Send Josh the signed contract",
+                owner="Sara",
+                due_date="tomorrow",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(self.make_transcript(), items)
+
+        self.assertEqual(len(commitments), 1)
+        commitment = commitments[0]
+        self.assertEqual(commitment.direction, "inbound")
+        self.assertEqual(commitment.source, "ff-inbound")
+        self.assertTrue(commitment.id.startswith("ffin_"))
+        self.assertEqual(commitment.text, "[inbound] Sara: Send Josh the signed contract (due 2026-06-09)")
+        self.assertEqual(commitment.source_ref, "meeting_123 · Acme Follow Up")
+
+    def test_inbound_dropped_for_generic_owners(self) -> None:
+        for owner in ("Unassigned", "the team", "Team", "everyone", "Client", "we", "they", ""):
+            items = [
+                MODULE.ExtractedItem(
+                    action="Send Josh the signed contract",
+                    owner=owner,
+                    due_date="tomorrow",
+                    status="pending",
+                )
+            ]
+
+            commitments = MODULE.refine_items(self.make_transcript(), items)
+
+            self.assertEqual(commitments, [], f"owner {owner!r} should be dropped")
+
+    def test_inbound_dropped_for_vague_action(self) -> None:
+        items = [
+            MODULE.ExtractedItem(
+                action="Look into the contract for Josh",
+                owner="Sara",
+                due_date="tomorrow",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(self.make_transcript(), items)
+
+        self.assertEqual(commitments, [])
+
+    def test_inbound_dropped_without_josh_tie(self) -> None:
+        items = [
+            MODULE.ExtractedItem(
+                action="Send the deck to Rachel",
+                owner="Sara",
+                due_date="later sometime",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(self.make_transcript(), items)
+
+        self.assertEqual(commitments, [])
+
+    def test_inbound_dropped_when_already_handled(self) -> None:
+        items = [
+            MODULE.ExtractedItem(
+                action="Send Josh the signed contract",
+                owner="Sara",
+                due_date="During meeting (completed verbally)",
+                status="pending",
+            )
+        ]
+
+        commitments = MODULE.refine_items(self.make_transcript(), items)
+
+        self.assertEqual(commitments, [])
+
+    def test_marcos_suppressed_in_both_directions(self) -> None:
+        outbound_items = [
+            MODULE.ExtractedItem(
+                action="Send proposal to Marcos Santa Ana",
+                owner="Josh",
+                due_date="Wednesday",
+                status="pending",
+            )
+        ]
+        inbound_items = [
+            MODULE.ExtractedItem(
+                action="Send Josh the revised scope",
+                owner="Marcos Santa Ana",
+                due_date="tomorrow",
+                status="pending",
+            )
+        ]
+
+        self.assertEqual(MODULE.refine_items(self.make_transcript(), outbound_items), [])
+        self.assertEqual(MODULE.refine_items(self.make_transcript(), inbound_items), [])
+
+    def test_inbound_and_outbound_ids_differ_for_same_action(self) -> None:
+        action = "Send the signed contract"
+        outbound_id = MODULE.directional_commitment_id("meeting_123", action, "outbound")
+        inbound_id = MODULE.directional_commitment_id("meeting_123", action, "inbound")
+
+        self.assertNotEqual(outbound_id, inbound_id)
+        self.assertEqual(outbound_id, MODULE.commitment_id("meeting_123", action))
+        self.assertRegex(outbound_id, r"^ff_meeting_123_[0-9a-f]{12}$")
+        self.assertRegex(inbound_id, r"^ffin_meeting_123_[0-9a-f]{12}$")
+
+    def test_post_commitments_includes_direction(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_urlopen(request: object, timeout: int | None = None) -> FakeResponse:
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            return FakeResponse(b'{"ok": true}')
+
+        commitments = [
+            MODULE.RefinedCommitment(
+                id="ff_meeting_123_abcdefabcdef",
+                text="Send the proposal to Acme (due 2026-06-10)",
+                source="ff",
+                source_ref="meeting_123 · Acme Follow Up",
+                direction="outbound",
+            ),
+            MODULE.RefinedCommitment(
+                id="ffin_meeting_123_abcdefabcdef",
+                text="[inbound] Sara: Send Josh the signed contract (due 2026-06-09)",
+                source="ff-inbound",
+                source_ref="meeting_123 · Acme Follow Up",
+                direction="inbound",
+            ),
+        ]
+
+        result = MODULE.post_commitments(
+            ingest_url="https://briefs.example/api/tasks/ingest",
+            ingest_token="token",
+            commitments=commitments,
+            urlopen=fake_urlopen,
+        )
+
+        self.assertEqual(result, {"ok": True})
+        sent = captured["body"]["commitments"]
+        self.assertEqual(len(sent), 2)
+        for entry in sent:
+            self.assertEqual(set(entry), {"id", "text", "direction", "source", "sourceRef"})
+        self.assertEqual(sent[0]["direction"], "outbound")
+        self.assertEqual(sent[1]["direction"], "inbound")
+
+
+class RunStdoutContractTests(unittest.TestCase):
+    ENV = {
+        "FIREFLIES_API_KEY": "ff-test",
+        "BRIEFS_INGEST_URL": "https://briefs.example/api/tasks/ingest",
+        "TASKS_INGEST_TOKEN": "tok-test",
+    }
+
+    def make_codex_run(self, *, casual: bool = False):
+        def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            requested = json.loads(str(kwargs["input"]).split("\n\n", 1)[1])["meetings"]
+            meetings = []
+            for meeting in requested:
+                meetings.append(
+                    {
+                        "id": meeting["id"],
+                        "is_casual": casual,
+                        "action_items": []
+                        if casual
+                        else [
+                            {
+                                "action": "Send the proposal to Acme",
+                                "owner": "Josh",
+                                "dueDate": "tomorrow",
+                                "status": "pending",
+                            },
+                            {
+                                "action": "Send Josh the signed contract",
+                                "owner": "Sara",
+                                "dueDate": "tomorrow",
+                                "status": "pending",
+                            },
+                        ],
+                        "decisions": [],
+                        "deal_state": "",
+                    }
+                )
+            output_path = Path(command[command.index("--output-last-message") + 1])
+            output_path.write_text(json.dumps({"meetings": meetings}), encoding="utf-8")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        return fake_run
+
+    def make_urlopen(self, transcripts: list[dict[str, object]], calls: list[str]):
+        def fake_urlopen(request: object, timeout: int | None = None) -> FakeResponse:
+            url = request.full_url
+            calls.append(url)
+            if "fireflies" in url:
+                body: dict[str, object] = {"data": {"transcripts": transcripts}}
+            elif "openrouter" in url:
+                prompt = json.loads(request.data.decode("utf-8"))["messages"][-1]["content"]
+                if prompt.startswith("Extract action items"):
+                    content = json.dumps(
+                        [
+                            {
+                                "action": "Send the proposal to Acme",
+                                "owner": "Josh",
+                                "dueDate": "tomorrow",
+                                "status": "pending",
+                            },
+                            {
+                                "action": "Send Josh the signed contract",
+                                "owner": "Sara",
+                                "dueDate": "tomorrow",
+                                "status": "pending",
+                            },
+                        ]
+                    )
+                else:
+                    content = json.dumps({"is_casual": False})
+                body = {"choices": [{"message": {"content": content}}]}
+            else:
+                body = {"ok": True}
+            return FakeResponse(json.dumps(body).encode("utf-8"))
+
+        return fake_urlopen
+
+    def make_transcript(self) -> dict[str, object]:
+        return {
+            "id": "meeting_123",
+            "title": "Acme Follow Up",
+            "date": "2026-06-08T16:00:00Z",
+            "sentences": [
+                {
+                    "speaker_name": "Josh Weiss",
+                    "text": "I'll send the proposal to Acme tomorrow.",
+                }
+            ],
+        }
+
+    def run_and_capture(self, transcripts: list[dict[str, object]], *, dry_run: bool) -> tuple[dict[str, object], list[str], Path]:
+        calls: list[str] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            watermark_path = Path(tmp) / "watermark.json"
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, self.ENV):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run(
+                        limit=5,
+                        dry_run=dry_run,
+                        meeting_id="",
+                        watermark_path=watermark_path,
+                        urlopen=self.make_urlopen(transcripts, calls),
+                        codex_run=self.make_codex_run(),
+                    )
+            self.assertEqual(exit_code, 0)
+            watermark_exists = watermark_path.exists()
+        printed = json.loads(stdout.getvalue())
+        printed["_watermark_exists"] = watermark_exists
+        return printed, calls, watermark_path
+
+    def run_and_capture_meeting_id(
+        self,
+        transcripts: list[dict[str, object]],
+        *,
+        dry_run: bool,
+        meeting_id: str,
+    ) -> tuple[dict[str, object], list[str], Path]:
+        calls: list[str] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            watermark_path = Path(tmp) / "watermark.json"
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, self.ENV):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run(
+                        limit=5,
+                        dry_run=dry_run,
+                        meeting_id=meeting_id,
+                        watermark_path=watermark_path,
+                        urlopen=self.make_urlopen(transcripts, calls),
+                        codex_run=self.make_codex_run(),
+                    )
+            self.assertEqual(exit_code, 0)
+            watermark_exists = watermark_path.exists()
+        printed = json.loads(stdout.getvalue())
+        printed["_watermark_exists"] = watermark_exists
+        return printed, calls, watermark_path
+
+    def assert_items_shape(self, items: list[dict[str, object]]) -> None:
+        for entry in items:
+            self.assertTrue(
+                {
+                    "id",
+                    "text",
+                    "direction",
+                    "source",
+                    "sourceRef",
+                    "owner",
+                    "deadline",
+                    "sourceQuote",
+                    "priority",
+                    "relevanceScore",
+                }.issubset(entry),
+                entry,
+            )
+
+    def test_no_fresh_transcripts_prints_empty_items(self) -> None:
+        printed, calls, _ = self.run_and_capture([], dry_run=False)
+
+        self.assertEqual(printed["items"], [])
+        self.assertEqual(printed["meetings"], 0)
+        self.assertFalse(printed["posted"])
+        self.assertFalse(any("briefs.example" in url for url in calls))
+
+    def test_dry_run_prints_items_and_does_not_post_or_advance_watermark(self) -> None:
+        printed, calls, _ = self.run_and_capture([self.make_transcript()], dry_run=True)
+
+        self.assertTrue(printed["dry_run"])
+        self.assertEqual(len(printed["items"]), 2)
+        self.assert_items_shape(printed["items"])
+        directions = {entry["direction"] for entry in printed["items"]}
+        self.assertEqual(directions, {"outbound", "inbound"})
+        self.assertFalse(any("briefs.example" in url for url in calls))
+        self.assertFalse(printed["_watermark_exists"])
+
+    def test_dry_run_succeeds_with_ingest_env_unset(self) -> None:
+        # SKILL DEGRADED path: BRIEFS_INGEST_URL / TASKS_INGEST_TOKEN missing →
+        # --dry-run must still run extract-only (exit 0, items printed, no POST).
+        calls: list[str] = []
+        degraded_env = {
+            "FIREFLIES_API_KEY": "ff-test",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            watermark_path = Path(tmp) / "watermark.json"
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, degraded_env, clear=True):
+                self.assertNotIn("BRIEFS_INGEST_URL", os.environ)
+                self.assertNotIn("TASKS_INGEST_TOKEN", os.environ)
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run(
+                        limit=5,
+                        dry_run=True,
+                        meeting_id="",
+                        watermark_path=watermark_path,
+                        urlopen=self.make_urlopen([self.make_transcript()], calls),
+                        codex_run=self.make_codex_run(),
+                    )
+            self.assertEqual(exit_code, 0)
+            self.assertFalse(watermark_path.exists())
+
+        printed = json.loads(stdout.getvalue())
+        self.assertTrue(printed["dry_run"])
+        self.assertEqual(len(printed["items"]), 2)
+        self.assert_items_shape(printed["items"])
+        self.assertFalse(any("briefs.example" in url for url in calls))
+
+    def test_non_dry_run_still_requires_ingest_env(self) -> None:
+        degraded_env = {
+            "FIREFLIES_API_KEY": "ff-test",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            watermark_path = Path(tmp) / "watermark.json"
+            with unittest.mock.patch.dict(os.environ, degraded_env, clear=True):
+                with self.assertRaises(ValueError):
+                    MODULE.run(
+                        limit=5,
+                        dry_run=False,
+                        meeting_id="",
+                        watermark_path=watermark_path,
+                        urlopen=self.make_urlopen([self.make_transcript()], []),
+                        codex_run=self.make_codex_run(),
+                    )
+
+    def test_noop_print_includes_items_array(self) -> None:
+        calls: list[str] = []
+
+        def casual_urlopen(request: object, timeout: int | None = None) -> FakeResponse:
+            url = request.full_url
+            calls.append(url)
+            if "fireflies" in url:
+                body: dict[str, object] = {"data": {"transcripts": [self.make_transcript()]}}
+            elif "openrouter" in url:
+                body = {"choices": [{"message": {"content": json.dumps({"is_casual": True})}}]}
+            else:
+                body = {"ok": True}
+            return FakeResponse(json.dumps(body).encode("utf-8"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            watermark_path = Path(tmp) / "watermark.json"
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, self.ENV):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run(
+                        limit=5,
+                        dry_run=False,
+                        meeting_id="",
+                        watermark_path=watermark_path,
+                        urlopen=casual_urlopen,
+                        codex_run=self.make_codex_run(casual=True),
+                    )
+            self.assertEqual(exit_code, 0)
+
+        printed = json.loads(stdout.getvalue())
+        self.assertTrue(printed["noop"])
+        self.assertEqual(printed["items"], [])
+        self.assertEqual(printed["casual"], 1)
+        self.assertEqual(printed["empty_text"], 0)
+        self.assertEqual(printed["zero_extracted"], 0)
+        self.assertEqual(printed["all_refined_out"], 0)
+        self.assertFalse(any("briefs.example" in url for url in calls))
+
+    def test_zero_yield_run_writes_auditable_ledger_row(self) -> None:
+        calls: list[str] = []
+
+        def casual_urlopen(request: object, timeout: int | None = None) -> FakeResponse:
+            url = request.full_url
+            calls.append(url)
+            if "fireflies" in url:
+                body: dict[str, object] = {"data": {"transcripts": [self.make_transcript()]}}
+            elif "openrouter" in url:
+                body = {"choices": [{"message": {"content": json.dumps({"is_casual": True})}}]}
+            else:
+                body = {"ok": True}
+            return FakeResponse(json.dumps(body).encode("utf-8"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            watermark_path = Path(tmp) / "watermark.json"
+            zero_yield_path = Path(tmp) / "ff-extractor-zero-yield.jsonl"
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, self.ENV):
+                with unittest.mock.patch.object(MODULE, "ZERO_YIELD_LEDGER_PATH", zero_yield_path):
+                    with contextlib.redirect_stdout(stdout):
+                        exit_code = MODULE.run(
+                            limit=5,
+                            dry_run=False,
+                            meeting_id="",
+                            watermark_path=watermark_path,
+                            urlopen=casual_urlopen,
+                            codex_run=self.make_codex_run(casual=True),
+                        )
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(watermark_path.exists())
+            self.assertTrue(zero_yield_path.exists())
+            rows = [
+                json.loads(line)
+                for line in zero_yield_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+
+        printed = json.loads(stdout.getvalue())
+        self.assertTrue(printed["noop"])
+        self.assertEqual(printed["casual"], 1)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["meeting_id"], "meeting_123")
+        self.assertEqual(rows[0]["drop_reason"], "casual")
+        self.assertEqual(rows[0]["drop_reason_counts"]["casual"], 1)
+        self.assertEqual(rows[0]["drop_reason_counts"]["empty_text"], 0)
+        self.assertFalse(any("briefs.example" in url for url in calls))
+
+    def test_posted_print_includes_items(self) -> None:
+        printed, calls, _ = self.run_and_capture([self.make_transcript()], dry_run=False)
+
+        self.assertTrue(printed["posted"])
+        self.assertEqual(len(printed["items"]), 2)
+        self.assert_items_shape(printed["items"])
+        sources = {entry["source"] for entry in printed["items"]}
+        self.assertEqual(sources, {"ff", "ff-inbound"})
+        self.assertTrue(any("briefs.example" in url for url in calls))
+        self.assertTrue(printed["_watermark_exists"])
+
+    def test_meeting_id_path_processes_only_selected_transcript(self) -> None:
+        keep = self.make_transcript()
+        drop = dict(keep)
+        drop["id"] = "meeting_999"
+        drop["title"] = "Internal Sync"
+
+        printed, calls, _ = self.run_and_capture_meeting_id(
+            [drop, keep],
+            dry_run=False,
+            meeting_id="meeting_123",
+        )
+
+        self.assertTrue(printed["posted"])
+        self.assertEqual(printed["meetings"], 1)
+        self.assertEqual(len(printed["items"]), 2)
+        self.assertTrue(all(str(entry["sourceRef"]).startswith("meeting_123 ·") for entry in printed["items"]))
+        self.assertTrue(any("briefs.example" in url for url in calls))
+
+    def test_meeting_id_path_does_not_rewind_watermark(self) -> None:
+        target = self.make_transcript()
+        newer = dict(target)
+        newer["id"] = "meeting_999"
+        newer["date"] = "2026-06-09T16:00:00Z"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            watermark_path = Path(tmp) / "watermark.json"
+            MODULE.save_watermark(watermark_path, newer)
+            before = watermark_path.read_text(encoding="utf-8")
+            with unittest.mock.patch.dict(os.environ, self.ENV):
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run(
+                        limit=5,
+                        dry_run=False,
+                        meeting_id="meeting_123",
+                        watermark_path=watermark_path,
+                        urlopen=self.make_urlopen([target, newer], []),
+                        codex_run=self.make_codex_run(),
+                    )
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(watermark_path.read_text(encoding="utf-8"), before)
+
+
+class FailureContractTests(unittest.TestCase):
+    ENV = {
+        "FIREFLIES_API_KEY": "ff-test",
+        "BRIEFS_INGEST_URL": "https://briefs.example/api/tasks/ingest",
+        "TASKS_INGEST_TOKEN": "tok-test",
+    }
+
+    def make_transcript(self) -> dict[str, object]:
+        return {
+            "id": "meeting_123",
+            "title": "Acme Follow Up",
+            "date": "2026-06-08T16:00:00Z",
+            "sentences": [{"speaker_name": "Josh Weiss", "text": "I'll send the proposal tomorrow."}],
+        }
+
+    def test_execute_prints_error_json_on_subscription_worker_failure(self) -> None:
+        def failing_urlopen(request: object, timeout: int | None = None) -> FakeResponse:
+            url = request.full_url
+            if "fireflies" in url:
+                return FakeResponse(json.dumps({"data": {"transcripts": [self.make_transcript()]}}).encode("utf-8"))
+            raise AssertionError(f"unexpected URL: {url}")
+
+        def failing_codex(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(command, 9, "", "subscription unavailable")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, self.ENV, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.execute(
+                        limit=5,
+                        dry_run=False,
+                        meeting_id="",
+                        watermark_path=Path(tmp) / "watermark.json",
+                        urlopen=failing_urlopen,
+                        codex_run=failing_codex,
+                    )
+
+        self.assertEqual(exit_code, 1)
+        printed = json.loads(stdout.getvalue())
+        self.assertEqual(printed["items"], [])
+        self.assertEqual(printed["error"], "Codex batch failed with exit 9")
+
+    def test_execute_marks_dry_run_in_error_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, {}, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.execute(
+                        limit=5,
+                        dry_run=True,
+                        meeting_id="",
+                        watermark_path=Path(tmp) / "watermark.json",
+                    )
+
+        self.assertEqual(exit_code, 1)
+        printed = json.loads(stdout.getvalue())
+        self.assertTrue(printed["dry_run"])
+        self.assertEqual(printed["items"], [])
+        self.assertIn("missing required env: FIREFLIES_API_KEY", printed["error"])
+
+
+class ClientContextTests(unittest.TestCase):
+    def write_context_sources(self, root: Path) -> tuple[Path, Path, Path]:
+        company = root / "company.md"
+        offer = root / "offer.md"
+        state = root / "STATE.md"
+        company.write_text(
+            "# Company\n\nOne-line: We fix integration failure, not tool failure.\n",
+            encoding="utf-8",
+        )
+        offer.write_text(
+            "# Offer\n\n## ICP / who we say yes to\n\nMission-driven teams with tool sprawl.\n",
+            encoding="utf-8",
+        )
+        state.write_text(
+            "# STATE\n\n## Active work\n\n- Active client delivery and follow-through.\n",
+            encoding="utf-8",
+        )
+        return company, offer, state
+
+    def write_client_file(self, clients_dir: Path, *, slug: str, body: str) -> Path:
+        path = clients_dir / f"{slug}.md"
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    @unittest.skip("provider-specific seam replaced by Codex batch prompt coverage")
+    def test_extract_action_items_includes_client_context_in_prompt(self) -> None:
+        captured_prompt: dict[str, str] = {}
+
+        def fake_urlopen(request: object, timeout: int | None = None) -> FakeResponse:
+            body = json.loads(request.data.decode("utf-8"))
+            captured_prompt["content"] = body["messages"][0]["content"]
+            return FakeResponse(
+                json.dumps({"choices": [{"message": {"content": "[]"}}]}).encode("utf-8")
+            )
+
+        MODULE.extract_action_items(
+            "Josh Weiss: I'll send the findings deck after this call.",
+            client_context="Clearworks maps this meeting to client=MSIA. Deal stage=won. Open next action: send findings deck.",
+            openrouter_api_key="or-test",
+            urlopen=fake_urlopen,
+        )
+
+        self.assertIn("Client context:\n", captured_prompt["content"])
+        self.assertIn("Only surface items material to an active Clearworks engagement", captured_prompt["content"])
+
+    @unittest.skip("provider-specific seam replaced by Codex batch prompt coverage")
+    def test_extract_action_items_context_can_reduce_and_focus_results(self) -> None:
+        captured_prompts: list[str] = []
+
+        def fake_urlopen(request: object, timeout: int | None = None) -> FakeResponse:
+            body = json.loads(request.data.decode("utf-8"))
+            prompt = body["messages"][0]["content"]
+            captured_prompts.append(prompt)
+            if "client=MSIA" in prompt and "Deal stage=won" in prompt:
+                response_items = [
+                    {
+                        "action": "Send findings deck to Mark",
+                        "owner": "Josh",
+                        "dueDate": "Friday",
+                        "status": "pending",
+                    },
+                    {
+                        "action": "Book follow-up with MSIA",
+                        "owner": "Josh",
+                        "dueDate": "Monday",
+                        "status": "pending",
+                    },
+                ]
+            else:
+                response_items = [
+                    {
+                        "action": "Send findings deck to Mark",
+                        "owner": "Josh",
+                        "dueDate": "Friday",
+                        "status": "pending",
+                    },
+                    {
+                        "action": "Book follow-up with MSIA",
+                        "owner": "Josh",
+                        "dueDate": "Monday",
+                        "status": "pending",
+                    },
+                    {
+                        "action": "Think about referral strategy",
+                        "owner": "Josh",
+                        "dueDate": "",
+                        "status": "pending",
+                    },
+                    {
+                        "action": "Explore broader positioning ideas",
+                        "owner": "Josh",
+                        "dueDate": "",
+                        "status": "pending",
+                    },
+                ]
+            return FakeResponse(
+                json.dumps({"choices": [{"message": {"content": json.dumps(response_items)}}]}).encode("utf-8")
+            )
+
+        transcript = "Josh Weiss: I'll send the findings deck and set the MSIA follow-up."
+        without_context = MODULE.extract_action_items(
+            transcript,
+            client_context="",
+            openrouter_api_key="or-test",
+            urlopen=fake_urlopen,
+        )
+        with_context = MODULE.extract_action_items(
+            transcript,
+            client_context="Clearworks maps this meeting to client=MSIA. Deal stage=won. Open next action: send findings deck.",
+            openrouter_api_key="or-test",
+            urlopen=fake_urlopen,
+        )
+
+        self.assertEqual(len(without_context), 4)
+        self.assertEqual(len(with_context), 2)
+        self.assertLess(len(with_context), len(without_context))
+        self.assertIn("client=MSIA", captured_prompts[1])
+        self.assertTrue(all("MSIA" in item.action or "findings" in item.action.lower() for item in with_context))
+
+    def test_client_context_matches_exact_email(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            clients_dir = root / "clients"
+            clients_dir.mkdir()
+            company, offer, state = self.write_context_sources(root)
+            self.write_client_file(
+                clients_dir,
+                slug="msia",
+                body="""# Client: MSIA
+
+## Contacts
+
+- Mark Lurie - Owner - mark@msia.org
+
+## Current state
+
+- Deal stage: won
+- CRM status: active_client
+- Next action: send findings deck
+
+## What we're delivering
+
+- Engagement: Busywork audit
+- Service type: AI ops audit
+""",
+            )
+            transcript = {
+                "title": "MSIA audit review",
+                "organizer_email": "josh@clearworks.ai",
+                "participants": ["mark@msia.org", "josh@clearworks.ai"],
+                "speakers": [{"name": "Mark Lurie"}],
+            }
+            with unittest.mock.patch.object(MODULE, "COMPANY_PATH", company):
+                with unittest.mock.patch.object(MODULE, "OFFER_PATH", offer):
+                    with unittest.mock.patch.object(MODULE, "STATE_PATH", state):
+                        context = MODULE.client_context_for_transcript(transcript, clients_dir=clients_dir)
+            self.assertIn("client=MSIA", context)
+            self.assertIn("Deal stage=won", context)
+            self.assertIn("Open next action: send findings deck.", context)
+
+    def test_client_context_matches_contact_name_without_email(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            clients_dir = root / "clients"
+            clients_dir.mkdir()
+            company, offer, state = self.write_context_sources(root)
+            self.write_client_file(
+                clients_dir,
+                slug="jsp",
+                body="""# Client: Jewish Studio Project
+
+## Contacts
+
+- Rachel Gross - COO - rachel@jsp.org
+
+## Current state
+
+- Deal stage: qualified
+- CRM status: prospect
+
+## What we're delivering
+
+- Engagement: AI Starter
+""",
+            )
+            transcript = {
+                "title": "JSP discovery sync",
+                "organizer_email": "josh@clearworks.ai",
+                "participants": ["Rachel Gross", "Josh Weiss"],
+                "speakers": [{"name": "Rachel Gross"}],
+            }
+            with unittest.mock.patch.object(MODULE, "COMPANY_PATH", company):
+                with unittest.mock.patch.object(MODULE, "OFFER_PATH", offer):
+                    with unittest.mock.patch.object(MODULE, "STATE_PATH", state):
+                        context = MODULE.client_context_for_transcript(transcript, clients_dir=clients_dir)
+            self.assertIn("client=Jewish Studio Project", context)
+            self.assertIn("Engagement=AI Starter", context)
+
+    def test_client_context_returns_empty_when_unmatched(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            clients_dir = Path(tmp) / "clients"
+            clients_dir.mkdir()
+            self.write_client_file(
+                clients_dir,
+                slug="ocg",
+                body="""# Client: OCG
+
+## Contacts
+
+- Mathew Owens - COO - mpo@owenscg.com
+
+## Current state
+
+- Deal stage: won
+- CRM status: active_client
+
+## What we're delivering
+
+- Engagement: Busywork audit
+""",
+            )
+            transcript = {
+                "title": "Internal ops check-in",
+                "organizer_email": "josh@clearworks.ai",
+                "participants": ["josh@clearworks.ai", "ops@clearworks.ai"],
+                "speakers": [{"name": "Josh Weiss"}],
+            }
+            self.assertEqual(MODULE.client_context_for_transcript(transcript, clients_dir=clients_dir), "")
+
+    @unittest.skip("provider-specific seam replaced by Codex batch prompt coverage")
+    def test_extract_action_items_renders_empty_client_context(self):
+        captured_prompt: dict[str, str] = {}
+
+        def fake_urlopen(request, timeout=None):
+            body = json.loads(request.data.decode("utf-8"))
+            captured_prompt["content"] = body["messages"][0]["content"]
+            response = {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                [
+                                    {
+                                        "action": "Send notes",
+                                        "owner": "Josh",
+                                        "dueDate": "Friday",
+                                        "status": "pending",
+                                    }
+                                ]
+                            )
+                        }
+                    }
+                ]
+            }
+            return FakeResponse(json.dumps(response).encode("utf-8"))
+
+        items = MODULE.extract_action_items(
+            "Josh Weiss: I'll send notes on Friday.",
+            client_context="",
+            openrouter_api_key="or-test",
+            urlopen=fake_urlopen,
+        )
+        self.assertEqual(len(items), 1)
+        self.assertIn("Client context:\n", captured_prompt["content"])
+        self.assertIn("Only surface items material to an active Clearworks engagement", captured_prompt["content"])
+
+
+class RecapModeTests(unittest.TestCase):
+    ENV = {
+        "FIREFLIES_API_KEY": "ff-test",
+    }
+    # Defaults for the decisions/deal-state extractor mock; individual tests override.
+    decisions_response: list[str] = []
+    deal_state_response: str = ""
+
+    def make_recap_transcript(self, **overrides) -> dict[str, object]:
+        base = {
+            "id": "meeting_r1",
+            "title": "Acme Strategy Sync",
+            "date": "2026-07-21T14:00:00Z",
+            "organizer_email": "josh@clearworks.ai",
+            "participants": ["josh@clearworks.ai", "sara@acme.com"],
+            "summary": {
+                "overview": "Discussed Q3 roadmap and deliverable timeline",
+                "shorthand_bullet": "Q3 roadmap finalized",
+                "action_items": "Send revised proposal by Friday",
+                "keywords": ["roadmap", "timeline"],
+            },
+            "sentences": [
+                {
+                    "speaker_name": "Josh Weiss",
+                    "text": "I'll send the proposal to Acme by Friday.",
+                }
+            ],
+        }
+        base.update(overrides)
+        return base
+
+    def make_codex_run(self, *, casual: bool = False, calls: list[list[str]] | None = None):
+        def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            if calls is not None:
+                calls.append(command)
+            requested = json.loads(str(kwargs["input"]).split("\n\n", 1)[1])["meetings"]
+            meetings = [
+                {
+                    "id": meeting["id"],
+                    "is_casual": casual,
+                    "action_items": []
+                    if casual
+                    else [
+                        {
+                            "action": "Send revised proposal",
+                            "owner": "Josh",
+                            "dueDate": "Friday",
+                            "status": "pending",
+                        }
+                    ],
+                    "decisions": self.decisions_response,
+                    "deal_state": self.deal_state_response,
+                }
+                for meeting in requested
+            ]
+            output_path = Path(command[command.index("--output-last-message") + 1])
+            output_path.write_text(json.dumps({"meetings": meetings}), encoding="utf-8")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        return fake_run
+
+    def fake_urlopen(self, responses):
+        def urlopen_wrapper(request, timeout: int | None = None):
+            url = request.full_url
+            if "fireflies" in url:
+                transcript_list = responses if responses else [self.make_recap_transcript()]
+                return FakeResponse(json.dumps({"data": {"transcripts": transcript_list}}).encode("utf-8"))
+            if "openrouter" in url:
+                # Check the prompt to determine if this is classifier or extractor
+                body = json.loads(request.data)
+                messages = body.get("messages", [])
+                if messages and len(messages) > 0:
+                    content = messages[0].get("content", "")
+
+                    # Classifier prompt contains "is_casual" and asks for is_casual field
+                    if "is_casual" in content:
+                        return FakeResponse(json.dumps({
+                            "choices": [{
+                                "message": {
+                                    "content": json.dumps({
+                                        "contacts_mentioned": [],
+                                        "extractions": [],
+                                        "is_casual": False
+                                    })
+                                }
+                            }]
+                        }).encode("utf-8"))
+                    elif "deal_state" in content:
+                        # Decisions + deal-state extractor prompt
+                        return FakeResponse(json.dumps({
+                            "choices": [{
+                                "message": {
+                                    "content": json.dumps({
+                                        "decisions": self.decisions_response,
+                                        "deal_state": self.deal_state_response,
+                                    })
+                                }
+                            }]
+                        }).encode("utf-8"))
+                    else:
+                        # Action-items extractor prompt
+                        return FakeResponse(json.dumps({
+                            "choices": [{
+                                "message": {
+                                    "content": json.dumps([
+                                        {
+                                            "action": "Send revised proposal",
+                                            "owner": "Josh",
+                                            "dueDate": "Friday",
+                                            "status": "pending"
+                                        }
+                                    ])
+                                }
+                            }]
+                        }).encode("utf-8"))
+                else:
+                    raise AssertionError(f"unexpected OpenRouter request: {url}")
+            raise AssertionError(f"unexpected URL: {url}")
+        return urlopen_wrapper
+
+    def test_parse_args_recap_defaults(self):
+        args = MODULE.parse_args(["--recap"])
+        self.assertTrue(args.recap)
+        self.assertTrue(args.recap_ledger.endswith("state/meeting-recap-drafts-surfaced.txt"))
+
+    def test_load_recap_ledger_missing_and_malformed(self):
+        # Missing file
+        self.assertEqual(MODULE.load_recap_ledger(Path("/nonexistent/path.txt")), set())
+
+        # File with content including malformed lines
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / "test-ledger.txt"
+            ledger_path.write_text("m1 1720000000\n\ngarbage-only-token\n m2 999\n")
+            result = MODULE.load_recap_ledger(ledger_path)
+            self.assertEqual(result, {"m1", "garbage-only-token", "m2"})
+
+    def test_run_recap_skips_ledgered_meeting_before_llm(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / "ledger.txt"
+            ledger_path.write_text("meeting_r1 1720000000\n")
+
+            openrouter_calls = []
+            codex_calls: list[list[str]] = []
+            def counting_urlopen(request, timeout: int | None = None):
+                if "openrouter" in request.full_url:
+                    openrouter_calls.append(request.full_url)
+                return self.fake_urlopen([])(request, timeout)
+
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, self.ENV, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run_recap(
+                        limit=10,
+                        ledger_path=ledger_path,
+                        urlopen=counting_urlopen,
+                        codex_run=self.make_codex_run(calls=codex_calls),
+                    )
+
+            self.assertEqual(exit_code, 0)
+            printed = json.loads(stdout.getvalue())
+            self.assertEqual(printed["meetings"], [])
+            self.assertEqual(printed["skipped_ledger"], 1)
+            self.assertEqual(len(openrouter_calls), 0)  # No LLM calls due to ledger skip
+            self.assertEqual(codex_calls, [])
+
+    def test_run_recap_suppresses_marcos_meeting(self):
+        marcos_transcript = self.make_recap_transcript(title="Sync with Marcos Santa Ana")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / "ledger.txt"
+            ledger_path.write_text("")
+
+            openrouter_calls = []
+            def counting_urlopen(request, timeout: int | None = None):
+                if "openrouter" in request.full_url:
+                    openrouter_calls.append(request.full_url)
+                return self.fake_urlopen([marcos_transcript])(request, timeout)
+
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, self.ENV, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run_recap(
+                        limit=10,
+                        ledger_path=ledger_path,
+                        urlopen=counting_urlopen,
+                        codex_run=self.make_codex_run(),
+                    )
+
+            self.assertEqual(exit_code, 0)
+            printed = json.loads(stdout.getvalue())
+            self.assertEqual(printed["meetings"], [])
+            self.assertEqual(printed["skipped_suppressed"], 1)
+            self.assertEqual(len(openrouter_calls), 0)
+
+    def test_run_recap_skips_casual_meeting(self):
+        # Create a transcript that will be classified as casual
+        casual_transcript = self.make_recap_transcript(
+            sentences=[{"speaker_name": "Josh Weiss", "text": "Hi everyone, how are you doing?"}]
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / "ledger.txt"
+            ledger_path.write_text("")
+
+            openrouter_calls = []
+            codex_calls: list[list[str]] = []
+            def counting_urlopen(request, timeout: int | None = None):
+                if "fireflies" in request.full_url:
+                    return FakeResponse(json.dumps({"data": {"transcripts": [casual_transcript]}}).encode("utf-8"))
+                if "openrouter" in request.full_url:
+                    openrouter_calls.append(request.full_url)
+                    # Check the prompt to determine if this is classifier or extractor
+                    body = json.loads(request.data)
+                    messages = body.get("messages", [])
+                    if messages and len(messages) > 0:
+                        content = messages[0].get("content", "")
+
+                        # Classifier prompt contains "is_casual"
+                        if "is_casual" in content:
+                            return FakeResponse(json.dumps({
+                                "choices": [{
+                                    "message": {
+                                        "content": json.dumps({
+                                            "contacts_mentioned": [],
+                                            "extractions": [],
+                                            "is_casual": True
+                                        })
+                                    }
+                                }]
+                            }).encode("utf-8"))
+                        else:
+                            # Extractor prompt (shouldn't be called for casual)
+                            return FakeResponse(json.dumps({
+                                "choices": [{
+                                    "message": {
+                                        "content": json.dumps([
+                                            {
+                                                "action": "Some action",
+                                                "owner": "Josh",
+                                                "dueDate": "Friday",
+                                                "status": "pending"
+                                            }
+                                        ])
+                                    }
+                                }]
+                            }).encode("utf-8"))
+                    else:
+                        raise AssertionError(f"unexpected OpenRouter request: {request.full_url}")
+                raise AssertionError(f"unexpected URL: {request.full_url}")
+
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, self.ENV, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run_recap(
+                        limit=10,
+                        ledger_path=ledger_path,
+                        urlopen=counting_urlopen,
+                        codex_run=self.make_codex_run(casual=True, calls=codex_calls),
+                    )
+
+            self.assertEqual(exit_code, 0)
+            printed = json.loads(stdout.getvalue())
+            self.assertEqual(printed["meetings"], [])
+            self.assertEqual(printed["skipped_casual"], 1)
+            self.assertEqual(openrouter_calls, [])
+            self.assertEqual(len(codex_calls), 1)
+
+    def test_run_recap_emits_contract_shape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / "ledger.txt"
+            ledger_path.write_text("")
+
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, self.ENV, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run_recap(
+                        limit=10,
+                        ledger_path=ledger_path,
+                        urlopen=self.fake_urlopen([]),
+                        codex_run=self.make_codex_run(),
+                    )
+
+            self.assertEqual(exit_code, 0)
+            printed = json.loads(stdout.getvalue())
+            self.assertTrue(printed["recap"])
+            self.assertEqual(len(printed["meetings"]), 1)
+
+            meeting = printed["meetings"][0]
+            self.assertEqual(meeting["id"], "meeting_r1")
+            self.assertEqual(meeting["title"], "Acme Strategy Sync")
+            self.assertIn("date", meeting)
+            self.assertIn("organizer", meeting)
+            self.assertIn("attendees", meeting)
+            self.assertIn("summary", meeting)
+            self.assertIn("overview", meeting["summary"])
+            self.assertIn("bullets", meeting["summary"])
+            self.assertIn("action_items", meeting["summary"])
+            self.assertIn("client_context", meeting)
+            self.assertIn("next_steps", meeting)
+
+            # Verify next_steps have the expected structure from refine_items
+            if meeting["next_steps"]:
+                for step in meeting["next_steps"]:
+                    self.assertIn("id", step)
+                    self.assertIn("text", step)
+                    self.assertIn("direction", step)
+                    self.assertIn("source", step)
+                    self.assertIn("sourceRef", step)
+
+    def test_run_recap_never_touches_watermark_or_ledger(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            watermark_path = Path(tmp) / "watermark.json"
+            ledger_path = Path(tmp) / "ledger.txt"
+
+            # Create initial files
+            watermark_path.write_text('{"last_transcript_id": "old_id"}')
+            ledger_path.write_text("old_meeting 1720000000\n")
+
+            initial_watermark = watermark_path.read_bytes()
+            initial_ledger = ledger_path.read_bytes()
+
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, self.ENV, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run_recap(
+                        limit=10,
+                        ledger_path=ledger_path,
+                        urlopen=self.fake_urlopen([]),
+                        codex_run=self.make_codex_run(),
+                    )
+
+            self.assertEqual(exit_code, 0)
+            # Watermark should be byte-identical (recap mode never touches it)
+            self.assertTrue(watermark_path.exists())
+            self.assertEqual(watermark_path.read_bytes(), initial_watermark)
+            # Ledger should be byte-identical (read-only)
+            self.assertEqual(ledger_path.read_bytes(), initial_ledger)
+
+    def test_execute_recap_error_contract(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / "ledger.txt"
+
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, {}, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.execute_recap(
+                        limit=10,
+                        ledger_path=ledger_path,
+                    )
+
+            self.assertEqual(exit_code, 1)
+            printed = json.loads(stdout.getvalue())
+            self.assertTrue(printed["recap"])
+            self.assertEqual(printed["meetings"], [])
+            self.assertIn("error", printed)
+            self.assertIn("missing required env", printed["error"])
+
+    def test_recap_mode_does_not_require_ingest_env(self):
+        recap_only_env = {
+            "FIREFLIES_API_KEY": "ff-test",
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / "ledger.txt"
+            ledger_path.write_text("")
+
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, recap_only_env, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run_recap(
+                        limit=10,
+                        ledger_path=ledger_path,
+                        urlopen=self.fake_urlopen([]),
+                        codex_run=self.make_codex_run(),
+                    )
+
+            self.assertEqual(exit_code, 0)
+            printed = json.loads(stdout.getvalue())
+            self.assertTrue(printed["recap"])
+
+    def test_existing_dry_run_contract_unchanged(self):
+        args = MODULE.parse_args([])
+        self.assertFalse(args.recap)
+        self.assertFalse(args.dry_run)
+
+    # --- Decisions + deal-state extraction (the gap the writeback hardcoded as none) ---
+
+    def test_parse_decisions_payload_extracts_list_and_string(self):
+        decisions, deal_state = MODULE.parse_decisions_payload(
+            json.dumps({
+                "decisions": ["Agreed to two-phase build", "Locked $12k pilot"],
+                "deal_state": "Moved from proposal to verbal yes",
+            })
+        )
+        self.assertEqual(decisions, ["Agreed to two-phase build", "Locked $12k pilot"])
+        self.assertEqual(deal_state, "Moved from proposal to verbal yes")
+
+    def test_parse_decisions_payload_empty_case(self):
+        decisions, deal_state = MODULE.parse_decisions_payload(
+            json.dumps({"decisions": [], "deal_state": ""})
+        )
+        self.assertEqual(decisions, [])
+        self.assertEqual(deal_state, "")
+
+    def test_parse_decisions_payload_tolerates_garbage(self):
+        # Non-dict / unparseable → empty, never raises (matches action-item parser tolerance).
+        self.assertEqual(MODULE.parse_decisions_payload("not json"), ([], ""))
+        self.assertEqual(MODULE.parse_decisions_payload(json.dumps(["a", "b"])), ([], ""))
+
+    @unittest.skip("provider-specific seam replaced by strict Codex batch schema coverage")
+    def test_extract_decisions_and_deal_state_uses_decisions_prompt(self):
+        captured = {}
+
+        def fake_urlopen(request, timeout: int | None = None):
+            body = json.loads(request.data)
+            captured["content"] = body["messages"][0]["content"]
+            return FakeResponse(json.dumps({
+                "choices": [{"message": {"content": json.dumps({
+                    "decisions": ["Chose fixed-scope pilot"],
+                    "deal_state": "Advanced to verbal",
+                })}}]
+            }).encode("utf-8"))
+
+        decisions, deal_state = MODULE.extract_decisions_and_deal_state(
+            "Josh Weiss: Let's lock the fixed-scope pilot. Client: Yes, we're in.",
+            client_context="client=Acme",
+            openrouter_api_key="or-test",
+            urlopen=fake_urlopen,
+        )
+        self.assertIn("DECISIONS", captured["content"])
+        self.assertIn("deal_state", captured["content"])
+        self.assertIn("client=Acme", captured["content"])
+        self.assertEqual(decisions, ["Chose fixed-scope pilot"])
+        self.assertEqual(deal_state, "Advanced to verbal")
+
+    def test_full_payload_carries_real_decisions_and_deal_state(self):
+        # A transcript with a real decision + a real deal-state change → both flow into the
+        # full-mode payload (NOT dropped, NOT hardcoded none).
+        self.decisions_response = ["Agreed to a two-phase build starting with the audit"]
+        self.deal_state_response = "Moved from discovery to proposal"
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                ledger_path = Path(tmp) / "full-ledger.txt"
+                ledger_path.write_text("")
+                stdout = io.StringIO()
+                with unittest.mock.patch.dict(os.environ, self.ENV, clear=True):
+                    with contextlib.redirect_stdout(stdout):
+                        exit_code = MODULE.run_full(
+                            limit=10,
+                            meeting_id="",
+                            full_ledger_path=ledger_path,
+                            urlopen=self.fake_urlopen([]),
+                            codex_run=self.make_codex_run(),
+                        )
+                self.assertEqual(exit_code, 0)
+                printed = json.loads(stdout.getvalue())
+                self.assertEqual(printed["mode"], "full")
+                self.assertEqual(len(printed["meetings"]), 1)
+                meeting = printed["meetings"][0]
+                self.assertEqual(
+                    meeting["decisions"],
+                    ["Agreed to a two-phase build starting with the audit"],
+                )
+                self.assertEqual(meeting["deal_state"], "Moved from discovery to proposal")
+        finally:
+            self.decisions_response = []
+            self.deal_state_response = ""
+
+    def test_full_payload_empty_decisions_yields_empty_not_missing(self):
+        # No decision / no deal move → empty (writeback falls back to none/no change).
+        self.decisions_response = []
+        self.deal_state_response = ""
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = Path(tmp) / "full-ledger.txt"
+            ledger_path.write_text("")
+            stdout = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, self.ENV, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run_full(
+                        limit=10,
+                        meeting_id="",
+                        full_ledger_path=ledger_path,
+                        urlopen=self.fake_urlopen([]),
+                        codex_run=self.make_codex_run(),
+                    )
+            self.assertEqual(exit_code, 0)
+            meeting = json.loads(stdout.getvalue())["meetings"][0]
+            self.assertEqual(meeting["decisions"], [])
+            self.assertEqual(meeting["deal_state"], "")
+
+
+if __name__ == "__main__":
+    unittest.main()

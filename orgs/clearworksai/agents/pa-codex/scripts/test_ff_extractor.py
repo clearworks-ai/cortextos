@@ -980,6 +980,43 @@ class RunStdoutContractTests(unittest.TestCase):
         self.assertTrue(all(str(item["sourceRef"]).startswith("future ·") for item in printed["items"]))
         self.assertEqual(saved["meeting_id"], "future")
 
+    def test_activation_cutoff_filters_backlog_before_applying_limit(self) -> None:
+        historical = []
+        for index in range(19):
+            transcript = self.make_transcript()
+            transcript["id"] = f"historical-{index:02d}"
+            transcript["date"] = f"2026-09-29T{index:02d}:00:00Z"
+            historical.append(transcript)
+        future = self.make_transcript()
+        future["id"] = "future"
+        future["date"] = "2026-09-30T16:00:00Z"
+        calls: list[str] = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            watermark_path = Path(tmp) / "watermark.json"
+            watermark_path.write_text(
+                '{"timestamp":"2026-08-31T18:00:00Z","meeting_id":"old","updated_at":"2026-08-31T19:01:04Z"}\n',
+                encoding="utf-8",
+            )
+            stdout = io.StringIO()
+            env = {**self.ENV, "FF_ACTIVATION_NOT_BEFORE": "2026-09-30T15:37:57Z"}
+            with unittest.mock.patch.dict(os.environ, env, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.run(
+                        limit=5,
+                        dry_run=False,
+                        meeting_id="",
+                        watermark_path=watermark_path,
+                        urlopen=self.make_urlopen([*historical, future], calls),
+                        codex_run=self.make_codex_run(),
+                    )
+
+            self.assertEqual(exit_code, 0)
+
+        printed = json.loads(stdout.getvalue())
+        self.assertEqual(printed["meetings"], 1)
+        self.assertTrue(all(str(item["sourceRef"]).startswith("future ·") for item in printed["items"]))
+
     def test_dry_run_prints_items_and_does_not_post_or_advance_watermark(self) -> None:
         printed, calls, _ = self.run_and_capture([self.make_transcript()], dry_run=True)
 

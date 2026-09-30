@@ -30,7 +30,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { parseDurationMs, readCronState } from '../bus/cron-state.js';
 import { readCronsWithStatus, updateCron, cronsFileMtimeMs } from '../bus/crons.js';
-import { appendCronOutcome, cronRunId, getActiveCronOutcome } from '../bus/cron-outcome.js';
+import { appendCronOutcome, cronRunId, getActiveCronOutcome, getActiveCronOutcomes } from '../bus/cron-outcome.js';
 import type { CronOutcomeReceipt } from '../bus/cron-outcome.js';
 import type { CronDefinition } from '../types/index.js';
 import { appendExecutionLog } from './cron-execution-log.js';
@@ -523,6 +523,19 @@ export class CronScheduler {
       // Malformed file / missing dir — fall back to crons.json only
     }
 
+    let pendingByName: Map<string, CronOutcomeReceipt | undefined> | undefined;
+    if (this.outcomeStateDir) {
+      try {
+        pendingByName = getActiveCronOutcomes(
+          this.outcomeStateDir,
+          this.agentName,
+          defs.filter(d => d.enabled).map(d => d.name),
+        );
+      } catch {
+        this.logger('[cron-scheduler] pending outcome recovery unavailable; retaining normal schedule.');
+      }
+    }
+
     for (const def of defs) {
       if (!def.enabled) {
         // Disabled — silently skip
@@ -598,9 +611,9 @@ export class CronScheduler {
       }
 
       let recoveryOutcome: CronOutcomeReceipt | undefined;
-      if (this.outcomeStateDir) {
+      if (this.outcomeStateDir && pendingByName) {
         try {
-          let pending = getActiveCronOutcome(this.outcomeStateDir, this.agentName, def.name);
+          let pending = pendingByName.get(def.name);
           const healed = new Set<string>();
           while (pending && (pending.state === 'scheduled' || pending.state === 'started') && def.last_fired_at !== undefined && Date.parse(def.last_fired_at) >= Date.parse(pending.scheduled_at)) {
             if (healed.has(pending.run_id)) throw new Error('cron recovery did not advance');

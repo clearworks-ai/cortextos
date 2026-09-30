@@ -8,12 +8,13 @@ vi.mock('../../../src/bus/system.js', async (importActual) => ({
   ...(await importActual<typeof import('../../../src/bus/system.js')>()),
   hardRestart: vi.fn(),
 }));
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync, utimesSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync, mkdirSync, existsSync, utimesSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { createHash } from 'crypto';
-import { FastChecker } from '../../../src/daemon/fast-checker';
+import { FastChecker, HEARTBEAT_WATCHDOG_ENV_KEYS } from '../../../src/daemon/fast-checker';
 import { hardRestart } from '../../../src/bus/system.js';
+import { acquireLock, releaseLock } from '../../../src/utils/lock';
 import type { BusPaths, TelegramCallbackQuery } from '../../../src/types';
 import { LifecycleStateStore } from '../../../src/daemon/lifecycle/state-store';
 import { AgentLifecycleSupervisor, type RuntimeAdapter } from '../../../src/daemon/lifecycle/supervisor';
@@ -26,6 +27,7 @@ function createMockAgent(name = 'test-agent', ctxRoot = '/tmp/framework') {
     isBootstrapped: vi.fn().mockReturnValue(true),
     isRunning: vi.fn().mockReturnValue(true),
     injectMessage: vi.fn().mockReturnValue(true),
+    injectMessageDetailed: vi.fn().mockReturnValue({ ok: true }),
     write: vi.fn(),
     getEnvironment: vi.fn().mockReturnValue({
       instanceId: 'test-instance',
@@ -36,6 +38,10 @@ function createMockAgent(name = 'test-agent', ctxRoot = '/tmp/framework') {
       org: 'test-org',
       projectRoot: '/tmp/framework',
     }),
+    getConfig: vi.fn().mockReturnValue({}),
+    getAgentDir: vi.fn().mockReturnValue(`/tmp/framework/agents/${name}`),
+    getLifecycleGeneration: vi.fn().mockReturnValue(0),
+    isRestartInFlight: vi.fn().mockReturnValue(false),
   } as any;
 }
 
@@ -863,29 +869,36 @@ describe('FastChecker', () => {
   });
 
   describe('heartbeat watchdog', () => {
+    // Isolate the 50-min interval from the default 1s poll loop (fake 50min
+    // otherwise storms pollCycle). Mock getConfig is still required if a tick lands.
+    const pollInterval = 86_400_000;
+    const allow = new Set<string>(HEARTBEAT_WATCHDOG_ENV_KEYS);
+
+    function assertWatchdogEnvKeys(env: NodeJS.ProcessEnv): void {
+      const extra = Object.keys(env).filter((k) => !allow.has(k) && !k.startsWith('CTX_'));
+      expect(extra).toEqual([]);
+      expect(Object.keys(env).filter((k) => /token|secret|password|credential|api[_-]?key/i.test(k))).toEqual([]);
+    }
+
     beforeEach(() => { vi.useFakeTimers(); });
     afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
 
     it('fires exec after bootstrap at 50-min interval, targeted at the agent\'s own identity', async () => {
       const { execFile } = await import('child_process');
       const agent = createMockAgent('my-agent', paths.ctxRoot);
-      const checker = new FastChecker(agent, paths, '/tmp/framework');
+      const checker = new FastChecker(agent, paths, '/tmp/framework', { pollInterval });
       checker.start();
       await vi.advanceTimersByTimeAsync(50 * 60 * 1000);
-      expect(execFile).toHaveBeenCalledWith(
-        'cortextos',
-        expect.arrayContaining(['bus', 'update-heartbeat', expect.stringContaining('[watchdog] my-agent alive')]),
-        expect.objectContaining({
-          cwd: '/tmp/framework/agents/my-agent',
-          env: expect.objectContaining({
-            CTX_AGENT_NAME: 'my-agent',
-            CTX_AGENT_DIR: '/tmp/framework/agents/my-agent',
-            CTX_ORG: 'test-org',
-            CTX_ROOT: paths.ctxRoot,
-          }),
-        }),
-        expect.any(Function),
-      );
+      const execMock = execFile as ReturnType<typeof vi.fn>;
+      expect(execMock).toHaveBeenCalled();
+      const opts = execMock.mock.calls[0][2] as { cwd: string; env: NodeJS.ProcessEnv };
+      expect(opts.cwd).toBe('/tmp/framework/agents/my-agent');
+      assertWatchdogEnvKeys(opts.env);
+      expect(opts.env.CTX_AGENT_NAME).toBe('my-agent');
+      expect(opts.env.CTX_AGENT_DIR).toBe('/tmp/framework/agents/my-agent');
+      expect(opts.env.CTX_ORG).toBe('test-org');
+      expect(opts.env.CTX_ROOT).toBe(paths.ctxRoot);
+      expect(String(execMock.mock.calls[0][1][2])).toContain('[watchdog] my-agent alive');
       checker.stop();
       checker.wake();
     });
@@ -894,7 +907,7 @@ describe('FastChecker', () => {
       const { execFile } = await import('child_process');
       const execMock = execFile as ReturnType<typeof vi.fn>;
       const agent = createMockAgent('my-agent', paths.ctxRoot);
-      const checker = new FastChecker(agent, paths, '/tmp/framework');
+      const checker = new FastChecker(agent, paths, '/tmp/framework', { pollInterval });
       checker.start();
       await vi.advanceTimersByTimeAsync(50 * 60 * 1000);
       const callsBefore = execMock.mock.calls.length;
@@ -909,7 +922,7 @@ describe('FastChecker', () => {
       const { execFile } = await import('child_process');
       const agent = createMockAgent('my-agent', paths.ctxRoot);
       agent.isBootstrapped.mockReturnValue(false);
-      const checker = new FastChecker(agent, paths, '/tmp/framework');
+      const checker = new FastChecker(agent, paths, '/tmp/framework', { pollInterval });
       checker.start();
       await vi.advanceTimersByTimeAsync(20 * 1000);
       expect(execFile).not.toHaveBeenCalledWith(
@@ -926,7 +939,7 @@ describe('FastChecker', () => {
       const execMock = execFile as ReturnType<typeof vi.fn>;
       const agent = createMockAgent('my-agent', paths.ctxRoot);
       agent.isRunning.mockReturnValue(false);
-      const checker = new FastChecker(agent, paths, '/tmp/framework');
+      const checker = new FastChecker(agent, paths, '/tmp/framework', { pollInterval });
       checker.start();
       await vi.advanceTimersByTimeAsync(50 * 60 * 1000);
       expect(execMock).not.toHaveBeenCalled();
@@ -939,25 +952,24 @@ describe('FastChecker', () => {
       const execMock = execFile as ReturnType<typeof vi.fn>;
 
       const knox = createMockAgent('knox-codex', paths.ctxRoot);
-      const knoxChecker = new FastChecker(knox, paths, '/tmp/framework');
+      const knoxChecker = new FastChecker(knox, paths, '/tmp/framework', { pollInterval });
       knoxChecker.start();
       await vi.advanceTimersByTimeAsync(50 * 60 * 1000);
 
       const larry = createMockAgent('larry-codex', paths.ctxRoot);
-      const larryChecker = new FastChecker(larry, paths, '/tmp/framework');
+      const larryChecker = new FastChecker(larry, paths, '/tmp/framework', { pollInterval });
       larryChecker.start();
       await vi.advanceTimersByTimeAsync(50 * 60 * 1000);
 
       const targets = execMock.mock.calls.map((call) => (call[2] as { env: NodeJS.ProcessEnv }).env.CTX_AGENT_NAME);
       expect(targets).toContain('knox-codex');
       expect(targets).toContain('larry-codex');
-      // Neither call's env carries the OTHER agent's identity — no bleed-through
-      // from a shared/inherited process.env (the exact bug this fix closes).
       for (const call of execMock.mock.calls) {
         const env = (call[2] as { env: NodeJS.ProcessEnv }).env;
         const cwd = (call[2] as { cwd: string }).cwd;
         const name = env.CTX_AGENT_NAME;
         expect(cwd).toBe(`/tmp/framework/agents/${name}`);
+        assertWatchdogEnvKeys(env);
       }
 
       knoxChecker.stop();
@@ -969,10 +981,8 @@ describe('FastChecker', () => {
     it('does not start an ambiguously-attributed watchdog when the agent context mismatches the checker paths', async () => {
       const { execFile } = await import('child_process');
       const execMock = execFile as ReturnType<typeof vi.fn>;
-      // getEnvironment() returns a DIFFERENT ctxRoot than this checker's paths —
-      // simulates the exact inherited-environment mismatch the fix guards against.
       const agent = createMockAgent('my-agent', '/some/other/ctx/root');
-      const checker = new FastChecker(agent, paths, '/tmp/framework');
+      const checker = new FastChecker(agent, paths, '/tmp/framework', { pollInterval });
       checker.start();
       await vi.advanceTimersByTimeAsync(50 * 60 * 1000);
       expect(execMock).not.toHaveBeenCalled();
@@ -1187,6 +1197,25 @@ describe('FastChecker', () => {
       expect(checker.isDuplicate('msg-5099')).toBe(true); // still in window
     }, 30000);
   });
+  describe('inbox lock failure visibility', () => {
+    it('logs the failure instead of treating the inbox as empty', async () => {
+      const log = vi.fn();
+      const checker = new FastChecker(createMockAgent(), paths, '/tmp/framework', { log }) as any;
+      // Hold the inbox lock from "another process" so checkInbox's acquire is refused.
+      const lockHandle = acquireLock(paths.inbox);
+      expect(lockHandle).not.toBe(false);
+
+      try {
+        await checker.pollCycle();
+      } finally {
+        if (lockHandle) releaseLock(lockHandle);
+      }
+
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('Inbox check failed'));
+      expect(log).toHaveBeenCalledWith(expect.stringContaining(paths.inbox));
+    });
+  });
+
 });
 
 describe('FastChecker pending Telegram queue persistence', () => {
@@ -1634,7 +1663,11 @@ describe('FastChecker watchdog — generation-bound daemon observation (Task 3.6
     const store = new LifecycleStateStore(paths, agentId);
     const supervisor = new AgentLifecycleSupervisor(agentId, store, makeUnusedRuntime());
 
-    const checker = new FastChecker(agent, paths, '/tmp/framework', { supervisor, supervised: true });
+    const checker = new FastChecker(agent, paths, '/tmp/framework', {
+      supervisor,
+      supervised: true,
+      pollInterval: 86_400_000,
+    });
     checker.start();
     await vi.advanceTimersByTimeAsync(50 * 60 * 1000);
 
@@ -1653,7 +1686,7 @@ describe('FastChecker watchdog — generation-bound daemon observation (Task 3.6
 
   it('an unsupervised checker (no supervisor wired) never attempts to publish an observation — no throw, no crash', async () => {
     const agent = createMockAgent('watchdog-agent', paths.ctxRoot);
-    const checker = new FastChecker(agent, paths, '/tmp/framework'); // no supervisor option
+    const checker = new FastChecker(agent, paths, '/tmp/framework', { pollInterval: 86_400_000 });
     checker.start();
     await vi.advanceTimersByTimeAsync(50 * 60 * 1000);
     // Absence of a thrown/unhandled exception across the tick IS the

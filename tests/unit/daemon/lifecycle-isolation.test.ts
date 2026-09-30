@@ -103,9 +103,11 @@ describe('Task 1.6 / 2.2: lifecycle isolation gate', () => {
   it('scan 2: src/utils/lock.ts exports are unchanged', () => {
     const lockSrc = readFileSync(join(SRC_ROOT, 'utils', 'lock.ts'), 'utf-8');
 
+    // D-05: freeze the merged generation-handle signatures, not the pre-merge
+    // boolean/dir pair. Stale-handle identity remains task_1790523877491_88723390.
     const requiredSignatures = [
-      'export function acquireLock(dir: string): boolean {',
-      'export function releaseLock(dir: string): void {',
+      'export function acquireLock(dir: string): LockHandle | false {',
+      'export function releaseLock(handle: LockHandle): boolean {',
       'export interface FileLockOptions {',
       'export function withFileLockSync<T>(',
       'export async function withFileLockAsync<T>(',

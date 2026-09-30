@@ -80,7 +80,7 @@ export const statusCommand = new Command('status')
     }
   });
 
-function displayStatuses(statuses: AgentStatus[]): void {
+export function displayStatuses(statuses: AgentStatus[]): void {
   if (statuses.length === 0) {
     console.log('No agents running.');
     console.log('Add one with: cortextos add-agent <name>');
@@ -106,7 +106,7 @@ function displayStatuses(statuses: AgentStatus[]): void {
     const status = label.padEnd(12);
     const pid = (s.pid?.toString() || '-').padEnd(10);
     const uptime = s.uptime ? formatUptime(s.uptime).padEnd(12) : '-'.padEnd(12);
-    const model = s.model || '-';
+    const model = s.model || 'default';
     console.log(`  ${name}${status}${pid}${uptime}${model}`);
     // Task 2.8: authoritative desired/observed lifecycle state, present only
     // for an agent on the supervised cutover path — printed as a SEPARATE

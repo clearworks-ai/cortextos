@@ -80,7 +80,11 @@ export function updateCronFire(
   cronName: string,
   interval?: string,
 ): void {
+  // ensureDir runs BEFORE the lock: acquireLock creates its `.lock.d` inside
+  // stateDir, so the directory must already exist.
   ensureDir(stateDir);
+  // Per-file RMW lock (fork) plus atomic tmp+rename write (upstream).
+  // a torn cron-state.json degrades to `{crons: []}` on read.
   const lockDir = cronStateLockDir(stateDir);
   ensureDir(lockDir);
   withFileLockSync(lockDir, () => {

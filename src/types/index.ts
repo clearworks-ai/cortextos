@@ -303,11 +303,22 @@ export interface AgentConfig {
    */
   opencode_agent?: string;
   /**
+   * Communication connector kind. When absent, the daemon's legacy-compat
+   * resolver infers `'telegram'` iff the agent's .env passes the existing
+   * BOT_TOKEN + CHAT_ID + numeric ALLOWED_USER gate, else `'none'`. Explicit
+   * values override the inference.
+   */
+  connector?: 'telegram' | 'none';
+  /**
    * Whether this agent runs a Telegram poller. Defaults to true when absent
    * (preserves existing behaviour). Set to false on specialist agents that
    * should not own a Telegram bot — only the designated orchestrator agent
    * should poll. Requires BOT_TOKEN + CHAT_ID to already be unset or the
    * poller will be skipped regardless.
+   *
+   * Note: for connectors other than `'telegram'`, this field is IGNORED
+   * (not an error) — the generic `inbound_polling` successor field lands
+   * with PR2 of the connector stack.
    */
   telegram_polling?: boolean;
   /**
@@ -1140,4 +1151,25 @@ export interface AgentStatus {
   phase?: LifecycleObservedPhaseWire;
   blockedReason?: string | null;
   dormancyReason?: string; // human explanation of the dormancy verdict
+}
+
+export type TrustLevel = 'owner' | 'manager' | 'member';
+
+export const VALID_TRUST_LEVELS: TrustLevel[] = ['owner', 'manager', 'member'];
+
+/**
+ * A human team member connected via Slack.
+ * Stored in org config or agent config under team_members.
+ */
+export interface TeamMember {
+  /** Display name (e.g. "Jordan Rivera") */
+  name: string;
+  /** Job role or title (e.g. "Operations Manager") */
+  role: string;
+  /** Slack handle without @ (e.g. "jordan.rivera") */
+  slack_handle: string;
+  /** Trust level — determines how the agent treats messages from this person */
+  trust_level: TrustLevel;
+  /** Optional persona-agent routing hint */
+  assigned_to_agent?: string;
 }

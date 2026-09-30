@@ -23,6 +23,7 @@ const mockUpdateCron = vi.fn();
 const mockReadCronsWithStatus = vi.fn();
 const mockAppendCronOutcome = vi.fn();
 const mockGetActiveCronOutcome = vi.fn();
+const mockGetActiveCronOutcomes = vi.fn();
 // cronsFileMtimeMs backs the tick loop's durable-edit detection.  Existing
 // tests keep a constant mtime (set in beforeEach) so they never spuriously
 // reload; tick-reload tests drive this to simulate crons.json edits.
@@ -39,6 +40,7 @@ vi.mock('../../../src/bus/cron-outcome.js', () => ({
   appendCronOutcome: (...args: unknown[]) => mockAppendCronOutcome(...args),
   cronRunId: () => 'cron_v1_0123456789abcdef0123456789abcdef',
   getActiveCronOutcome: (...args: unknown[]) => mockGetActiveCronOutcome(...args),
+  getActiveCronOutcomes: (...args: unknown[]) => mockGetActiveCronOutcomes(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -202,6 +204,12 @@ describe('CronScheduler', () => {
     mockAppendCronOutcome.mockReset();
     mockGetActiveCronOutcome.mockReset();
     mockGetActiveCronOutcome.mockReturnValue(undefined);
+    mockGetActiveCronOutcomes.mockReset();
+    mockGetActiveCronOutcomes.mockImplementation((dir: unknown, agent: unknown, names: unknown) => {
+      const map = new Map();
+      for (const name of names as string[]) map.set(name, mockGetActiveCronOutcome(dir, agent, name));
+      return map;
+    });
     mockReadCronsWithStatus.mockReset();
     mockCronsFileMtimeMs.mockReset();
     // Default: readCronsWithStatus reflects whatever readCrons returns
@@ -337,6 +345,24 @@ describe('CronScheduler', () => {
     await vi.advanceTimersByTimeAsync(2 * TICK);
     outcomeScheduler.stop();
     expect(runIds).toEqual([older.run_id, newer.run_id]);
+  });
+
+  it('reads pending cron outcomes once per start(), not once per cron', () => {
+    mockReadCrons.mockReturnValue([
+      makeCron({ name: 'a' }),
+      makeCron({ name: 'b' }),
+      makeCron({ name: 'c' }),
+    ]);
+    const outcomeScheduler = new CronScheduler({
+      agentName: 'test-agent',
+      onFire: (cron) => { fired.push(cron); },
+      logger: (msg) => { logs.push(msg); },
+      outcomeStateDir: '/tmp/cortextos-cron-outcomes',
+    });
+    outcomeScheduler.start();
+    outcomeScheduler.stop();
+    expect(mockGetActiveCronOutcomes).toHaveBeenCalledTimes(1);
+    expect(mockGetActiveCronOutcomes.mock.calls[0][2]).toEqual(['a', 'b', 'c']);
   });
 
   it('does NOT fire before the interval has elapsed', async () => {

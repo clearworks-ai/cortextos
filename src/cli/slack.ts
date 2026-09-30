@@ -1,5 +1,7 @@
 import { Command } from 'commander';
-import { SlackAPI, loadSlackIdentity, type PostMessageRequest } from '../slack/index.js';
+import { existsSync, readFileSync } from 'fs';
+import { SlackAPI } from '../slack/index.js';
+import { resolveGatedDisplayIdentity, slackConfigPath } from '../slack/slack-routing.js';
 import { resolveEnv, loadEnvFileInto } from '../utils/env.js';
 import { join } from 'path';
 
@@ -11,17 +13,31 @@ export interface TestSendOptions {
   text: string;
 }
 
-/** Pure function — testable without process exit. */
+/** Pure function — testable without process exit. Identity goes through the
+ * D4 persona gate; object-form postMessage never carries username/icon. */
 export async function runTestSend(opts: TestSendOptions, api: SlackAPI): Promise<void> {
-  const req: PostMessageRequest = { channel: opts.channel, text: opts.text };
-  if (opts.agent) {
-    const id = loadSlackIdentity(opts.frameworkRoot, opts.org, opts.agent);
-    if (!id) throw new Error(`agent "${opts.agent}" has no slack.json (not Slack-enabled)`);
-    req.username = id.username;
-    if (id.icon_emoji) req.icon_emoji = id.icon_emoji;
-    if (id.icon_url) req.icon_url = id.icon_url;
+  if (!opts.agent) {
+    await api.postMessage(opts.channel, opts.text);
+    return;
   }
-  await api.postMessage(req);
+  const cfgPath = slackConfigPath(opts.frameworkRoot, opts.org, opts.agent);
+  if (!existsSync(cfgPath)) {
+    throw new Error(`agent "${opts.agent}" has no slack.json (not Slack-enabled)`);
+  }
+  // Prior CLI: loadSlackIdentity threw on unparseable JSON. Do not treat
+  // malformed as absent (that would silently send with the app default).
+  try {
+    JSON.parse(readFileSync(cfgPath, 'utf-8'));
+  } catch (e) {
+    throw new Error(`slack.json parse failed for ${opts.agent}: ${(e as Error).message}`);
+  }
+  const identity = resolveGatedDisplayIdentity(
+    opts.frameworkRoot,
+    opts.org,
+    opts.agent,
+    (line) => console.error(line),
+  );
+  await api.postMessage(opts.channel, opts.text, identity);
 }
 
 function requireToken(): string {
@@ -98,10 +114,8 @@ const discoverChannelsCommand = new Command('discover-channels')
   .action(async () => {
     const api = new SlackAPI(requireToken());
     const channels = await api.listChannels();
-    const visible = channels.filter((c) => c.is_member !== false);
-    for (const c of visible) {
-      const prefix = c.is_private ? '🔒' : '#';
-      console.log(`${c.id}\t${prefix}${c.name}`);
+    for (const c of channels) {
+      console.log(`${c.id}\t#${c.name}`);
     }
   });
 

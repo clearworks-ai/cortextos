@@ -209,18 +209,11 @@ describe('legacy-compat: fresh-start intent as an identified request (Task 2.2)'
 });
 
 // ---------------------------------------------------------------------------
-// Hermes honors fresh intent (Task 2.2 test case 4) — adapted from
-// tests/unit/daemon/agent-process-hermes.test.ts: confirms Hermes's
-// `hermesDbExists()` DB-existence decision is completely unaffected by a
-// `.force-fresh` marker (PHASES.md's explicit ruling — Hermes semantics are
-// NOT changed by this task), while the marker is still imported and
-// consumed/restored against the spawn outcome for audit-consistency
-// bookkeeping, so it no longer leaks in the state dir indefinitely (the
-// second upstream `31af138b` defect).
-//
-// This describe block needs a real `AgentProcess` + real filesystem (the
-// reservation-by-rename mechanics operate on real files), so — unlike
-// `agent-process-hermes.test.ts` — 'fs' is intentionally left UNMOCKED here.
+// D-06: Hermes honors `.force-fresh` the same way other runtimes do (marker
+// first, consume after successful spawn). PHASES.md Task 2.2's "Hermes
+// ignores the marker" ruling is superseded by the catch-up matrix.
+// `importFreshRequest` in this file remains a unit of the legacy helper, not
+// the AgentProcess start path.
 // ---------------------------------------------------------------------------
 
 let capturedOnExit: ((exitCode: number, signal?: number) => void) | null = null;
@@ -267,7 +260,7 @@ vi.mock('../../../src/utils/paths.js', () => ({
 
 const { AgentProcess } = await import('../../../src/daemon/agent-process.js');
 
-describe('AgentProcess + Hermes: fresh-request bookkeeping does not change hermesDbExists semantics', () => {
+describe('AgentProcess + Hermes: D-06 force-fresh wins over hermesDbExists', () => {
   let ctxRoot: string;
   const agentName = 'hermes-agent';
 
@@ -309,18 +302,14 @@ describe('AgentProcess + Hermes: fresh-request bookkeeping does not change herme
     rmSync(ctxRoot, { recursive: true, force: true });
   });
 
-  it('hermesDbExists()=true still spawns `continue` with a `.force-fresh` marker present, and the marker is consumed as bookkeeping', async () => {
+  it('D-06: hermesDbExists()=true with a `.force-fresh` marker spawns `fresh` and consumes the marker', async () => {
     mockHermesDbExists.mockReturnValue(true);
     writeFileSync(forceFreshLivePath(ctxRoot), 'operator armed fresh\n', 'utf-8');
 
     const ap = new AgentProcess(agentName, mockEnvFor(ctxRoot), { runtime: 'hermes' });
     await ap.start();
 
-    // Hermes's DECISION is unaffected by the marker — still `continue`.
-    expect(mockPty.spawn).toHaveBeenCalledWith('continue', expect.any(String));
-
-    // But the marker was imported and consumed (bookkeeping/audit
-    // consistency): no live marker, no leftover reservation file.
+    expect(mockPty.spawn).toHaveBeenCalledWith('fresh', expect.any(String));
     expect(existsSync(forceFreshLivePath(ctxRoot))).toBe(false);
     expect(reservedLeftovers(ctxRoot).length).toBe(0);
   });

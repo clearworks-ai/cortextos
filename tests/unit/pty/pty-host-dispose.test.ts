@@ -101,7 +101,7 @@ describe.skipIf(!canRun)('pty-host-entry RW-4 dispose/SIGTERM grandchild reaping
     expect(pidAlive(grandchildPid)).toBe(false);
   }, 20000);
 
-  it('CONTROL — the old semantics (bare SIGKILL on the host) orphans the grandchild', async () => {
+  it.skipIf(platform() === 'darwin')('CONTROL — the old semantics (bare SIGKILL on the host) orphans the grandchild', async () => {
     const { child, grandchildPid } = await spawnRealHost();
     expect(pidAlive(grandchildPid)).toBe(true);
 
@@ -113,7 +113,8 @@ describe.skipIf(!canRun)('pty-host-entry RW-4 dispose/SIGTERM grandchild reaping
     // The grandchild survives the host's SIGKILL — this is the wound the
     // graceful path exists to avoid. If this assertion ever starts failing,
     // the kernel/node-pty semantics changed and the grace machinery can be
-    // revisited.
+    // revisited. Darwin reaps the grandchild here (this host: orphaned=false
+    // in isolation and in the full suite), so CONTROL is Linux-only.
     const orphaned = pidAlive(grandchildPid);
     if (orphaned) {
       try { process.kill(grandchildPid, 'SIGKILL'); } catch { /* cleanup */ }

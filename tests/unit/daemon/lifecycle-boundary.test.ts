@@ -978,7 +978,7 @@ describe('Source/AST allowlist: production spawn/kill call sites', () => {
     { file: join('src', 'cli', 'webhook-bridge.ts'), reason: 'process.kill(pid, \'SIGUSR1\') is a non-terminating wake signal to the fast-checker poll loop, not a lifecycle kill' },
     { file: join('src', 'bus', 'multica', 'trigger.ts'), reason: 'spawns an unrelated one-shot external script, not an agent PTY' },
     { file: join('src', 'daemon', 'meeting-consumer-dispatch.ts'), reason: 'spawns a deterministic one-shot meeting-consumer script, not an agent PTY' },
-    { file: join('src', 'telegram', 'transcribe.ts'), reason: 'spawns a one-shot transcription binary, not an agent PTY' },
+    { file: join('src', 'connectors', 'telegram', 'transcribe.ts'), reason: 'D-04: transcribe spawn lives on the Telegram connector adapter, still a one-shot transcription binary, not an agent PTY' },
     { file: join('src', 'pipeline', 'staging-verify', 'railway.ts'), reason: 'spawns the Railway CLI for a one-shot staging check, not an agent PTY' },
   ];
 

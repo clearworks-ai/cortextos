@@ -31,6 +31,9 @@ jobs:
       - name: Verify CLI binary
         run: node dist/cli.js --help
 
+      - name: Verify lifecycle status CLI contracts and exits
+        run: node scripts/verify-lifecycle-status-cli.mjs
+
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
@@ -93,3 +96,100 @@ jobs:
 
       - name: Build dashboard
         run: npm run build
+
+  lifecycle-connectors:
+    name: Lifecycle & Connectors (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 25
+    strategy:
+      fail-fast: true
+      matrix:
+        node: ['20', '24']
+    env:
+      CTX_INSTANCE_ID: ci-test
+      CTX_ORG: testorg
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lifecycle + connector suite
+        run: |
+          npx vitest run \
+            tests/unit/daemon/agent-manager*.test.ts \
+            tests/unit/daemon/agent-process*.test.ts \
+            tests/unit/daemon/cron-scheduler.test.ts \
+            tests/unit/daemon/fast-checker*.test.ts \
+            tests/unit/daemon/heartbeat-watchdog-env.test.ts \
+            tests/unit/pty/*.test.ts \
+            tests/unit/utils/dormancy.test.ts \
+            tests/unit/connectors \
+            tests/unit/telegram \
+            tests/unit/slack \
+            tests/unit/buzz \
+            --reporter=dot
+
+      - name: Sanitized coverage receipt
+        if: always()
+        env:
+          RESULT: ${{ job.status }}
+        run: |
+          mkdir -p ci-receipts
+          node -e 'const fs=require("fs"); fs.writeFileSync("ci-receipts/lifecycle-connectors.json", JSON.stringify({job:"lifecycle-connectors",sha:process.env.GITHUB_SHA||"",node:process.version,platform:process.platform,result:process.env.RESULT||"unknown"})+"\n")'
+
+      - name: Upload sanitized coverage receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lifecycle-connectors-node${{ matrix.node }}-${{ github.sha }}
+          path: ci-receipts/lifecycle-connectors.json
+          if-no-files-found: error
+
+  lifecycle-connectors-100x:
+    name: Lifecycle/connector 100x (Node 24)
+    runs-on: ubuntu-latest
+    needs: lifecycle-connectors
+    timeout-minutes: 90
+    env:
+      CTX_INSTANCE_ID: ci-test
+      CTX_ORG: testorg
+      REPEAT: '100'
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Repeat race-sensitive lifecycle/connector files 100 times
+        run: bash scripts/ci-lifecycle-connector-repeat.sh
+
+      - name: Sanitized 100x receipt
+        if: always()
+        env:
+          RESULT: ${{ job.status }}
+          REPEAT: '100'
+        run: |
+          mkdir -p ci-receipts
+          node -e 'const fs=require("fs"); fs.writeFileSync("ci-receipts/lifecycle-connectors-100x.json", JSON.stringify({job:"lifecycle-connectors-100x",sha:process.env.GITHUB_SHA||"",node:process.version,repeat:Number(process.env.REPEAT),result:process.env.RESULT||"unknown"})+"\n")'
+
+      - name: Upload sanitized 100x receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lifecycle-connectors-100x-${{ github.sha }}
+          path: ci-receipts/lifecycle-connectors-100x.json
+          if-no-files-found: error

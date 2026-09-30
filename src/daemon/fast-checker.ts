@@ -4,7 +4,7 @@ import { join, dirname, basename } from 'path';
 import { createHash } from 'crypto';
 import { hardRestart } from '../bus/system.js';
 import type { InboxMessage, BusPaths, TelegramMessage, TelegramCallbackQuery } from '../types/index.js';
-import { checkInbox, ackInbox, sendMessage } from '../bus/message.js';
+import { checkInbox, ackInbox, sendMessage, InboxLockUnavailableError } from '../bus/message.js';
 import { updateApproval } from '../bus/approval.js';
 import { AgentProcess } from './agent-process.js';
 import type { AgentLifecycleSupervisor } from './lifecycle/supervisor.js';
@@ -36,6 +36,61 @@ type LogFn = (msg: string) => void;
 export function handoffGraceMs(runtime: string | undefined): number {
   if (runtime === 'codex-app-server' || runtime === 'opencode') return 600_000;
   return 120_000;
+}
+
+/**
+ * Parent-env keys the heartbeat watchdog child may inherit. PATH/HOME/locale
+ * plus Windows path/temp keys required to exec `cortextos`. No USER/SHELL/TZ,
+ * no credential-shaped names, nothing else from process.env.
+ */
+export const HEARTBEAT_WATCHDOG_ENV_KEYS = [
+  'PATH',
+  'HOME',
+  'TMPDIR',
+  'TMP',
+  'TEMP',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'PATHEXT',
+  'SYSTEMROOT',
+  'COMSPEC',
+  'HOMEDRIVE',
+  'HOMEPATH',
+] as const;
+
+export interface HeartbeatWatchdogTarget {
+  agentName: string;
+  agentDir: string;
+  org: string;
+  ctxRoot: string;
+  instanceId: string;
+  frameworkRoot: string;
+  projectRoot: string;
+  timezone?: string;
+  orchestrator?: string;
+}
+
+/** Build the watchdog child env from an explicit allowlist plus CTX_* pin. */
+export function buildHeartbeatWatchdogEnv(
+  processEnv: NodeJS.ProcessEnv,
+  target: HeartbeatWatchdogTarget,
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of HEARTBEAT_WATCHDOG_ENV_KEYS) {
+    const value = processEnv[key];
+    if (value !== undefined) env[key] = value;
+  }
+  env.CTX_AGENT_NAME = target.agentName;
+  env.CTX_AGENT_DIR = target.agentDir;
+  env.CTX_ORG = target.org;
+  env.CTX_ROOT = target.ctxRoot;
+  env.CTX_INSTANCE_ID = target.instanceId;
+  env.CTX_FRAMEWORK_ROOT = target.frameworkRoot;
+  env.CTX_PROJECT_ROOT = target.projectRoot;
+  env.CTX_TIMEZONE = target.timezone ?? '';
+  env.CTX_ORCHESTRATOR = target.orchestrator ?? '';
+  return env;
 }
 
 /**
@@ -137,6 +192,9 @@ export class FastChecker {
   private telegramApi?: TelegramAPI;
   private chatId?: string;
   private allowedUserId?: number;
+  // PR1: held alongside legacy telegramApi for connector-aware callers. Outbound
+  // sendMessage sites stay Telegram-direct until PR2.
+  private connector?: import('../connectors/index.js').MessageConnector;
 
   // Task 3.3: constructor-injected lifecycle supervisor (mirrors how
   // `AgentProcess` is already injected into this constructor). Only ever
@@ -242,6 +300,7 @@ export class FastChecker {
       telegramApi?: TelegramAPI;
       chatId?: string;
       allowedUserId?: number;
+      connector?: import('../connectors/index.js').MessageConnector;
       supervisor?: AgentLifecycleSupervisor;
       supervised?: boolean;
     } = {},
@@ -254,6 +313,7 @@ export class FastChecker {
     this.telegramApi = options.telegramApi;
     this.chatId = options.chatId;
     this.allowedUserId = options.allowedUserId;
+    this.connector = options.connector;
     this.supervisor = options.supervisor;
     this.supervised = options.supervised === true;
 
@@ -313,18 +373,7 @@ export class FastChecker {
     if (target.agentName !== this.agent.name || !target.agentDir || target.ctxRoot !== this.paths.ctxRoot) {
       this.log(`Heartbeat watchdog target-context mismatch for ${this.agent.name} — not starting an ambiguously attributed watchdog`);
     } else {
-      const watchdogEnv: NodeJS.ProcessEnv = {
-        ...process.env,
-        CTX_AGENT_NAME: target.agentName,
-        CTX_AGENT_DIR: target.agentDir,
-        CTX_ORG: target.org,
-        CTX_ROOT: target.ctxRoot,
-        CTX_INSTANCE_ID: target.instanceId,
-        CTX_FRAMEWORK_ROOT: target.frameworkRoot,
-        CTX_PROJECT_ROOT: target.projectRoot,
-        CTX_TIMEZONE: target.timezone ?? '',
-        CTX_ORCHESTRATOR: target.orchestrator ?? '',
-      };
+      const watchdogEnv = buildHeartbeatWatchdogEnv(process.env, target);
       this.heartbeatTimer = setInterval(() => {
         if (!this.running || !this.agent.isRunning()) return;
         const ts = new Date().toISOString();
@@ -503,8 +552,15 @@ export class FastChecker {
     // below needs one acceptBatch input per source item, not one opaque
     // blob. Building this array costs nothing on the unsupervised path: it
     // is simply never read there.
-    const inboxMessages = checkInbox(this.paths);
     const inboxFormatted: Array<{ id: string; formatted: string }> = [];
+    let inboxMessages: InboxMessage[] = [];
+    try {
+      inboxMessages = checkInbox(this.paths);
+    } catch (err) {
+      // D-05: a refused inbox lock is a failure, never a silent empty inbox.
+      const detail = err instanceof InboxLockUnavailableError ? err.message : String(err);
+      this.log(`Inbox check failed: ${detail} (${this.paths.inbox})`);
+    }
     for (const msg of inboxMessages) {
       const formatted = this.formatInboxMessage(msg);
       messageBlock += formatted;

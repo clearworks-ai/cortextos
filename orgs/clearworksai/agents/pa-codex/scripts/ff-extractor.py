@@ -955,12 +955,14 @@ def select_recent_transcripts(
     watermark_meeting_id: str | None,
     *,
     limit: int,
+    not_before: datetime | None = None,
 ) -> list[dict[str, Any]]:
     ordered = sorted(transcripts, key=transcript_sort_key)
     fresh = [
         transcript
         for transcript in ordered
         if is_newer_than_watermark(transcript, watermark_timestamp, watermark_meeting_id)
+        and (not_before is None or transcript_sort_key(transcript)[0] >= not_before)
     ]
     return fresh[:limit]
 
@@ -1860,10 +1862,30 @@ def run(
 
     watermark_timestamp, watermark_meeting_id = load_watermark(watermark_path)
     recent = fetch_recent_transcripts(fireflies_api_key, limit=limit, urlopen=urlopen)
+    activation_not_before_raw = os.environ.get("FF_ACTIVATION_NOT_BEFORE", "").strip()
+    activation_not_before = None
+    if activation_not_before_raw:
+        activation_not_before = parse_transcript_datetime(activation_not_before_raw)
+        if activation_not_before is None:
+            raise ValueError("invalid FF_ACTIVATION_NOT_BEFORE timestamp")
     if meeting_id:
-        fresh = [t for t in recent if str(t.get("id") or "") == meeting_id]
+        fresh = [
+            transcript
+            for transcript in recent
+            if str(transcript.get("id") or "") == meeting_id
+            and (
+                activation_not_before is None
+                or transcript_sort_key(transcript)[0] >= activation_not_before
+            )
+        ]
     else:
-        fresh = select_recent_transcripts(recent, watermark_timestamp, watermark_meeting_id, limit=limit)
+        fresh = select_recent_transcripts(
+            recent,
+            watermark_timestamp,
+            watermark_meeting_id,
+            limit=limit,
+            not_before=activation_not_before,
+        )
     if not fresh:
         print(
             json.dumps(

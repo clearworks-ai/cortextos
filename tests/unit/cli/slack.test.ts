@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { runTestSend, slackCommand } from '../../../src/cli/slack';
+import { hasRecentReceiptOfKind } from '../../../src/utils/verification-receipt';
 
 describe('runTestSend', () => {
   let root: string;
@@ -25,10 +26,15 @@ describe('runTestSend', () => {
         allowed_channels: [],
       }),
     );
-    await runTestSend(
-      { frameworkRoot: root, org: 'wyre', agent: 'boss', channel: 'C1', text: 'hi' },
+    const receipt = await runTestSend(
+      {
+        frameworkRoot: root, org: 'wyre', agent: 'boss', channel: 'C1', text: 'hi',
+        ctxRoot: root,
+      },
       api as never,
     );
+    expect(receipt).toEqual({ ok: true, channel: 'C1', ts: '1' });
+    expect(hasRecentReceiptOfKind(root, 'boss', ['external-send'], 60_000)).toBe(true);
     expect(api.postMessage).toHaveBeenCalledWith({
       channel: 'C1',
       text: 'hi',

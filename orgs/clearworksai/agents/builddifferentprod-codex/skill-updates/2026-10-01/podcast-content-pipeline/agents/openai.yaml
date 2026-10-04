@@ -1,0 +1,4 @@
+interface:
+  display_name: "Podcast Content Pipeline"
+  short_description: "Run the three-lane podcast-to-distribution workflow"
+  default_prompt: "Process this podcast episode through the governed Build Different, Clearworks, and AllSafe content lanes."

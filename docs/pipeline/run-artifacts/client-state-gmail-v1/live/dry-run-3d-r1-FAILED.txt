@@ -1,0 +1,471 @@
+=== source_ref=gmail:1a09d3655d130bd6 thread_id=1a09d051c8483592 ===
+From: ShinePay <support@getshinepay.com>
+Subject: ShinePay Transaction Processed
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='support@getshinepay.com'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09d356d7844ff3 thread_id=1a09d051c8483592 ===
+From: ShinePay <support@getshinepay.com>
+Subject: ShinePay Transaction Processed
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='support@getshinepay.com'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09d1ec3531b4bc thread_id=1a09d1ec3531b4bc ===
+From: Josh Weiss <josh@clearworks.ai>
+Subject: A very delayed follow-up from SANTŌ.
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='josh@clearworks.ai'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09d1eb308b9d92 thread_id=1a09d1eb308b9d92 ===
+From: Josh Weiss <josh@clearworks.ai>
+Subject: 
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='josh@clearworks.ai'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09d10cdb6bb8df thread_id=1a09d10cdb6bb8df ===
+From: Nishant from Fireflies.ai <promoter@firstpromoter.com>
+Subject: You've earned a commission for your hard work!
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='promoter@firstpromoter.com'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09d05f76edabce thread_id=1a09d05f76edabce ===
+From: Josh Weiss <josh@clearworks.ai>
+Subject: An alternative to the AI automation hire
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='josh@clearworks.ai'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09d051c8483592 thread_id=1a09d051c8483592 ===
+From: ShinePay <support@getshinepay.com>
+Subject: ShinePay Transaction Processed
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='support@getshinepay.com'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09d04f9c3f19be thread_id=1a09d04f9c3f19be ===
+From: ShinePay <support@getshinepay.com>
+Subject: ShinePay Deposit Processed
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='support@getshinepay.com'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09cfa36924feda thread_id=1a09cf7ee75c066f ===
+From: Josh Weiss <josh@clearworks.ai>
+Subject: An alternative to the AI automation hire (Logic TCG Connection)
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='josh@clearworks.ai'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09cf254c290b53 thread_id=1a09cebfb56d7418 ===
+From: Josh Weiss <josh@clearworks.ai>
+Subject: AI role (Logic TCG Connection!)
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='josh@clearworks.ai'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09ce69c317fcdc thread_id=1a09ce69c317fcdc ===
+From: Callan | The Uncommon Business <vip@ai.reioptimize.com>
+Subject: ⏰ Last chance before price doubles
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='vip@ai.reioptimize.com'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09cd05910de313 thread_id=1a09cd05910de313 ===
+From: Josh Weiss <josh@clearworks.ai>
+Subject: Recap: C2<>RR Sync — 2026-07-15
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='josh@clearworks.ai'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09ccdb916bdf4a thread_id=1a09ccdb916bdf4a ===
+From: Josh Weiss <josh@clearworks.ai>
+Subject: Recap: Assessment Interviews (Rick Crame) — 2026-09-10
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='josh@clearworks.ai'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09ccce7f4d18e0 thread_id=1a09ccce7f4d18e0 ===
+From: Josh Weiss <josh@clearworks.ai>
+Subject: Recap: Jawad Chughtai and Bones Ijeoma — 2026-09-10
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='josh@clearworks.ai'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09ccc19ea56f5d thread_id=1a09ccc19ea56f5d ===
+From: Josh Weiss <josh@clearworks.ai>
+Subject: Recap: Assessment Interviews (Joann Gates) — 2026-09-10
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='josh@clearworks.ai'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09ccb0e3f74695 thread_id=1a09ccb0e3f74695 ===
+From: Josh Weiss <josh@clearworks.ai>
+Subject: Recap: AI Discussion — 2026-09-09
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='josh@clearworks.ai'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09cc9c2df0916d thread_id=1a09cc9c2df0916d ===
+From: Josh Weiss <josh@clearworks.ai>
+Subject: Recap: Assessment Interviews (Chris Ocampo) — 2026-09-09
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='josh@clearworks.ai'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09cc8ac0e778e4 thread_id=1a09cc8ac0e778e4 ===
+From: Josh Weiss <josh@clearworks.ai>
+Subject: Recap: FW: Saud Ahmed and Bones Ijeoma — 2026-09-08
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='josh@clearworks.ai'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09caecf0859839 thread_id=1a09caecf0859839 ===
+From: Josh Weiss <josh@clearworks.ai>
+Subject: Recap: John Gates and Josh Weiss — 2026-09-09
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='josh@clearworks.ai'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09c5765086e070 thread_id=1a09c5765086e070 ===
+From: Sabrina from Blotato <sabrina@blotato.com>
+Subject: Faceless videos | blotato
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='sabrina@blotato.com'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09b2f263a47ecc thread_id=1a09b2f263a47ecc ===
+From: Callan | The Uncommon Business <vip@ai.reioptimize.com>
+Subject: [Ends tonight] $2,488 of value for just $47
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='vip@ai.reioptimize.com'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09abf8be9d2910 thread_id=1a088609ba243e50 ===
+From: Naomi Werner <n@joinsmoothhaven.com>
+Subject: Re: AssetMeld and Clearworks
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id='naomi-werner' email='n@joinsmoothhaven.com'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09aa5ca987b90e thread_id=1a09aa5ca987b90e ===
+From: Mindstream <hello@mindstream.news>
+Subject: We interviewed a Pulitzer winning tech journalist about AI!
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='hello@mindstream.news'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09964a9a12731a thread_id=1a0981cd68a90c6a ===
+From: Accounting Department <accounting@alloi.us>
+Subject: Re: Alloi
+outcome: filed
+  resolution: slug='alloi' kind='client' method='contact-email' outcome='filed' reason='' contact_id='accounting-department' email='accounting@alloi.us'
+  extraction: cached=False cost_usd=0.0949278 model_receipt=claude-haiku-4-5-20251001,claude-sonnet-5
+  summary: Evelyn Kamkari thanks Josh for a clarification.
+  item: none [quote: none]
+  CRM row: contact=accounting-department argv=['python3', '/private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-env/crm/add-interaction.py', '--contact-id', 'accounting-department', '--type', 'email', '--summary', 'Evelyn Kamkari thanks Josh for a clarification.', '--source-ref', 'gmail:1a09964a9a12731a']
+  page diff for /private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-env/vault/raw/areas/clearworks/org-brain/clients/alloi.md:
+--- a//private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-env/vault/raw/areas/clearworks/org-brain/clients/alloi.md
++++ b//private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-env/vault/raw/areas/clearworks/org-brain/clients/alloi.md
+@@ -154,6 +154,9 @@
+ - 2026-07-10 — Alloi Audit Discovery Interview #3: Architecture (73min, 7/10). 6 Alloi stakeholders (Marcos, Cindy Wu, Ivette, Joe/Joseph Chang, Molly + Josh). Themes: mornings lost to email/coordination pushing design to afternoons;…
+ - 2026-07-03 — Bassem Dawod (Alloi) accepted invite for 'Alloi Interview #4: Leadership' — Mon Jul 6, 2026 12–1pm PDT. Meeting confirmed.
+ - 2026-06-26 — Proposal: Alloi // AllSafe IT (6/26, 22min). AllSafe (Bones Ijeoma, Nathan Phinney) presented managed-IT/cybersecurity proposal to Marcos; Josh advising. Scope: full security audit + managed Cisco firewall + 24/7 monito…
++- 2026-09-13 — Re: Alloi (email) [source: gmail:1a09964a9a12731a]
++  - Summary: Evelyn Kamkari thanks Josh for a clarification.
++  - Decisions: none
+ 
+ ## Open Items
+ 
+
+  task: none
+  escalation: none
+  digest preview: - CRM: crm:accounting-department (gmail:1a09964a9a12731a) — Evelyn Kamkari thanks Josh for a clarification. [simulated]
+  digest preview: - Page: raw/areas/clearworks/org-brain/clients/alloi.md (gmail:1a09964a9a12731a) — Evelyn Kamkari thanks Josh for a clarification. [simulated]
+=== source_ref=gmail:1a09962f1c0305d5 thread_id=1a0985c3009db309 ===
+From: Accounting Department <accounting@alloi.us>
+Subject: Re: Paid invoice AI-2026-4 - Alloi 10-hour IT block
+outcome: filed
+  resolution: slug='alloi' kind='client' method='contact-email' outcome='filed' reason='' contact_id='accounting-department' email='accounting@alloi.us'
+  extraction: cached=False cost_usd=0.0756198 model_receipt=claude-haiku-4-5-20251001,claude-sonnet-5
+  summary: Evelyn Kamkari, Controller at Alloi Architecture, sends an email sign-off with contact details and no substantive content.
+  item: none [quote: none]
+  CRM row: contact=accounting-department argv=['python3', '/private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-env/crm/add-interaction.py', '--contact-id', 'accounting-department', '--type', 'email', '--summary', 'Evelyn Kamkari, Controller at Alloi Architecture, sends an email sign-off with contact details and no substantive content.', '--source-ref', 'gmail:1a09962f1c0305d5']
+  page diff for /private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-env/vault/raw/areas/clearworks/org-brain/clients/alloi.md:
+--- a//private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-env/vault/raw/areas/clearworks/org-brain/clients/alloi.md
++++ b//private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-env/vault/raw/areas/clearworks/org-brain/clients/alloi.md
+@@ -154,6 +154,9 @@
+ - 2026-07-10 — Alloi Audit Discovery Interview #3: Architecture (73min, 7/10). 6 Alloi stakeholders (Marcos, Cindy Wu, Ivette, Joe/Joseph Chang, Molly + Josh). Themes: mornings lost to email/coordination pushing design to afternoons;…
+ - 2026-07-03 — Bassem Dawod (Alloi) accepted invite for 'Alloi Interview #4: Leadership' — Mon Jul 6, 2026 12–1pm PDT. Meeting confirmed.
+ - 2026-06-26 — Proposal: Alloi // AllSafe IT (6/26, 22min). AllSafe (Bones Ijeoma, Nathan Phinney) presented managed-IT/cybersecurity proposal to Marcos; Josh advising. Scope: full security audit + managed Cisco firewall + 24/7 monito…
++- 2026-09-13 — Re: Paid invoice AI-2026-4 - Alloi 10-hour IT block (email) [source: gmail:1a09962f1c0305d5]
++  - Summary: Evelyn Kamkari, Controller at Alloi Architecture, sends an email sign-off with contact details and no substantive content.
++  - Decisions: none
+ 
+ ## Open Items
+ 
+
+  task: none
+  escalation: none
+  digest preview: - CRM: crm:accounting-department (gmail:1a09962f1c0305d5) — Evelyn Kamkari, Controller at Alloi Architecture, sends an email sign-off with contact details and no substantive content. [simulated]
+  digest preview: - Page: raw/areas/clearworks/org-brain/clients/alloi.md (gmail:1a09962f1c0305d5) — Evelyn Kamkari, Controller at Alloi Architecture, sends an email sign-off with contact details and no substantive content. [simulated]
+=== source_ref=gmail:1a099288efd958cd thread_id=1a099288efd958cd ===
+From: Ruben Hassid <ruben@substack.com>
+Subject: Privacy.
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='ruben@substack.com'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a0990020fcd3fcb thread_id=1a0990020fcd3fcb ===
+From:  <billing@withmoxie.com>
+Subject: Thank You for Being A Subscriber
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='billing@withmoxie.com'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a098b582dd860f8 thread_id=1a098b582dd860f8 ===
+From: Virtuous Raise <info@raisedonors.com>
+Subject: Raise Report
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='info@raisedonors.com'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a098a6d7b39841d thread_id=1a098a6d7b39841d ===
+From: human touch project <scheduling@acuityscheduling.com>
+Subject: Appointment Reminder: 60 Minute Treatment is on Sunday, September 13, 2026 1:00pm (Madison Chandler)
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='scheduling@acuityscheduling.com'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a098a04a1370185 thread_id=1a098a04a1370185 ===
+From: human touch project <scheduling@acuityscheduling-mail.com>
+Subject: New Appointment: 60 Minute Treatment (Josh Weiss) on Sunday, September 13, 2026 1:00pm with Madison Chandler
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='scheduling@acuityscheduling-mail.com'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a0985c3009db309 thread_id=1a0985c3009db309 ===
+From: Josh Weiss <josh@clearworks.ai>
+Subject: Paid invoice AI-2026-4 - Alloi 10-hour IT block
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='josh@clearworks.ai'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a09838697d185df thread_id=1a0981cd68a90c6a ===
+From: Josh Weiss <josh@clearworks.ai>
+Subject: Re: Alloi
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='josh@clearworks.ai'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a0982d10842512d thread_id=1a0981cd68a90c6a ===
+From: Josh Weiss <josh@clearworks.ai>
+Subject: Re: Alloi
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='josh@clearworks.ai'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+=== source_ref=gmail:1a0981e7f661053d thread_id=1a0981e504dc1198 ===
+From: Josh Weiss <josh@clearworks.ai>
+Subject: content workflow
+outcome: ignored
+  resolution: slug='' kind='' method='' outcome='ignored' reason='no-known-entity' contact_id=None email='josh@clearworks.ai'
+  extraction: n/a
+  summary: n/a
+  item: none [quote: none]
+  CRM: none
+  page: none
+  task: none
+  escalation: none
+  digest preview: - none
+filed=2 escalated=0 ignored=32 skipped_terminal=0 cost_usd=0.1705

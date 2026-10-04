@@ -172,7 +172,11 @@ export async function runInboundPoll(
 
         if (!dryRun) {
           try {
-            claimTask(paths, taskId, 'human');
+            // G2r3-9: the deliberate human-synchronization claim. The
+            // human-exempt barrier refuses every unforced claim, by design —
+            // this caller is the documented exception, made explicit here
+            // rather than by exempting the claimant name globally.
+            claimTask(paths, taskId, 'human', { force: true });
             result.wrote_back += 1;
           } catch (error) {
             result.errors += 1;

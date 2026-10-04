@@ -91,3 +91,4 @@ orgs/clearworksai/skills/cxportal-import/**/__pycache__/
 leakage-fixture.json
 **/leakage-fixture.json
 *.leakage-fixture.json
+state/client-state/

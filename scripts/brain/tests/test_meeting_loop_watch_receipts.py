@@ -1,5 +1,8 @@
 """meeting_loop_watch must key 'filed' on the receipt, not on the envelope dir.
 
+Ported from main (8c956a0b / PR #389) onto this branch's SECTION-split
+meeting_loop_watch, so the eventual rebase keeps both behaviours.
+
 2026-09-14: the webhook worker fetched a transcript, then died at extract; the
 watch reported "all filed" because the envelope dir existed. A watcher that
 cannot tell fetched-and-abandoned from filed is the failure it exists to catch.
@@ -31,8 +34,10 @@ def _run(monkeypatch, tmp_path: Path, *, with_receipt: bool, capsys):
     ])
     monkeypatch.setattr(mlw, "_probe", lambda _u: "ok")
     monkeypatch.setattr(mlw, "_occurred", lambda _r: mlw.datetime.now(mlw.timezone.utc))
-    monkeypatch.setattr(sys, "argv", ["meeting_loop_watch.py", "--dry-run", "--days", "1"])
-    rc = mlw.main()
+    # the Gmail section is a separate concern here; point it at an empty dir
+    monkeypatch.setenv("CLIENT_STATE_DIR", str(tmp_path / "client-state"))
+    monkeypatch.setenv("CLIENT_STATE_VAULT", str(tmp_path / "client-vault"))
+    rc = mlw.main(["--dry-run", "--days", "1"])
     return rc, capsys.readouterr().out
 
 

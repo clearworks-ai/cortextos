@@ -1,0 +1,7 @@
+=== POSITIVE-CONTROL ===
+2026-09-15T21:08:23Z 75113 74928 cortextos bus create-task pc
+2026-09-15T21:08:23Z 75113 74928 TRAP: cortextos bus create-task pc
+2026-09-15T21:08:23Z 75123 74928 gws-trap gmail +draft x
+2026-09-15T21:08:23Z 75123 74928 TRAP: gws-trap gmail +draft x
+2026-09-15T21:08:23Z 75163 74928 claude-trap -p x
+2026-09-15T21:08:23Z 75163 74928 TRAP: claude-trap -p x

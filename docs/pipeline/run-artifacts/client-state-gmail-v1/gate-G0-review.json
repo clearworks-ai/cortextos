@@ -1,0 +1,9 @@
+{
+  "gate": "G0-review",
+  "kind": "deterministic",
+  "command": "node /Users/joshweiss/code/bones-dev-skills/goalify/scripts/verify-review-artifact.mjs --file /Users/joshweiss/code/cortextos-worktrees/client-state-gmail-v1/docs/pipeline/run-artifacts/client-state-gmail-v1/G0-review-opus.json --sha 8ac1ca58847cf0991c0ba3a114592921b2d7cede91257adcff0a02701f3c1bad && node /Users/joshweiss/code/bones-dev-skills/goalify/scripts/verify-review-artifact.mjs --file /Users/joshweiss/code/cortextos-worktrees/client-state-gmail-v1/docs/pipeline/run-artifacts/client-state-gmail-v1/G0-adjudication.json --sha 62ec29c51775a43d7530ee1cf413e84cf09bfefb8e27fd254e28a548627c381a",
+  "exit": 0,
+  "recorded_at": "2026-09-15T04:25:24.433Z",
+  "cwd": "/Users/joshweiss/code/cortextos-worktrees/client-state-gmail-v1",
+  "notes": "recorded by bonesify record-gate"
+}

@@ -1,0 +1,29 @@
+{
+  "second_run_claude_calls": 0,
+  "second_run_cost_delta_usd": 0.0,
+  "second_run_exit_code": 0,
+  "second_run_previews_count": 0,
+  "second_run_rows_added": 0,
+  "stale_discovering_claim_calls": 1,
+  "stale_discovering_run_exit_code": 2,
+  "stale_discovering_run_refuses": true,
+  "stale_refusal_reason": "stale-cleared",
+  "stale_then_next_acquire_claude_calls": 0,
+  "stale_then_next_acquire_exit_code": 0,
+  "stale_then_next_acquire_wins": true,
+  "third_run_exit_code": 2,
+  "third_run_lock_held_processed": false,
+  "third_run_lock_refusal": {
+    "detail": "/private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-env/state-efc90b57/claims",
+    "error": "lock-held",
+    "pid": 87083,
+    "reason": "already-claimed",
+    "refused_at": "2026-09-15T21:11:37.803415+00:00"
+  },
+  "third_run_lock_setup": {
+    "rc": 0,
+    "stderr": "",
+    "stdout": "Claimed client-state-gmail (won)"
+  },
+  "third_run_receipt_byte_identical": true
+}

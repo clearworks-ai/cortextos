@@ -1,0 +1,189 @@
+{
+  "reviewer": "codex + opus residuals \u2014 adjudicated by orchestrator at the 3-round cap (fixed-final-adjudication)",
+  "gate": "G0-adjudication",
+  "reviewed": {
+    "plan": "docs/pipeline/plans/2026-09-14-client-state-gmail-v1-build.md",
+    "plan_sha256": "62ec29c51775a43d7530ee1cf413e84cf09bfefb8e27fd254e28a548627c381a",
+    "branch_tip": "248d61de",
+    "basis": "G0b-codex-r3.json + G0-review-opus.json (round 3) open items"
+  },
+  "closure_evidence": {
+    "tree": "scratchpad/pc-tree (orchestrator-run)",
+    "pytest": "710 passed / 0 failed / 1 skipped",
+    "mutation_check": "68/68 rows green rc=0",
+    "registry_test": "pass",
+    "plan_materialises_to_tree": true,
+    "harness": "run-artifacts/client-state-gmail-v1/verify-materialised.sh \u2192 orch-verify-final.json"
+  },
+  "findings": [
+    {
+      "id": "G0B3-1",
+      "severity": "Critical",
+      "ruling_cluster": "A",
+      "disposition": "fixed-final-adjudication",
+      "evidence": "test_partial_message_failure_persists_completed_writes_and_never_replays_them; test_is_terminal_false_for_a_partial_row_even_when_every_resolution_is_filed; test_writer_error_on_add_interaction_aborts_message_never_marks_filed; registry G-EFFECT-1, G-MERGE-2, G-MERGE-3",
+      "ruled_by": "orchestrator (main thread) at review-loop cap; ledger '## ADJUDICATION AT THE CAP'"
+    },
+    {
+      "id": "G0B-11",
+      "severity": "Critical",
+      "ruling_cluster": "A",
+      "disposition": "fixed-final-adjudication",
+      "evidence": "test_partial_message_failure_persists_completed_writes_and_never_replays_them; test_is_terminal_false_for_a_partial_row_even_when_every_resolution_is_filed; test_writer_error_on_add_interaction_aborts_message_never_marks_filed; registry G-EFFECT-1, G-MERGE-2, G-MERGE-3",
+      "ruled_by": "orchestrator (main thread) at review-loop cap; ledger '## ADJUDICATION AT THE CAP'"
+    },
+    {
+      "id": "G0B-3",
+      "severity": "Critical",
+      "ruling_cluster": "A",
+      "disposition": "fixed-final-adjudication",
+      "evidence": "test_partial_message_failure_persists_completed_writes_and_never_replays_them; test_is_terminal_false_for_a_partial_row_even_when_every_resolution_is_filed; test_writer_error_on_add_interaction_aborts_message_never_marks_filed; registry G-EFFECT-1, G-MERGE-2, G-MERGE-3",
+      "ruled_by": "orchestrator (main thread) at review-loop cap; ledger '## ADJUDICATION AT THE CAP'"
+    },
+    {
+      "id": "G0B3-2",
+      "severity": "Critical",
+      "ruling_cluster": "B",
+      "disposition": "fixed-final-adjudication",
+      "evidence": "test_budget_exit_persists_the_paid_extraction_so_the_retry_pays_nothing; test_budget_exceeded_persists_partial_cost_and_exits_12; registry G-BUDGET-2",
+      "ruled_by": "orchestrator (main thread) at review-loop cap; ledger '## ADJUDICATION AT THE CAP'"
+    },
+    {
+      "id": "G0B-6",
+      "severity": "Critical",
+      "ruling_cluster": "B",
+      "disposition": "fixed-final-adjudication",
+      "evidence": "test_budget_exit_persists_the_paid_extraction_so_the_retry_pays_nothing; test_budget_exceeded_persists_partial_cost_and_exits_12; registry G-BUDGET-2",
+      "ruled_by": "orchestrator (main thread) at review-loop cap; ledger '## ADJUDICATION AT THE CAP'"
+    },
+    {
+      "id": "G0B3-3",
+      "severity": "Critical",
+      "ruling_cluster": "C",
+      "disposition": "fixed-final-adjudication",
+      "evidence": "test_dry_run_revision_then_live_revision_keeps_the_supersede_marker; registry G-REV-1",
+      "ruled_by": "orchestrator (main thread) at review-loop cap; ledger '## ADJUDICATION AT THE CAP'"
+    },
+    {
+      "id": "G0B3-4",
+      "severity": "Critical",
+      "ruling_cluster": "D",
+      "disposition": "fixed-final-adjudication",
+      "evidence": "test_plan_message_preview_states_every_absent_section_explicitly; g4-check.sh --selftest (8 items + 8 item-negatives + 44 field-negatives; positives from g4-gen-fixture.py real producers)",
+      "ruled_by": "orchestrator (main thread) at review-loop cap; ledger '## ADJUDICATION AT THE CAP'"
+    },
+    {
+      "id": "G0B-2",
+      "severity": "Critical",
+      "ruling_cluster": "D",
+      "disposition": "fixed-final-adjudication",
+      "evidence": "test_plan_message_preview_states_every_absent_section_explicitly; g4-check.sh --selftest (8 items + 8 item-negatives + 44 field-negatives; positives from g4-gen-fixture.py real producers)",
+      "ruled_by": "orchestrator (main thread) at review-loop cap; ledger '## ADJUDICATION AT THE CAP'"
+    },
+    {
+      "id": "G0B3-5",
+      "severity": "Critical",
+      "ruling_cluster": "E",
+      "disposition": "fixed-final-adjudication",
+      "evidence": "g4-check.sh --selftest item 1 (g1-record bound to tree SHA + merge SHA) and item 8 (named artifact paths, one negative per artifact)",
+      "ruled_by": "orchestrator (main thread) at review-loop cap; ledger '## ADJUDICATION AT THE CAP'"
+    },
+    {
+      "id": "G0B-23",
+      "severity": "Important",
+      "ruling_cluster": "E",
+      "disposition": "fixed-final-adjudication",
+      "evidence": "g4-check.sh --selftest item 1 (g1-record bound to tree SHA + merge SHA) and item 8 (named artifact paths, one negative per artifact)",
+      "ruled_by": "orchestrator (main thread) at review-loop cap; ledger '## ADJUDICATION AT THE CAP'"
+    },
+    {
+      "id": "G0B2-14",
+      "severity": "Critical",
+      "ruling_cluster": "E",
+      "disposition": "fixed-final-adjudication",
+      "evidence": "g4-check.sh --selftest item 1 (g1-record bound to tree SHA + merge SHA) and item 8 (named artifact paths, one negative per artifact)",
+      "ruled_by": "orchestrator (main thread) at review-loop cap; ledger '## ADJUDICATION AT THE CAP'"
+    },
+    {
+      "id": "G0B3-6",
+      "severity": "Critical",
+      "ruling_cluster": "F",
+      "disposition": "fixed-final-adjudication",
+      "evidence": "test_heartbeat_touches_through_a_long_sweep_and_a_long_extraction; test_heartbeat_stops_the_run_the_moment_the_lock_disappears; registry G-LOCK-8",
+      "ruled_by": "orchestrator (main thread) at review-loop cap; ledger '## ADJUDICATION AT THE CAP'"
+    },
+    {
+      "id": "G0B3-7",
+      "severity": "Critical",
+      "ruling_cluster": "G",
+      "disposition": "fixed-final-adjudication",
+      "evidence": "test_missing_or_malformed_inputs_exit_2_with_the_cause",
+      "ruled_by": "orchestrator (main thread) at review-loop cap; ledger '## ADJUDICATION AT THE CAP'"
+    },
+    {
+      "id": "G0B3-8",
+      "severity": "Critical",
+      "ruling_cluster": "H",
+      "disposition": "fixed-final-adjudication",
+      "evidence": "test_write_interaction_rejects_record_for_a_different_contact; test_write_interaction_rejects_json_that_is_not_an_interaction_record; registry G-WRITER-2",
+      "ruled_by": "orchestrator (main thread) at review-loop cap; ledger '## ADJUDICATION AT THE CAP'"
+    },
+    {
+      "id": "G0B3-9",
+      "severity": "Important",
+      "ruling_cluster": "I",
+      "disposition": "fixed-final-adjudication",
+      "evidence": "mutation-check.sh restore-failure selftest (EXIT handler exits non-zero on failed restore)",
+      "ruled_by": "orchestrator (main thread) at review-loop cap; ledger '## ADJUDICATION AT THE CAP'"
+    },
+    {
+      "id": "G0B3-10",
+      "severity": "Important",
+      "ruling_cluster": "J",
+      "disposition": "fixed-final-adjudication",
+      "evidence": "Task 1 FakeRunner block == final consume-only-if-followed version (plan-sync); Task 7 restates identically; through-Task-1/2 gates re-run by the replacement integrator",
+      "ruled_by": "orchestrator (main thread) at review-loop cap; ledger '## ADJUDICATION AT THE CAP'"
+    },
+    {
+      "id": "G0B3-11",
+      "severity": "Important",
+      "ruling_cluster": "K",
+      "disposition": "fixed-final-adjudication",
+      "evidence": "test_release_failure_exits_3_with_its_own_diagnostic_and_keeps_last_success_at; test_lease_release_nonzero_rc_raises_lease_release_error; test_lease_release_timeout_raises_lease_release_error; registry G-LOCK-7",
+      "ruled_by": "orchestrator (main thread) at review-loop cap; ledger '## ADJUDICATION AT THE CAP'"
+    },
+    {
+      "id": "G0A3-1",
+      "severity": "Important",
+      "ruling_cluster": "FILEMAP",
+      "disposition": "fixed-final-adjudication",
+      "evidence": "plan-skeleton.md File map synced by the integrator (parts 01/06/09 + skeleton at 21:13-21:16Z); candidate plan materialises to exactly the green tree",
+      "ruled_by": "orchestrator (main thread) at review-loop cap; ledger '## ADJUDICATION AT THE CAP'"
+    },
+    {
+      "id": "G0A-16",
+      "severity": "Important",
+      "ruling_cluster": "FILEMAP",
+      "disposition": "fixed-final-adjudication",
+      "evidence": "plan-skeleton.md File map synced by the integrator (parts 01/06/09 + skeleton at 21:13-21:16Z); candidate plan materialises to exactly the green tree",
+      "ruled_by": "orchestrator (main thread) at review-loop cap; ledger '## ADJUDICATION AT THE CAP'"
+    },
+    {
+      "id": "G0A2-11",
+      "severity": "Important",
+      "ruling_cluster": "FILEMAP",
+      "disposition": "fixed-final-adjudication",
+      "evidence": "plan-skeleton.md File map synced by the integrator (parts 01/06/09 + skeleton at 21:13-21:16Z); candidate plan materialises to exactly the green tree",
+      "ruled_by": "orchestrator (main thread) at review-loop cap; ledger '## ADJUDICATION AT THE CAP'"
+    },
+    {
+      "id": "G0A3-2",
+      "severity": "Important",
+      "ruling_cluster": "CITE",
+      "disposition": "fixed-final-adjudication",
+      "evidence": "G0-r3-integration record citation corrected to the existing node test_ledger_escalated_for_does_not_suppress_the_live_telegram",
+      "ruled_by": "orchestrator (main thread) at review-loop cap; ledger '## ADJUDICATION AT THE CAP'"
+    }
+  ],
+  "at": "2026-09-15T04:24:00Z"
+}

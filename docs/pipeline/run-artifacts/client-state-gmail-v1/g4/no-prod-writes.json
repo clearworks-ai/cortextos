@@ -1,0 +1,33 @@
+{
+  "vault_porcelain": "",
+  "vault_tree_diff": "",
+  "crm": {
+    "contacts_json": {
+      "sha_before": "d058cc9bad6e7f22ea56f88ed3166f33be3019f1f0eaa58e07d73863ea3c0748",
+      "sha_after": "d058cc9bad6e7f22ea56f88ed3166f33be3019f1f0eaa58e07d73863ea3c0748"
+    },
+    "interactions_jsonl": {
+      "sha_before": "d8f175063eda7eaab5a833d5c3a2401993867f78c186ecd8dcb4e8b31a5ead7b",
+      "sha_after": "d8f175063eda7eaab5a833d5c3a2401993867f78c186ecd8dcb4e8b31a5ead7b"
+    }
+  },
+  "shim_forbidden_verbs": [],
+  "shim_event_dedup_calls": 0,
+  "gws_argv_verbs": [
+    "+read",
+    "+triage"
+  ],
+  "gws_argv_verb_counts": {
+    "+triage": 4,
+    "+read": 110
+  },
+  "shim_verbs": {
+    "cortextos bus meeting-brief-claim": 1,
+    "cortextos bus list-tasks": 20,
+    "cortextos bus meeting-brief-release": 1
+  },
+  "vault_copy": "/private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-env/vault",
+  "crm_copy": "/private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-env/crm-g4",
+  "state_dir": "/private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-env/state-efc90b57",
+  "note": "copies only; production vault/CRM untouched (porcelain + recursive tree diff + sha pairs)"
+}

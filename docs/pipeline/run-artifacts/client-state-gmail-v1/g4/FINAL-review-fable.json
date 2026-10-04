@@ -1,0 +1,133 @@
+{
+  "reviewer": "claude-fable-5-1",
+  "model_requested": "fable",
+  "gate": "FINAL-review",
+  "round": 3,
+  "scope": "scoped re-verification of the round-2 corrections (F-5, F-6) on the fixed tree, including anything they introduced; F-1..F-4 dispositions carried from round 2",
+  "reviewed": {
+    "range": "600e05f3..efc90b570123b63347323917219b0d84b00c2d24",
+    "sha": "efc90b570123b63347323917219b0d84b00c2d24",
+    "spec": "/Users/joshweiss/code/cortextos/state/specs/2026-09-14-client-state-gmail-v1-spec.md",
+    "artifacts": [
+      "<scratchpad>/g4-tree-efc90b57: git diff 9fc208f0..efc90b57 -- scripts/brain (client_state_digest.py:304-318, client_state_gmail.py:452-471 and :497, tests)",
+      "<scratchpad>/g4-tree-efc90b57/scripts/brain/tests/test_client_state_guards.py rows G-DIG-5 (:202-206) and G-ESC-5 (:207-211); both seds applied with `sed -E` against the tree files and shown to mutate (digest.py:308, gmail.py:455)",
+      "<scratchpad>/g4-tree-efc90b57/scripts/brain/tests/test_client_state_digest.py:614 and test_client_state_gmail.py:2226 (the two pinning tests named in the ruling exist)",
+      "<scratchpad>/g4-tree-efc90b57/scripts/brain/client_state_gmail.py:367-403 (only-escalated messages take the `not pending` branch and never reach the freeze branch)",
+      "<scratchpad>/g4-tree-efc90b57/docs/pipeline/run-artifacts/client-state-gmail-v1/g4-check.sh:417 (item-6 digest regex is an any-of; the new '- extraction frozen' line is neither required nor rejected)",
+      "<scratchpad>/final-review/probe-r3/repro_r3.py (my own probes A, H, BUD, ESC, DRY on the efc90b57 tree; outputs quoted in claims_verified)"
+    ]
+  },
+  "claims_verified": [
+    {
+      "claim": "F-5 fix: the digest keeps reporting a still-frozen identity from the receipt on later days, the OK line cannot collapse, and the day-of-freeze shows exactly ONE frozen line",
+      "how": "probe A on g4-tree-efc90b57: run1 freeze -> receipt.extraction_failures[0].frozen == True (the FIRST, same-run freeze entry now carries the flag); digest 1 min later: 1 frozen line (the row-derived 'extraction failed twice - manual re-run: gmail:m1 ... --retry-frozen', receipt line deduped); sweeps 2-3: 0 claude, 0 list-tasks, rows 1 -> 1, receipt entry frozen True each time; digest +2 days: 1 line '- extraction frozen - manual re-run: gmail:m1 (...) - client_state_gmail.py --retry-frozen', OK line NOT emitted; after --retry-frozen + good result: receipt failures [] (cleared by the success receipt). client_state_digest.py:308-318 dedupes on 'manual re-run: <ref>'",
+      "result": "holds"
+    },
+    {
+      "claim": "F-6 fix: an ambiguous counterparty on a frozen message is not persisted as delivered and is paged exactly once by the run that gets past extraction",
+      "how": "probe H (sender marcos@acme.org page-domain + cc amb@acme.org CRM company Alloy -> ambiguous, two rejected outputs): run1 sends 0, row resolutions [('acme','partial'), ('','partial')] (no persisted 'escalated'); run2 (F-2 skip) sends 0, rows 1; --retry-frozen + good result: sends 1, filed 1, row [('acme','filed'), ('','escalated')]; run4: sends 0, no new row (signature unchanged). esc_state['already'] stays False across the frozen sweeps because escalated_for() finds no persisted 'escalated' (client_state_gmail.py:452-455 demotes before the row)",
+      "result": "holds"
+    },
+    {
+      "claim": "F-6 budget-row path: BudgetExceeded persists a demoted row with the paid extraction; the next run pages once without a new LLM call",
+      "how": "probe BUD (max_usd 0.001, ambiguous cc): run1 exit 12, sends 0, row [('acme','partial'), ('','partial')], extraction cached True; run2 (max_usd 2): 0 claude calls, sends 1, filed 1; run3: sends 0. client_state_gmail.py:497 demotes before the G-BUDGET-2 row",
+      "result": "holds"
+    },
+    {
+      "claim": "A message with ONLY escalated resolutions never reaches the freeze branch (so the demotion cannot suppress a plain escalation)",
+      "how": "client_state_gmail.py:367-403 (`if not pending:` sends and returns before extraction); probe ESC (contact marcos@acme.org company Alloy, no fileable sibling): run1 0 claude calls, sends 1, row [('','escalated')]; run2 sends 0, rows 1",
+      "result": "holds"
+    },
+    {
+      "claim": "Dry-run interplay: a simulated frozen row keeps 'escalated' (delivered=True in dry-run) and a later LIVE --retry-frozen still pages once",
+      "how": "probe DRY: dry-run freeze -> sends 0, row [('acme','partial'), ('','escalated')] simulated True; live retry-frozen + good result -> sends 1, filed 1 (escalated_for skips simulated rows, observation_ledger.py)",
+      "result": "holds"
+    },
+    {
+      "claim": "Both new guards are registered with mutation seds that actually apply under `sed -E`",
+      "how": "G-DIG-5 sed mutates client_state_digest.py:308 to `for failure in []:`; G-ESC-5 sed mutates client_state_gmail.py:455 to `pass`; diffs shown against the tree files (read-only, stdout only)",
+      "result": "holds"
+    }
+  ],
+  "findings": [
+    {
+      "id": "F-1",
+      "severity": "Critical",
+      "title": "A claude transport/credit failure (rc != 0, or a runner timeout) was consumed as a 'rejected output': message frozen, sweep reported SUCCESS, outage stranded the window",
+      "file": "scripts/brain/extract_email.py:84-99,276-289; scripts/brain/client_state_gmail.py:480-485; scripts/brain/observation_ledger.py:327-340",
+      "evidence": "Fixed in e0a60eb5 / 2c3ab594 (ExtractionTransportError, unstamp + re-raise into the exit-3 path, --retry-frozen); re-verified in round 2 by probes B, B2, E, E2 (exit 3, receipt.error, no attempt consumed, next good sweep files) and pinned by test_a_transport_failure_is_run_fatal_and_consumes_no_attempt + G-EXT-7. Unchanged by the round-3 diff (the freeze branch edit at :452-471 does not touch the transport arm).",
+      "spec_ref": "FR-002, FR-001/FR-005 (G2r3-7/LIVE-1), goal STANDING RULES 'Fail-closed halts persist the cause'",
+      "recommended_fix": "(applied)",
+      "disposition": "fixed-and-reverified"
+    },
+    {
+      "id": "F-2",
+      "severity": "Critical",
+      "title": "A frozen message was re-processed on every sweep: one new frozen ledger row, one duplicate digest line and two bus reads per 10-minute tick",
+      "file": "scripts/brain/client_state_gmail.py:411-424; scripts/brain/observation_ledger.py:133-143",
+      "evidence": "Fixed in e0a60eb5 / 2c3ab594 (frozen-identity short-circuit before enumeration, receipt carries the frozen set); re-verified round 2 (probe A rows 1 -> 1 -> 1; F/G proceed on a new digest or widened slugs) and again round 3 on efc90b57 (probe A sweeps 2-3: 0 claude, 0 list-tasks, rows 1). Pinned by test_a_frozen_message_writes_nothing_and_enumerates_nothing_on_later_sweeps + G-EXT-8 (sed escaped at 9fc208f0).",
+      "spec_ref": "FR-001 ('re-check changes nothing -> write nothing'), FR-009, FR-008",
+      "recommended_fix": "(applied)",
+      "disposition": "fixed-and-reverified"
+    },
+    {
+      "id": "F-3",
+      "severity": "Important",
+      "title": "src/bus/multica/poll.ts is modified by this release but was outside the R1 FR-010 allowlist as written",
+      "file": "src/bus/multica/poll.ts:175-179; docs/pipeline/goals/2026-09-14-client-state-gmail-v1-build-goal.md:390-397",
+      "evidence": "Ruling confirmed-code-kept: the goal's FR-010 allowlist bullet carries 'Amended 2026-09-15 (G2 round-3 ruling G2r3-9, recorded here per FINAL F-3): also src/bus/multica/poll.ts ...' (lines 392-396), committed 1fc94d2a on feature/client-state-gmail-v1 (verified round 2: porcelain clean, git log -1 on the file). Code unchanged and tested ('lets Multica's deliberate { force: true } claim through').",
+      "spec_ref": "FR-010 (R1) as amended by the recorded G2r3-9 ruling",
+      "recommended_fix": "none further; keep the amended bullet in the evidence PR",
+      "disposition": "confirmed-code-kept"
+    },
+    {
+      "id": "F-4",
+      "severity": "Important",
+      "title": "FR-006's dedup assumption (same source_ref + same contact_id as the existing comms-backfill writer) is false for at least 2 of the 10 live-filed senders; the 7-day parallel run would double interaction rows",
+      "file": "scripts/brain/client_state_gmail.py:594-647; docs/pipeline/run-artifacts/client-state-gmail-v1/coverage-diff.py",
+      "evidence": "Unchanged since round 1 (production interactions.jsonl holds 'dt'/'mbermudez' rows for gmail ids the dry-run files under 'douglas-teiger'/'marcela-bermudez-mbermudez-lmdarchitecture-com'). No R1 production write is affected.",
+      "spec_ref": "FR-006 (dedup key source_ref+contact_id; SUBSUME gated on the 7-day coverage diff)",
+      "recommended_fix": "Watch item for the ACTIVATE goal. Verification trigger: coverage-diff.py gains a contact-id-divergence class (same gmail: source_ref present from both writers under different contact ids) with a green fixture test, AND the duplicate-contact merge (dt vs douglas-teiger, mbermudez vs marcela-bermudez-mbermudez-lmdarchitecture-com) is recorded as an activation precondition satisfied before the CRM writer goes live. Until both hold, parallel-run row counts are not evidence of dedup.",
+      "disposition": "carried-as-watch-item"
+    },
+    {
+      "id": "F-5",
+      "severity": "Important",
+      "title": "The F-2 fix moved the frozen set onto the receipt but no digest reader consumed it: a still-frozen message vanished from the daily digest after 24h and the one-line OK was sent",
+      "file": "scripts/brain/client_state_digest.py:304-318; scripts/brain/client_state_gmail.py:469-471",
+      "evidence": "Fixed in 594327f2 / efc90b57: gmail_section reads receipt.extraction_failures entries with frozen: true and appends '- extraction frozen - manual re-run: <ref> (<last_error>) - client_state_gmail.py --retry-frozen', deduped on 'manual re-run: <ref>' against the row-derived line; the same-run freeze entry now carries frozen: True. Re-verified by probe A: day-of-freeze exactly 1 frozen line; +2 days 1 receipt-derived line and no OK collapse; cleared from the receipt after --retry-frozen succeeds. Pinned by test_gmail_section_keeps_reporting_a_frozen_identity_from_the_receipt + G-DIG-5 (sed bites under sed -E). The corrected code (the reviewer-prescribed line text and dedupe) was itself verified, not only the original symptom.",
+      "spec_ref": "FR-009, FR-001 (G2r3-7 'says so in the digest')",
+      "recommended_fix": "(applied)",
+      "disposition": "fixed-and-reverified"
+    },
+    {
+      "id": "F-6",
+      "severity": "Important",
+      "title": "The freeze branch persisted an UNDELIVERED 'escalated' outcome, so a multi-party message with an ambiguous counterparty and a frozen fileable sibling never escalated - and escalated_for() then treated it as delivered forever",
+      "file": "scripts/brain/client_state_gmail.py:452-455 (freeze branch), :497 (budget row)",
+      "evidence": "Fixed in 594327f2 / efc90b57: _demote_undelivered_escalations() runs before the frozen row and before the G-BUDGET-2 row. Re-verified by probe H (frozen: 0 sends, no persisted 'escalated'; --retry-frozen + good result: exactly 1 send; later sweep: 0 sends, no new row), probe BUD (budget row demoted; next run 1 send with 0 LLM calls; then 0), probe ESC (only-escalated message never reaches the branch; 1 send then silent) and probe DRY (dry-run keeps 'escalated' on the simulated row; the live retry still pages once). Pinned by test_an_ambiguous_counterparty_on_a_frozen_message_is_still_paged_once + G-ESC-5 (sed bites). Nothing the demotion touches changed esc_state['already'] semantics: it is derived from persisted 'escalated' outcomes only, which the demoted rows no longer carry.",
+      "spec_ref": "FR-003 (escalate exactly once), G-ESC-3 invariant",
+      "recommended_fix": "(applied)",
+      "disposition": "fixed-and-reverified"
+    }
+  ],
+  "locked_decision_rejections": [
+    {
+      "would_be_finding": "On the day a frozen message is recovered by --retry-frozen, the digest still shows the row-derived 'extraction failed twice - manual re-run' line for that ref next to its CRM/Page lines (probe A 'after recovery frozen lines: 1'), because the superseded frozen row is inside the 24h window",
+      "row": "not reportable (softer than Important) - severity rubric",
+      "why_rejected": "Same-day only; the receipt entry is already cleared and the filed lines for the same ref appear beside it, so nothing is hidden and it disappears the next day. Pre-existing row-based rendering, not introduced by the F-5/F-6 fix."
+    },
+    {
+      "would_be_finding": "The F-5 dedupe is a substring match on 'manual re-run: <ref>' (a ref that is a prefix of another ref would be suppressed)",
+      "row": "not reportable - Gmail message ids are fixed-length 16-hex, so no id is a prefix of another",
+      "why_rejected": "Unreachable with real ids; latent at most, and free to harden by matching '<ref> ' or '<ref>(' if the digest ever carries variable-length refs."
+    },
+    {
+      "would_be_finding": "While a message stays frozen, its ambiguous counterparty is not paged until a run gets past extraction (the F-2 skip returns before the escalation)",
+      "row": "ledger ruling F-6 ('demote it so the run that gets past extraction still pages')",
+      "why_rejected": "Implemented exactly as ruled; the alternative (send before extraction) was offered in round 2 and not chosen. The frozen digest line names the manual step that unblocks both."
+    }
+  ],
+  "verdict": "findings",
+  "summary": "F-5 and F-6 are fixed and re-verified on efc90b57 by five probes: the digest now carries a still-frozen identity from the receipt on later days (one line on the day of the freeze, no OK collapse two days later, cleared after --retry-frozen succeeds); an ambiguous counterparty on a frozen or budget-halted message is demoted, never persisted as delivered, and paged exactly once by the run that gets past extraction; only-escalated messages and dry-run rows behave as before. Both new guards (G-DIG-5, G-ESC-5) are registered with seds that bite and their pinning tests exist. F-1/F-2 remain fixed-and-reverified (F-2 re-probed on this tree), F-3 confirmed-code-kept, F-4 carried as the activate-goal watch item. No new findings; zero open."
+}

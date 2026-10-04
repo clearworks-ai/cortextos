@@ -1,0 +1,9 @@
+{
+  "gate": "G4-matrix",
+  "kind": "deterministic",
+  "command": "bash /Users/joshweiss/code/cortextos-worktrees/client-state-gmail-v1/docs/pipeline/run-artifacts/client-state-gmail-v1/g4-check.sh efc90b570123b63347323917219b0d84b00c2d24",
+  "exit": 0,
+  "recorded_at": "2026-09-15T21:19:48.349Z",
+  "cwd": "/Users/joshweiss/code/cortextos-worktrees/client-state-gmail-v1",
+  "notes": "recorded by bonesify record-gate"
+}

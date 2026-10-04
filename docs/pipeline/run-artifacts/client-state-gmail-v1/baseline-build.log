@@ -1,0 +1,53 @@
+
+> cortextos@0.1.1 build
+> tsup
+
+CLI Building entry: {"cli":"src/cli/index.ts","daemon":"src/daemon/index.ts","pipeline/bypass-audit":"src/pipeline/bypass-audit.ts","pipeline/stage-emit":"src/pipeline/stage-emit.ts","pipeline/scoping-gate":"src/pipeline/scoping-gate.ts","pipeline/deal-context":"src/pipeline/deal-context.ts","pipeline/staging-verify/cli":"src/pipeline/staging-verify/cli.ts","pipeline/pr-target":"src/pipeline/pr-target.ts","hooks/hook-permission-telegram":"src/hooks/hook-permission-telegram.ts","hooks/hook-ask-telegram":"src/hooks/hook-ask-telegram.ts","hooks/hook-planmode-telegram":"src/hooks/hook-planmode-telegram.ts","hooks/hook-crash-alert":"src/hooks/hook-crash-alert.ts","hooks/hook-compact-telegram":"src/hooks/hook-compact-telegram.ts","hooks/hook-extract-facts":"src/hooks/hook-extract-facts.ts","hooks/hook-idle-flag":"src/hooks/hook-idle-flag.ts","hooks/hook-context-status":"src/hooks/hook-context-status.ts","hooks/hook-tool-result-router":"src/hooks/hook-tool-result-router.ts","hooks/hook-loop-detector":"src/hooks/hook-loop-detector.ts","hooks/hook-retrieval-enforcer":"src/hooks/hook-retrieval-enforcer.ts","pty/pty-host-entry":"src/pty/pty-host-entry.ts"}
+CLI Using tsconfig: tsconfig.json
+CLI tsup v8.5.1
+CLI Using tsup config: /Users/joshweiss/code/cortextos-worktrees/client-state-gmail-v1/tsup.config.ts
+CLI Target: node20
+CLI Cleaning output folder
+CJS Build start
+CJS dist/hooks/hook-ask-telegram.js            28.41 KB
+CJS dist/hooks/hook-planmode-telegram.js       32.46 KB
+CJS dist/hooks/hook-idle-flag.js               736.00 B
+CJS dist/hooks/hook-crash-alert.js             18.10 KB
+CJS dist/hooks/hook-compact-telegram.js        9.40 KB
+CJS dist/hooks/hook-loop-detector.js           11.69 KB
+CJS dist/hooks/hook-context-status.js          2.47 KB
+CJS dist/pty/pty-host-entry.js                 3.13 KB
+CJS dist/hooks/hook-retrieval-enforcer.js      17.18 KB
+CJS dist/hooks/hook-extract-facts.js           6.20 KB
+CJS dist/hooks/hook-tool-result-router.js      15.77 KB
+CJS dist/daemon.js                             702.08 KB
+CJS dist/pipeline/staging-verify/cli.js        63.72 KB
+CJS dist/cli.js                                923.81 KB
+CJS dist/pipeline/stage-emit.js                43.15 KB
+CJS dist/pipeline/bypass-audit.js              58.32 KB
+CJS dist/pipeline/scoping-gate.js              7.69 KB
+CJS dist/hooks/hook-permission-telegram.js     33.58 KB
+CJS dist/pipeline/deal-context.js              18.08 KB
+CJS dist/pipeline/pr-target.js                 7.72 KB
+CJS dist/hooks/hook-ask-telegram.js.map        67.93 KB
+CJS dist/hooks/hook-idle-flag.js.map           1.40 KB
+CJS dist/hooks/hook-planmode-telegram.js.map   72.03 KB
+CJS dist/hooks/hook-compact-telegram.js.map    41.09 KB
+CJS dist/hooks/hook-crash-alert.js.map         51.88 KB
+CJS dist/hooks/hook-loop-detector.js.map       41.14 KB
+CJS dist/hooks/hook-context-status.js.map      8.22 KB
+CJS dist/pty/pty-host-entry.js.map             8.93 KB
+CJS dist/hooks/hook-tool-result-router.js.map  59.25 KB
+CJS dist/hooks/hook-retrieval-enforcer.js.map  41.68 KB
+CJS dist/hooks/hook-extract-facts.js.map       22.98 KB
+CJS dist/pipeline/staging-verify/cli.js.map    124.03 KB
+CJS dist/pipeline/stage-emit.js.map            87.22 KB
+CJS dist/pipeline/bypass-audit.js.map          127.07 KB
+CJS dist/pipeline/scoping-gate.js.map          16.72 KB
+CJS dist/pipeline/pr-target.js.map             12.27 KB
+CJS dist/pipeline/deal-context.js.map          42.64 KB
+CJS dist/hooks/hook-permission-telegram.js.map 74.60 KB
+CJS dist/daemon.js.map                         1.71 MB
+CJS dist/cli.js.map                            2.22 MB
+CJS ⚡️ Build success in 133ms
+npm run build rc=0

@@ -1,0 +1,623 @@
+{
+  "reviewer": "claude-opus-5 (requested: opus; receipt: unverified-by-reviewer)",
+  "gate": "G0a",
+  "round": 2,
+  "reviewed": {
+    "plan": "docs/pipeline/plans/2026-09-14-client-state-gmail-v1-build.md",
+    "plan_sha256": "06cbb519b477d296c9b8c056e355798685099b9792743b3c0565dc459838873b",
+    "branch_tip": "eb72ca79 (reviewed tip; NOTE: the branch was rewritten to 248d61de DURING this review — same BASELINE commit message, reparented onto an amended goal commit cc58caf4. eb72ca79 is no longer an ancestor of HEAD. The PLAN file's sha256 is unchanged (06cbb519…), so every empirical result below stands; the GOAL changed, and the two findings G0A2-15/G0A2-16 record where the unchanged plan no longer satisfies the amended goal.)",
+    "spec_sections": "FR-001..FR-010, D-11, G-01..G-17"
+  },
+  "empirical": {
+    "throwaway": "/private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g0a-r2-throwaway (git worktree add --detach feat/client-state-gmail-v1-build @ eb72ca79, rc 0; npm ci --no-audit --no-fund rc 0, 143 packages; tasks 1->23 applied verbatim in order; torn down and confirmed absent from `git worktree list`)",
+    "tasks_applied": [
+      {
+        "task": 1,
+        "cmd": "python3 -m pytest scripts/brain/tests/test_observation_ledger.py -q -p no:cacheprovider",
+        "rc": 0,
+        "stated": "9 passed",
+        "actual": "not isolated — Task 3 restates the SAME test file (plan's own instruction), so Task 1's 9-test snapshot is superseded before it can be run standalone; Task 3's 16 passed verified instead"
+      },
+      {
+        "task": 2,
+        "cmd": "python3 -m pytest scripts/brain/tests/test_single_flight.py -q -p no:cacheprovider",
+        "rc": 0,
+        "stated": "7 passed, 1 skipped",
+        "actual": "7 passed, 1 skipped in 0.05s — MATCHES"
+      },
+      {
+        "task": 3,
+        "cmd": "python3 -m pytest scripts/brain/tests/test_observation_ledger.py -q -p no:cacheprovider",
+        "rc": 0,
+        "stated": "16 passed",
+        "actual": "16 passed in 0.07s — MATCHES"
+      },
+      {
+        "task": 4,
+        "cmd": "python3 -m pytest scripts/brain/tests/test_gmail_source.py -q -p no:cacheprovider",
+        "rc": 0,
+        "stated": "Step2 16 failed; Step4 16 passed",
+        "actual": "Step2 16 failed in 0.07s; Step4 16 passed in 0.01s — MATCHES"
+      },
+      {
+        "task": 5,
+        "cmd": "python3 -m pytest scripts/brain/tests/test_gmail_source.py -q -p no:cacheprovider",
+        "rc": 0,
+        "stated": "Step2 4 failed, 18 passed; Step4 22 passed",
+        "actual": "Step2 4 failed, 18 passed in 0.05s; Step4 22 passed in 0.02s — MATCHES; 4 fixtures generated (triage_3/triage_50/read_m001/read_hostile)"
+      },
+      {
+        "task": 6,
+        "cmd": "python3 -m pytest scripts/brain/tests/test_resolve_email.py -q -p no:cacheprovider",
+        "rc": 0,
+        "stated": "13 passed",
+        "actual": "13 passed in 0.07s — MATCHES"
+      },
+      {
+        "task": 7,
+        "cmd": "python3 -m pytest scripts/brain/tests/test_helpers_client_state.py -q -p no:cacheprovider",
+        "rc": 0,
+        "stated": "2 passed",
+        "actual": "2 passed in 0.02s — MATCHES"
+      },
+      {
+        "task": 8,
+        "cmd": "python3 -m pytest scripts/brain/tests/test_client_state_gmail_task8.py -q -p no:cacheprovider",
+        "rc": 1,
+        "stated": "6 passed",
+        "actual": "MISMATCH: 1 failed, 5 passed in 0.05s. test_backfill_query_composes_exclusion_and_day_sweep: assert 2 == (1+2) — sweep's day queries die on GmailSourceError rc=127 'FakeRunner: no response' because the shared FakeRunner CONSUMES its single recorded +triage response (see G0A2-1). Step 2 (collection error, module absent) matched."
+      },
+      {
+        "task": 9,
+        "cmd": "python3 -m pytest scripts/brain/tests/test_extract_email.py -q -p no:cacheprovider",
+        "rc": 0,
+        "stated": "12 passed",
+        "actual": "12 passed in 0.03s — MATCHES (Step2: 12 failed)"
+      },
+      {
+        "task": 10,
+        "cmd": "python3 -m pytest scripts/brain/tests/test_extract_email.py -q -p no:cacheprovider",
+        "rc": 0,
+        "stated": "19 passed",
+        "actual": "19 passed in 0.03s — MATCHES (Step2 -k selection: 7 failed, 12 deselected)"
+      },
+      {
+        "task": 11,
+        "cmd": "python3 -m pytest scripts/brain/tests/test_extract_email.py -q -p no:cacheprovider",
+        "rc": 0,
+        "stated": "23 passed",
+        "actual": "23 passed in 0.03s — MATCHES (Step2 -k selection: 3 failed, 1 passed)"
+      },
+      {
+        "task": 12,
+        "cmd": "python3 -m pytest scripts/brain/tests/test_client_state_writes.py -q -p no:cacheprovider",
+        "rc": 0,
+        "stated": "7 passed",
+        "actual": "7 passed in 0.01s — MATCHES (Step2 collection error)"
+      },
+      {
+        "task": 13,
+        "cmd": "python3 -m pytest scripts/brain/tests/test_writeback_email.py -q -p no:cacheprovider",
+        "rc": 0,
+        "stated": "10 passed",
+        "actual": "10 passed in 0.01s — MATCHES (Step2 collection error)"
+      },
+      {
+        "task": 14,
+        "cmd": "python3 -m pytest scripts/brain/tests/test_client_state_writes.py -q -p no:cacheprovider",
+        "rc": 0,
+        "stated": "18 passed",
+        "actual": "18 passed in 0.02s — MATCHES (Step2: 11 failed, 7 passed); import difflib confirmed at header line 6"
+      },
+      {
+        "task": 15,
+        "cmd": "python3 -m pytest scripts/brain/tests/test_client_state_projections.py scripts/brain/tests/test_client_state_gmail.py -q -p no:cacheprovider",
+        "rc": 1,
+        "stated": "21 passed (7 projections + 14 gmail)",
+        "actual": "MISMATCH: 1 failed, 20 passed in 0.08s. projections 7/7 pass; test_client_state_gmail 13/14 — test_two_known_contacts_same_page_one_history_two_crm_rows: assert 3 == 0 (WriterError, second add-interaction.py call gets FakeRunner rc=127 — G0A2-1). Step 2 (17 failed, 4 passed) matched the stated RED."
+      },
+      {
+        "task": 16,
+        "cmd": "npx vitest run tests/unit/bus/task-human-type.test.ts; npx vitest run tests/unit/cli/bus-create-task-type.test.ts; npx tsc --noEmit -p tsconfig.json",
+        "rc": 0,
+        "stated": "all green; tsc 0 errors",
+        "actual": "4 passed (1 file) + 3 passed (1 file); tsc rc 0 — MATCHES. All 3 OLD hunks matched src/bus/task.ts / src/cli/bus.ts exactly once."
+      },
+      {
+        "task": 17,
+        "cmd": "npx vitest run tests/unit/bus/task-human-type.test.ts; npx vitest run tests/unit/cli/bus-create-task-type.test.ts; npx tsc --noEmit -p tsconfig.json",
+        "rc": 0,
+        "stated": "all green; tsc 0 errors",
+        "actual": "7 passed (1 file) + 6 passed (1 file); tsc rc 0 — MATCHES. All 3 OLD hunks + both additive test-import edits matched exactly once."
+      },
+      {
+        "task": 18,
+        "cmd": "python3 -m pytest scripts/brain/tests/test_client_state_digest.py -q -p no:cacheprovider",
+        "rc": 0,
+        "stated": "8 passed",
+        "actual": "8 passed in 0.04s — MATCHES"
+      },
+      {
+        "task": 19,
+        "cmd": "python3 -m pytest scripts/brain/tests/test_client_state_digest.py -q -p no:cacheprovider",
+        "rc": 1,
+        "stated": "14 passed (8 Part A + 6 Part B)",
+        "actual": "MISMATCH: 1 failed, 13 passed in 0.06s. test_gmail_section_renders_each_change_line_type: client_state_writes.TaskEnumerationError 'list-tasks --class build rc=127: FakeRunner: no response' — list_open_tasks enumerates BOTH classes but the test records ONE list-tasks response (G0A2-1). NOTE the plan's own Step-4 note admits this count was derived against 'a LOCAL FakeRunner patch to helpers_client_state.py', i.e. NOT the Task 1 class that actually ships."
+      },
+      {
+        "task": 20,
+        "cmd": "python3 -m py_compile scripts/brain/meeting_loop_watch.py && python3 -m pytest scripts/brain/tests/test_meeting_loop_watch_sections.py -q -p no:cacheprovider",
+        "rc": 0,
+        "stated": "3 passed",
+        "actual": "3 passed in 0.04s — MATCHES; meeting_loop_watch.py 161->211 lines, 0 defs/constants removed"
+      },
+      {
+        "task": 21,
+        "cmd": "bash docs/pipeline/run-artifacts/client-state-gmail-v1/test-ops-shims.sh; bash .../g4-check.sh --selftest",
+        "rc": 0,
+        "stated": "ALL OPS-SHIM TESTS PASSED, rc=0",
+        "actual": "ALL OPS-SHIM TESTS PASSED (14 PASS rows incl. 'passing files are never counted as failing (G0B-22 fixed)' and 'g4-check printed 8 PASS rows'); g4-check.sh --selftest: fully-satisfying fixture passes all 8, and each of the 8 per-item negative fixtures flips ONLY its own row — MATCHES"
+      },
+      {
+        "task": 22,
+        "cmd": "python3 -m pytest scripts/brain/tests/test_coverage_diff.py -q -p no:cacheprovider; bash .../cron-precheck.sh --selftest",
+        "rc": 0,
+        "stated": "all tests pass rc=0; 'cron-precheck selftest: OK ...' rc=0",
+        "actual": "4 passed in 0.07s; 'cron-precheck selftest: OK (clean fixture -> 0, bad fixture -> 1)' — MATCHES"
+      },
+      {
+        "task": 23,
+        "cmd": "python3 -m pytest scripts/brain/tests/test_client_state_guards.py scripts/brain/tests/test_no_network.py::test_shim_positive_control -q -p no:cacheprovider",
+        "rc": 0,
+        "stated": "rc=0 for the two named node ids",
+        "actual": "5 passed in 0.04s — MATCHES for the stated gate. BUT the task's own other deliverables are red in the integrated tree: test_client_state_parity.py 2 failed / 4 passed; test_no_network.py::test_no_shim_traps_during_focused_suite failed; mutation-check.sh rc=1 (11/50 rows not fully green)."
+      }
+    ],
+    "pytest_total": {
+      "passed": 670,
+      "failed": 8,
+      "skipped": 1
+    },
+    "tsc_rc": 0,
+    "selftests": {
+      "test-ops-shims.sh": "rc 0 — 'ALL OPS-SHIM TESTS PASSED'; 14 PASS rows (cortextos trap + pass-through + logging, gws-trap, claude-trap, g1 --selftest non-vacuous, g4 fail-closed on empty dir, g4 passes a satisfying fixture, g4 printed 8 PASS rows)",
+      "g1-count-delta.sh --selftest": "rc 0 — 'extracted 18 failing files from the real log, exact match with BASELINE.json'; 'doctored log correctly rejected (non-vacuous)'; 'passing files are never counted as failing (G0B-22 fixed)'",
+      "g4-check.sh --selftest": "rc 0 — fully-satisfying fixture passes all 8 items, then each of 8 per-item negative fixtures flips ONLY its own row to FAIL",
+      "cron-precheck.sh --selftest": "rc 0 — 'cron-precheck selftest: OK (clean fixture -> 0, bad fixture -> 1)'",
+      "mutation-check.sh": "rc 1 — refuses to run without CLIENT_STATE_REPO_ROOT (verified); with it set, 'loaded 50 guard row(s)' and 39/50 fully green. NOT green: G-LEDGER-4 (registered test node no longer exists), G-RES-1 / G-INV-1 / G-DIG-1 / G-IDEMP-2 (mutation applied, named test STILL PASSES — re-confirmed by hand with __pycache__ cleared), G-EXT-2 (harness false negative from stale bytecode; bites when run by hand), G-SUPER-1 / G-MERGE-1 / G-QUERY-1 / G-CRM-2 / G-HIST-2 (control arm RED before mutation, all five from the FakeRunner defect). Tree restored exactly after the run.",
+      "test_client_state_guards.py::test_no_unregistered_guard": "PASS — every `# G-<ID>` marker in scripts/brain/*.py has a registry row and vice versa",
+      "test_no_network.py::test_shim_positive_control": "PASS — each of the 3 shims exits 1 and writes a TRAP line (traps are non-vacuous)",
+      "test_no_network.py::test_no_shim_traps_during_focused_suite": "FAIL — asserts subprocess rc==0 before reading the shim log, and the focused slice is red (7 failed, 118 passed). Boundary verified independently: full brain suite under all 3 shims produced 2 TRAP lines, both from pre-existing test_run_meeting_apply.py, zero from any client-state test.",
+      "vitest_count_delta": "with CLIENT_STATE_REPO_ROOT=<throwaway>: 305 files / 4046 tests vs BASELINE 303 / 4033 = +2 files, +13 tests (Tasks 16+17); failing file set IDENTICAL to BASELINE's 18. Without the env var the same command silently measured the REAL worktree and reported BASELINE verbatim — see G0A2-5."
+    },
+    "torn_down": true
+  },
+  "round1_dispositions": [
+    {
+      "id": "G0A-1",
+      "disposition": "still-open",
+      "evidence": "Task 15 was genuinely rebuilt against the real Tasks 1-14 (13 of 14 now pass, and the whole file is restated rather than appended), but its Step 4 is still NOT green: test_two_known_contacts_same_page_one_history_two_crm_rows fails with exit_code 3 (WriterError). Stated '21 passed', actual '1 failed, 20 passed'. Root cause is G0A2-1, not the Task-15 wiring itself."
+    },
+    {
+      "id": "G0A-2",
+      "disposition": "fixed-and-reverified",
+      "evidence": "email_extraction.schema.json commitments[].required = [text, owner_name, deadline_iso, quote, matches_open_item] with additionalProperties:false; client_state_writes.plan_tasks:181 reads commitment.get('owner_name'). test_client_state_writes.py 18 passed incl. the tier-1 0.75-boundary tests (which now actually run — difflib is in the header)."
+    },
+    {
+      "id": "G0A-3",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Dry-run now writes observations.jsonl AND run-receipt.json into --state-dir (client_state_gmail.py:303 'ledger.append(row) # persisted in BOTH dry-run and live', :356 write_receipt); verified by running run(dry_run=True) and reading both files back. Only create-task/send-telegram/CRM subprocesses/vault write stay behind the dry-run branch. NEW DEFECT introduced by this fix: see G0A2-2."
+    },
+    {
+      "id": "G0A-4",
+      "disposition": "fixed-and-reverified",
+      "evidence": "run() now has 'except extract_email.BudgetExceeded' -> record_failure('budget', cost_usd=...) + exit 12; 'except (GmailSourceError, ExtractionError, WriterError, TaskEnumerationError)' -> record_failure(str(exc)) + exit 3; 'except Exception' catch-all -> record_failure + exit 3; lock-held path calls record_failure(state_dir,'lock-held') before returning exit 2. test_client_state_gmail.py::test_writer_error_on_add_interaction_aborts_message_never_marks_filed, ::test_task_enumeration_error_exit_3, ::test_budget_exceeded_persists_partial_cost_and_exits_12 — 5 passed in the -k selection."
+    },
+    {
+      "id": "G0A-5",
+      "disposition": "fixed-and-reverified",
+      "evidence": "gmail_source.sweep(runner, days, today, extra_query=None) composes '<extra_query> <date ops> <EXCLUSION_QUERY>' into the full-window query AND every per-day query, and the 50-cap day-sweep runs on that path; client_state_gmail.py:145 calls sweep(..., extra_query=cfg.query). Pinned green by test_gmail_source.py::test_sweep_extra_query_present_in_full_and_every_day_query (part of the 22 passed). Task 8's own end-to-end assertion of the same behaviour is red for the unrelated FakeRunner reason (G0A2-1)."
+    },
+    {
+      "id": "G0A-6",
+      "disposition": "fixed-and-reverified",
+      "evidence": "grep for 'del ' in scripts/brain/client_state_gmail.py returns nothing — the `del cfg, runner, ledger` statement is gone from both the Task 8 and the Task 15 module."
+    },
+    {
+      "id": "G0A-7",
+      "disposition": "fixed-and-reverified",
+      "evidence": "client_state_projections.plan_escalation(msg, resolutions) -> str plus TELEGRAM_CHAT_ID='6690120787'; client_state_gmail.py:195 and :293 gate the live 'cortextos bus send-telegram' on `not ledger.escalated_for(source_ref, digest)` and preview the text in dry-run. The pytest.skip is gone: test_client_state_parity.py::test_escalation_text_parity_via_real_fake_runner_execution PASSED, and test_client_state_gmail.py::test_ambiguous_message_escalates_once_then_stays_silent PASSED."
+    },
+    {
+      "id": "G0A-8",
+      "disposition": "fixed-and-reverified",
+      "evidence": "scripts/brain/tests/conftest.py created (C2), inserting both scripts/brain and scripts/brain/tests on sys.path. test_helpers_client_state.py has ZERO sys.path.insert lines of its own and still collects and passes — proving the conftest is doing the work."
+    },
+    {
+      "id": "G0A-9",
+      "disposition": "fixed-and-reverified",
+      "evidence": "helpers_client_state.py header now imports json, shutil and `from pathlib import Path`; Task 7's append (make_vault/make_crm_dir) uses all three and test_helpers_client_state.py passes 2/2."
+    },
+    {
+      "id": "G0A-10",
+      "disposition": "still-open",
+      "evidence": "The two contracts were merged into ONE FakeRunner in Task 1, but the merged semantics is consume-on-match (`del self.responses[i]`), which contradicts C1's own wording ('first matching prefix wins, in insertion order') and cannot satisfy both sides of the consumer set. See G0A2-1 for the empirical both-directions proof."
+    },
+    {
+      "id": "G0A-11",
+      "disposition": "fixed-and-reverified",
+      "evidence": "`import difflib` is line 6 of test_client_state_writes.py's header (before any test); Task 14's tier-1 0.75-boundary tests execute and are part of the 18 passed."
+    },
+    {
+      "id": "G0A-12",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Task 15 restates test_client_state_gmail.py as a WHOLE new file (plan line 7095, 'restated whole, new file'), and Task 8's tests were moved into their own file test_client_state_gmail_task8.py — no append-a-whole-file-shaped-block remains. The fix introduced G0A2-3."
+    },
+    {
+      "id": "G0A-13",
+      "disposition": "fixed-and-reverified",
+      "evidence": "single_flight.Lease.touch wraps os.utime in try/except FileNotFoundError (G-LOCK-5) with the race documented; pinned by test_single_flight.py::test_lease_touch_missing_lock_file_does_not_raise, and the G-LOCK-5 mutation row is control_green/mutation_applied/mutated_red all true in g4/py-guards.json."
+    },
+    {
+      "id": "G0A-14",
+      "disposition": "fixed-and-reverified",
+      "evidence": "mutation-check.sh now: captures the registry into a temp file and checks the loader's real rc; treats zero rows as FATAL exit 1; requires CLIENT_STATE_REPO_ROOT (verified — running it without the var printed 'CLIENT_STATE_REPO_ROOT is required - refusing to sed-mutate an unspecified checkout'); and restores every target from an explicit backup under an EXIT trap, never `git checkout --`. Confirmed 'loaded 50 guard row(s)' and rc 1 on a non-green matrix. THE SAME hardcoded-default bug survives in g1-count-delta.sh — see G0A2-5."
+    },
+    {
+      "id": "G0A-15",
+      "disposition": "fixed-and-reverified",
+      "evidence": "test_client_state_guards.py::test_no_unregistered_guard PASSES against the delivered modules (5 passed in the Task 23 gate) — every `# G-<ID>` marker present in scripts/brain/*.py has a GUARD_REGISTRY row and vice versa. Registry holds 50 rows (48 py + 2 ts). Separately, 4 of those rows do not actually bite and 1 names a renamed test — G0A2-6 / G0A2-8."
+    },
+    {
+      "id": "G0A-16",
+      "disposition": "still-open",
+      "evidence": "Counts were re-derived for most tasks but three are still wrong against a real run: Task 8 stated 6 passed / actual 1 failed 5 passed; Task 15 stated 21 passed / actual 1 failed 20 passed; Task 19 stated 14 passed / actual 1 failed 13 passed. The File map also still omits two test files the tasks create: scripts/brain/tests/test_client_state_gmail_task8.py and scripts/brain/tests/test_client_state_projections.py (C12 required the File map to gain every test file)."
+    },
+    {
+      "id": "G0A-17",
+      "disposition": "fixed-and-reverified",
+      "evidence": "read_hostile.json now has exactly ONE definition — Task 5's `_write_read_hostile_fixture()` in gws `+read` payload shape. Task 11's hostile test (test_extract_email.py:483) does `parse_message(json.load(read_hostile.json))` and explicitly documents that it neither writes nor redefines the fixture. Both files' suites are green (22 and 23 passed)."
+    },
+    {
+      "id": "G0A-18",
+      "disposition": "fixed-and-reverified",
+      "evidence": "test_client_state_parity.py::test_upsert_contact_argv_parity_via_real_fake_runner_execution and ::test_add_interaction_argv_parity_via_real_fake_runner_execution both PASSED against Task 12's real client_state_writes.ensure_contact/write_interaction (which now build their argv from the shared client_state_projections functions). Two OTHER parity tests in the same file are red — G0A2-4."
+    },
+    {
+      "id": "G0A-19",
+      "disposition": "fixed-and-reverified",
+      "evidence": "client_state_writes.list_open_tasks uses `--open --class <cls> --format json --limit 200` for cls in ('human','build'); src/bus/task.ts:89 confirmed `export const LIST_TASKS_MAX_LIMIT = 200`. Argv pinned by test_client_state_gmail.py::test_list_open_tasks_argv_uses_open_flag_and_both_classes (passed)."
+    },
+    {
+      "id": "G0A-20",
+      "disposition": "fixed-and-reverified",
+      "evidence": "single_flight.acquire retries ONCE when stderr contains 'stale-cleared' (lines 70-80, G-LOCK-4), with the meeting-brief.ts:396-418 semantics quoted correctly; test_single_flight.py::test_acquire_retries_once_on_stale_cleared_stderr_and_wins passes; g4-check.sh item 5 asserts BOTH stale_lock_reclaimed_and_ran and stale_then_next_acquire_wins and its negative fixture flips only item 5."
+    },
+    {
+      "id": "G0B-1",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Same evidence as G0A-3: ledger rows, extraction cache (on the row), run receipt and argv.log (main() wires LoggingRunner(SubprocessRunner(), state_dir) at client_state_gmail.py:402-403) all persist in dry-run; only create-task / send-telegram / CRM subprocesses / vault page write are suppressed. Repeat-run inertness is pinned by test_second_identical_dry_run_zero_new_claude_calls (passed). New defect G0A2-2."
+    },
+    {
+      "id": "G0B-2",
+      "disposition": "fixed-and-reverified",
+      "evidence": "client_state_projections.plan_message_preview emits source_ref+thread_id, From name <email>, subject, each resolution's slug/kind/method/outcome/reason/contact_id/email, cached flag, cost_usd, model_receipt, summary, every decision/commitment/open_question with its [quote:] and matches_open_item, the CRM argv lines, the page unified diff, the task lines with dedup verdicts, and the escalation text. test_client_state_projections.py (7 passed) asserts that exact field list is present in the rendered block."
+    },
+    {
+      "id": "G0B-3",
+      "disposition": "still-open",
+      "evidence": "_merge_resolutions carries forward already-filed resolutions and the no-change re-check path exists (G-IDEMP-1/G-IDEMP-2 markers), and test_second_identical_dry_run_zero_new_claude_calls passes. BUT the 'unchanged recheck appends nothing' half is NOT pinned: mutating G-IDEMP-2's operative line to `if False:` leaves its registered test green (verified by hand with __pycache__ cleared). The only test that did assert append-nothing (test_second_identical_dry_run_appends_nothing) lives in the Task-8 file, which is red in the final tree (G0A2-3)."
+    },
+    {
+      "id": "G0B-4",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Same evidence as G0A-7 — plan_escalation text, live `cortextos bus send-telegram <TELEGRAM_CHAT_ID> <text>`, gated by ledger.escalated_for, previewed in dry-run, row outcome 'escalated'. test_ambiguous_message_escalates_once_then_stays_silent passed."
+    },
+    {
+      "id": "G0B-5",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Same evidence as G0A-5 — sweep gained extra_query; composed into the full-window AND every per-day query; 50-cap day-sweep applies on the --query path."
+    },
+    {
+      "id": "G0B-6",
+      "disposition": "fixed-and-reverified",
+      "evidence": "observation_ledger.record_failure(state_dir, error, **partial) starts from the PREVIOUS receipt so last_success_at survives (G-RECEIPT-1, whose mutation row is fully green in g4/py-guards.json); BudgetExceeded persists exc.extraction's cost before exit 12 (test_budget_exceeded_persists_partial_cost_and_exits_12 passed); lock-held writes error='lock-held' with last_success_at unchanged."
+    },
+    {
+      "id": "G0B-7",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Same evidence as G0A-2 — owner_name is the single field name through the schema, extract_email's validator, plan_tasks, the fixtures and Task 15's integration tests."
+    },
+    {
+      "id": "G0B-8",
+      "disposition": "fixed-and-reverified",
+      "evidence": "list_open_tasks enumerates BOTH --class human and --class build, raises TaskEnumerationError on either rc!=0 (never an empty authoritative list), and tier-1 dedup uses normalize_owner(task['assigned_to']) not a hardcoded 'josh'; the orchestrator joins ledger.open_email_tasks() ids against that live list (_open_email_titles_still_open). Pinned by test_list_open_tasks_argv_uses_open_flag_and_both_classes and test_task_enumeration_error_exit_3 (both passed)."
+    },
+    {
+      "id": "G0B-9",
+      "disposition": "still-open",
+      "evidence": "The code is correct — CRM rows are written per contact_id and History once per DISTINCT bound slug (`seen_slugs`) — but the ONLY test proving it, test_two_known_contacts_same_page_one_history_two_crm_rows, is RED (exit_code 3). The behaviour is therefore unverified, and the G-CRM-2 and G-HIST-2 mutation rows both record control_green:false for the same reason."
+    },
+    {
+      "id": "G0B-10",
+      "disposition": "fixed-and-reverified",
+      "evidence": "client_state_gmail.py auto-creates a contact ONLY when `is_sender` (resolution.email == From header, normalized), using msg.from_name/msg.from_email; recipients with no contact row keep contact_id None and still get a History entry. test_recipient_without_contact_never_auto_created passed."
+    },
+    {
+      "id": "G0B-11",
+      "disposition": "fixed-and-reverified",
+      "evidence": "write_interaction/create_task raise WriterError on rc!=0 or unparsable/empty stdout; list_open_tasks raises TaskEnumerationError; run() maps both to record_failure + exit 3 and NO row is appended, so a failed effect is never marked filed. test_writer_error_on_add_interaction_aborts_message_never_marks_filed passed."
+    },
+    {
+      "id": "G0B-12",
+      "disposition": "fixed-and-reverified",
+      "evidence": "email_extraction.schema.json is a real typed schema (required keys, nested primitive types, additionalProperties:false at every level, nullable deadline_iso/matches_open_item) and validate_email_extraction walks it before the single-line checks and the matches_open_item range check. 12 validator tests pass, including rejects_extra_nested_key and rejects_non_string_quote."
+    },
+    {
+      "id": "G0B-13",
+      "disposition": "fixed-and-reverified",
+      "evidence": "client_state_gmail._load_client_file_lock() loads orgs/clearworksai/agents/pa/scripts/meeting_writeback.py by path via importlib.util.spec_from_file_location (read-only, FR-010) and `with client_file_lock(page):` wraps read + apply_history + atomic write (and the dry-run diff read). Confirmed client_file_lock exists at meeting_writeback.py:52 and that meeting_writeback.py is NOT in git diff --name-only."
+    },
+    {
+      "id": "G0B-14",
+      "disposition": "fixed-and-reverified",
+      "evidence": "No auto-baseline anywhere: a new `write-baseline` subcommand exists (client_state_digest.py main), and gmail_section with a missing/corrupt baseline emits an ERROR line and never writes one (G-BASE-1, mutation row fully green). new_violations compares canonical records incl. the sorted page set. test_gmail_section_reports_missing_baseline_and_never_writes_one and ::test_gmail_section_reports_corrupt_baseline pass."
+    },
+    {
+      "id": "G0B-15",
+      "disposition": "still-open",
+      "evidence": "_superseded_task_ids does read the FULL history via a since-epoch sentinel and joins against list_open_tasks (G-SUPER-1 marked at both the function and its call site), but the ONE test that exercises it — test_gmail_section_renders_each_change_line_type — is RED (TaskEnumerationError), and G-SUPER-1's mutation row records control_green:false. The behaviour is unverified. The other four gmail_section tests pass FakeRunner({}), which would itself raise TaskEnumerationError if they ever reached this branch."
+    },
+    {
+      "id": "G0B-16",
+      "disposition": "fixed-and-reverified",
+      "evidence": "meeting_loop_watch.py now has fireflies_section() and gmail_section_lines() each wrapped in its own try/except Exception returning (lines, error); main() composes both. test_meeting_loop_watch_sections.py 3 passed, including test_main_dry_run_gmail_error_does_not_block_fireflies and the list_transcripts-raises case. Diff vs the original: 0 defs/constants removed, statements of the Fireflies body unchanged."
+    },
+    {
+      "id": "G0B-17",
+      "disposition": "still-open",
+      "evidence": "plan_digest_line does include the extraction summary on the CRM and Page lines and client_state_digest.gmail_section:226 calls it — but the rendering test (test_gmail_section_renders_each_change_line_type) is RED, and test_client_state_parity.py::test_digest_line_parity_pure_and_deterministic is RED too (its fixture row has writes=[], so plan_digest_line returns [] and the test's own 'must not be empty' assertion fires). Nothing green currently proves the digest displays a summary."
+    },
+    {
+      "id": "G0B-18",
+      "disposition": "still-open",
+      "evidence": "The `del cfg` half is fixed (no `del` statements remain). The other half of the prescribed fix — 'run Task 8's focused gate against its actual dependencies before proceeding' — was not done: the gate is 1 failed, 5 passed against the real siblings, and the plan still states '6 passed'."
+    },
+    {
+      "id": "G0B-19",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Task 15's test file is restated whole with all imports in the header; the lock fake scripts real meeting-brief-claim/release argv; fixtures go through gmail_source.parse_message's real payload shape and a real `claude -p` wrapper JSON ({'type':'result','subtype':'success','result': json.dumps(model), 'total_cost_usd':…}). The file compiles and 13 of 14 tests pass."
+    },
+    {
+      "id": "G0B-20",
+      "disposition": "fixed-and-reverified",
+      "evidence": "Task 5 constructs the shared FakeRunner with the documented list-of-(argv_prefix, CompletedProcess) pairs and reads `.calls` as bare argv lists; test_gmail_source.py 22 passed. (The remaining FakeRunner problem is semantic, not container-shaped — G0A2-1.)"
+    },
+    {
+      "id": "G0B-21",
+      "disposition": "fixed-and-reverified",
+      "evidence": "test_single_flight.py now has test_acquire_retries_once_on_stale_cleared_stderr_and_wins (stale-cleared refusal then a win) plus a live-bus variant test_acquire_live_bus_stale_lock_cleared_then_next_claim_wins (skipped without CLIENT_STATE_LIVE_BUS). 7 passed, 1 skipped."
+    },
+    {
+      "id": "G0B-22",
+      "disposition": "fixed-and-reverified",
+      "evidence": "g1-count-delta.sh parses only real vitest FAIL records (both ' FAIL  <path> [ <path> ]' and ' FAIL  <path> > <describe> > …' shapes), keeps every runner rc with no `|| true`, runs `npm run test:node` as a separate command, and its --selftest printed 'extracted 18 failing files from the real log, exact match with BASELINE.json', 'doctored log correctly rejected (non-vacuous)' and 'passing files are never counted as failing (G0B-22 fixed)'. Confirmed against the throwaway: vitest failing set == BASELINE's 18 files exactly."
+    },
+    {
+      "id": "G0B-23",
+      "disposition": "fixed-and-reverified",
+      "evidence": "g4-check.sh --selftest: the fully-satisfying fixture passes all 8 items, then each of 8 per-item negative fixtures flips ONLY its own row to FAIL while the other 7 stay PASS. Item 5 asserts zero previews / cost delta 0.00 / receipt unchanged / lock-held / stale-then-next-acquire-wins; item 3 asserts ledger+receipt+model_receipt; item 8 asserts named layers with existing evidence paths."
+    },
+    {
+      "id": "G0B-24",
+      "disposition": "still-open",
+      "evidence": "The pytest.skip is gone and 4 of 6 parity tests now compare a real preview against a real consumer — but 2 of the 6 are RED, including the History one, which is the single most important projection. test_history_entry_parity_byte_identical_via_real_consumer calls plan_history_entry(row, resolution, extraction, msg) — four positional args in the WRONG ORDER for the delivered (msg, extraction, source_ref, revision_of) signature, so it dies on AttributeError: 'ObservationRow' object has no attribute 'date_iso' and has never once exercised parity. See G0A2-4."
+    },
+    {
+      "id": "G0B-25",
+      "disposition": "fixed-and-reverified",
+      "evidence": "mutation-check.sh never calls `git checkout --` anywhere; every target is cp'd to a mktemp backup, registered for an EXIT-trap restore, and restored explicitly after each row. After the full 50-row run `git status --porcelain` showed exactly the four allowlisted modified files and nothing else — the uncommitted Task 16/17 guards survived intact."
+    },
+    {
+      "id": "G0B-26",
+      "disposition": "fixed-and-reverified",
+      "evidence": "The canonical Interfaces block now documents Resolution.outcome as '\"pending\" (transient resolver output, never persisted) | filed | escalated | ignored', carries the real extract_email signatures (extract(..., *, slugs, max_usd, spent_usd), cached_or_extract(prior_row, msg, context, slugs, runner, *, max_usd, spent_usd) -> tuple[dict,bool]), and Task 11 no longer imports client_state_writes.plan_tasks — routing is asserted in Task 15's tests against the real plan_tasks (grep for plan_tasks in test_extract_email.py returns only a docstring mention)."
+    }
+  ],
+  "findings": [
+    {
+      "id": "G0A2-1",
+      "severity": "Critical",
+      "title": "The C1 FakeRunner unification shipped consume-on-match semantics that no single consumer set can satisfy — 4 of the 8 pytest failures, and 5 red mutation control-arms, come from it",
+      "location": "Task 1 / scripts/brain/tests/helpers_client_state.py (`del self.responses[i]` in FakeRunner.run) vs Tasks 8, 15, 19 and Task 2",
+      "evidence": "C1 says 'first matching prefix wins, in insertion order'; the implementation DELETES the matched entry, so one record() serves exactly one call. Real failures: Task 8 test_backfill_query_composes_exclusion_and_day_sweep (1 +triage response recorded, sweep issues 1+days queries -> GmailSourceError rc=127 'FakeRunner: no response'); Task 15 test_two_known_contacts_same_page_one_history_two_crm_rows (1 add-interaction.py response, 2 contacts -> WriterError -> exit_code 3); Task 19 test_gmail_section_renders_each_change_line_type (1 list-tasks response, list_open_tasks enumerates human AND build -> TaskEnumerationError). Deleting the `del` line flips the suite to '3 failed, 642 passed' and breaks the OTHER side: Task 2 test_acquire_retries_once_on_stale_cleared_stderr_and_wins (the C11/G0A-20 fix) REQUIRES consumption so the retry gets the second response. Both directions run and recorded. Consequently mutation-check.sh records control_green:false for G-QUERY-1, G-CRM-2, G-HIST-2, G-MERGE-1 and G-SUPER-1 — five guards whose control arm never went green.",
+      "fix": "Pick ONE semantics in C1 and make every consumer match it. Cleanest: make matching NON-consuming by default (so a prefix stands for 'every call shaped like this') and add an explicit `record_once(prefix, ...)` / FIFO queue for the single genuine sequence case (Task 2's stale-cleared -> win). Then re-derive Tasks 8, 15 and 19's Step-4 counts from a real run.",
+      "disposition": "open"
+    },
+    {
+      "id": "G0A2-2",
+      "severity": "Critical",
+      "title": "A --dry-run writes ledger rows with outcome 'filed' and writes=[], so `is_terminal` makes the subsequent LIVE run a no-op — the dry-run silently cancels the release",
+      "location": "Task 15 / scripts/brain/client_state_gmail.py `_file_message` (`resolution.outcome = \"filed\"` on the dry-run path, then `ledger.append(row)` at :303) vs observation_ledger.Ledger.is_terminal",
+      "evidence": "Ran the orchestrator twice against one --state-dir with the same message: DRY-RUN -> exit 0, filed 1, ledger row resolutions [{'outcome':'filed'}] with writes=[]; LIVE-RUN -> exit 0, filed 0, skipped_terminal 1, ZERO add-interaction.py calls, and the vault page still contains no 'gmail:m1' marker. is_terminal is 'latest row, same digest, all outcomes == filed', which the dry-run row satisfies. The same mechanism silences FR-003: the dry-run row makes ledger.escalated_for(ref, digest) true, so the live run never sends the Telegram. This is a direct consequence of the G0A-3/G0B-1/C7 fix (persist in dry-run) not being paired with a persisted-outcome distinction. The goal's rollout runs dry-runs before live, and G4 items 3/5/6 are produced from dry-runs.",
+      "fix": "Persist the dry-run row WITHOUT terminal semantics: either stamp the row `dry_run: true` and have is_terminal/escalated_for ignore such rows, or keep the resolution outcome 'pending' in dry-run and only set 'filed' on the live write path. Add a test that does dry-run then live against the same --state-dir and asserts the live run still writes CRM + page + task.",
+      "disposition": "open"
+    },
+    {
+      "id": "G0A2-3",
+      "severity": "Critical",
+      "title": "scripts/brain/tests/test_client_state_gmail_task8.py is committed by Task 8 Step 5 and is permanently red once Task 15 replaces the module — 3 of the final suite's 8 failures",
+      "location": "Task 8 Step 5 (`git add … scripts/brain/tests/test_client_state_gmail_task8.py`) vs Task 15 Step 3 (whole-module replacement of scripts/brain/client_state_gmail.py)",
+      "evidence": "Against Task 15's final module the file reports 3 failed, 3 passed: test_dry_run_persists_ledger_and_receipt (exit_code 3), test_second_identical_dry_run_appends_nothing (FileNotFoundError on observations.jsonl), test_backfill_query_composes_exclusion_and_day_sweep. The plan itself says the divergence is 'expected … and is NOT part of this task's gate' — but the file is committed, so the divergence lands in the shipped tree. BASELINE pytest is 507 passed / 0 failed and the G1 rule is 'failing set ⊆ BASELINE failing set', so this alone fails G1.",
+      "fix": "Either do not commit the Task-8 test file (make it a scratch gate that Task 15's Step 5 `git rm`s), or fold its 6 assertions into Task 15's restated test_client_state_gmail.py so they are maintained against the module that actually ships. Whichever, the plan must state it in Task 8 Step 5 and Task 15 Step 5.",
+      "disposition": "open"
+    },
+    {
+      "id": "G0A2-4",
+      "severity": "Critical",
+      "title": "The parity test that replaced G0A-18/G0B-24's skips is itself broken: plan_history_entry is called with four positional args in the wrong order, and the digest-line fixture can never produce output",
+      "location": "Task 23 / scripts/brain/tests/test_client_state_parity.py::test_history_entry_parity_byte_identical_via_real_consumer and ::test_digest_line_parity_pure_and_deterministic",
+      "evidence": "(a) The test calls `csp.plan_history_entry(row, resolution, extraction, msg)` while the delivered signature is `plan_history_entry(msg, extraction, source_ref, revision_of)`. Arity matches, so there is no TypeError — it dies inside the function with \"AttributeError: 'ObservationRow' object has no attribute 'date_iso'\". FR-007's History projection has therefore never been parity-checked at all. (b) `_fixture_row()` builds an ObservationRow with no `writes` and no `suppressed`, so `plan_digest_line` returns [] and the test's own `assert lines_preview, 'plan_digest_line must not be empty for a filed resolution'` fires. Real output: 2 failed, 4 passed.",
+      "fix": "Call plan_history_entry(msg, extraction, source_ref, revision_of) and assert the rendered lines appear in what writeback_email.apply_history persists; give _fixture_row real `writes` (a 'crm:<id>', a page path, a 'task:<id>|<title>') and a `suppressed` entry so plan_digest_line has something to render. Then re-run the whole file as part of Task 23's Step 4 (the plan currently scopes Step 4 to two node ids that exclude this file).",
+      "disposition": "open"
+    },
+    {
+      "id": "G0A2-5",
+      "severity": "Critical",
+      "title": "g1-count-delta.sh — the G1 gate itself — silently falls back to a HARDCODED checkout path, so G1 can measure a tree that is not the one under test",
+      "location": "Task 21 / docs/pipeline/run-artifacts/client-state-gmail-v1/g1-count-delta.sh, `repo_root()` (plan lines 10925-10927)",
+      "evidence": "`repo_root()` returns $CLIENT_STATE_REPO_ROOT if set, else the literal '/Users/joshweiss/code/cortextos-worktrees/client-state-gmail-v1'. Running `g1-count-delta.sh capture` from the throwaway worktree (all 23 tasks applied, 8 pytest failures present) produced vitest 303 files / 4033 tests and pytest 507 passed / 0 failed — byte-identical to BASELINE.json — because npx vitest, npm run test:node and pytest all ran `( cd \"$root\" && … )` in the REAL worktree instead. Re-running with CLIENT_STATE_REPO_ROOT=$PWD gave the truth: 305 files / 4046 tests, pytest 670 passed / 8 failed. C11 made REPO_ROOT required for mutation-check.sh and left the identical default in the gate that decides G1 — a green G1 recorded this way proves nothing about the code being gated, which is exactly the G0A-14 failure mode.",
+      "fix": "Make CLIENT_STATE_REPO_ROOT required in g1-count-delta.sh the same way mutation-check.sh does (`${CLIENT_STATE_REPO_ROOT:?…}`), or derive it from `git rev-parse --show-toplevel` of the script's own location. Same for baseline_log_path()/baseline_json_path(), which are built on repo_root().",
+      "disposition": "open"
+    },
+    {
+      "id": "G0A2-6",
+      "severity": "Critical",
+      "title": "Four registered guards are not actually pinned — their named test stays GREEN with the guard mutated away, so mutation-check.sh exits 1 and G4 item 7 cannot pass",
+      "location": "Task 23 / scripts/brain/tests/test_client_state_guards.py GUARD_REGISTRY rows G-RES-1, G-INV-1, G-DIG-1, G-IDEMP-2 (+ their sites in resolve_email.py, client_state_digest.py, client_state_gmail.py)",
+      "evidence": "Each mutation was re-applied by hand with __pycache__ cleared and the registered node run alone: G-RES-1 `domain_to_slug.get(dom)` -> `.get(dom.split('.')[0])` / test_full_domain_never_bare_label_collision -> 1 passed; G-INV-1 `domain_pages.setdefault(dom, [])` -> `.setdefault(dom.split('.')[0], [])` / test_compute_invariants_does_not_confuse_different_tlds -> 1 passed; G-DIG-1 collapse condition -> `if True:` / test_gmail_section_collapses_to_one_line_when_nothing_happened -> 1 passed; G-IDEMP-2 signature check -> `if False:` / test_second_identical_dry_run_zero_new_claude_calls -> 1 passed. G-RES-1 and G-INV-1 are the FR-004 'full domain, never the bare label' invariant on both sides of the system; G-IDEMP-2 is FR-001's no-duplicate-append rule. mutation-check.sh over 50 rows exits 1 with 11 rows not fully green (these 4 + G-EXT-2's false negative + G-LEDGER-4's stale node + the 5 control-red rows from G0A2-1).",
+      "fix": "For each of the four, either strengthen the named test until the mutation makes it fail (e.g. G-RES-1 needs a fixture where two pages differ only past the first label, like example.com vs example.org, and G-IDEMP-2 needs an assertion on the ledger row COUNT after the second run), or repoint the registry row at a test that does bite. A guard whose mutation does not bite is worse than no guard.",
+      "disposition": "open"
+    },
+    {
+      "id": "G0A2-7",
+      "severity": "Important",
+      "title": "mutation-check.sh reports false 'mutated_red: false' for byte-length-preserving mutations because it never clears __pycache__ between the control and mutated arms",
+      "location": "Task 23 / docs/pipeline/run-artifacts/client-state-gmail-v1/mutation-check.sh, run_one_row()",
+      "evidence": "G-EXT-2's sed is `/CLAUDE_ARGV: list[str] = [/,+12 s/\"1\",/\"2\",/` — same byte length. The harness recorded control_green:true, mutation_applied:true, mutated_red:FALSE. Re-running the identical sed and the identical node by hand after `find scripts/brain -name __pycache__ -exec rm -rf {} +` gives '1 failed' — the guard DOES bite. CPython validates a .pyc against (source mtime in SECONDS, source size); the control run, the cp, the sed and the mutated run all complete inside one wall-clock second (the node takes 0.02s), so the stale bytecode is reused and the mutation is invisible. The failure direction is fail-closed (a real guard reported unproven), but it blocks G4 item 7 and it would equally hide a genuinely unproven guard behind noise.",
+      "fix": "Export PYTHONDONTWRITEBYTECODE=1 for the whole script, or `find \"$REPO_ROOT/scripts\" -name __pycache__ -type d -exec rm -rf {} +` immediately after each sed and each restore.",
+      "disposition": "open"
+    },
+    {
+      "id": "G0A2-8",
+      "severity": "Important",
+      "title": "GUARD_REGISTRY row G-LEDGER-4 names a test that C4's rename deleted, so its control arm runs zero tests",
+      "location": "Task 23 / scripts/brain/tests/test_client_state_guards.py:41-44",
+      "evidence": "The row points at scripts/brain/tests/test_observation_ledger.py::test_open_email_task_titles_parses_task_writes_entries. C4 replaced Ledger.open_email_task_titles() with open_email_tasks(), and the test was renamed with it. mutation-check.sh printed 'ERROR: not found: …::test_open_email_task_titles_parses_task_writes_entries (no match in any of [<Module test_observation_ledger.py>]) / no tests ran in 0.01s' and recorded control_green:false, mutation_applied:false. `grep -rn open_email_task_titles scripts/brain/` matches ONLY this registry row — it is the last stale reference to the pre-C4 name.",
+      "fix": "Repoint the row at the real node id in test_observation_ledger.py (the open_email_tasks parsing test) and re-run the row.",
+      "disposition": "open"
+    },
+    {
+      "id": "G0A2-9",
+      "severity": "Important",
+      "title": "The dry-run preview omits the CRM interaction argv whenever the sender's contact would be auto-created, so G4 item 3's 'CRM argv previews' is incomplete for exactly the new-contact case",
+      "location": "Task 15 / scripts/brain/client_state_gmail.py `_file_message`, the `elif cfg.dry_run:` branch of the contact auto-create block",
+      "evidence": "On the live path ensure_contact() returns a contact_id and the code goes on to plan_add_interaction_argv. On the dry-run path the branch appends only 'CRM: would create contact argv=…' and leaves contact_id None, so the `if contact_id is not None:` guard below is skipped and NO 'CRM row: contact=… argv=…' line is produced. A dry-run over a message from an unknown-but-domain-matched sender therefore previews the upsert but never the interaction the live run would write — a parity hole in the artifact G4 item 3 is read from.",
+      "fix": "In dry-run, synthesise a placeholder contact id (e.g. '<new:from_email>') after the upsert preview and still emit plan_add_interaction_argv with it, marking the id as pending; or preview the interaction argv with an explicit '<contact-id-from-upsert>' token so the shape is visible.",
+      "disposition": "open"
+    },
+    {
+      "id": "G0A2-10",
+      "severity": "Important",
+      "title": "plan_digest_line has no consumer in the orchestrator, so the dry-run produces no 'digest preview' — a C6 contract item that was not built",
+      "location": "wave2-contract C6 vs Task 15 / scripts/brain/client_state_gmail.py",
+      "evidence": "C6: 'plan_digest_line(row) -> list[str] … used by client_state_digest.gmail_section AND by the dry-run's \"digest preview\"'. `grep -n plan_digest_line scripts/brain/client_state_gmail.py` returns nothing (exit 1); the only real consumer is client_state_digest.py:26/226. plan_message_preview never calls it either. The dry-run's previews list therefore carries per-message blocks but no digest-shaped lines.",
+      "fix": "Either have run() append `plan_digest_line(row)` output to previews (and assert it in Task 15's dry-run test), or amend C6 and the Interfaces block to say gmail_section is the sole consumer — but do not leave the contract claiming a consumer that does not exist.",
+      "disposition": "open"
+    },
+    {
+      "id": "G0A2-11",
+      "severity": "Important",
+      "title": "The File map still omits two test files the tasks create, so G1's COUNT DELTA cannot name every new test file",
+      "location": "Plan / File map (lines 242-265) vs Task 8 Step 5 and Task 15 Step 5",
+      "evidence": "Applying all 23 tasks creates 39 new files. Cross-checking each basename against the File map section leaves scripts/brain/tests/test_client_state_gmail_task8.py and scripts/brain/tests/test_client_state_projections.py unlisted (the fixture .md pages under fixtures/client_state/vault_min/ are also outside the `fixtures/client_state/*.json` glob). C12 required the File map to gain every test file the tasks create; G0A-16's fix covered the counts but not the map.",
+      "fix": "Add both test files (and widen the fixtures row to cover vault_min/**) to the File map row for their slice.",
+      "disposition": "open"
+    },
+    {
+      "id": "G0A2-12",
+      "severity": "Important",
+      "title": "Three tasks still state Step-4 counts that a real run contradicts, and Task 19's own note discloses it was measured against a patched FakeRunner rather than the one that ships",
+      "location": "Tasks 8, 15, 19 Step 4",
+      "evidence": "Task 8 states '6 passed' — actual 1 failed, 5 passed. Task 15 states '21 passed' — actual 1 failed, 20 passed. Task 19 states '14 passed' — actual 1 failed, 13 passed. Task 19's Step-2 note says the number came from a sandbox with 'a LOCAL FakeRunner patch to helpers_client_state.py (Task 1 not yet landed)' and 'a LOCAL STUB client_state_projections.py' — i.e. the verification that produced the stated count did not use the delivered siblings, which is precisely how G0A2-1 survived the wave.",
+      "fix": "Re-derive all three counts from a run against the real siblings after G0A2-1 is fixed, and drop 'verified against a local stub/patch' as acceptable evidence — a Step-4 count is only meaningful against the modules the plan actually ships.",
+      "disposition": "open"
+    },
+    {
+      "id": "G0A2-13",
+      "severity": "Important",
+      "title": "test_no_network.py checks the subprocess exit code before it reads the shim log, so the external-write boundary proof is masked by any unrelated failure in the focused slice",
+      "location": "Task 23 / scripts/brain/tests/test_no_network.py::test_no_shim_traps_during_focused_suite:34",
+      "evidence": "`assert result.returncode == 0, …` precedes `trap_lines == []`. Today the focused slice is red (7 failed, 118 passed under `-k client_state or gmail or extract_email or single_flight`), so the test fails on rc and the zero-TRAP assertion — the actual boundary evidence — never executes. Verified the boundary independently by running the FULL brain suite under the three shims: exactly 2 TRAP lines, both from the pre-existing scripts/brain/tests/test_run_meeting_apply.py ('cortextos list-workers', 'cortextos bus list-tasks --status pending'), zero from any client-state test.",
+      "fix": "Read the shim log and assert trap_lines == [] FIRST, then assert the rc (or assert rc with the trap list included in the message). The boundary claim should not be contingent on an unrelated green suite.",
+      "disposition": "open"
+    },
+    {
+      "id": "G0A2-14",
+      "severity": "Important",
+      "title": "Task 22's test docstring still claims 'no conftest' — the one C2 correction that was not applied",
+      "location": "Task 22 / scripts/brain/tests/test_coverage_diff.py:4",
+      "evidence": "The docstring reads 'sys.path (no conftest), matching the other scripts/brain/tests files.' C2 states verbatim: 'Task 22's docstring claim \"no conftest\" is corrected.' scripts/brain/tests/conftest.py now exists and is what makes the bare `import helpers_client_state` work everywhere; a future reader trusting this docstring could delete it and break collection across the slice.",
+      "fix": "Update the docstring to reference scripts/brain/tests/conftest.py.",
+      "disposition": "open"
+    },
+    {
+      "id": "G0A2-15",
+      "severity": "Critical",
+      "title": "The PATH-trap shim traps `bus list-tasks`, which the amended goal now requires it to pass through — every live dry-run in the G4 protocol would die with TaskEnumerationError",
+      "location": "Task 21 / docs/pipeline/run-artifacts/client-state-gmail-v1/shims/cortextos (plan line 10858) vs goal (248d61de) STANDING RULES, amended 2026-09-14 after G0 round-2 finding G0B2-6",
+      "evidence": "The shim's pass-through test is `[ \"$1\" = \"bus\" ] && { [ \"$2\" = \"meeting-brief-claim\" ] || [ \"$2\" = \"meeting-brief-release\" ]; }` — everything else traps (exit 1 + a TRAP line). The amended goal now names THREE pass-through verbs: meeting-brief-claim, meeting-brief-release, and `bus list-tasks` ('a read; the orchestrator needs current open tasks for FR-008 dedup'). Empirically confirmed trapped: running the full brain suite under the shims logged 'TRAP: cortextos bus list-tasks --status pending'. Since client_state_writes.list_open_tasks raises TaskEnumerationError on rc != 0 (correctly — G0B-8/G0B-11), a dry-run executed under the shim as the goal's dry-run protocol requires would exit 3 on the first message with a resolvable counterparty, so G4 items 3, 4, 5 and 6 could never be produced. test-ops-shims.sh also has no pass-through case for list-tasks, so the plan's own selftest will keep asserting the wrong behaviour.",
+      "fix": "Add `[ \"${2:-}\" = \"list-tasks\" ]` to the shim's pass-through condition (still logging the argv), add a matching assertion to test-ops-shims.sh ('shims/cortextos passes through bus list-tasks' + 'logged the pass-through call'), and re-run the shim selftest.",
+      "disposition": "open"
+    },
+    {
+      "id": "G0A2-16",
+      "severity": "Critical",
+      "title": "A lock-held refusal writes error/failed_at INTO run-receipt.json, but the amended G4 item 5 requires the receipt byte-identical and the cause in a separate last-lock-refusal.json",
+      "location": "Task 3 / scripts/brain/observation_ledger.py record_failure + Task 15 / client_state_gmail.py:319 `record_failure(cfg.state_dir, \"lock-held\")`, and Task 21 / g4-check.sh check_5, vs goal (248d61de) G4 item 5, amended 2026-09-14 after G0 round-2 finding G0B2-7",
+      "evidence": "record_failure does `prev = read_receipt(state_dir) or {}; out = dict(prev); out.update(partial); out['error']=error; out['failed_at']=…; write_receipt(state_dir, out)` — it writes run-receipt.json. The amended goal now reads: 'a third run with the lock file held by a live PID exits 2 without processing, the run receipt (run-receipt.json) is byte-identical to before, and the refusal cause lands in a SEPARATE diagnostic file (last-lock-refusal.json) — fail-closed halts persist their cause without falsifying the success receipt.' `grep -c last-lock-refusal` over the plan returns 0: neither the ledger module, nor the orchestrator, nor g4-check.sh's check_5 (which asserts only third_run_lock_held_processed / stale_lock_reclaimed_and_ran / stale_then_next_acquire_wins) knows about it. As written the plan mutates the receipt on the lock-held path, so G4 item 5's 'receipt unchanged' assertion is unsatisfiable by construction. Note this also reverses part of round-1 G0A-4/G0B-6, which asked for the lock-held cause to be written to the receipt — the goal amendment supersedes that.",
+      "fix": "Split the lock-held path out of record_failure: write {error:'lock-held', refused_at, pid} to <state-dir>/last-lock-refusal.json and leave run-receipt.json untouched (client_state_gmail.py:319). Add the file to the State-dir layout line in the Interfaces block, assert byte-identity of run-receipt.json plus the presence of last-lock-refusal.json in g4-check.sh check_5, and add a negative fixture for it to g4-check.sh --selftest. Keep record_failure as-is for the gws/extraction/writer/budget/catch-all paths, which the goal still wants on the receipt.",
+      "disposition": "open"
+    }
+  ],
+  "claims_checked": [
+    "Plan sha256 06cbb519b477d296c9b8c056e355798685099b9792743b3c0565dc459838873b — recomputed with shasum -a 256 before reading: MATCHES.",
+    "EXCLUSION_QUERY is a verbatim substring of orgs/clearworksai/skills/comms-check-worker/SKILL.md line 26 (the clause from -category:promotions through -subject:\"auto-reply\", with is:unread newer_than:5h dropped) — checked by substring test against the real line: True.",
+    "src/bus/task.ts:89 `export const LIST_TASKS_MAX_LIMIT = 200` — confirmed; --limit 200 is correct, 500 would have been clamped.",
+    "extract_meeting.py:356-371 claude argv shape (-p --setting-sources \"\" --disallowedTools \"*\" --model sonnet --output-format json --max-turns 1) — confirmed verbatim.",
+    "src/bus/meeting-brief.ts:396-418 unlinks a stale lock and returns {claimed:false, reason:'stale-cleared'} WITHOUT reclaiming in-band — confirmed; single_flight's retry-once comment quotes it accurately.",
+    "writeback_render.render_page:133-137 returns old_text unchanged when the [source:] marker already exists — confirmed; justifies writeback_email as a new always-append sibling.",
+    "orgs/clearworksai/agents/pa/scripts/meeting_writeback.py:52 def client_file_lock — confirmed; loaded by path, and the file is NOT in git diff --name-only (FR-010 read-only reuse holds).",
+    "src/types/index.ts:54 `type: 'agent' | 'human'` on Task — confirmed; Task 16 needs no types change.",
+    "Tasks 16/17's OLD hunks: all six matched src/bus/task.ts / src/cli/bus.ts exactly once (count==1 each) — the plan's quoted pre-images are accurate at tip eb72ca79.",
+    "Task 20's 'Fireflies logic body: 0 lines differ' — extracted and diffed both bodies; the statement sequence is unchanged, the only deltas are the added try/except wrapper and the `return lines, None` / `return [], f\"{type(exc).__name__}: {exc}\"` shape, exactly as the plan states.",
+    "FR-010 allowlist: git diff --name-only HEAD after all 23 tasks = .gitignore (one added line `state/client-state/`), scripts/brain/meeting_loop_watch.py, src/bus/task.ts, src/cli/bus.ts. Nothing outside the allowlist. meeting_loop_watch.py grew 161->211 lines with zero defs/constants removed.",
+    "External-write boundary in dry-run: ledger row + run receipt ARE persisted to --state-dir (read back from disk); create-task, send-telegram, the CRM subprocesses and the vault page write ARE skipped (0 such calls recorded on a dry-run, page unchanged); main() wires LoggingRunner(SubprocessRunner(), state_dir) so argv.log is produced.",
+    "Escalate-once: verified end to end — plan_escalation text, TELEGRAM_CHAT_ID 6690120787, gated by ledger.escalated_for, live via `cortextos bus send-telegram`, parity test green, escalate-then-silent test green. (Caveat: a prior dry-run row satisfies escalated_for — see G0A2-2.)",
+    "Failure receipts: record_failure keeps the previous last_success_at (G-RECEIPT-1 mutation row fully green) and is called on lock-held, gws/extraction/writer/enumeration, budget and the catch-all.",
+    "WriterError never-filed: a failing add-interaction.py aborts the message with NO ledger row appended — test_writer_error_on_add_interaction_aborts_message_never_marks_filed green.",
+    "client_file_lock reuse: held across page read + apply_history + atomic write (and the dry-run read), imported by path, shared implementation unmodified.",
+    "Explicit write-baseline: `python3 scripts/brain/client_state_digest.py write-baseline` subcommand exists; gmail_section with missing/corrupt baseline emits an error line and never writes one (both tests green, G-BASE-1 mutation bites).",
+    "Per-section try/except in meeting_loop_watch: fireflies_section and gmail_section_lines each catch Exception independently; the list_transcripts-raises test is green.",
+    "g1-count-delta.sh --selftest, g4-check.sh --selftest (8 per-item negative fixtures), test-ops-shims.sh and cron-precheck.sh --selftest: all green, all recorded.",
+    "mutation-check.sh restore discipline: after 50 rows the tree held exactly the four allowlisted modified files; no `git checkout --` anywhere in the script.",
+    "conftest.py: test_helpers_client_state.py has ZERO sys.path.insert lines and still collects — the conftest is load-bearing and working.",
+    "Resolution 'pending': documented in the Interfaces block and in resolve_email.py's module docstring; resolve_email only ever emits pending/escalated/ignored, and _file_message is the only place 'filed' is set.",
+    "Ledger.open_email_tasks() returns [{id,title,source_ref}] parsed from 'task:<id>|<title>' writes entries; open_email_task_titles has exactly one surviving reference — the stale registry row in G0A2-8.",
+    "cached_or_extract signature (prior_row, msg, context, slugs, runner, *, max_usd, spent_usd) -> (dict, bool) matches the orchestrator's call site exactly.",
+    "client_state_projections exports (plan_history_entry, plan_upsert_contact_argv, plan_add_interaction_argv, plan_task_create_argv, plan_escalation, plan_digest_line, plan_message_preview, TELEGRAM_CHAT_ID) vs consumers: client_state_writes uses the two argv builders, client_state_digest imports plan_digest_line, client_state_gmail uses all the rest. plan_digest_line has no orchestrator consumer — G0A2-10.",
+    "vitest count delta against the throwaway with CLIENT_STATE_REPO_ROOT set: 305 files / 4046 tests (BASELINE 303 / 4033 => +2 files, +13 tests, exactly Tasks 16+17), and the failing file set is IDENTICAL to BASELINE's 18. The vitest half of G1 is clean.",
+    "Zero live transports from client-state tests: the whole brain suite under shims/cortextos + shims/gws-trap + shims/claude-trap produced 2 TRAP lines, both from the pre-existing test_run_meeting_apply.py (outside this diff), and none from any file this plan creates.",
+    "Goal amendment check: re-read the goal at the new tip 248d61de after the branch was rewritten mid-review. Two STANDING-RULES/G4 amendments landed (shim list-tasks pass-through; lock-held receipt byte-identity + last-lock-refusal.json) that the unchanged plan does not satisfy — filed as G0A2-15 and G0A2-16."
+  ],
+  "claims_taken_on_trust": [
+    "That the `codex`-side G0b round-1 artifact's 26 findings are exactly the set the wave was contracted against — read from G0b-codex-r1.json, not re-derived.",
+    "The runtime behaviour of the real `gws gmail +triage` / `+read` payload shapes: every test uses recorded/synthesised fixtures in the shape Task 5 declares. No live gws call was made (correctly), so 'parse_message handles what gws actually returns' rests on the fixtures being faithful.",
+    "The real `claude -p` wrapper envelope: tests feed {'type':'result','subtype':'success','result': json.dumps(model), 'total_cost_usd':…, 'modelUsage':…}, matching extract_meeting._parse_claude_stdout's documented shape. Not executed against the real CLI.",
+    "The real stdout of orgs/clearworksai/agents/crm/scripts/upsert-contact.py and add-interaction.py: ensure_contact/write_interaction parse a JSON id with a contacts.json reload fallback. The parsing branch matches the plan's description; the scripts themselves were not executed (they are outside the allowlist and would touch CRM data).",
+    "Timing of Tasks 16/17's Step-2 RED arm: the OLD/NEW hunks were applied before I ran the vitest node ids, so the stated pre-implementation failures were not independently observed (the post-implementation greens were).",
+    "Task 1's isolated '9 passed' Step-4 count: Task 3 restates the same test file, so the 9-test snapshot cannot be observed in an in-order application. Task 3's 16 passed was verified instead.",
+    "npm run build: not run this round (Task-level gates are pytest/vitest/tsc; BASELINE records build rc 0 and no task touches the build graph beyond src/bus/task.ts + src/cli/bus.ts, which tsc --noEmit covers).",
+    "The 2 pre-existing TRAP lines from test_run_meeting_apply.py: reported as-is; they are outside this diff's file set and per the goal's zero-file-overlap rule are noted as likely unrelated rather than filed as a finding against this plan."
+  ],
+  "locked_decision_rejections": [
+    "Interface note 5 (a WriterError mid-message aborts filing for the WHOLE message with no partial-progress row) — the plan flags this as a deliberate choice resting on upsert-contact.py --match-email and add-interaction.py's source_ref+contact_id dedup being idempotent, and C3 gives Resolution.outcome no 'attempted, failed' value. Accepted assumption, not a finding.",
+    "Duplicating TELEGRAM_CHAT_ID in client_state_projections instead of importing it from meeting_loop_watch — C6 chose this explicitly to avoid a hard import-order dependency on an FR-010 read-mostly module. Locked decision.",
+    "No triviality gate on extraction (FR-005) — every non-excluded message from a known counterparty is extracted. Spec decision.",
+    "`bus comms-filter` is never called (FR-003) — spec decision; the exclusion clause is applied in the Gmail query instead.",
+    "G-INV-2 scoping the missing-ref invariant to 'gmail:' refs only — deliberate (the live meeting pipeline appends 'fireflies:' refs daily and an all-source check would violate forever). Documented on its operative line; not a finding.",
+    "apply_history locating the section by heading PREFIX 'History' rather than the literal '## History' — flagged deviation in Task 13, matches the real page convention. Not a finding.",
+    "Task 8 shipping a stub-filing orchestrator that Task 15 replaces — the slice ordering is the plan's chosen shape. Only the COMMITTED red test file that survives it is a finding (G0A2-3).",
+    "The dry-run holding client_file_lock to read the page — C7 calls this out as cheap and deliberate. Not a finding."
+  ]
+}

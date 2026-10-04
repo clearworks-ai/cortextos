@@ -104,6 +104,7 @@ export function classifyTask(task: Task): TaskClass {
     || task.assigned_to === 'user'
     || task.project === 'human-tasks'
     || HUMAN_TITLE_RE.test(title)
+    || task.type === 'human' // G-BUS-3: an explicit type:human task is human-class whoever owns it
   ) {
     return 'human';
   }
@@ -713,6 +714,7 @@ export function createTask(
     dueDate?: string;
     blockedBy?: string[];
     blocks?: string[];
+    type?: 'agent' | 'human'; // G-BUS-1: default 'agent' — existing callers unaffected
   } = {},
 ): string {
   const {
@@ -725,6 +727,7 @@ export function createTask(
     dueDate = '',
     blockedBy = [],
     blocks = [],
+    type: taskType = 'agent', // G-BUS-1
   } = options;
   const assignee = resolveTaskOwner(agentName, explicitAssignee, {
     title,
@@ -766,6 +769,7 @@ export function createTask(
       title,
       project,
       assigned_to: assignee,
+      type: taskType, // G-BUS-4: `type` is persisted below but classifies HERE too
     } as Task);
     effectiveDueDate = computeDefaultDueDate(priority, someday, taskClass);
   }
@@ -783,7 +787,7 @@ export function createTask(
     id: taskId,
     title,
     description,
-    type: 'agent',
+    type: taskType, // G-BUS-1
     needs_approval: needsApproval,
     status: someday ? 'someday' : 'pending',
     assigned_to: assignee,
@@ -1112,6 +1116,7 @@ export function claimTask(
   paths: BusPaths,
   taskId: string,
   agent: string,
+  opts?: { force?: boolean }, // G-BUS-2
 ): Task {
   const filePath = findTaskFile(paths, taskId);
   if (!filePath) {
@@ -1138,6 +1143,28 @@ export function claimTask(
       task = JSON.parse(readFileSync(filePath, 'utf-8')) as Task;
     } catch (err) {
       throw new Error(`Task ${taskId} claim failed (unreadable): ${err}`);
+    }
+
+    // G-BUS-2: human-exempt tasks (type=human / assigned_to=human|user /
+    // project=human-tasks / [HUMAN] title) are never silently claimable by an
+    // agent — claim-task must pass --force-claim to promote one deliberately.
+    //
+    // Evaluated HERE, before EVERY successful return path (G2B-7): the
+    // same-owner claim-file idempotency branch and the O_EXCL race-recovery
+    // branch both `return task`, and updateTask permits resetting an
+    // in_progress task to pending WITHOUT deleting its .claim file — so an
+    // agent that once force-claimed a human task could re-claim it silently
+    // forever through the leftover claim file.
+    //
+    // There is NO exemption by claimant NAME (G2r3-9): `agent` is
+    // caller-controlled, so exempting 'human'/'user' made the barrier
+    // bypassable by anyone willing to pass --agent human. The ONE deliberate
+    // synchronization caller — Multica's writeback, src/bus/multica/poll.ts —
+    // passes { force: true } instead, which is auditable at its call site.
+    if (isHumanExemptTask(task) && !opts?.force) {
+      throw new Error(
+        `Task ${taskId} is human-exempt (type=${task.type}, assigned_to=${task.assigned_to}); pass --force-claim to promote it deliberately`,
+      );
     }
 
     const claimPath = join(claimsDir, `${taskId}.claim`);

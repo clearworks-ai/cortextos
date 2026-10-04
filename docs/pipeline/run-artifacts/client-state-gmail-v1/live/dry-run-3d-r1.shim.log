@@ -1,0 +1,8 @@
+2026-09-15T17:33:07Z 52240 52233 cortextos bus meeting-brief-claim client-state-gmail --claims-dir /private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-env/state-live1/claims --ttl-min 60
+2026-09-15T17:33:35Z 54924 52233 cortextos bus list-tasks --open --class human --format json --limit 200
+2026-09-15T17:33:35Z 54930 52233 cortextos bus list-tasks --open --class build --format json --limit 200
+2026-09-15T17:33:42Z 55656 52233 cortextos bus list-tasks --open --class human --format json --limit 200
+2026-09-15T17:33:42Z 55662 52233 cortextos bus list-tasks --open --class build --format json --limit 200
+2026-09-15T17:33:48Z 56114 52233 cortextos bus list-tasks --open --class human --format json --limit 200
+2026-09-15T17:33:48Z 56123 52233 cortextos bus list-tasks --open --class build --format json --limit 200
+2026-09-15T17:33:55Z 56955 52233 cortextos bus meeting-brief-release client-state-gmail --claims-dir /private/tmp/claude-501/-Users-joshweiss-code-cortextos/cae12226-d674-4173-af86-d7fe5cbba2d7/scratchpad/g4-env/state-live1/claims

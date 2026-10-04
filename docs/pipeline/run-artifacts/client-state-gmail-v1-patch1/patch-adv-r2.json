@@ -1,0 +1,167 @@
+{
+ "round": 2,
+ "dispositions": [
+  {
+   "id": "P1-1",
+   "status": "PARTIAL",
+   "note": "FR-011 says bridge runtime configuration includes \"audience, expected service account, OIDC verifier\" and gates activation through a manifest, but omits the subscription value required by provider-shadow-ingress.ts:213 to validate envelope.subscription."
+  },
+  {
+   "id": "P1-2",
+   "status": "RESOLVED",
+   "note": "FR-002: \"enqueue {history_id} durably BEFORE acknowledging\"; FR-011 likewise requires \"durable-enqueue-before-ack\" before activation."
+  },
+  {
+   "id": "P1-3",
+   "status": "OPEN",
+   "note": "FR-011 still does not compose: the hub relays under x-webhook-bridge-secret, while the bridge contract still requires Google OIDC Bearer and an OIDC verifier. Current relay.ts:45-66 sends no Authorization header, and provider-shadow-ingress.ts:209-216 requires one."
+  },
+  {
+   "id": "P1-4",
+   "status": "RESOLVED",
+   "note": "G-19 now says the hub serves /healthz and /webhooks/:name for zoom-officehours, ops-check-lead, and fireflies, with no Gmail integration."
+  },
+  {
+   "id": "P1-5",
+   "status": "PARTIAL",
+   "note": "G-22 correctly says history IDs are typically valid for a week but sometimes only hours, and FR-002 handles 404, but \"enqueue a full-window sweep\" means the default three-day window unless otherwise sized; it does not guarantee recovery of the entire cursor gap."
+  },
+  {
+   "id": "P1-6",
+   "status": "RESOLVED",
+   "note": "G-23 now states that SystemExit(5) applies only when participants and text_units are both absent, classification is optional, and planned_files is meeting-shaped."
+  },
+  {
+   "id": "P1-7",
+   "status": "RESOLVED",
+   "note": "G-28 now limits the absence claim to gcloud/configuration and records the readable project and service-account identities."
+  },
+  {
+   "id": "P1-8",
+   "status": "RESOLVED",
+   "note": "G-32 explicitly records a later 2026-09-15 re-probe reporting launchd running and three HTTP 200 health responses; the earlier stopped observation is no longer presented as current."
+  },
+  {
+   "id": "P1-9",
+   "status": "RESOLVED",
+   "note": "G-33 now identifies the webhook-hub repository's separate Railway link and lists its production variable names."
+  },
+  {
+   "id": "P1-10",
+   "status": "PARTIAL",
+   "note": "FR-002 correctly lists history from last_processed_history_id and advances only after processing, but its first-run bootstrap uses users.getProfile after the triggering push. That cursor is already at or beyond the notification watermark, so the first Tier-B event can return zero history and be lost."
+  },
+  {
+   "id": "P1-11",
+   "status": "PARTIAL",
+   "note": "FR-002 now follows nextPageToken, deduplicates IDs, and defines zero-result advancement, but still specifies no bounded chunk/checkpoint scheme or receipt counts for pages, records, unique IDs, and remaining work."
+  },
+  {
+   "id": "P1-12",
+   "status": "RESOLVED",
+   "note": "FR-002 gives the detached drain's complete required path argv: --repo-root, --vault, --crm-dir, and --state-dir; G-25 correctly preserves live mode as absence of --dry-run and names the new flags as implementation work."
+  },
+  {
+   "id": "P1-13",
+   "status": "RESOLVED",
+   "note": "FR-002 says last_success_at/window_days/message_count are written only by completed full-window sweeps and gives event runs separate receipt fields."
+  },
+  {
+   "id": "P1-14",
+   "status": "RESOLVED",
+   "note": "FR-009 checks launchd state, last_pull freshness, and stuck queue depth, and forbids one-line OK whenever trigger health is DOWN/STALE."
+  },
+  {
+   "id": "P1-15",
+   "status": "PARTIAL",
+   "note": "FR-003 correctly forbids declaring FREE_MAIL domains and proposes exact-contact/company binding, but that fallback depends on contact auto-creation that unchanged base FR-006 permits only for a domain-matched sender."
+  },
+  {
+   "id": "P1-16",
+   "status": "RESOLVED",
+   "note": "FR-003 defines one predicate requiring INBOX, retained labelIds/raw headers, in:inbox on sweeps, and local rejection for by-ID entry forms."
+  },
+  {
+   "id": "P1-17",
+   "status": "PARTIAL",
+   "note": "FR-003 defines a parity fixture, fail-closed handling, and predicate-divergence telemetry, but runtime sweep processing can detect only query-admitted/local-rejected IDs; it cannot observe the stated \"vice versa\" case without a broader oracle query."
+  },
+  {
+   "id": "P1-18",
+   "status": "RESOLVED",
+   "note": "FR-005 explicitly says both known-entity/volume sentences are SUPERSEDED and restates the no-tools, schema, budget, task-routing, and digest containment rules."
+  },
+  {
+   "id": "P1-19",
+   "status": "RESOLVED",
+   "note": "FR-003 specifies stage-1 and final-binding identities, stage-1 binding precedence on drift, both-call budgeting, and caching on the append-only row history."
+  },
+  {
+   "id": "P1-20",
+   "status": "RESOLVED",
+   "note": "FR-003 requires writeback_email.create_page and explicitly says \"NOT writeback_render.planned_files,\" while defining template, domains, CRM-name, and History responsibilities."
+  },
+  {
+   "id": "P1-21",
+   "status": "RESOLVED",
+   "note": "FR-001 adds created:<vault-relative path> to writes, and FR-003/FR-009 require it to render as created."
+  },
+  {
+   "id": "P1-22",
+   "status": "RESOLVED",
+   "note": "FR-003 requires checking both clients/<slug>.md and orgs/<slug>.md plus identity maps, reusing only on identity match and otherwise allocating a disambiguated slug."
+  },
+  {
+   "id": "P1-23",
+   "status": "RESOLVED",
+   "note": "FR-003 says internal/colleague is valid only for OURS_DOMAINS and escalates an external-domain internal classification."
+  },
+  {
+   "id": "P1-24",
+   "status": "RESOLVED",
+   "note": "FR-011 gates active mode on all five prerequisites, including a machine-consulted activation manifest; provider-config.json alone cannot activate Tier B."
+  },
+  {
+   "id": "P1-25",
+   "status": "RESOLVED",
+   "note": "FR-011 names projects/cortextos-gws-495505/topics/<name> and requires exact equality with the credential project executing users.watch."
+  },
+  {
+   "id": "P1-26",
+   "status": "RESOLVED",
+   "note": "FR-002 requires queueing plus detached subprocess.Popen without waiting and a fake-clock regression comparing prefilter decisions, pending_since, attention argv, and spawn timing."
+  },
+  {
+   "id": "P1-27",
+   "status": "RESOLVED",
+   "note": "FR-003 defines an email-local evidence gate using normalize_quote/quote_grounded over body plus From/Subject and mandates escalation for invalid or ungrounded classification; both helpers exist in resolve_meeting.py."
+  }
+ ],
+ "new_findings": [
+  {
+   "id": "P2-1",
+   "severity": "HIGH",
+   "fr": "FR-003",
+   "claim": "FR-003 simultaneously requires every admitted inbound real-person message to be filed and requires admitted personal messages to be ignored with no page or CRM write.",
+   "evidence": "FR-003: \"System MUST file every INBOUND message that passes the real-person filter\" versus \"personal \u21d2 observation with outcome ignored, reason personal, no page, no CRM write\"; A-08 repeats the exception.",
+   "fix": "Amend the top-level MUST and D-11 to state the precise personal exception, or require a home for personal messages."
+  },
+  {
+   "id": "P2-2",
+   "severity": "HIGH",
+   "fr": "FR-003",
+   "claim": "The free-mail binding path cannot be implemented under the unchanged CRM-write requirement.",
+   "evidence": "FR-003 requires FREE_MAIL senders to bind through \"contact auto-create per base FR-006\"; base FR-006 permits auto-creation only \"when a domain-matched sender has no contact row.\" FREE_MAIL senders deliberately receive no declared domain match.",
+   "fix": "Explicitly amend FR-006 to permit classification-backed contact creation for admitted free-mail senders, including interaction and rollback/idempotency semantics, or introduce a separate exact-address binding store."
+  },
+  {
+   "id": "P2-3",
+   "severity": "CRITICAL",
+   "fr": "FR-002",
+   "claim": "Tier B can acknowledge and lose its first notification because the initial history cursor is bootstrapped after the event.",
+   "evidence": "FR-002: \"list history from the per-mailbox last_processed_history_id ... bootstrapped from users.getProfile on first run\" and then advance to the queued watermark. Gmail history.list returns changes after the start cursor; a post-notification profile cursor is already equal to or newer than that watermark.",
+   "fix": "Persist the historyId returned by users.watch before enabling push delivery and use it as the initial prior cursor. Never initialize from a post-notification profile cursor; if no prior cursor exists, run a gap-sized recovery sweep before acknowledging or advancing."
+  }
+ ],
+ "verdict": "NOT_CONVERGED"
+}

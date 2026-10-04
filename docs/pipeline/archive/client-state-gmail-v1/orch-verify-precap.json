@@ -1,0 +1,16 @@
+{
+  "kind": "orchestrator-materialised-verification",
+  "at": "2026-09-15T02:38:02Z",
+  "plan_sha256": "8ac1ca58847cf0991c0ba3a114592921b2d7cede91257adcff0a02701f3c1bad",
+  "worktree_add_rc": 0,
+  "g0_compile_rc": 0,
+  "pytest_rc": 0,
+  "pytest_summary": "693 passed, 1 skipped in 83.58s (0:01:23)",
+  "g1_selftest_rc": 0,
+  "g4_selftest_rc": 0,
+  "cron_selftest_rc": 0,
+  "shims_rc": 0,
+  "mutation_rc": 1,
+  "mutation_summary": "rows=60 green=58 not_green=['G-BUS-1', 'G-BUS-2']",
+  "note": "TS edits (Tasks 16-17) are OLD/NEW snippets not applied by this harness; TS coverage = opus G0a round-3 empirical run (anchors matched once, vitest 7+6, tsc 0). Mutation TS rows may report not-applied here."
+}

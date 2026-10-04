@@ -10,11 +10,13 @@ Preflight every run in this order:
 
 1. Confirm Riverside MCP OAuth can identify the exact edit, revision, and completed export ID.
 2. If the MCP returns file bytes or a signed download URL, use it and bind the result to that export ID.
-3. If the MCP returns only export metadata or an object key, use the official Business API download route with `RIVERSIDE_API_KEY` from the approved secret store.
-4. If an API key is unavailable, use the authenticated Riverside web session with `RIVERSIDE_PASSWORD` from the approved secret store. Log in, open the exact edit, choose Download, preserve the approved resolution/settings, and capture the browser's completed download.
+3. Read the account plan/capability before expecting the Business API. Riverside documents its Business API as an owner-only feature on enabled Business plans; a Grow account does not expose the Settings → Team → API key surface. When the feature is present, use the official export-download route with `RIVERSIDE_API_KEY` from the approved secret store.
+4. When the account has no Business API entitlement, or no active key is available, use the authenticated Riverside web session with `RIVERSIDE_EMAIL` and `RIVERSIDE_PASSWORD` from the approved secret store. Log in, open the exact edit, choose Download, preserve the approved resolution/settings, and capture the browser's completed download.
 5. A missing route is a technical recovery condition, not a reason to ask a producer to download the file. Exhaust the authorized MCP, Business API, and authenticated-web routes before creating a human task.
 
-Never place the password, API key, session cookie, signed URL, or share token in a command transcript, task description, receipt, `.env` file, or documentation. Store credential values only in the approved secret manager/keychain and document their variable names. A credential preflight proves presence and successful authentication without printing the value.
+Riverside's current Codex MCP connection uses OAuth and does not require an API key. Its published connection guide says the grant lasts seven days and does not silently refresh. On an authentication failure, run `codex mcp login riverside`, complete the hosted Riverside authorization using the stored account credentials, then prove the connection with a read-only exact-export query before resuming. Do not conflate MCP OAuth with the separate Business API entitlement/key.
+
+Never place the email/password pair, API key, OAuth token, session cookie, signed URL, or share token in a command transcript, task description, receipt, `.env` file, or documentation. Store credential values only in the approved secret manager/keychain and document their variable names. A credential preflight proves presence and successful authentication without printing the value.
 
 Treat the project share token, review token, and signed media URLs as secrets. Do not repeat them in chat, ordinary logs, filenames, ledgers, or reports. Store only a protected reference location.
 

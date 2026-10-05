@@ -15,6 +15,7 @@ if str(BRAIN) not in sys.path:
     sys.path.insert(0, str(BRAIN))
 
 from atomic import atomic_write
+from extract_meeting import prompt_sha
 from sign_dry_run import marker_path
 
 # Captured at collection time, before the autouse _no_live_daemon fixture
@@ -286,7 +287,7 @@ def _seed_apply_vault(tmp_path: Path) -> tuple[Path, Path, str]:
     extraction = {
         "schema": "brain.extraction/1",
         "inputSha": sha,
-        "promptSha": "p",
+        "promptSha": prompt_sha(),
         "model": "sonnet",
         "cost_usd": 0,
         "extracted_at": "2026-09-05T00:00:00Z",
@@ -2140,3 +2141,150 @@ def test_compose_receipt_omits_backfill_skipped_when_nothing_skipped():
     doc["tasks"] = {"done": False, "skipped": "backfill", "at": "2026-09-06T00:00:00Z"}
     receipt = progress.compose_receipt(doc, meeting_id="M", source="fireflies:M", vault_sha="s", prior=None)
     assert receipt["backfill_skipped"] == ["tasks"]
+
+
+def _complete_draft_snapshot(draft: dict) -> bool:
+    drafts = draft.get("drafts") or []
+    if not drafts or draft.get("done") is not True:
+        return False
+    row = drafts[0]
+    return bool(row.get("to") and row.get("subject") and row.get("body") and "cc" in row)
+
+
+def _install_telegram_spy_fakes(tmp_path: Path, *, progress_path: Path, saw_path: Path, telegram_rc: int = 1) -> Path:
+    bindir = _install_fakes(tmp_path)
+    cortextos = bindir / "cortextos"
+    cortextos.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1 $2" = "bus event-dedup" ]; then echo SURFACE; exit 0; fi\n'
+        'if [ "$1 $2" = "bus create-task" ]; then echo task-1; exit 0; fi\n'
+        'if [ "$1" = "list-workers" ]; then exit 1; fi\n'
+        'if [ "$1 $2" = "bus send-telegram" ]; then\n'
+        f'  python3 - "{progress_path}" "{saw_path}" <<\'PY\'\n'
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        "prog, out = Path(sys.argv[1]), Path(sys.argv[2])\n"
+        "doc = json.loads(prog.read_text()) if prog.exists() else {}\n"
+        "out.write_text(json.dumps(doc.get('draft') or {}, sort_keys=True))\n"
+        "PY\n"
+        f"  exit {telegram_rc}\n"
+        "fi\n"
+        "exit 0\n"
+    )
+    cortextos.chmod(0o755)
+    return bindir
+
+
+def _apply_env(tmp_path: Path, bindir: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["BRAIN_ENABLED_AGENTS_JSON"] = str(tmp_path / "no-agents.json")
+    (tmp_path / "no-agents.json").write_text("{}", encoding="utf-8")
+    return env
+
+
+def _rewrite_source_with_name_only_ada(vault: Path, mid: str) -> None:
+    env_dir = vault / "raw/media/transcripts/fireflies" / mid
+    source = json.loads((env_dir / "source.json").read_text(encoding="utf-8"))
+    source["participants"].append({
+        "name": "Ada External",
+        "email": "",
+        "side": "theirs",
+        "spoke": True,
+        "notetaker": False,
+        "handle": None,
+    })
+    raw = json.dumps(source, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    (env_dir / "source.json").write_bytes(raw)
+    sha = hashlib.sha256(raw).hexdigest()
+    (env_dir / "source.sha256").write_text(sha + "\n", encoding="utf-8")
+    extraction = json.loads((env_dir / "extraction.json").read_text(encoding="utf-8"))
+    extraction["inputSha"] = sha
+    (env_dir / "extraction.json").write_text(json.dumps(extraction), encoding="utf-8")
+
+
+def test_apply_recap_subprocess_binds_canonical_contacts(tmp_path):
+    vault, repo, mid = _seed_apply_vault(tmp_path)
+    _rewrite_source_with_name_only_ada(vault, mid)
+    canonical = repo / "orgs/clearworksai/agents/crm/crm/contacts.json"
+    canonical.write_text(
+        json.dumps({
+            "contacts": [{"name": "Ada External", "email": "ada@clients.example", "emails": ["ada@clients.example"]}],
+        }),
+        encoding="utf-8",
+    )
+    decoy = tmp_path / "decoy-crm" / "contacts.json"
+    decoy.parent.mkdir()
+    decoy.write_text(
+        json.dumps({
+            "contacts": [{"name": "Ada External", "email": "decoy@evil.example", "emails": ["decoy@evil.example"]}],
+        }),
+        encoding="utf-8",
+    )
+    bindir = _install_fakes(tmp_path)
+    env = _apply_env(tmp_path, bindir)
+    env["CRM_CONTACTS_PATH"] = str(decoy)
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    prog = json.loads(
+        (vault / "raw/media/transcripts/_state" / f"fireflies-{mid}" / "progress.json").read_text(encoding="utf-8")
+    )
+    to = (prog.get("draft") or {}).get("drafts") or []
+    assert to and "ada@clients.example" in to[0]["to"]
+    assert "decoy@evil.example" not in to[0]["to"]
+
+
+def test_draft_receipt_persists_before_telegram_failure_and_timeout(tmp_path, monkeypatch):
+    import run_meeting
+
+    rc_root = tmp_path / "rc"
+    rc_root.mkdir()
+    vault, repo, mid = _seed_apply_vault(rc_root)
+    prog_path = vault / "raw/media/transcripts/_state" / f"fireflies-{mid}" / "progress.json"
+    saw_rc = tmp_path / "telegram-saw-rc.json"
+    bindir = _install_telegram_spy_fakes(rc_root, progress_path=prog_path, saw_path=saw_rc, telegram_rc=1)
+    env = _apply_env(rc_root, bindir)
+    result = subprocess.run(
+        [sys.executable, str(BRAIN / "run_meeting.py"), "--meeting-id", mid,
+         "--repo-root", str(repo), "--vault", str(vault), "--apply"],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert saw_rc.is_file()
+    saw = json.loads(saw_rc.read_text(encoding="utf-8"))
+    assert _complete_draft_snapshot(saw)
+    after = json.loads(prog_path.read_text(encoding="utf-8"))["draft"]
+    assert after == saw
+
+    to_root = tmp_path / "timeout"
+    to_root.mkdir()
+    vault_t, repo_t, mid_t = _seed_apply_vault(to_root)
+    prog_t = vault_t / "raw/media/transcripts/_state" / f"fireflies-{mid_t}" / "progress.json"
+    saw_timeout = tmp_path / "telegram-saw-timeout.json"
+    bindir_t = _install_fakes(to_root)
+    env_t = _apply_env(to_root, bindir_t)
+    real_run = run_meeting.subprocess.run
+
+    def wrapped(args, *a, **kw):
+        cmd = list(args)
+        if cmd[:3] == ["cortextos", "bus", "send-telegram"]:
+            draft = json.loads(prog_t.read_text(encoding="utf-8")).get("draft") if prog_t.exists() else {}
+            saw_timeout.write_text(json.dumps(draft or {}, sort_keys=True), encoding="utf-8")
+            raise subprocess.TimeoutExpired(cmd, kw.get("timeout") or 1)
+        return real_run(args, *a, **kw)
+
+    monkeypatch.setattr(run_meeting.subprocess, "run", wrapped)
+    monkeypatch.setenv("PATH", env_t["PATH"])
+    monkeypatch.setenv("BRAIN_ENABLED_AGENTS_JSON", env_t["BRAIN_ENABLED_AGENTS_JSON"])
+    rc = run_meeting.main(["--meeting-id", mid_t, "--repo-root", str(repo_t), "--vault", str(vault_t), "--apply"])
+    assert rc == 0
+    assert saw_timeout.is_file()
+    timeout_saw = json.loads(saw_timeout.read_text(encoding="utf-8"))
+    assert _complete_draft_snapshot(timeout_saw)
+    after_timeout = json.loads(prog_t.read_text(encoding="utf-8"))["draft"]
+    assert after_timeout["drafts"] == timeout_saw["drafts"]
+    assert after_timeout["done"] is True

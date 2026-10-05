@@ -38,12 +38,17 @@ sys.path.insert(0, str(HERE))
 
 import envparse  # noqa: E402
 import paths as brain_paths  # noqa: E402
+from atomic import atomic_write  # noqa: E402
 from fetch_fireflies import list_transcripts  # noqa: E402
 
 REPO = Path("/Users/joshweiss/code/cortextos")
 VAULT = Path("/Users/joshweiss/code/knowledge-sync")
 ENVELOPES = VAULT / "raw/media/transcripts/fireflies"
 STATE = VAULT / "raw/media/transcripts/_state"
+# Post-subscription healthy path (e4021750 + 2026-09-30 activation). Failures
+# at-or-before this instant are historical, not current provider health.
+DEFAULT_CUTOVER_AT = "2026-10-01T00:00:00+00:00"
+ACK_PATH = STATE / "meeting-loop-watch-ack.json"
 TELEGRAM_CHAT_ID = "6690120787"
 TELEGRAM_AGENT_DIR = REPO / "orgs/clearworksai/agents/pa-codex"
 
@@ -96,6 +101,110 @@ def _sentence_count(reason: str | None) -> int | None:
         return None
 
 
+def _parse_iso(value: object) -> datetime | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        try:
+            dt = datetime.fromisoformat(str(value)[:19].replace("Z", "")).replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _load_ack() -> dict:
+    doc = {"cutover_at": DEFAULT_CUTOVER_AT, "superseded": {}}
+    if not ACK_PATH.is_file():
+        return doc
+    try:
+        raw = json.loads(ACK_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return doc
+    if not isinstance(raw, dict):
+        return doc
+    superseded = raw.get("superseded") if isinstance(raw.get("superseded"), dict) else {}
+    return {"cutover_at": str(raw.get("cutover_at") or DEFAULT_CUTOVER_AT), "superseded": superseded}
+
+
+def _save_ack(doc: dict) -> None:
+    superseded = {}
+    for mid, rec in (doc.get("superseded") or {}).items():
+        if not isinstance(rec, dict):
+            continue
+        superseded[str(mid)] = {
+            "class": rec.get("class") or "processing",
+            "error_at": rec.get("error_at"),
+        }
+    payload = {
+        "cutover_at": doc.get("cutover_at") or DEFAULT_CUTOVER_AT,
+        "superseded": superseded,
+    }
+    atomic_write(ACK_PATH, (json.dumps(payload, sort_keys=True, indent=2) + "\n").encode("utf-8"))
+
+
+def _processing_error_doc(meeting_id: str) -> dict | None:
+    path = STATE / f"fireflies-{meeting_id}" / "processing-error.json"
+    if not path.is_file():
+        return None
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
+def _processing_failure(meeting_id: str) -> str | None:
+    path = STATE / f"fireflies-{meeting_id}" / "processing-error.json"
+    if not path.is_file():
+        return None
+    doc = _processing_error_doc(meeting_id)
+    if doc is None:
+        return "processing-error.json is unreadable"
+    if doc.get("class") != "processing":
+        return "processing failure evidence is malformed"
+    return str(doc.get("message") or f"returncode={doc.get('returncode')}")[:200]
+
+
+def _is_active_failure(meeting_id: str, evidence_at: datetime | None, ack: dict) -> bool:
+    cutover = _parse_iso(ack.get("cutover_at") or DEFAULT_CUTOVER_AT)
+    rec = (ack.get("superseded") or {}).get(meeting_id)
+    rec_at = _parse_iso(rec.get("error_at")) if isinstance(rec, dict) else None
+    if evidence_at is not None and cutover is not None and evidence_at <= cutover:
+        return False
+    if evidence_at is not None and rec_at is not None and evidence_at == rec_at:
+        return False
+    return True
+
+
+def _note_superseded(ack: dict, meeting_id: str, doc: dict | None) -> None:
+    evidence_at = _parse_iso((doc or {}).get("at"))
+    ack.setdefault("superseded", {})[meeting_id] = {
+        "class": (doc or {}).get("class") or "processing",
+        "error_at": evidence_at.isoformat() if evidence_at else None,
+    }
+
+
+def _source_sentence_count(meeting_id: str) -> int | None:
+    path = ENVELOPES / meeting_id / "source.json"
+    try:
+        source = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    sentences = None
+    if isinstance(source, dict):
+        sentences = source.get("text_units")
+        if sentences is None:
+            sentences = source.get("sentences")
+    return len(sentences) if isinstance(sentences, list) else None
+
+
 def send_telegram(text: str) -> bool:
     env = dict(os.environ)
     env["CTX_AGENT_DIR"] = str(TELEGRAM_AGENT_DIR)
@@ -112,10 +221,12 @@ def send_telegram(text: str) -> bool:
         return False
 
 
-def fireflies_section(args: argparse.Namespace) -> tuple[list[str], str | None]:
+def fireflies_section(args: argparse.Namespace) -> tuple[list[str], str | None, dict | None]:
     """The original meeting-loop watch, logic byte-identical, now wrapped so
     EVERY failure (missing key, list_transcripts raising, anything else)
-    returns ([], err) instead of exiting main() early (G-07 / G0B-16)."""
+    returns ([], err, None) instead of exiting main() early (G-07 / G0B-16).
+    Never persists ACK_PATH; main() writes fingerprints only on the authorized
+    non-dry-run path."""
     try:
         # G-DIG-4 (G2A-6): the secrets file is THIS section's input and nothing
         # else's, so it is read inside this section's own guard. main() used to
@@ -125,17 +236,23 @@ def fireflies_section(args: argparse.Namespace) -> tuple[list[str], str | None]:
         secrets = envparse.parse_env_file(brain_paths.secrets_path(REPO))
         api_key = secrets.get("FIREFLIES_API_KEY")
         if not api_key:
-            return [], "no FIREFLIES_API_KEY"
+            return [], "no FIREFLIES_API_KEY", None
 
         rows = list_transcripts(api_key, throttle_s=1.0)
         cutoff = datetime.now(timezone.utc) - timedelta(days=args.days)
         recent = [r for r in rows if _occurred(r) >= cutoff]
         have = {p.name for p in ENVELOPES.iterdir() if p.is_dir()} if ENVELOPES.is_dir() else set()
+        ack = _load_ack()
+        ack_dirty = False
 
-        missing, empty, incomplete = [], [], []
+        missing, empty, incomplete, failed = [], [], [], []
+        superseded = 0
         for row in sorted(recent, key=_occurred):
             mid = str(row.get("id"))
             if mid in have:
+                if _source_sentence_count(mid) == 0:
+                    empty.append((_occurred(row).date().isoformat(), mid, str(row.get("title") or "")[:48], 0))
+                    continue
                 # 2026-09-14 (ported from main 8c956a0b): an envelope dir only
                 # proves FETCH happened. The receipt is written last, after
                 # extract -> resolve -> file -> phase 3; a run that died at any
@@ -143,40 +260,70 @@ def fireflies_section(args: argparse.Namespace) -> tuple[list[str], str | None]:
                 # sign-check) leaves the envelope and no receipt, and this watch
                 # used to call that "filed". Key on the receipt instead.
                 if not (STATE / f"fireflies-{mid}" / "receipt.json").exists():
-                    incomplete.append((_occurred(row).date().isoformat(), mid, str(row.get("title") or "")[:48]))
+                    doc = _processing_error_doc(mid)
+                    failure = _processing_failure(mid)
+                    entry = (_occurred(row).date().isoformat(), mid, str(row.get("title") or "")[:48])
+                    if failure:
+                        evidence_at = _parse_iso((doc or {}).get("at"))
+                        if not _is_active_failure(mid, evidence_at, ack):
+                            _note_superseded(ack, mid, doc)
+                            ack_dirty = True
+                            superseded += 1
+                            continue
+                        failed.append((*entry, failure))
+                    else:
+                        incomplete.append(entry)
                 continue
             reason = _not_ready_reason(mid)
             count = _sentence_count(reason)
             entry = (_occurred(row).date().isoformat(), mid, str(row.get("title") or "")[:48], count)
             (empty if count is not None and count < MIN_SENTENCES else missing).append(entry)
 
+        pending_ack = ack if ack_dirty else None
+
         hub, bridge = _probe(HUB_HEALTH), _probe(BRIDGE_HEALTH)
         transport_ok = hub == "ok" and bridge == "ok"
         newest = max((_occurred(r) for r in rows), default=None)
 
-        if not missing and not incomplete and transport_ok:
-            lines = [
-                f"Meeting loop OK — {len(recent)} transcript(s) in the last {args.days}d, all filed (receipts present).",
-                f"Newest: {newest.date().isoformat() if newest else 'none'} · hub {hub} · bridge {bridge}",
-            ]
+        if not missing and not incomplete and not failed and transport_ok:
+            newest_line = (
+                f"Newest: {newest.date().isoformat() if newest else 'none'} · hub {hub} · bridge {bridge}"
+            )
+            if superseded:
+                filed = len(recent) - len(empty) - superseded
+                lines = [
+                    f"Meeting loop OK — {filed} current transcript(s) in the last {args.days}d with receipts; "
+                    f"{superseded} historical no-receipt item(s) superseded, not current.",
+                    newest_line,
+                ]
+            else:
+                lines = [
+                    f"Meeting loop OK — {len(recent)} transcript(s) in the last {args.days}d, all filed (receipts present).",
+                    newest_line,
+                ]
             if empty:
                 lines.append(f"({len(empty)} empty recording(s) skipped, which is correct.)")
         else:
             lines = ["⚠️ Meeting loop needs a look."]
             if missing:
-                lines.append(f"\n{len(missing)} transcript(s) NOT in the vault and not empty:")
+                lines.append(f"\n{len(missing)} transcript(s) NOT in the vault — content not yet verified:")
                 lines += [f"- {d} {t} ({m})" for d, m, t, _ in missing[:10]]
             if incomplete:
-                lines.append(f"\n{len(incomplete)} transcript(s) fetched but NOT processed (no receipt — "
-                             "the run died after fetch; re-run run_meeting.py --apply for each):")
+                lines.append(f"\n{len(incomplete)} transcript(s) fetched but completion UNVERIFIED "
+                             "(receipt missing — reconcile filing/task/draft evidence before replay):")
                 lines += [f"- {d} {t} ({m})" for d, m, t in incomplete[:10]]
+            if failed:
+                lines.append(f"\n{len(failed)} transcript(s) have a recorded processing failure "
+                             "(automatic replay held until explicit retry):")
+                lines += [f"- {d} {t} ({m}) — {reason}" for d, m, t, reason in failed[:10]]
             if not transport_ok:
                 lines.append(f"\nTransport: hub {hub} · bridge {bridge}")
-            lines.append("\nEvery failure in this chain has been silent — check the hub logs "
+            lines.append("\nCheck fetch/processing receipts and meeting-worker logs first. "
+                         "If delivery is missing, check hub logs "
                          "(railway logs --service webhook-hub) for relay_failed.")
-        return lines, None
+        return lines, None, pending_ack
     except Exception as exc:  # noqa: BLE001 — G0B-16: sections fail independently
-        return [], f"{type(exc).__name__}: {exc}"
+        return [], f"{type(exc).__name__}: {exc}", None
 
 
 def gmail_section_lines(args: argparse.Namespace) -> tuple[list[str], str | None]:
@@ -210,7 +357,7 @@ def main(argv: list[str] | None = None) -> int:
     # fireflies_section / gmail_section_lines) -- neither call here can take
     # the other section down with it, and main() itself now reads NOTHING that
     # either section could fail on (G-DIG-4).
-    ff_lines, ff_err = fireflies_section(args)
+    ff_lines, ff_err, pending_ack = fireflies_section(args)
     gm_lines, gm_err = gmail_section_lines(args)
 
     sections: list[str] = []
@@ -221,6 +368,8 @@ def main(argv: list[str] | None = None) -> int:
     print(message)
     if args.dry_run:
         return 0
+    if pending_ack is not None:
+        _save_ack(pending_ack)
     return 0 if send_telegram(message) else 1
 
 

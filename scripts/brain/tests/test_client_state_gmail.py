@@ -1043,7 +1043,7 @@ def test_failure_after_the_first_task_completes_the_second_task_next_run(tmp_pat
     assert _page_path(cfg).read_text(encoding="utf-8").count("[source: gmail:m1]") == 1
 
 
-def test_exact_task_reconciliation_preserves_landed_effects_and_is_idempotent(tmp_path):
+def test_exact_open_task_reconciliation_preserves_landed_effects_and_is_idempotent(tmp_path):
     """A one-time reconciliation may credit only an exactly evidenced task.
 
     The historical run already landed its CRM interaction and History entry but
@@ -1091,7 +1091,20 @@ def test_exact_task_reconciliation_preserves_landed_effects_and_is_idempotent(tm
     second.record(("gws", "gmail", "+triage"), rc=0,
                   stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
     second.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
-    _open_tasks_empty(second)
+    second.record(
+        ("cortextos", "bus", "list-tasks", "--open", "--class", "human"),
+        rc=0,
+        stdout=json.dumps([{
+            "id": "task_1791252751937_23973428",
+            "title": "Send the updated MSA",
+            "assigned_to": "human",
+        }]),
+    )
+    second.record(
+        ("cortextos", "bus", "list-tasks", "--open", "--class", "build"),
+        rc=0,
+        stdout="[]",
+    )
 
     result = csg.run(cfg, second)
 
@@ -1110,6 +1123,7 @@ def test_exact_task_reconciliation_preserves_landed_effects_and_is_idempotent(tm
         "source_ref": "gmail:m1",
         "evidence_description": "source gmail:m1",
     }]
+    assert rows[-1]["suppressed"] == []
     assert not any(write.startswith("task:") for write in rows[-1]["writes"])
 
     ledger_before = (cfg.state_dir / "observations.jsonl").read_bytes()

@@ -670,7 +670,11 @@ def _do_writes(
     # complete while a commitment task this message owes is still missing, and
     # the required-effect set has to be known before anything is marked filed.
     task_plans = client_state_writes.plan_tasks(extraction, context, open_tasks, source_ref)
-    task_keys = [f"task:{plan.title}" for plan in task_plans if plan.dedup is None]
+    task_keys = [
+        f"task:{plan.title}"
+        for plan in task_plans
+        if plan.dedup is None or (source_ref, plan.title) in task_reconciliations
+    ]
 
     def landed(key: str) -> bool:
         """Has this effect already landed, on THIS message, in any run? History
@@ -796,15 +800,7 @@ def _do_writes(
     task_lines: list[str] = []
     suppressed: list[dict] = []
     for plan in task_plans:
-        if plan.dedup is not None:
-            suppressed.append({"title": plan.title, "tier": plan.dedup["tier"], "match": plan.dedup["match"]})
-            task_lines.append(f"  task: {plan.title} (suppressed tier {plan.dedup['tier']} match: {plan.dedup['match']})")
-            continue
         key = f"task:{plan.title}"
-        if landed(key):
-            task_lines.append(f"  task: {plan.title} (already created on an earlier run)")
-            mark(key, pending)  # G-EFFECT-3: tasks are per MESSAGE, so every resolution owes this key
-            continue
         reconciliation = task_reconciliations.get((source_ref, plan.title))
         if reconciliation is not None:
             task_lines.append(
@@ -813,6 +809,14 @@ def _do_writes(
             if reconciliation not in reconciled_tasks:
                 reconciled_tasks.append(reconciliation)
             mark(key, pending)
+            continue
+        if plan.dedup is not None:
+            suppressed.append({"title": plan.title, "tier": plan.dedup["tier"], "match": plan.dedup["match"]})
+            task_lines.append(f"  task: {plan.title} (suppressed tier {plan.dedup['tier']} match: {plan.dedup['match']})")
+            continue
+        if landed(key):
+            task_lines.append(f"  task: {plan.title} (already created on an earlier run)")
+            mark(key, pending)  # G-EFFECT-3: tasks are per MESSAGE, so every resolution owes this key
             continue
         if cfg.dry_run:
             argv = projections.plan_task_create_argv(plan)

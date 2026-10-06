@@ -11,6 +11,8 @@ from typing import Protocol
 
 
 class Runner(Protocol):
+    use_logical_command_names: bool
+
     def run(
         self,
         argv: list[str],
@@ -23,6 +25,8 @@ class Runner(Protocol):
 
 class SubprocessRunner:
     """Real subprocess.run wrapper. capture_output=True, text=True, check=False."""
+
+    use_logical_command_names = False
 
     def run(
         self,
@@ -51,6 +55,10 @@ class LoggingRunner:
     def __init__(self, inner: Runner, state_dir: Path) -> None:
         self.inner = inner
         self.state_dir = Path(state_dir)
+
+    @property
+    def use_logical_command_names(self) -> bool:
+        return bool(getattr(self.inner, "use_logical_command_names", False))
 
     def run(
         self,

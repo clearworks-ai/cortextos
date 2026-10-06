@@ -8,7 +8,9 @@ from __future__ import annotations
 import base64
 import email.utils
 import json
+import os
 import re
+from pathlib import Path
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
@@ -37,12 +39,25 @@ EXCLUSION_QUERY = (  # G-SWEEP-7
 INBOUND_ONLY = "-in:sent -in:drafts"
 
 OURS_DOMAINS: frozenset[str] = frozenset({"clearworks.ai"})
+GWS_BIN = Path.home() / ".local" / "bin" / "gws"
 
 _QUOTE_TAIL_RE = re.compile(r"^On .* wrote:$")
 
 
 class GmailSourceError(RuntimeError):
     """Raised when a `gws gmail` subprocess exits non-zero or returns unparseable JSON."""
+
+
+def _gws_argv(runner: "Runner", *args: str) -> list[str]:
+    """Use canonical gws unless a test runner explicitly requests logical names."""
+    current = runner
+    while current is not None:
+        if getattr(current, "use_logical_command_names", False):
+            return ["gws", *args]
+        current = getattr(current, "inner", None)
+    if not GWS_BIN.is_file() or not os.access(GWS_BIN, os.X_OK):
+        raise GmailSourceError(f"canonical gws is missing or not executable: {GWS_BIN}")
+    return [str(GWS_BIN), *args]
 
 
 @dataclass
@@ -295,7 +310,7 @@ def parse_message(payload: dict) -> Message:
 
 
 def list_messages(runner: "Runner", query: str, max_results: int = 50) -> list[dict]:
-    argv = ["gws", "gmail", "+triage", "--query", query, "--format", "json", "--max", str(max_results)]
+    argv = _gws_argv(runner, "gmail", "+triage", "--query", query, "--format", "json", "--max", str(max_results))
     proc = runner.run(argv)
     if proc.returncode != 0:
         raise GmailSourceError(f"gws gmail +triage failed rc={proc.returncode}: {proc.stderr.strip()}")  # G-SWEEP-6
@@ -326,7 +341,7 @@ def list_messages(runner: "Runner", query: str, max_results: int = 50) -> list[d
 
 
 def read_message(runner: "Runner", message_id: str) -> Message:
-    argv = ["gws", "gmail", "+read", "--id", message_id, "--format", "json"]
+    argv = _gws_argv(runner, "gmail", "+read", "--id", message_id, "--format", "json")
     proc = runner.run(argv)
     if proc.returncode != 0:
         raise GmailSourceError(f"gws gmail +read failed rc={proc.returncode}: {proc.stderr.strip()}")  # G-SWEEP-6

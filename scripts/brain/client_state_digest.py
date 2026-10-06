@@ -234,6 +234,7 @@ def _superseded_task_ids(ledger: Ledger, row: ObservationRow) -> set[str]:
         for w in hist.writes:
             if w.startswith("task:"):
                 ids.add(_task_id(w))
+        ids.update(task.task_id for task in hist.reconciled_tasks)
     return ids
 
 

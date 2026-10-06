@@ -87,6 +87,82 @@ def _page_path(cfg: csg.Config, slug: str = "acme") -> Path:
     return cfg.vault / "raw" / "areas" / "clearworks" / "org-brain" / "clients" / f"{slug}.md"
 
 
+def test_gmail_source_uses_canonical_gws_not_ambient_path(tmp_path, monkeypatch):
+    """The production subprocess seam must never resolve gws from PATH."""
+    from runner import SubprocessRunner
+
+    canonical = tmp_path / "canonical" / "gws"
+    ambient = tmp_path / "ambient" / "gws"
+    canonical.parent.mkdir()
+    ambient.parent.mkdir()
+    canonical.write_text(
+        "#!/bin/sh\nprintf '%s\\n' '{\"messages\":[{\"id\":\"canonical\"}]}'\n",
+        encoding="utf-8",
+    )
+    ambient.write_text(
+        "#!/bin/sh\nprintf '%s\\n' '{\"messages\":[{\"id\":\"ambient\"}]}'\n",
+        encoding="utf-8",
+    )
+    canonical.chmod(0o755)
+    ambient.chmod(0o755)
+    monkeypatch.setattr(csg.gmail_source, "GWS_BIN", canonical)
+    monkeypatch.setenv("PATH", str(ambient.parent))
+
+    rows = csg.gmail_source.list_messages(
+        SubprocessRunner(), "after:2026/10/06", max_results=1,
+    )
+
+    assert [row["id"] for row in rows] == ["canonical"]
+
+
+def test_gmail_source_fails_closed_when_canonical_gws_is_missing(tmp_path, monkeypatch):
+    from runner import SubprocessRunner
+
+    ambient = tmp_path / "ambient" / "gws"
+    ambient.parent.mkdir()
+    ambient.write_text(
+        "#!/bin/sh\nprintf '%s\\n' '{\"messages\":[{\"id\":\"ambient\"}]}'\n",
+        encoding="utf-8",
+    )
+    ambient.chmod(0o755)
+    monkeypatch.setattr(csg.gmail_source, "GWS_BIN", tmp_path / "missing" / "gws")
+    monkeypatch.setenv("PATH", str(ambient.parent))
+
+    try:
+        csg.gmail_source.list_messages(
+            SubprocessRunner(), "after:2026/10/06", max_results=1,
+        )
+    except csg.gmail_source.GmailSourceError as exc:
+        assert "canonical gws is missing or not executable" in str(exc)
+    else:
+        raise AssertionError("missing canonical gws fell back to ambient PATH")
+
+
+def test_gmail_source_defaults_custom_real_runner_to_canonical_gws(tmp_path, monkeypatch):
+    """A custom real Runner is canonical; only test fakes opt into logical names."""
+    from subprocess import CompletedProcess
+
+    class CustomRealRunner:
+        use_logical_command_names = False
+
+        def __init__(self):
+            self.argv = None
+
+        def run(self, argv, *, input=None, env=None, timeout=120):
+            self.argv = list(argv)
+            return CompletedProcess(argv, 0, '{"messages": []}', "")
+
+    canonical = tmp_path / "canonical" / "gws"
+    canonical.parent.mkdir()
+    canonical.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    canonical.chmod(0o755)
+    monkeypatch.setattr(csg.gmail_source, "GWS_BIN", canonical)
+    runner = CustomRealRunner()
+
+    assert csg.gmail_source.list_messages(runner, "after:2026/10/06", max_results=1) == []
+    assert runner.argv[0] == str(canonical)
+
+
 def test_dry_run_files_message_previews_crm_page_and_persists_ledger_receipt(tmp_path):
     cfg = _cfg(tmp_path, dry_run=True)
     runner = FakeRunner()
@@ -965,6 +1041,400 @@ def test_failure_after_the_first_task_completes_the_second_task_next_run(tmp_pat
     rows2 = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
     assert all(r["outcome"] == "filed" for r in rows2[-1]["resolutions"])
     assert _page_path(cfg).read_text(encoding="utf-8").count("[source: gmail:m1]") == 1
+
+
+def test_exact_open_task_reconciliation_preserves_landed_effects_and_is_idempotent(tmp_path):
+    """A one-time reconciliation may credit only an exactly evidenced task.
+
+    The historical run already landed its CRM interaction and History entry but
+    failed before its task effect was stamped.  Retrying with exact task
+    evidence must preserve those effects, skip task creation, and become
+    terminal without changing the ledger again on the next poll.
+    """
+    cfg = _cfg(tmp_path, dry_run=False)
+    first = FakeRunner()
+    _lock_ok(first, cfg.state_dir / "claims")
+    first.record(("gws", "gmail", "+triage"), rc=0,
+                 stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    first.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+    _open_tasks_empty(first)
+    first.record(("claude",), rc=0, stdout=_claude_wrapper(commitments=[{
+        "text": "Send the updated MSA", "owner_name": "Josh", "deadline_iso": None,
+        "quote": "send the updated MSA", "matches_open_item": None,
+    }]))
+    first.record(("python3", str(cfg.crm_dir / "upsert-contact.py")), rc=0, stdout="c1\n")
+    first.record(("python3", str(cfg.crm_dir / "add-interaction.py")), rc=0,
+                 stdout=_interaction_stdout())
+    first.record(("cortextos", "bus", "create-task"), rc=1, stderr="historical no-stamp")
+
+    assert csg.run(cfg, first).exit_code == 3
+    partial = json.loads((cfg.state_dir / "observations.jsonl").read_text().splitlines()[-1])
+    landed_before = partial["resolutions"][0]["effects"]
+    assert "crm:c1" in landed_before
+    assert any(effect.startswith("page:") for effect in landed_before)
+    assert "task:Send the updated MSA" not in landed_before
+
+    evidence_path = tmp_path / "task-reconciliation.json"
+    evidence_path.write_text(json.dumps([{
+        "source_ref": "gmail:m1",
+        "task_title": "Send the updated MSA",
+        "evidence": {
+            "id": "task_1791252751937_23973428",
+            "title": "Send the updated MSA",
+            "description": "source gmail:m1",
+        },
+    }]), encoding="utf-8")
+    cfg.task_reconciliation_path = evidence_path
+
+    second = FakeRunner()
+    _lock_ok(second, cfg.state_dir / "claims")
+    second.record(("gws", "gmail", "+triage"), rc=0,
+                  stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    second.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+    second.record(
+        ("cortextos", "bus", "list-tasks", "--open", "--class", "human"),
+        rc=0,
+        stdout=json.dumps([{
+            "id": "task_1791252751937_23973428",
+            "title": "Send the updated MSA",
+            "assigned_to": "human",
+        }]),
+    )
+    second.record(
+        ("cortextos", "bus", "list-tasks", "--open", "--class", "build"),
+        rc=0,
+        stdout="[]",
+    )
+
+    result = csg.run(cfg, second)
+
+    assert result.exit_code == 0
+    assert result.filed == 1
+    assert not any(c[:3] == ["cortextos", "bus", "create-task"] for c in second.calls)
+    assert not any(len(c) > 1 and "add-interaction.py" in c[1] for c in second.calls)
+    rows = [json.loads(line) for line in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
+    final_effects = rows[-1]["resolutions"][0]["effects"]
+    assert set(landed_before).issubset(final_effects)
+    assert "task:Send the updated MSA" in final_effects
+    assert rows[-1]["resolutions"][0]["outcome"] == "filed"
+    assert rows[-1]["reconciled_tasks"] == [{
+        "task_id": "task_1791252751937_23973428",
+        "title": "Send the updated MSA",
+        "source_ref": "gmail:m1",
+        "evidence_description": "source gmail:m1",
+    }]
+    assert rows[-1]["suppressed"] == []
+    assert not any(write.startswith("task:") for write in rows[-1]["writes"])
+
+    ledger_before = (cfg.state_dir / "observations.jsonl").read_bytes()
+    third = FakeRunner()
+    _lock_ok(third, cfg.state_dir / "claims")
+    third.record(("gws", "gmail", "+triage"), rc=0,
+                 stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    third.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+
+    repeated = csg.run(cfg, third)
+
+    assert repeated.exit_code == 0
+    assert repeated.skipped_terminal == 1
+    assert (cfg.state_dir / "observations.jsonl").read_bytes() == ledger_before
+    assert not any(c[:3] == ["cortextos", "bus", "create-task"] for c in third.calls)
+
+
+def test_completed_task_evidence_satisfies_exact_commitment_without_losing_other_filings(tmp_path):
+    """The scratch preflight's eight legitimate CRM/page filings stay required,
+    while exact completed-task + calendar evidence satisfies only Malena's task.
+    """
+    source_ref = "gmail:1a1091289e586b01"
+    commitment_title = "Include Malena on the Tuesday 10am call."
+    existing_task_id = "task_1791147760260_03308975"
+    existing_task_title = (
+        "[WAITING ON THEM] Nerin — confirm Monday or Tuesday "
+        "launch-video/CRM review time"
+    )
+    calendar_ref = "calendar:63u3m7f6la4f0loedft861vhpi"
+    task_result = (
+        "Original scheduling-confirmation condition satisfied: "
+        f"{source_ref} records Nerin selecting Tuesday at 10:00 AM and "
+        "requesting Malena; gmail:1a10d2a290751c99 records Josh saying the "
+        f"invite was sent; Nerin accepted; {calendar_ref} contains Nerin and "
+        "Malena. This proves the scheduled slot and inclusion only."
+    )
+
+    filings = [
+        ("1a1091289e586b01", "kadre", "client", "nerin-kadribegovic", "Nerin Kadribegovic", "nerin@kadre.org"),
+        ("1a108a6fd3a843b7", "doug-teiger-consulting", "org", "douglas-teiger", "Douglas Teiger", "dt@douglasteiger.com"),
+        ("1a10519ffecbfddc", "seiu-521", "client", "david-sailer", "David Sailer", "david.sailer@seiu521.org"),
+        ("1a1049ca2df7e38f", "doug-teiger-consulting", "org", "douglas-teiger", "Douglas Teiger", "dt@douglasteiger.com"),
+        ("1a10ccbba3a8555a", "doug-teiger-consulting", "org", "douglas-teiger", "Douglas Teiger", "dt@douglasteiger.com"),
+        ("1a10c8eb0625d348", "alloi", "client", "marcos-santa-ana", "Marcos Santa Ana", "marcos@alloi.us"),
+        ("1a10ed2926ce3141", "alloi", "client", "joe", "Joe Chang", "joe@alloi.us"),
+        ("1a10ecdc6c3ddc5a", "logictcg", "client", "mitch-logictcg", "Mitch", "mitch@logictcg.com"),
+    ]
+    contacts = {
+        contact_id: {"id": contact_id, "name": name, "emails": [email]}
+        for _, _, _, contact_id, name, email in filings
+    }
+    cfg = _cfg(tmp_path, dry_run=False, contacts=list(contacts.values()))
+    pages = {}
+    for _, slug, kind, _, _, email in filings:
+        folder = "clients" if kind == "client" else "orgs"
+        page = cfg.vault / "raw" / "areas" / "clearworks" / "org-brain" / folder / f"{slug}.md"
+        pages[(kind, slug)] = page
+        page.parent.mkdir(parents=True, exist_ok=True)
+        page.write_text(
+            f"# {kind.title()}: {slug}\n\n## Node\nid: {slug}\n\n"
+            f"domains: {email.rsplit('@', 1)[1]}\n\n"
+            "## History (dated, newest first)\n\n## Open Items\n",
+            encoding="utf-8",
+        )
+    evidence_path = tmp_path / "satisfied-task-reconciliation.json"
+    evidence_path.write_text(json.dumps([{
+        "kind": "satisfied-task",
+        "source_ref": source_ref,
+        "task_title": commitment_title,
+        "task_id": existing_task_id,
+        "calendar_ref": calendar_ref,
+        "evidence": {
+            "id": existing_task_id,
+            "title": existing_task_title,
+            "status": "completed",
+            "result": task_result,
+        },
+    }]), encoding="utf-8")
+    cfg.task_reconciliation_path = evidence_path
+
+    def payload(filing):
+        mid, _, _, _, name, email = filing
+        is_target = f"gmail:{mid}" == source_ref
+        return _gmail_payload(
+            mid=mid,
+            from_email=email,
+            from_name=name,
+            subject="Tuesday call" if is_target else f"Legitimate update {mid}",
+            body=(
+                "Tuesday at 10am works. Include Malena on the call pls."
+                if is_target else f"Legitimate client update {mid}."
+            ),
+        )
+
+    runner = FakeRunner()
+    _lock_ok(runner, cfg.state_dir / "claims")
+    runner.record(
+        ("gws", "gmail", "+triage"), rc=0,
+        stdout=json.dumps([{"id": item[0], "threadId": f"thread-{item[0]}"} for item in filings]),
+    )
+    for filing in filings:
+        mid = filing[0]
+        runner.record(
+            ("gws", "gmail", "+read", "--id", mid), rc=0,
+            stdout=json.dumps(payload(filing)),
+        )
+    _open_tasks_empty(runner)
+    runner.record(("claude",), rc=0, stdout=_claude_wrapper(
+        summary="Nerin selected Tuesday 10am and asked to include Malena.",
+        commitments=[{
+            "text": commitment_title,
+            "owner_name": "Josh Weiss",
+            "deadline_iso": "2026-10-06",
+            "quote": "Include Malena on the call pls.",
+            "matches_open_item": None,
+        }],
+    ))
+    for i in range(1, 8):
+        runner.record(("claude",), rc=0, stdout=_claude_wrapper(
+            summary=f"Legitimate client update {i}.",
+        ))
+    for mid, _, _, contact_id, _, _ in filings:
+        runner.record(
+            ("python3", str(cfg.crm_dir / "add-interaction.py"), "--contact-id", contact_id),
+            rc=0,
+            stdout=_interaction_stdout(
+                contact_id=contact_id, source_ref=f"gmail:{mid}",
+            ),
+        )
+
+    result = csg.run(cfg, runner)
+
+    assert result.exit_code == 0
+    assert result.filed == 8
+    assert len([c for c in runner.calls if len(c) > 1 and "add-interaction.py" in c[1]]) == 8
+    assert not any(c[:3] == ["cortextos", "bus", "create-task"] for c in runner.calls)
+    assert sum(page.read_text(encoding="utf-8").count("[source: gmail:") for page in pages.values()) == 8
+    rows = [json.loads(line) for line in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
+    assert {row["source_ref"] for row in rows} == {f"gmail:{item[0]}" for item in filings}
+    assert sum(write.startswith("crm:") for row in rows for write in row["writes"]) == 8
+    assert sum(write.endswith(".md") for row in rows for write in row["writes"]) == 8
+    target = next(row for row in rows if row["source_ref"] == source_ref)
+    assert target["resolutions"][0]["effects"][-1] == f"task:{commitment_title}"
+    assert target["reconciled_tasks"] == [{
+        "task_id": existing_task_id,
+        "title": commitment_title,
+        "source_ref": source_ref,
+        "evidence_description": task_result,
+        "kind": "satisfied-task",
+        "evidence_task_title": existing_task_title,
+        "evidence_status": "completed",
+        "calendar_ref": calendar_ref,
+    }]
+    assert not any(write.startswith("task:") for write in target["writes"])
+    assert not any(write.startswith("task:") for row in rows for write in row["writes"])
+    from observation_ledger import Ledger
+    target_row = Ledger(cfg.state_dir / "observations.jsonl").latest(source_ref)
+    assert target_row is not None
+    assert Ledger(cfg.state_dir / "observations.jsonl").open_email_tasks() == []
+    rendered = "\n".join(csg.projections.plan_digest_line(target_row))
+    assert "Task already satisfied" in rendered
+    assert "Task created" not in rendered
+    assert "Task reconciled" not in rendered
+
+    before = (cfg.state_dir / "observations.jsonl").read_bytes()
+    repeated_runner = FakeRunner()
+    _lock_ok(repeated_runner, cfg.state_dir / "claims")
+    repeated_runner.record(
+        ("gws", "gmail", "+triage"), rc=0,
+        stdout=json.dumps([{"id": item[0], "threadId": f"thread-{item[0]}"} for item in filings]),
+    )
+    for filing in filings:
+        mid = filing[0]
+        repeated_runner.record(
+            ("gws", "gmail", "+read", "--id", mid), rc=0,
+            stdout=json.dumps(payload(filing)),
+        )
+
+    repeated = csg.run(cfg, repeated_runner)
+
+    assert repeated.exit_code == 0
+    assert repeated.skipped_terminal == 8
+    assert (cfg.state_dir / "observations.jsonl").read_bytes() == before
+    assert not any(c[:3] == ["cortextos", "bus", "create-task"] for c in repeated_runner.calls)
+
+
+def test_satisfied_task_evidence_mismatches_fail_before_effects(tmp_path):
+    source_ref = "gmail:1a1091289e586b01"
+    commitment_title = "Include Malena on the Tuesday 10am call."
+    task_id = "task_1791147760260_03308975"
+    calendar_ref = "calendar:63u3m7f6la4f0loedft861vhpi"
+    result_text = f"Completed from {source_ref} with {calendar_ref}."
+    base = {
+        "kind": "satisfied-task",
+        "source_ref": source_ref,
+        "task_title": commitment_title,
+        "task_id": task_id,
+        "calendar_ref": calendar_ref,
+        "evidence": {
+            "id": task_id,
+            "title": "[WAITING ON THEM] Nerin scheduling",
+            "status": "completed",
+            "result": result_text,
+        },
+    }
+
+    def mutate_task(record):
+        record["evidence"]["id"] = "task_1791147760260_03308976"
+
+    def mutate_calendar(record):
+        record["calendar_ref"] = "calendar:different"
+
+    def mutate_status(record):
+        record["evidence"]["status"] = "in_progress"
+
+    def mutate_result(record):
+        record["evidence"]["result"] = "Completed without exact evidence refs."
+
+    def mutate_source(record):
+        record["source_ref"] = "gmail:different"
+
+    def mutate_title(record):
+        record["task_title"] = "A different extracted commitment"
+
+    cases = {
+        "task": mutate_task,
+        "calendar": mutate_calendar,
+        "status": mutate_status,
+        "result": mutate_result,
+        "source": mutate_source,
+        "title": mutate_title,
+    }
+    for label, mutate in cases.items():
+        case_dir = tmp_path / label
+        cfg = _cfg(case_dir, dry_run=False, contacts=[{
+            "id": "nerin-kadribegovic",
+            "name": "Nerin Kadribegovic",
+            "emails": ["nerin@kadre.org"],
+        }])
+        page = _page_path(cfg, "kadre")
+        page.parent.mkdir(parents=True, exist_ok=True)
+        original_page = (
+            "# Client: KADRE\n\n## Node\nid: kadre\n\ndomains: kadre.org\n\n"
+            "## History (dated, newest first)\n\n## Open Items\n"
+        )
+        page.write_text(original_page, encoding="utf-8")
+        record = json.loads(json.dumps(base))
+        mutate(record)
+        evidence_path = case_dir / "satisfied-task-reconciliation.json"
+        evidence_path.write_text(json.dumps([record]), encoding="utf-8")
+        cfg.task_reconciliation_path = evidence_path
+
+        runner = FakeRunner()
+        _lock_ok(runner, cfg.state_dir / "claims")
+        runner.record(
+            ("gws", "gmail", "+triage"), rc=0,
+            stdout=json.dumps([{"id": source_ref.removeprefix("gmail:"), "threadId": "t1"}]),
+        )
+        runner.record(
+            ("gws", "gmail", "+read"), rc=0,
+            stdout=json.dumps(_gmail_payload(
+                mid=source_ref.removeprefix("gmail:"),
+                from_email="nerin@kadre.org",
+                from_name="Nerin Kadribegovic",
+                subject="Tuesday call",
+                body="Tuesday at 10am works. Include Malena on the call pls.",
+            )),
+        )
+        _open_tasks_empty(runner)
+        runner.record(("claude",), rc=0, stdout=_claude_wrapper(commitments=[{
+            "text": commitment_title,
+            "owner_name": "Josh Weiss",
+            "deadline_iso": "2026-10-06",
+            "quote": "Include Malena on the call pls.",
+            "matches_open_item": None,
+        }]))
+
+        run_result = csg.run(cfg, runner)
+
+        assert run_result.exit_code == 3, label
+        assert not any(
+            c[:3] == ["cortextos", "bus", "create-task"]
+            or (len(c) > 1 and "add-interaction.py" in c[1])
+            for c in runner.calls
+        ), label
+        assert page.read_text(encoding="utf-8") == original_page, label
+        assert (cfg.crm_dir / "interactions.jsonl").read_text(encoding="utf-8") == "", label
+
+
+def test_task_reconciliation_evidence_mismatch_fails_before_external_calls(tmp_path):
+    cfg = _cfg(tmp_path, dry_run=False)
+    evidence_path = tmp_path / "task-reconciliation.json"
+    evidence_path.write_text(json.dumps([{
+        "source_ref": "gmail:m1",
+        "task_title": "Send the updated MSA",
+        "evidence": {
+            "id": "task_1791252751937_23973428",
+            "title": "A merely similar manual task",
+            "description": "source gmail:m1",
+        },
+    }]), encoding="utf-8")
+    cfg.task_reconciliation_path = evidence_path
+    runner = FakeRunner()
+
+    result = csg.run(cfg, runner)
+
+    assert result.exit_code == 3
+    assert runner.calls == []
+    receipt = json.loads((cfg.state_dir / "run-receipt.json").read_text())
+    assert "evidence title mismatch" in receipt["error"]
+    assert not (cfg.state_dir / "observations.jsonl").exists()
 
 
 def test_a_filed_prior_resolution_is_carried_verbatim_not_re_evaluated():

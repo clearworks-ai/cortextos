@@ -16,6 +16,7 @@ import contextlib
 import difflib
 import fcntl
 import importlib.util
+import json
 import os
 import sys
 import tempfile
@@ -38,7 +39,7 @@ import single_flight
 import writeback_email
 from gmail_source import GmailSourceError
 from observation_ledger import (
-    EXTRACTION_MAX_ATTEMPTS, Ledger, ObservationRow, Resolution, clear_all_extraction_attempts,
+    EXTRACTION_MAX_ATTEMPTS, Ledger, ObservationRow, ReconciledTask, Resolution, clear_all_extraction_attempts,
     clear_extraction_attempts, unstamp_extraction_attempt,
     content_digest, extraction_attempt_state, read_receipt, record_extraction_attempt,
     record_extraction_failure, record_failure, record_lease_release_failure,
@@ -61,6 +62,7 @@ class Config:
     now: datetime
     clock: "Callable[[], float]" = time.monotonic   # monotonic source for the lease heartbeat (injectable for tests)
     retry_frozen: bool = False  # FINAL F-1: the named un-freeze path (--retry-frozen)
+    task_reconciliation_path: Path | None = None
 
 
 @dataclass
@@ -182,6 +184,108 @@ class EscalationError(Exception):
     whole message aborts and the next run escalates again (G0B-4)."""
 
 
+class TaskReconciliationError(ValueError):
+    """A one-time task reconciliation file is malformed or self-contradictory."""
+
+
+def _load_task_reconciliations(path: Path | None) -> dict[tuple[str, str], ReconciledTask]:
+    """Load bounded, exact proof that a task effect already exists.
+
+    Each record binds the requested source/title either to an existing
+    cortextOS task whose title and source-bearing description agree, or to a
+    completed task whose result names the exact Gmail and calendar evidence
+    satisfying that commitment. Any malformed or mismatched record rejects the
+    whole input; there is no fuzzy/manual-task fallback.
+    """
+    if path is None:
+        return {}
+    path = Path(path)
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise TaskReconciliationError(f"cannot read task reconciliation {path}: {exc}") from exc
+    if len(raw) > 1_000_000:
+        raise TaskReconciliationError("task reconciliation exceeds 1000000 bytes")
+    try:
+        records = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise TaskReconciliationError(f"task reconciliation is not valid JSON: {exc}") from exc
+    if not isinstance(records, list) or len(records) > 100:
+        raise TaskReconciliationError("task reconciliation must be a list of at most 100 records")
+
+    loaded: dict[tuple[str, str], ReconciledTask] = {}
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            raise TaskReconciliationError(f"task reconciliation record {index} is not an object")
+        source_ref = record.get("source_ref")
+        task_title = record.get("task_title")
+        evidence = record.get("evidence")
+        kind = record.get("kind", "existing-task")
+        if not isinstance(source_ref, str) or not source_ref.startswith("gmail:") or source_ref.strip() != source_ref:
+            raise TaskReconciliationError(f"task reconciliation record {index} has invalid source_ref")
+        if not isinstance(task_title, str) or not task_title or task_title.strip() != task_title:
+            raise TaskReconciliationError(f"task reconciliation record {index} has invalid task_title")
+        if not isinstance(evidence, dict):
+            raise TaskReconciliationError(f"task reconciliation record {index} has no evidence object")
+        if kind not in {"existing-task", "satisfied-task"}:
+            raise TaskReconciliationError(f"task reconciliation record {index} has invalid kind")
+        task_id = evidence.get("id")
+        if not client_state_writes.is_task_id(task_id):
+            raise TaskReconciliationError(f"task reconciliation record {index} has invalid task id")
+        if kind == "existing-task":
+            if evidence.get("title") != task_title:
+                raise TaskReconciliationError(f"task reconciliation record {index} evidence title mismatch")
+            if evidence.get("description") != f"source {source_ref}":
+                raise TaskReconciliationError(f"task reconciliation record {index} evidence source mismatch")
+            reconciliation = ReconciledTask(
+                task_id=task_id,
+                title=task_title,
+                source_ref=source_ref,
+                evidence_description=evidence["description"],
+            )
+        else:
+            bound_task_id = record.get("task_id")
+            bound_calendar_ref = record.get("calendar_ref")
+            evidence_title = evidence.get("title")
+            status = evidence.get("status")
+            result = evidence.get("result")
+            if not client_state_writes.is_task_id(bound_task_id) or task_id != bound_task_id:
+                raise TaskReconciliationError(f"task reconciliation record {index} evidence task mismatch")
+            if not isinstance(evidence_title, str) or not evidence_title or evidence_title.strip() != evidence_title:
+                raise TaskReconciliationError(f"task reconciliation record {index} has invalid evidence task title")
+            if status != "completed":
+                raise TaskReconciliationError(f"task reconciliation record {index} evidence status mismatch")
+            if not isinstance(result, str) or not result.strip():
+                raise TaskReconciliationError(f"task reconciliation record {index} has invalid evidence result")
+            if (
+                not isinstance(bound_calendar_ref, str)
+                or not bound_calendar_ref.startswith("calendar:")
+                or bound_calendar_ref.strip() != bound_calendar_ref
+                or bound_calendar_ref == "calendar:"
+            ):
+                raise TaskReconciliationError(f"task reconciliation record {index} evidence calendar mismatch")
+            result_refs = {token.strip(".,;()[]{}") for token in result.split()}
+            if source_ref not in result_refs:
+                raise TaskReconciliationError(f"task reconciliation record {index} result source mismatch")
+            if bound_calendar_ref not in result_refs:
+                raise TaskReconciliationError(f"task reconciliation record {index} result calendar mismatch")
+            reconciliation = ReconciledTask(
+                task_id=task_id,
+                title=task_title,
+                source_ref=source_ref,
+                evidence_description=result,
+                kind=kind,
+                evidence_task_title=evidence_title,
+                evidence_status=status,
+                calendar_ref=bound_calendar_ref,
+            )
+        key = (source_ref, task_title)
+        if key in loaded:
+            raise TaskReconciliationError(f"duplicate task reconciliation for {source_ref} / {task_title}")
+        loaded[key] = reconciliation
+    return loaded
+
+
 def _send_escalation(runner, text: str, source_key: str) -> None:
     proc = runner.run(projections.plan_escalation_argv(text, source_key))  # G-ESC-4
     if proc.returncode != 0:  # G-ESC-2
@@ -297,6 +401,7 @@ def _diff_preview(page: Path, old_text: str, new_text: str) -> str:
 def _file_message(
     cfg: Config, runner, ledger: Ledger, resolver: "resolve_email.EmailResolver",
     msg, contacts: list[dict], previews: list[str], state: _RunState,
+    task_reconciliations: dict[tuple[str, str], ReconciledTask],
 ) -> tuple[int, int, int]:
     """Files every not-yet-filed resolution on `msg`. Returns (filed, escalated,
     ignored) counts for THIS run's reporting. A resolution already 'filed' on a
@@ -333,6 +438,7 @@ def _file_message(
 
     fresh = resolver.resolve_message(msg)
     resolutions = _merge_resolutions(merge_prior, fresh)
+    reconciled_tasks = list(merge_prior.reconciled_tasks) if merge_prior is not None else []
 
     pending = [r for r in resolutions if r.outcome == "pending"]
     escalated = [r for r in resolutions if r.outcome == "escalated"]
@@ -388,13 +494,14 @@ def _file_message(
                         source_ref=source_ref, thread_id=msg.thread_id, content_digest=digest,
                         observed_at=cfg.now.isoformat(), resolutions=resolutions,
                         revision_of=revision_of, partial=True,
+                        reconciled_tasks=reconciled_tasks,
                     ))
                     raise
                 esc_state["delivered"] = True
         row = ObservationRow(
             source_ref=source_ref, thread_id=msg.thread_id, content_digest=digest,
             observed_at=cfg.now.isoformat(), resolutions=resolutions, revision_of=revision_of,
-            simulated=cfg.dry_run,  # G-LEDGER-6
+            simulated=cfg.dry_run, reconciled_tasks=reconciled_tasks,  # G-LEDGER-6
         )
         ledger.append(row)
         if cfg.dry_run:
@@ -461,6 +568,7 @@ def _file_message(
                     observed_at=cfg.now.isoformat(), resolutions=resolutions,
                     reason=f"extraction frozen after {attempts} attempts: {last_error}",
                     revision_of=revision_of, simulated=cfg.dry_run, partial=True,
+                    reconciled_tasks=reconciled_tasks,
                     extraction_attempt={
                         "identity": identity, "attempt": attempts,
                         "last_error": last_error, "frozen": True,
@@ -503,6 +611,7 @@ def _file_message(
                 observed_at=cfg.now.isoformat(), resolutions=resolutions,
                 reason=f"budget: {exc}", extraction=exc.extraction, writes=[],
                 revision_of=revision_of, partial=True,
+                reconciled_tasks=reconciled_tasks,
                 simulated=cfg.dry_run,  # G-LEDGER-6: a dry-run budget row is a PREVIEW, not a real run
             ))
             raise
@@ -553,6 +662,7 @@ def _file_message(
             observed_at=cfg.now.isoformat(), resolutions=resolutions,
             reason=f"partial: {exc}", extraction=extraction, writes=writes,
             revision_of=revision_of, simulated=cfg.dry_run,  # G-LEDGER-6
+            reconciled_tasks=reconciled_tasks,
             # G-LEDGER-7: DERIVED, never a blanket True. If the failure landed
             # after every effect and every resolution was already filed, there
             # is nothing left to finish -- flagging it partial made the message
@@ -566,6 +676,7 @@ def _file_message(
             resolutions, pending, escalated, ignored, context, open_tasks,
             source_ref, digest, revision_of, from_email_norm,
             crm_lines, page_diffs, writes, planned_writes, esc_state,
+            task_reconciliations, reconciled_tasks,
         )
     except Exception as exc:  # noqa: BLE001 -- G-EFFECT-2: ANY escape persists landed effects
         # G0B-11 only covered WriterError/EscalationError, so an OSError out of
@@ -588,6 +699,7 @@ def _do_writes(
     resolutions, pending, escalated, ignored, context, open_tasks,
     source_ref, digest, revision_of, from_email_norm,
     crm_lines, page_diffs, writes, planned_writes, esc_state,
+    task_reconciliations, reconciled_tasks,
 ):
     """Executes (or, in dry-run, previews) every effect this message owes, then
     marks a resolution `filed` ONLY once every effect REQUIRED for it has landed
@@ -600,7 +712,22 @@ def _do_writes(
     # complete while a commitment task this message owes is still missing, and
     # the required-effect set has to be known before anything is marked filed.
     task_plans = client_state_writes.plan_tasks(extraction, context, open_tasks, source_ref)
-    task_keys = [f"task:{plan.title}" for plan in task_plans if plan.dedup is None]
+    planned_task_titles = {plan.title for plan in task_plans}
+    unbound_reconciliations = sorted(
+        title
+        for reconciled_source, title in task_reconciliations
+        if reconciled_source == source_ref and title not in planned_task_titles
+    )
+    if unbound_reconciliations:
+        raise TaskReconciliationError(
+            f"task reconciliation commitment title mismatch for {source_ref}: "
+            f"{unbound_reconciliations[0]}"
+        )
+    task_keys = [
+        f"task:{plan.title}"
+        for plan in task_plans
+        if plan.dedup is None or (source_ref, plan.title) in task_reconciliations
+    ]
 
     def landed(key: str) -> bool:
         """Has this effect already landed, on THIS message, in any run? History
@@ -726,11 +853,26 @@ def _do_writes(
     task_lines: list[str] = []
     suppressed: list[dict] = []
     for plan in task_plans:
+        key = f"task:{plan.title}"
+        reconciliation = task_reconciliations.get((source_ref, plan.title))
+        if reconciliation is not None:
+            if reconciliation.kind == "satisfied-task":
+                task_lines.append(
+                    f"  task: {plan.title} (already satisfied by completed "
+                    f"{reconciliation.task_id} via {reconciliation.calendar_ref})"
+                )
+            else:
+                task_lines.append(
+                    f"  task: {plan.title} (reconciled existing {reconciliation.task_id})"
+                )
+            if reconciliation not in reconciled_tasks:
+                reconciled_tasks.append(reconciliation)
+            mark(key, pending)
+            continue
         if plan.dedup is not None:
             suppressed.append({"title": plan.title, "tier": plan.dedup["tier"], "match": plan.dedup["match"]})
             task_lines.append(f"  task: {plan.title} (suppressed tier {plan.dedup['tier']} match: {plan.dedup['match']})")
             continue
-        key = f"task:{plan.title}"
         if landed(key):
             task_lines.append(f"  task: {plan.title} (already created on an earlier run)")
             mark(key, pending)  # G-EFFECT-3: tasks are per MESSAGE, so every resolution owes this key
@@ -772,6 +914,7 @@ def _do_writes(
         source_ref=source_ref, thread_id=msg.thread_id, content_digest=digest,
         observed_at=cfg.now.isoformat(), resolutions=resolutions,
         extraction=extraction, writes=writes, revision_of=revision_of, suppressed=suppressed,
+        reconciled_tasks=reconciled_tasks,
         simulated=cfg.dry_run, planned_writes=planned_writes,  # G-LEDGER-6
         partial=any(r.outcome != "filed" for r in pending),
     )
@@ -801,6 +944,7 @@ def run(cfg: Config, runner) -> RunResult:
     lease = None
 
     try:
+        task_reconciliations = _load_task_reconciliations(cfg.task_reconciliation_path)
         # G-LOCK-9 (G2A-3): acquisition happens INSIDE the guarded try, so a
         # missing `cortextos`, an unwritable claims dir or a timed-out claim
         # call lands on the structured failure path (record_failure + exit 3)
@@ -850,7 +994,10 @@ def run(cfg: Config, runner) -> RunResult:
                 result.skipped_terminal += 1
                 continue
 
-            filed, escalated, ignored = _file_message(cfg, runner, ledger, resolver, msg, contacts, result.previews, state)
+            filed, escalated, ignored = _file_message(
+                cfg, runner, ledger, resolver, msg, contacts, result.previews, state,
+                task_reconciliations,
+            )
             result.filed += filed
             result.escalated += escalated
             result.ignored += ignored
@@ -923,6 +1070,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--today", default=None)
     parser.add_argument("--retry-frozen", action="store_true",
                         help="give every frozen extraction identity a fresh attempt budget before sweeping (FINAL F-1)")
+    parser.add_argument("--task-reconciliation", default=None,
+                        help="one-time JSON evidence for already-created exact-source tasks")
     args = parser.parse_args(argv)
 
     today = date.fromisoformat(args.today) if args.today else datetime.now(timezone.utc).date()
@@ -931,6 +1080,7 @@ def main(argv: list[str] | None = None) -> int:
         state_dir=Path(args.state_dir), days=args.days, query=args.query, dry_run=args.dry_run,
         max_usd=args.max_usd, today=today, now=datetime.now(timezone.utc),
         retry_frozen=bool(args.retry_frozen),
+        task_reconciliation_path=Path(args.task_reconciliation) if args.task_reconciliation else None,
     )
     from runner import LoggingRunner, SubprocessRunner
     runner = LoggingRunner(SubprocessRunner(), cfg.state_dir)

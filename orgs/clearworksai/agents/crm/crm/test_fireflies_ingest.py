@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import shutil
 import tempfile
@@ -20,6 +21,13 @@ CRM_DIR = MODULE_PATH.parent
 
 
 class FirefliesIngestTests(unittest.TestCase):
+    def setUp(self) -> None:
+        fireflies = unittest.mock.patch.object(
+            MODULE, "fireflies_query", side_effect=AssertionError("live Fireflies forbidden")
+        )
+        fireflies.start()
+        self.addCleanup(fireflies.stop)
+
     def make_transcript(self) -> dict[str, object]:
         return {
             "id": "01KZ71M4876B6NKT8V3TFCQBRW",
@@ -52,6 +60,16 @@ class FirefliesIngestTests(unittest.TestCase):
         (root / "followups.jsonl").write_text("", encoding="utf-8")
         (root / "interactions.jsonl").write_text("", encoding="utf-8")
         (root / "_ingest_suppression.json").write_text("{}\n", encoding="utf-8")
+        environment = unittest.mock.patch.dict(MODULE.os.environ, {
+            "CRM_CONTACTS_PATH": str(root / "contacts.json"),
+            "CRM_INTERACTIONS_PATH": str(root / "interactions.jsonl"),
+            "CRM_FOLLOWUPS_PATH": str(root / "followups.jsonl"),
+            "CRM_SUPPRESSION_PATH": str(root / "_ingest_suppression.json"),
+            "CRM_EVENT_EMIT_LOG": str(root / "events.log"),
+            "PYTHONDONTWRITEBYTECODE": "1",
+        })
+        environment.start()
+        self.addCleanup(environment.stop)
         return root
 
     def patch_paths(self, root: Path):
@@ -61,6 +79,209 @@ class FirefliesIngestTests(unittest.TestCase):
             SEEN_PATH=root / "ingested-transcripts.txt",
             MEETINGS_DIR=root / "meetings",
         )
+
+    def test_main_point_read_only(self) -> None:
+        root = self.make_fixture_root()
+        transcript = self.make_transcript()
+        (root / "ingested-transcripts.txt").write_text("other-id  fixture\n")
+        (root / "meetings" / "existing.md").write_text("Existing meeting\n")
+        before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+        with (
+            self.patch_paths(root),
+            unittest.mock.patch("sys.argv", ["fireflies-ingest.py", "--meeting-id", transcript["id"]]),
+            unittest.mock.patch("sys.stdout", new_callable=io.StringIO) as output,
+            unittest.mock.patch.object(MODULE, "fetch_transcript", return_value=transcript) as fetch,
+            unittest.mock.patch.object(MODULE, "run_ingest") as ingest,
+            unittest.mock.patch.object(MODULE, "mark_seen") as mark,
+        ):
+            exit_code = MODULE.main()
+        ingest.assert_not_called()
+        mark.assert_not_called()
+        fetch.assert_called_once_with(transcript["id"])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(json.loads(output.getvalue()), transcript)
+        self.assertEqual(before, {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()})
+
+    def test_main_point_apply_unseen(self) -> None:
+        root = self.make_fixture_root()
+        transcript = self.make_transcript()
+        with (
+            self.patch_paths(root),
+            unittest.mock.patch("sys.argv", ["fireflies-ingest.py", "--meeting-id", transcript["id"], "--apply"]),
+            unittest.mock.patch("sys.stdout", new_callable=io.StringIO) as output,
+            unittest.mock.patch.object(MODULE, "fetch_transcript", return_value=transcript) as fetch,
+            unittest.mock.patch.object(MODULE, "run_ingest", wraps=MODULE.run_ingest) as ingest,
+        ):
+            exit_code = MODULE.main()
+        ingest.assert_called_once_with([transcript])
+        fetch.assert_called_once_with(transcript["id"])
+        self.assertEqual(exit_code, 0, output.getvalue())
+        self.assertEqual(json.loads(output.getvalue())["count"], 1)
+        self.assertIn(transcript["id"], (root / "ingested-transcripts.txt").read_text())
+        self.assertEqual(len(json.loads((root / "contacts.json").read_text())["contacts"]), 1)
+        self.assertEqual(len((root / "interactions.jsonl").read_text().splitlines()), 1)
+        self.assertEqual(len((root / "followups.jsonl").read_text().splitlines()), 2)
+        self.assertEqual(len(list((root / "meetings").glob("*.md"))), 1)
+
+    def test_main_point_apply_seen_rejected(self) -> None:
+        root = self.make_fixture_root()
+        transcript = self.make_transcript()
+        (root / "ingested-transcripts.txt").write_text(f"{transcript['id']}  already ingested\n")
+        before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+        with (
+            self.patch_paths(root),
+            unittest.mock.patch("sys.argv", ["fireflies-ingest.py", "--meeting-id", transcript["id"], "--apply"]),
+            unittest.mock.patch("sys.stdout", new_callable=io.StringIO) as output,
+            unittest.mock.patch.object(MODULE, "fetch_transcript", return_value=transcript),
+            unittest.mock.patch.object(MODULE, "run_ingest", return_value=(0, {"ok": True})) as ingest,
+            unittest.mock.patch.object(MODULE, "mark_seen") as mark,
+        ):
+            exit_code = MODULE.main()
+        ingest.assert_not_called()
+        mark.assert_not_called()
+        self.assertNotEqual(exit_code, 0)
+        payload = json.loads(output.getvalue())
+        self.assertFalse(payload["ok"])
+        self.assertIn("already seen", payload["error"])
+        self.assertEqual(before, {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()})
+
+    def test_main_point_apply_seen_reprocess(self) -> None:
+        root = self.make_fixture_root()
+        transcript = self.make_transcript()
+        (root / "ingested-transcripts.txt").write_text(f"{transcript['id']}  already ingested\n")
+        with (
+            self.patch_paths(root),
+            unittest.mock.patch("sys.argv", ["fireflies-ingest.py", "--meeting-id", transcript["id"], "--apply", "--reprocess"]),
+            unittest.mock.patch("sys.stdout", new_callable=io.StringIO) as output,
+            unittest.mock.patch.object(MODULE, "fetch_transcript", return_value=transcript),
+            unittest.mock.patch.object(MODULE, "run_ingest", wraps=MODULE.run_ingest) as ingest,
+        ):
+            exit_code = MODULE.main()
+        ingest.assert_called_once_with([transcript])
+        self.assertEqual(exit_code, 0, output.getvalue())
+        self.assertEqual(json.loads(output.getvalue())["count"], 1)
+        self.assertEqual(len((root / "ingested-transcripts.txt").read_text().splitlines()), 2)
+
+    def test_main_rejects_empty_point_apply_id(self) -> None:
+        for point_id in ("", " "):
+            with (
+                self.subTest(point_id=repr(point_id)),
+                self.patch_paths(self.make_fixture_root()),
+                unittest.mock.patch("sys.argv", ["fireflies-ingest.py", "--meeting-id", point_id, "--apply"]),
+                unittest.mock.patch("sys.stdout", new_callable=io.StringIO),
+                unittest.mock.patch("sys.stderr", new_callable=io.StringIO),
+                unittest.mock.patch.object(MODULE, "list_new") as listing,
+                unittest.mock.patch.object(MODULE, "fetch_transcript") as fetch,
+                unittest.mock.patch.object(MODULE, "run_ingest") as ingest,
+                unittest.mock.patch.object(MODULE, "mark_seen") as mark,
+            ):
+                with self.assertRaises(SystemExit) as error:
+                    MODULE.main()
+                self.assertEqual(error.exception.code, 2)
+                listing.assert_not_called()
+                fetch.assert_not_called()
+                ingest.assert_not_called()
+                mark.assert_not_called()
+
+    def test_main_rejects_unsafe_flag_combinations(self) -> None:
+        for flags in (
+            ["--meeting-id", "fixture-id", "--mark", "fixture-id"],
+            ["--meeting-id", "fixture-id", "--apply", "--mark", "fixture-id"],
+            ["--reprocess"],
+            ["--reprocess", "--apply"],
+            ["--meeting-id", "fixture-id", "--reprocess"],
+        ):
+            with (
+                self.subTest(flags=flags),
+                self.patch_paths(self.make_fixture_root()),
+                unittest.mock.patch("sys.argv", ["fireflies-ingest.py", *flags]),
+                unittest.mock.patch("sys.stdout", new_callable=io.StringIO),
+                unittest.mock.patch("sys.stderr", new_callable=io.StringIO),
+                unittest.mock.patch.object(MODULE, "fetch_transcript") as fetch,
+                unittest.mock.patch.object(MODULE, "list_new") as listing,
+                unittest.mock.patch.object(MODULE, "run_ingest") as ingest,
+                unittest.mock.patch.object(MODULE, "mark_seen") as mark,
+            ):
+                with self.assertRaises(SystemExit) as error:
+                    MODULE.main()
+                self.assertEqual(error.exception.code, 2)
+                fetch.assert_not_called()
+                listing.assert_not_called()
+                ingest.assert_not_called()
+                mark.assert_not_called()
+
+    def test_main_lists_without_arguments(self) -> None:
+        rows = [{"id": "fixture-id", "title": "Fixture meeting"}]
+        with (
+            self.patch_paths(self.make_fixture_root()),
+            unittest.mock.patch("sys.argv", ["fireflies-ingest.py"]),
+            unittest.mock.patch("sys.stdout", new_callable=io.StringIO) as output,
+            unittest.mock.patch.object(MODULE, "list_new", return_value=rows) as listing,
+            unittest.mock.patch.object(MODULE, "fetch_transcript") as fetch,
+            unittest.mock.patch.object(MODULE, "run_ingest") as ingest,
+            unittest.mock.patch.object(MODULE, "mark_seen") as mark,
+        ):
+            self.assertEqual(MODULE.main(), 0)
+        listing.assert_called_once_with(MODULE.DEFAULT_LOOKBACK_S)
+        fetch.assert_not_called()
+        ingest.assert_not_called()
+        mark.assert_not_called()
+        self.assertEqual(json.loads(output.getvalue()), {"new": rows, "count": 1})
+
+    def test_main_batch_apply_preserves_dispatch_and_exit_code(self) -> None:
+        for rows, transcripts in (([{"id": "one"}, {}, {"id": "two"}], [{"id": "one"}, {"id": "two"}]), ([], [])):
+            with (
+                self.subTest(rows=rows),
+                self.patch_paths(self.make_fixture_root()),
+                unittest.mock.patch("sys.argv", ["fireflies-ingest.py", "--apply", "--lookback", "123"]),
+                unittest.mock.patch("sys.stdout", new_callable=io.StringIO) as output,
+                unittest.mock.patch.object(MODULE, "list_new", return_value=rows) as listing,
+                unittest.mock.patch.object(MODULE, "fetch_transcript", side_effect=transcripts) as fetch,
+                unittest.mock.patch.object(MODULE, "run_ingest", return_value=(1, {"ok": False})) as ingest,
+            ):
+                self.assertEqual(MODULE.main(), 1)
+            listing.assert_called_once_with(123)
+            self.assertEqual(fetch.call_args_list, [unittest.mock.call(row["id"]) for row in transcripts])
+            ingest.assert_called_once_with(transcripts)
+            self.assertEqual(json.loads(output.getvalue()), {"ok": False})
+
+    def test_main_point_read_only_seen_and_fetch_failure(self) -> None:
+        root = self.make_fixture_root()
+        transcript = self.make_transcript()
+        (root / "ingested-transcripts.txt").write_text(f"{transcript['id']}  already ingested\n")
+        before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+        for failure in (None, RuntimeError("fixture fetch failed")):
+            with (
+                self.subTest(failure=failure),
+                self.patch_paths(root),
+                unittest.mock.patch("sys.argv", ["fireflies-ingest.py", "--meeting-id", transcript["id"]]),
+                unittest.mock.patch("sys.stdout", new_callable=io.StringIO) as output,
+                unittest.mock.patch.object(MODULE, "fetch_transcript", return_value=transcript, side_effect=failure),
+                unittest.mock.patch.object(MODULE, "run_ingest") as ingest,
+                unittest.mock.patch.object(MODULE, "mark_seen") as mark,
+            ):
+                self.assertEqual(MODULE.main(), 1 if failure else 0)
+            ingest.assert_not_called()
+            mark.assert_not_called()
+            expected = {"ok": False, "error": "fixture fetch failed"} if failure else transcript
+            self.assertEqual(json.loads(output.getvalue()), expected)
+            self.assertEqual(before, {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()})
+
+    def test_main_point_apply_fails_closed_when_seen_ledger_unreadable(self) -> None:
+        with (
+            self.patch_paths(self.make_fixture_root()),
+            unittest.mock.patch("sys.argv", ["fireflies-ingest.py", "--meeting-id", "fixture-id", "--apply"]),
+            unittest.mock.patch("sys.stdout", new_callable=io.StringIO) as output,
+            unittest.mock.patch.object(MODULE, "load_seen", side_effect=OSError("ledger unreadable")),
+            unittest.mock.patch.object(MODULE, "fetch_transcript") as fetch,
+            unittest.mock.patch.object(MODULE, "run_ingest") as ingest,
+            unittest.mock.patch.object(MODULE, "mark_seen") as mark,
+        ):
+            self.assertEqual(MODULE.main(), 1)
+        fetch.assert_not_called()
+        ingest.assert_not_called()
+        mark.assert_not_called()
+        self.assertEqual(json.loads(output.getvalue()), {"ok": False, "error": "ledger unreadable"})
 
     def test_run_ingest_writes_contact_interaction_followups_and_meeting_file(self) -> None:
         root = self.make_fixture_root()

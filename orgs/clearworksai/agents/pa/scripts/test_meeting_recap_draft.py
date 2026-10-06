@@ -279,7 +279,7 @@ class ProcessMeetingsTests(unittest.TestCase):
                     )
             self.assertEqual(rc, 0)
             out = stdout.getvalue()
-            self.assertIn("to: josh@clearworks.ai", out)
+            self.assertIn("to: mark@msia.org", out)
             self.assertIn("cc: (none)", out)
             self.assertIn("attendees: mark@msia.org", out)
             self.assertIn("Following up on our Jul 27 conversation", out)
@@ -377,9 +377,10 @@ class ProcessMeetingsTests(unittest.TestCase):
                             "--dry-run",
                         ]
                     )
-            self.assertEqual(rc, 0)
+            self.assertNotEqual(rc, 0)
             out = stdout.getvalue()
             self.assertIn("attendees: (none)", out)
+            self.assertIn("to: (none)", out)
 
 
 import os
@@ -402,6 +403,7 @@ def test_apply_calls_gws_and_keys_ledger_by_source(tmp_path, monkeypatch):
                 "date": "2026-09-04T17:00:00Z",
                 "summary": {"overview": "Scoped tactical reports."},
                 "next_steps": [],
+                "attendees": ["ada@clients.example"],
                 "source": {"kind": "omi", "id": "OMI-999"},
             }
         ]
@@ -429,7 +431,7 @@ def test_legacy_no_source_falls_back_to_fireflies_prefixed_id(tmp_path, monkeypa
     gws.write_text("#!/bin/sh\nexit 0\n")
     gws.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
-    payload = {"meetings": [{"id": "legacy123", "title": "T", "date": "2026-01-01", "next_steps": []}]}
+    payload = {"meetings": [{"id": "legacy123", "title": "T", "date": "2026-01-01", "next_steps": [], "attendees": ["ada@clients.example"]}]}
     payload_path = tmp_path / "p.json"
     payload_path.write_text(json.dumps(payload), encoding="utf-8")
     ledger = tmp_path / "l.txt"
@@ -740,3 +742,181 @@ class VoiceBundleTests(unittest.TestCase):
         if MODULE.APPROVED_EXEMPLAR_PATH.exists():
             self.assertIn("APPROVED RECAP EXEMPLAR", bundle)
             self.assertIn("Quick recap so nothing gets lost", bundle)
+
+
+ADA_EMAIL = "ada@clients.example"
+ADA_NAME = "Ada External"
+
+
+def _client_meeting(**overrides: object) -> dict[str, object]:
+    meeting: dict[str, object] = {
+        "id": "meeting-name-only",
+        "title": "Client recap",
+        "date": "2026-07-27T11:00:00Z",
+        "organizer": "josh@clearworks.ai",
+        "attendees": [ADA_NAME],
+        "summary": {"overview": "Reviewed the audit findings.", "bullets": "", "action_items": ""},
+        "client_context": "Client-facing delivery.",
+        "next_steps": [{"text": "Send findings deck", "direction": "outbound", "owner": "Josh"}],
+    }
+    meeting.update(overrides)
+    return meeting
+
+
+def _contacts_file(path: Path, rows: list[dict[str, object]]) -> None:
+    path.write_text(json.dumps({"contacts": rows}), encoding="utf-8")
+
+
+class RecipientVerificationTests(unittest.TestCase):
+    def _run(self, meeting: dict[str, object], contacts: list[dict[str, object]], *, dry_run: bool = False):
+        calls: list[list[str]] = []
+        runner = fake_runner(calls, gws_stdout='{"draft_id": "r-syn-1", "message_id": "m-syn-1"}')
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            contacts_path = tmp_path / "contacts.json"
+            _contacts_file(contacts_path, contacts)
+            stdout = io.StringIO()
+            with mock.patch.dict(os.environ, {"CRM_CONTACTS_PATH": str(contacts_path)}), \
+                 mock.patch.object(MODULE, "compose_customer_email", lambda m, v, r: GOOD_BODY), \
+                 contextlib.redirect_stdout(stdout):
+                summary = MODULE.process_meetings(
+                    [meeting],
+                    ledger_path=tmp_path / "ledger.txt",
+                    voice_guidance="Keep it direct.",
+                    vip_list=set(),
+                    runner=runner,
+                    dry_run=dry_run,
+                    voice_prompt="Direct.",
+                )
+            return summary, calls, stdout.getvalue()
+
+    def _cli_dry(self, meeting: dict[str, object], contacts: list[dict[str, object]]):
+        def boom(*_a, **_k):
+            raise AssertionError("gws/subprocess must not run in --dry-run")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            payload_path = tmp_path / "payload.json"
+            ledger_path = tmp_path / "ledger.txt"
+            voice_path = tmp_path / "voice.md"
+            vip_path = tmp_path / "vip.txt"
+            contacts_path = tmp_path / "contacts.json"
+            payload_path.write_text(json.dumps({"meetings": [meeting]}), encoding="utf-8")
+            ledger_path.write_text("", encoding="utf-8")
+            voice_path.write_text("", encoding="utf-8")
+            vip_path.write_text("", encoding="utf-8")
+            _contacts_file(contacts_path, contacts)
+            stdout = io.StringIO()
+            with mock.patch.dict(os.environ, {"CRM_CONTACTS_PATH": str(contacts_path)}), \
+                 mock.patch.object(MODULE.subprocess, "run", boom), \
+                 mock.patch.object(MODULE, "compose_customer_email", lambda m, v, r: GOOD_BODY), \
+                 contextlib.redirect_stdout(stdout):
+                rc = MODULE.main(
+                    [
+                        "--payload", str(payload_path),
+                        "--ledger", str(ledger_path),
+                        "--voice", str(voice_path),
+                        "--vip-list", str(vip_path),
+                        "--dry-run",
+                    ]
+                )
+            return rc, stdout.getvalue()
+
+    def test_unique_external_to_is_verified_contact_not_josh(self):
+        summary, calls, _ = self._run(
+            _client_meeting(),
+            [{"name": ADA_NAME, "email": ADA_EMAIL}],
+        )
+        gws = [c for c in calls if c[:3] == ["gws", "gmail", "+draft"]]
+        self.assertEqual(len(gws), 1)
+        self.assertEqual(gws[0][gws[0].index("--to") + 1], ADA_EMAIL)
+        self.assertNotIn("josh@clearworks.ai", gws[0])
+        self.assertNotIn("send", gws[0])
+        self.assertEqual(summary["drafts_created"], 1)
+        self.assertEqual(summary["drafts"][0]["to"], [ADA_EMAIL])
+        self.assertEqual(summary["drafts"][0]["cc"], [])
+
+    def test_missing_ambiguous_josh_self_clearworks_fallback_make_zero_gws_calls(self):
+        cases = [
+            (_client_meeting(attendees=["Zed Unknown"]), [{"name": ADA_NAME, "email": ADA_EMAIL}]),
+            (
+                _client_meeting(attendees=["Blair Twin"]),
+                [
+                    {"name": "Blair Twin", "email": "blair.a@clients.example"},
+                    {"name": "Blair Twin", "email": "blair.b@clients.example"},
+                ],
+            ),
+            (_client_meeting(attendees=["josh@clearworks.ai"]), [{"name": "Josh Weiss", "email": "josh@clearworks.ai"}]),
+            (_client_meeting(attendees=["ops@clearworks.ai"]), [{"name": "Ops Desk", "email": "ops@clearworks.ai"}]),
+            (_client_meeting(attendees=[]), [{"name": ADA_NAME, "email": ADA_EMAIL}]),
+        ]
+        for meeting, contacts in cases:
+            with self.subTest(attendees=meeting["attendees"]):
+                summary, calls, _ = self._run(meeting, contacts)
+                self.assertEqual([c for c in calls if c[:3] == ["gws", "gmail", "+draft"]], [])
+                self.assertEqual(summary["drafts_created"], 0)
+
+    def test_cli_dry_run_zero_match_returns_nonzero_with_diagnostics(self):
+        rc, out = self._cli_dry(
+            _client_meeting(attendees=["Zed Unknown"]),
+            [{"name": ADA_NAME, "email": ADA_EMAIL}],
+        )
+        self.assertNotEqual(rc, 0)
+        self.assertIn("to: (none)", out)
+        self.assertIn("attendees: Zed Unknown", out)
+        self.assertIn("recipients: missing or unverified external To", out)
+
+    def test_cli_dry_run_ambiguous_returns_nonzero_with_diagnostics(self):
+        rc, out = self._cli_dry(
+            _client_meeting(attendees=["Blair Twin"]),
+            [
+                {"name": "Blair Twin", "email": "blair.a@clients.example"},
+                {"name": "Blair Twin", "email": "blair.b@clients.example"},
+            ],
+        )
+        self.assertNotEqual(rc, 0)
+        self.assertIn("to: (none)", out)
+        self.assertIn("attendees: Blair Twin", out)
+        self.assertIn("recipients: missing or unverified external To", out)
+
+    def test_malformed_and_internal_alias_make_zero_gws_calls(self):
+        contacts = [{"name": ADA_NAME, "email": ADA_EMAIL}]
+        cases = [
+            ["ada@clients.example,eve@clients.example"],
+            ["ada@clients@example.com"],
+            ["ada@clients.example\x00"],
+            ["ops@clearworksai.com"],
+        ]
+        for attendees in cases:
+            with self.subTest(attendees=attendees):
+                summary, calls, _ = self._run(_client_meeting(attendees=attendees), contacts)
+                self.assertEqual([c for c in calls if c[:3] == ["gws", "gmail", "+draft"]], [])
+                self.assertEqual(summary["drafts_created"], 0)
+
+    def test_name_only_malformed_canonical_contact_makes_zero_gws_calls(self):
+        summary, calls, _ = self._run(
+            _client_meeting(attendees=[ADA_NAME]),
+            [{"name": ADA_NAME, "email": "ada@clients.example,eve@clients.example"}],
+        )
+        self.assertEqual([c for c in calls if c[:3] == ["gws", "gmail", "+draft"]], [])
+        self.assertEqual(summary["drafts_created"], 0)
+
+    def test_invalid_cc_and_send_path_never_reach_gws(self):
+        summary, calls, _ = self._run(
+            _client_meeting(cc=["ops@clearworks.ai"]),
+            [{"name": ADA_NAME, "email": ADA_EMAIL}],
+        )
+        self.assertEqual([c for c in calls if c[:3] == ["gws", "gmail", "+draft"]], [])
+        self.assertEqual(summary["drafts_created"], 0)
+        self.assertFalse(any("send" in c for c in calls))
+
+    def test_dry_run_rendering_matches_persisted_draft_receipt(self):
+        contacts = [{"name": ADA_NAME, "email": ADA_EMAIL}]
+        summary, _, _ = self._run(_client_meeting(), contacts)
+        persisted = summary["drafts"][0]
+        _, dry_calls, dry_out = self._run(_client_meeting(), contacts, dry_run=True)
+        self.assertEqual(dry_calls, [])
+        self.assertIn(f"to: {', '.join(persisted['to'])}", dry_out)
+        self.assertIn("cc: (none)" if not persisted["cc"] else f"cc: {', '.join(persisted['cc'])}", dry_out)
+        self.assertIn(persisted["subject"], dry_out)
+        self.assertIn(persisted["body"], dry_out)

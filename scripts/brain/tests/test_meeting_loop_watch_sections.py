@@ -52,6 +52,7 @@ def test_main_dry_run_gmail_error_does_not_block_fireflies(tmp_path, monkeypatch
     monkeypatch.setattr(mlw, "list_transcripts", lambda api_key, throttle_s=1.0: [])
     monkeypatch.setattr(mlw, "_probe", lambda url: "ok")
     monkeypatch.setattr(mlw, "ENVELOPES", tmp_path / "no-envelopes-here")  # is_dir() False -> have = set()
+    monkeypatch.setattr(mlw, "ACK_PATH", tmp_path / "ack.json")
 
     # gmail_section_lines lazily imports client_state_digest and calls its
     # gmail_section -- forcing THAT to raise proves gmail_section_lines's own

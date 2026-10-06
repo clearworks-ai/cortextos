@@ -1,0 +1,707 @@
+{
+  "attempts": [
+    {
+      "duration_ms": 7174,
+      "http_status": 200,
+      "model": "gemini-2.5-flash",
+      "response": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "Several Los Angeles consultants specialize in assisting small Architecture, Engineering, and Construction (AEC) firms with AI implementation, extending beyond mere staff training. These firms offer services ranging from strategy development and workflow audits to hands-on integration of AI tools and custom solution development.\n\nConsultants that help small AEC firms implement AI include:\n\n*   **AEC Hub** offers AI strategy consulting and implementation services specifically for architecture and engineering firms. They help firms determine where AI fits, build and put into production AI tools and automations, and offer a fixed-price discovery sprint to assess AI readiness and develop a roadmap. They also provide ongoing AI strategy retainers that include help getting one workflow into production each quarter. For smaller operations, they can also provide hourly work and custom pricing.\n*   **AI in AEC** provides AI workflow implementation for AEC firms. They conduct hands-on engagements to map current workflows, identify areas where AI can provide leverage, and build an executable roadmap. Founded by an architect, their expertise is rooted in solving real problems within AEC firms.\n*   **AEC Advisors.AI** focuses exclusively on the professional services sector, including the A/E/C industries. They offer AI systems implementation services, consulting, and support, and help incorporate new AI technologies into workflows. Their consultants are experienced in implementing change within organizations.\n*   **Zweig Group** provides tailored guidance, consulting, and training to AEC firms on leveraging AI in their business operations. They specialize in end-to-end consulting services, from initial planning and strategy development to implementation and ongoing support, customized to each firm's unique needs.\n*   **Strategence AI** takes a strategy-first approach to AI for small businesses, including a clear diagnosis-plan-implement methodology, and focuses on marketing automation and operational efficiency. They emphasize hands-on management experience to ensure technology supports business operations.\n*   **Lotus AI** is a boutique consultancy specializing in machine learning platforms, generative experiences, and full-cycle AI product development. While not explicitly mentioning AEC, their focus on full-cycle AI product development suggests implementation capabilities relevant to small firms.\n*   **BridgePath AI Solutions** specializes in small businesses and offers support in areas like AI voice agents and workflow automation.\n*   **Alcala Consulting, Inc.** provides AI automation services for Los Angeles businesses, including implementation and integration of AI with existing systems like CRMs and Microsoft 365. They offer a process that includes discovery, workflow assessment, solution design, implementation, and ongoing optimization.\n*   **Agent Architects (Burbank, CA)** specializes in helping small and mid-sized businesses leverage AI, providing a five-step process that includes understanding needs, assessing AI's potential, planning tools and agents, and implementing technology into the business. They build agents and agent teams that integrate with existing software and tools to automate tasks.\n*   **Perceptive Analytics** offers end-to-end artificial intelligence consulting in Los Angeles, covering AI strategy and roadmapping, Generative AI and LLM solution development, machine learning engineering, and data engineering. They aim to deploy custom machine learning and generative AI workflows to automate operational bottlenecks.\n*   **Los Angeles AI Agency** focuses on AI integration, connecting new intelligence tools into existing software systems. Their services include system mapping, secure API configuration, and end-to-end testing to ensure consistent output and reliable automation.\n*   **Opinosis Analytics** offers AI consulting and digital transformation in Los Angeles, providing end-to-end strategy and implementation support, including AI and Generative AI integration, to transform complex workflows into intelligent, scalable systems. They have experience helping both small and large organizations implement AI effectively."
+                }
+              ],
+              "role": "model"
+            },
+            "finishReason": "STOP",
+            "groundingMetadata": {
+              "groundingChunks": [
+                {
+                  "web": {
+                    "title": "aechub.org",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGw5xDSP397dhWOb4ybvdgUk78omqhXlxYJ25ZJXzV8Z5Yb_bhVoGam3djVOQC7YfAsyrA_Gp90ZqNssLwJ_7FQioOPB5KTaCXEM6ME85qwmSn-n2F6iSVrAjxFYFw="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aechub.org",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG730sjLa5V_gyV68F0z2I4BRub5BvTY4-WOtt0lcc0G73t1NrFMNUPKqr-44g15iNH2RG8nJ-mAEY0YnqMOZwV7_1Mg8kdwj5E5Gn4mVr1-mlsRB7TxVGkGxY="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aiinaec.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHz4VQiimr_iAwohzu1d3jXRWQJwKer1MFMsfnS72OTM0OI92l1d3e_1G2gvqJEUPQegelmCbhn3xIA0eF3GP-JIdbNqi2Fj3wfXyIARBGNRhQeRg=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aecadvisors.ai",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFhKfWerl_ebzGTqSBo98P_2k9oU-QtqzHabw0HoowNicAXewmc83Z2OFw5QGX8Ckxyij82fGSF4eFiAT5YBEg6ftdPezzOj5Wd5UgQNjuhYsQ="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "zweiggroup.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEHCi6XIVg9kC9sKNgwStSVCnAAkS4zmpr60l-a73azWb3IVccNp5mG3ncBVSMDgvyd4VCV6WFgPWiVxLrlDBQZwyPeepyC5ZxRvObLdcfpDm8X5A7uEZvhFtMO0bdDxB25L7XLj29daGP53lmhBxo="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "manhattanbeachai.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEgfpZhavg7ku3oFFExZQ1VjtJKRDyKbU8Fk9uZR8-mBA0R_TC-ZO6aJ7a602pkPyIu_MyR8HQbh7mFomo8YsmwtewHh4hWM2N893O72P9_Vl8d-f6dk5VMLgrfRh-U0jllEYCQvfY="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "strategenceai.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGJokY-o5n88Q6U2ErCWw0G0PRU-3wj43b08uI-jE_5r8ot1PUiVaODhHo0Xqh7Y3rbLg19Oy-jOPt2uJ6DQaYs10M8od38IioJZcxbZB3ukRFRcEx3ORkxtw=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "alcalaconsulting.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF0iKmYDcm7gTq-wJVG1qDltfk0r1mZRPcbEhpArgPBorM5r_IvzsElzRO0WWOt--trJac4JNAV6E83D7lDHi47JtDxWiJl5dINUk2ie_XjebKG_Lf9aOipARKPmfH1D3cWaI7-oVPr3_zZ-ZJjhhHxK0EKGFq9IFKcYCvpujet"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "agentarchitects.io",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHiBSq5emWEEMWIy4ndDljDvDu7DD4hth3dCq8VxvZy4Bxc9mlHdZdQIdg8iPvcL7uO0ayBSj0tAiOl6IXQy2J-OizHiCMjk-PczYlkgrLl1QRHsFznmp5fO-vhKY1hooMA2DiT4wS6W0GCwQ=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "perceptive-analytics.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEVXcEpvP8ATQ4Yey4Gok37M9DzpNkZ5j_WgIA0X8APs79Tnbm6cWLCaNg1srBAeaaS7YwhIIng2CREyq3TsdT8mZjqnt3FCfCG-IY6D1IZ_vlHvQMHm-ITOTtfORsBsG9VOSerGHOFZTyQmZgDSLJA8Lj6W-K4-cfDDrWnsg=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aiagencyla.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGMmPG_PdgpMncUWDxd7v8uiaX60fF-2lWRN0OO1CqD10aknL1XqFUPXcagR5tKyAN2yfdjJsByJLKjHCEJatNSeYnsb3nRNjB8A8WvvzxljzQAJnHOPpGYC-21ILmTcDlHLiVGIry_KLBcpYxBI8zc"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "opinosis-analytics.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFj_xZSPutiTWu1r1I-VQC3Tfv-E0XfbvnlUjrVtDXI6QwhrDTPXCGqm4dNIF1mdl3qkiPaq3xVOWU4sfnuuDj2_n4ZKjPSrRNgiGI0Ld2MQ7HVSd9w0p_PVOZR2qCNFyf0yLKvZmuxNN0lMRJ8jYpHtnjXaQsuVXZd8Ds="
+                  }
+                }
+              ],
+              "groundingSupports": [
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 819,
+                    "startIndex": 703,
+                    "text": "They also provide ongoing AI strategy retainers that include help getting one workflow into production each quarter."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 897,
+                    "startIndex": 820,
+                    "text": "For smaller operations, they can also provide hourly work and custom pricing."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    2
+                  ],
+                  "segment": {
+                    "endIndex": 1105,
+                    "startIndex": 967,
+                    "text": "They conduct hands-on engagements to map current workflows, identify areas where AI can provide leverage, and build an executable roadmap."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    2
+                  ],
+                  "segment": {
+                    "endIndex": 1199,
+                    "startIndex": 1106,
+                    "text": "Founded by an architect, their expertise is rooted in solving real problems within AEC firms."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 1441,
+                    "startIndex": 1313,
+                    "text": "They offer AI systems implementation services, consulting, and support, and help incorporate new AI technologies into workflows."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 1520,
+                    "startIndex": 1442,
+                    "text": "Their consultants are experienced in implementing change within organizations."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    4
+                  ],
+                  "segment": {
+                    "endIndex": 1830,
+                    "startIndex": 1654,
+                    "text": "They specialize in end-to-end consulting services, from initial planning and strategy development to implementation and ongoing support, customized to each firm's unique needs."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    5,
+                    6
+                  ],
+                  "segment": {
+                    "endIndex": 2033,
+                    "startIndex": 1831,
+                    "text": "*   **Strategence AI** takes a strategy-first approach to AI for small businesses, including a clear diagnosis-plan-implement methodology, and focuses on marketing automation and operational efficiency."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    6
+                  ],
+                  "segment": {
+                    "endIndex": 2130,
+                    "startIndex": 2034,
+                    "text": "They emphasize hands-on management experience to ensure technology supports business operations."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    5
+                  ],
+                  "segment": {
+                    "endIndex": 2280,
+                    "startIndex": 2131,
+                    "text": "*   **Lotus AI** is a boutique consultancy specializing in machine learning platforms, generative experiences, and full-cycle AI product development."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    5
+                  ],
+                  "segment": {
+                    "endIndex": 2566,
+                    "startIndex": 2429,
+                    "text": "*   **BridgePath AI Solutions** specializes in small businesses and offers support in areas like AI voice agents and workflow automation."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    7
+                  ],
+                  "segment": {
+                    "endIndex": 2756,
+                    "startIndex": 2596,
+                    "text": "** provides AI automation services for Los Angeles businesses, including implementation and integration of AI with existing systems like CRMs and Microsoft 365."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    7
+                  ],
+                  "segment": {
+                    "endIndex": 2882,
+                    "startIndex": 2757,
+                    "text": "They offer a process that includes discovery, workflow assessment, solution design, implementation, and ongoing optimization."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    8
+                  ],
+                  "segment": {
+                    "endIndex": 3153,
+                    "startIndex": 2883,
+                    "text": "*   **Agent Architects (Burbank, CA)** specializes in helping small and mid-sized businesses leverage AI, providing a five-step process that includes understanding needs, assessing AI's potential, planning tools and agents, and implementing technology into the business."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    8
+                  ],
+                  "segment": {
+                    "endIndex": 3254,
+                    "startIndex": 3154,
+                    "text": "They build agents and agent teams that integrate with existing software and tools to automate tasks."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    9
+                  ],
+                  "segment": {
+                    "endIndex": 3486,
+                    "startIndex": 3255,
+                    "text": "*   **Perceptive Analytics** offers end-to-end artificial intelligence consulting in Los Angeles, covering AI strategy and roadmapping, Generative AI and LLM solution development, machine learning engineering, and data engineering."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    9
+                  ],
+                  "segment": {
+                    "endIndex": 3594,
+                    "startIndex": 3487,
+                    "text": "They aim to deploy custom machine learning and generative AI workflows to automate operational bottlenecks."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    10
+                  ],
+                  "segment": {
+                    "endIndex": 3717,
+                    "startIndex": 3595,
+                    "text": "*   **Los Angeles AI Agency** focuses on AI integration, connecting new intelligence tools into existing software systems."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    10
+                  ],
+                  "segment": {
+                    "endIndex": 3858,
+                    "startIndex": 3718,
+                    "text": "Their services include system mapping, secure API configuration, and end-to-end testing to ensure consistent output and reliable automation."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    11
+                  ],
+                  "segment": {
+                    "endIndex": 4118,
+                    "startIndex": 3859,
+                    "text": "*   **Opinosis Analytics** offers AI consulting and digital transformation in Los Angeles, providing end-to-end strategy and implementation support, including AI and Generative AI integration, to transform complex workflows into intelligent, scalable systems."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    11
+                  ],
+                  "segment": {
+                    "endIndex": 4208,
+                    "startIndex": 4119,
+                    "text": "They have experience helping both small and large organizations implement AI effectively."
+                  }
+                }
+              ],
+              "searchEntryPoint": {
+                "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFge1rT1rO14dd9Ropw0njPhCwfW-fnlnXlB_tI8dwcQGnK2igCenwjURO0S-Z4TY56wd9tTtegBmjfI0UvGZIuv1Xsxah-sY1VyHuWbrqLD3SowxKvkuPGOHDvfeFSIE6hvnrp_6o81va7tlNzz55BHbn0eCZeXauJh_VQN6yRdmJMXRfhlDxo--zKfgB90P_vDZdtI530KR6Q1Ee2uo3u3RLOuVq3qkYxQk9kKREWRWGrwSn4xPRUPI-eWUUHrd4XGXNV\">AI integration services for small architecture firms Los Angeles</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFCFlNC6cmoqojI1ZOSh7WYKh43fyuOYhhsaQWSn1gll-CDbr9vtAyhen9rLvFTSn3H9VeuDBWNeJ5EQ6YJGqoB5aig_7rZrmDVvTTyv0XbAPuj4052-zuZKu7FVHol-FoK9sXwKH14NXmJR2ftg0_2xAJv4abKgGAgBC2jwR2srqEqdlMI8fcvnfEjYTxhqbym331iSQVwAd-WiqdIdOuj1pnJ5hxf0Gkw0yM972i0jS0XkasFC3nYfvjuAgg=\">Los Angeles AI implementation consultants small AEC firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGzUtc4x8naAVk0Smb8kCRspkSkpYSoig42mdV323xNVYildjZjeUNqIbxOV7kWuwddZ8LYR2DUsAVmyAKeAy368eaOvo41kBJPi36bNOVroOdkIq44Y81Epzo4vwuBITBCxVA33UlmL0bbeiWZz3Ep6SbxhIJKb1t4WhfvJJa4K36junO6ifWpuGgLOu4cTBxs_leJpbCiKL-M-uZMjd4NpZR7jD09S3_ZUGyLzcj6\">AEC AI consulting Los Angeles implementation</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQElmeuDMQtlR5RBolVbZTn9eUyZ5ZdoO5eBqaw6JIZkNkQ1wVFikDUtxHq-n4Wk8JQ20bib06_oyTrI37RBnxrJvB36RWHX064byAx5kFa7ruRNnAUiD2Yqp0qeHRlhU5pEnW26rOz6tzt4siDcMXzOTeEb6-nEIdW6Xr0jQom027-6SR0cMev9w_hhl8AIGRgSVb147QHtKCHdhGsl4cLWkdkakjsm5giVitviVNKeLvyb5M4GLDQ856E=\">AI strategy consultants for small engineering firms LA</a>\n  </div>\n</div>\n"
+              },
+              "webSearchQueries": [
+                "Los Angeles AI implementation consultants small AEC firms",
+                "AEC AI consulting Los Angeles implementation",
+                "AI integration services for small architecture firms Los Angeles",
+                "AI strategy consultants for small engineering firms LA"
+              ]
+            },
+            "index": 0
+          }
+        ],
+        "modelVersion": "gemini-2.5-flash",
+        "responseId": "VVe3auiRE-ucz7IPvIGTkAY",
+        "usageMetadata": {
+          "candidatesTokenCount": 808,
+          "promptTokenCount": 16,
+          "promptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 16
+            }
+          ],
+          "serviceTier": "standard",
+          "thoughtsTokenCount": 260,
+          "toolUsePromptTokenCount": 150,
+          "toolUsePromptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 150
+            }
+          ],
+          "totalTokenCount": 1234
+        }
+      },
+      "technical_status": "success",
+      "timestamp": "2026-09-26T05:25:41.114605Z"
+    }
+  ],
+  "final_response": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "Several Los Angeles consultants specialize in assisting small Architecture, Engineering, and Construction (AEC) firms with AI implementation, extending beyond mere staff training. These firms offer services ranging from strategy development and workflow audits to hands-on integration of AI tools and custom solution development.\n\nConsultants that help small AEC firms implement AI include:\n\n*   **AEC Hub** offers AI strategy consulting and implementation services specifically for architecture and engineering firms. They help firms determine where AI fits, build and put into production AI tools and automations, and offer a fixed-price discovery sprint to assess AI readiness and develop a roadmap. They also provide ongoing AI strategy retainers that include help getting one workflow into production each quarter. For smaller operations, they can also provide hourly work and custom pricing.\n*   **AI in AEC** provides AI workflow implementation for AEC firms. They conduct hands-on engagements to map current workflows, identify areas where AI can provide leverage, and build an executable roadmap. Founded by an architect, their expertise is rooted in solving real problems within AEC firms.\n*   **AEC Advisors.AI** focuses exclusively on the professional services sector, including the A/E/C industries. They offer AI systems implementation services, consulting, and support, and help incorporate new AI technologies into workflows. Their consultants are experienced in implementing change within organizations.\n*   **Zweig Group** provides tailored guidance, consulting, and training to AEC firms on leveraging AI in their business operations. They specialize in end-to-end consulting services, from initial planning and strategy development to implementation and ongoing support, customized to each firm's unique needs.\n*   **Strategence AI** takes a strategy-first approach to AI for small businesses, including a clear diagnosis-plan-implement methodology, and focuses on marketing automation and operational efficiency. They emphasize hands-on management experience to ensure technology supports business operations.\n*   **Lotus AI** is a boutique consultancy specializing in machine learning platforms, generative experiences, and full-cycle AI product development. While not explicitly mentioning AEC, their focus on full-cycle AI product development suggests implementation capabilities relevant to small firms.\n*   **BridgePath AI Solutions** specializes in small businesses and offers support in areas like AI voice agents and workflow automation.\n*   **Alcala Consulting, Inc.** provides AI automation services for Los Angeles businesses, including implementation and integration of AI with existing systems like CRMs and Microsoft 365. They offer a process that includes discovery, workflow assessment, solution design, implementation, and ongoing optimization.\n*   **Agent Architects (Burbank, CA)** specializes in helping small and mid-sized businesses leverage AI, providing a five-step process that includes understanding needs, assessing AI's potential, planning tools and agents, and implementing technology into the business. They build agents and agent teams that integrate with existing software and tools to automate tasks.\n*   **Perceptive Analytics** offers end-to-end artificial intelligence consulting in Los Angeles, covering AI strategy and roadmapping, Generative AI and LLM solution development, machine learning engineering, and data engineering. They aim to deploy custom machine learning and generative AI workflows to automate operational bottlenecks.\n*   **Los Angeles AI Agency** focuses on AI integration, connecting new intelligence tools into existing software systems. Their services include system mapping, secure API configuration, and end-to-end testing to ensure consistent output and reliable automation.\n*   **Opinosis Analytics** offers AI consulting and digital transformation in Los Angeles, providing end-to-end strategy and implementation support, including AI and Generative AI integration, to transform complex workflows into intelligent, scalable systems. They have experience helping both small and large organizations implement AI effectively."
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "STOP",
+        "groundingMetadata": {
+          "groundingChunks": [
+            {
+              "web": {
+                "title": "aechub.org",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGw5xDSP397dhWOb4ybvdgUk78omqhXlxYJ25ZJXzV8Z5Yb_bhVoGam3djVOQC7YfAsyrA_Gp90ZqNssLwJ_7FQioOPB5KTaCXEM6ME85qwmSn-n2F6iSVrAjxFYFw="
+              }
+            },
+            {
+              "web": {
+                "title": "aechub.org",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG730sjLa5V_gyV68F0z2I4BRub5BvTY4-WOtt0lcc0G73t1NrFMNUPKqr-44g15iNH2RG8nJ-mAEY0YnqMOZwV7_1Mg8kdwj5E5Gn4mVr1-mlsRB7TxVGkGxY="
+              }
+            },
+            {
+              "web": {
+                "title": "aiinaec.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHz4VQiimr_iAwohzu1d3jXRWQJwKer1MFMsfnS72OTM0OI92l1d3e_1G2gvqJEUPQegelmCbhn3xIA0eF3GP-JIdbNqi2Fj3wfXyIARBGNRhQeRg=="
+              }
+            },
+            {
+              "web": {
+                "title": "aecadvisors.ai",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFhKfWerl_ebzGTqSBo98P_2k9oU-QtqzHabw0HoowNicAXewmc83Z2OFw5QGX8Ckxyij82fGSF4eFiAT5YBEg6ftdPezzOj5Wd5UgQNjuhYsQ="
+              }
+            },
+            {
+              "web": {
+                "title": "zweiggroup.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEHCi6XIVg9kC9sKNgwStSVCnAAkS4zmpr60l-a73azWb3IVccNp5mG3ncBVSMDgvyd4VCV6WFgPWiVxLrlDBQZwyPeepyC5ZxRvObLdcfpDm8X5A7uEZvhFtMO0bdDxB25L7XLj29daGP53lmhBxo="
+              }
+            },
+            {
+              "web": {
+                "title": "manhattanbeachai.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEgfpZhavg7ku3oFFExZQ1VjtJKRDyKbU8Fk9uZR8-mBA0R_TC-ZO6aJ7a602pkPyIu_MyR8HQbh7mFomo8YsmwtewHh4hWM2N893O72P9_Vl8d-f6dk5VMLgrfRh-U0jllEYCQvfY="
+              }
+            },
+            {
+              "web": {
+                "title": "strategenceai.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGJokY-o5n88Q6U2ErCWw0G0PRU-3wj43b08uI-jE_5r8ot1PUiVaODhHo0Xqh7Y3rbLg19Oy-jOPt2uJ6DQaYs10M8od38IioJZcxbZB3ukRFRcEx3ORkxtw=="
+              }
+            },
+            {
+              "web": {
+                "title": "alcalaconsulting.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF0iKmYDcm7gTq-wJVG1qDltfk0r1mZRPcbEhpArgPBorM5r_IvzsElzRO0WWOt--trJac4JNAV6E83D7lDHi47JtDxWiJl5dINUk2ie_XjebKG_Lf9aOipARKPmfH1D3cWaI7-oVPr3_zZ-ZJjhhHxK0EKGFq9IFKcYCvpujet"
+              }
+            },
+            {
+              "web": {
+                "title": "agentarchitects.io",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHiBSq5emWEEMWIy4ndDljDvDu7DD4hth3dCq8VxvZy4Bxc9mlHdZdQIdg8iPvcL7uO0ayBSj0tAiOl6IXQy2J-OizHiCMjk-PczYlkgrLl1QRHsFznmp5fO-vhKY1hooMA2DiT4wS6W0GCwQ=="
+              }
+            },
+            {
+              "web": {
+                "title": "perceptive-analytics.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEVXcEpvP8ATQ4Yey4Gok37M9DzpNkZ5j_WgIA0X8APs79Tnbm6cWLCaNg1srBAeaaS7YwhIIng2CREyq3TsdT8mZjqnt3FCfCG-IY6D1IZ_vlHvQMHm-ITOTtfORsBsG9VOSerGHOFZTyQmZgDSLJA8Lj6W-K4-cfDDrWnsg=="
+              }
+            },
+            {
+              "web": {
+                "title": "aiagencyla.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGMmPG_PdgpMncUWDxd7v8uiaX60fF-2lWRN0OO1CqD10aknL1XqFUPXcagR5tKyAN2yfdjJsByJLKjHCEJatNSeYnsb3nRNjB8A8WvvzxljzQAJnHOPpGYC-21ILmTcDlHLiVGIry_KLBcpYxBI8zc"
+              }
+            },
+            {
+              "web": {
+                "title": "opinosis-analytics.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFj_xZSPutiTWu1r1I-VQC3Tfv-E0XfbvnlUjrVtDXI6QwhrDTPXCGqm4dNIF1mdl3qkiPaq3xVOWU4sfnuuDj2_n4ZKjPSrRNgiGI0Ld2MQ7HVSd9w0p_PVOZR2qCNFyf0yLKvZmuxNN0lMRJ8jYpHtnjXaQsuVXZd8Ds="
+              }
+            }
+          ],
+          "groundingSupports": [
+            {
+              "groundingChunkIndices": [
+                0,
+                1
+              ],
+              "segment": {
+                "endIndex": 819,
+                "startIndex": 703,
+                "text": "They also provide ongoing AI strategy retainers that include help getting one workflow into production each quarter."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                1
+              ],
+              "segment": {
+                "endIndex": 897,
+                "startIndex": 820,
+                "text": "For smaller operations, they can also provide hourly work and custom pricing."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                2
+              ],
+              "segment": {
+                "endIndex": 1105,
+                "startIndex": 967,
+                "text": "They conduct hands-on engagements to map current workflows, identify areas where AI can provide leverage, and build an executable roadmap."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                2
+              ],
+              "segment": {
+                "endIndex": 1199,
+                "startIndex": 1106,
+                "text": "Founded by an architect, their expertise is rooted in solving real problems within AEC firms."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                3
+              ],
+              "segment": {
+                "endIndex": 1441,
+                "startIndex": 1313,
+                "text": "They offer AI systems implementation services, consulting, and support, and help incorporate new AI technologies into workflows."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                3
+              ],
+              "segment": {
+                "endIndex": 1520,
+                "startIndex": 1442,
+                "text": "Their consultants are experienced in implementing change within organizations."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                4
+              ],
+              "segment": {
+                "endIndex": 1830,
+                "startIndex": 1654,
+                "text": "They specialize in end-to-end consulting services, from initial planning and strategy development to implementation and ongoing support, customized to each firm's unique needs."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                5,
+                6
+              ],
+              "segment": {
+                "endIndex": 2033,
+                "startIndex": 1831,
+                "text": "*   **Strategence AI** takes a strategy-first approach to AI for small businesses, including a clear diagnosis-plan-implement methodology, and focuses on marketing automation and operational efficiency."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                6
+              ],
+              "segment": {
+                "endIndex": 2130,
+                "startIndex": 2034,
+                "text": "They emphasize hands-on management experience to ensure technology supports business operations."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                5
+              ],
+              "segment": {
+                "endIndex": 2280,
+                "startIndex": 2131,
+                "text": "*   **Lotus AI** is a boutique consultancy specializing in machine learning platforms, generative experiences, and full-cycle AI product development."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                5
+              ],
+              "segment": {
+                "endIndex": 2566,
+                "startIndex": 2429,
+                "text": "*   **BridgePath AI Solutions** specializes in small businesses and offers support in areas like AI voice agents and workflow automation."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                7
+              ],
+              "segment": {
+                "endIndex": 2756,
+                "startIndex": 2596,
+                "text": "** provides AI automation services for Los Angeles businesses, including implementation and integration of AI with existing systems like CRMs and Microsoft 365."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                7
+              ],
+              "segment": {
+                "endIndex": 2882,
+                "startIndex": 2757,
+                "text": "They offer a process that includes discovery, workflow assessment, solution design, implementation, and ongoing optimization."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                8
+              ],
+              "segment": {
+                "endIndex": 3153,
+                "startIndex": 2883,
+                "text": "*   **Agent Architects (Burbank, CA)** specializes in helping small and mid-sized businesses leverage AI, providing a five-step process that includes understanding needs, assessing AI's potential, planning tools and agents, and implementing technology into the business."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                8
+              ],
+              "segment": {
+                "endIndex": 3254,
+                "startIndex": 3154,
+                "text": "They build agents and agent teams that integrate with existing software and tools to automate tasks."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                9
+              ],
+              "segment": {
+                "endIndex": 3486,
+                "startIndex": 3255,
+                "text": "*   **Perceptive Analytics** offers end-to-end artificial intelligence consulting in Los Angeles, covering AI strategy and roadmapping, Generative AI and LLM solution development, machine learning engineering, and data engineering."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                9
+              ],
+              "segment": {
+                "endIndex": 3594,
+                "startIndex": 3487,
+                "text": "They aim to deploy custom machine learning and generative AI workflows to automate operational bottlenecks."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                10
+              ],
+              "segment": {
+                "endIndex": 3717,
+                "startIndex": 3595,
+                "text": "*   **Los Angeles AI Agency** focuses on AI integration, connecting new intelligence tools into existing software systems."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                10
+              ],
+              "segment": {
+                "endIndex": 3858,
+                "startIndex": 3718,
+                "text": "Their services include system mapping, secure API configuration, and end-to-end testing to ensure consistent output and reliable automation."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                11
+              ],
+              "segment": {
+                "endIndex": 4118,
+                "startIndex": 3859,
+                "text": "*   **Opinosis Analytics** offers AI consulting and digital transformation in Los Angeles, providing end-to-end strategy and implementation support, including AI and Generative AI integration, to transform complex workflows into intelligent, scalable systems."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                11
+              ],
+              "segment": {
+                "endIndex": 4208,
+                "startIndex": 4119,
+                "text": "They have experience helping both small and large organizations implement AI effectively."
+              }
+            }
+          ],
+          "searchEntryPoint": {
+            "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFge1rT1rO14dd9Ropw0njPhCwfW-fnlnXlB_tI8dwcQGnK2igCenwjURO0S-Z4TY56wd9tTtegBmjfI0UvGZIuv1Xsxah-sY1VyHuWbrqLD3SowxKvkuPGOHDvfeFSIE6hvnrp_6o81va7tlNzz55BHbn0eCZeXauJh_VQN6yRdmJMXRfhlDxo--zKfgB90P_vDZdtI530KR6Q1Ee2uo3u3RLOuVq3qkYxQk9kKREWRWGrwSn4xPRUPI-eWUUHrd4XGXNV\">AI integration services for small architecture firms Los Angeles</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFCFlNC6cmoqojI1ZOSh7WYKh43fyuOYhhsaQWSn1gll-CDbr9vtAyhen9rLvFTSn3H9VeuDBWNeJ5EQ6YJGqoB5aig_7rZrmDVvTTyv0XbAPuj4052-zuZKu7FVHol-FoK9sXwKH14NXmJR2ftg0_2xAJv4abKgGAgBC2jwR2srqEqdlMI8fcvnfEjYTxhqbym331iSQVwAd-WiqdIdOuj1pnJ5hxf0Gkw0yM972i0jS0XkasFC3nYfvjuAgg=\">Los Angeles AI implementation consultants small AEC firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGzUtc4x8naAVk0Smb8kCRspkSkpYSoig42mdV323xNVYildjZjeUNqIbxOV7kWuwddZ8LYR2DUsAVmyAKeAy368eaOvo41kBJPi36bNOVroOdkIq44Y81Epzo4vwuBITBCxVA33UlmL0bbeiWZz3Ep6SbxhIJKb1t4WhfvJJa4K36junO6ifWpuGgLOu4cTBxs_leJpbCiKL-M-uZMjd4NpZR7jD09S3_ZUGyLzcj6\">AEC AI consulting Los Angeles implementation</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQElmeuDMQtlR5RBolVbZTn9eUyZ5ZdoO5eBqaw6JIZkNkQ1wVFikDUtxHq-n4Wk8JQ20bib06_oyTrI37RBnxrJvB36RWHX064byAx5kFa7ruRNnAUiD2Yqp0qeHRlhU5pEnW26rOz6tzt4siDcMXzOTeEb6-nEIdW6Xr0jQom027-6SR0cMev9w_hhl8AIGRgSVb147QHtKCHdhGsl4cLWkdkakjsm5giVitviVNKeLvyb5M4GLDQ856E=\">AI strategy consultants for small engineering firms LA</a>\n  </div>\n</div>\n"
+          },
+          "webSearchQueries": [
+            "Los Angeles AI implementation consultants small AEC firms",
+            "AEC AI consulting Los Angeles implementation",
+            "AI integration services for small architecture firms Los Angeles",
+            "AI strategy consultants for small engineering firms LA"
+          ]
+        },
+        "index": 0
+      }
+    ],
+    "modelVersion": "gemini-2.5-flash",
+    "responseId": "VVe3auiRE-ucz7IPvIGTkAY",
+    "usageMetadata": {
+      "candidatesTokenCount": 808,
+      "promptTokenCount": 16,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 16
+        }
+      ],
+      "serviceTier": "standard",
+      "thoughtsTokenCount": 260,
+      "toolUsePromptTokenCount": 150,
+      "toolUsePromptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 150
+        }
+      ],
+      "totalTokenCount": 1234
+    }
+  },
+  "prompt_id": "L03",
+  "request": {
+    "body": {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Which Los Angeles consultants help small AEC firms implement AI, not just train staff?"
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "google_search": {}
+        }
+      ]
+    },
+    "model": "gemini-2.5-flash"
+  },
+  "run_id": "gemini-api-google-search-20260925-r1",
+  "schema_version": "gemini-grounded-raw-receipt/v1"
+}

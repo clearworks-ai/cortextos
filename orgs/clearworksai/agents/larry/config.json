@@ -1,7 +1,7 @@
 {
   "agent_name": "larry",
   "model": "claude-sonnet-5[1m]",
-  "enabled": true,
+  "enabled": false,
   "startup_delay": 0,
   "max_session_seconds": 255600,
   "max_crashes_per_day": 30,
@@ -109,7 +109,8 @@
       "name": "weekly-security-audit",
       "type": "recurring",
       "cron": "7 3 * * 3",
-      "prompt": "cortextos bus update-cron-fire weekly-security-audit --interval 7d 2>/dev/null; WEEKLY SECURITY AUDIT \u2014 (1) Create output dir: mkdir -p ~/code/knowledge-sync/raw/areas/clearworks/security-audits. (2) For each agent in ~/code/cortextos/orgs/clearworksai/agents/ (academy, auditos, auditos2, frank2, hunter, larry, maven, muse, sage, sre): invoke the /agent-security-audit skill with AGENT_DIR=<full path>, save full report to ~/code/knowledge-sync/raw/areas/clearworks/security-audits/<agent>-$(date +%Y-%m-%d).md. (3) After all 10 done: cd ~/code/knowledge-sync && git add raw/areas/clearworks/security-audits/ && git commit -m 'chore: weekly agent security audit '$(date +%Y-%m-%d) && git push. (4) Build Telegram message: each agent score/100 with CRITICAL+HIGH counts, all CRITICAL findings (text + file:line), top 3 cross-agent fixes, and GitHub links: https://github.com/clearworks-ai/knowledge-sync/blob/main/raw/areas/clearworks/security-audits/<agent>-$(date +%Y-%m-%d).md. (5) Send to 6690120787. Max 3000 chars."
+      "enabled": false,
+      "prompt": "DISABLED LEGACY CRON. The active weekly security audit is owned by larry-codex and derives the enabled physical agent fleet from the canonical registry. Never audit or substitute Claude-era aliases."
     },
     {
       "name": "staging-health",

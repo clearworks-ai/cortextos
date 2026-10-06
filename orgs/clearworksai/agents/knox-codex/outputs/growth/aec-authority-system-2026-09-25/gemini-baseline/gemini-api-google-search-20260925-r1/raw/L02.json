@@ -1,0 +1,489 @@
+{
+  "attempts": [
+    {
+      "duration_ms": 9651,
+      "http_status": 200,
+      "model": "gemini-2.5-flash",
+      "response": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "To find an AI workflow consultant in Los Angeles who understands architecture and design firms, consider the following options:\n\n**Consultants and Firms with Specific AEC/Design Industry Focus:**\n\n*   **YegaTech** specializes in AI transformation for architecture and engineering firms. They work with firms to develop customized AI strategies, training programs, and business transformation initiatives. YegaTech serves clients remotely across the US.\n*   **Reope** offers custom software development and BIM (Building Information Modeling) expert guidance, including AI/ML implementations for architecture, engineering, and construction professionals. They aim to improve firm efficiency through technology.\n*   **AECforward** focuses on developing bespoke AI agents for the AEC industry, integrating AI agents with computational design and AEC drawing miners. They provide custom AI solutions designed to integrate with existing workflows in architecture, engineering, and construction.\n*   **AI in AEC** provides consulting, courses, and workshops to help professionals in the Architecture, Engineering, and Construction (AEC) industry integrate AI into their workflows, offering training and guidance on AI tools.\n*   **Lotus AI**, a Los Angeles-based boutique consultancy, excels in the intersection of LLM engineering and creative AI. They specialize in machine learning platforms, generative experiences, and full-cycle AI product development, making them a strong fit for product-focused startups and creative teams needing polished AI builds.\n*   **Los Angeles AI Agency** offers custom AI solutions and AI workflow automation, mapping processes and integrating tailored AI pipelines into existing tools. Their services are noted as suitable for residential property managers, commercial operators, and multi-unit teams, indicating some understanding of the broader real estate and building sector.\n\n**General AI Workflow Consultants in Los Angeles (may require further inquiry into their experience with architecture/design):**\n\n*   **Chandler — Independent AI Consultant** is a local Los Angeles consultant offering transparent pricing and a direct working relationship. They are highlighted as suitable for small and mid-size businesses in Southern California seeking hands-on implementation.\n*   **Perceptive Analytics** is a Los Angeles-based generative AI consulting firm with extensive experience in AI and data science. They build custom AI models, MLOps infrastructure, and governance frameworks, focusing on operational automation and integrating AI into daily operations for various sectors.\n*   **Emcee IT Solutions** connects AI to daily operations, offering services like RAG knowledge assistants, workflow automation, intelligent search, and integrations with existing business systems.\n*   **Intellectyx** assists organizations in designing, building, and deploying AI-powered solutions to automate workflows, enhance decision-making, and boost operational efficiency.\n*   **Alcala Consulting Inc.** provides AI-powered automation solutions to Los Angeles businesses, aiming to automate workflows, increase productivity, and reduce costs.\n*   **Arc Intermedia** designs and builds automation solutions, from streamlining repetitive tasks to architecting complex, multi-step workflows with AI-assisted decision support.\n\nWhen selecting a consultant, it would be beneficial to specifically discuss their portfolio and case studies related to architecture, engineering, or design projects to ensure their understanding aligns with your firm's unique needs."
+                }
+              ],
+              "role": "model"
+            },
+            "finishReason": "STOP",
+            "groundingMetadata": {
+              "groundingChunks": [
+                {
+                  "web": {
+                    "title": "aechub.org",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHgJ6ZjbJ1lHcfp7ml7QLKJoIsTHZe97KcFBP57KKYdIUuFAkYcb7tqmqWu6xhwgES-5T_va-82UkX-ZZb5iCbVNEv2J4-ldYuCeTnyWZ9LjdEhwCc9v5Hi8vlL4ao="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "manhattanbeachai.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFqcFlhIwtkwny3-j3NNojvcNZ-hRDLVfDF7ikM_P6asqaGcvMeHw0QtzbAjgXEDeIAkHsel_eq81CzNPYEZpgmpqfr-35UFccGx3KNoTGQT5CfKczjZM0ifHCRTWOjWtWc__9Osn4="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aiagencyla.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFXUPW9wtEGtngsKnMHmYQpxreKNpsn5VJng5K9D54vvE1uVrPreuB8K3GBEG_CtjKszlEu7TCkAhD6ccFMa7Ml-xnetjjiB6a4y3DLt7m2kZDEuXSThRMUsZiW_qCEK5zWXjxIKuWDnWV6G1k4zmIQRJe8rxw="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aiagencyla.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFGDZBLIE4NvKE2BnNZwlYJN7M1OAx1pfD9cQzAo0-8BWgl21sxuMrCDU9LTNt4r6lVeXtofK3CyBiDOH5VBCBXHUYiLh0ujkbSz7M2pz-VJDgA_WXVWtcjnQydrBo7zaWHqVnRTMKw2XcwV9R7sliIkgvySTI3hQo="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "perceptive-analytics.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGE280gnn-d4WmWZl9RQZDljBVPV-wYzZRSbgvWo6UelANy1Gbl72EnyYZGD1JQldnsJ9YaMsdY_w0OX1s0AndqVEYYosMks5GB8bX4JQv11aqfRCxutNyhby_cqOfpH7eQHcYjd2smdxglbYxw2eC23KqDIW6k546pvgO0oA=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "emcee.it",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEC_oOSY9gl4xZQuKnJP0OnfFIyo-Nonq9n43wmX57c-3f8U3C98xfH9oSj-ltV2ypbx9lDFj6RkK7r8l_2izATxukGkxT68kNn3iC3yeRQK6BlG1bJq0jS-wPscTCL0PEzB-0baH1jGOdeKVOAqyUDre4IPYYz7dQTSznI-8bM"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "intellectyx.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFVjdorlUIxewy44Fc2FpmIu9RhbkAMu3MATf0PQb7i_ny241oWjaMLffvovVAhbrV9x2FfTf0wE0gi3et0kiDEGLHFmptMAxMt4qs9TeX8o5YvOrfjaKWcAtLtCIXQ3f2OTOaUhA1AIThOdu4lS3s3MsrgThXt27lGdeOeROwCq7Pc"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "alcalaconsulting.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQENOI3W2EPq03tFzt78_QOZaOpbgIdd8CID1PA1x45kC1ihwSEiXKIZdJy9Ahd1Ibu7WALJz2njajovJCUrb97RY3y24cWgyH1F_jRFCZg4KPr7-nuE3e2Jcb8pc_Mn0e9C-FM-6v3JsInEqYl9JCYlQ2o="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "arcintermedia.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGcz5Tyz4odRbVv3L4LlN9U9dGWkWFWab0KDG3VhpdlfTv_EraWLXzigrhzJR9nhcE_ZlKJvWdD-97p2NyjruFwxyXijYNEg-PvDSab1OxYkYrU308ImQ1eM4LY3z-OAZM34RU1uED-aH3DyP-EfaEtx0Rxvr3GF0gokyglGE-E5PKp5291QBi7Y8CO84_EGJy56sBYj38="
+                  }
+                }
+              ],
+              "groundingSupports": [
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 452,
+                    "startIndex": 405,
+                    "text": "YegaTech serves clients remotely across the US."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 709,
+                    "startIndex": 654,
+                    "text": "They aim to improve firm efficiency through technology."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 989,
+                    "startIndex": 863,
+                    "text": "They provide custom AI solutions designed to integrate with existing workflows in architecture, engineering, and construction."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 1218,
+                    "startIndex": 990,
+                    "text": "*   **AI in AEC** provides consulting, courses, and workshops to help professionals in the Architecture, Engineering, and Construction (AEC) industry integrate AI into their workflows, offering training and guidance on AI tools."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 1552,
+                    "startIndex": 1342,
+                    "text": "They specialize in machine learning platforms, generative experiences, and full-cycle AI product development, making them a strong fit for product-focused startups and creative teams needing polished AI builds."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    2,
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 1908,
+                    "startIndex": 1715,
+                    "text": "Their services are noted as suitable for residential property managers, commercial operators, and multi-unit teams, indicating some understanding of the broader real estate and building sector."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 2307,
+                    "startIndex": 2185,
+                    "text": "They are highlighted as suitable for small and mid-size businesses in Southern California seeking hands-on implementation."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    4
+                  ],
+                  "segment": {
+                    "endIndex": 2614,
+                    "startIndex": 2440,
+                    "text": "They build custom AI models, MLOps infrastructure, and governance frameworks, focusing on operational automation and integrating AI into daily operations for various sectors."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    5
+                  ],
+                  "segment": {
+                    "endIndex": 2813,
+                    "startIndex": 2615,
+                    "text": "*   **Emcee IT Solutions** connects AI to daily operations, offering services like RAG knowledge assistants, workflow automation, intelligent search, and integrations with existing business systems."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    6
+                  ],
+                  "segment": {
+                    "endIndex": 2996,
+                    "startIndex": 2814,
+                    "text": "*   **Intellectyx** assists organizations in designing, building, and deploying AI-powered solutions to automate workflows, enhance decision-making, and boost operational efficiency."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    7
+                  ],
+                  "segment": {
+                    "endIndex": 3166,
+                    "startIndex": 3025,
+                    "text": "** provides AI-powered automation solutions to Los Angeles businesses, aiming to automate workflows, increase productivity, and reduce costs."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    8
+                  ],
+                  "segment": {
+                    "endIndex": 3346,
+                    "startIndex": 3167,
+                    "text": "*   **Arc Intermedia** designs and builds automation solutions, from streamlining repetitive tasks to architecting complex, multi-step workflows with AI-assisted decision support."
+                  }
+                }
+              ],
+              "searchEntryPoint": {
+                "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQECHwvnFU7jhv5lR1kxP3F7zB_g70eRRUXom1XBSrFYdNJyf9P2hmLcOll0uh3lvuowajS2x-6U1XTg7HdlCPSbdldeoYJ5QVb0epwp8b0gbCe2qi1asWNYsy8N6Z7qr2pWTmz--v5bvT1mPAwoB59NcqMJqfjLpt6y_nrv-YdPRrr9STpCNKYhgNQpH_x5931q4SkmttyvP7qj9CSYHjVSAM_fmdwBqIxPcTqe1vzsFFcYGA==\">AI consulting for architecture firms Los Angeles</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHmhxBr0I3LDVnHu87bbwVkg8x3MJa3TvKi5OabZsElbuEnn1qYBlIuVK_LTak3940IpSqh9qWkpol-IxSzInHcoDOWrmuBTkvxTescg5dXg7QTjrG4c5OUA1AIIZWR61pWeOTq_nVyHCSVXrSizCuK8GYGtAdn-TaW-YHxbtRSYZ-utjO30urHuG-C9uQLVts66bYmtadUVhNhCGXdfqz2adLEMJrVjA7yAJvmaPpFp63kzsrjv8j2cQ9vidu2pIM=\">AI workflow consultant Los Angeles architecture design firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGorMdsRJ4vHCdmAyn2e6SXXhQEq650n5aK53lfquXc-29vpNhKOqm3qdgEAWkLWz0bOirLlbnI_u1lIcfCaHLUGOcKOGQ7GdGmXkBUfwP78VAy6NBcmx4BNb0TZddbaJ7gqwRHm4M22zYhsQCRSrSg-dK77fZMn5hSZYKS_8Dh4zTgQNOQK361tO7rIL9mYA64bQN6jADO8tA7K3bqLl-G1OFsZsOZ_LGqneozGdeK\">AI solutions for design agencies Los Angeles</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGecD1z1vQM_1VkR-gjRUy_DJdzQ_s6nGYtbmO9J0XHsXI6gzDL8Qb1iPPBGBuKtazpjzT8SoagZR3YXokpNE_RKn2dzoIrhNEx2kO4rk_1whI1WH9dLW4gonFv_J4ijcy7UWxJRFcMSPFBpSOsT6dZJyE63Wb78od_wEmRkRviukHcZIypXddj7yIBof9mg1iJkbP6rZa6aVVaMciuZo-BzRa1n1rxpfpoWQE-E2Bz1rxKXE1S0pY9o4y6\">workflow automation consultant Los Angeles architecture</a>\n  </div>\n</div>\n"
+              },
+              "webSearchQueries": [
+                "AI workflow consultant Los Angeles architecture design firms",
+                "AI consulting for architecture firms Los Angeles",
+                "AI solutions for design agencies Los Angeles",
+                "workflow automation consultant Los Angeles architecture"
+              ]
+            },
+            "index": 0
+          }
+        ],
+        "modelVersion": "gemini-2.5-flash",
+        "responseId": "s1a3aqOZH-eDmtkPiZqboAY",
+        "usageMetadata": {
+          "candidatesTokenCount": 691,
+          "promptTokenCount": 15,
+          "promptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 15
+            }
+          ],
+          "serviceTier": "standard",
+          "thoughtsTokenCount": 1156,
+          "toolUsePromptTokenCount": 102,
+          "toolUsePromptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 102
+            }
+          ],
+          "totalTokenCount": 1964
+        }
+      },
+      "technical_status": "success",
+      "timestamp": "2026-09-26T05:22:59.356792Z"
+    }
+  ],
+  "final_response": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "To find an AI workflow consultant in Los Angeles who understands architecture and design firms, consider the following options:\n\n**Consultants and Firms with Specific AEC/Design Industry Focus:**\n\n*   **YegaTech** specializes in AI transformation for architecture and engineering firms. They work with firms to develop customized AI strategies, training programs, and business transformation initiatives. YegaTech serves clients remotely across the US.\n*   **Reope** offers custom software development and BIM (Building Information Modeling) expert guidance, including AI/ML implementations for architecture, engineering, and construction professionals. They aim to improve firm efficiency through technology.\n*   **AECforward** focuses on developing bespoke AI agents for the AEC industry, integrating AI agents with computational design and AEC drawing miners. They provide custom AI solutions designed to integrate with existing workflows in architecture, engineering, and construction.\n*   **AI in AEC** provides consulting, courses, and workshops to help professionals in the Architecture, Engineering, and Construction (AEC) industry integrate AI into their workflows, offering training and guidance on AI tools.\n*   **Lotus AI**, a Los Angeles-based boutique consultancy, excels in the intersection of LLM engineering and creative AI. They specialize in machine learning platforms, generative experiences, and full-cycle AI product development, making them a strong fit for product-focused startups and creative teams needing polished AI builds.\n*   **Los Angeles AI Agency** offers custom AI solutions and AI workflow automation, mapping processes and integrating tailored AI pipelines into existing tools. Their services are noted as suitable for residential property managers, commercial operators, and multi-unit teams, indicating some understanding of the broader real estate and building sector.\n\n**General AI Workflow Consultants in Los Angeles (may require further inquiry into their experience with architecture/design):**\n\n*   **Chandler — Independent AI Consultant** is a local Los Angeles consultant offering transparent pricing and a direct working relationship. They are highlighted as suitable for small and mid-size businesses in Southern California seeking hands-on implementation.\n*   **Perceptive Analytics** is a Los Angeles-based generative AI consulting firm with extensive experience in AI and data science. They build custom AI models, MLOps infrastructure, and governance frameworks, focusing on operational automation and integrating AI into daily operations for various sectors.\n*   **Emcee IT Solutions** connects AI to daily operations, offering services like RAG knowledge assistants, workflow automation, intelligent search, and integrations with existing business systems.\n*   **Intellectyx** assists organizations in designing, building, and deploying AI-powered solutions to automate workflows, enhance decision-making, and boost operational efficiency.\n*   **Alcala Consulting Inc.** provides AI-powered automation solutions to Los Angeles businesses, aiming to automate workflows, increase productivity, and reduce costs.\n*   **Arc Intermedia** designs and builds automation solutions, from streamlining repetitive tasks to architecting complex, multi-step workflows with AI-assisted decision support.\n\nWhen selecting a consultant, it would be beneficial to specifically discuss their portfolio and case studies related to architecture, engineering, or design projects to ensure their understanding aligns with your firm's unique needs."
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "STOP",
+        "groundingMetadata": {
+          "groundingChunks": [
+            {
+              "web": {
+                "title": "aechub.org",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHgJ6ZjbJ1lHcfp7ml7QLKJoIsTHZe97KcFBP57KKYdIUuFAkYcb7tqmqWu6xhwgES-5T_va-82UkX-ZZb5iCbVNEv2J4-ldYuCeTnyWZ9LjdEhwCc9v5Hi8vlL4ao="
+              }
+            },
+            {
+              "web": {
+                "title": "manhattanbeachai.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFqcFlhIwtkwny3-j3NNojvcNZ-hRDLVfDF7ikM_P6asqaGcvMeHw0QtzbAjgXEDeIAkHsel_eq81CzNPYEZpgmpqfr-35UFccGx3KNoTGQT5CfKczjZM0ifHCRTWOjWtWc__9Osn4="
+              }
+            },
+            {
+              "web": {
+                "title": "aiagencyla.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFXUPW9wtEGtngsKnMHmYQpxreKNpsn5VJng5K9D54vvE1uVrPreuB8K3GBEG_CtjKszlEu7TCkAhD6ccFMa7Ml-xnetjjiB6a4y3DLt7m2kZDEuXSThRMUsZiW_qCEK5zWXjxIKuWDnWV6G1k4zmIQRJe8rxw="
+              }
+            },
+            {
+              "web": {
+                "title": "aiagencyla.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFGDZBLIE4NvKE2BnNZwlYJN7M1OAx1pfD9cQzAo0-8BWgl21sxuMrCDU9LTNt4r6lVeXtofK3CyBiDOH5VBCBXHUYiLh0ujkbSz7M2pz-VJDgA_WXVWtcjnQydrBo7zaWHqVnRTMKw2XcwV9R7sliIkgvySTI3hQo="
+              }
+            },
+            {
+              "web": {
+                "title": "perceptive-analytics.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGE280gnn-d4WmWZl9RQZDljBVPV-wYzZRSbgvWo6UelANy1Gbl72EnyYZGD1JQldnsJ9YaMsdY_w0OX1s0AndqVEYYosMks5GB8bX4JQv11aqfRCxutNyhby_cqOfpH7eQHcYjd2smdxglbYxw2eC23KqDIW6k546pvgO0oA=="
+              }
+            },
+            {
+              "web": {
+                "title": "emcee.it",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEC_oOSY9gl4xZQuKnJP0OnfFIyo-Nonq9n43wmX57c-3f8U3C98xfH9oSj-ltV2ypbx9lDFj6RkK7r8l_2izATxukGkxT68kNn3iC3yeRQK6BlG1bJq0jS-wPscTCL0PEzB-0baH1jGOdeKVOAqyUDre4IPYYz7dQTSznI-8bM"
+              }
+            },
+            {
+              "web": {
+                "title": "intellectyx.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFVjdorlUIxewy44Fc2FpmIu9RhbkAMu3MATf0PQb7i_ny241oWjaMLffvovVAhbrV9x2FfTf0wE0gi3et0kiDEGLHFmptMAxMt4qs9TeX8o5YvOrfjaKWcAtLtCIXQ3f2OTOaUhA1AIThOdu4lS3s3MsrgThXt27lGdeOeROwCq7Pc"
+              }
+            },
+            {
+              "web": {
+                "title": "alcalaconsulting.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQENOI3W2EPq03tFzt78_QOZaOpbgIdd8CID1PA1x45kC1ihwSEiXKIZdJy9Ahd1Ibu7WALJz2njajovJCUrb97RY3y24cWgyH1F_jRFCZg4KPr7-nuE3e2Jcb8pc_Mn0e9C-FM-6v3JsInEqYl9JCYlQ2o="
+              }
+            },
+            {
+              "web": {
+                "title": "arcintermedia.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGcz5Tyz4odRbVv3L4LlN9U9dGWkWFWab0KDG3VhpdlfTv_EraWLXzigrhzJR9nhcE_ZlKJvWdD-97p2NyjruFwxyXijYNEg-PvDSab1OxYkYrU308ImQ1eM4LY3z-OAZM34RU1uED-aH3DyP-EfaEtx0Rxvr3GF0gokyglGE-E5PKp5291QBi7Y8CO84_EGJy56sBYj38="
+              }
+            }
+          ],
+          "groundingSupports": [
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 452,
+                "startIndex": 405,
+                "text": "YegaTech serves clients remotely across the US."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 709,
+                "startIndex": 654,
+                "text": "They aim to improve firm efficiency through technology."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 989,
+                "startIndex": 863,
+                "text": "They provide custom AI solutions designed to integrate with existing workflows in architecture, engineering, and construction."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 1218,
+                "startIndex": 990,
+                "text": "*   **AI in AEC** provides consulting, courses, and workshops to help professionals in the Architecture, Engineering, and Construction (AEC) industry integrate AI into their workflows, offering training and guidance on AI tools."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                1
+              ],
+              "segment": {
+                "endIndex": 1552,
+                "startIndex": 1342,
+                "text": "They specialize in machine learning platforms, generative experiences, and full-cycle AI product development, making them a strong fit for product-focused startups and creative teams needing polished AI builds."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                2,
+                3
+              ],
+              "segment": {
+                "endIndex": 1908,
+                "startIndex": 1715,
+                "text": "Their services are noted as suitable for residential property managers, commercial operators, and multi-unit teams, indicating some understanding of the broader real estate and building sector."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                1
+              ],
+              "segment": {
+                "endIndex": 2307,
+                "startIndex": 2185,
+                "text": "They are highlighted as suitable for small and mid-size businesses in Southern California seeking hands-on implementation."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                4
+              ],
+              "segment": {
+                "endIndex": 2614,
+                "startIndex": 2440,
+                "text": "They build custom AI models, MLOps infrastructure, and governance frameworks, focusing on operational automation and integrating AI into daily operations for various sectors."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                5
+              ],
+              "segment": {
+                "endIndex": 2813,
+                "startIndex": 2615,
+                "text": "*   **Emcee IT Solutions** connects AI to daily operations, offering services like RAG knowledge assistants, workflow automation, intelligent search, and integrations with existing business systems."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                6
+              ],
+              "segment": {
+                "endIndex": 2996,
+                "startIndex": 2814,
+                "text": "*   **Intellectyx** assists organizations in designing, building, and deploying AI-powered solutions to automate workflows, enhance decision-making, and boost operational efficiency."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                7
+              ],
+              "segment": {
+                "endIndex": 3166,
+                "startIndex": 3025,
+                "text": "** provides AI-powered automation solutions to Los Angeles businesses, aiming to automate workflows, increase productivity, and reduce costs."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                8
+              ],
+              "segment": {
+                "endIndex": 3346,
+                "startIndex": 3167,
+                "text": "*   **Arc Intermedia** designs and builds automation solutions, from streamlining repetitive tasks to architecting complex, multi-step workflows with AI-assisted decision support."
+              }
+            }
+          ],
+          "searchEntryPoint": {
+            "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQECHwvnFU7jhv5lR1kxP3F7zB_g70eRRUXom1XBSrFYdNJyf9P2hmLcOll0uh3lvuowajS2x-6U1XTg7HdlCPSbdldeoYJ5QVb0epwp8b0gbCe2qi1asWNYsy8N6Z7qr2pWTmz--v5bvT1mPAwoB59NcqMJqfjLpt6y_nrv-YdPRrr9STpCNKYhgNQpH_x5931q4SkmttyvP7qj9CSYHjVSAM_fmdwBqIxPcTqe1vzsFFcYGA==\">AI consulting for architecture firms Los Angeles</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHmhxBr0I3LDVnHu87bbwVkg8x3MJa3TvKi5OabZsElbuEnn1qYBlIuVK_LTak3940IpSqh9qWkpol-IxSzInHcoDOWrmuBTkvxTescg5dXg7QTjrG4c5OUA1AIIZWR61pWeOTq_nVyHCSVXrSizCuK8GYGtAdn-TaW-YHxbtRSYZ-utjO30urHuG-C9uQLVts66bYmtadUVhNhCGXdfqz2adLEMJrVjA7yAJvmaPpFp63kzsrjv8j2cQ9vidu2pIM=\">AI workflow consultant Los Angeles architecture design firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGorMdsRJ4vHCdmAyn2e6SXXhQEq650n5aK53lfquXc-29vpNhKOqm3qdgEAWkLWz0bOirLlbnI_u1lIcfCaHLUGOcKOGQ7GdGmXkBUfwP78VAy6NBcmx4BNb0TZddbaJ7gqwRHm4M22zYhsQCRSrSg-dK77fZMn5hSZYKS_8Dh4zTgQNOQK361tO7rIL9mYA64bQN6jADO8tA7K3bqLl-G1OFsZsOZ_LGqneozGdeK\">AI solutions for design agencies Los Angeles</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGecD1z1vQM_1VkR-gjRUy_DJdzQ_s6nGYtbmO9J0XHsXI6gzDL8Qb1iPPBGBuKtazpjzT8SoagZR3YXokpNE_RKn2dzoIrhNEx2kO4rk_1whI1WH9dLW4gonFv_J4ijcy7UWxJRFcMSPFBpSOsT6dZJyE63Wb78od_wEmRkRviukHcZIypXddj7yIBof9mg1iJkbP6rZa6aVVaMciuZo-BzRa1n1rxpfpoWQE-E2Bz1rxKXE1S0pY9o4y6\">workflow automation consultant Los Angeles architecture</a>\n  </div>\n</div>\n"
+          },
+          "webSearchQueries": [
+            "AI workflow consultant Los Angeles architecture design firms",
+            "AI consulting for architecture firms Los Angeles",
+            "AI solutions for design agencies Los Angeles",
+            "workflow automation consultant Los Angeles architecture"
+          ]
+        },
+        "index": 0
+      }
+    ],
+    "modelVersion": "gemini-2.5-flash",
+    "responseId": "s1a3aqOZH-eDmtkPiZqboAY",
+    "usageMetadata": {
+      "candidatesTokenCount": 691,
+      "promptTokenCount": 15,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 15
+        }
+      ],
+      "serviceTier": "standard",
+      "thoughtsTokenCount": 1156,
+      "toolUsePromptTokenCount": 102,
+      "toolUsePromptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 102
+        }
+      ],
+      "totalTokenCount": 1964
+    }
+  },
+  "prompt_id": "L02",
+  "request": {
+    "body": {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Find an AI workflow consultant in Los Angeles who understands architecture and design firms."
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "google_search": {}
+        }
+      ]
+    },
+    "model": "gemini-2.5-flash"
+  },
+  "run_id": "gemini-api-google-search-20260925-r1",
+  "schema_version": "gemini-grounded-raw-receipt/v1"
+}

@@ -1,0 +1,603 @@
+{
+  "attempts": [
+    {
+      "duration_ms": 11798,
+      "http_status": 200,
+      "model": "gemini-2.5-flash",
+      "response": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "Building a searchable AI knowledge system for an architecture firm, encompassing standards, project files, and past work, can be achieved by collaborating with various types of specialized firms and utilizing advanced AI-powered platforms. These solutions aim to streamline access to institutional knowledge, improve efficiency, and enhance decision-making.\n\nKey entities that can assist in developing such a system include:\n\n*   **Specialized AI/ML & Custom Software Development Firms for AEC:** These companies possess expertise in artificial intelligence, machine learning, and custom software development tailored for the Architecture, Engineering, and Construction (AEC) industry. They can build bespoke AI agents and integrate them with existing architectural workflows and computational design tools. Examples include Reope, which offers tailored software solutions and AI/ML implementations, AECforward, specializing in custom AI agents integrated with computational design, YegaTech, which focuses on AI transformation for architecture firms, and Itransition, a provider of AI software development services. Firms like HourlyDeveloper and ScienceSoft also offer AI integration and consulting with a focus on detailed documentation and scalability. Strategic Micro Systems provides AI integration services specifically for architecture firms, capable of integrating with CAD tools like Revit, ArchiCAD, and Rhino.\n\n*   **Enterprise AI and Knowledge Management Platform Providers:** Many companies offer robust AI-powered knowledge management platforms that can be customized and integrated to form a searchable knowledge system for internal enterprise use. These platforms typically feature AI-powered search, content creation, and integration with various business applications. Noteworthy providers include:\n    *   **Glean** and **Guru**, which act as \"AI Sources of Truth\" by connecting information across multiple systems and providing AI-driven answers.\n    *   **Bloomfire**, leveraging AI for enterprise search, content creation assistance, and an \"Ask AI\" feature that provides cited answers from company knowledge.\n    *   **Document360**, an AI-powered platform for creating, managing, and delivering internal documentation with semantic search and AI writing agents.\n    *   **Coveo**, offering a unified AI-powered search layer across enterprise systems for improved self-service and employee productivity.\n    *   **eGain** and **Cygnite**, which provide comprehensive AI knowledge application services, from consulting and implementation to transforming enterprise knowledge into AI-ready assets.\n    *   **Microsoft Copilot**, which assists with project management and can be leveraged for knowledge management within Microsoft 365 environments.\n    *   Other platforms like **Zendesk AI Knowledge Base**, **ServiceNow**, and **Lucidworks** also offer AI-driven solutions for knowledge retrieval, automated content suggestions, and integrated knowledge within workflows.\n\n*   **Large Software Vendors with AI Offerings for AEC:** Major software companies in the AEC space are integrating AI into their core products, which can serve as foundational tools for a knowledge system. Companies like Autodesk (Revit, AutoCAD), Nemetschek, Trimble Inc., Bentley Systems, and Siemens AG offer AI-powered features for design, analysis, and project management that can contribute to a comprehensive knowledge base.\n\nBy engaging with these specialists and leveraging suitable platforms, an architecture firm can successfully develop a searchable AI knowledge system to efficiently manage and access its vast repository of information."
+                }
+              ],
+              "role": "model"
+            },
+            "finishReason": "STOP",
+            "groundingMetadata": {
+              "groundingChunks": [
+                {
+                  "web": {
+                    "title": "aechub.org",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHmb4gsKCTJ3P0-p_1f_JZjAF0zdAqrNGTwclmzuSL6_Cx-335GjxkIZKMk11qkMEWFR9k1nrNqbLq3Yyx6ZxKDQFYdfrHB-BYbScZOekYVuphJST91dEAYR_1IPkE="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "itransition.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHrU3f_5mjHf4xdK04Q8hgFZKkjz8J5DyeOCEWhtITEhwNJYQwabVezbhg253i_VxJjjeD88mbe4xESsoMQxbYJ7pw4-doijIw-DjZPillamjNTSl03tw0mwVs75sYDLWO0rEEL6bM="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "hourlydeveloper.io",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG5fiyrjEuwMnz9viAa6nPETthsRH61DW5Z2B_5zWxou6lc_SGnkd6E4KzepreEB31rdfd4KOD2NMH74D-rYMozXI0T2L5q8r1e4q0at1tSe4JksRSWkqHfdX95FZhKDL1V_QaXbRllxJm0Vt9Xg2lmMZfAUnlJvEsbTstYJmVSAUa_-7fPgobOKgEwXIK2jFMmGA=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "stmicro.net",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGbVZai1IPJBxY35urTWl__3LiKzvuKPE_YN-3Z58MbqFx5H_zN3TbaT9HoPQjTdwzuWh0ZyP6mF71ql7FL8zFLVz4hl7qRFmS8KfzJWiIXH87McBNotUFbsViRNpHJRqL0q7V0YY2piM37VDVP"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "gartner.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFSWlYfnvjpmg7CnRFpWCM5bkUiJriAkNblm0rUF1GTGEY2yzft-MYnreMmNzCI1jY8GHgYXaq2edQ6zvwqJwhqLZt16ozyLALQZhUZD0q713n-t2LU0Q0S6uTESEeS5QdRSyNUzDjpx2SBenwS5prcoWwda3UbBxox_nCMYNYw"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "kuse.ai",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH9eKVWKTv5bCOeBFyMyHRnHWroxIezmzerC3MCuvaNKNL4paD440rhFyMh_AyxYzhuG5putuKXzpIQXOGa3idmWcK9n0B_QDqPYZe2YhuuE7klMWGTfh5nrhtbCKRXje2m9yzODtno5V9yN-gdpoJ8kRmH43LAHg3aJ3s_-synXAzFAW5HvKeTKJBlRJ_xyhLuK_OftLrXNDr92KEWabtunK-UbMqXg_b9XcQaDYDKDSqOr60_wiWmslIQbWWZO109ybw="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "bloomfire.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEcg5X4wdEvFZJWn-KcRR03ka_gh5nMbAj7Y8rGNWhoX-iEt4BFTv7XA3vqeSgPrq3yK9kyPbb0ursn4jTKl-e-IMddkLWi-4j4vdg5REVuS6s="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "techtarget.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFEHv3Vz6uJyJCaPi1vtHYt0e388i7sXtX0gR4FMqa9gRYhkobl8TVHCPcmQ4MhJtoOgtG9oZvEcrI8MnCYQLa34liPA1lWzVCkrBw9vUw6_zQobPz_y0RW0sFJ-wWxmjev10lMKCnUS4RhDQXiS0vGLjmSo-T7_dlKNXaRKcQPk-7ByScVY-xa0JmSReMbqaXMAuWaonPDsg=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "cygnite.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFTE95tGsaPZgU-pSDtWdHewN4iAWTs0EQ3WmKMozm9WeDT0oXtHiQX4uQkuEKfE00OLLsjQHI_yQ0hfBiUktVwwaziC0f509bQxbquQ_2OUhmP0OveqVsiZZihJ98UgTRaTFDa9Gv6asOYQwHY31T4dXIa"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "egain.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEFD1H9Z4u3PHtnSBxWDGeRqkM27kX86yUE0BG2ZY3z4YLY0OQEmAAxqOjVJ3tMGdsp6TvJf8l_ni7uBpth0dnelfEynaaN0MQ6EkkU-2lB3FQWcfx-GI-z-Jj7hmrotIBpSvEQX8F3"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "microsoft.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFBtBsUZLmBMrPiTfR7aWnmr21ZY1PeHvt4HKXyBVwhujz1FI2wuaq2hnBSjRbBrVv-zvjjupGNGl4784hQhQR93OVLe__WckkB_BVCDnG1nV30LBGCcFwoJiB8wmeCnhZOCTt2PcycFikQQdzbWsMWBJLdsBbIOQze6E9LMPcKXQZ6Urovxdn9xpvbIQ=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "lucidworks.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEx2YjOgXYsb7E4wNltlJvkz9-jPp7xQBMZvWAVEBE3pk_oOZCx8Zs8NRyIyozshWmd2Lt6cC3QfwfXxgkw-7eIqO-EP-Gq78ZJVRavvk-dCcEvn3aWq7SvMMOzkPiLcDtlabt9tAocX405pla37Mq5Kc5PzMjBmxvnGw=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "landbase.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEFSzGwV_VhcPHPjb8NOpqshi1Hx_-jmZY3KAqrAV-XcyRHvE5ltHr0wsnkQedXEw6Qo2FqVCS51jCTsMF4d7l152UdjP8hNVR4akeAp4WWEs_xq2ZSELDQtIkNtm1h6Ayu38FyEim59ww92gp-YREA3W1j1IKz-hvQssvCbCDYLe9J"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "researchandmarkets.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH63hgKphyyGD5SGVwEEkSZVckZRwqyNs5SYjp2Y2Q3NIPQsUIisjpYRZR7JRWrckIQz42PBCi3M6SsOzgyob0ojn2G7tJyLmcm2Wfha9gPTPkVILML17ukAmFK4SsH-GxC6ESiCsj2Oahn4hS_2Z_DwbG1uS5IlUmqU3aG48U-XsWE1d6R_L16FZ2aySTl"
+                  }
+                }
+              ],
+              "groundingSupports": [
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 898,
+                    "startIndex": 808,
+                    "text": "Examples include Reope, which offers tailored software solutions and AI/ML implementations"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 981,
+                    "startIndex": 898,
+                    "text": ", AECforward, specializing in custom AI agents integrated with computational design"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 1050,
+                    "startIndex": 981,
+                    "text": ", YegaTech, which focuses on AI transformation for architecture firms"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 1115,
+                    "startIndex": 1050,
+                    "text": ", and Itransition, a provider of AI software development services"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    2
+                  ],
+                  "segment": {
+                    "endIndex": 1255,
+                    "startIndex": 1117,
+                    "text": "Firms like HourlyDeveloper and ScienceSoft also offer AI integration and consulting with a focus on detailed documentation and scalability"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 1420,
+                    "startIndex": 1257,
+                    "text": "Strategic Micro Systems provides AI integration services specifically for architecture firms, capable of integrating with CAD tools like Revit, ArchiCAD, and Rhino"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    4,
+                    5
+                  ],
+                  "segment": {
+                    "endIndex": 1966,
+                    "startIndex": 1788,
+                    "text": "Noteworthy providers include:\n    *   **Glean** and **Guru**, which act as \"AI Sources of Truth\" by connecting information across multiple systems and providing AI-driven answers"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    4,
+                    6
+                  ],
+                  "segment": {
+                    "endIndex": 2131,
+                    "startIndex": 1972,
+                    "text": "*   **Bloomfire**, leveraging AI for enterprise search, content creation assistance, and an \"Ask AI\" feature that provides cited answers from company knowledge"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    7,
+                    4
+                  ],
+                  "segment": {
+                    "endIndex": 2285,
+                    "startIndex": 2137,
+                    "text": "*   **Document360**, an AI-powered platform for creating, managing, and delivering internal documentation with semantic search and AI writing agents"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    7
+                  ],
+                  "segment": {
+                    "endIndex": 2426,
+                    "startIndex": 2291,
+                    "text": "*   **Coveo**, offering a unified AI-powered search layer across enterprise systems for improved self-service and employee productivity"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    8,
+                    9
+                  ],
+                  "segment": {
+                    "endIndex": 2618,
+                    "startIndex": 2432,
+                    "text": "*   **eGain** and **Cygnite**, which provide comprehensive AI knowledge application services, from consulting and implementation to transforming enterprise knowledge into AI-ready assets"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    8,
+                    10
+                  ],
+                  "segment": {
+                    "endIndex": 2768,
+                    "startIndex": 2624,
+                    "text": "*   **Microsoft Copilot**, which assists with project management and can be leveraged for knowledge management within Microsoft 365 environments"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    5,
+                    11,
+                    12
+                  ],
+                  "segment": {
+                    "endIndex": 2993,
+                    "startIndex": 2774,
+                    "text": "*   Other platforms like **Zendesk AI Knowledge Base**, **ServiceNow**, and **Lucidworks** also offer AI-driven solutions for knowledge retrieval, automated content suggestions, and integrated knowledge within workflows"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    13
+                  ],
+                  "segment": {
+                    "endIndex": 3427,
+                    "startIndex": 3203,
+                    "text": "Companies like Autodesk (Revit, AutoCAD), Nemetschek, Trimble Inc., Bentley Systems, and Siemens AG offer AI-powered features for design, analysis, and project management that can contribute to a comprehensive knowledge base"
+                  }
+                }
+              ],
+              "searchEntryPoint": {
+                "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHLfFMsyCSwypE5lflLPrDSvQHxF9VKrMiDg6K2fG1pyde3ZseGoT8DwHXEN1uEyDGyoZpIa8npcS9MboZ_K9mqJEyNcrOxHIu0J-IXCoCUQUHkka4Q_zaPLWzp7yerIDx4paE3ee0gV25A3rP62sr2sEFmXy6ox-BOHFG2EwohdjfWyDmqizCwM3_B2ThtITF2gLUNiE1j-YKfI3QU8-SXSuJtPjTBuiOLCYl32bXJKwEDHvT44LCzHD5fNe1DyYjZYihmBlUgCvJM82K5Vy8=\">companies specializing in knowledge management AI for professional services</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH79zLzLXFXB-f7Anyygzodi1nn1b4wIrtmKJ1nxsXtUsuA8fS9uzWFYN-5SldSDfVHGJJp2ZiqvuoTpqDly3C2GmQVvsFJOYuJw745AA3peQ_9xHVcvkRDZ86d0VjfHW7HynxmImj6iuhDxQsAdUKrfhYk_Fk2g8bzjthA1na1hVKLqH-ceYSIRmb2iNkcGSxG5ECwO0fjON0giazzZSYu_fHLJYaDsMyIbJaeDewx\">AI solution providers for architecture firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFnjaphg7hYSu6viZxxi7D-ot6ci64v4vG1qm8dv7ZpSQzX7oS3vc-p9XSnaBu1IYCjPQf8e6sRUDaawYuRrmoK5is8FCjRC_2O5apDkE6VTXJm3eUa8pCyyIYaKogD0vKUwfJo7vNiufvVqttqcwaKAA0sJmh_CAQ7dKvj8tMETQ5ewD9c6Bm84ni92MvAPCTpBKMknRYINw6dQHIvOduWY92gza2Rp6oPajp-KDaCFDc=\">who builds AI knowledge systems for businesses</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEHTnHuRuBaWQseH2ZnRagMlDa5yLxMNRgq6QkLp6yUKCa4krSieTS7_yZgkBJ-JQ9BzyEw4Mwilrc5BZoL90X1dC3wTMAgRitkmfFKuMwBZHqBiVwmyhL2kdqJWvbvGjhIZ2DmqtMsuZV0TNEw3ZgjhEcOiUDC1unaqSWxG6lyy_JWuK8pAFuxlnrSx2Cjl9l82TFbYbCP2nsfR9Y0-qKaMOLYE5YF_rMtgIgesmOcIBwwrxmYuGR3HA==\">developers of searchable AI databases for enterprises</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHEhURP-qYqkx72dF9S2ATEWuNZiJTzJSoo_nug-rOczpWSW894xoAtRbXSUlr1A7GVV8Y6KvrZdRp9c2uMqO2r44O34TEnjIZf6e8Oq7B4RWZEyRFMOFjOIrPQGDiFkfhesN-89rWs-JIMiSwSSYiWepZna16l3jyX91gHXeqnceJ8rXWjNvHUVoam99QKBwbEc5waijh7PfMDKuVdLce_YzdFx3nOIf26_i5sUIqA-ZDx_eU=\">AI development services for architecture industry</a>\n  </div>\n</div>\n"
+              },
+              "webSearchQueries": [
+                "who builds AI knowledge systems for businesses",
+                "AI solution providers for architecture firms",
+                "developers of searchable AI databases for enterprises",
+                "companies specializing in knowledge management AI for professional services",
+                "AI development services for architecture industry"
+              ]
+            },
+            "index": 0
+          }
+        ],
+        "modelVersion": "gemini-2.5-flash",
+        "responseId": "x1a3ap0epMGq2w--26fRBg",
+        "usageMetadata": {
+          "candidatesTokenCount": 713,
+          "promptTokenCount": 23,
+          "promptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 23
+            }
+          ],
+          "serviceTier": "standard",
+          "thoughtsTokenCount": 1364,
+          "toolUsePromptTokenCount": 148,
+          "toolUsePromptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 148
+            }
+          ],
+          "totalTokenCount": 2248
+        }
+      },
+      "technical_status": "success",
+      "timestamp": "2026-09-26T05:23:18.890090Z"
+    }
+  ],
+  "final_response": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "Building a searchable AI knowledge system for an architecture firm, encompassing standards, project files, and past work, can be achieved by collaborating with various types of specialized firms and utilizing advanced AI-powered platforms. These solutions aim to streamline access to institutional knowledge, improve efficiency, and enhance decision-making.\n\nKey entities that can assist in developing such a system include:\n\n*   **Specialized AI/ML & Custom Software Development Firms for AEC:** These companies possess expertise in artificial intelligence, machine learning, and custom software development tailored for the Architecture, Engineering, and Construction (AEC) industry. They can build bespoke AI agents and integrate them with existing architectural workflows and computational design tools. Examples include Reope, which offers tailored software solutions and AI/ML implementations, AECforward, specializing in custom AI agents integrated with computational design, YegaTech, which focuses on AI transformation for architecture firms, and Itransition, a provider of AI software development services. Firms like HourlyDeveloper and ScienceSoft also offer AI integration and consulting with a focus on detailed documentation and scalability. Strategic Micro Systems provides AI integration services specifically for architecture firms, capable of integrating with CAD tools like Revit, ArchiCAD, and Rhino.\n\n*   **Enterprise AI and Knowledge Management Platform Providers:** Many companies offer robust AI-powered knowledge management platforms that can be customized and integrated to form a searchable knowledge system for internal enterprise use. These platforms typically feature AI-powered search, content creation, and integration with various business applications. Noteworthy providers include:\n    *   **Glean** and **Guru**, which act as \"AI Sources of Truth\" by connecting information across multiple systems and providing AI-driven answers.\n    *   **Bloomfire**, leveraging AI for enterprise search, content creation assistance, and an \"Ask AI\" feature that provides cited answers from company knowledge.\n    *   **Document360**, an AI-powered platform for creating, managing, and delivering internal documentation with semantic search and AI writing agents.\n    *   **Coveo**, offering a unified AI-powered search layer across enterprise systems for improved self-service and employee productivity.\n    *   **eGain** and **Cygnite**, which provide comprehensive AI knowledge application services, from consulting and implementation to transforming enterprise knowledge into AI-ready assets.\n    *   **Microsoft Copilot**, which assists with project management and can be leveraged for knowledge management within Microsoft 365 environments.\n    *   Other platforms like **Zendesk AI Knowledge Base**, **ServiceNow**, and **Lucidworks** also offer AI-driven solutions for knowledge retrieval, automated content suggestions, and integrated knowledge within workflows.\n\n*   **Large Software Vendors with AI Offerings for AEC:** Major software companies in the AEC space are integrating AI into their core products, which can serve as foundational tools for a knowledge system. Companies like Autodesk (Revit, AutoCAD), Nemetschek, Trimble Inc., Bentley Systems, and Siemens AG offer AI-powered features for design, analysis, and project management that can contribute to a comprehensive knowledge base.\n\nBy engaging with these specialists and leveraging suitable platforms, an architecture firm can successfully develop a searchable AI knowledge system to efficiently manage and access its vast repository of information."
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "STOP",
+        "groundingMetadata": {
+          "groundingChunks": [
+            {
+              "web": {
+                "title": "aechub.org",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHmb4gsKCTJ3P0-p_1f_JZjAF0zdAqrNGTwclmzuSL6_Cx-335GjxkIZKMk11qkMEWFR9k1nrNqbLq3Yyx6ZxKDQFYdfrHB-BYbScZOekYVuphJST91dEAYR_1IPkE="
+              }
+            },
+            {
+              "web": {
+                "title": "itransition.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHrU3f_5mjHf4xdK04Q8hgFZKkjz8J5DyeOCEWhtITEhwNJYQwabVezbhg253i_VxJjjeD88mbe4xESsoMQxbYJ7pw4-doijIw-DjZPillamjNTSl03tw0mwVs75sYDLWO0rEEL6bM="
+              }
+            },
+            {
+              "web": {
+                "title": "hourlydeveloper.io",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG5fiyrjEuwMnz9viAa6nPETthsRH61DW5Z2B_5zWxou6lc_SGnkd6E4KzepreEB31rdfd4KOD2NMH74D-rYMozXI0T2L5q8r1e4q0at1tSe4JksRSWkqHfdX95FZhKDL1V_QaXbRllxJm0Vt9Xg2lmMZfAUnlJvEsbTstYJmVSAUa_-7fPgobOKgEwXIK2jFMmGA=="
+              }
+            },
+            {
+              "web": {
+                "title": "stmicro.net",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGbVZai1IPJBxY35urTWl__3LiKzvuKPE_YN-3Z58MbqFx5H_zN3TbaT9HoPQjTdwzuWh0ZyP6mF71ql7FL8zFLVz4hl7qRFmS8KfzJWiIXH87McBNotUFbsViRNpHJRqL0q7V0YY2piM37VDVP"
+              }
+            },
+            {
+              "web": {
+                "title": "gartner.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFSWlYfnvjpmg7CnRFpWCM5bkUiJriAkNblm0rUF1GTGEY2yzft-MYnreMmNzCI1jY8GHgYXaq2edQ6zvwqJwhqLZt16ozyLALQZhUZD0q713n-t2LU0Q0S6uTESEeS5QdRSyNUzDjpx2SBenwS5prcoWwda3UbBxox_nCMYNYw"
+              }
+            },
+            {
+              "web": {
+                "title": "kuse.ai",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH9eKVWKTv5bCOeBFyMyHRnHWroxIezmzerC3MCuvaNKNL4paD440rhFyMh_AyxYzhuG5putuKXzpIQXOGa3idmWcK9n0B_QDqPYZe2YhuuE7klMWGTfh5nrhtbCKRXje2m9yzODtno5V9yN-gdpoJ8kRmH43LAHg3aJ3s_-synXAzFAW5HvKeTKJBlRJ_xyhLuK_OftLrXNDr92KEWabtunK-UbMqXg_b9XcQaDYDKDSqOr60_wiWmslIQbWWZO109ybw="
+              }
+            },
+            {
+              "web": {
+                "title": "bloomfire.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEcg5X4wdEvFZJWn-KcRR03ka_gh5nMbAj7Y8rGNWhoX-iEt4BFTv7XA3vqeSgPrq3yK9kyPbb0ursn4jTKl-e-IMddkLWi-4j4vdg5REVuS6s="
+              }
+            },
+            {
+              "web": {
+                "title": "techtarget.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFEHv3Vz6uJyJCaPi1vtHYt0e388i7sXtX0gR4FMqa9gRYhkobl8TVHCPcmQ4MhJtoOgtG9oZvEcrI8MnCYQLa34liPA1lWzVCkrBw9vUw6_zQobPz_y0RW0sFJ-wWxmjev10lMKCnUS4RhDQXiS0vGLjmSo-T7_dlKNXaRKcQPk-7ByScVY-xa0JmSReMbqaXMAuWaonPDsg=="
+              }
+            },
+            {
+              "web": {
+                "title": "cygnite.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFTE95tGsaPZgU-pSDtWdHewN4iAWTs0EQ3WmKMozm9WeDT0oXtHiQX4uQkuEKfE00OLLsjQHI_yQ0hfBiUktVwwaziC0f509bQxbquQ_2OUhmP0OveqVsiZZihJ98UgTRaTFDa9Gv6asOYQwHY31T4dXIa"
+              }
+            },
+            {
+              "web": {
+                "title": "egain.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEFD1H9Z4u3PHtnSBxWDGeRqkM27kX86yUE0BG2ZY3z4YLY0OQEmAAxqOjVJ3tMGdsp6TvJf8l_ni7uBpth0dnelfEynaaN0MQ6EkkU-2lB3FQWcfx-GI-z-Jj7hmrotIBpSvEQX8F3"
+              }
+            },
+            {
+              "web": {
+                "title": "microsoft.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFBtBsUZLmBMrPiTfR7aWnmr21ZY1PeHvt4HKXyBVwhujz1FI2wuaq2hnBSjRbBrVv-zvjjupGNGl4784hQhQR93OVLe__WckkB_BVCDnG1nV30LBGCcFwoJiB8wmeCnhZOCTt2PcycFikQQdzbWsMWBJLdsBbIOQze6E9LMPcKXQZ6Urovxdn9xpvbIQ=="
+              }
+            },
+            {
+              "web": {
+                "title": "lucidworks.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEx2YjOgXYsb7E4wNltlJvkz9-jPp7xQBMZvWAVEBE3pk_oOZCx8Zs8NRyIyozshWmd2Lt6cC3QfwfXxgkw-7eIqO-EP-Gq78ZJVRavvk-dCcEvn3aWq7SvMMOzkPiLcDtlabt9tAocX405pla37Mq5Kc5PzMjBmxvnGw=="
+              }
+            },
+            {
+              "web": {
+                "title": "landbase.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEFSzGwV_VhcPHPjb8NOpqshi1Hx_-jmZY3KAqrAV-XcyRHvE5ltHr0wsnkQedXEw6Qo2FqVCS51jCTsMF4d7l152UdjP8hNVR4akeAp4WWEs_xq2ZSELDQtIkNtm1h6Ayu38FyEim59ww92gp-YREA3W1j1IKz-hvQssvCbCDYLe9J"
+              }
+            },
+            {
+              "web": {
+                "title": "researchandmarkets.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH63hgKphyyGD5SGVwEEkSZVckZRwqyNs5SYjp2Y2Q3NIPQsUIisjpYRZR7JRWrckIQz42PBCi3M6SsOzgyob0ojn2G7tJyLmcm2Wfha9gPTPkVILML17ukAmFK4SsH-GxC6ESiCsj2Oahn4hS_2Z_DwbG1uS5IlUmqU3aG48U-XsWE1d6R_L16FZ2aySTl"
+              }
+            }
+          ],
+          "groundingSupports": [
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 898,
+                "startIndex": 808,
+                "text": "Examples include Reope, which offers tailored software solutions and AI/ML implementations"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 981,
+                "startIndex": 898,
+                "text": ", AECforward, specializing in custom AI agents integrated with computational design"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 1050,
+                "startIndex": 981,
+                "text": ", YegaTech, which focuses on AI transformation for architecture firms"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                1
+              ],
+              "segment": {
+                "endIndex": 1115,
+                "startIndex": 1050,
+                "text": ", and Itransition, a provider of AI software development services"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                2
+              ],
+              "segment": {
+                "endIndex": 1255,
+                "startIndex": 1117,
+                "text": "Firms like HourlyDeveloper and ScienceSoft also offer AI integration and consulting with a focus on detailed documentation and scalability"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                3
+              ],
+              "segment": {
+                "endIndex": 1420,
+                "startIndex": 1257,
+                "text": "Strategic Micro Systems provides AI integration services specifically for architecture firms, capable of integrating with CAD tools like Revit, ArchiCAD, and Rhino"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                4,
+                5
+              ],
+              "segment": {
+                "endIndex": 1966,
+                "startIndex": 1788,
+                "text": "Noteworthy providers include:\n    *   **Glean** and **Guru**, which act as \"AI Sources of Truth\" by connecting information across multiple systems and providing AI-driven answers"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                4,
+                6
+              ],
+              "segment": {
+                "endIndex": 2131,
+                "startIndex": 1972,
+                "text": "*   **Bloomfire**, leveraging AI for enterprise search, content creation assistance, and an \"Ask AI\" feature that provides cited answers from company knowledge"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                7,
+                4
+              ],
+              "segment": {
+                "endIndex": 2285,
+                "startIndex": 2137,
+                "text": "*   **Document360**, an AI-powered platform for creating, managing, and delivering internal documentation with semantic search and AI writing agents"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                7
+              ],
+              "segment": {
+                "endIndex": 2426,
+                "startIndex": 2291,
+                "text": "*   **Coveo**, offering a unified AI-powered search layer across enterprise systems for improved self-service and employee productivity"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                8,
+                9
+              ],
+              "segment": {
+                "endIndex": 2618,
+                "startIndex": 2432,
+                "text": "*   **eGain** and **Cygnite**, which provide comprehensive AI knowledge application services, from consulting and implementation to transforming enterprise knowledge into AI-ready assets"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                8,
+                10
+              ],
+              "segment": {
+                "endIndex": 2768,
+                "startIndex": 2624,
+                "text": "*   **Microsoft Copilot**, which assists with project management and can be leveraged for knowledge management within Microsoft 365 environments"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                5,
+                11,
+                12
+              ],
+              "segment": {
+                "endIndex": 2993,
+                "startIndex": 2774,
+                "text": "*   Other platforms like **Zendesk AI Knowledge Base**, **ServiceNow**, and **Lucidworks** also offer AI-driven solutions for knowledge retrieval, automated content suggestions, and integrated knowledge within workflows"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                13
+              ],
+              "segment": {
+                "endIndex": 3427,
+                "startIndex": 3203,
+                "text": "Companies like Autodesk (Revit, AutoCAD), Nemetschek, Trimble Inc., Bentley Systems, and Siemens AG offer AI-powered features for design, analysis, and project management that can contribute to a comprehensive knowledge base"
+              }
+            }
+          ],
+          "searchEntryPoint": {
+            "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHLfFMsyCSwypE5lflLPrDSvQHxF9VKrMiDg6K2fG1pyde3ZseGoT8DwHXEN1uEyDGyoZpIa8npcS9MboZ_K9mqJEyNcrOxHIu0J-IXCoCUQUHkka4Q_zaPLWzp7yerIDx4paE3ee0gV25A3rP62sr2sEFmXy6ox-BOHFG2EwohdjfWyDmqizCwM3_B2ThtITF2gLUNiE1j-YKfI3QU8-SXSuJtPjTBuiOLCYl32bXJKwEDHvT44LCzHD5fNe1DyYjZYihmBlUgCvJM82K5Vy8=\">companies specializing in knowledge management AI for professional services</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH79zLzLXFXB-f7Anyygzodi1nn1b4wIrtmKJ1nxsXtUsuA8fS9uzWFYN-5SldSDfVHGJJp2ZiqvuoTpqDly3C2GmQVvsFJOYuJw745AA3peQ_9xHVcvkRDZ86d0VjfHW7HynxmImj6iuhDxQsAdUKrfhYk_Fk2g8bzjthA1na1hVKLqH-ceYSIRmb2iNkcGSxG5ECwO0fjON0giazzZSYu_fHLJYaDsMyIbJaeDewx\">AI solution providers for architecture firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFnjaphg7hYSu6viZxxi7D-ot6ci64v4vG1qm8dv7ZpSQzX7oS3vc-p9XSnaBu1IYCjPQf8e6sRUDaawYuRrmoK5is8FCjRC_2O5apDkE6VTXJm3eUa8pCyyIYaKogD0vKUwfJo7vNiufvVqttqcwaKAA0sJmh_CAQ7dKvj8tMETQ5ewD9c6Bm84ni92MvAPCTpBKMknRYINw6dQHIvOduWY92gza2Rp6oPajp-KDaCFDc=\">who builds AI knowledge systems for businesses</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEHTnHuRuBaWQseH2ZnRagMlDa5yLxMNRgq6QkLp6yUKCa4krSieTS7_yZgkBJ-JQ9BzyEw4Mwilrc5BZoL90X1dC3wTMAgRitkmfFKuMwBZHqBiVwmyhL2kdqJWvbvGjhIZ2DmqtMsuZV0TNEw3ZgjhEcOiUDC1unaqSWxG6lyy_JWuK8pAFuxlnrSx2Cjl9l82TFbYbCP2nsfR9Y0-qKaMOLYE5YF_rMtgIgesmOcIBwwrxmYuGR3HA==\">developers of searchable AI databases for enterprises</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHEhURP-qYqkx72dF9S2ATEWuNZiJTzJSoo_nug-rOczpWSW894xoAtRbXSUlr1A7GVV8Y6KvrZdRp9c2uMqO2r44O34TEnjIZf6e8Oq7B4RWZEyRFMOFjOIrPQGDiFkfhesN-89rWs-JIMiSwSSYiWepZna16l3jyX91gHXeqnceJ8rXWjNvHUVoam99QKBwbEc5waijh7PfMDKuVdLce_YzdFx3nOIf26_i5sUIqA-ZDx_eU=\">AI development services for architecture industry</a>\n  </div>\n</div>\n"
+          },
+          "webSearchQueries": [
+            "who builds AI knowledge systems for businesses",
+            "AI solution providers for architecture firms",
+            "developers of searchable AI databases for enterprises",
+            "companies specializing in knowledge management AI for professional services",
+            "AI development services for architecture industry"
+          ]
+        },
+        "index": 0
+      }
+    ],
+    "modelVersion": "gemini-2.5-flash",
+    "responseId": "x1a3ap0epMGq2w--26fRBg",
+    "usageMetadata": {
+      "candidatesTokenCount": 713,
+      "promptTokenCount": 23,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 23
+        }
+      ],
+      "serviceTier": "standard",
+      "thoughtsTokenCount": 1364,
+      "toolUsePromptTokenCount": 148,
+      "toolUsePromptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 148
+        }
+      ],
+      "totalTokenCount": 2248
+    }
+  },
+  "prompt_id": "U02",
+  "request": {
+    "body": {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Who can build a searchable AI knowledge system over an architecture firm's standards, project files, and past work?"
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "google_search": {}
+        }
+      ]
+    },
+    "model": "gemini-2.5-flash"
+  },
+  "run_id": "gemini-api-google-search-20260925-r1",
+  "schema_version": "gemini-grounded-raw-receipt/v1"
+}

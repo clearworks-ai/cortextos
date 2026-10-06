@@ -1,0 +1,463 @@
+{
+  "attempts": [
+    {
+      "duration_ms": 7694,
+      "http_status": 200,
+      "model": "gemini-2.5-flash",
+      "response": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "For a 25-person architecture firm seeking AI implementation consultants, several highly-regarded firms specialize in the Architecture, Engineering, and Construction (AEC) sector and offer services tailored to smaller and mid-sized businesses. These consultants can help integrate AI to boost efficiency, automate repetitive tasks, enhance design processes, and improve project delivery.\n\nHere are some of the best AEC AI implementation consultants, along with their relevant expertise:\n\n*   **Advisor Labs** is recognized as a top AI consulting firm for AEC in 2026, particularly for design practices, engineering consultancies, and contractors with lean IT departments. They offer a dedicated AEC practice focusing on workflows that impact margins, such as RFP response, RFI triage, submittal review, meeting minutes to action items, and conceptual estimating support. They are known for their fixed-price entry engagements and a 4-week pilot format designed to leave firm staff capable of running the tools. Advisor Labs aims to achieve significant productivity increases through strategic technology investments and custom AI process automation.\n\n*   **YegaTech** is an AEC-only technology consultancy that provides AI strategy, governance, and adoption services for architecture and engineering firms. They focus on achieving measurable production use of AI, rather than just demos, and their consultants possess deep industry knowledge of BIM environments, project delivery methods, and design technology stacks, which can shorten the discovery phase.\n\n*   **AI in AEC** empowers AEC professionals by integrating AI into their workflows. They offer courses, workshops, and consulting, boasting the world's largest platform for AI education in AEC with over 1,700 AI tools. Their services are designed to guide teams through the AI transformation journey, from audit to optimization, without an enterprise price tag.\n\n*   **Active AI** highlights a success story with a 25-person architecture firm, demonstrating their ability to implement AI platforms that generate design options, automate documentation, optimize for sustainability, handle code compliance, cost estimation, and BIM coordination. They claim to have reduced design development time by 65% and helped a firm win five major competitions in 12 months.\n\n*   **AEC Hub** offers AI implementation services for architecture and construction firms, focusing on helping them discover, implement, and master AI tools to save time, boost productivity, and modernize workflows. They offer a range of services from free strategy sessions to discovery sprints and monthly retainers, and can cater to operations of one to ten people with hourly work and custom pricing.\n\n*   **AEC Advisors AI** specializes in providing AI systems implementation services, consulting, and support exclusively for the AEC and professional services industries. Their mission is to partner with firms to provide AI training and integrate new AI technologies into workflows, aiming to improve current processes and ensure a return on investment.\n\n*   **Zweig Group** offers tailored guidance, consulting, and training to AEC firms on leveraging AI. Their AI Consulting Team has extensive knowledge in both AI and AEC, providing insights on integrating AI into organizational structures, identifying areas for implementation, and developing roadmaps for successful adoption. They emphasize customized approaches based on a firm's unique needs and resources.\n\n*   **GSDC AI Consulting** focuses on practical AI for real-world studio work, aiming to improve repetitive tasks in architecture firms. They highlight a case where a mid-sized architecture firm cut project delivery time by 35% and reduced design rework by 45% through AI implementation. Their services include workflow assessment, pilot implementation, and training for architects, project managers, and operations staff.\n\nThese consultants offer a range of services critical for a 25-person architecture firm, including generative design, automated documentation, sustainability optimization, code compliance checking, cost estimation, BIM automation and coordination, and AI-driven project management. They aim to streamline processes, enhance efficiency, reduce manual errors, and improve decision-making, allowing architects to focus more on creative work."
+                }
+              ],
+              "role": "model"
+            },
+            "finishReason": "STOP",
+            "groundingMetadata": {
+              "groundingChunks": [
+                {
+                  "web": {
+                    "title": "bestaiconsultingfirm.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGt5wQAFKTjsVztsTnU9R8N3Tlav_hDyD_TyJU_6Y-ERNTnNBInfVb0Bc-P4l7mj6QXNeOu6hgKmQ-WYpxQkfc_DZSGE56CTFFhXcl8KmUhzYpnr3hXTgnbZWDj8O69xnvlNpMX3Njrvc_cECHPLvGcg8Hs"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "advisorlabs.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH79Pmu5pD6Ws3B-wurTCT3JdklQwErnzJOlbrYTN-vUaMmuq5GUmhPWNkgEeL9tJv6pC0vJHdDRaZ-L0129n7qDiWOeozcOXWllE-hD2QdCCDbcv2c6blEnjcuhws8pHrdTtFGZF4="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aechub.org",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGcbCTkMM_ogpm-1hf9GWtERAoXo9Wb6ZpMCGVyopc9qH0cIS00OlUeNZtAtxbmzTtbQk-SVoOwlYkaRxrwD18HvJ2TNfYOBMLBMPduR7fClRsvvvfJQHbbjtdNtQ8="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "beactive.ai",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGySHjnlLe365Y2w3PVsTdYcuF-rrlafCWjbLWULMLoCoaScvAh0UNlAOuvr9WbpId926sVDpb1VLXYLkAMVI50CdRQGGHZmOS9qK-UI9cXdp2ztBMyg7lE2N5r0aaShJ53OxGWkPmbFoLh-50="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aechub.org",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFiFvKamr5y6EFi1pJt7VD2rRdhSm2nRR6XfRKsvU5ZFUmW5amavf1clnd_-ilJluHBOltIJAParNHvgVzpplKZ2z2NCb75ljdTfn060PvHW8yZb92Oa54gTyM="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aecadvisors.ai",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHPMxNT5RZErxO-YDiLkrgZfaWOIM9zx4xyeqC7eY0GjOrb4CkNcbOtYNnnDRH1Q4ybXCqrf5nbAEEYfx761fleObniAjeM7gtQHpct4hp_SWQ="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "zweiggroup.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFGwMmxgv3VTdeXi1aOE77v-bjPGpUwuCBabiBWUGNYaDnrf6wKkC71J7bt2QI8TuV6nlHEByeNvK8DphntUXndGOvocZU4rNNY81uvOIBYZ-SUBiNiaFWmKfBR5latyR94WVTVyHOJU7VMyE0p2Ww="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "gsdcouncil.org",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHlo2aEWeeRsJ-Zwm3iEx50XfqE1Z8mgCjHU8r5ca1vUPluWFc9mY7nvdb5ABvXjtfQcw9LTOwTusCRHjk1Q7SHB-tySYKLkj27UpMIXLPEZ-cf_YUbRMZDwtmphh1SkTdYK6lU916UM1pL7IcYFfoT78UXDYbt9SCixEt7hg=="
+                  }
+                }
+              ],
+              "groundingSupports": [
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 1008,
+                    "startIndex": 870,
+                    "text": "They are known for their fixed-price entry engagements and a 4-week pilot format designed to leave firm staff capable of running the tools"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    2
+                  ],
+                  "segment": {
+                    "endIndex": 1147,
+                    "startIndex": 1010,
+                    "text": "Advisor Labs aims to achieve significant productivity increases through strategic technology investments and custom AI process automation"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    2,
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 1555,
+                    "startIndex": 1306,
+                    "text": "They focus on achieving measurable production use of AI, rather than just demos, and their consultants possess deep industry knowledge of BIM environments, project delivery methods, and design technology stacks, which can shorten the discovery phase"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    2
+                  ],
+                  "segment": {
+                    "endIndex": 1919,
+                    "startIndex": 1778,
+                    "text": "Their services are designed to guide teams through the AI transformation journey, from audit to optimization, without an enterprise price tag"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 2319,
+                    "startIndex": 2203,
+                    "text": "They claim to have reduced design development time by 65% and helped a firm win five major competitions in 12 months"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    2,
+                    4
+                  ],
+                  "segment": {
+                    "endIndex": 2725,
+                    "startIndex": 2538,
+                    "text": "They offer a range of services from free strategy sessions to discovery sprints and monthly retainers, and can cater to operations of one to ten people with hourly work and custom pricing"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    5
+                  ],
+                  "segment": {
+                    "endIndex": 3080,
+                    "startIndex": 2899,
+                    "text": "Their mission is to partner with firms to provide AI training and integrate new AI technologies into workflows, aiming to improve current processes and ensure a return on investment"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    6
+                  ],
+                  "segment": {
+                    "endIndex": 3491,
+                    "startIndex": 3410,
+                    "text": "They emphasize customized approaches based on a firm's unique needs and resources"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    7
+                  ],
+                  "segment": {
+                    "endIndex": 3915,
+                    "startIndex": 3782,
+                    "text": "Their services include workflow assessment, pilot implementation, and training for architects, project managers, and operations staff"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    3,
+                    7
+                  ],
+                  "segment": {
+                    "endIndex": 4197,
+                    "startIndex": 3918,
+                    "text": "These consultants offer a range of services critical for a 25-person architecture firm, including generative design, automated documentation, sustainability optimization, code compliance checking, cost estimation, BIM automation and coordination, and AI-driven project management"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    1,
+                    7
+                  ],
+                  "segment": {
+                    "endIndex": 4354,
+                    "startIndex": 4199,
+                    "text": "They aim to streamline processes, enhance efficiency, reduce manual errors, and improve decision-making, allowing architects to focus more on creative work"
+                  }
+                }
+              ],
+              "searchEntryPoint": {
+                "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEwOHOWvzAQtEW4i1Hb26a_IppDgikmx1WvcQdHBoOday_D03uPO1z03pD0IPKN7Zv0wGRJezETeI82nxi2dmg39IglYrpOWuBC2w131_VSW5oY3K2bMFpedEfAAWtcs92GOEtYht7DWTja0qnLtYZOWJA_z9Zp-mWzLd384p9OK0Ve0hLWNmNjmSiEhzBcQCoSHTUur_quBzRUuYYysfhbFsQE7EtafJTXiS5aUg==\">AEC AI strategy consultants small business</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEpX6x1DmmjG3ozFiprMStW015NJMOngQ3QVozc3lHfk8INxBJZXSg65uJpQXa31G4zahKtY6eCL5s5Dlyqa69aoF5GPS0CVa0ftNcE8CRzZnVyI196E5j-q37YvVGhCX7J4pLzHFrAnD3rkLXH15fWgBJLlNxiMCLfBrxDFd_ZvRGundOexIS60767p4TiVL8Gc1yuoIkJ_EJm3KqzSDYvLDnO4FCDF9E2TQO2DznQSo2Gt2eFFcig58tJwoxSjBJpp8uSlh3M\">best AEC AI implementation consultants for small architecture firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF4HWPKekyokCOaXw4CPYAU97iOlb_GIfBEx_Zo7K7WYS8lusPbYFSrMznxHC60XInwXAZuAh0_rABbGpBC7b9WgOqmKlVqM9gdEDqCUjzIpkh74mBaiUGN8MpO5OKizhib8aBhOYW_d8wn9W5C8l2yOkTD7wAyESpXZZfldzlkpY-7PGa1fXFjCZY3WVR5ifjCt1784DIXnmmUd3HSVGHhilmDjUejANW77XtCZ8wFTw==\">AI consulting for 25-person architecture firm</a>\n  </div>\n</div>\n"
+              },
+              "webSearchQueries": [
+                "best AEC AI implementation consultants for small architecture firms",
+                "AI consulting for 25-person architecture firm",
+                "AEC AI strategy consultants small business"
+              ]
+            },
+            "index": 0
+          }
+        ],
+        "modelVersion": "gemini-2.5-flash",
+        "responseId": "DVe3asyWFZ6gz7IPtLnF4Q0",
+        "usageMetadata": {
+          "candidatesTokenCount": 846,
+          "promptTokenCount": 18,
+          "promptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 18
+            }
+          ],
+          "serviceTier": "standard",
+          "thoughtsTokenCount": 361,
+          "toolUsePromptTokenCount": 182,
+          "toolUsePromptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 182
+            }
+          ],
+          "totalTokenCount": 1407
+        }
+      },
+      "technical_status": "success",
+      "timestamp": "2026-09-26T05:24:29.229622Z"
+    }
+  ],
+  "final_response": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "For a 25-person architecture firm seeking AI implementation consultants, several highly-regarded firms specialize in the Architecture, Engineering, and Construction (AEC) sector and offer services tailored to smaller and mid-sized businesses. These consultants can help integrate AI to boost efficiency, automate repetitive tasks, enhance design processes, and improve project delivery.\n\nHere are some of the best AEC AI implementation consultants, along with their relevant expertise:\n\n*   **Advisor Labs** is recognized as a top AI consulting firm for AEC in 2026, particularly for design practices, engineering consultancies, and contractors with lean IT departments. They offer a dedicated AEC practice focusing on workflows that impact margins, such as RFP response, RFI triage, submittal review, meeting minutes to action items, and conceptual estimating support. They are known for their fixed-price entry engagements and a 4-week pilot format designed to leave firm staff capable of running the tools. Advisor Labs aims to achieve significant productivity increases through strategic technology investments and custom AI process automation.\n\n*   **YegaTech** is an AEC-only technology consultancy that provides AI strategy, governance, and adoption services for architecture and engineering firms. They focus on achieving measurable production use of AI, rather than just demos, and their consultants possess deep industry knowledge of BIM environments, project delivery methods, and design technology stacks, which can shorten the discovery phase.\n\n*   **AI in AEC** empowers AEC professionals by integrating AI into their workflows. They offer courses, workshops, and consulting, boasting the world's largest platform for AI education in AEC with over 1,700 AI tools. Their services are designed to guide teams through the AI transformation journey, from audit to optimization, without an enterprise price tag.\n\n*   **Active AI** highlights a success story with a 25-person architecture firm, demonstrating their ability to implement AI platforms that generate design options, automate documentation, optimize for sustainability, handle code compliance, cost estimation, and BIM coordination. They claim to have reduced design development time by 65% and helped a firm win five major competitions in 12 months.\n\n*   **AEC Hub** offers AI implementation services for architecture and construction firms, focusing on helping them discover, implement, and master AI tools to save time, boost productivity, and modernize workflows. They offer a range of services from free strategy sessions to discovery sprints and monthly retainers, and can cater to operations of one to ten people with hourly work and custom pricing.\n\n*   **AEC Advisors AI** specializes in providing AI systems implementation services, consulting, and support exclusively for the AEC and professional services industries. Their mission is to partner with firms to provide AI training and integrate new AI technologies into workflows, aiming to improve current processes and ensure a return on investment.\n\n*   **Zweig Group** offers tailored guidance, consulting, and training to AEC firms on leveraging AI. Their AI Consulting Team has extensive knowledge in both AI and AEC, providing insights on integrating AI into organizational structures, identifying areas for implementation, and developing roadmaps for successful adoption. They emphasize customized approaches based on a firm's unique needs and resources.\n\n*   **GSDC AI Consulting** focuses on practical AI for real-world studio work, aiming to improve repetitive tasks in architecture firms. They highlight a case where a mid-sized architecture firm cut project delivery time by 35% and reduced design rework by 45% through AI implementation. Their services include workflow assessment, pilot implementation, and training for architects, project managers, and operations staff.\n\nThese consultants offer a range of services critical for a 25-person architecture firm, including generative design, automated documentation, sustainability optimization, code compliance checking, cost estimation, BIM automation and coordination, and AI-driven project management. They aim to streamline processes, enhance efficiency, reduce manual errors, and improve decision-making, allowing architects to focus more on creative work."
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "STOP",
+        "groundingMetadata": {
+          "groundingChunks": [
+            {
+              "web": {
+                "title": "bestaiconsultingfirm.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGt5wQAFKTjsVztsTnU9R8N3Tlav_hDyD_TyJU_6Y-ERNTnNBInfVb0Bc-P4l7mj6QXNeOu6hgKmQ-WYpxQkfc_DZSGE56CTFFhXcl8KmUhzYpnr3hXTgnbZWDj8O69xnvlNpMX3Njrvc_cECHPLvGcg8Hs"
+              }
+            },
+            {
+              "web": {
+                "title": "advisorlabs.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH79Pmu5pD6Ws3B-wurTCT3JdklQwErnzJOlbrYTN-vUaMmuq5GUmhPWNkgEeL9tJv6pC0vJHdDRaZ-L0129n7qDiWOeozcOXWllE-hD2QdCCDbcv2c6blEnjcuhws8pHrdTtFGZF4="
+              }
+            },
+            {
+              "web": {
+                "title": "aechub.org",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGcbCTkMM_ogpm-1hf9GWtERAoXo9Wb6ZpMCGVyopc9qH0cIS00OlUeNZtAtxbmzTtbQk-SVoOwlYkaRxrwD18HvJ2TNfYOBMLBMPduR7fClRsvvvfJQHbbjtdNtQ8="
+              }
+            },
+            {
+              "web": {
+                "title": "beactive.ai",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGySHjnlLe365Y2w3PVsTdYcuF-rrlafCWjbLWULMLoCoaScvAh0UNlAOuvr9WbpId926sVDpb1VLXYLkAMVI50CdRQGGHZmOS9qK-UI9cXdp2ztBMyg7lE2N5r0aaShJ53OxGWkPmbFoLh-50="
+              }
+            },
+            {
+              "web": {
+                "title": "aechub.org",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFiFvKamr5y6EFi1pJt7VD2rRdhSm2nRR6XfRKsvU5ZFUmW5amavf1clnd_-ilJluHBOltIJAParNHvgVzpplKZ2z2NCb75ljdTfn060PvHW8yZb92Oa54gTyM="
+              }
+            },
+            {
+              "web": {
+                "title": "aecadvisors.ai",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHPMxNT5RZErxO-YDiLkrgZfaWOIM9zx4xyeqC7eY0GjOrb4CkNcbOtYNnnDRH1Q4ybXCqrf5nbAEEYfx761fleObniAjeM7gtQHpct4hp_SWQ="
+              }
+            },
+            {
+              "web": {
+                "title": "zweiggroup.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFGwMmxgv3VTdeXi1aOE77v-bjPGpUwuCBabiBWUGNYaDnrf6wKkC71J7bt2QI8TuV6nlHEByeNvK8DphntUXndGOvocZU4rNNY81uvOIBYZ-SUBiNiaFWmKfBR5latyR94WVTVyHOJU7VMyE0p2Ww="
+              }
+            },
+            {
+              "web": {
+                "title": "gsdcouncil.org",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHlo2aEWeeRsJ-Zwm3iEx50XfqE1Z8mgCjHU8r5ca1vUPluWFc9mY7nvdb5ABvXjtfQcw9LTOwTusCRHjk1Q7SHB-tySYKLkj27UpMIXLPEZ-cf_YUbRMZDwtmphh1SkTdYK6lU916UM1pL7IcYFfoT78UXDYbt9SCixEt7hg=="
+              }
+            }
+          ],
+          "groundingSupports": [
+            {
+              "groundingChunkIndices": [
+                0,
+                1
+              ],
+              "segment": {
+                "endIndex": 1008,
+                "startIndex": 870,
+                "text": "They are known for their fixed-price entry engagements and a 4-week pilot format designed to leave firm staff capable of running the tools"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                2
+              ],
+              "segment": {
+                "endIndex": 1147,
+                "startIndex": 1010,
+                "text": "Advisor Labs aims to achieve significant productivity increases through strategic technology investments and custom AI process automation"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                2,
+                0
+              ],
+              "segment": {
+                "endIndex": 1555,
+                "startIndex": 1306,
+                "text": "They focus on achieving measurable production use of AI, rather than just demos, and their consultants possess deep industry knowledge of BIM environments, project delivery methods, and design technology stacks, which can shorten the discovery phase"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                2
+              ],
+              "segment": {
+                "endIndex": 1919,
+                "startIndex": 1778,
+                "text": "Their services are designed to guide teams through the AI transformation journey, from audit to optimization, without an enterprise price tag"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                3
+              ],
+              "segment": {
+                "endIndex": 2319,
+                "startIndex": 2203,
+                "text": "They claim to have reduced design development time by 65% and helped a firm win five major competitions in 12 months"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                2,
+                4
+              ],
+              "segment": {
+                "endIndex": 2725,
+                "startIndex": 2538,
+                "text": "They offer a range of services from free strategy sessions to discovery sprints and monthly retainers, and can cater to operations of one to ten people with hourly work and custom pricing"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                5
+              ],
+              "segment": {
+                "endIndex": 3080,
+                "startIndex": 2899,
+                "text": "Their mission is to partner with firms to provide AI training and integrate new AI technologies into workflows, aiming to improve current processes and ensure a return on investment"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                6
+              ],
+              "segment": {
+                "endIndex": 3491,
+                "startIndex": 3410,
+                "text": "They emphasize customized approaches based on a firm's unique needs and resources"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                7
+              ],
+              "segment": {
+                "endIndex": 3915,
+                "startIndex": 3782,
+                "text": "Their services include workflow assessment, pilot implementation, and training for architects, project managers, and operations staff"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                3,
+                7
+              ],
+              "segment": {
+                "endIndex": 4197,
+                "startIndex": 3918,
+                "text": "These consultants offer a range of services critical for a 25-person architecture firm, including generative design, automated documentation, sustainability optimization, code compliance checking, cost estimation, BIM automation and coordination, and AI-driven project management"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                1,
+                7
+              ],
+              "segment": {
+                "endIndex": 4354,
+                "startIndex": 4199,
+                "text": "They aim to streamline processes, enhance efficiency, reduce manual errors, and improve decision-making, allowing architects to focus more on creative work"
+              }
+            }
+          ],
+          "searchEntryPoint": {
+            "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEwOHOWvzAQtEW4i1Hb26a_IppDgikmx1WvcQdHBoOday_D03uPO1z03pD0IPKN7Zv0wGRJezETeI82nxi2dmg39IglYrpOWuBC2w131_VSW5oY3K2bMFpedEfAAWtcs92GOEtYht7DWTja0qnLtYZOWJA_z9Zp-mWzLd384p9OK0Ve0hLWNmNjmSiEhzBcQCoSHTUur_quBzRUuYYysfhbFsQE7EtafJTXiS5aUg==\">AEC AI strategy consultants small business</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEpX6x1DmmjG3ozFiprMStW015NJMOngQ3QVozc3lHfk8INxBJZXSg65uJpQXa31G4zahKtY6eCL5s5Dlyqa69aoF5GPS0CVa0ftNcE8CRzZnVyI196E5j-q37YvVGhCX7J4pLzHFrAnD3rkLXH15fWgBJLlNxiMCLfBrxDFd_ZvRGundOexIS60767p4TiVL8Gc1yuoIkJ_EJm3KqzSDYvLDnO4FCDF9E2TQO2DznQSo2Gt2eFFcig58tJwoxSjBJpp8uSlh3M\">best AEC AI implementation consultants for small architecture firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF4HWPKekyokCOaXw4CPYAU97iOlb_GIfBEx_Zo7K7WYS8lusPbYFSrMznxHC60XInwXAZuAh0_rABbGpBC7b9WgOqmKlVqM9gdEDqCUjzIpkh74mBaiUGN8MpO5OKizhib8aBhOYW_d8wn9W5C8l2yOkTD7wAyESpXZZfldzlkpY-7PGa1fXFjCZY3WVR5ifjCt1784DIXnmmUd3HSVGHhilmDjUejANW77XtCZ8wFTw==\">AI consulting for 25-person architecture firm</a>\n  </div>\n</div>\n"
+          },
+          "webSearchQueries": [
+            "best AEC AI implementation consultants for small architecture firms",
+            "AI consulting for 25-person architecture firm",
+            "AEC AI strategy consultants small business"
+          ]
+        },
+        "index": 0
+      }
+    ],
+    "modelVersion": "gemini-2.5-flash",
+    "responseId": "DVe3asyWFZ6gz7IPtLnF4Q0",
+    "usageMetadata": {
+      "candidatesTokenCount": 846,
+      "promptTokenCount": 18,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 18
+        }
+      ],
+      "serviceTier": "standard",
+      "thoughtsTokenCount": 361,
+      "toolUsePromptTokenCount": 182,
+      "toolUsePromptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 182
+        }
+      ],
+      "totalTokenCount": 1407
+    }
+  },
+  "prompt_id": "C02",
+  "request": {
+    "body": {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Who are the best AEC AI implementation consultants for a 25-person architecture firm?"
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "google_search": {}
+        }
+      ]
+    },
+    "model": "gemini-2.5-flash"
+  },
+  "run_id": "gemini-api-google-search-20260925-r1",
+  "schema_version": "gemini-grounded-raw-receipt/v1"
+}

@@ -1,0 +1,709 @@
+{
+  "attempts": [
+    {
+      "duration_ms": 9814,
+      "http_status": 200,
+      "model": "gemini-2.5-flash",
+      "response": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "Implementing AI in an architecture firm with robust controls for permissions, source attribution, human review, and writeback to the system of record requires a collaborative effort from various professionals and a well-defined architectural framework.\n\nKey roles and components for successful implementation include:\n\n*   **AI Governance and Leadership:**\n    *   **Firm Leadership/Stakeholders:** These individuals define the ethical guidelines, risk tolerance, and strategic vision for AI adoption within the firm. They are responsible for establishing policies and ensuring that AI use aligns with business objectives and professional standards.\n    *   **AI Ethics and Risk Committees:** Drawing inspiration from larger tech companies, an architecture firm can establish internal committees to review AI model design before deployment, ensuring compliance and building trust.\n    *   **Governance Boards:** These bodies oversee the entire AI ecosystem, setting direction and ensuring accountability.\n\n*   **Technical Implementation Team:**\n    *   **Enterprise Architects / AI Architects:** These professionals are crucial for designing the overall AI architecture. They ensure that AI systems are integrated with existing infrastructure, define data flows, and embed governance directly into the architectural blueprints. Their role involves translating governance policies into enforceable controls within the firm's infrastructure.\n    *   **Data Scientists / Machine Learning Engineers:** Responsible for developing, training, and deploying AI models. They ensure data quality, implement algorithms, and consider how AI can generate insights and automate tasks within architectural workflows.\n    *   **Computational Designers / Design Technologists:** These architects possess expertise in both design and technology, making them essential for integrating AI tools into the design process. They can help define how AI assists with generative design, analysis, visualization, and documentation.\n    *   **IT and Security Specialists:** Vital for establishing and maintaining the underlying infrastructure, ensuring data security, managing access controls, and addressing privacy concerns. They implement the technical mechanisms for permissions and secure data integration.\n\n*   **Operational and Review Processes:**\n    *   **Human Reviewers (Architects and Designers):** Despite AI's capabilities, human architects remain accountable for final decisions and provide the necessary nuanced, project-specific context and empathy. AI acts as an assistant, augmenting human skills by handling repetitive tasks and offering data-driven insights, allowing architects to focus on creative and strategic aspects. Human oversight requirements are a core component of responsible AI governance.\n    *   **Data Governance Frameworks:** These frameworks are essential for defining how data flows through systems, who can access different datasets, and addressing data quality, access controls, auditing, and compliance. This ensures permissions are clearly defined and enforced.\n    *   **Source Attribution Mechanisms:** The AI system's architecture should include components that can locate relevant content, check the current source, and return citations with the AI-generated output. Formal disclosures in AI outputs are recommended to build trust and provide traceability of the model used. Data lineage should be documented to ensure models are explainable, reproducible, and auditable.\n    *   **Writeback to System of Record / Data Integration Architecture:** A robust data integration architecture is necessary to define the flow of data from source systems through transformations and into enterprise systems. This ensures that AI-generated insights and decisions can be accurately recorded and updated within the firm's existing systems, such as BIM software, project management tools, or other databases. This architecture needs to address governance policies, security, privacy, and data quality requirements.\n\nUltimately, the successful implementation relies on an \"ecosystem of shared responsibility\" where diverse roles collaborate to integrate AI responsibly and effectively into the firm's workflows. Resources like the American Institute of Architects (AIA) AI Firm Toolkit can provide guidance on developing responsible AI policies and implementing AI in practice."
+                }
+              ],
+              "role": "model"
+            },
+            "finishReason": "STOP",
+            "groundingMetadata": {
+              "groundingChunks": [
+                {
+                  "web": {
+                    "title": "architectureandgovernance.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHWYpnEU-cwbmzMGhRkPpjGAM6iucWkcFULK5cLEeE13n_O7u5X9gKP_DSOnow0sx4ncrfYrJxOr_WLSbyQj8Lmn-BDF4qNZKcMljDWL9sydSoZIbWAMLeeIzWmVt654vt6iHcRszbFFLFA--rEWvLGVSL-GwwessSlIEvvuMBgWqzjDJO98zPPOh-h5rdN8kfcHanreOPSc2M5uYFB9KwHKt-MI-Os38gfy6NTU2vZiA=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "c3.ai",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFEMPcUwMCkU6U8sPVukly13JSv5Ok01dDM1GGNyY-DkE4Tkmss009YUA5tI7ZUmfp-R3f717fGdYW1RrzfpILSWkzXD45kldiIaCSSUlZoEYPm1-nYXBdt5SP3HnPTxb5FhMn5hu36xe_wt74s61rdPbDGqAFs7an3konl_qiFXMsY"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "scality.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEmUGAdKb87EHXjifA7w8W16Hw844_RibG8dawlhfiXX0mAmIiFKWJHjBxCC6_gJ-9SVonn8obbp0y-tR74_Q6QpMpdEifpfw14KpXMG4xRNV_wBvmZaBcZ4A5SP5zPEuTD5P8b1CXP30uz8PPEz8bWYibceDdGvbxwLX6bUM62zdIi_1uRScw="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "reloadux.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQExqVrOPWulhVH6PZMPbkNalCuesl_Mls8rs3Nxjay9vGhn5MkN0ZzboRgYStryANFFtntKQIuVn2BXyW-hcdGAe5upaxLSJdwKJ-EPl5szRGi0uqvs2VfzLUKphQOCDqhSC3IssVfDPFPSGWF6lQ=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "institutedata.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFrwjQFeR6ZKr5nN-9wfYKAmkLeVYPfu6MhlxloDQOPe_qG6w-mMp3XdGBnX88OPHLcyONR73cFxeIlO3tjCsq8j_sZAecruTmjbBb2U_rNWdhXU7BU67__F_uEGa1lEz6G6-NOjYFs3A7kz6tsm2-1SY_r96ovd49WDLHYgdz4nlFAkDEilA3vMtp4amo3DEx-sdb0bF9wScBDW5rexLjFn21k_Snrvv1Gwh7WW8IGRmTgeo9c6iZ49Fl97cua"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "microsoft.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE95olt1uoNWNgCZSIxbQ3g8kG-4HBBWGv7o8HFTuSohP04_Xu_rV2L0JrD-ME_5dECZNpwIh5vkfr855u-fEnwjg8NEvP6r2g6A5e_e2DGw7Hkrw2rLHfEBUWBYPff2cOUJY1DrAspCzmVJxsoDSfHhQKJNtC8AuX8lzmeKQy47Gh0DkAEnJnV0N6g2Q=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "autodesk.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFuDZ8PA1ZD4hyEa3tnpt0SBXOY1D7YuTwE0jaA67nALxijeFK-520YcNEuLF2efBIS2epEZUW_mkbErh5j2UOWUVS7QRyYPI4Oemx72ekswgs6ZLS0TIbLGesZnK6P4JfBk3oecj3vRyXoWy9Nw_XRkGhBtwJSDs8FkXw="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "beactive.ai",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFn_CnRZKab9gczgSUgnLQgnt0xq8GZahdVum9u-kocz7spIdHBEnBPT2OdvBDOU4waY1mJXcrb95vr_8tJk0GsMQGrPtg-hCxkq2J-MiFYNpUMNKE33StI7cXewo4FYp-De7-vLI3THc2pg8I="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "youtube.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHfsfYMn7p7iZralTjbka55kpCBlbGw-p0D-npy5iNU-Q3eTwWwarf3zDra9K-ypSjIUyzSXDE6pmyDPt93lg7AqLmtVTPkbVh8mSXjtkk0-CpNqfWAHB9PYEE6DuR2bz-79qxv9eU="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "databricks.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEFSKhKo2dd9hMIphCPxZMBIO4IZPnJHXjmry8ARmO4N3NEeXnmGrHMuZbGTEs8uPyZVlvGgLzy_AMHxFlaGVG0-SZEw4dpV0YfNpwpBCXz3jnZzzfx3UARDIxeMzJykdTgeqlwk-IDz4Jcud9wTEoP5eVLmmGWGhWOXmpK961Ys1LGGpajv2R95e6n3KJSlAhex3N3"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "box.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHy0cV0W8q3FB9UWsPDFp1SMjvd3J734WaKE2zkeiGnvrIheaqiGaEe_RRF8fB0kNkcVLovT0QAT0FrJbjLFAey3jCUVzZhe-1KGpKQPjsqOV0UXcrfngJs_dcILXw131GVlbx8j1Gkb1mZcaNj90m7t5SLWXpHr6QTTEexjr3FtVNYljCJaIxgX-A="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "salesforce.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGNFL3EckqVJMQFj4qp6BL2Y2WjodzYztcS9q3GSyPKYb4nQrM_anCZdUKahPPf30Zbe3JQFiJQK4VqmRZREr1exwRU8hPNwvVAucNCJUokw69ggDNbJu0DDZ_LDfcLUDhQ4S14OVg1gMy3X-qzL9rgR6V-GuIbbXQljnzn_g1i3dSxX57EBTXX-LMoV2XpKXly"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "designaspirants.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFGihiaHY1tZovmsi2VSTPhAEKMp-Q9mQyBseo9KH8hyn29OYhtrUHLu44i56oZviKkwcNtkgbmbsxjSW48daXMVxlF9ZhIlImZyIWhzi0QO_BwrKVMVmEM_0v2vkoYY2IzD0bBvkIiI3cR-RPnkaqJ0A=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aigovernancearchitecture.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHgBS97WDY2UN8AgJPqwY1wq-jKJHcAluoFHWT-rRasPyWOJawOgmzYiSyTNIsX3tlDW2yv4ut6Hlgt6zZ3cICfhemdMctbkAVEGjIQJqw-KM2QolfOvaMXxZQptYAiG9g="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aia.org",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQESUKHUwf_V5S0fBKGE53DLnlGjoZoASB7qnrrg2Qbz6lNwAwO7RqU0Z5nnuJQn9myqR_4L2Oi8Xr-58euGzE_SjNSRQavb2gYfCCgurzMvx9_Knh6jh1M_xLAGpZiGcxdEkwGvm6-_d0DlJh_Lqg=="
+                  }
+                }
+              ],
+              "groundingSupports": [
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 879,
+                    "startIndex": 654,
+                    "text": "*   **AI Ethics and Risk Committees:** Drawing inspiration from larger tech companies, an architecture firm can establish internal committees to review AI model design before deployment, ensuring compliance and building trust"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 1003,
+                    "startIndex": 885,
+                    "text": "*   **Governance Boards:** These bodies oversee the entire AI ecosystem, setting direction and ensuring accountability"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 1326,
+                    "startIndex": 1171,
+                    "text": "They ensure that AI systems are integrated with existing infrastructure, define data flows, and embed governance directly into the architectural blueprints"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    2
+                  ],
+                  "segment": {
+                    "endIndex": 1438,
+                    "startIndex": 1328,
+                    "text": "Their role involves translating governance policies into enforceable controls within the firm's infrastructure"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    3,
+                    4,
+                    5
+                  ],
+                  "segment": {
+                    "endIndex": 1700,
+                    "startIndex": 1561,
+                    "text": "They ensure data quality, implement algorithms, and consider how AI can generate insights and automate tasks within architectural workflows"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    6,
+                    7,
+                    8,
+                    5
+                  ],
+                  "segment": {
+                    "endIndex": 2002,
+                    "startIndex": 1900,
+                    "text": "They can help define how AI assists with generative design, analysis, visualization, and documentation"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    9,
+                    1,
+                    10
+                  ],
+                  "segment": {
+                    "endIndex": 2281,
+                    "startIndex": 2198,
+                    "text": "They implement the technical mechanisms for permissions and secure data integration"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    11
+                  ],
+                  "segment": {
+                    "endIndex": 2536,
+                    "startIndex": 2284,
+                    "text": "*   **Operational and Review Processes:**\n    *   **Human Reviewers (Architects and Designers):** Despite AI's capabilities, human architects remain accountable for final decisions and provide the necessary nuanced, project-specific context and empathy"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    6,
+                    5,
+                    12
+                  ],
+                  "segment": {
+                    "endIndex": 2713,
+                    "startIndex": 2538,
+                    "text": "AI acts as an assistant, augmenting human skills by handling repetitive tasks and offering data-driven insights, allowing architects to focus on creative and strategic aspects"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    13
+                  ],
+                  "segment": {
+                    "endIndex": 2793,
+                    "startIndex": 2715,
+                    "text": "Human oversight requirements are a core component of responsible AI governance"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    9,
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 3016,
+                    "startIndex": 2799,
+                    "text": "*   **Data Governance Frameworks:** These frameworks are essential for defining how data flows through systems, who can access different datasets, and addressing data quality, access controls, auditing, and compliance"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    10
+                  ],
+                  "segment": {
+                    "endIndex": 3284,
+                    "startIndex": 3081,
+                    "text": "*   **Source Attribution Mechanisms:** The AI system's architecture should include components that can locate relevant content, check the current source, and return citations with the AI-generated output"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    11
+                  ],
+                  "segment": {
+                    "endIndex": 3392,
+                    "startIndex": 3286,
+                    "text": "Formal disclosures in AI outputs are recommended to build trust and provide traceability of the model used"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 3489,
+                    "startIndex": 3394,
+                    "text": "Data lineage should be documented to ensure models are explainable, reproducible, and auditable"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    6,
+                    7,
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 3913,
+                    "startIndex": 3718,
+                    "text": "This ensures that AI-generated insights and decisions can be accurately recorded and updated within the firm's existing systems, such as BIM software, project management tools, or other databases"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 4019,
+                    "startIndex": 3915,
+                    "text": "This architecture needs to address governance policies, security, privacy, and data quality requirements"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 4215,
+                    "startIndex": 4022,
+                    "text": "Ultimately, the successful implementation relies on an \"ecosystem of shared responsibility\" where diverse roles collaborate to integrate AI responsibly and effectively into the firm's workflows"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    14
+                  ],
+                  "segment": {
+                    "endIndex": 4381,
+                    "startIndex": 4217,
+                    "text": "Resources like the American Institute of Architects (AIA) AI Firm Toolkit can provide guidance on developing responsible AI policies and implementing AI in practice"
+                  }
+                }
+              ],
+              "searchEntryPoint": {
+                "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF_qmZoAeJY7yDuYBuQ5PoLietPNKC2p58t1yfw6T3MG7KP9MIiwbIdbMy9L3OYxWsfm8Ju9prP-RqC9DjNRTk3v_4S39ucBh3BULfIcyXeGjW2SH70bG86zWdgFNmNqbnKlxKCPmgNnm6N_Xe8gP5wt--xUEM3mPmIItRV5V5LjWqYf5wQZOuAm10iJnNkDOvCGyy485UwUQB8octbBCSN\">AI governance in architecture</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHnlzWV9SO6-C9jJbWI6B_uSxfAYkZHyPExp-n52XVsViC3u6oDOB95yDRZqqcvFP1CZ8rEPyIK7Ypd_wOb4cW9XVjvn-8Ulnl_-EWwszcoxIrAqQ44Dgaz8m_UfhURjRyTj91_8FfTiaULl2kTa4T2vTArm7lT6mztoy29ViuZm-i9GkhydnMNXT5q52AD1GCxtk8ru0Md11u30EYNKdr7GTtZh7SWYCNCvDA=\">AI implementation team architecture firm</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGAW4Yyvot4e3Al1KvmjX8YnghCexZxqgr3t7BDVR-6DUelPJ3BIZPjBWptiVPrrf8YxFhcV-AeH021JYptDB5eTJ_p_BqWjLqDIc3ApKL2vEwQclAQjJwYB6Opi1jF-7cJPm_2z3dHmmPR97fS3xT3La3mTUhtkqnagIGdEcSi2zL4mWquhq7klmvpE0T9vpO3FAdjMoNwpoeZqdn4dEbYVM0DrvHKiPSwI0lvYQH6ton7hiA176mGprz_-h14DeusAVkee_CfG0Uii12gAwrFr1U4OnSVXNj_FTg1_UvGZ4l-vCKp5FtR3P3tuw==\">implement AI in architecture firm permissions source attribution human review writeback system of record</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGifEQOKGNbLTejXYDuobe7nS2TeahSkFJWDwXVHGVi0ZAN9IE-wN46TU1iKPdC361_NqErCGUEUOh9BjoWQnnfmSpPUZguKYAeh-9uM9cz-D4kpjPoCciu4RM7RVwbyxMYxUd8sLxVWpYNFqJnoZN_W9KzmnOTQFrtyBCCD1XeVwCdlnYlQSXIriABhY9i3wlzmRMRv_Ak0yxQCoTQyIXxjmjxkB0mgWGPhvXF0eg=\">roles for AI implementation in design firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGAbN2YqUiW9iRRmqhCyoIKT1oyhIHQI2wh3hFNapwGb6Eaa-dSaX3biOvf1nv75CStlB1ZiJE1vntDma-IjaBwx2R0byNxQWLmD4XAq69e-y9IGG8TXsY5HnIWMfO1NXvr32wQT_IO3LNC_GeyeXZRjWkoeYV0mF6WmX6EOih-WvU9mXvOeJPGwuULlIYTjKgb5b3y6YTJHQrJKUArwEIcgxeNGQ2_QzR1Rw2V5HfysQ==\">data integration for AI in architecture firms</a>\n  </div>\n</div>\n"
+              },
+              "webSearchQueries": [
+                "implement AI in architecture firm permissions source attribution human review writeback system of record",
+                "AI implementation team architecture firm",
+                "roles for AI implementation in design firms",
+                "AI governance in architecture",
+                "data integration for AI in architecture firms"
+              ]
+            },
+            "index": 0
+          }
+        ],
+        "modelVersion": "gemini-2.5-flash",
+        "responseId": "P1e3aqnzNMek6dkPi6fqwQ0",
+        "usageMetadata": {
+          "candidatesTokenCount": 809,
+          "promptTokenCount": 26,
+          "promptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 26
+            }
+          ],
+          "serviceTier": "standard",
+          "thoughtsTokenCount": 636,
+          "toolUsePromptTokenCount": 177,
+          "toolUsePromptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 177
+            }
+          ],
+          "totalTokenCount": 1648
+        }
+      },
+      "technical_status": "success",
+      "timestamp": "2026-09-26T05:25:19.662119Z"
+    }
+  ],
+  "final_response": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "Implementing AI in an architecture firm with robust controls for permissions, source attribution, human review, and writeback to the system of record requires a collaborative effort from various professionals and a well-defined architectural framework.\n\nKey roles and components for successful implementation include:\n\n*   **AI Governance and Leadership:**\n    *   **Firm Leadership/Stakeholders:** These individuals define the ethical guidelines, risk tolerance, and strategic vision for AI adoption within the firm. They are responsible for establishing policies and ensuring that AI use aligns with business objectives and professional standards.\n    *   **AI Ethics and Risk Committees:** Drawing inspiration from larger tech companies, an architecture firm can establish internal committees to review AI model design before deployment, ensuring compliance and building trust.\n    *   **Governance Boards:** These bodies oversee the entire AI ecosystem, setting direction and ensuring accountability.\n\n*   **Technical Implementation Team:**\n    *   **Enterprise Architects / AI Architects:** These professionals are crucial for designing the overall AI architecture. They ensure that AI systems are integrated with existing infrastructure, define data flows, and embed governance directly into the architectural blueprints. Their role involves translating governance policies into enforceable controls within the firm's infrastructure.\n    *   **Data Scientists / Machine Learning Engineers:** Responsible for developing, training, and deploying AI models. They ensure data quality, implement algorithms, and consider how AI can generate insights and automate tasks within architectural workflows.\n    *   **Computational Designers / Design Technologists:** These architects possess expertise in both design and technology, making them essential for integrating AI tools into the design process. They can help define how AI assists with generative design, analysis, visualization, and documentation.\n    *   **IT and Security Specialists:** Vital for establishing and maintaining the underlying infrastructure, ensuring data security, managing access controls, and addressing privacy concerns. They implement the technical mechanisms for permissions and secure data integration.\n\n*   **Operational and Review Processes:**\n    *   **Human Reviewers (Architects and Designers):** Despite AI's capabilities, human architects remain accountable for final decisions and provide the necessary nuanced, project-specific context and empathy. AI acts as an assistant, augmenting human skills by handling repetitive tasks and offering data-driven insights, allowing architects to focus on creative and strategic aspects. Human oversight requirements are a core component of responsible AI governance.\n    *   **Data Governance Frameworks:** These frameworks are essential for defining how data flows through systems, who can access different datasets, and addressing data quality, access controls, auditing, and compliance. This ensures permissions are clearly defined and enforced.\n    *   **Source Attribution Mechanisms:** The AI system's architecture should include components that can locate relevant content, check the current source, and return citations with the AI-generated output. Formal disclosures in AI outputs are recommended to build trust and provide traceability of the model used. Data lineage should be documented to ensure models are explainable, reproducible, and auditable.\n    *   **Writeback to System of Record / Data Integration Architecture:** A robust data integration architecture is necessary to define the flow of data from source systems through transformations and into enterprise systems. This ensures that AI-generated insights and decisions can be accurately recorded and updated within the firm's existing systems, such as BIM software, project management tools, or other databases. This architecture needs to address governance policies, security, privacy, and data quality requirements.\n\nUltimately, the successful implementation relies on an \"ecosystem of shared responsibility\" where diverse roles collaborate to integrate AI responsibly and effectively into the firm's workflows. Resources like the American Institute of Architects (AIA) AI Firm Toolkit can provide guidance on developing responsible AI policies and implementing AI in practice."
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "STOP",
+        "groundingMetadata": {
+          "groundingChunks": [
+            {
+              "web": {
+                "title": "architectureandgovernance.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHWYpnEU-cwbmzMGhRkPpjGAM6iucWkcFULK5cLEeE13n_O7u5X9gKP_DSOnow0sx4ncrfYrJxOr_WLSbyQj8Lmn-BDF4qNZKcMljDWL9sydSoZIbWAMLeeIzWmVt654vt6iHcRszbFFLFA--rEWvLGVSL-GwwessSlIEvvuMBgWqzjDJO98zPPOh-h5rdN8kfcHanreOPSc2M5uYFB9KwHKt-MI-Os38gfy6NTU2vZiA=="
+              }
+            },
+            {
+              "web": {
+                "title": "c3.ai",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFEMPcUwMCkU6U8sPVukly13JSv5Ok01dDM1GGNyY-DkE4Tkmss009YUA5tI7ZUmfp-R3f717fGdYW1RrzfpILSWkzXD45kldiIaCSSUlZoEYPm1-nYXBdt5SP3HnPTxb5FhMn5hu36xe_wt74s61rdPbDGqAFs7an3konl_qiFXMsY"
+              }
+            },
+            {
+              "web": {
+                "title": "scality.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEmUGAdKb87EHXjifA7w8W16Hw844_RibG8dawlhfiXX0mAmIiFKWJHjBxCC6_gJ-9SVonn8obbp0y-tR74_Q6QpMpdEifpfw14KpXMG4xRNV_wBvmZaBcZ4A5SP5zPEuTD5P8b1CXP30uz8PPEz8bWYibceDdGvbxwLX6bUM62zdIi_1uRScw="
+              }
+            },
+            {
+              "web": {
+                "title": "reloadux.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQExqVrOPWulhVH6PZMPbkNalCuesl_Mls8rs3Nxjay9vGhn5MkN0ZzboRgYStryANFFtntKQIuVn2BXyW-hcdGAe5upaxLSJdwKJ-EPl5szRGi0uqvs2VfzLUKphQOCDqhSC3IssVfDPFPSGWF6lQ=="
+              }
+            },
+            {
+              "web": {
+                "title": "institutedata.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFrwjQFeR6ZKr5nN-9wfYKAmkLeVYPfu6MhlxloDQOPe_qG6w-mMp3XdGBnX88OPHLcyONR73cFxeIlO3tjCsq8j_sZAecruTmjbBb2U_rNWdhXU7BU67__F_uEGa1lEz6G6-NOjYFs3A7kz6tsm2-1SY_r96ovd49WDLHYgdz4nlFAkDEilA3vMtp4amo3DEx-sdb0bF9wScBDW5rexLjFn21k_Snrvv1Gwh7WW8IGRmTgeo9c6iZ49Fl97cua"
+              }
+            },
+            {
+              "web": {
+                "title": "microsoft.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE95olt1uoNWNgCZSIxbQ3g8kG-4HBBWGv7o8HFTuSohP04_Xu_rV2L0JrD-ME_5dECZNpwIh5vkfr855u-fEnwjg8NEvP6r2g6A5e_e2DGw7Hkrw2rLHfEBUWBYPff2cOUJY1DrAspCzmVJxsoDSfHhQKJNtC8AuX8lzmeKQy47Gh0DkAEnJnV0N6g2Q=="
+              }
+            },
+            {
+              "web": {
+                "title": "autodesk.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFuDZ8PA1ZD4hyEa3tnpt0SBXOY1D7YuTwE0jaA67nALxijeFK-520YcNEuLF2efBIS2epEZUW_mkbErh5j2UOWUVS7QRyYPI4Oemx72ekswgs6ZLS0TIbLGesZnK6P4JfBk3oecj3vRyXoWy9Nw_XRkGhBtwJSDs8FkXw="
+              }
+            },
+            {
+              "web": {
+                "title": "beactive.ai",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFn_CnRZKab9gczgSUgnLQgnt0xq8GZahdVum9u-kocz7spIdHBEnBPT2OdvBDOU4waY1mJXcrb95vr_8tJk0GsMQGrPtg-hCxkq2J-MiFYNpUMNKE33StI7cXewo4FYp-De7-vLI3THc2pg8I="
+              }
+            },
+            {
+              "web": {
+                "title": "youtube.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHfsfYMn7p7iZralTjbka55kpCBlbGw-p0D-npy5iNU-Q3eTwWwarf3zDra9K-ypSjIUyzSXDE6pmyDPt93lg7AqLmtVTPkbVh8mSXjtkk0-CpNqfWAHB9PYEE6DuR2bz-79qxv9eU="
+              }
+            },
+            {
+              "web": {
+                "title": "databricks.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEFSKhKo2dd9hMIphCPxZMBIO4IZPnJHXjmry8ARmO4N3NEeXnmGrHMuZbGTEs8uPyZVlvGgLzy_AMHxFlaGVG0-SZEw4dpV0YfNpwpBCXz3jnZzzfx3UARDIxeMzJykdTgeqlwk-IDz4Jcud9wTEoP5eVLmmGWGhWOXmpK961Ys1LGGpajv2R95e6n3KJSlAhex3N3"
+              }
+            },
+            {
+              "web": {
+                "title": "box.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHy0cV0W8q3FB9UWsPDFp1SMjvd3J734WaKE2zkeiGnvrIheaqiGaEe_RRF8fB0kNkcVLovT0QAT0FrJbjLFAey3jCUVzZhe-1KGpKQPjsqOV0UXcrfngJs_dcILXw131GVlbx8j1Gkb1mZcaNj90m7t5SLWXpHr6QTTEexjr3FtVNYljCJaIxgX-A="
+              }
+            },
+            {
+              "web": {
+                "title": "salesforce.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGNFL3EckqVJMQFj4qp6BL2Y2WjodzYztcS9q3GSyPKYb4nQrM_anCZdUKahPPf30Zbe3JQFiJQK4VqmRZREr1exwRU8hPNwvVAucNCJUokw69ggDNbJu0DDZ_LDfcLUDhQ4S14OVg1gMy3X-qzL9rgR6V-GuIbbXQljnzn_g1i3dSxX57EBTXX-LMoV2XpKXly"
+              }
+            },
+            {
+              "web": {
+                "title": "designaspirants.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFGihiaHY1tZovmsi2VSTPhAEKMp-Q9mQyBseo9KH8hyn29OYhtrUHLu44i56oZviKkwcNtkgbmbsxjSW48daXMVxlF9ZhIlImZyIWhzi0QO_BwrKVMVmEM_0v2vkoYY2IzD0bBvkIiI3cR-RPnkaqJ0A=="
+              }
+            },
+            {
+              "web": {
+                "title": "aigovernancearchitecture.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHgBS97WDY2UN8AgJPqwY1wq-jKJHcAluoFHWT-rRasPyWOJawOgmzYiSyTNIsX3tlDW2yv4ut6Hlgt6zZ3cICfhemdMctbkAVEGjIQJqw-KM2QolfOvaMXxZQptYAiG9g="
+              }
+            },
+            {
+              "web": {
+                "title": "aia.org",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQESUKHUwf_V5S0fBKGE53DLnlGjoZoASB7qnrrg2Qbz6lNwAwO7RqU0Z5nnuJQn9myqR_4L2Oi8Xr-58euGzE_SjNSRQavb2gYfCCgurzMvx9_Knh6jh1M_xLAGpZiGcxdEkwGvm6-_d0DlJh_Lqg=="
+              }
+            }
+          ],
+          "groundingSupports": [
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 879,
+                "startIndex": 654,
+                "text": "*   **AI Ethics and Risk Committees:** Drawing inspiration from larger tech companies, an architecture firm can establish internal committees to review AI model design before deployment, ensuring compliance and building trust"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 1003,
+                "startIndex": 885,
+                "text": "*   **Governance Boards:** These bodies oversee the entire AI ecosystem, setting direction and ensuring accountability"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0,
+                1
+              ],
+              "segment": {
+                "endIndex": 1326,
+                "startIndex": 1171,
+                "text": "They ensure that AI systems are integrated with existing infrastructure, define data flows, and embed governance directly into the architectural blueprints"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                2
+              ],
+              "segment": {
+                "endIndex": 1438,
+                "startIndex": 1328,
+                "text": "Their role involves translating governance policies into enforceable controls within the firm's infrastructure"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0,
+                3,
+                4,
+                5
+              ],
+              "segment": {
+                "endIndex": 1700,
+                "startIndex": 1561,
+                "text": "They ensure data quality, implement algorithms, and consider how AI can generate insights and automate tasks within architectural workflows"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                6,
+                7,
+                8,
+                5
+              ],
+              "segment": {
+                "endIndex": 2002,
+                "startIndex": 1900,
+                "text": "They can help define how AI assists with generative design, analysis, visualization, and documentation"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                9,
+                1,
+                10
+              ],
+              "segment": {
+                "endIndex": 2281,
+                "startIndex": 2198,
+                "text": "They implement the technical mechanisms for permissions and secure data integration"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                11
+              ],
+              "segment": {
+                "endIndex": 2536,
+                "startIndex": 2284,
+                "text": "*   **Operational and Review Processes:**\n    *   **Human Reviewers (Architects and Designers):** Despite AI's capabilities, human architects remain accountable for final decisions and provide the necessary nuanced, project-specific context and empathy"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                6,
+                5,
+                12
+              ],
+              "segment": {
+                "endIndex": 2713,
+                "startIndex": 2538,
+                "text": "AI acts as an assistant, augmenting human skills by handling repetitive tasks and offering data-driven insights, allowing architects to focus on creative and strategic aspects"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                13
+              ],
+              "segment": {
+                "endIndex": 2793,
+                "startIndex": 2715,
+                "text": "Human oversight requirements are a core component of responsible AI governance"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                9,
+                1
+              ],
+              "segment": {
+                "endIndex": 3016,
+                "startIndex": 2799,
+                "text": "*   **Data Governance Frameworks:** These frameworks are essential for defining how data flows through systems, who can access different datasets, and addressing data quality, access controls, auditing, and compliance"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                10
+              ],
+              "segment": {
+                "endIndex": 3284,
+                "startIndex": 3081,
+                "text": "*   **Source Attribution Mechanisms:** The AI system's architecture should include components that can locate relevant content, check the current source, and return citations with the AI-generated output"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                11
+              ],
+              "segment": {
+                "endIndex": 3392,
+                "startIndex": 3286,
+                "text": "Formal disclosures in AI outputs are recommended to build trust and provide traceability of the model used"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 3489,
+                "startIndex": 3394,
+                "text": "Data lineage should be documented to ensure models are explainable, reproducible, and auditable"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                6,
+                7,
+                1
+              ],
+              "segment": {
+                "endIndex": 3913,
+                "startIndex": 3718,
+                "text": "This ensures that AI-generated insights and decisions can be accurately recorded and updated within the firm's existing systems, such as BIM software, project management tools, or other databases"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                1
+              ],
+              "segment": {
+                "endIndex": 4019,
+                "startIndex": 3915,
+                "text": "This architecture needs to address governance policies, security, privacy, and data quality requirements"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 4215,
+                "startIndex": 4022,
+                "text": "Ultimately, the successful implementation relies on an \"ecosystem of shared responsibility\" where diverse roles collaborate to integrate AI responsibly and effectively into the firm's workflows"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                14
+              ],
+              "segment": {
+                "endIndex": 4381,
+                "startIndex": 4217,
+                "text": "Resources like the American Institute of Architects (AIA) AI Firm Toolkit can provide guidance on developing responsible AI policies and implementing AI in practice"
+              }
+            }
+          ],
+          "searchEntryPoint": {
+            "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF_qmZoAeJY7yDuYBuQ5PoLietPNKC2p58t1yfw6T3MG7KP9MIiwbIdbMy9L3OYxWsfm8Ju9prP-RqC9DjNRTk3v_4S39ucBh3BULfIcyXeGjW2SH70bG86zWdgFNmNqbnKlxKCPmgNnm6N_Xe8gP5wt--xUEM3mPmIItRV5V5LjWqYf5wQZOuAm10iJnNkDOvCGyy485UwUQB8octbBCSN\">AI governance in architecture</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHnlzWV9SO6-C9jJbWI6B_uSxfAYkZHyPExp-n52XVsViC3u6oDOB95yDRZqqcvFP1CZ8rEPyIK7Ypd_wOb4cW9XVjvn-8Ulnl_-EWwszcoxIrAqQ44Dgaz8m_UfhURjRyTj91_8FfTiaULl2kTa4T2vTArm7lT6mztoy29ViuZm-i9GkhydnMNXT5q52AD1GCxtk8ru0Md11u30EYNKdr7GTtZh7SWYCNCvDA=\">AI implementation team architecture firm</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGAW4Yyvot4e3Al1KvmjX8YnghCexZxqgr3t7BDVR-6DUelPJ3BIZPjBWptiVPrrf8YxFhcV-AeH021JYptDB5eTJ_p_BqWjLqDIc3ApKL2vEwQclAQjJwYB6Opi1jF-7cJPm_2z3dHmmPR97fS3xT3La3mTUhtkqnagIGdEcSi2zL4mWquhq7klmvpE0T9vpO3FAdjMoNwpoeZqdn4dEbYVM0DrvHKiPSwI0lvYQH6ton7hiA176mGprz_-h14DeusAVkee_CfG0Uii12gAwrFr1U4OnSVXNj_FTg1_UvGZ4l-vCKp5FtR3P3tuw==\">implement AI in architecture firm permissions source attribution human review writeback system of record</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGifEQOKGNbLTejXYDuobe7nS2TeahSkFJWDwXVHGVi0ZAN9IE-wN46TU1iKPdC361_NqErCGUEUOh9BjoWQnnfmSpPUZguKYAeh-9uM9cz-D4kpjPoCciu4RM7RVwbyxMYxUd8sLxVWpYNFqJnoZN_W9KzmnOTQFrtyBCCD1XeVwCdlnYlQSXIriABhY9i3wlzmRMRv_Ak0yxQCoTQyIXxjmjxkB0mgWGPhvXF0eg=\">roles for AI implementation in design firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGAbN2YqUiW9iRRmqhCyoIKT1oyhIHQI2wh3hFNapwGb6Eaa-dSaX3biOvf1nv75CStlB1ZiJE1vntDma-IjaBwx2R0byNxQWLmD4XAq69e-y9IGG8TXsY5HnIWMfO1NXvr32wQT_IO3LNC_GeyeXZRjWkoeYV0mF6WmX6EOih-WvU9mXvOeJPGwuULlIYTjKgb5b3y6YTJHQrJKUArwEIcgxeNGQ2_QzR1Rw2V5HfysQ==\">data integration for AI in architecture firms</a>\n  </div>\n</div>\n"
+          },
+          "webSearchQueries": [
+            "implement AI in architecture firm permissions source attribution human review writeback system of record",
+            "AI implementation team architecture firm",
+            "roles for AI implementation in design firms",
+            "AI governance in architecture",
+            "data integration for AI in architecture firms"
+          ]
+        },
+        "index": 0
+      }
+    ],
+    "modelVersion": "gemini-2.5-flash",
+    "responseId": "P1e3aqnzNMek6dkPi6fqwQ0",
+    "usageMetadata": {
+      "candidatesTokenCount": 809,
+      "promptTokenCount": 26,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 26
+        }
+      ],
+      "serviceTier": "standard",
+      "thoughtsTokenCount": 636,
+      "toolUsePromptTokenCount": 177,
+      "toolUsePromptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 177
+        }
+      ],
+      "totalTokenCount": 1648
+    }
+  },
+  "prompt_id": "I02",
+  "request": {
+    "body": {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Who can implement AI in an architecture firm with permissions, source attribution, human review, and writeback to the system of record?"
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "google_search": {}
+        }
+      ]
+    },
+    "model": "gemini-2.5-flash"
+  },
+  "run_id": "gemini-api-google-search-20260925-r1",
+  "schema_version": "gemini-grounded-raw-receipt/v1"
+}

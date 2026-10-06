@@ -1,0 +1,915 @@
+{
+  "attempts": [
+    {
+      "duration_ms": 16139,
+      "http_status": 200,
+      "model": "gemini-2.5-flash",
+      "response": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "A 90-day AI implementation plan for a 30-person architecture firm can be broken down into three focused 30-day phases, prioritizing practical, high-impact applications to demonstrate value quickly. This approach emphasizes selecting specific workflows, measuring results, and building internal capabilities.\n\n**90-Day AI Implementation Plan for a 30-Person Architecture Firm**\n\n**Phase 1: Discovery & Strategy (Days 1-30)**\n\nThe goal of this phase is to identify the most impactful areas for AI integration and establish a foundation.\n\n*   **Days 1-10: Internal Assessment & AI Education**\n    *   **Form an AI Task Force:** Assemble a small, cross-functional team (e.g., a principal, a project manager, a senior architect, and a junior staff member) to lead the initiative.\n    *   **Internal Workshop & Brainstorming:** Conduct sessions to educate staff on AI's potential in architecture and identify daily pain points and time-consuming tasks. Encourage ideas for how AI could help.\n    *   **Workflow Audit:** Identify the workflows that consume the most non-design hours and have a measurable cost (e.g., proposal drafting, meeting documentation, code research, searching past project details, initial rendering, clash detection). Prioritize these based on frequency, impact, and risk. A common first win is automating parts of RFP responses or internal knowledge search.\n    *   **Define Success Metrics:** For the chosen pilot workflow, establish clear, measurable goals (e.g., \"reduce time spent on initial proposal drafts by 50%,\" \"decrease RFI processing time by 40%\").\n\n*   **Days 11-20: Data Readiness & Governance**\n    *   **Data Audit:** Assess the firm's existing data (project files, past proposals, specifications, design libraries) for quality, accessibility, and relevance to the chosen AI use cases.\n    *   **Establish Data Governance Basics:** Define clear guidelines on what client and project data can and cannot be used with AI tools, who owns the data, and basic privacy/security protocols. This is crucial to mitigate risks and build trust.\n    *   **Vendor Research:** Begin researching AI tools and solutions specifically designed for architectural workflows identified in the audit. Focus on tools that align with your firm's immediate needs and offer transparent data handling policies.\n\n*   **Days 21-30: Pilot Project Selection & Ethical Guidelines**\n    *   **Select a High-ROI Pilot:** Choose one specific, low-risk workflow that is frequent and measurable for the initial pilot project. Examples include drafting proposals, converting meeting minutes to action items, or internal knowledge retrieval. Initial rendering tools are a common first purchase but might not offer the most significant economic impact on their own.\n    *   **Develop Ethical Guidelines:** Establish internal guidelines for the responsible use of AI, ensuring outputs can be explained and maintaining transparency with clients about AI tool usage.\n    *   **Initial Tool Shortlist:** Based on the pilot, narrow down 2-3 potential AI tools for evaluation.\n\n**Phase 2: Pilot Implementation & Training (Days 31-60)**\n\nThis phase focuses on hands-on experimentation with the chosen AI solution and initial team training.\n\n*   **Days 31-45: Tool Trial & Workflow Integration**\n    *   **Procure/Trial Pilot Tools:** Initiate trials or subscriptions for the shortlisted AI tools for the chosen workflow. Prioritize tools that can be integrated seamlessly with existing software.\n    *   **Execute Pilot with a Real Project:** Implement the chosen AI tool(s) on a live, low-stakes project rather than a demo file to get real-world feedback.\n    *   **Team Training (Pilot Group):** Provide focused training to the AI Task Force and the team directly involved in the pilot project. Emphasize how the tool integrates into their current workflow and the \"human-in-the-loop\" aspect for review and quality control.\n\n*   **Days 46-60: Feedback, Iteration & Initial Measurement**\n    *   **Collect Feedback:** Regularly gather feedback from the pilot team on the tool's effectiveness, ease of use, and areas for improvement.\n    *   **Iterate & Adjust:** Make necessary adjustments to the workflow or tool usage based on feedback.\n    *   **Measure Initial ROI:** Begin tracking the defined success metrics for the pilot project to quantify the time saved, errors reduced, or efficiency gained. Document these results to demonstrate value.\n\n**Phase 3: Evaluation & Future Roadmapping (Days 61-90)**\n\nThe final phase evaluates the pilot's success and plans for broader adoption or future AI initiatives.\n\n*   **Days 61-75: Comprehensive Review & Decision**\n    *   **Pilot Review Meeting:** Present the results of the pilot project to firm leadership and key stakeholders, highlighting successes, challenges, and measured ROI.\n    *   **Go/No-Go Decision:** Based on the pilot's performance against the defined metrics, decide whether to scale the current AI solution, refine it, or explore alternative tools.\n    *   **Formalize Architecture Governance:** Integrate AI tool usage and data management into existing IT and project intake processes.\n\n*   **Days 76-90: Scaling & Long-Term Vision**\n    *   **Phased Rollout Plan:** If the pilot is successful, develop a phased plan for broader implementation across more projects or teams.\n    *   **Develop Internal \"AI Champions\":** Identify enthusiastic early adopters from the pilot team to become internal experts and support wider adoption.\n    *   **Continuous Learning Plan:** Establish a framework for ongoing AI education and monitoring of new AI developments relevant to architecture.\n    *   **Scope Second Use Case:** Based on lessons learned and identified needs, begin scoping the next high-impact AI application for the firm.\n\n**Who Could Help Execute the Plan?**\n\nFor a 30-person architecture firm, external expertise can be invaluable for navigating the complexities of AI adoption. Here are key types of entities that could assist:\n\n1.  **AEC-Specific AI Consulting Firms:** These firms specialize in applying AI within the Architecture, Engineering, and Construction (AEC) industry. They offer tailored guidance, strategy development, implementation support, and training.\n    *   **Examples:**\n        *   **Advisor Labs:** Known for helping design practices and engineering consultancies with lean IT departments, offering services from business strategy to hands-on technical delivery. They focus on workflows like RFP response, RFI triage, submittal review, and conceptual estimating.\n        *   **YegaTech:** An AEC-only technology consultancy that helps firms develop customized AI strategies, training programs, and business transformation initiatives, explicitly aiming for measurable production use rather than just demos.\n        *   **AI in AEC:** Provides courses, workshops, and consulting, focusing on empowering professionals in the AEC industry to integrate AI into their workflows with practical, industry-specific training.\n        *   **Zweig Group:** Offers AI consulting services specifically for AEC firms, providing guidance, consulting, and training on leveraging AI in business operations.\n        *   **AEC Hub:** A knowledge hub and consulting practice that combines independent research, a tool directory, and implementation support for AI in AEC.\n\n2.  **General AI/Digital Transformation Consultants:** While not AEC-specific, some general consulting firms or smaller tech consultancies can provide expertise in AI strategy, data governance, and technology integration. However, an AEC-specific firm will likely have a deeper understanding of industry workflows and nuances.\n\n3.  **Managed IT Service Providers with AI Integration Expertise:** For firms with lean IT departments, an IT partner experienced in integrating new technologies and ensuring robust, secure infrastructure for AI tools is crucial. They can help with data pipelines, security, and ongoing support.\n\n4.  **In-House \"AI Champions\" / Design Technology Leads:** Cultivating internal talent is key for long-term success. Designating existing staff members who are tech-savvy and enthusiastic about AI to become internal champions can drive adoption and provide peer support. This can be more cost-effective for a smaller firm than relying solely on external consultants for every step.\n\nEngaging with consultants who offer fixed-price entry engagements and a clear pilot format can be particularly beneficial for mid-sized firms looking for measurable results within a defined timeframe."
+                }
+              ],
+              "role": "model"
+            },
+            "finishReason": "STOP",
+            "groundingMetadata": {
+              "groundingChunks": [
+                {
+                  "web": {
+                    "title": "aechub.org",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEVsKcuLsC9UA0IVn82mBWLIyGma6q_xgdg83daCXDybzAjwzWIuBhc6Hx3O98qPSjTeWOob47Z5PucmcyRjc-rnnkbRZeJSMkhru_8CdYja4P6Hcr7TmRFGxhBu-z_JkrPkCfc0vTLs1nKxB0i4Ox6X4zJdqchInMe"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "beactive.ai",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHMkoQHw9izqduXOpNQrtt-r9AjYBU-j8FdAtF_OzZ8EMD6jv_J4x8-QRFqxkhhavAM2daKzTA-6vjzHp1Cm-bLzt5QNgOs6CCCVDhI8iKa_gu-w4lZTUrcDTp5Jf2a8o-WHsyfyOgeUBu-0A=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "dancumberlandlabs.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQER9QvC2OVQ155qNbb-E8yJjEGpQ-rHmBnAgSBE_i43xQrut1RbMlgx-pGvUcvh5r6Ov6VtMczGB-mp9ufFT_mLI7fd_njc1Rr7CHbODxl1N-_bu_pcYv9e3l3Y3waGYJ8t3c84xsi2E2e_Bwg="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "multiqos.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE00tJvcGFW0Z4duaFOWvIsYYmrUPaDMZ_EGiluPQ6bXRBNf8M28vSTV63AEesmMOsPhzEvX0ayfE8Ovu8SfyLAymZvozIZPhMIL0lLjSrzYKIAAY3ikMfOfvFJMtOZlvtVw1JABF9c2p-DJ1TgBXY="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "fastcompany.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE21mNndJ7g9kcJRmxoV44Yucqam5aW_V4DjhQKcCMsadgi9Yqqb7VE-_p4Mgtrx25ODrrRK1JpC6haM-y-ulLO5A4mqDSSkMYAlqQ-qOPVb_q7pxbmdDrtAoYK4NhF9fHtfn-sg0urltxpMx9vON8vFPlaWeFLAdnGm4-kQVvEFcXbIqv0EhXg4Rw8o-dx"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "helium42.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGalFEAmkjk7_25G_rcHDe9EtGE7hptGF6L_b2O54hteh-4HxbLcsutlOgbGrdaBF1sbK3aKBfwj_0HZSe06kh-SAOxBHebJSeFmZo308No81gLT7H2YS7jSchGMwf1x9L-xSpIT3PwTuF79mpH"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "deltek.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH41G9rJorh20pVZkEk_1pxPyYTGt4H45l6lbADaA0QMiq2_LJ4vxHAbYFp0ofYULfoTUzIo-EtlQD5qei72R4y7DpON9JY4XNEbnBO5FlnzxBcbsjNUFNuhzK3kpdcWiuwp2AtI4QKx3cDrVhacknDh4dAXfBrx4CSP0tY63I-2443-epr"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "monaverse.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF3vTXcjAO9Lo0vO7l7gA-c3KX7GbKShoRJi-Nt-GNLpy3-v6iI6z1e-xh_wZweK7FnuC1ppt7Jd9R85z2KvFYIBWmy5wLHF4xy212lX-qgqHtaheLetVKhSCM2nQ65CvdxQ3fsqA73"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "monograph.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQERsyD4EUsT24lutF__Lk2NyjQKqTVWUVAKAXSNet08GpZFnuQ7cEFFJROB1B9YV1U5jyVmLI5kr4jnT17h-4jL9NTD_WZtXviVrrXKFKqGiixzS8DHaH460gWm8g6EShLl1CSqRrLc"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aechub.org",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHFZDzvZ3SIn1Ov9wZRA7a7bvo3M9ZuTqiq7RJ6MbcxOHcD4D7JxdSBFPCg1W1LTEKWcWofdWs8FMBbGCLjdyzdXK0JUHsgePCXJijCcTnHBl8BapjkIViCtecj9w=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "advisorlabs.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEAtrxi_lfRJgDCBFvmmW602lr6tEglBwvHZgSPwMBU9oOEnSP6pZeIlzw8axFvLf27EWndEZd8fqsbLMXxGRs6tSmkpmVlRv5xWq24IM5Rqh8OnZ-5Wc959zxPHl1tmTpmv3teHQ=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "zweiggroup.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFHfLmfebR2yPqqtE4M_gkFHNHWCLnQ6q27gwXKF8Eop_G4YmJu7OTCzIuXzq9VOX5FMQ9TqcMeONouTt8MW5NnnOCjc__dPLaE5SMHHW9yzMXGlMreJbqvLOlHB-G59kRiW2COhLABuqMLc70X8Q=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aechub.org",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG4GGDs0ptQudMd7_RZuudrkWaUBO6aTc6fpfG5bx5zYkNIujfHk3RsxoW3tz0SfdW2irMART0EA-6h229QnCUiEmvo6aUJH-61sc2c10dnJlA="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "yegatech.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGRDIvAfzFnAP4XxEvzYBh2C88a-khNBi5k28OqNgQiGwa1pIT130I7Acz6XFl_o7HJTk2kbrgm8Yi-BK-uFIYWqyUhC5hNL2oofGq1kPxvuY2ljfPDI3MDlOBKJcLFnjCRgN5mnEi2wX42YRod8G6LtipDQigisbUCYPPDHyTTFL-X"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "bestaiconsultingfirm.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEKJ87q33kTNqAAQ7nrRTvL7Y9YFwx8db1tzcbrVTVmnKa2QHs9jyQIsPjO7OcZrZ5DA2o7qzODDevfiJwIRAkvm2m_O527TegYezKPgWHeBLyLMoC1e_4dcxfXIvBR2zhDfXttuqeFXUOA55aaUeYuVYM="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "intermixit.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQElbKef0lvFtG2SqDzSDUJ-MQPj_2a5ITqYAB-k6zOd4AC885GZRuVnTtBeNQJEzbMl5PkyGclVNiSkj7nSSz0q62m2Zzt90QS51jVSR7CZW4AHgzVsRbeogMsKr3ZLnPUc49WJoEc1D3v-1U0V8lrAqmw8dlpKNk3fw0HyWPqy1GNWuvTYPVgy_-Z6gazgRgDuTo0luEyep11ibEI_cNj6jh5x7Q=="
+                  }
+                }
+              ],
+              "groundingSupports": [
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 1234,
+                    "startIndex": 990,
+                    "text": "*   **Workflow Audit:** Identify the workflows that consume the most non-design hours and have a measurable cost (e.g., proposal drafting, meeting documentation, code research, searching past project details, initial rendering, clash detection)"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 1376,
+                    "startIndex": 1291,
+                    "text": "A common first win is automating parts of RFP responses or internal knowledge search."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    2,
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 1579,
+                    "startIndex": 1381,
+                    "text": "*   **Define Success Metrics:** For the chosen pilot workflow, establish clear, measurable goals (e.g., \"reduce time spent on initial proposal drafts by 50%,\" \"decrease RFI processing time by 40%\")."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    4,
+                    3,
+                    5
+                  ],
+                  "segment": {
+                    "endIndex": 2017,
+                    "startIndex": 1825,
+                    "text": "*   **Establish Data Governance Basics:** Define clear guidelines on what client and project data can and cannot be used with AI tools, who owns the data, and basic privacy/security protocols."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    6,
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 2068,
+                    "startIndex": 2018,
+                    "text": "This is crucial to mitigate risks and build trust."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 2318,
+                    "startIndex": 2214,
+                    "text": "Focus on tools that align with your firm's immediate needs and offer transparent data handling policies."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    2,
+                    5
+                  ],
+                  "segment": {
+                    "endIndex": 2523,
+                    "startIndex": 2320,
+                    "text": "*   **Days 21-30: Pilot Project Selection & Ethical Guidelines**\n    *   **Select a High-ROI Pilot:** Choose one specific, low-risk workflow that is frequent and measurable for the initial pilot project."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 2637,
+                    "startIndex": 2524,
+                    "text": "Examples include drafting proposals, converting meeting minutes to action items, or internal knowledge retrieval."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    7
+                  ],
+                  "segment": {
+                    "endIndex": 2760,
+                    "startIndex": 2638,
+                    "text": "Initial rendering tools are a common first purchase but might not offer the most significant economic impact on their own."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    6,
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 2958,
+                    "startIndex": 2765,
+                    "text": "*   **Develop Ethical Guidelines:** Establish internal guidelines for the responsible use of AI, ensuring outputs can be explained and maintaining transparency with clients about AI tool usage."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 3644,
+                    "startIndex": 3488,
+                    "text": "*   **Execute Pilot with a Real Project:** Implement the chosen AI tool(s) on a live, low-stakes project rather than a demo file to get real-world feedback."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    8
+                  ],
+                  "segment": {
+                    "endIndex": 3913,
+                    "startIndex": 3785,
+                    "text": "Emphasize how the tool integrates into their current workflow and the \"human-in-the-loop\" aspect for review and quality control."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    5
+                  ],
+                  "segment": {
+                    "endIndex": 4391,
+                    "startIndex": 4232,
+                    "text": "*   **Measure Initial ROI:** Begin tracking the defined success metrics for the pilot project to quantify the time saved, errors reduced, or efficiency gained."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 4436,
+                    "startIndex": 4392,
+                    "text": "Document these results to demonstrate value."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    2
+                  ],
+                  "segment": {
+                    "endIndex": 5005,
+                    "startIndex": 4827,
+                    "text": "*   **Go/No-Go Decision:** Based on the pilot's performance against the defined metrics, decide whether to scale the current AI solution, refine it, or explore alternative tools."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    4,
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 5143,
+                    "startIndex": 5010,
+                    "text": "*   **Formalize Architecture Governance:** Integrate AI tool usage and data management into existing IT and project intake processes."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    6,
+                    5
+                  ],
+                  "segment": {
+                    "endIndex": 5489,
+                    "startIndex": 5337,
+                    "text": "*   **Develop Internal \"AI Champions\":** Identify enthusiastic early adopters from the pilot team to become internal experts and support wider adoption."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    5
+                  ],
+                  "segment": {
+                    "endIndex": 5784,
+                    "startIndex": 5643,
+                    "text": "*   **Scope Second Use Case:** Based on lessons learned and identified needs, begin scoping the next high-impact AI application for the firm."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    9,
+                    10,
+                    11,
+                    12,
+                    13
+                  ],
+                  "segment": {
+                    "endIndex": 6235,
+                    "startIndex": 6146,
+                    "text": "They offer tailored guidance, strategy development, implementation support, and training."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    14,
+                    10
+                  ],
+                  "segment": {
+                    "endIndex": 6551,
+                    "startIndex": 6452,
+                    "text": "They focus on workflows like RFP response, RFI triage, submittal review, and conceptual estimating."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    9,
+                    14,
+                    13
+                  ],
+                  "segment": {
+                    "endIndex": 6795,
+                    "startIndex": 6560,
+                    "text": "*   **YegaTech:** An AEC-only technology consultancy that helps firms develop customized AI strategies, training programs, and business transformation initiatives, explicitly aiming for measurable production use rather than just demos."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    9,
+                    14
+                  ],
+                  "segment": {
+                    "endIndex": 7005,
+                    "startIndex": 6804,
+                    "text": "*   **AI in AEC:** Provides courses, workshops, and consulting, focusing on empowering professionals in the AEC industry to integrate AI into their workflows with practical, industry-specific training."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    11
+                  ],
+                  "segment": {
+                    "endIndex": 7178,
+                    "startIndex": 7014,
+                    "text": "*   **Zweig Group:** Offers AI consulting services specifically for AEC firms, providing guidance, consulting, and training on leveraging AI in business operations."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    12
+                  ],
+                  "segment": {
+                    "endIndex": 7339,
+                    "startIndex": 7187,
+                    "text": "*   **AEC Hub:** A knowledge hub and consulting practice that combines independent research, a tool directory, and implementation support for AI in AEC."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    15
+                  ],
+                  "segment": {
+                    "endIndex": 7964,
+                    "startIndex": 7899,
+                    "text": "They can help with data pipelines, security, and ongoing support."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    6,
+                    5
+                  ],
+                  "segment": {
+                    "endIndex": 8236,
+                    "startIndex": 8083,
+                    "text": "Designating existing staff members who are tech-savvy and enthusiastic about AI to become internal champions can drive adoption and provide peer support."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    14
+                  ],
+                  "segment": {
+                    "endIndex": 8549,
+                    "startIndex": 8349,
+                    "text": "Engaging with consultants who offer fixed-price entry engagements and a clear pilot format can be particularly beneficial for mid-sized firms looking for measurable results within a defined timeframe."
+                  }
+                }
+              ],
+              "searchEntryPoint": {
+                "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE9sCrwlrFASJ7n835Hnr3S_tcmaBsxsDeArxN4_vrTJhD9VxH36LBiL4TLwBu5rauzyEDLHcsNb2p-SH9XPF_0eZlh5KCo4DEiClz3Yk6qUPhIAgjtUPKgxMiguVOXuPU-OZVO_CcaVcUu9ON0A3vTh6luoCZMZ5qbU52S_tEf4FuD1GK8MNstOxmjEJWNoXpWBCK8\">AEC AI consultants</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEbbEtyFwH8tYMp0y027zBAlaYKmr2BVmxvfpEg52n_RshyuIzPI30VSyNzdffEPp7JIfTkoeQ9t9MWT8POpOGAS43rGKwdcsrg3rL3wuxyjJ9m80MgVYTFJyKQjvpa9raCwPRffiy4KEFrtZe7E6ihwX1APJlFJaNq_-X0suYl250qzjUUzh8Cc1vtz9TcthQqRJSongwje7VoxTvkvhhODWtbAo-M\">AI consulting for architecture firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFxDCNn_dzHZOGag_MxqpDQRj5I014wKsw0KS1noH7zfEqI513cKjC3FTSNda0JFN0Z8sVF4xNB_xCqVKoJEAcjxO4YmeibrxpHy14ukzSikEkyAiIEHnFTqsjvvSKkAfhCl3y-WEhfv49liLjngAtbixY882I834s6x5wwRZrIYb4xd6O-BbxhC_-ISUTICp3-_BzzeoBogUUd_2GMYdnsyAoeoPXba1ey9BHTNK70pDitD87vuEE=\">AI implementation plan for architecture firm 90 days</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE017MIV3ijJxCZf2JWydwbgWYiUqoOh8-yfMyHIZ537PdyJhB0ZTlSx60laX0mZcqu95YCUGdZBMfl5eDQ2JyC3uZxBevnNWXIGMF8V6vOfvbXwX-cwhqz_egYT_jD3sMw2RqgINZ79T-rOX8FnEJIyaVkCU9wP5TQLpk6f2yk4es42aN7vZdM1icjuZbUIPs0_nR8dnhStFljUNg_ToShYCOP11ZHZg==\">AI applications in architecture firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGXgSIYz5BtrYd2j7r-F3Neu1GRWEm3Ti2iP04nAfd4iLP1f4iKbotxyJ0_d9pVlSDS3RRyFq1WsAxsh7xzhyZDgRpOc8pW3SO24YPuBFOPKND-U-n6cprnSbkys3_E3L8hzX68ouyYjOB7C1gkcCiVEi4YuUTYKzd2BJghVAmmUfcyEba-22VtcAZcUBVAKC4J0pGPQqEz6pnSHi74jp_5oXIeDNbzlegp3zbEJ_NLgyVaPkWq\">how AI can benefit architecture firms of 30 people</a>\n  </div>\n</div>\n"
+              },
+              "webSearchQueries": [
+                "AI implementation plan for architecture firm 90 days",
+                "AI applications in architecture firms",
+                "AI consulting for architecture firms",
+                "AEC AI consultants",
+                "how AI can benefit architecture firms of 30 people"
+              ]
+            },
+            "index": 0
+          }
+        ],
+        "modelVersion": "gemini-2.5-flash",
+        "responseId": "1Fa3aqDFAezjz7IP2PX2kA4",
+        "usageMetadata": {
+          "candidatesTokenCount": 1821,
+          "promptTokenCount": 30,
+          "promptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 30
+            }
+          ],
+          "serviceTier": "standard",
+          "thoughtsTokenCount": 738,
+          "toolUsePromptTokenCount": 343,
+          "toolUsePromptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 343
+            }
+          ],
+          "totalTokenCount": 2932
+        }
+      },
+      "technical_status": "success",
+      "timestamp": "2026-09-26T05:23:31.834398Z"
+    }
+  ],
+  "final_response": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "A 90-day AI implementation plan for a 30-person architecture firm can be broken down into three focused 30-day phases, prioritizing practical, high-impact applications to demonstrate value quickly. This approach emphasizes selecting specific workflows, measuring results, and building internal capabilities.\n\n**90-Day AI Implementation Plan for a 30-Person Architecture Firm**\n\n**Phase 1: Discovery & Strategy (Days 1-30)**\n\nThe goal of this phase is to identify the most impactful areas for AI integration and establish a foundation.\n\n*   **Days 1-10: Internal Assessment & AI Education**\n    *   **Form an AI Task Force:** Assemble a small, cross-functional team (e.g., a principal, a project manager, a senior architect, and a junior staff member) to lead the initiative.\n    *   **Internal Workshop & Brainstorming:** Conduct sessions to educate staff on AI's potential in architecture and identify daily pain points and time-consuming tasks. Encourage ideas for how AI could help.\n    *   **Workflow Audit:** Identify the workflows that consume the most non-design hours and have a measurable cost (e.g., proposal drafting, meeting documentation, code research, searching past project details, initial rendering, clash detection). Prioritize these based on frequency, impact, and risk. A common first win is automating parts of RFP responses or internal knowledge search.\n    *   **Define Success Metrics:** For the chosen pilot workflow, establish clear, measurable goals (e.g., \"reduce time spent on initial proposal drafts by 50%,\" \"decrease RFI processing time by 40%\").\n\n*   **Days 11-20: Data Readiness & Governance**\n    *   **Data Audit:** Assess the firm's existing data (project files, past proposals, specifications, design libraries) for quality, accessibility, and relevance to the chosen AI use cases.\n    *   **Establish Data Governance Basics:** Define clear guidelines on what client and project data can and cannot be used with AI tools, who owns the data, and basic privacy/security protocols. This is crucial to mitigate risks and build trust.\n    *   **Vendor Research:** Begin researching AI tools and solutions specifically designed for architectural workflows identified in the audit. Focus on tools that align with your firm's immediate needs and offer transparent data handling policies.\n\n*   **Days 21-30: Pilot Project Selection & Ethical Guidelines**\n    *   **Select a High-ROI Pilot:** Choose one specific, low-risk workflow that is frequent and measurable for the initial pilot project. Examples include drafting proposals, converting meeting minutes to action items, or internal knowledge retrieval. Initial rendering tools are a common first purchase but might not offer the most significant economic impact on their own.\n    *   **Develop Ethical Guidelines:** Establish internal guidelines for the responsible use of AI, ensuring outputs can be explained and maintaining transparency with clients about AI tool usage.\n    *   **Initial Tool Shortlist:** Based on the pilot, narrow down 2-3 potential AI tools for evaluation.\n\n**Phase 2: Pilot Implementation & Training (Days 31-60)**\n\nThis phase focuses on hands-on experimentation with the chosen AI solution and initial team training.\n\n*   **Days 31-45: Tool Trial & Workflow Integration**\n    *   **Procure/Trial Pilot Tools:** Initiate trials or subscriptions for the shortlisted AI tools for the chosen workflow. Prioritize tools that can be integrated seamlessly with existing software.\n    *   **Execute Pilot with a Real Project:** Implement the chosen AI tool(s) on a live, low-stakes project rather than a demo file to get real-world feedback.\n    *   **Team Training (Pilot Group):** Provide focused training to the AI Task Force and the team directly involved in the pilot project. Emphasize how the tool integrates into their current workflow and the \"human-in-the-loop\" aspect for review and quality control.\n\n*   **Days 46-60: Feedback, Iteration & Initial Measurement**\n    *   **Collect Feedback:** Regularly gather feedback from the pilot team on the tool's effectiveness, ease of use, and areas for improvement.\n    *   **Iterate & Adjust:** Make necessary adjustments to the workflow or tool usage based on feedback.\n    *   **Measure Initial ROI:** Begin tracking the defined success metrics for the pilot project to quantify the time saved, errors reduced, or efficiency gained. Document these results to demonstrate value.\n\n**Phase 3: Evaluation & Future Roadmapping (Days 61-90)**\n\nThe final phase evaluates the pilot's success and plans for broader adoption or future AI initiatives.\n\n*   **Days 61-75: Comprehensive Review & Decision**\n    *   **Pilot Review Meeting:** Present the results of the pilot project to firm leadership and key stakeholders, highlighting successes, challenges, and measured ROI.\n    *   **Go/No-Go Decision:** Based on the pilot's performance against the defined metrics, decide whether to scale the current AI solution, refine it, or explore alternative tools.\n    *   **Formalize Architecture Governance:** Integrate AI tool usage and data management into existing IT and project intake processes.\n\n*   **Days 76-90: Scaling & Long-Term Vision**\n    *   **Phased Rollout Plan:** If the pilot is successful, develop a phased plan for broader implementation across more projects or teams.\n    *   **Develop Internal \"AI Champions\":** Identify enthusiastic early adopters from the pilot team to become internal experts and support wider adoption.\n    *   **Continuous Learning Plan:** Establish a framework for ongoing AI education and monitoring of new AI developments relevant to architecture.\n    *   **Scope Second Use Case:** Based on lessons learned and identified needs, begin scoping the next high-impact AI application for the firm.\n\n**Who Could Help Execute the Plan?**\n\nFor a 30-person architecture firm, external expertise can be invaluable for navigating the complexities of AI adoption. Here are key types of entities that could assist:\n\n1.  **AEC-Specific AI Consulting Firms:** These firms specialize in applying AI within the Architecture, Engineering, and Construction (AEC) industry. They offer tailored guidance, strategy development, implementation support, and training.\n    *   **Examples:**\n        *   **Advisor Labs:** Known for helping design practices and engineering consultancies with lean IT departments, offering services from business strategy to hands-on technical delivery. They focus on workflows like RFP response, RFI triage, submittal review, and conceptual estimating.\n        *   **YegaTech:** An AEC-only technology consultancy that helps firms develop customized AI strategies, training programs, and business transformation initiatives, explicitly aiming for measurable production use rather than just demos.\n        *   **AI in AEC:** Provides courses, workshops, and consulting, focusing on empowering professionals in the AEC industry to integrate AI into their workflows with practical, industry-specific training.\n        *   **Zweig Group:** Offers AI consulting services specifically for AEC firms, providing guidance, consulting, and training on leveraging AI in business operations.\n        *   **AEC Hub:** A knowledge hub and consulting practice that combines independent research, a tool directory, and implementation support for AI in AEC.\n\n2.  **General AI/Digital Transformation Consultants:** While not AEC-specific, some general consulting firms or smaller tech consultancies can provide expertise in AI strategy, data governance, and technology integration. However, an AEC-specific firm will likely have a deeper understanding of industry workflows and nuances.\n\n3.  **Managed IT Service Providers with AI Integration Expertise:** For firms with lean IT departments, an IT partner experienced in integrating new technologies and ensuring robust, secure infrastructure for AI tools is crucial. They can help with data pipelines, security, and ongoing support.\n\n4.  **In-House \"AI Champions\" / Design Technology Leads:** Cultivating internal talent is key for long-term success. Designating existing staff members who are tech-savvy and enthusiastic about AI to become internal champions can drive adoption and provide peer support. This can be more cost-effective for a smaller firm than relying solely on external consultants for every step.\n\nEngaging with consultants who offer fixed-price entry engagements and a clear pilot format can be particularly beneficial for mid-sized firms looking for measurable results within a defined timeframe."
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "STOP",
+        "groundingMetadata": {
+          "groundingChunks": [
+            {
+              "web": {
+                "title": "aechub.org",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEVsKcuLsC9UA0IVn82mBWLIyGma6q_xgdg83daCXDybzAjwzWIuBhc6Hx3O98qPSjTeWOob47Z5PucmcyRjc-rnnkbRZeJSMkhru_8CdYja4P6Hcr7TmRFGxhBu-z_JkrPkCfc0vTLs1nKxB0i4Ox6X4zJdqchInMe"
+              }
+            },
+            {
+              "web": {
+                "title": "beactive.ai",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHMkoQHw9izqduXOpNQrtt-r9AjYBU-j8FdAtF_OzZ8EMD6jv_J4x8-QRFqxkhhavAM2daKzTA-6vjzHp1Cm-bLzt5QNgOs6CCCVDhI8iKa_gu-w4lZTUrcDTp5Jf2a8o-WHsyfyOgeUBu-0A=="
+              }
+            },
+            {
+              "web": {
+                "title": "dancumberlandlabs.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQER9QvC2OVQ155qNbb-E8yJjEGpQ-rHmBnAgSBE_i43xQrut1RbMlgx-pGvUcvh5r6Ov6VtMczGB-mp9ufFT_mLI7fd_njc1Rr7CHbODxl1N-_bu_pcYv9e3l3Y3waGYJ8t3c84xsi2E2e_Bwg="
+              }
+            },
+            {
+              "web": {
+                "title": "multiqos.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE00tJvcGFW0Z4duaFOWvIsYYmrUPaDMZ_EGiluPQ6bXRBNf8M28vSTV63AEesmMOsPhzEvX0ayfE8Ovu8SfyLAymZvozIZPhMIL0lLjSrzYKIAAY3ikMfOfvFJMtOZlvtVw1JABF9c2p-DJ1TgBXY="
+              }
+            },
+            {
+              "web": {
+                "title": "fastcompany.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE21mNndJ7g9kcJRmxoV44Yucqam5aW_V4DjhQKcCMsadgi9Yqqb7VE-_p4Mgtrx25ODrrRK1JpC6haM-y-ulLO5A4mqDSSkMYAlqQ-qOPVb_q7pxbmdDrtAoYK4NhF9fHtfn-sg0urltxpMx9vON8vFPlaWeFLAdnGm4-kQVvEFcXbIqv0EhXg4Rw8o-dx"
+              }
+            },
+            {
+              "web": {
+                "title": "helium42.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGalFEAmkjk7_25G_rcHDe9EtGE7hptGF6L_b2O54hteh-4HxbLcsutlOgbGrdaBF1sbK3aKBfwj_0HZSe06kh-SAOxBHebJSeFmZo308No81gLT7H2YS7jSchGMwf1x9L-xSpIT3PwTuF79mpH"
+              }
+            },
+            {
+              "web": {
+                "title": "deltek.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH41G9rJorh20pVZkEk_1pxPyYTGt4H45l6lbADaA0QMiq2_LJ4vxHAbYFp0ofYULfoTUzIo-EtlQD5qei72R4y7DpON9JY4XNEbnBO5FlnzxBcbsjNUFNuhzK3kpdcWiuwp2AtI4QKx3cDrVhacknDh4dAXfBrx4CSP0tY63I-2443-epr"
+              }
+            },
+            {
+              "web": {
+                "title": "monaverse.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF3vTXcjAO9Lo0vO7l7gA-c3KX7GbKShoRJi-Nt-GNLpy3-v6iI6z1e-xh_wZweK7FnuC1ppt7Jd9R85z2KvFYIBWmy5wLHF4xy212lX-qgqHtaheLetVKhSCM2nQ65CvdxQ3fsqA73"
+              }
+            },
+            {
+              "web": {
+                "title": "monograph.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQERsyD4EUsT24lutF__Lk2NyjQKqTVWUVAKAXSNet08GpZFnuQ7cEFFJROB1B9YV1U5jyVmLI5kr4jnT17h-4jL9NTD_WZtXviVrrXKFKqGiixzS8DHaH460gWm8g6EShLl1CSqRrLc"
+              }
+            },
+            {
+              "web": {
+                "title": "aechub.org",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHFZDzvZ3SIn1Ov9wZRA7a7bvo3M9ZuTqiq7RJ6MbcxOHcD4D7JxdSBFPCg1W1LTEKWcWofdWs8FMBbGCLjdyzdXK0JUHsgePCXJijCcTnHBl8BapjkIViCtecj9w=="
+              }
+            },
+            {
+              "web": {
+                "title": "advisorlabs.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEAtrxi_lfRJgDCBFvmmW602lr6tEglBwvHZgSPwMBU9oOEnSP6pZeIlzw8axFvLf27EWndEZd8fqsbLMXxGRs6tSmkpmVlRv5xWq24IM5Rqh8OnZ-5Wc959zxPHl1tmTpmv3teHQ=="
+              }
+            },
+            {
+              "web": {
+                "title": "zweiggroup.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFHfLmfebR2yPqqtE4M_gkFHNHWCLnQ6q27gwXKF8Eop_G4YmJu7OTCzIuXzq9VOX5FMQ9TqcMeONouTt8MW5NnnOCjc__dPLaE5SMHHW9yzMXGlMreJbqvLOlHB-G59kRiW2COhLABuqMLc70X8Q=="
+              }
+            },
+            {
+              "web": {
+                "title": "aechub.org",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG4GGDs0ptQudMd7_RZuudrkWaUBO6aTc6fpfG5bx5zYkNIujfHk3RsxoW3tz0SfdW2irMART0EA-6h229QnCUiEmvo6aUJH-61sc2c10dnJlA="
+              }
+            },
+            {
+              "web": {
+                "title": "yegatech.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGRDIvAfzFnAP4XxEvzYBh2C88a-khNBi5k28OqNgQiGwa1pIT130I7Acz6XFl_o7HJTk2kbrgm8Yi-BK-uFIYWqyUhC5hNL2oofGq1kPxvuY2ljfPDI3MDlOBKJcLFnjCRgN5mnEi2wX42YRod8G6LtipDQigisbUCYPPDHyTTFL-X"
+              }
+            },
+            {
+              "web": {
+                "title": "bestaiconsultingfirm.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEKJ87q33kTNqAAQ7nrRTvL7Y9YFwx8db1tzcbrVTVmnKa2QHs9jyQIsPjO7OcZrZ5DA2o7qzODDevfiJwIRAkvm2m_O527TegYezKPgWHeBLyLMoC1e_4dcxfXIvBR2zhDfXttuqeFXUOA55aaUeYuVYM="
+              }
+            },
+            {
+              "web": {
+                "title": "intermixit.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQElbKef0lvFtG2SqDzSDUJ-MQPj_2a5ITqYAB-k6zOd4AC885GZRuVnTtBeNQJEzbMl5PkyGclVNiSkj7nSSz0q62m2Zzt90QS51jVSR7CZW4AHgzVsRbeogMsKr3ZLnPUc49WJoEc1D3v-1U0V8lrAqmw8dlpKNk3fw0HyWPqy1GNWuvTYPVgy_-Z6gazgRgDuTo0luEyep11ibEI_cNj6jh5x7Q=="
+              }
+            }
+          ],
+          "groundingSupports": [
+            {
+              "groundingChunkIndices": [
+                0,
+                1
+              ],
+              "segment": {
+                "endIndex": 1234,
+                "startIndex": 990,
+                "text": "*   **Workflow Audit:** Identify the workflows that consume the most non-design hours and have a measurable cost (e.g., proposal drafting, meeting documentation, code research, searching past project details, initial rendering, clash detection)"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 1376,
+                "startIndex": 1291,
+                "text": "A common first win is automating parts of RFP responses or internal knowledge search."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                2,
+                3
+              ],
+              "segment": {
+                "endIndex": 1579,
+                "startIndex": 1381,
+                "text": "*   **Define Success Metrics:** For the chosen pilot workflow, establish clear, measurable goals (e.g., \"reduce time spent on initial proposal drafts by 50%,\" \"decrease RFI processing time by 40%\")."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0,
+                4,
+                3,
+                5
+              ],
+              "segment": {
+                "endIndex": 2017,
+                "startIndex": 1825,
+                "text": "*   **Establish Data Governance Basics:** Define clear guidelines on what client and project data can and cannot be used with AI tools, who owns the data, and basic privacy/security protocols."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                6,
+                3
+              ],
+              "segment": {
+                "endIndex": 2068,
+                "startIndex": 2018,
+                "text": "This is crucial to mitigate risks and build trust."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 2318,
+                "startIndex": 2214,
+                "text": "Focus on tools that align with your firm's immediate needs and offer transparent data handling policies."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0,
+                2,
+                5
+              ],
+              "segment": {
+                "endIndex": 2523,
+                "startIndex": 2320,
+                "text": "*   **Days 21-30: Pilot Project Selection & Ethical Guidelines**\n    *   **Select a High-ROI Pilot:** Choose one specific, low-risk workflow that is frequent and measurable for the initial pilot project."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 2637,
+                "startIndex": 2524,
+                "text": "Examples include drafting proposals, converting meeting minutes to action items, or internal knowledge retrieval."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0,
+                7
+              ],
+              "segment": {
+                "endIndex": 2760,
+                "startIndex": 2638,
+                "text": "Initial rendering tools are a common first purchase but might not offer the most significant economic impact on their own."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                6,
+                3
+              ],
+              "segment": {
+                "endIndex": 2958,
+                "startIndex": 2765,
+                "text": "*   **Develop Ethical Guidelines:** Establish internal guidelines for the responsible use of AI, ensuring outputs can be explained and maintaining transparency with clients about AI tool usage."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 3644,
+                "startIndex": 3488,
+                "text": "*   **Execute Pilot with a Real Project:** Implement the chosen AI tool(s) on a live, low-stakes project rather than a demo file to get real-world feedback."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                8
+              ],
+              "segment": {
+                "endIndex": 3913,
+                "startIndex": 3785,
+                "text": "Emphasize how the tool integrates into their current workflow and the \"human-in-the-loop\" aspect for review and quality control."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                5
+              ],
+              "segment": {
+                "endIndex": 4391,
+                "startIndex": 4232,
+                "text": "*   **Measure Initial ROI:** Begin tracking the defined success metrics for the pilot project to quantify the time saved, errors reduced, or efficiency gained."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                3
+              ],
+              "segment": {
+                "endIndex": 4436,
+                "startIndex": 4392,
+                "text": "Document these results to demonstrate value."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                2
+              ],
+              "segment": {
+                "endIndex": 5005,
+                "startIndex": 4827,
+                "text": "*   **Go/No-Go Decision:** Based on the pilot's performance against the defined metrics, decide whether to scale the current AI solution, refine it, or explore alternative tools."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                4,
+                3
+              ],
+              "segment": {
+                "endIndex": 5143,
+                "startIndex": 5010,
+                "text": "*   **Formalize Architecture Governance:** Integrate AI tool usage and data management into existing IT and project intake processes."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                6,
+                5
+              ],
+              "segment": {
+                "endIndex": 5489,
+                "startIndex": 5337,
+                "text": "*   **Develop Internal \"AI Champions\":** Identify enthusiastic early adopters from the pilot team to become internal experts and support wider adoption."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                5
+              ],
+              "segment": {
+                "endIndex": 5784,
+                "startIndex": 5643,
+                "text": "*   **Scope Second Use Case:** Based on lessons learned and identified needs, begin scoping the next high-impact AI application for the firm."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                9,
+                10,
+                11,
+                12,
+                13
+              ],
+              "segment": {
+                "endIndex": 6235,
+                "startIndex": 6146,
+                "text": "They offer tailored guidance, strategy development, implementation support, and training."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                14,
+                10
+              ],
+              "segment": {
+                "endIndex": 6551,
+                "startIndex": 6452,
+                "text": "They focus on workflows like RFP response, RFI triage, submittal review, and conceptual estimating."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                9,
+                14,
+                13
+              ],
+              "segment": {
+                "endIndex": 6795,
+                "startIndex": 6560,
+                "text": "*   **YegaTech:** An AEC-only technology consultancy that helps firms develop customized AI strategies, training programs, and business transformation initiatives, explicitly aiming for measurable production use rather than just demos."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                9,
+                14
+              ],
+              "segment": {
+                "endIndex": 7005,
+                "startIndex": 6804,
+                "text": "*   **AI in AEC:** Provides courses, workshops, and consulting, focusing on empowering professionals in the AEC industry to integrate AI into their workflows with practical, industry-specific training."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                11
+              ],
+              "segment": {
+                "endIndex": 7178,
+                "startIndex": 7014,
+                "text": "*   **Zweig Group:** Offers AI consulting services specifically for AEC firms, providing guidance, consulting, and training on leveraging AI in business operations."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                12
+              ],
+              "segment": {
+                "endIndex": 7339,
+                "startIndex": 7187,
+                "text": "*   **AEC Hub:** A knowledge hub and consulting practice that combines independent research, a tool directory, and implementation support for AI in AEC."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                15
+              ],
+              "segment": {
+                "endIndex": 7964,
+                "startIndex": 7899,
+                "text": "They can help with data pipelines, security, and ongoing support."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                6,
+                5
+              ],
+              "segment": {
+                "endIndex": 8236,
+                "startIndex": 8083,
+                "text": "Designating existing staff members who are tech-savvy and enthusiastic about AI to become internal champions can drive adoption and provide peer support."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                14
+              ],
+              "segment": {
+                "endIndex": 8549,
+                "startIndex": 8349,
+                "text": "Engaging with consultants who offer fixed-price entry engagements and a clear pilot format can be particularly beneficial for mid-sized firms looking for measurable results within a defined timeframe."
+              }
+            }
+          ],
+          "searchEntryPoint": {
+            "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE9sCrwlrFASJ7n835Hnr3S_tcmaBsxsDeArxN4_vrTJhD9VxH36LBiL4TLwBu5rauzyEDLHcsNb2p-SH9XPF_0eZlh5KCo4DEiClz3Yk6qUPhIAgjtUPKgxMiguVOXuPU-OZVO_CcaVcUu9ON0A3vTh6luoCZMZ5qbU52S_tEf4FuD1GK8MNstOxmjEJWNoXpWBCK8\">AEC AI consultants</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEbbEtyFwH8tYMp0y027zBAlaYKmr2BVmxvfpEg52n_RshyuIzPI30VSyNzdffEPp7JIfTkoeQ9t9MWT8POpOGAS43rGKwdcsrg3rL3wuxyjJ9m80MgVYTFJyKQjvpa9raCwPRffiy4KEFrtZe7E6ihwX1APJlFJaNq_-X0suYl250qzjUUzh8Cc1vtz9TcthQqRJSongwje7VoxTvkvhhODWtbAo-M\">AI consulting for architecture firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFxDCNn_dzHZOGag_MxqpDQRj5I014wKsw0KS1noH7zfEqI513cKjC3FTSNda0JFN0Z8sVF4xNB_xCqVKoJEAcjxO4YmeibrxpHy14ukzSikEkyAiIEHnFTqsjvvSKkAfhCl3y-WEhfv49liLjngAtbixY882I834s6x5wwRZrIYb4xd6O-BbxhC_-ISUTICp3-_BzzeoBogUUd_2GMYdnsyAoeoPXba1ey9BHTNK70pDitD87vuEE=\">AI implementation plan for architecture firm 90 days</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE017MIV3ijJxCZf2JWydwbgWYiUqoOh8-yfMyHIZ537PdyJhB0ZTlSx60laX0mZcqu95YCUGdZBMfl5eDQ2JyC3uZxBevnNWXIGMF8V6vOfvbXwX-cwhqz_egYT_jD3sMw2RqgINZ79T-rOX8FnEJIyaVkCU9wP5TQLpk6f2yk4es42aN7vZdM1icjuZbUIPs0_nR8dnhStFljUNg_ToShYCOP11ZHZg==\">AI applications in architecture firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGXgSIYz5BtrYd2j7r-F3Neu1GRWEm3Ti2iP04nAfd4iLP1f4iKbotxyJ0_d9pVlSDS3RRyFq1WsAxsh7xzhyZDgRpOc8pW3SO24YPuBFOPKND-U-n6cprnSbkys3_E3L8hzX68ouyYjOB7C1gkcCiVEi4YuUTYKzd2BJghVAmmUfcyEba-22VtcAZcUBVAKC4J0pGPQqEz6pnSHi74jp_5oXIeDNbzlegp3zbEJ_NLgyVaPkWq\">how AI can benefit architecture firms of 30 people</a>\n  </div>\n</div>\n"
+          },
+          "webSearchQueries": [
+            "AI implementation plan for architecture firm 90 days",
+            "AI applications in architecture firms",
+            "AI consulting for architecture firms",
+            "AEC AI consultants",
+            "how AI can benefit architecture firms of 30 people"
+          ]
+        },
+        "index": 0
+      }
+    ],
+    "modelVersion": "gemini-2.5-flash",
+    "responseId": "1Fa3aqDFAezjz7IP2PX2kA4",
+    "usageMetadata": {
+      "candidatesTokenCount": 1821,
+      "promptTokenCount": 30,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 30
+        }
+      ],
+      "serviceTier": "standard",
+      "thoughtsTokenCount": 738,
+      "toolUsePromptTokenCount": 343,
+      "toolUsePromptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 343
+        }
+      ],
+      "totalTokenCount": 2932
+    }
+  },
+  "prompt_id": "I03",
+  "request": {
+    "body": {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "What is a practical 90-day AI implementation plan for a 30-person architecture firm, and who could help us execute it?"
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "google_search": {}
+        }
+      ]
+    },
+    "model": "gemini-2.5-flash"
+  },
+  "run_id": "gemini-api-google-search-20260925-r1",
+  "schema_version": "gemini-grounded-raw-receipt/v1"
+}

@@ -1,0 +1,677 @@
+{
+  "attempts": [
+    {
+      "duration_ms": 11580,
+      "http_status": 200,
+      "model": "gemini-2.5-flash",
+      "response": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "To address the challenge of critical knowledge residing with a few senior individuals within an architecture firm, several consulting firms and software providers specialize in knowledge management (KM) solutions. These companies can help implement strategies and tools for knowledge transfer, documentation, and making information accessible across your organization.\n\nHere are some firms that can assist:\n\n**Firms Specializing in Knowledge Management for AEC (Architecture, Engineering, and Construction) Industry:**\n\n*   **Knowledge Architecture:** This firm builds knowledge and learning management software specifically for AEC firms. Their flagship platform, Synthesis, acts as an intranet, Learning Management System (LMS), and an AI-powered search solution designed for the AEC industry. Synthesis integrates with common industry tools like Deltek, Unanet, OpenAsset, Newforma, and Revit to centralize knowledge, learning, and AI capabilities. They also foster community and best practices through events like the KA Connect conference and their \"Smarter by Design\" podcast.\n*   **Glide Solutions:** This company offers tailor-made apps for architects to improve knowledge management. Their solutions focus on centralizing project information for quick access, integrating spreadsheets and SQL databases, and crafting custom workflows to manage collective expertise.\n\n**General Knowledge Management Consulting Firms (Applicable to Professional Services):**\n\n*   **Alpha Apex Group:** A leading knowledge management consulting firm that offers strategies and solutions to help organizations capture, manage, and leverage their collective knowledge. They focus on enhancing decision-making, fostering innovation, and maintaining a competitive edge.\n*   **Knoco Ltd:** With over two decades of experience, Knoco Ltd specializes in knowledge management consultancy, providing services such as KM strategy development, knowledge retention programs, training, and community support.\n*   **FireOak Strategies:** This firm specializes in knowledge management consulting, aiming to connect people with the knowledge they need. They offer customized KM strategies, conduct current state assessments to identify pain points and knowledge bottlenecks, and help implement new initiatives.\n*   **Iknow LLC:** Known for implementing knowledge management systems that capture, save, and reuse organizational knowledge, Iknow LLC has a successful track record across numerous industry sectors.\n*   **Altuent:** Provides knowledge management consulting to improve decision-making, drive user adoption of systems, and prepare data for AI insights, with a focus on content strategy.\n*   **\"Big Four\" Consultancies (Accenture, Arup, Deloitte, EY, PwC):** These large consulting firms often have dedicated knowledge management practices that can offer comprehensive solutions for knowledge-intensive organizations. Arup, for instance, has been recognized for creating a learning organization.\n\n**Key Strategies These Firms Can Help You Implement:**\n\n*   **Develop a Knowledge Management Strategy:** Consultants can help identify knowledge gaps, streamline information processes, and define clear objectives for your KM initiative.\n*   **Implement KM Systems:** This involves setting up platforms for capturing, storing, and organizing project documentation, design standards, client information, and regulatory codes. Tools often feature robust metadata, version control, and advanced search capabilities.\n*   **Foster Knowledge Transfer and Retention:** This includes establishing practices for documenting \"lessons learned\" from projects, creating internal wikis or repositories for technical expertise, and encouraging mentorship between senior and junior architects.\n*   **Cultivate a Knowledge-Sharing Culture:** Firms can help encourage an environment where learning and sharing knowledge are valued and rewarded, through recognition programs and knowledge-sharing events.\n*   **Leverage AI and Automation:** Many solutions now incorporate AI-powered search and knowledge agents to help employees quickly find relevant information by asking natural language questions and summarizing content.\n*   **Integrate KM with Existing Workflows:** Successful KM solutions are integrated with the tools and processes architects already use, rather than creating separate information silos.\n\nBy engaging with these specialized firms, your architecture practice can develop a structured approach to capture, manage, and leverage its collective expertise, moving away from reliance on individual knowledge silos and fostering a more efficient, collaborative, and resilient practice."
+                }
+              ],
+              "role": "model"
+            },
+            "finishReason": "STOP",
+            "groundingMetadata": {
+              "groundingChunks": [
+                {
+                  "web": {
+                    "title": "knowledge-architecture.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEdy2ObzN6L0qGjHt4Kfg6NgPGPhCjmt7OtmxvwaHLD4skq6mMV42LNrhCrtH9dCSV3WTbPgv3k9PhiNqff0Qs_5JZUmrzGBj-fRW0Izl9poUR1nctXOuOvReQ4euQPgytaqDlRieZV"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "entrearchitect.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF275HRqIb-EazDup67MAAIZ9zQzxwrSCSRMwl9D3eNdKg8vIP0N8sB9tpQaYVj7OWtP9o-I-1tVZa8VPXUlwUVCbnnBpyHCO7qa34VcAU-OsQysYqS5wEndCZAxth7T7fDc8T01wfW2MPcm5upMbs80lpPffaBG2E="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "knowledge-architecture.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHST9TqcmOMiiSty7kQdayYNQWaZ2uR17oAIIIEG-GPXlqVWU7T4HWUmN-Mf6VbcYeTcJZaN0k69T7CwtPFeeR-WoWg6uxsFo_eBNd1Q6E12tSro_Issrp3V1nRHUnGweBxtA=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "youtube.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGLPLDOv10ZlKLkkbjTiSA_NfQtuc31DCGZ0k2H-tyryK-qzoNKu5Q4xWWbg0yaMUTW9vB2KtoEhs2qEEgpauOrQ9yb64c3hbCx6d4OFKIIGi-InZEbXMJ6q4Y75PKOpVbGQLdxmtA="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "glideapps.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF_V8uBr92XZTmsGvuGuHWtEB197vZWD4Dbxf08C1ziM32uic_f2aguR8fkm7O1jIp0Ws7VMJit8LU38Bnhd2Dlzb_GUYvBazMDWLR8w2FB-R-sefWIoxsgfM41ZPw_gK9YkGAXr__vtEWioiKCEJUrgu9YSws4w6Ib1CdQnRTwl_J_vqJtRgk="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "jake-jorgovan.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQElgn14uNnfN1iUoWrYUzQDUWrLOpb6iI7lSGH9LWwOSO7VW366J5eyL8TzQKmurvCV8k11S-k8bSsRdWADTeL9jsQbdbQek0SYT8debgCAyS9uflJ33HmNP-bVuQ4jAkzbmD8YPvYXHIDukrB8XWw-gnZhzDkJvLu_3HH-3nPK"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "cioreview.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGm764jDqwiVX6OmIXvtObkmjk1EknCkI_354koG-8F64HlACHi2YeiNlYqYPSM-ode8hO-oaRSXtKYizhdcKkZgOAuH0QBWd8DfNnHw71li1pWrwB_JJZzOeUfWDYrx-6cEd40PZ-16b_xjalNF3mcXwZgFVltLZ2ZJxbhmkHvwJss-OXIfv_AJvAEq--x0toVi3YtCqo2q54aCFAUV3Kc7mk4MyJXfmptCGxe"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "altuent.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEUQtVGN97UyAToyjFoQFyNfdxwTKmIfpg_WzUbdJLRcQWsNk6Yj28BiivrcA0wEnxlqJnDFDCrSNUtG5rYKOC1XWtj7VtR60dmHXh8J-w_0lGu8XAaZ0MZQ89yZSrFQtDdXwBn0UqSzKRwxACo"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "consultancy.uk",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFokGNo7sqRlQXRZr9vabzBUoRDwcopVrAFsPcIbZ5gic-fqLpeJDNBxMJCPzZ8tpcGydRUKgPPU2tnGOEtDLWhQxtOragz9mI2EHblsKyEHfCUC2NoL5o1qH5z3oVKyRoDpHjtwUtO0ErnJnjfewsGv_6X4FWIIiHy-aHeKnc4mR0hLGT9poleEl_8Vbp-w3u2tA=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "zigpoll.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEMrqWWgNdHY1lnn4jbl4ILl1SkXrbafk7zcs5baPdOm0bJ9UwVel_iN-2TLIznaf4UCD-_e1MHfViYryYDe6ivmq83vLRvEGjVAjEU4kcRHgk8o8uMqp3n9-q9-j38YslRHRafh9s3S9rMCnv1aOV-Ry5jY3cwxIoX6YoPwbqoqg84DeRgJcyf6IoYEHmXhfGsi7MiaxQoJWX8dObX0hIQU2j6qDT8AHVoyqGq3sC3_k8iNqA8uBvYh4l2DCrnyzvfmMwD7NxxUrqE07c32-9qFZrcNtc4iUNPijY1XXXiGtnkmQxpPhdGLc3Xsdyd62XRLEeL"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "flowcase.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE_rFKQej3LzN7oOkMg2jcac2_itulVnYQ6mAgAokdKSJHTl8ugs4JM-GCPAMTLXEvcksPW0yxt2aX4YGYhpOeRV64QtQIV75uDgS2Oekh8WFklb0g1adFXE_JseZwvQ8vBiyot9Ab8GOPNgahMVw96U4nSTuqqBfk_LmgJEVrFbgO4LFaxK3I="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "medium.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFCJoCG-ftK1fN11t85NHRZY9PSHANLYz2GiZtcQUfgDHmvd1FjmAYjMuiFAbWCXPIeDfZdBd3ZAVlcum7JRlygv4Qe8t17oB3mpLy_rDzd8dbtV3qhIXEyA4T4Mk4vpw1LvlnqJL4uKaX0q8Ke1wWpvppv52J84AM_uiSYd-2qC5lkoZhJMAZunyz20bpuMN38UHY9ZJrCTnzd0tXabwWx7xiGDkFHw-xmfamGeA=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "valamis.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHxsJ7-sqR_wY7SttBvMfEl7BejqumTbaYobdxjLU5NkrG9haV5yugkZJr-LqCx4x6qanpXibkIm4YidP69l1B2WKvYszLq4sg3JBIwo0F7wd-fsehUYD7TGFhvSLlUj7j2lvwsLdWH7KGxBA=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "businessprocessmgmt.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHC77WKrahylMqYthOoPnu-X8npuVgdtbNO9kURLFJbbDcRkmFizKx4t_y9AqV4B2idB3tWm7CpWl73n1eX5KAvkQ53kAo4JRIx8vtLmOnuA5yGaMiSa8PUZbUIb_uFiCOMOzgCfch6NJs5d0uNJKg="
+                  }
+                }
+              ],
+              "groundingSupports": [
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    1,
+                    2,
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 951,
+                    "startIndex": 796,
+                    "text": "Synthesis integrates with common industry tools like Deltek, Unanet, OpenAsset, Newforma, and Revit to centralize knowledge, learning, and AI capabilities."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    1
+                  ],
+                  "segment": {
+                    "endIndex": 1082,
+                    "startIndex": 952,
+                    "text": "They also foster community and best practices through events like the KA Connect conference and their \"Smarter by Design\" podcast."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    4
+                  ],
+                  "segment": {
+                    "endIndex": 1374,
+                    "startIndex": 1193,
+                    "text": "Their solutions focus on centralizing project information for quick access, integrating spreadsheets and SQL databases, and crafting custom workflows to manage collective expertise."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    5
+                  ],
+                  "segment": {
+                    "endIndex": 1754,
+                    "startIndex": 1656,
+                    "text": "They focus on enhancing decision-making, fostering innovation, and maintaining a competitive edge."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    5
+                  ],
+                  "segment": {
+                    "endIndex": 1984,
+                    "startIndex": 1755,
+                    "text": "*   **Knoco Ltd:** With over two decades of experience, Knoco Ltd specializes in knowledge management consultancy, providing services such as KM strategy development, knowledge retention programs, training, and community support."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    5,
+                    6
+                  ],
+                  "segment": {
+                    "endIndex": 2283,
+                    "startIndex": 2126,
+                    "text": "They offer customized KM strategies, conduct current state assessments to identify pain points and knowledge bottlenecks, and help implement new initiatives."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    6
+                  ],
+                  "segment": {
+                    "endIndex": 2484,
+                    "startIndex": 2284,
+                    "text": "*   **Iknow LLC:** Known for implementing knowledge management systems that capture, save, and reuse organizational knowledge, Iknow LLC has a successful track record across numerous industry sectors."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    7
+                  ],
+                  "segment": {
+                    "endIndex": 2670,
+                    "startIndex": 2485,
+                    "text": "*   **Altuent:** Provides knowledge management consulting to improve decision-making, drive user adoption of systems, and prepare data for AI insights, with a focus on content strategy."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    8
+                  ],
+                  "segment": {
+                    "endIndex": 2900,
+                    "startIndex": 2671,
+                    "text": "*   **\"Big Four\" Consultancies (Accenture, Arup, Deloitte, EY, PwC):** These large consulting firms often have dedicated knowledge management practices that can offer comprehensive solutions for knowledge-intensive organizations."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    8
+                  ],
+                  "segment": {
+                    "endIndex": 2978,
+                    "startIndex": 2901,
+                    "text": "Arup, for instance, has been recognized for creating a learning organization."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    5,
+                    9
+                  ],
+                  "segment": {
+                    "endIndex": 3216,
+                    "startIndex": 3036,
+                    "text": "*   **Develop a Knowledge Management Strategy:** Consultants can help identify knowledge gaps, streamline information processes, and define clear objectives for your KM initiative."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    10,
+                    9,
+                    4
+                  ],
+                  "segment": {
+                    "endIndex": 3403,
+                    "startIndex": 3217,
+                    "text": "*   **Implement KM Systems:** This involves setting up platforms for capturing, storing, and organizing project documentation, design standards, client information, and regulatory codes."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    11,
+                    9
+                  ],
+                  "segment": {
+                    "endIndex": 3491,
+                    "startIndex": 3404,
+                    "text": "Tools often feature robust metadata, version control, and advanced search capabilities."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    11,
+                    12,
+                    13
+                  ],
+                  "segment": {
+                    "endIndex": 3756,
+                    "startIndex": 3492,
+                    "text": "*   **Foster Knowledge Transfer and Retention:** This includes establishing practices for documenting \"lessons learned\" from projects, creating internal wikis or repositories for technical expertise, and encouraging mentorship between senior and junior architects."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    11,
+                    13
+                  ],
+                  "segment": {
+                    "endIndex": 3964,
+                    "startIndex": 3757,
+                    "text": "*   **Cultivate a Knowledge-Sharing Culture:** Firms can help encourage an environment where learning and sharing knowledge are valued and rewarded, through recognition programs and knowledge-sharing events."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    1,
+                    2,
+                    3
+                  ],
+                  "segment": {
+                    "endIndex": 4184,
+                    "startIndex": 3965,
+                    "text": "*   **Leverage AI and Automation:** Many solutions now incorporate AI-powered search and knowledge agents to help employees quickly find relevant information by asking natural language questions and summarizing content."
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    11
+                  ],
+                  "segment": {
+                    "endIndex": 4371,
+                    "startIndex": 4185,
+                    "text": "*   **Integrate KM with Existing Workflows:** Successful KM solutions are integrated with the tools and processes architects already use, rather than creating separate information silos."
+                  }
+                }
+              ],
+              "searchEntryPoint": {
+                "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFsL0f4VxNPEcaM1efV9eXvdM10MO3Gk1qT6RYlOd9_QKX_n6eo4Xf7t84RC9wcEEmht7c-PW5LEJnQ8fZlK3Tke7vSOfL9i8DDAAdGB9CkMMWGdkvWIVWObU7Ja8ny7y5nRyjmMwWGqUJ4J1FZYeH-DQTv0S02Tgu2c6N_iXreyR0q4Tp_LPxjx_7aHuofVqqQF41Arm-MEqGaZhKUsteOm6VXi_ojh3QT_Mxap9U=\">knowledge retention strategies architecture</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEIWhU9yCnpzAthMSwki1KiBBgTbIcpHNtymFNYGALa4ztG6ctaaiJQ0DkxLflUS4DvBqHoAcJAnRDLkDjtoR-yzxnEe_TKaVCUi4TdN73kdA-Q3sWbFf5MQdjw_t1Od_bmzpIGmGh0uAgtw9VsUO3ZEKoILtpTNnbFzwMHW1KFesL75vE6PwODfxTKzbSiJ6-sZ5T08sFfDBPIhemvVl2PloAaNByH3vGAiJq1ZbBXComDDkAv_Jc=\">knowledge transfer solutions for architecture firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQElSihbPHHtgwYXl_VuZZdq3EZzmXM0PBqY-iyKN9VJtcgyteH6GNRCBBFe8hHV9ixv01jKFRQzv-27-FYF1Adnf8nt7srXT7yj82dkYNcZ4ORyh35dvtVy8qrFqkLW1AmOdDhZnqON0ouIa4ZeyuhCPKfkkzkY08bAlV8CQiYRM1B92mFU2rY8CLIvpSWjb-gc-Q_dtCUn3Bo7njdUZPx_nHBCK6XGX0sLOVB2873QI-79KT_Ci_ad3K4=\">knowledge management consulting firms for architecture</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHlzMGfD40GWUg36y2CKcs9oTk9cXI-uhulRSCXfsRnKnYL-4WbSXpNj8uZ13DSgjCJ2gDOVNTooRkKYMhGcJ6KDl1DJpmBfCnfsjZMYsfTm759qFkxxO10qR7-wLgAfFDFYBN-qt3uEF_8l7nuALkZ6NSSlFo8dNwCmSCguv_GdEb37_gHFJ6RFJ1GQMy3ZHdOoRz1bNBqhSEEXmdb4OoYWG864-AyASD4PPemk6UTFyZY70NSTa2bhCG7Kyr25hLclKfDwdg7phw=\">consulting firms expertise knowledge management professional services</a>\n  </div>\n</div>\n"
+              },
+              "webSearchQueries": [
+                "knowledge management consulting firms for architecture",
+                "knowledge transfer solutions for architecture firms",
+                "consulting firms expertise knowledge management professional services",
+                "knowledge retention strategies architecture"
+              ]
+            },
+            "index": 0
+          }
+        ],
+        "modelVersion": "gemini-2.5-flash",
+        "responseId": "9Va3aqSwN4Csz7IPzvyyqQY",
+        "usageMetadata": {
+          "candidatesTokenCount": 857,
+          "promptTokenCount": 27,
+          "promptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 27
+            }
+          ],
+          "serviceTier": "standard",
+          "thoughtsTokenCount": 1019,
+          "toolUsePromptTokenCount": 142,
+          "toolUsePromptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 142
+            }
+          ],
+          "totalTokenCount": 2045
+        }
+      },
+      "technical_status": "success",
+      "timestamp": "2026-09-26T05:24:05.775970Z"
+    }
+  ],
+  "final_response": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "To address the challenge of critical knowledge residing with a few senior individuals within an architecture firm, several consulting firms and software providers specialize in knowledge management (KM) solutions. These companies can help implement strategies and tools for knowledge transfer, documentation, and making information accessible across your organization.\n\nHere are some firms that can assist:\n\n**Firms Specializing in Knowledge Management for AEC (Architecture, Engineering, and Construction) Industry:**\n\n*   **Knowledge Architecture:** This firm builds knowledge and learning management software specifically for AEC firms. Their flagship platform, Synthesis, acts as an intranet, Learning Management System (LMS), and an AI-powered search solution designed for the AEC industry. Synthesis integrates with common industry tools like Deltek, Unanet, OpenAsset, Newforma, and Revit to centralize knowledge, learning, and AI capabilities. They also foster community and best practices through events like the KA Connect conference and their \"Smarter by Design\" podcast.\n*   **Glide Solutions:** This company offers tailor-made apps for architects to improve knowledge management. Their solutions focus on centralizing project information for quick access, integrating spreadsheets and SQL databases, and crafting custom workflows to manage collective expertise.\n\n**General Knowledge Management Consulting Firms (Applicable to Professional Services):**\n\n*   **Alpha Apex Group:** A leading knowledge management consulting firm that offers strategies and solutions to help organizations capture, manage, and leverage their collective knowledge. They focus on enhancing decision-making, fostering innovation, and maintaining a competitive edge.\n*   **Knoco Ltd:** With over two decades of experience, Knoco Ltd specializes in knowledge management consultancy, providing services such as KM strategy development, knowledge retention programs, training, and community support.\n*   **FireOak Strategies:** This firm specializes in knowledge management consulting, aiming to connect people with the knowledge they need. They offer customized KM strategies, conduct current state assessments to identify pain points and knowledge bottlenecks, and help implement new initiatives.\n*   **Iknow LLC:** Known for implementing knowledge management systems that capture, save, and reuse organizational knowledge, Iknow LLC has a successful track record across numerous industry sectors.\n*   **Altuent:** Provides knowledge management consulting to improve decision-making, drive user adoption of systems, and prepare data for AI insights, with a focus on content strategy.\n*   **\"Big Four\" Consultancies (Accenture, Arup, Deloitte, EY, PwC):** These large consulting firms often have dedicated knowledge management practices that can offer comprehensive solutions for knowledge-intensive organizations. Arup, for instance, has been recognized for creating a learning organization.\n\n**Key Strategies These Firms Can Help You Implement:**\n\n*   **Develop a Knowledge Management Strategy:** Consultants can help identify knowledge gaps, streamline information processes, and define clear objectives for your KM initiative.\n*   **Implement KM Systems:** This involves setting up platforms for capturing, storing, and organizing project documentation, design standards, client information, and regulatory codes. Tools often feature robust metadata, version control, and advanced search capabilities.\n*   **Foster Knowledge Transfer and Retention:** This includes establishing practices for documenting \"lessons learned\" from projects, creating internal wikis or repositories for technical expertise, and encouraging mentorship between senior and junior architects.\n*   **Cultivate a Knowledge-Sharing Culture:** Firms can help encourage an environment where learning and sharing knowledge are valued and rewarded, through recognition programs and knowledge-sharing events.\n*   **Leverage AI and Automation:** Many solutions now incorporate AI-powered search and knowledge agents to help employees quickly find relevant information by asking natural language questions and summarizing content.\n*   **Integrate KM with Existing Workflows:** Successful KM solutions are integrated with the tools and processes architects already use, rather than creating separate information silos.\n\nBy engaging with these specialized firms, your architecture practice can develop a structured approach to capture, manage, and leverage its collective expertise, moving away from reliance on individual knowledge silos and fostering a more efficient, collaborative, and resilient practice."
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "STOP",
+        "groundingMetadata": {
+          "groundingChunks": [
+            {
+              "web": {
+                "title": "knowledge-architecture.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEdy2ObzN6L0qGjHt4Kfg6NgPGPhCjmt7OtmxvwaHLD4skq6mMV42LNrhCrtH9dCSV3WTbPgv3k9PhiNqff0Qs_5JZUmrzGBj-fRW0Izl9poUR1nctXOuOvReQ4euQPgytaqDlRieZV"
+              }
+            },
+            {
+              "web": {
+                "title": "entrearchitect.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF275HRqIb-EazDup67MAAIZ9zQzxwrSCSRMwl9D3eNdKg8vIP0N8sB9tpQaYVj7OWtP9o-I-1tVZa8VPXUlwUVCbnnBpyHCO7qa34VcAU-OsQysYqS5wEndCZAxth7T7fDc8T01wfW2MPcm5upMbs80lpPffaBG2E="
+              }
+            },
+            {
+              "web": {
+                "title": "knowledge-architecture.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHST9TqcmOMiiSty7kQdayYNQWaZ2uR17oAIIIEG-GPXlqVWU7T4HWUmN-Mf6VbcYeTcJZaN0k69T7CwtPFeeR-WoWg6uxsFo_eBNd1Q6E12tSro_Issrp3V1nRHUnGweBxtA=="
+              }
+            },
+            {
+              "web": {
+                "title": "youtube.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGLPLDOv10ZlKLkkbjTiSA_NfQtuc31DCGZ0k2H-tyryK-qzoNKu5Q4xWWbg0yaMUTW9vB2KtoEhs2qEEgpauOrQ9yb64c3hbCx6d4OFKIIGi-InZEbXMJ6q4Y75PKOpVbGQLdxmtA="
+              }
+            },
+            {
+              "web": {
+                "title": "glideapps.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF_V8uBr92XZTmsGvuGuHWtEB197vZWD4Dbxf08C1ziM32uic_f2aguR8fkm7O1jIp0Ws7VMJit8LU38Bnhd2Dlzb_GUYvBazMDWLR8w2FB-R-sefWIoxsgfM41ZPw_gK9YkGAXr__vtEWioiKCEJUrgu9YSws4w6Ib1CdQnRTwl_J_vqJtRgk="
+              }
+            },
+            {
+              "web": {
+                "title": "jake-jorgovan.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQElgn14uNnfN1iUoWrYUzQDUWrLOpb6iI7lSGH9LWwOSO7VW366J5eyL8TzQKmurvCV8k11S-k8bSsRdWADTeL9jsQbdbQek0SYT8debgCAyS9uflJ33HmNP-bVuQ4jAkzbmD8YPvYXHIDukrB8XWw-gnZhzDkJvLu_3HH-3nPK"
+              }
+            },
+            {
+              "web": {
+                "title": "cioreview.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGm764jDqwiVX6OmIXvtObkmjk1EknCkI_354koG-8F64HlACHi2YeiNlYqYPSM-ode8hO-oaRSXtKYizhdcKkZgOAuH0QBWd8DfNnHw71li1pWrwB_JJZzOeUfWDYrx-6cEd40PZ-16b_xjalNF3mcXwZgFVltLZ2ZJxbhmkHvwJss-OXIfv_AJvAEq--x0toVi3YtCqo2q54aCFAUV3Kc7mk4MyJXfmptCGxe"
+              }
+            },
+            {
+              "web": {
+                "title": "altuent.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEUQtVGN97UyAToyjFoQFyNfdxwTKmIfpg_WzUbdJLRcQWsNk6Yj28BiivrcA0wEnxlqJnDFDCrSNUtG5rYKOC1XWtj7VtR60dmHXh8J-w_0lGu8XAaZ0MZQ89yZSrFQtDdXwBn0UqSzKRwxACo"
+              }
+            },
+            {
+              "web": {
+                "title": "consultancy.uk",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFokGNo7sqRlQXRZr9vabzBUoRDwcopVrAFsPcIbZ5gic-fqLpeJDNBxMJCPzZ8tpcGydRUKgPPU2tnGOEtDLWhQxtOragz9mI2EHblsKyEHfCUC2NoL5o1qH5z3oVKyRoDpHjtwUtO0ErnJnjfewsGv_6X4FWIIiHy-aHeKnc4mR0hLGT9poleEl_8Vbp-w3u2tA=="
+              }
+            },
+            {
+              "web": {
+                "title": "zigpoll.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEMrqWWgNdHY1lnn4jbl4ILl1SkXrbafk7zcs5baPdOm0bJ9UwVel_iN-2TLIznaf4UCD-_e1MHfViYryYDe6ivmq83vLRvEGjVAjEU4kcRHgk8o8uMqp3n9-q9-j38YslRHRafh9s3S9rMCnv1aOV-Ry5jY3cwxIoX6YoPwbqoqg84DeRgJcyf6IoYEHmXhfGsi7MiaxQoJWX8dObX0hIQU2j6qDT8AHVoyqGq3sC3_k8iNqA8uBvYh4l2DCrnyzvfmMwD7NxxUrqE07c32-9qFZrcNtc4iUNPijY1XXXiGtnkmQxpPhdGLc3Xsdyd62XRLEeL"
+              }
+            },
+            {
+              "web": {
+                "title": "flowcase.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE_rFKQej3LzN7oOkMg2jcac2_itulVnYQ6mAgAokdKSJHTl8ugs4JM-GCPAMTLXEvcksPW0yxt2aX4YGYhpOeRV64QtQIV75uDgS2Oekh8WFklb0g1adFXE_JseZwvQ8vBiyot9Ab8GOPNgahMVw96U4nSTuqqBfk_LmgJEVrFbgO4LFaxK3I="
+              }
+            },
+            {
+              "web": {
+                "title": "medium.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFCJoCG-ftK1fN11t85NHRZY9PSHANLYz2GiZtcQUfgDHmvd1FjmAYjMuiFAbWCXPIeDfZdBd3ZAVlcum7JRlygv4Qe8t17oB3mpLy_rDzd8dbtV3qhIXEyA4T4Mk4vpw1LvlnqJL4uKaX0q8Ke1wWpvppv52J84AM_uiSYd-2qC5lkoZhJMAZunyz20bpuMN38UHY9ZJrCTnzd0tXabwWx7xiGDkFHw-xmfamGeA=="
+              }
+            },
+            {
+              "web": {
+                "title": "valamis.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHxsJ7-sqR_wY7SttBvMfEl7BejqumTbaYobdxjLU5NkrG9haV5yugkZJr-LqCx4x6qanpXibkIm4YidP69l1B2WKvYszLq4sg3JBIwo0F7wd-fsehUYD7TGFhvSLlUj7j2lvwsLdWH7KGxBA=="
+              }
+            },
+            {
+              "web": {
+                "title": "businessprocessmgmt.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHC77WKrahylMqYthOoPnu-X8npuVgdtbNO9kURLFJbbDcRkmFizKx4t_y9AqV4B2idB3tWm7CpWl73n1eX5KAvkQ53kAo4JRIx8vtLmOnuA5yGaMiSa8PUZbUIb_uFiCOMOzgCfch6NJs5d0uNJKg="
+              }
+            }
+          ],
+          "groundingSupports": [
+            {
+              "groundingChunkIndices": [
+                0,
+                1,
+                2,
+                3
+              ],
+              "segment": {
+                "endIndex": 951,
+                "startIndex": 796,
+                "text": "Synthesis integrates with common industry tools like Deltek, Unanet, OpenAsset, Newforma, and Revit to centralize knowledge, learning, and AI capabilities."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0,
+                1
+              ],
+              "segment": {
+                "endIndex": 1082,
+                "startIndex": 952,
+                "text": "They also foster community and best practices through events like the KA Connect conference and their \"Smarter by Design\" podcast."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                4
+              ],
+              "segment": {
+                "endIndex": 1374,
+                "startIndex": 1193,
+                "text": "Their solutions focus on centralizing project information for quick access, integrating spreadsheets and SQL databases, and crafting custom workflows to manage collective expertise."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                5
+              ],
+              "segment": {
+                "endIndex": 1754,
+                "startIndex": 1656,
+                "text": "They focus on enhancing decision-making, fostering innovation, and maintaining a competitive edge."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                5
+              ],
+              "segment": {
+                "endIndex": 1984,
+                "startIndex": 1755,
+                "text": "*   **Knoco Ltd:** With over two decades of experience, Knoco Ltd specializes in knowledge management consultancy, providing services such as KM strategy development, knowledge retention programs, training, and community support."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                5,
+                6
+              ],
+              "segment": {
+                "endIndex": 2283,
+                "startIndex": 2126,
+                "text": "They offer customized KM strategies, conduct current state assessments to identify pain points and knowledge bottlenecks, and help implement new initiatives."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                6
+              ],
+              "segment": {
+                "endIndex": 2484,
+                "startIndex": 2284,
+                "text": "*   **Iknow LLC:** Known for implementing knowledge management systems that capture, save, and reuse organizational knowledge, Iknow LLC has a successful track record across numerous industry sectors."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                7
+              ],
+              "segment": {
+                "endIndex": 2670,
+                "startIndex": 2485,
+                "text": "*   **Altuent:** Provides knowledge management consulting to improve decision-making, drive user adoption of systems, and prepare data for AI insights, with a focus on content strategy."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                8
+              ],
+              "segment": {
+                "endIndex": 2900,
+                "startIndex": 2671,
+                "text": "*   **\"Big Four\" Consultancies (Accenture, Arup, Deloitte, EY, PwC):** These large consulting firms often have dedicated knowledge management practices that can offer comprehensive solutions for knowledge-intensive organizations."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                8
+              ],
+              "segment": {
+                "endIndex": 2978,
+                "startIndex": 2901,
+                "text": "Arup, for instance, has been recognized for creating a learning organization."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                5,
+                9
+              ],
+              "segment": {
+                "endIndex": 3216,
+                "startIndex": 3036,
+                "text": "*   **Develop a Knowledge Management Strategy:** Consultants can help identify knowledge gaps, streamline information processes, and define clear objectives for your KM initiative."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                10,
+                9,
+                4
+              ],
+              "segment": {
+                "endIndex": 3403,
+                "startIndex": 3217,
+                "text": "*   **Implement KM Systems:** This involves setting up platforms for capturing, storing, and organizing project documentation, design standards, client information, and regulatory codes."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                11,
+                9
+              ],
+              "segment": {
+                "endIndex": 3491,
+                "startIndex": 3404,
+                "text": "Tools often feature robust metadata, version control, and advanced search capabilities."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                11,
+                12,
+                13
+              ],
+              "segment": {
+                "endIndex": 3756,
+                "startIndex": 3492,
+                "text": "*   **Foster Knowledge Transfer and Retention:** This includes establishing practices for documenting \"lessons learned\" from projects, creating internal wikis or repositories for technical expertise, and encouraging mentorship between senior and junior architects."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                11,
+                13
+              ],
+              "segment": {
+                "endIndex": 3964,
+                "startIndex": 3757,
+                "text": "*   **Cultivate a Knowledge-Sharing Culture:** Firms can help encourage an environment where learning and sharing knowledge are valued and rewarded, through recognition programs and knowledge-sharing events."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                1,
+                2,
+                3
+              ],
+              "segment": {
+                "endIndex": 4184,
+                "startIndex": 3965,
+                "text": "*   **Leverage AI and Automation:** Many solutions now incorporate AI-powered search and knowledge agents to help employees quickly find relevant information by asking natural language questions and summarizing content."
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0,
+                11
+              ],
+              "segment": {
+                "endIndex": 4371,
+                "startIndex": 4185,
+                "text": "*   **Integrate KM with Existing Workflows:** Successful KM solutions are integrated with the tools and processes architects already use, rather than creating separate information silos."
+              }
+            }
+          ],
+          "searchEntryPoint": {
+            "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFsL0f4VxNPEcaM1efV9eXvdM10MO3Gk1qT6RYlOd9_QKX_n6eo4Xf7t84RC9wcEEmht7c-PW5LEJnQ8fZlK3Tke7vSOfL9i8DDAAdGB9CkMMWGdkvWIVWObU7Ja8ny7y5nRyjmMwWGqUJ4J1FZYeH-DQTv0S02Tgu2c6N_iXreyR0q4Tp_LPxjx_7aHuofVqqQF41Arm-MEqGaZhKUsteOm6VXi_ojh3QT_Mxap9U=\">knowledge retention strategies architecture</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEIWhU9yCnpzAthMSwki1KiBBgTbIcpHNtymFNYGALa4ztG6ctaaiJQ0DkxLflUS4DvBqHoAcJAnRDLkDjtoR-yzxnEe_TKaVCUi4TdN73kdA-Q3sWbFf5MQdjw_t1Od_bmzpIGmGh0uAgtw9VsUO3ZEKoILtpTNnbFzwMHW1KFesL75vE6PwODfxTKzbSiJ6-sZ5T08sFfDBPIhemvVl2PloAaNByH3vGAiJq1ZbBXComDDkAv_Jc=\">knowledge transfer solutions for architecture firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQElSihbPHHtgwYXl_VuZZdq3EZzmXM0PBqY-iyKN9VJtcgyteH6GNRCBBFe8hHV9ixv01jKFRQzv-27-FYF1Adnf8nt7srXT7yj82dkYNcZ4ORyh35dvtVy8qrFqkLW1AmOdDhZnqON0ouIa4ZeyuhCPKfkkzkY08bAlV8CQiYRM1B92mFU2rY8CLIvpSWjb-gc-Q_dtCUn3Bo7njdUZPx_nHBCK6XGX0sLOVB2873QI-79KT_Ci_ad3K4=\">knowledge management consulting firms for architecture</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHlzMGfD40GWUg36y2CKcs9oTk9cXI-uhulRSCXfsRnKnYL-4WbSXpNj8uZ13DSgjCJ2gDOVNTooRkKYMhGcJ6KDl1DJpmBfCnfsjZMYsfTm759qFkxxO10qR7-wLgAfFDFYBN-qt3uEF_8l7nuALkZ6NSSlFo8dNwCmSCguv_GdEb37_gHFJ6RFJ1GQMy3ZHdOoRz1bNBqhSEEXmdb4OoYWG864-AyASD4PPemk6UTFyZY70NSTa2bhCG7Kyr25hLclKfDwdg7phw=\">consulting firms expertise knowledge management professional services</a>\n  </div>\n</div>\n"
+          },
+          "webSearchQueries": [
+            "knowledge management consulting firms for architecture",
+            "knowledge transfer solutions for architecture firms",
+            "consulting firms expertise knowledge management professional services",
+            "knowledge retention strategies architecture"
+          ]
+        },
+        "index": 0
+      }
+    ],
+    "modelVersion": "gemini-2.5-flash",
+    "responseId": "9Va3aqSwN4Csz7IPzvyyqQY",
+    "usageMetadata": {
+      "candidatesTokenCount": 857,
+      "promptTokenCount": 27,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 27
+        }
+      ],
+      "serviceTier": "standard",
+      "thoughtsTokenCount": 1019,
+      "toolUsePromptTokenCount": 142,
+      "toolUsePromptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 142
+        }
+      ],
+      "totalTokenCount": 2045
+    }
+  },
+  "prompt_id": "P03",
+  "request": {
+    "body": {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Too much of our architecture firm's knowledge lives in a few senior people's heads. What firms can help us solve that?"
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "google_search": {}
+        }
+      ]
+    },
+    "model": "gemini-2.5-flash"
+  },
+  "run_id": "gemini-api-google-search-20260925-r1",
+  "schema_version": "gemini-grounded-raw-receipt/v1"
+}

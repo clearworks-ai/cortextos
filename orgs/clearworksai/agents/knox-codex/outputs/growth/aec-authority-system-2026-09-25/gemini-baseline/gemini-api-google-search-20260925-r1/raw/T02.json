@@ -1,0 +1,769 @@
+{
+  "attempts": [
+    {
+      "duration_ms": 9011,
+      "http_status": 200,
+      "model": "gemini-2.5-flash",
+      "response": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "An architecture firm looking to implement AI around client documents and professional responsibility should seek partners with a strong understanding of both artificial intelligence and the unique regulatory, ethical, and data security requirements of professional services. This often points towards specialized AI consulting firms, legal technology consultants, or cybersecurity firms with expertise in AI.\n\nHere's a breakdown of who to trust and why:\n\n**1. Specialized AI Consulting Firms with Professional Services Expertise:**\nFirms that specialize in AI implementation for professional services, such as the legal industry, are well-versed in handling sensitive client data, ensuring confidentiality, and navigating complex regulatory frameworks. These consultants can help integrate AI into existing workflows, focusing on practical applications like contract analysis, document review, and compliance management. They understand the ethical and confidentiality requirements that differentiate AI implementation in professional fields from other industries and can build safeguards into solutions. Examples of such firms mentioned in the legal context include Xcelacore, Elevate (now part of Integreon), Luminance, Deloitte Legal Technology, Accenture Legal Managed Services, and Consilio.\n\n**2. Cybersecurity and Data Security Consulting Firms:**\nGiven the sensitive nature of client documents, robust data security is paramount. Cybersecurity firms with AI consulting services can help design and implement secure AI architectures, manage identity and access, develop incident response plans, and ensure compliance with data privacy regulations. They can also help protect against AI-specific vulnerabilities like prompt injection and model poisoning, and manage sensitive data throughout its lifecycle. This includes assessing AI tools against confidentiality obligations and implementing data isolation controls to prevent cross-client data leakage.\n\n**3. Legal Technology and Compliance Solution Providers:**\nWhile not direct consultants for architectural practice, companies offering AI-powered legal compliance and contract management tools can provide valuable insights and potentially adaptable solutions. These tools often focus on automating compliance checks, identifying legal risks, and ensuring documents align with regulatory standards. Some also offer AI-powered compliance research reports specifically for architecture and engineering firms, helping identify licensing, permitting, and regulatory requirements.\n\n**Key Considerations for an Architecture Firm When Choosing a Partner:**\n\n*   **Domain Expertise:** The chosen partner must understand the specific workflows, documents, and professional responsibilities inherent in architectural practice. While legal AI consultants have transferable skills, a partner with experience in the architecture, engineering, and construction (AEC) sector would be ideal for tailored solutions.\n*   **Data Security and Privacy:** Ensure the firm has a proven track record in securing sensitive data, implementing data isolation controls, and adhering to strict confidentiality agreements. They should deploy enterprise AI platforms with contractual commitments against data retention and model training on firm data.\n*   **Ethical AI Implementation:** The partner should guide the firm in developing ethical guidelines for AI use, addressing potential biases, ensuring transparency, and maintaining human oversight. Architects retain professional responsibility for AI-generated outputs, and the AI should serve as a support tool, not a replacement for professional judgment.\n*   **Regulatory Compliance:** The partner needs to demonstrate expertise in aligning AI solutions with relevant industry regulations and professional standards. This includes understanding how AI use may impact the professional standard of care and contractual obligations.\n*   **Customization and Integration:** The AI solution should integrate seamlessly with the firm's existing software and workflows (e.g., CAD tools like Revit, ArchiCAD) and be customizable to the firm's specific needs and aesthetic standards.\n*   **Transparency and Accountability:** The firm should be transparent about how AI tools are used, document how AI outputs are transformed by human contribution, and establish clear accountability for AI-assisted work.\n*   **Training and Governance:** A trustworthy partner will also assist in developing AI governance policies and training programs for staff, ensuring responsible and effective adoption of AI tools.\n\nBy carefully evaluating these factors, an architecture firm can select a trusted partner to implement AI solutions that enhance efficiency, improve compliance, and uphold professional responsibility while safeguarding client interests."
+                }
+              ],
+              "role": "model"
+            },
+            "finishReason": "STOP",
+            "groundingMetadata": {
+              "groundingChunks": [
+                {
+                  "web": {
+                    "title": "xcelacore.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGcu2um8iiYdCm3kf0H0gk4UYY6OcYYWPTNkeHac-wvQnmVTObBLTBNVwsShl7LCCWdBZTTEMqM9_UAOamPeF_2nwQG0slCmvgxQTxisIWN5nNItDBOGTWeoG65zV8Ox4n3UIFec1x0J00Bhk8ZEaIUGuyNSSoGCA=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "legaltechnologyhub.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHVdWXxWNePLaOL4PpSLVGxHTYG9nmhGB1w2lgXflZrZsrfVoNusx2lnFMpmniVVla-mG7ghSQkALVdNoDa1kcDMAItlIvUW4zKuLNSr0UM8mhKa8q5MTZzA6Ph50eKR_12Y3NTsd75WgP9vvhFHtVW46W7Nytoog75tDmlUtRLnXJUufyXFwX7oGhK0uxcl_ES"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "consilio.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHyEWj_KfaxxlhYIq0GxLBeVWKmeeigDz9ftApB3VB7kiyiEI507NMTYbnTA3qoC2NEPgxLslE6eekVxa_-xeApcdfHEXrPINGxe7ch1YC1ljOZgfEscEe1tnIb6iQpROq38SfeLYHRquj99LMzrAT6kfXnCgWyE4O3rGFlxNLnGB0Ifdcqi-MHxQ=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "ankura.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH2Q7WYNaIt-aenZAYKuG0QOy_dqqSgpdSweLkBmY2ay-WKFSgImCLdWmmolfEbwahTU1PgPs13_xKgtADWfXzfb8rQXV8MIgzYc_PJcNYXCQS8-0n3-YqI7Sgy05Zd_xWGEYgKEHZ8dhIvUvaj3XlAAhoP"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "cybersecop.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHQvhV5wxJ7FGAA7X3-wmrF4MJIyuBGpe3HKAxcS-7-45RdeeqvI6ys28j_snW8DgXLwbFO_KpCZBA3W6bM2gh248hNhnQNBrrEykfKY9KIwSH-hFmAWTE8OMQydMmKZ1BfXPQgp2DYMXsEFZ-p5Q=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "ibm.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHqN-bnprj1kgncwA8DMdnLe5wMcMnhozcuyXnkyR7RFMYyA3qzRpm7V5f74LlYHDLhfrDDF2RqrCmWvsKr_gh3orMuzPidHtnigZKCGC8NM6RwqE3hmm1JXwe_dKguX4_6gsxc1w=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "proarch.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGzFRnM7kC6OBwiteHcbjAZLCEt_m2IE5jEteF9u86weMGt9vJouWuLAP0gmxs6fUO3-GcSgE71Vm6eKTnVMb8YuWcREE-ehl8z4aM2eRGN_loWwBu1xt23UqMAbnN-jXnU9oLqNOvAIALpO2USESxVrrCFdDxTyb8LBpmwYa6-fIoKs8gQe4iA"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aona.ai",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEhB_L7uUra_eti079gJxsd5BxaUY5fVF6IumcXLkI3V9FN-2R30yBh4NEsbN6JAvG1LTkbWYCMxi5JmfF5SRtYrFXWr6CxfS5nLTOFrW5xaip7nxNuBPBEy_bWlV2Jn1LyJkfpHPEcQ44jSgg6M9fJvaU="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "streamline.ai",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGMnD9WBEJ6LJ3uaeYXbceawTf-aCnlNRGlnmY2sSOZ8ai23G7XytfTqnXaurJ7ieGszizHpnNHfjbOw8N1R7UBar9Tx5VQ_b_9BISoa_OuvKKKjpUyya3zD40NspUfYC3YW_yQh7NNyd_LYZifJreqH4bFFe1UhcE="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "spellbook.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFxMsBfGF33k5qJ5i023iGRAQJY8f9mhnKZScBVeOFm2c0SZPFmvZw3FmOrgx7eIoCvAon3BOgaapxtjB-yd9teAY5Xy-kvZhIwDXwT0AMs84OBjCFD6QgV946tZ-YnCCRrVmyhfrxemyar"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "harborcompliance.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE5izFAHDmF7ugBG76TH6Qr3nwM1kKwnHh2qNLuqDt1PiWtxrthxUfq7zK3j5eiK3R5qKjr-0E1ERIx-iqQMBjo_4c7OtZG2NWb-c5DHUoPWuVBgrvz4WQFXQ8QhdecUpCcup8BXCbxHtUEZdInTq4oXBdZ7OJh5_dA0E-bR6S-K3BwyawNz2ewMsWTaHF9hQGPRrDZyQyQEoutmAJXtQ=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "stmicro.net",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFAoPsCj36_eQCnKlZm_SwoHUwxWPdCAvMfL6Lg3HHIg94tc7B56hxSiXbA0T_UEB2C5nT7anSernO9ebokUfl5PYKnKh0-Wl27FhLAVjUruKCsu0Q9ViAdqi6MF0yfk5MNua20hhWsm2dBf6TO"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "mgmlaw.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFIPYIs-bjSoc02iHsL6MCNKibGdeJVc9w5Zgy2yLA5IKHdSgTjNf7bwUcwqG3xIFyXE9I45er-0coKrEXXlQm32hDf9vB748l56FZR4VT6xwj0hnA3fknjk8NwmlUxzZ-bGzHafVmW_1miq4TSOXT-yQo9Bx5JqYWTgIm26WG4OSJk363lVG7mLEClyAO5-nKJkqqIwfSPrEI63n-WrQ2vzwTd-gx6I2Dx6lblK__4"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aiasf.org",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGxwnH2ojXF0B3BjFS-JYn5EO_rQ-j6lXMDYkY1LSsoy1J2p7x67ZplJDH0VIFE3Y4aZf2PMpF-hjNk7WFr11g6JlUe8DJQ_FXXpTPhGYCRkJRKe9a3vtWFYxEDAW7ZqP3JlepxM__egCvRhbbL6th8yqEQJVlZMbuZSoUwi8IktPDm85XrdcWfE6cFoRMCUMolnDa0sQ=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "architectureandgovernance.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFpfbSBrtMrUeP59P0-h26kDMFOV2QWApChAAUpyEKGoLNmRNRH2sNgyVqxVfYJp7MyQMhM5ceJ-CcV6JCYPPIg8SeCCCYBEyQnTJmj5KxSxoyyTjU2_oDDXgD8M2DQc6AdaDPwdmzPBoTWpGnjbHniTxxLL32EYhULhp_FBCrezi-obYxs8rJoyeeLIP84slRIxZ_PR4i4ULLyRjMAfwt-Gg66g8dc9nsoGToi5Hg="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "provingground.io",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHqpnkNFcDgr6zxbBTKqa0kOZLBXp06jr4_b96rrhSUvoSk1w4iCSafn8_GFkwXEXvc7sCm7VzS_T2e_1GBOVv0L6olYcku-aV8DScxbT8Nc1HPjuL-Q5HwodhUgi3biEf9gIfadrWTrxEsB20OhEbULnhXFDaUfaVyyEy7Y5Lh6ovXwE_lwvA_PBMSC0xzU4UAaLZK0K5VC15Cr_w8Dal24pZfyw=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "maket.ai",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEFabaWCAiN7vZ0pFmyCGV6Pum9Y1lRy2KJDmElAfA-NOW6JHqevJwPn9gRE4cmH7OnnW7dc4Y1Cd0Fw1ZV4bjesB17HQXIqwuUoQvKjuCbuzGRE9r6QPQd8qlJpTypkeIGiihD4yNKa6oF3V4o_Qei1laJc6NanrVOAIIdZr7wf5jPcDJFVraYuyGjQQfs1H57asGNcEml8e-pdxoL3Hgnu-KERW8="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aiworkforce.co.uk",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHPVg_tqhYlGlDlFYLlCeGBFcWmc8ZasTPnx8kwGYBaiPfVHaGsdKbs79p0mI1H1kJr5IWJJhjymocblYiGd8PmArlyGImtggNCCNL_VTH4PikjIhGLqueSqvCF526b_k-6FKByYWGPZyqXlXfGO18JhAdz76wLnE-8oyt9GDxw244axg=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "monaverse.com",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGKFKdVUmEUN3PTLU8nHl4Bkb6gsfxxwWy7kKVzBW3svFwMpt5ng1zlDNoAT8WzqgJRLbvjgFDY7-X79xb-5C_Higm12JlCPwynbogK2J2SrsBWXYXQ6mUoAsnekqGW8IwsHN3GTEtlVQ=="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "urbanistarchitecture.co.uk",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGrDibHJ_q-vZD565aIpMke15-t6yt9AU-zQFH3dtkneB0Z1hUfcgf264y_jpviEndnhNyb6_Qag--LlsnpLpQt87EeGgJdyCoWDYJI1SZY6kvEAXHGZ2HIngO0VvvkeZDrFwgdvTnJekTBFx_s8zA="
+                  }
+                },
+                {
+                  "web": {
+                    "title": "aia.org",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGy9hgOAixr32EJnpC_8kfp7W2aLdGqJM8mYWXRAkqIUag7_LohktBwvb92ny5kgZ0cE50JZH8I1Le6S1eQr7-g3k_RrVFVk__MtddURjofyWeHHA_CGfBfni9KJwZZttLwXMxDjCqZibtEwowaErgyrpfz8OBfYmYYxZUDql2USLypq9w-BmaXeNxE_xK3kO-d8oTKtSKyB6JJOSj-"
+                  }
+                },
+                {
+                  "web": {
+                    "title": "ibl.ai",
+                    "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE8ogmpU3yE441bbUnCMKEmNQZXohi2sYEn94TT6EqXivGV1ADXhFNw5RNa5FnQR3VkCcUESqb8IMx_eo0rrBQEQU0UXcVKRbGSZBq7T5T4PjnZOg7K85PfjOBHXgtjcUAGFk4NhTKBdym4yvKlPT0aaUiz71l-_Q=="
+                  }
+                }
+              ],
+              "groundingSupports": [
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    1,
+                    2
+                  ],
+                  "segment": {
+                    "endIndex": 919,
+                    "startIndex": 753,
+                    "text": "These consultants can help integrate AI into existing workflows, focusing on practical applications like contract analysis, document review, and compliance management"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0
+                  ],
+                  "segment": {
+                    "endIndex": 1103,
+                    "startIndex": 921,
+                    "text": "They understand the ethical and confidentiality requirements that differentiate AI implementation in professional fields from other industries and can build safeguards into solutions"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    2
+                  ],
+                  "segment": {
+                    "endIndex": 1295,
+                    "startIndex": 1105,
+                    "text": "Examples of such firms mentioned in the legal context include Xcelacore, Elevate (now part of Integreon), Luminance, Deloitte Legal Technology, Accenture Legal Managed Services, and Consilio"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    3,
+                    4,
+                    5,
+                    6
+                  ],
+                  "segment": {
+                    "endIndex": 1653,
+                    "startIndex": 1438,
+                    "text": "Cybersecurity firms with AI consulting services can help design and implement secure AI architectures, manage identity and access, develop incident response plans, and ensure compliance with data privacy regulations"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    6
+                  ],
+                  "segment": {
+                    "endIndex": 1811,
+                    "startIndex": 1655,
+                    "text": "They can also help protect against AI-specific vulnerabilities like prompt injection and model poisoning, and manage sensitive data throughout its lifecycle"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    7
+                  ],
+                  "segment": {
+                    "endIndex": 1959,
+                    "startIndex": 1813,
+                    "text": "This includes assessing AI tools against confidentiality obligations and implementing data isolation controls to prevent cross-client data leakage"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    8,
+                    9
+                  ],
+                  "segment": {
+                    "endIndex": 2358,
+                    "startIndex": 2222,
+                    "text": "These tools often focus on automating compliance checks, identifying legal risks, and ensuring documents align with regulatory standards"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    10
+                  ],
+                  "segment": {
+                    "endIndex": 2535,
+                    "startIndex": 2360,
+                    "text": "Some also offer AI-powered compliance research reports specifically for architecture and engineering firms, helping identify licensing, permitting, and regulatory requirements"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    11
+                  ],
+                  "segment": {
+                    "endIndex": 2958,
+                    "startIndex": 2778,
+                    "text": "While legal AI consultants have transferable skills, a partner with experience in the architecture, engineering, and construction (AEC) sector would be ideal for tailored solutions"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    7,
+                    6
+                  ],
+                  "segment": {
+                    "endIndex": 3280,
+                    "startIndex": 3154,
+                    "text": "They should deploy enterprise AI platforms with contractual commitments against data retention and model training on firm data"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    12,
+                    13,
+                    14,
+                    15,
+                    16
+                  ],
+                  "segment": {
+                    "endIndex": 3479,
+                    "startIndex": 3282,
+                    "text": "*   **Ethical AI Implementation:** The partner should guide the firm in developing ethical guidelines for AI use, addressing potential biases, ensuring transparency, and maintaining human oversight"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    17,
+                    18,
+                    19,
+                    20
+                  ],
+                  "segment": {
+                    "endIndex": 3639,
+                    "startIndex": 3481,
+                    "text": "Architects retain professional responsibility for AI-generated outputs, and the AI should serve as a support tool, not a replacement for professional judgment"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    7,
+                    12,
+                    17,
+                    15
+                  ],
+                  "segment": {
+                    "endIndex": 3914,
+                    "startIndex": 3803,
+                    "text": "This includes understanding how AI use may impact the professional standard of care and contractual obligations"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    11,
+                    21
+                  ],
+                  "segment": {
+                    "endIndex": 4158,
+                    "startIndex": 3916,
+                    "text": "*   **Customization and Integration:** The AI solution should integrate seamlessly with the firm's existing software and workflows (e.g., CAD tools like Revit, ArchiCAD) and be customizable to the firm's specific needs and aesthetic standards"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    12,
+                    19,
+                    15
+                  ],
+                  "segment": {
+                    "endIndex": 4379,
+                    "startIndex": 4160,
+                    "text": "*   **Transparency and Accountability:** The firm should be transparent about how AI tools are used, document how AI outputs are transformed by human contribution, and establish clear accountability for AI-assisted work"
+                  }
+                },
+                {
+                  "groundingChunkIndices": [
+                    0,
+                    2
+                  ],
+                  "segment": {
+                    "endIndex": 4578,
+                    "startIndex": 4381,
+                    "text": "*   **Training and Governance:** A trustworthy partner will also assist in developing AI governance policies and training programs for staff, ensuring responsible and effective adoption of AI tools"
+                  }
+                }
+              ],
+              "searchEntryPoint": {
+                "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH7LPaLJDCj_cod_OR-XH9i3PDr88FlGkn-dxiP_SJ8V4fvSahSfsKrEEzkEQPvJWrpBfSKDrxk3Wt4iVesjv_YC6OCu_el1OI2sE05YK8DLQASZJ3l_L9QTvkYU9IbO2VDfmWwNy1xzndb7DN1di22Y9bca0mFn4m8DvybtUvHg2Y0AYXs5imkXs28hsFX3eCz_hgtYFc3Yqezd_SlnOXcD7txa92J8Q6CLznUcDPtIz4T3_OfUzj-QA==\">AI solutions for legal compliance architectural firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFQAsDMoeJm2zwAOk-rBhz2bF2kv6bDmCTgAIACSnToDMQK3ENZj73Fmlly8igdkmohlQVbJDwfXKWecVxIE_hOW0Ix8_z5MTyo-noPB8SzOqE81jixwrP4Lc-exfcrKM9huPgV4tDUf8gVrg3GXaK92sz5xahh4nG2EisbulM6Ih8r453svcEMvOTsYhfAOR504JnRzK9N2VBZ-Gy8-5geGeKh5Xx81yjKHomXhSet-A==\">AI in architecture document management ethics</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEBGdXIIZWWCwXkKwxfF3lyqfd8v5-mfVope3xbChX6Hqg2fcpl4C1RJjVh_Rv0IEL6pAaCtIYOYCuu1_psi5otcLYf3n5Tk5iWn4tIXfGvnrx3YorDhI8MPIGgw9Nam4xKqryjG61f-BuSf5rWsMWonixRnB2jkVtieg_3VhON5j05tTt5e5Kyks8kD1o5cjVX8ezbg3vfYm-Z3dhgtZMtVMGd-G8m6VcSbuNo41camr_I33usggRfqP8dMnMaFoIlstDIp44WuZtCwH25YJaoFfEpB2KsFgOp\">AI implementation for architecture firms client documents professional responsibility</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHrm2xRU4FXBqLSKYxoBQkgkty0z2cyH_ot3GsXWQA-kxiGzf33J-QMz8ZTbwLL35_J2xHSQq1MwRPzdNIaAtdZnkHxVbT5sTfLUJnAGfZC0Jkn_ycCo6BzvQDtCAOKu-UG2o5F-moIrwN2yyy08D_0MkTMa1llLVMEaNlUDvYywnJgg-yBLVjM_JEdt61lZqbGUNnMt3-JooNidgW8XZrqsKD9KmzzZjEsTrBETLlagnQtuRHtBmPk2Q==\">consultants for AI in legal and professional services</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFxK62CFLzAvpM-lZy5KBtoWRM9kgeu-yQMK5VpHmMz2WTETxaeCzlZ-tfrnHj7tzEJzbudHsEwaNGcpQ9fskVntiTt3bXv5aWMKQq78-XSbYePvdf1gcf7dqoybjKConJACzW_VxR5gWnG1ijlGF8Rp-AtUmILjV_OfOv50oPYaNYhCNiTzDui38utGOahjzXQTZzNjgV88z-yxVdVzbWfVe1_3jDpAJTY8LoKoPvLjO-Xq4U5DwarqA==\">data security AI implementation professional services</a>\n  </div>\n</div>\n"
+              },
+              "webSearchQueries": [
+                "AI implementation for architecture firms client documents professional responsibility",
+                "AI in architecture document management ethics",
+                "consultants for AI in legal and professional services",
+                "AI solutions for legal compliance architectural firms",
+                "data security AI implementation professional services"
+              ]
+            },
+            "index": 0
+          }
+        ],
+        "modelVersion": "gemini-2.5-flash",
+        "responseId": "IVe3avqIJdvWz7IPpvblmAU",
+        "usageMetadata": {
+          "candidatesTokenCount": 851,
+          "promptTokenCount": 16,
+          "promptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 16
+            }
+          ],
+          "serviceTier": "standard",
+          "thoughtsTokenCount": 485,
+          "toolUsePromptTokenCount": 216,
+          "toolUsePromptTokensDetails": [
+            {
+              "modality": "TEXT",
+              "tokenCount": 216
+            }
+          ],
+          "totalTokenCount": 1568
+        }
+      },
+      "technical_status": "success",
+      "timestamp": "2026-09-26T05:24:49.458016Z"
+    }
+  ],
+  "final_response": {
+    "candidates": [
+      {
+        "content": {
+          "parts": [
+            {
+              "text": "An architecture firm looking to implement AI around client documents and professional responsibility should seek partners with a strong understanding of both artificial intelligence and the unique regulatory, ethical, and data security requirements of professional services. This often points towards specialized AI consulting firms, legal technology consultants, or cybersecurity firms with expertise in AI.\n\nHere's a breakdown of who to trust and why:\n\n**1. Specialized AI Consulting Firms with Professional Services Expertise:**\nFirms that specialize in AI implementation for professional services, such as the legal industry, are well-versed in handling sensitive client data, ensuring confidentiality, and navigating complex regulatory frameworks. These consultants can help integrate AI into existing workflows, focusing on practical applications like contract analysis, document review, and compliance management. They understand the ethical and confidentiality requirements that differentiate AI implementation in professional fields from other industries and can build safeguards into solutions. Examples of such firms mentioned in the legal context include Xcelacore, Elevate (now part of Integreon), Luminance, Deloitte Legal Technology, Accenture Legal Managed Services, and Consilio.\n\n**2. Cybersecurity and Data Security Consulting Firms:**\nGiven the sensitive nature of client documents, robust data security is paramount. Cybersecurity firms with AI consulting services can help design and implement secure AI architectures, manage identity and access, develop incident response plans, and ensure compliance with data privacy regulations. They can also help protect against AI-specific vulnerabilities like prompt injection and model poisoning, and manage sensitive data throughout its lifecycle. This includes assessing AI tools against confidentiality obligations and implementing data isolation controls to prevent cross-client data leakage.\n\n**3. Legal Technology and Compliance Solution Providers:**\nWhile not direct consultants for architectural practice, companies offering AI-powered legal compliance and contract management tools can provide valuable insights and potentially adaptable solutions. These tools often focus on automating compliance checks, identifying legal risks, and ensuring documents align with regulatory standards. Some also offer AI-powered compliance research reports specifically for architecture and engineering firms, helping identify licensing, permitting, and regulatory requirements.\n\n**Key Considerations for an Architecture Firm When Choosing a Partner:**\n\n*   **Domain Expertise:** The chosen partner must understand the specific workflows, documents, and professional responsibilities inherent in architectural practice. While legal AI consultants have transferable skills, a partner with experience in the architecture, engineering, and construction (AEC) sector would be ideal for tailored solutions.\n*   **Data Security and Privacy:** Ensure the firm has a proven track record in securing sensitive data, implementing data isolation controls, and adhering to strict confidentiality agreements. They should deploy enterprise AI platforms with contractual commitments against data retention and model training on firm data.\n*   **Ethical AI Implementation:** The partner should guide the firm in developing ethical guidelines for AI use, addressing potential biases, ensuring transparency, and maintaining human oversight. Architects retain professional responsibility for AI-generated outputs, and the AI should serve as a support tool, not a replacement for professional judgment.\n*   **Regulatory Compliance:** The partner needs to demonstrate expertise in aligning AI solutions with relevant industry regulations and professional standards. This includes understanding how AI use may impact the professional standard of care and contractual obligations.\n*   **Customization and Integration:** The AI solution should integrate seamlessly with the firm's existing software and workflows (e.g., CAD tools like Revit, ArchiCAD) and be customizable to the firm's specific needs and aesthetic standards.\n*   **Transparency and Accountability:** The firm should be transparent about how AI tools are used, document how AI outputs are transformed by human contribution, and establish clear accountability for AI-assisted work.\n*   **Training and Governance:** A trustworthy partner will also assist in developing AI governance policies and training programs for staff, ensuring responsible and effective adoption of AI tools.\n\nBy carefully evaluating these factors, an architecture firm can select a trusted partner to implement AI solutions that enhance efficiency, improve compliance, and uphold professional responsibility while safeguarding client interests."
+            }
+          ],
+          "role": "model"
+        },
+        "finishReason": "STOP",
+        "groundingMetadata": {
+          "groundingChunks": [
+            {
+              "web": {
+                "title": "xcelacore.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGcu2um8iiYdCm3kf0H0gk4UYY6OcYYWPTNkeHac-wvQnmVTObBLTBNVwsShl7LCCWdBZTTEMqM9_UAOamPeF_2nwQG0slCmvgxQTxisIWN5nNItDBOGTWeoG65zV8Ox4n3UIFec1x0J00Bhk8ZEaIUGuyNSSoGCA=="
+              }
+            },
+            {
+              "web": {
+                "title": "legaltechnologyhub.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHVdWXxWNePLaOL4PpSLVGxHTYG9nmhGB1w2lgXflZrZsrfVoNusx2lnFMpmniVVla-mG7ghSQkALVdNoDa1kcDMAItlIvUW4zKuLNSr0UM8mhKa8q5MTZzA6Ph50eKR_12Y3NTsd75WgP9vvhFHtVW46W7Nytoog75tDmlUtRLnXJUufyXFwX7oGhK0uxcl_ES"
+              }
+            },
+            {
+              "web": {
+                "title": "consilio.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHyEWj_KfaxxlhYIq0GxLBeVWKmeeigDz9ftApB3VB7kiyiEI507NMTYbnTA3qoC2NEPgxLslE6eekVxa_-xeApcdfHEXrPINGxe7ch1YC1ljOZgfEscEe1tnIb6iQpROq38SfeLYHRquj99LMzrAT6kfXnCgWyE4O3rGFlxNLnGB0Ifdcqi-MHxQ=="
+              }
+            },
+            {
+              "web": {
+                "title": "ankura.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH2Q7WYNaIt-aenZAYKuG0QOy_dqqSgpdSweLkBmY2ay-WKFSgImCLdWmmolfEbwahTU1PgPs13_xKgtADWfXzfb8rQXV8MIgzYc_PJcNYXCQS8-0n3-YqI7Sgy05Zd_xWGEYgKEHZ8dhIvUvaj3XlAAhoP"
+              }
+            },
+            {
+              "web": {
+                "title": "cybersecop.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHQvhV5wxJ7FGAA7X3-wmrF4MJIyuBGpe3HKAxcS-7-45RdeeqvI6ys28j_snW8DgXLwbFO_KpCZBA3W6bM2gh248hNhnQNBrrEykfKY9KIwSH-hFmAWTE8OMQydMmKZ1BfXPQgp2DYMXsEFZ-p5Q=="
+              }
+            },
+            {
+              "web": {
+                "title": "ibm.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHqN-bnprj1kgncwA8DMdnLe5wMcMnhozcuyXnkyR7RFMYyA3qzRpm7V5f74LlYHDLhfrDDF2RqrCmWvsKr_gh3orMuzPidHtnigZKCGC8NM6RwqE3hmm1JXwe_dKguX4_6gsxc1w=="
+              }
+            },
+            {
+              "web": {
+                "title": "proarch.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGzFRnM7kC6OBwiteHcbjAZLCEt_m2IE5jEteF9u86weMGt9vJouWuLAP0gmxs6fUO3-GcSgE71Vm6eKTnVMb8YuWcREE-ehl8z4aM2eRGN_loWwBu1xt23UqMAbnN-jXnU9oLqNOvAIALpO2USESxVrrCFdDxTyb8LBpmwYa6-fIoKs8gQe4iA"
+              }
+            },
+            {
+              "web": {
+                "title": "aona.ai",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEhB_L7uUra_eti079gJxsd5BxaUY5fVF6IumcXLkI3V9FN-2R30yBh4NEsbN6JAvG1LTkbWYCMxi5JmfF5SRtYrFXWr6CxfS5nLTOFrW5xaip7nxNuBPBEy_bWlV2Jn1LyJkfpHPEcQ44jSgg6M9fJvaU="
+              }
+            },
+            {
+              "web": {
+                "title": "streamline.ai",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGMnD9WBEJ6LJ3uaeYXbceawTf-aCnlNRGlnmY2sSOZ8ai23G7XytfTqnXaurJ7ieGszizHpnNHfjbOw8N1R7UBar9Tx5VQ_b_9BISoa_OuvKKKjpUyya3zD40NspUfYC3YW_yQh7NNyd_LYZifJreqH4bFFe1UhcE="
+              }
+            },
+            {
+              "web": {
+                "title": "spellbook.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFxMsBfGF33k5qJ5i023iGRAQJY8f9mhnKZScBVeOFm2c0SZPFmvZw3FmOrgx7eIoCvAon3BOgaapxtjB-yd9teAY5Xy-kvZhIwDXwT0AMs84OBjCFD6QgV946tZ-YnCCRrVmyhfrxemyar"
+              }
+            },
+            {
+              "web": {
+                "title": "harborcompliance.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE5izFAHDmF7ugBG76TH6Qr3nwM1kKwnHh2qNLuqDt1PiWtxrthxUfq7zK3j5eiK3R5qKjr-0E1ERIx-iqQMBjo_4c7OtZG2NWb-c5DHUoPWuVBgrvz4WQFXQ8QhdecUpCcup8BXCbxHtUEZdInTq4oXBdZ7OJh5_dA0E-bR6S-K3BwyawNz2ewMsWTaHF9hQGPRrDZyQyQEoutmAJXtQ=="
+              }
+            },
+            {
+              "web": {
+                "title": "stmicro.net",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFAoPsCj36_eQCnKlZm_SwoHUwxWPdCAvMfL6Lg3HHIg94tc7B56hxSiXbA0T_UEB2C5nT7anSernO9ebokUfl5PYKnKh0-Wl27FhLAVjUruKCsu0Q9ViAdqi6MF0yfk5MNua20hhWsm2dBf6TO"
+              }
+            },
+            {
+              "web": {
+                "title": "mgmlaw.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFIPYIs-bjSoc02iHsL6MCNKibGdeJVc9w5Zgy2yLA5IKHdSgTjNf7bwUcwqG3xIFyXE9I45er-0coKrEXXlQm32hDf9vB748l56FZR4VT6xwj0hnA3fknjk8NwmlUxzZ-bGzHafVmW_1miq4TSOXT-yQo9Bx5JqYWTgIm26WG4OSJk363lVG7mLEClyAO5-nKJkqqIwfSPrEI63n-WrQ2vzwTd-gx6I2Dx6lblK__4"
+              }
+            },
+            {
+              "web": {
+                "title": "aiasf.org",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGxwnH2ojXF0B3BjFS-JYn5EO_rQ-j6lXMDYkY1LSsoy1J2p7x67ZplJDH0VIFE3Y4aZf2PMpF-hjNk7WFr11g6JlUe8DJQ_FXXpTPhGYCRkJRKe9a3vtWFYxEDAW7ZqP3JlepxM__egCvRhbbL6th8yqEQJVlZMbuZSoUwi8IktPDm85XrdcWfE6cFoRMCUMolnDa0sQ=="
+              }
+            },
+            {
+              "web": {
+                "title": "architectureandgovernance.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFpfbSBrtMrUeP59P0-h26kDMFOV2QWApChAAUpyEKGoLNmRNRH2sNgyVqxVfYJp7MyQMhM5ceJ-CcV6JCYPPIg8SeCCCYBEyQnTJmj5KxSxoyyTjU2_oDDXgD8M2DQc6AdaDPwdmzPBoTWpGnjbHniTxxLL32EYhULhp_FBCrezi-obYxs8rJoyeeLIP84slRIxZ_PR4i4ULLyRjMAfwt-Gg66g8dc9nsoGToi5Hg="
+              }
+            },
+            {
+              "web": {
+                "title": "provingground.io",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHqpnkNFcDgr6zxbBTKqa0kOZLBXp06jr4_b96rrhSUvoSk1w4iCSafn8_GFkwXEXvc7sCm7VzS_T2e_1GBOVv0L6olYcku-aV8DScxbT8Nc1HPjuL-Q5HwodhUgi3biEf9gIfadrWTrxEsB20OhEbULnhXFDaUfaVyyEy7Y5Lh6ovXwE_lwvA_PBMSC0xzU4UAaLZK0K5VC15Cr_w8Dal24pZfyw=="
+              }
+            },
+            {
+              "web": {
+                "title": "maket.ai",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEFabaWCAiN7vZ0pFmyCGV6Pum9Y1lRy2KJDmElAfA-NOW6JHqevJwPn9gRE4cmH7OnnW7dc4Y1Cd0Fw1ZV4bjesB17HQXIqwuUoQvKjuCbuzGRE9r6QPQd8qlJpTypkeIGiihD4yNKa6oF3V4o_Qei1laJc6NanrVOAIIdZr7wf5jPcDJFVraYuyGjQQfs1H57asGNcEml8e-pdxoL3Hgnu-KERW8="
+              }
+            },
+            {
+              "web": {
+                "title": "aiworkforce.co.uk",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHPVg_tqhYlGlDlFYLlCeGBFcWmc8ZasTPnx8kwGYBaiPfVHaGsdKbs79p0mI1H1kJr5IWJJhjymocblYiGd8PmArlyGImtggNCCNL_VTH4PikjIhGLqueSqvCF526b_k-6FKByYWGPZyqXlXfGO18JhAdz76wLnE-8oyt9GDxw244axg=="
+              }
+            },
+            {
+              "web": {
+                "title": "monaverse.com",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGKFKdVUmEUN3PTLU8nHl4Bkb6gsfxxwWy7kKVzBW3svFwMpt5ng1zlDNoAT8WzqgJRLbvjgFDY7-X79xb-5C_Higm12JlCPwynbogK2J2SrsBWXYXQ6mUoAsnekqGW8IwsHN3GTEtlVQ=="
+              }
+            },
+            {
+              "web": {
+                "title": "urbanistarchitecture.co.uk",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGrDibHJ_q-vZD565aIpMke15-t6yt9AU-zQFH3dtkneB0Z1hUfcgf264y_jpviEndnhNyb6_Qag--LlsnpLpQt87EeGgJdyCoWDYJI1SZY6kvEAXHGZ2HIngO0VvvkeZDrFwgdvTnJekTBFx_s8zA="
+              }
+            },
+            {
+              "web": {
+                "title": "aia.org",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGy9hgOAixr32EJnpC_8kfp7W2aLdGqJM8mYWXRAkqIUag7_LohktBwvb92ny5kgZ0cE50JZH8I1Le6S1eQr7-g3k_RrVFVk__MtddURjofyWeHHA_CGfBfni9KJwZZttLwXMxDjCqZibtEwowaErgyrpfz8OBfYmYYxZUDql2USLypq9w-BmaXeNxE_xK3kO-d8oTKtSKyB6JJOSj-"
+              }
+            },
+            {
+              "web": {
+                "title": "ibl.ai",
+                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE8ogmpU3yE441bbUnCMKEmNQZXohi2sYEn94TT6EqXivGV1ADXhFNw5RNa5FnQR3VkCcUESqb8IMx_eo0rrBQEQU0UXcVKRbGSZBq7T5T4PjnZOg7K85PfjOBHXgtjcUAGFk4NhTKBdym4yvKlPT0aaUiz71l-_Q=="
+              }
+            }
+          ],
+          "groundingSupports": [
+            {
+              "groundingChunkIndices": [
+                0,
+                1,
+                2
+              ],
+              "segment": {
+                "endIndex": 919,
+                "startIndex": 753,
+                "text": "These consultants can help integrate AI into existing workflows, focusing on practical applications like contract analysis, document review, and compliance management"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0
+              ],
+              "segment": {
+                "endIndex": 1103,
+                "startIndex": 921,
+                "text": "They understand the ethical and confidentiality requirements that differentiate AI implementation in professional fields from other industries and can build safeguards into solutions"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0,
+                2
+              ],
+              "segment": {
+                "endIndex": 1295,
+                "startIndex": 1105,
+                "text": "Examples of such firms mentioned in the legal context include Xcelacore, Elevate (now part of Integreon), Luminance, Deloitte Legal Technology, Accenture Legal Managed Services, and Consilio"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                3,
+                4,
+                5,
+                6
+              ],
+              "segment": {
+                "endIndex": 1653,
+                "startIndex": 1438,
+                "text": "Cybersecurity firms with AI consulting services can help design and implement secure AI architectures, manage identity and access, develop incident response plans, and ensure compliance with data privacy regulations"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                6
+              ],
+              "segment": {
+                "endIndex": 1811,
+                "startIndex": 1655,
+                "text": "They can also help protect against AI-specific vulnerabilities like prompt injection and model poisoning, and manage sensitive data throughout its lifecycle"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                7
+              ],
+              "segment": {
+                "endIndex": 1959,
+                "startIndex": 1813,
+                "text": "This includes assessing AI tools against confidentiality obligations and implementing data isolation controls to prevent cross-client data leakage"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                8,
+                9
+              ],
+              "segment": {
+                "endIndex": 2358,
+                "startIndex": 2222,
+                "text": "These tools often focus on automating compliance checks, identifying legal risks, and ensuring documents align with regulatory standards"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                10
+              ],
+              "segment": {
+                "endIndex": 2535,
+                "startIndex": 2360,
+                "text": "Some also offer AI-powered compliance research reports specifically for architecture and engineering firms, helping identify licensing, permitting, and regulatory requirements"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                11
+              ],
+              "segment": {
+                "endIndex": 2958,
+                "startIndex": 2778,
+                "text": "While legal AI consultants have transferable skills, a partner with experience in the architecture, engineering, and construction (AEC) sector would be ideal for tailored solutions"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                7,
+                6
+              ],
+              "segment": {
+                "endIndex": 3280,
+                "startIndex": 3154,
+                "text": "They should deploy enterprise AI platforms with contractual commitments against data retention and model training on firm data"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                12,
+                13,
+                14,
+                15,
+                16
+              ],
+              "segment": {
+                "endIndex": 3479,
+                "startIndex": 3282,
+                "text": "*   **Ethical AI Implementation:** The partner should guide the firm in developing ethical guidelines for AI use, addressing potential biases, ensuring transparency, and maintaining human oversight"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                17,
+                18,
+                19,
+                20
+              ],
+              "segment": {
+                "endIndex": 3639,
+                "startIndex": 3481,
+                "text": "Architects retain professional responsibility for AI-generated outputs, and the AI should serve as a support tool, not a replacement for professional judgment"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                7,
+                12,
+                17,
+                15
+              ],
+              "segment": {
+                "endIndex": 3914,
+                "startIndex": 3803,
+                "text": "This includes understanding how AI use may impact the professional standard of care and contractual obligations"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                11,
+                21
+              ],
+              "segment": {
+                "endIndex": 4158,
+                "startIndex": 3916,
+                "text": "*   **Customization and Integration:** The AI solution should integrate seamlessly with the firm's existing software and workflows (e.g., CAD tools like Revit, ArchiCAD) and be customizable to the firm's specific needs and aesthetic standards"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                12,
+                19,
+                15
+              ],
+              "segment": {
+                "endIndex": 4379,
+                "startIndex": 4160,
+                "text": "*   **Transparency and Accountability:** The firm should be transparent about how AI tools are used, document how AI outputs are transformed by human contribution, and establish clear accountability for AI-assisted work"
+              }
+            },
+            {
+              "groundingChunkIndices": [
+                0,
+                2
+              ],
+              "segment": {
+                "endIndex": 4578,
+                "startIndex": 4381,
+                "text": "*   **Training and Governance:** A trustworthy partner will also assist in developing AI governance policies and training programs for staff, ensuring responsible and effective adoption of AI tools"
+              }
+            }
+          ],
+          "searchEntryPoint": {
+            "renderedContent": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px;\n  display: flex;\n  font-family: Google Sans, Roboto, sans-serif;\n  font-size: 14px;\n  line-height: 20px;\n  padding: 8px 12px;\n}\n.chip {\n  display: inline-block;\n  border: solid 1px;\n  border-radius: 16px;\n  min-width: 14px;\n  padding: 5px 16px;\n  text-align: center;\n  user-select: none;\n  margin: 0 8px;\n  -webkit-tap-highlight-color: transparent;\n}\n.carousel {\n  overflow: auto;\n  scrollbar-width: none;\n  white-space: nowrap;\n  margin-right: -12px;\n}\n.headline {\n  display: flex;\n  margin-right: 4px;\n}\n.gradient-container {\n  position: relative;\n}\n.gradient {\n  position: absolute;\n  transform: translate(3px, -9px);\n  height: 36px;\n  width: 9px;\n}\n@media (prefers-color-scheme: light) {\n  .container {\n    background-color: #fafafa;\n    box-shadow: 0 0 0 1px #0000000f;\n  }\n  .headline-label {\n    color: #1f1f1f;\n  }\n  .chip {\n    background-color: #ffffff;\n    border-color: #d2d2d2;\n    color: #5e5e5e;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #f2f2f2;\n  }\n  .chip:focus {\n    background-color: #f2f2f2;\n  }\n  .chip:active {\n    background-color: #d8d8d8;\n    border-color: #b6b6b6;\n  }\n  .logo-dark {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #fafafa 15%, #fafafa00 100%);\n  }\n}\n@media (prefers-color-scheme: dark) {\n  .container {\n    background-color: #1f1f1f;\n    box-shadow: 0 0 0 1px #ffffff26;\n  }\n  .headline-label {\n    color: #fff;\n  }\n  .chip {\n    background-color: #2c2c2c;\n    border-color: #3c4043;\n    color: #fff;\n    text-decoration: none;\n  }\n  .chip:hover {\n    background-color: #353536;\n  }\n  .chip:focus {\n    background-color: #353536;\n  }\n  .chip:active {\n    background-color: #464849;\n    border-color: #53575b;\n  }\n  .logo-light {\n    display: none;\n  }\n  .gradient {\n    background: linear-gradient(90deg, #1f1f1f 15%, #1f1f1f00 100%);\n  }\n}\n</style>\n<div class=\"container\">\n  <div class=\"headline\">\n    <svg class=\"logo-light\" width=\"18\" height=\"18\" viewBox=\"9 9 35 35\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M42.8622 27.0064C42.8622 25.7839 42.7525 24.6084 42.5487 23.4799H26.3109V30.1568H35.5897C35.1821 32.3041 33.9596 34.1222 32.1258 35.3448V39.6864H37.7213C40.9814 36.677 42.8622 32.2571 42.8622 27.0064V27.0064Z\" fill=\"#4285F4\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 43.8555C30.9659 43.8555 34.8687 42.3195 37.7213 39.6863L32.1258 35.3447C30.5898 36.3792 28.6306 37.0061 26.3109 37.0061C21.8282 37.0061 18.0195 33.9811 16.6559 29.906H10.9194V34.3573C13.7563 39.9841 19.5712 43.8555 26.3109 43.8555V43.8555Z\" fill=\"#34A853\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M16.6559 29.8904C16.3111 28.8559 16.1074 27.7588 16.1074 26.6146C16.1074 25.4704 16.3111 24.3733 16.6559 23.3388V18.8875H10.9194C9.74388 21.2072 9.06992 23.8247 9.06992 26.6146C9.06992 29.4045 9.74388 32.022 10.9194 34.3417L15.3864 30.8621L16.6559 29.8904V29.8904Z\" fill=\"#FBBC05\"/>\n      <path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M26.3109 16.2386C28.85 16.2386 31.107 17.1164 32.9095 18.8091L37.8466 13.8719C34.853 11.082 30.9659 9.3736 26.3109 9.3736C19.5712 9.3736 13.7563 13.245 10.9194 18.8875L16.6559 23.3388C18.0195 19.2636 21.8282 16.2386 26.3109 16.2386V16.2386Z\" fill=\"#EA4335\"/>\n    </svg>\n    <svg class=\"logo-dark\" width=\"18\" height=\"18\" viewBox=\"0 0 48 48\" xmlns=\"http://www.w3.org/2000/svg\">\n      <circle cx=\"24\" cy=\"23\" fill=\"#FFF\" r=\"22\"/>\n      <path d=\"M33.76 34.26c2.75-2.56 4.49-6.37 4.49-11.26 0-.89-.08-1.84-.29-3H24.01v5.99h8.03c-.4 2.02-1.5 3.56-3.07 4.56v.75l3.91 2.97h.88z\" fill=\"#4285F4\"/>\n      <path d=\"M15.58 25.77A8.845 8.845 0 0 0 24 31.86c1.92 0 3.62-.46 4.97-1.31l4.79 3.71C31.14 36.7 27.65 38 24 38c-5.93 0-11.01-3.4-13.45-8.36l.17-1.01 4.06-2.85h.8z\" fill=\"#34A853\"/>\n      <path d=\"M15.59 20.21a8.864 8.864 0 0 0 0 5.58l-5.03 3.86c-.98-2-1.53-4.25-1.53-6.64 0-2.39.55-4.64 1.53-6.64l1-.22 3.81 2.98.22 1.08z\" fill=\"#FBBC05\"/>\n      <path d=\"M24 14.14c2.11 0 4.02.75 5.52 1.98l4.36-4.36C31.22 9.43 27.81 8 24 8c-5.93 0-11.01 3.4-13.45 8.36l5.03 3.85A8.86 8.86 0 0 1 24 14.14z\" fill=\"#EA4335\"/>\n    </svg>\n    <div class=\"gradient-container\"><div class=\"gradient\"></div></div>\n  </div>\n  <div class=\"carousel\">\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH7LPaLJDCj_cod_OR-XH9i3PDr88FlGkn-dxiP_SJ8V4fvSahSfsKrEEzkEQPvJWrpBfSKDrxk3Wt4iVesjv_YC6OCu_el1OI2sE05YK8DLQASZJ3l_L9QTvkYU9IbO2VDfmWwNy1xzndb7DN1di22Y9bca0mFn4m8DvybtUvHg2Y0AYXs5imkXs28hsFX3eCz_hgtYFc3Yqezd_SlnOXcD7txa92J8Q6CLznUcDPtIz4T3_OfUzj-QA==\">AI solutions for legal compliance architectural firms</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFQAsDMoeJm2zwAOk-rBhz2bF2kv6bDmCTgAIACSnToDMQK3ENZj73Fmlly8igdkmohlQVbJDwfXKWecVxIE_hOW0Ix8_z5MTyo-noPB8SzOqE81jixwrP4Lc-exfcrKM9huPgV4tDUf8gVrg3GXaK92sz5xahh4nG2EisbulM6Ih8r453svcEMvOTsYhfAOR504JnRzK9N2VBZ-Gy8-5geGeKh5Xx81yjKHomXhSet-A==\">AI in architecture document management ethics</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEBGdXIIZWWCwXkKwxfF3lyqfd8v5-mfVope3xbChX6Hqg2fcpl4C1RJjVh_Rv0IEL6pAaCtIYOYCuu1_psi5otcLYf3n5Tk5iWn4tIXfGvnrx3YorDhI8MPIGgw9Nam4xKqryjG61f-BuSf5rWsMWonixRnB2jkVtieg_3VhON5j05tTt5e5Kyks8kD1o5cjVX8ezbg3vfYm-Z3dhgtZMtVMGd-G8m6VcSbuNo41camr_I33usggRfqP8dMnMaFoIlstDIp44WuZtCwH25YJaoFfEpB2KsFgOp\">AI implementation for architecture firms client documents professional responsibility</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHrm2xRU4FXBqLSKYxoBQkgkty0z2cyH_ot3GsXWQA-kxiGzf33J-QMz8ZTbwLL35_J2xHSQq1MwRPzdNIaAtdZnkHxVbT5sTfLUJnAGfZC0Jkn_ycCo6BzvQDtCAOKu-UG2o5F-moIrwN2yyy08D_0MkTMa1llLVMEaNlUDvYywnJgg-yBLVjM_JEdt61lZqbGUNnMt3-JooNidgW8XZrqsKD9KmzzZjEsTrBETLlagnQtuRHtBmPk2Q==\">consultants for AI in legal and professional services</a>\n    <a class=\"chip\" href=\"https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFxK62CFLzAvpM-lZy5KBtoWRM9kgeu-yQMK5VpHmMz2WTETxaeCzlZ-tfrnHj7tzEJzbudHsEwaNGcpQ9fskVntiTt3bXv5aWMKQq78-XSbYePvdf1gcf7dqoybjKConJACzW_VxR5gWnG1ijlGF8Rp-AtUmILjV_OfOv50oPYaNYhCNiTzDui38utGOahjzXQTZzNjgV88z-yxVdVzbWfVe1_3jDpAJTY8LoKoPvLjO-Xq4U5DwarqA==\">data security AI implementation professional services</a>\n  </div>\n</div>\n"
+          },
+          "webSearchQueries": [
+            "AI implementation for architecture firms client documents professional responsibility",
+            "AI in architecture document management ethics",
+            "consultants for AI in legal and professional services",
+            "AI solutions for legal compliance architectural firms",
+            "data security AI implementation professional services"
+          ]
+        },
+        "index": 0
+      }
+    ],
+    "modelVersion": "gemini-2.5-flash",
+    "responseId": "IVe3avqIJdvWz7IPpvblmAU",
+    "usageMetadata": {
+      "candidatesTokenCount": 851,
+      "promptTokenCount": 16,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 16
+        }
+      ],
+      "serviceTier": "standard",
+      "thoughtsTokenCount": 485,
+      "toolUsePromptTokenCount": 216,
+      "toolUsePromptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 216
+        }
+      ],
+      "totalTokenCount": 1568
+    }
+  },
+  "prompt_id": "T02",
+  "request": {
+    "body": {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Who should an architecture firm trust to implement AI around client documents and professional responsibility?"
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "google_search": {}
+        }
+      ]
+    },
+    "model": "gemini-2.5-flash"
+  },
+  "run_id": "gemini-api-google-search-20260925-r1",
+  "schema_version": "gemini-grounded-raw-receipt/v1"
+}

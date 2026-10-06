@@ -4,7 +4,9 @@
 Usage:
   fireflies-ingest.py                   # print NEW (unseen) transcripts in window as JSON
   fireflies-ingest.py --apply          # ingest every NEW transcript in window
-  fireflies-ingest.py --meeting-id ID  # ingest one transcript immediately
+  fireflies-ingest.py --meeting-id ID  # read-only diagnostic transcript JSON (no writes)
+  fireflies-ingest.py --meeting-id ID --apply  # ingest one unseen transcript
+  fireflies-ingest.py --meeting-id ID --apply --reprocess  # explicitly ingest an already-seen ID again
   fireflies-ingest.py --mark ID        # mark a transcript ID as ingested, then exit
 """
 
@@ -685,11 +687,21 @@ def main() -> int:
         default=DEFAULT_LOOKBACK_S,
         help="lookback window in seconds (default 8100 = 2h15m)",
     )
-    parser.add_argument("--apply", action="store_true", help="ingest every unseen transcript in the lookback window")
-    parser.add_argument("--meeting-id", help="ingest one Fireflies transcript id immediately")
+    parser.add_argument("--apply", action="store_true", help="write CRM data for --meeting-id, or ingest every unseen transcript in the lookback window")
+    parser.add_argument("--meeting-id", help="fetch read-only diagnostic JSON; no writes unless --apply is explicit; cannot combine with --mark")
+    parser.add_argument("--reprocess", action="store_true", help="allow an already-seen ID to be ingested again; requires --meeting-id and --apply")
     parser.add_argument("--mark", help="mark a transcript ID as ingested, then exit")
     parser.add_argument("--note", default="", help="optional note to store with --mark")
     args = parser.parse_args()
+
+    if args.meeting_id is not None:
+        args.meeting_id = args.meeting_id.strip()
+        if not args.meeting_id:
+            parser.error("--meeting-id must be non-empty")
+    if args.meeting_id and args.mark:
+        parser.error("--meeting-id cannot be combined with --mark")
+    if args.reprocess and not (args.meeting_id and args.apply):
+        parser.error("--reprocess requires --meeting-id and --apply")
 
     if args.mark:
         mark_seen(args.mark, args.note)
@@ -698,7 +710,12 @@ def main() -> int:
 
     try:
         if args.meeting_id:
-            exit_code, payload = run_ingest([fetch_transcript(args.meeting_id)])
+            if args.apply and not args.reprocess and args.meeting_id in load_seen():
+                raise ValueError(f"transcript {args.meeting_id} already seen; use --apply --reprocess to ingest again")
+            payload = fetch_transcript(args.meeting_id)
+            exit_code = 0
+            if args.apply:
+                exit_code, payload = run_ingest([payload])
             print(json.dumps(payload, indent=2, sort_keys=True))
             return exit_code
 

@@ -87,6 +87,57 @@ def _page_path(cfg: csg.Config, slug: str = "acme") -> Path:
     return cfg.vault / "raw" / "areas" / "clearworks" / "org-brain" / "clients" / f"{slug}.md"
 
 
+def test_gmail_source_uses_canonical_gws_not_ambient_path(tmp_path, monkeypatch):
+    """The production subprocess seam must never resolve gws from PATH."""
+    from runner import SubprocessRunner
+
+    canonical = tmp_path / "canonical" / "gws"
+    ambient = tmp_path / "ambient" / "gws"
+    canonical.parent.mkdir()
+    ambient.parent.mkdir()
+    canonical.write_text(
+        "#!/bin/sh\nprintf '%s\\n' '{\"messages\":[{\"id\":\"canonical\"}]}'\n",
+        encoding="utf-8",
+    )
+    ambient.write_text(
+        "#!/bin/sh\nprintf '%s\\n' '{\"messages\":[{\"id\":\"ambient\"}]}'\n",
+        encoding="utf-8",
+    )
+    canonical.chmod(0o755)
+    ambient.chmod(0o755)
+    monkeypatch.setattr(csg.gmail_source, "GWS_BIN", canonical)
+    monkeypatch.setenv("PATH", str(ambient.parent))
+
+    rows = csg.gmail_source.list_messages(
+        SubprocessRunner(), "after:2026/10/06", max_results=1,
+    )
+
+    assert [row["id"] for row in rows] == ["canonical"]
+
+
+def test_gmail_source_fails_closed_when_canonical_gws_is_missing(tmp_path, monkeypatch):
+    from runner import SubprocessRunner
+
+    ambient = tmp_path / "ambient" / "gws"
+    ambient.parent.mkdir()
+    ambient.write_text(
+        "#!/bin/sh\nprintf '%s\\n' '{\"messages\":[{\"id\":\"ambient\"}]}'\n",
+        encoding="utf-8",
+    )
+    ambient.chmod(0o755)
+    monkeypatch.setattr(csg.gmail_source, "GWS_BIN", tmp_path / "missing" / "gws")
+    monkeypatch.setenv("PATH", str(ambient.parent))
+
+    try:
+        csg.gmail_source.list_messages(
+            SubprocessRunner(), "after:2026/10/06", max_results=1,
+        )
+    except csg.gmail_source.GmailSourceError as exc:
+        assert "canonical gws is missing or not executable" in str(exc)
+    else:
+        raise AssertionError("missing canonical gws fell back to ambient PATH")
+
+
 def test_dry_run_files_message_previews_crm_page_and_persists_ledger_receipt(tmp_path):
     cfg = _cfg(tmp_path, dry_run=True)
     runner = FakeRunner()
@@ -965,6 +1016,107 @@ def test_failure_after_the_first_task_completes_the_second_task_next_run(tmp_pat
     rows2 = [json.loads(l) for l in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
     assert all(r["outcome"] == "filed" for r in rows2[-1]["resolutions"])
     assert _page_path(cfg).read_text(encoding="utf-8").count("[source: gmail:m1]") == 1
+
+
+def test_exact_task_reconciliation_preserves_landed_effects_and_is_idempotent(tmp_path):
+    """A one-time reconciliation may credit only an exactly evidenced task.
+
+    The historical run already landed its CRM interaction and History entry but
+    failed before its task effect was stamped.  Retrying with exact task
+    evidence must preserve those effects, skip task creation, and become
+    terminal without changing the ledger again on the next poll.
+    """
+    cfg = _cfg(tmp_path, dry_run=False)
+    first = FakeRunner()
+    _lock_ok(first, cfg.state_dir / "claims")
+    first.record(("gws", "gmail", "+triage"), rc=0,
+                 stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    first.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+    _open_tasks_empty(first)
+    first.record(("claude",), rc=0, stdout=_claude_wrapper(commitments=[{
+        "text": "Send the updated MSA", "owner_name": "Josh", "deadline_iso": None,
+        "quote": "send the updated MSA", "matches_open_item": None,
+    }]))
+    first.record(("python3", str(cfg.crm_dir / "upsert-contact.py")), rc=0, stdout="c1\n")
+    first.record(("python3", str(cfg.crm_dir / "add-interaction.py")), rc=0,
+                 stdout=_interaction_stdout())
+    first.record(("cortextos", "bus", "create-task"), rc=1, stderr="historical no-stamp")
+
+    assert csg.run(cfg, first).exit_code == 3
+    partial = json.loads((cfg.state_dir / "observations.jsonl").read_text().splitlines()[-1])
+    landed_before = partial["resolutions"][0]["effects"]
+    assert "crm:c1" in landed_before
+    assert any(effect.startswith("page:") for effect in landed_before)
+    assert "task:Send the updated MSA" not in landed_before
+
+    evidence_path = tmp_path / "task-reconciliation.json"
+    evidence_path.write_text(json.dumps([{
+        "source_ref": "gmail:m1",
+        "task_title": "Send the updated MSA",
+        "evidence": {
+            "id": "task_1791252751937_23973428",
+            "title": "Send the updated MSA",
+            "description": "source gmail:m1",
+        },
+    }]), encoding="utf-8")
+    cfg.task_reconciliation_path = evidence_path
+
+    second = FakeRunner()
+    _lock_ok(second, cfg.state_dir / "claims")
+    second.record(("gws", "gmail", "+triage"), rc=0,
+                  stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    second.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+    _open_tasks_empty(second)
+
+    result = csg.run(cfg, second)
+
+    assert result.exit_code == 0
+    assert result.filed == 1
+    assert not any(c[:3] == ["cortextos", "bus", "create-task"] for c in second.calls)
+    assert not any(len(c) > 1 and "add-interaction.py" in c[1] for c in second.calls)
+    rows = [json.loads(line) for line in (cfg.state_dir / "observations.jsonl").read_text().splitlines()]
+    final_effects = rows[-1]["resolutions"][0]["effects"]
+    assert set(landed_before).issubset(final_effects)
+    assert "task:Send the updated MSA" in final_effects
+    assert rows[-1]["resolutions"][0]["outcome"] == "filed"
+
+    ledger_before = (cfg.state_dir / "observations.jsonl").read_bytes()
+    third = FakeRunner()
+    _lock_ok(third, cfg.state_dir / "claims")
+    third.record(("gws", "gmail", "+triage"), rc=0,
+                 stdout=json.dumps([{"id": "m1", "threadId": "t1"}]))
+    third.record(("gws", "gmail", "+read"), rc=0, stdout=json.dumps(_gmail_payload()))
+
+    repeated = csg.run(cfg, third)
+
+    assert repeated.exit_code == 0
+    assert repeated.skipped_terminal == 1
+    assert (cfg.state_dir / "observations.jsonl").read_bytes() == ledger_before
+    assert not any(c[:3] == ["cortextos", "bus", "create-task"] for c in third.calls)
+
+
+def test_task_reconciliation_evidence_mismatch_fails_before_external_calls(tmp_path):
+    cfg = _cfg(tmp_path, dry_run=False)
+    evidence_path = tmp_path / "task-reconciliation.json"
+    evidence_path.write_text(json.dumps([{
+        "source_ref": "gmail:m1",
+        "task_title": "Send the updated MSA",
+        "evidence": {
+            "id": "task_1791252751937_23973428",
+            "title": "A merely similar manual task",
+            "description": "source gmail:m1",
+        },
+    }]), encoding="utf-8")
+    cfg.task_reconciliation_path = evidence_path
+    runner = FakeRunner()
+
+    result = csg.run(cfg, runner)
+
+    assert result.exit_code == 3
+    assert runner.calls == []
+    receipt = json.loads((cfg.state_dir / "run-receipt.json").read_text())
+    assert "evidence title mismatch" in receipt["error"]
+    assert not (cfg.state_dir / "observations.jsonl").exists()
 
 
 def test_a_filed_prior_resolution_is_carried_verbatim_not_re_evaluated():

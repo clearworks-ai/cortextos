@@ -24,6 +24,8 @@ class Runner(Protocol):
 class SubprocessRunner:
     """Real subprocess.run wrapper. capture_output=True, text=True, check=False."""
 
+    uses_real_subprocess = True
+
     def run(
         self,
         argv: list[str],

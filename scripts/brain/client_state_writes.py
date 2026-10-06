@@ -63,6 +63,10 @@ _CONTACT_ID_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 _TASK_ID_RE = re.compile(r"task_\d+_\d+")
 
 
+def is_task_id(value: object) -> bool:
+    return isinstance(value, str) and _TASK_ID_RE.fullmatch(value) is not None
+
+
 def ensure_contact(runner, crm_dir: Path, from_name: str, from_email: str, contacts: list[dict]) -> str:
     """Returns the contact id for `from_email`. Looks in the given `contacts`
     list first (no subprocess call for a known contact); only auto-creates via
@@ -282,7 +286,7 @@ def create_task(runner, plan: "TaskPlan") -> str:
     task_id = stdout.splitlines()[0].strip() if stdout else ""
     if not task_id:
         raise WriterError("create-task produced no id on rc=0")
-    if not _TASK_ID_RE.fullmatch(task_id):  # G-WRITER-2
+    if not is_task_id(task_id):  # G-WRITER-2
         # `bus create-task` prints ONLY the id (src/cli/bus.ts:552), shaped
         # task_<epoch>_<8 digits> (src/bus/task.ts:781). Anything else on the
         # first line is a warning or an error, not an id (G0B-11).

@@ -16,6 +16,7 @@ import contextlib
 import difflib
 import fcntl
 import importlib.util
+import json
 import os
 import sys
 import tempfile
@@ -61,6 +62,7 @@ class Config:
     now: datetime
     clock: "Callable[[], float]" = time.monotonic   # monotonic source for the lease heartbeat (injectable for tests)
     retry_frozen: bool = False  # FINAL F-1: the named un-freeze path (--retry-frozen)
+    task_reconciliation_path: Path | None = None
 
 
 @dataclass
@@ -182,6 +184,61 @@ class EscalationError(Exception):
     whole message aborts and the next run escalates again (G0B-4)."""
 
 
+class TaskReconciliationError(ValueError):
+    """A one-time task reconciliation file is malformed or self-contradictory."""
+
+
+def _load_task_reconciliations(path: Path | None) -> dict[tuple[str, str], str]:
+    """Load bounded, exact proof that a task effect already exists.
+
+    Each record binds the requested source/title to an existing cortextOS task
+    whose id, title and source-bearing description all agree.  Any malformed or
+    mismatched record rejects the whole input before Gmail or write transports
+    run; there is no fuzzy/manual-task fallback.
+    """
+    if path is None:
+        return {}
+    path = Path(path)
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise TaskReconciliationError(f"cannot read task reconciliation {path}: {exc}") from exc
+    if len(raw) > 1_000_000:
+        raise TaskReconciliationError("task reconciliation exceeds 1000000 bytes")
+    try:
+        records = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise TaskReconciliationError(f"task reconciliation is not valid JSON: {exc}") from exc
+    if not isinstance(records, list) or len(records) > 100:
+        raise TaskReconciliationError("task reconciliation must be a list of at most 100 records")
+
+    loaded: dict[tuple[str, str], str] = {}
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            raise TaskReconciliationError(f"task reconciliation record {index} is not an object")
+        source_ref = record.get("source_ref")
+        task_title = record.get("task_title")
+        evidence = record.get("evidence")
+        if not isinstance(source_ref, str) or not source_ref.startswith("gmail:") or source_ref.strip() != source_ref:
+            raise TaskReconciliationError(f"task reconciliation record {index} has invalid source_ref")
+        if not isinstance(task_title, str) or not task_title or task_title.strip() != task_title:
+            raise TaskReconciliationError(f"task reconciliation record {index} has invalid task_title")
+        if not isinstance(evidence, dict):
+            raise TaskReconciliationError(f"task reconciliation record {index} has no evidence object")
+        task_id = evidence.get("id")
+        if not client_state_writes.is_task_id(task_id):
+            raise TaskReconciliationError(f"task reconciliation record {index} has invalid task id")
+        if evidence.get("title") != task_title:
+            raise TaskReconciliationError(f"task reconciliation record {index} evidence title mismatch")
+        if evidence.get("description") != f"source {source_ref}":
+            raise TaskReconciliationError(f"task reconciliation record {index} evidence source mismatch")
+        key = (source_ref, task_title)
+        if key in loaded:
+            raise TaskReconciliationError(f"duplicate task reconciliation for {source_ref} / {task_title}")
+        loaded[key] = task_id
+    return loaded
+
+
 def _send_escalation(runner, text: str, source_key: str) -> None:
     proc = runner.run(projections.plan_escalation_argv(text, source_key))  # G-ESC-4
     if proc.returncode != 0:  # G-ESC-2
@@ -297,6 +354,7 @@ def _diff_preview(page: Path, old_text: str, new_text: str) -> str:
 def _file_message(
     cfg: Config, runner, ledger: Ledger, resolver: "resolve_email.EmailResolver",
     msg, contacts: list[dict], previews: list[str], state: _RunState,
+    task_reconciliations: dict[tuple[str, str], str],
 ) -> tuple[int, int, int]:
     """Files every not-yet-filed resolution on `msg`. Returns (filed, escalated,
     ignored) counts for THIS run's reporting. A resolution already 'filed' on a
@@ -566,6 +624,7 @@ def _file_message(
             resolutions, pending, escalated, ignored, context, open_tasks,
             source_ref, digest, revision_of, from_email_norm,
             crm_lines, page_diffs, writes, planned_writes, esc_state,
+            task_reconciliations,
         )
     except Exception as exc:  # noqa: BLE001 -- G-EFFECT-2: ANY escape persists landed effects
         # G0B-11 only covered WriterError/EscalationError, so an OSError out of
@@ -588,6 +647,7 @@ def _do_writes(
     resolutions, pending, escalated, ignored, context, open_tasks,
     source_ref, digest, revision_of, from_email_norm,
     crm_lines, page_diffs, writes, planned_writes, esc_state,
+    task_reconciliations,
 ):
     """Executes (or, in dry-run, previews) every effect this message owes, then
     marks a resolution `filed` ONLY once every effect REQUIRED for it has landed
@@ -735,6 +795,11 @@ def _do_writes(
             task_lines.append(f"  task: {plan.title} (already created on an earlier run)")
             mark(key, pending)  # G-EFFECT-3: tasks are per MESSAGE, so every resolution owes this key
             continue
+        task_id = task_reconciliations.get((source_ref, plan.title))
+        if task_id is not None:
+            task_lines.append(f"  task: {plan.title} (reconciled existing {task_id})")
+            mark(key, pending)
+            continue
         if cfg.dry_run:
             argv = projections.plan_task_create_argv(plan)
             task_lines.append(f"  task: {plan.title} (create) argv={argv}")
@@ -801,6 +866,7 @@ def run(cfg: Config, runner) -> RunResult:
     lease = None
 
     try:
+        task_reconciliations = _load_task_reconciliations(cfg.task_reconciliation_path)
         # G-LOCK-9 (G2A-3): acquisition happens INSIDE the guarded try, so a
         # missing `cortextos`, an unwritable claims dir or a timed-out claim
         # call lands on the structured failure path (record_failure + exit 3)
@@ -850,7 +916,10 @@ def run(cfg: Config, runner) -> RunResult:
                 result.skipped_terminal += 1
                 continue
 
-            filed, escalated, ignored = _file_message(cfg, runner, ledger, resolver, msg, contacts, result.previews, state)
+            filed, escalated, ignored = _file_message(
+                cfg, runner, ledger, resolver, msg, contacts, result.previews, state,
+                task_reconciliations,
+            )
             result.filed += filed
             result.escalated += escalated
             result.ignored += ignored
@@ -923,6 +992,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--today", default=None)
     parser.add_argument("--retry-frozen", action="store_true",
                         help="give every frozen extraction identity a fresh attempt budget before sweeping (FINAL F-1)")
+    parser.add_argument("--task-reconciliation", default=None,
+                        help="one-time JSON evidence for already-created exact-source tasks")
     args = parser.parse_args(argv)
 
     today = date.fromisoformat(args.today) if args.today else datetime.now(timezone.utc).date()
@@ -931,6 +1002,7 @@ def main(argv: list[str] | None = None) -> int:
         state_dir=Path(args.state_dir), days=args.days, query=args.query, dry_run=args.dry_run,
         max_usd=args.max_usd, today=today, now=datetime.now(timezone.utc),
         retry_frozen=bool(args.retry_frozen),
+        task_reconciliation_path=Path(args.task_reconciliation) if args.task_reconciliation else None,
     )
     from runner import LoggingRunner, SubprocessRunner
     runner = LoggingRunner(SubprocessRunner(), cfg.state_dir)

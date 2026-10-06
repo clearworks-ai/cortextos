@@ -179,7 +179,13 @@ def plan_digest_line(row: ObservationRow) -> list[str]:
         else:
             lines.append(f"- Page: {w} ({row.source_ref}) — {summary}{tag}")
     for task in row.reconciled_tasks:
-        lines.append(f"- Task reconciled: {task.title} ({row.source_ref}){tag}")
+        if task.kind == "satisfied-task":
+            lines.append(
+                f"- Task already satisfied: {task.title} ({row.source_ref}) — "
+                f"completed {task.task_id} via {task.calendar_ref}{tag}"
+            )
+        else:
+            lines.append(f"- Task reconciled: {task.title} ({row.source_ref}){tag}")
     for s in row.suppressed:
         lines.append(
             f"- Task suppressed (tier {s['tier']}): {s['title']} matches {s['match']!r} ({row.source_ref}){tag}"

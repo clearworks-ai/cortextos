@@ -191,10 +191,11 @@ class TaskReconciliationError(ValueError):
 def _load_task_reconciliations(path: Path | None) -> dict[tuple[str, str], ReconciledTask]:
     """Load bounded, exact proof that a task effect already exists.
 
-    Each record binds the requested source/title to an existing cortextOS task
-    whose id, title and source-bearing description all agree.  Any malformed or
-    mismatched record rejects the whole input before Gmail or write transports
-    run; there is no fuzzy/manual-task fallback.
+    Each record binds the requested source/title either to an existing
+    cortextOS task whose title and source-bearing description agree, or to a
+    completed task whose result names the exact Gmail and calendar evidence
+    satisfying that commitment. Any malformed or mismatched record rejects the
+    whole input; there is no fuzzy/manual-task fallback.
     """
     if path is None:
         return {}
@@ -219,28 +220,69 @@ def _load_task_reconciliations(path: Path | None) -> dict[tuple[str, str], Recon
         source_ref = record.get("source_ref")
         task_title = record.get("task_title")
         evidence = record.get("evidence")
+        kind = record.get("kind", "existing-task")
         if not isinstance(source_ref, str) or not source_ref.startswith("gmail:") or source_ref.strip() != source_ref:
             raise TaskReconciliationError(f"task reconciliation record {index} has invalid source_ref")
         if not isinstance(task_title, str) or not task_title or task_title.strip() != task_title:
             raise TaskReconciliationError(f"task reconciliation record {index} has invalid task_title")
         if not isinstance(evidence, dict):
             raise TaskReconciliationError(f"task reconciliation record {index} has no evidence object")
+        if kind not in {"existing-task", "satisfied-task"}:
+            raise TaskReconciliationError(f"task reconciliation record {index} has invalid kind")
         task_id = evidence.get("id")
         if not client_state_writes.is_task_id(task_id):
             raise TaskReconciliationError(f"task reconciliation record {index} has invalid task id")
-        if evidence.get("title") != task_title:
-            raise TaskReconciliationError(f"task reconciliation record {index} evidence title mismatch")
-        if evidence.get("description") != f"source {source_ref}":
-            raise TaskReconciliationError(f"task reconciliation record {index} evidence source mismatch")
+        if kind == "existing-task":
+            if evidence.get("title") != task_title:
+                raise TaskReconciliationError(f"task reconciliation record {index} evidence title mismatch")
+            if evidence.get("description") != f"source {source_ref}":
+                raise TaskReconciliationError(f"task reconciliation record {index} evidence source mismatch")
+            reconciliation = ReconciledTask(
+                task_id=task_id,
+                title=task_title,
+                source_ref=source_ref,
+                evidence_description=evidence["description"],
+            )
+        else:
+            bound_task_id = record.get("task_id")
+            bound_calendar_ref = record.get("calendar_ref")
+            evidence_title = evidence.get("title")
+            status = evidence.get("status")
+            result = evidence.get("result")
+            if not client_state_writes.is_task_id(bound_task_id) or task_id != bound_task_id:
+                raise TaskReconciliationError(f"task reconciliation record {index} evidence task mismatch")
+            if not isinstance(evidence_title, str) or not evidence_title or evidence_title.strip() != evidence_title:
+                raise TaskReconciliationError(f"task reconciliation record {index} has invalid evidence task title")
+            if status != "completed":
+                raise TaskReconciliationError(f"task reconciliation record {index} evidence status mismatch")
+            if not isinstance(result, str) or not result.strip():
+                raise TaskReconciliationError(f"task reconciliation record {index} has invalid evidence result")
+            if (
+                not isinstance(bound_calendar_ref, str)
+                or not bound_calendar_ref.startswith("calendar:")
+                or bound_calendar_ref.strip() != bound_calendar_ref
+                or bound_calendar_ref == "calendar:"
+            ):
+                raise TaskReconciliationError(f"task reconciliation record {index} evidence calendar mismatch")
+            result_refs = {token.strip(".,;()[]{}") for token in result.split()}
+            if source_ref not in result_refs:
+                raise TaskReconciliationError(f"task reconciliation record {index} result source mismatch")
+            if bound_calendar_ref not in result_refs:
+                raise TaskReconciliationError(f"task reconciliation record {index} result calendar mismatch")
+            reconciliation = ReconciledTask(
+                task_id=task_id,
+                title=task_title,
+                source_ref=source_ref,
+                evidence_description=result,
+                kind=kind,
+                evidence_task_title=evidence_title,
+                evidence_status=status,
+                calendar_ref=bound_calendar_ref,
+            )
         key = (source_ref, task_title)
         if key in loaded:
             raise TaskReconciliationError(f"duplicate task reconciliation for {source_ref} / {task_title}")
-        loaded[key] = ReconciledTask(
-            task_id=task_id,
-            title=task_title,
-            source_ref=source_ref,
-            evidence_description=evidence["description"],
-        )
+        loaded[key] = reconciliation
     return loaded
 
 
@@ -670,6 +712,17 @@ def _do_writes(
     # complete while a commitment task this message owes is still missing, and
     # the required-effect set has to be known before anything is marked filed.
     task_plans = client_state_writes.plan_tasks(extraction, context, open_tasks, source_ref)
+    planned_task_titles = {plan.title for plan in task_plans}
+    unbound_reconciliations = sorted(
+        title
+        for reconciled_source, title in task_reconciliations
+        if reconciled_source == source_ref and title not in planned_task_titles
+    )
+    if unbound_reconciliations:
+        raise TaskReconciliationError(
+            f"task reconciliation commitment title mismatch for {source_ref}: "
+            f"{unbound_reconciliations[0]}"
+        )
     task_keys = [
         f"task:{plan.title}"
         for plan in task_plans
@@ -803,9 +856,15 @@ def _do_writes(
         key = f"task:{plan.title}"
         reconciliation = task_reconciliations.get((source_ref, plan.title))
         if reconciliation is not None:
-            task_lines.append(
-                f"  task: {plan.title} (reconciled existing {reconciliation.task_id})"
-            )
+            if reconciliation.kind == "satisfied-task":
+                task_lines.append(
+                    f"  task: {plan.title} (already satisfied by completed "
+                    f"{reconciliation.task_id} via {reconciliation.calendar_ref})"
+                )
+            else:
+                task_lines.append(
+                    f"  task: {plan.title} (reconciled existing {reconciliation.task_id})"
+                )
             if reconciliation not in reconciled_tasks:
                 reconciled_tasks.append(reconciliation)
             mark(key, pending)

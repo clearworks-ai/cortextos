@@ -39,12 +39,16 @@ class Resolution:
 
 @dataclass(frozen=True)
 class ReconciledTask:
-    """Exact evidence for a pre-existing task credited to one Gmail source."""
+    """Exact evidence for a pre-existing or already-satisfied task effect."""
 
     task_id: str
     title: str
     source_ref: str
     evidence_description: str
+    kind: str = "existing-task"
+    evidence_task_title: str | None = None
+    evidence_status: str | None = None
+    calendar_ref: str | None = None
 
 
 @dataclass
@@ -83,7 +87,14 @@ def content_digest(subject: str, body_text: str, from_email: str) -> str:
 
 
 def _row_to_dict(row: ObservationRow) -> dict:
-    return asdict(row)
+    data = asdict(row)
+    for task in data["reconciled_tasks"]:
+        if task.get("kind") == "existing-task":
+            task.pop("kind")
+        for key in ("evidence_task_title", "evidence_status", "calendar_ref"):
+            if task.get(key) is None:
+                task.pop(key)
+    return data
 
 
 def _row_from_dict(d: dict) -> ObservationRow:
@@ -212,6 +223,8 @@ class Ledger:
                     "id": task_id, "title": title, "source_ref": row.source_ref,
                 }
             for task in row.reconciled_tasks:
+                if task.kind == "satisfied-task":
+                    continue
                 tasks[(task.task_id, task.source_ref)] = {
                     "id": task.task_id, "title": task.title, "source_ref": task.source_ref,
                 }

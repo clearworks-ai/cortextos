@@ -39,7 +39,7 @@ import single_flight
 import writeback_email
 from gmail_source import GmailSourceError
 from observation_ledger import (
-    EXTRACTION_MAX_ATTEMPTS, Ledger, ObservationRow, Resolution, clear_all_extraction_attempts,
+    EXTRACTION_MAX_ATTEMPTS, Ledger, ObservationRow, ReconciledTask, Resolution, clear_all_extraction_attempts,
     clear_extraction_attempts, unstamp_extraction_attempt,
     content_digest, extraction_attempt_state, read_receipt, record_extraction_attempt,
     record_extraction_failure, record_failure, record_lease_release_failure,
@@ -188,7 +188,7 @@ class TaskReconciliationError(ValueError):
     """A one-time task reconciliation file is malformed or self-contradictory."""
 
 
-def _load_task_reconciliations(path: Path | None) -> dict[tuple[str, str], str]:
+def _load_task_reconciliations(path: Path | None) -> dict[tuple[str, str], ReconciledTask]:
     """Load bounded, exact proof that a task effect already exists.
 
     Each record binds the requested source/title to an existing cortextOS task
@@ -212,7 +212,7 @@ def _load_task_reconciliations(path: Path | None) -> dict[tuple[str, str], str]:
     if not isinstance(records, list) or len(records) > 100:
         raise TaskReconciliationError("task reconciliation must be a list of at most 100 records")
 
-    loaded: dict[tuple[str, str], str] = {}
+    loaded: dict[tuple[str, str], ReconciledTask] = {}
     for index, record in enumerate(records):
         if not isinstance(record, dict):
             raise TaskReconciliationError(f"task reconciliation record {index} is not an object")
@@ -235,7 +235,12 @@ def _load_task_reconciliations(path: Path | None) -> dict[tuple[str, str], str]:
         key = (source_ref, task_title)
         if key in loaded:
             raise TaskReconciliationError(f"duplicate task reconciliation for {source_ref} / {task_title}")
-        loaded[key] = task_id
+        loaded[key] = ReconciledTask(
+            task_id=task_id,
+            title=task_title,
+            source_ref=source_ref,
+            evidence_description=evidence["description"],
+        )
     return loaded
 
 
@@ -354,7 +359,7 @@ def _diff_preview(page: Path, old_text: str, new_text: str) -> str:
 def _file_message(
     cfg: Config, runner, ledger: Ledger, resolver: "resolve_email.EmailResolver",
     msg, contacts: list[dict], previews: list[str], state: _RunState,
-    task_reconciliations: dict[tuple[str, str], str],
+    task_reconciliations: dict[tuple[str, str], ReconciledTask],
 ) -> tuple[int, int, int]:
     """Files every not-yet-filed resolution on `msg`. Returns (filed, escalated,
     ignored) counts for THIS run's reporting. A resolution already 'filed' on a
@@ -391,6 +396,7 @@ def _file_message(
 
     fresh = resolver.resolve_message(msg)
     resolutions = _merge_resolutions(merge_prior, fresh)
+    reconciled_tasks = list(merge_prior.reconciled_tasks) if merge_prior is not None else []
 
     pending = [r for r in resolutions if r.outcome == "pending"]
     escalated = [r for r in resolutions if r.outcome == "escalated"]
@@ -446,13 +452,14 @@ def _file_message(
                         source_ref=source_ref, thread_id=msg.thread_id, content_digest=digest,
                         observed_at=cfg.now.isoformat(), resolutions=resolutions,
                         revision_of=revision_of, partial=True,
+                        reconciled_tasks=reconciled_tasks,
                     ))
                     raise
                 esc_state["delivered"] = True
         row = ObservationRow(
             source_ref=source_ref, thread_id=msg.thread_id, content_digest=digest,
             observed_at=cfg.now.isoformat(), resolutions=resolutions, revision_of=revision_of,
-            simulated=cfg.dry_run,  # G-LEDGER-6
+            simulated=cfg.dry_run, reconciled_tasks=reconciled_tasks,  # G-LEDGER-6
         )
         ledger.append(row)
         if cfg.dry_run:
@@ -519,6 +526,7 @@ def _file_message(
                     observed_at=cfg.now.isoformat(), resolutions=resolutions,
                     reason=f"extraction frozen after {attempts} attempts: {last_error}",
                     revision_of=revision_of, simulated=cfg.dry_run, partial=True,
+                    reconciled_tasks=reconciled_tasks,
                     extraction_attempt={
                         "identity": identity, "attempt": attempts,
                         "last_error": last_error, "frozen": True,
@@ -561,6 +569,7 @@ def _file_message(
                 observed_at=cfg.now.isoformat(), resolutions=resolutions,
                 reason=f"budget: {exc}", extraction=exc.extraction, writes=[],
                 revision_of=revision_of, partial=True,
+                reconciled_tasks=reconciled_tasks,
                 simulated=cfg.dry_run,  # G-LEDGER-6: a dry-run budget row is a PREVIEW, not a real run
             ))
             raise
@@ -611,6 +620,7 @@ def _file_message(
             observed_at=cfg.now.isoformat(), resolutions=resolutions,
             reason=f"partial: {exc}", extraction=extraction, writes=writes,
             revision_of=revision_of, simulated=cfg.dry_run,  # G-LEDGER-6
+            reconciled_tasks=reconciled_tasks,
             # G-LEDGER-7: DERIVED, never a blanket True. If the failure landed
             # after every effect and every resolution was already filed, there
             # is nothing left to finish -- flagging it partial made the message
@@ -624,7 +634,7 @@ def _file_message(
             resolutions, pending, escalated, ignored, context, open_tasks,
             source_ref, digest, revision_of, from_email_norm,
             crm_lines, page_diffs, writes, planned_writes, esc_state,
-            task_reconciliations,
+            task_reconciliations, reconciled_tasks,
         )
     except Exception as exc:  # noqa: BLE001 -- G-EFFECT-2: ANY escape persists landed effects
         # G0B-11 only covered WriterError/EscalationError, so an OSError out of
@@ -647,7 +657,7 @@ def _do_writes(
     resolutions, pending, escalated, ignored, context, open_tasks,
     source_ref, digest, revision_of, from_email_norm,
     crm_lines, page_diffs, writes, planned_writes, esc_state,
-    task_reconciliations,
+    task_reconciliations, reconciled_tasks,
 ):
     """Executes (or, in dry-run, previews) every effect this message owes, then
     marks a resolution `filed` ONLY once every effect REQUIRED for it has landed
@@ -795,9 +805,13 @@ def _do_writes(
             task_lines.append(f"  task: {plan.title} (already created on an earlier run)")
             mark(key, pending)  # G-EFFECT-3: tasks are per MESSAGE, so every resolution owes this key
             continue
-        task_id = task_reconciliations.get((source_ref, plan.title))
-        if task_id is not None:
-            task_lines.append(f"  task: {plan.title} (reconciled existing {task_id})")
+        reconciliation = task_reconciliations.get((source_ref, plan.title))
+        if reconciliation is not None:
+            task_lines.append(
+                f"  task: {plan.title} (reconciled existing {reconciliation.task_id})"
+            )
+            if reconciliation not in reconciled_tasks:
+                reconciled_tasks.append(reconciliation)
             mark(key, pending)
             continue
         if cfg.dry_run:
@@ -837,6 +851,7 @@ def _do_writes(
         source_ref=source_ref, thread_id=msg.thread_id, content_digest=digest,
         observed_at=cfg.now.isoformat(), resolutions=resolutions,
         extraction=extraction, writes=writes, revision_of=revision_of, suppressed=suppressed,
+        reconciled_tasks=reconciled_tasks,
         simulated=cfg.dry_run, planned_writes=planned_writes,  # G-LEDGER-6
         partial=any(r.outcome != "filed" for r in pending),
     )

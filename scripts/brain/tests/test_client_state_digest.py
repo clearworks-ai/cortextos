@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -296,6 +297,66 @@ def test_gmail_section_renders_each_change_line_type(tmp_path):
     assert "unknown-co.com" in text
     assert "- truncated: 2026-09-12 (50 msgs, cap reached)" in text
     assert "- invariants: OK" in text
+
+
+def test_reconciled_task_provenance_survives_audit_and_revision_review(tmp_path):
+    """A reconciled task is existing evidence, not a task this poller created."""
+    vault = tmp_path / "vault"
+    state = tmp_path / "state"
+    state.mkdir(parents=True)
+    ledger = Ledger(state / "observations.jsonl")
+    now = datetime(2026, 9, 14, 12, 0, 0, tzinfo=timezone.utc)
+
+    original = asdict(_row(
+        "gmail:msg-r", "digest-r1", "2026-09-01T08:00:00+00:00",
+        writes=["crm:c1", "clients/acme.md"],
+    ))
+    original["reconciled_tasks"] = [{
+        "task_id": "task_1791252751937_23973428",
+        "title": "Send the updated MSA",
+        "source_ref": "gmail:msg-r",
+        "evidence_description": "source gmail:msg-r",
+    }]
+    revision = asdict(_row(
+        "gmail:msg-r", "digest-r2", "2026-09-14T09:00:00+00:00",
+        writes=["clients/acme.md"], revision_of="digest-r1",
+    ))
+    _write(
+        ledger.path,
+        json.dumps(original, sort_keys=True) + "\n" + json.dumps(revision, sort_keys=True) + "\n",
+    )
+    _write(state / "run-receipt.json", json.dumps({
+        "last_success_at": "2026-09-14T11:50:00+00:00",
+        "window_days": 3, "message_count": 1, "truncation": [], "cost_usd": 0.0,
+    }))
+    _seed_baseline_ok(state, now)
+
+    assert ledger.open_email_tasks() == [{
+        "id": "task_1791252751937_23973428",
+        "title": "Send the updated MSA",
+        "source_ref": "gmail:msg-r",
+    }]
+    original_lines = cs_digest.plan_digest_line(ledger.all_rows()[0])
+    assert "- Task reconciled: Send the updated MSA (gmail:msg-r)" in original_lines
+    assert not any("Task created" in line for line in original_lines)
+
+    runner = FakeRunner({
+        ("cortextos", "bus", "list-tasks"): subprocess.CompletedProcess(
+            ["cortextos", "bus", "list-tasks"], 0,
+            json.dumps([{
+                "id": "task_1791252751937_23973428",
+                "title": "Send the updated MSA",
+                "status": "open",
+                "assigned_to": "josh",
+            }]),
+            "",
+        ),
+    })
+    text = "\n".join(cs_digest.gmail_section(state, vault, ledger, now, 3, runner))
+    assert (
+        "- evidence superseded — review: task:task_1791252751937_23973428 "
+        "Send the updated MSA"
+    ) in text
 
 
 def test_gmail_section_renders_simulated_rows_from_planned_writes(tmp_path):

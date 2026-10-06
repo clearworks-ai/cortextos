@@ -138,6 +138,31 @@ def test_gmail_source_fails_closed_when_canonical_gws_is_missing(tmp_path, monke
         raise AssertionError("missing canonical gws fell back to ambient PATH")
 
 
+def test_gmail_source_defaults_custom_real_runner_to_canonical_gws(tmp_path, monkeypatch):
+    """A custom real Runner is canonical; only test fakes opt into logical names."""
+    from subprocess import CompletedProcess
+
+    class CustomRealRunner:
+        use_logical_command_names = False
+
+        def __init__(self):
+            self.argv = None
+
+        def run(self, argv, *, input=None, env=None, timeout=120):
+            self.argv = list(argv)
+            return CompletedProcess(argv, 0, '{"messages": []}', "")
+
+    canonical = tmp_path / "canonical" / "gws"
+    canonical.parent.mkdir()
+    canonical.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    canonical.chmod(0o755)
+    monkeypatch.setattr(csg.gmail_source, "GWS_BIN", canonical)
+    runner = CustomRealRunner()
+
+    assert csg.gmail_source.list_messages(runner, "after:2026/10/06", max_results=1) == []
+    assert runner.argv[0] == str(canonical)
+
+
 def test_dry_run_files_message_previews_crm_page_and_persists_ledger_receipt(tmp_path):
     cfg = _cfg(tmp_path, dry_run=True)
     runner = FakeRunner()
@@ -1079,6 +1104,13 @@ def test_exact_task_reconciliation_preserves_landed_effects_and_is_idempotent(tm
     assert set(landed_before).issubset(final_effects)
     assert "task:Send the updated MSA" in final_effects
     assert rows[-1]["resolutions"][0]["outcome"] == "filed"
+    assert rows[-1]["reconciled_tasks"] == [{
+        "task_id": "task_1791252751937_23973428",
+        "title": "Send the updated MSA",
+        "source_ref": "gmail:m1",
+        "evidence_description": "source gmail:m1",
+    }]
+    assert not any(write.startswith("task:") for write in rows[-1]["writes"])
 
     ledger_before = (cfg.state_dir / "observations.jsonl").read_bytes()
     third = FakeRunner()

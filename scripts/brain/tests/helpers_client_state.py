@@ -36,6 +36,8 @@ class FakeRunner:
     An unmatched argv returns rc 127 rather than raising, so a missing fixture
     fails loudly at an assert instead of deep inside a stack trace."""
 
+    use_logical_command_names = True
+
     def __init__(
         self,
         responses: (

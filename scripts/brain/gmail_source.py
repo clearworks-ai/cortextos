@@ -49,15 +49,15 @@ class GmailSourceError(RuntimeError):
 
 
 def _gws_argv(runner: "Runner", *args: str) -> list[str]:
-    """Use canonical gws at the real subprocess seam; fakes keep a logical name."""
+    """Use canonical gws unless a test runner explicitly requests logical names."""
     current = runner
     while current is not None:
-        if getattr(current, "uses_real_subprocess", False):
-            if not GWS_BIN.is_file() or not os.access(GWS_BIN, os.X_OK):
-                raise GmailSourceError(f"canonical gws is missing or not executable: {GWS_BIN}")
-            return [str(GWS_BIN), *args]
+        if getattr(current, "use_logical_command_names", False):
+            return ["gws", *args]
         current = getattr(current, "inner", None)
-    return ["gws", *args]
+    if not GWS_BIN.is_file() or not os.access(GWS_BIN, os.X_OK):
+        raise GmailSourceError(f"canonical gws is missing or not executable: {GWS_BIN}")
+    return [str(GWS_BIN), *args]
 
 
 @dataclass

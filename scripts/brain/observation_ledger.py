@@ -37,6 +37,16 @@ class Resolution:
     # that the next run finishes instead of treating as complete.
 
 
+@dataclass(frozen=True)
+class ReconciledTask:
+    """Exact evidence for a pre-existing task credited to one Gmail source."""
+
+    task_id: str
+    title: str
+    source_ref: str
+    evidence_description: str
+
+
 @dataclass
 class ObservationRow:
     source_ref: str
@@ -47,6 +57,7 @@ class ObservationRow:
     reason: str = ""
     extraction: dict | None = None
     writes: list[str] = field(default_factory=list)
+    reconciled_tasks: list[ReconciledTask] = field(default_factory=list)
     revision_of: str | None = None
     suppressed: list[dict] = field(default_factory=list)
     simulated: bool = False
@@ -77,6 +88,7 @@ def _row_to_dict(row: ObservationRow) -> dict:
 
 def _row_from_dict(d: dict) -> ObservationRow:
     resolutions = [Resolution(**r) for r in d.get("resolutions", [])]
+    reconciled_tasks = [ReconciledTask(**task) for task in d.get("reconciled_tasks", [])]
     return ObservationRow(
         source_ref=d["source_ref"],
         thread_id=d["thread_id"],
@@ -86,6 +98,7 @@ def _row_from_dict(d: dict) -> ObservationRow:
         reason=d.get("reason", ""),
         extraction=d.get("extraction"),
         writes=list(d.get("writes", [])),
+        reconciled_tasks=reconciled_tasks,
         revision_of=d.get("revision_of"),
         suppressed=list(d.get("suppressed", [])),
         simulated=bool(d.get("simulated", False)),
@@ -183,22 +196,26 @@ class Ledger:
         return {r.source_ref for r in self._read_rows()}  # G-LEDGER-3: DISTINCT refs, not row count
 
     def open_email_tasks(self) -> list[dict]:
-        # G-LEDGER-4: parse ledger "writes" entries shaped "task:<id>|<title>"
-        # into {"id","title","source_ref"} -- source_ref comes from the
-        # OWNING row so a caller (client_state_writes.list_open_tasks join)
-        # can match back to the observation that created the task, and can
-        # itself re-check CURRENT task status before treating a title as
-        # still-open dedup context (this module has no bus access to do that
-        # join itself -- G0B-8).
-        tasks: list[dict] = []
+        # G-LEDGER-4: collect tasks either created by this poller ("writes"
+        # entries shaped "task:<id>|<title>") or credited from exact external
+        # evidence (typed `reconciled_tasks`). A caller can then re-check CURRENT
+        # task status before treating a title as still-open dedup context; this
+        # module has no bus access to do that join itself (G0B-8).
+        tasks: dict[tuple[str, str], dict] = {}
         for row in self._read_rows():
             for entry in row.writes:
                 if not entry.startswith("task:") or "|" not in entry:
                     continue
                 _, _, rest = entry.partition(":")
                 task_id, _, title = rest.partition("|")
-                tasks.append({"id": task_id, "title": title, "source_ref": row.source_ref})
-        return tasks
+                tasks[(task_id, row.source_ref)] = {
+                    "id": task_id, "title": title, "source_ref": row.source_ref,
+                }
+            for task in row.reconciled_tasks:
+                tasks[(task.task_id, task.source_ref)] = {
+                    "id": task.task_id, "title": task.title, "source_ref": task.source_ref,
+                }
+        return list(tasks.values())
 
     def cached_extraction(self, identity: str) -> dict | None:
         """The NEWEST stamped extraction anywhere in history whose `identity`

@@ -154,6 +154,10 @@ class HeartbeatRunner:
         self.heartbeat = heartbeat
 
     @property
+    def use_logical_command_names(self) -> bool:
+        return bool(getattr(self.inner, "use_logical_command_names", False))
+
+    @property
     def calls(self):
         return getattr(self.inner, "calls", [])
 

@@ -16,22 +16,26 @@ list_transcripts() (or anything else in the Fireflies body) was UNGUARDED and wo
 crash before the Gmail digest ran. Both sections now catch their own exceptions
 independently and main() always composes both result/error lines before sending.
 
-Sends Josh one Telegram a day either way — a one-line heartbeat when clean, detail when
+With --send, sends Josh one Telegram — a one-line heartbeat when clean, detail when
 not. Silent-when-clean was the alternative and was rejected deliberately: a watcher nobody
 hears from is indistinguishable from a watcher that has itself died.
 
-  python3 meeting_loop_watch.py [--dry-run] [--days N]
+  python3 meeting_loop_watch.py [--send | --dry-run] [--days N]
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from email.utils import getaddresses, parsedate_to_datetime
 from pathlib import Path
+from typing import Literal, TypedDict
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -62,6 +66,60 @@ BRIDGE_HEALTH = "https://bridge.clearworks.ai/healthz"
 # FR-002 default lookback window for the Gmail client-state poller — distinct
 # from --days above, which is the Fireflies watch's own lookback.
 GMAIL_POLL_WINDOW_DAYS = 3
+
+
+class IdentityEvidence(TypedDict):
+    path: str
+    sha256: str
+
+
+class RecoveryIdentity(TypedDict):
+    """Operator-verified identity; the watcher never registers these records."""
+    kind: Literal["verified_manual_recovery"]
+    meeting_id: str
+    source_ref: str
+    error_at: str
+    error_sha256: str
+    verifier: str
+    verified_at: str
+    draft_id: str
+    gmail_message_id: str
+    account: str
+    recipient: str
+    identity_evidence: IdentityEvidence
+
+
+class VerifiedManualRecovery(RecoveryIdentity):
+    """identity_evidence pins a manual-recovery-identity/v1 SENT artifact."""
+    scope: Literal["recap_sent_only"]
+
+
+class CompletedTaskEvidence(IdentityEvidence):
+    task_id: str
+    result: str
+
+
+class ProposalEvidence(IdentityEvidence):
+    # SHA of canonical row JSON, NOT the mutable whole JSONL ledger.
+    id: str
+
+
+class VerifiedDraftRecovery(RecoveryIdentity):
+    scope: Literal["recap_draft_created_and_surfaced"]
+    meeting_title: str
+    source_evidence: IdentityEvidence
+    error_evidence: IdentityEvidence
+    crm_task: CompletedTaskEvidence
+    draft_task: CompletedTaskEvidence
+    crm_task_id: str
+    draft_task_id: str
+    from_header: str
+    to_header: str
+    subject: str
+    thread_id: str
+    draft_created_at: str
+    surfaced_at: str
+    excluded_proposals: list[ProposalEvidence]
 
 
 def _occurred(row: dict) -> datetime:
@@ -120,7 +178,7 @@ def _parse_iso(value: object) -> datetime | None:
 
 
 def _load_ack() -> dict:
-    doc = {"cutover_at": DEFAULT_CUTOVER_AT, "superseded": {}}
+    doc = {"cutover_at": DEFAULT_CUTOVER_AT, "superseded": {}, "verified_manual_recoveries": {}}
     if not ACK_PATH.is_file():
         return doc
     try:
@@ -130,7 +188,8 @@ def _load_ack() -> dict:
     if not isinstance(raw, dict):
         return doc
     superseded = raw.get("superseded") if isinstance(raw.get("superseded"), dict) else {}
-    return {"cutover_at": str(raw.get("cutover_at") or DEFAULT_CUTOVER_AT), "superseded": superseded}
+    return {"cutover_at": str(raw.get("cutover_at") or DEFAULT_CUTOVER_AT), "superseded": superseded,
+            "verified_manual_recoveries": raw.get("verified_manual_recoveries", {})}
 
 
 def _save_ack(doc: dict) -> None:
@@ -145,8 +204,168 @@ def _save_ack(doc: dict) -> None:
     payload = {
         "cutover_at": doc.get("cutover_at") or DEFAULT_CUTOVER_AT,
         "superseded": superseded,
+        # Preserve provenance verbatim, including invalid records for audit.
+        # Classification validates on every read; a save cannot bless evidence.
+        "verified_manual_recoveries": doc.get("verified_manual_recoveries", {}),
     }
     atomic_write(ACK_PATH, (json.dumps(payload, sort_keys=True, indent=2) + "\n").encode("utf-8"))
+
+
+def _pinned_json(ref: dict, expected_path: Path | None = None) -> dict:
+    path = Path(ref["path"])
+    if not path.is_absolute() or (expected_path is not None and path.resolve() != expected_path.resolve()):
+        raise ValueError("wrong evidence path")
+    raw = path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != ref["sha256"]:
+        raise ValueError("changed evidence")
+    doc = json.loads(raw)
+    if not isinstance(doc, dict):
+        raise ValueError("malformed evidence")
+    return doc
+
+
+def _completed_task(ref: CompletedTaskEvidence) -> dict:
+    if any(not isinstance(ref.get(k), str) or not ref[k].strip() for k in ("task_id", "result")):
+        raise ValueError("malformed task binding")
+    task = _pinned_json(ref)
+    if (task.get("id") != ref["task_id"] or task.get("status") != "completed"
+            or not ref["result"] or task.get("result") != ref["result"]):
+        raise ValueError("task completion does not match")
+    return task
+
+
+def _draft_created_and_surfaced(rec: VerifiedDraftRecovery, evidence: dict, doc: dict) -> bool:
+    """The draft-worker contract requires CRM + created/surfaced, never SENT.
+
+    identity_evidence is the hash-pinned PA metadata receipt, not a new
+    normalized claim. Proposal refs pin canonical row bytes so unrelated
+    appends to their JSONL ledger cannot invalidate this reconciliation.
+    """
+    nested = {"identity_evidence", "source_evidence", "error_evidence", "crm_task", "draft_task", "excluded_proposals"}
+    if any(not isinstance(rec.get(k), str) or not rec[k].strip()
+           for k in VerifiedDraftRecovery.__required_keys__ - nested):
+        return False
+    mid = rec["meeting_id"]
+    source = _pinned_json(rec["source_evidence"], ENVELOPES / mid / "source.json")
+    error = _pinned_json(rec["error_evidence"], STATE / f"fireflies-{mid}" / "processing-error.json")
+    if source.get("title") != rec["meeting_title"] or error != doc or "sent_at" in rec or "sent" in rec:
+        return False
+    crm = _completed_task(rec["crm_task"])
+    draft = _completed_task(rec["draft_task"])
+    if (crm["id"] != rec["crm_task_id"] or draft["id"] != rec["draft_task_id"]
+            or crm["id"] == draft["id"] or not all(value in draft["result"] for value in (
+            mid, rec["meeting_title"], rec["draft_id"], rec["recipient"]))):
+        return False
+    if not re.search(r"(?:^|[.;]\s*)surfaced link to Josh(?:[.;]|$)", draft["result"], re.IGNORECASE):
+        return False
+    text = evidence["text"].replace(r"\\n", "\n").replace(r"\n", "\n")
+    blocks = re.findall(r"Result rc=0:\n((?:- [^\n]+\n?)+)", text)
+    if len(blocks) != 1:
+        return False
+    pairs = re.findall(r"^- ([^:]+): (.+)$", blocks[0], re.MULTILINE)
+    headers = dict(pairs)
+    if len(pairs) != len(headers) or headers.get("labels") != "[DRAFT]":
+        return False
+    expected = {"id": rec["gmail_message_id"].removeprefix("gmail:"), "threadId": rec["thread_id"],
+                "From": rec["from_header"], "To": rec["to_header"], "Subject": rec["subject"]}
+    if any(headers.get(k) != v for k, v in expected.items()):
+        return False
+    if ([email for _, email in getaddresses([headers["From"]])] != [rec["account"]]
+            or [email for _, email in getaddresses([headers["To"]])] != [rec["recipient"]]):
+        return False
+    times = [datetime.fromisoformat(rec[k].replace("Z", "+00:00"))
+             for k in ("error_at", "draft_created_at", "surfaced_at", "verified_at")]
+    failed_at, created_at, surfaced_at, verified_at = times
+    crm_at, task_created, task_completed, headers_at = [datetime.fromisoformat(value.replace("Z", "+00:00"))
+        for value in (crm["completed_at"], draft["created_at"], draft["completed_at"], evidence["timestamp"])]
+    if (not all(t.tzinfo for t in [*times, crm_at, task_created, task_completed, headers_at])
+            or not failed_at <= created_at <= surfaced_at <= verified_at
+            or not failed_at <= crm_at <= verified_at or not surfaced_at <= headers_at <= verified_at
+            or created_at != task_created or surfaced_at != task_completed
+            or parsedate_to_datetime(headers["Date"]) != created_at):
+        return False
+    refs = rec["excluded_proposals"]
+    if not isinstance(refs, list) or len(refs) != 2 or len({r["id"] for r in refs}) != 2:
+        return False
+    for ref in refs:
+        path = Path(ref["path"])
+        if not path.is_absolute():
+            return False
+        rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+        matches = [row for row in rows if isinstance(row, dict) and row.get("id") == ref["id"]]
+        if len(matches) != 1:
+            return False
+        row = matches[0]
+        raw = json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+        if (hashlib.sha256(raw).hexdigest() != ref["sha256"] or row.get("status") != "open"
+                or row.get("source_ref") != rec["source_ref"] or row.get("sent") or row.get("sent_at")):
+            return False
+    return True
+
+
+def _verified_manual_recovery(meeting_id: str, doc: dict | None, ack: dict) -> str | None:
+    """Return only the verified scope, never canonical processing completion.
+
+    This is a local audit boundary, not a Gmail lookup or authorization to
+    replay. Missing/changed evidence must leave the original failure active.
+    """
+    records = ack.get("verified_manual_recoveries")
+    rec = records.get(meeting_id) if isinstance(records, dict) else None
+    if not isinstance(rec, dict) or not doc or doc.get("class") != "processing":
+        return None
+    string_fields = RecoveryIdentity.__required_keys__ - {"identity_evidence"}
+    if any(not isinstance(rec.get(k), str) or not rec[k].strip() for k in string_fields):
+        return None
+    if not re.fullmatch(r"r[0-9]+", rec["draft_id"]) or not re.fullmatch(r"gmail:[0-9a-f]+", rec["gmail_message_id"]):
+        return None
+    evidence_ref = rec.get("identity_evidence")
+    if not isinstance(evidence_ref, dict) or not isinstance(evidence_ref.get("path"), str):
+        return None
+    evidence_path = Path(evidence_ref["path"])
+    if not evidence_path.is_absolute():
+        return None
+    try:
+        error = (STATE / f"fireflies-{meeting_id}" / "processing-error.json").read_bytes()
+        evidence_bytes = evidence_path.read_bytes()
+        evidence = json.loads(evidence_bytes)
+        source = json.loads((ENVELOPES / meeting_id / "source.json").read_bytes())
+        if not isinstance(evidence, dict) or not isinstance(source, dict):
+            return None
+        if (rec["kind"] != "verified_manual_recovery" or rec["meeting_id"] != meeting_id
+                or rec["source_ref"] != f"fireflies:{meeting_id}"
+                or rec["scope"] not in ("recap_sent_only", "recap_draft_created_and_surfaced")
+                or rec["error_at"] != doc.get("at")
+                or json.loads(error) != doc
+                or rec["error_sha256"] != hashlib.sha256(error).hexdigest()
+                or evidence_ref.get("sha256") != hashlib.sha256(evidence_bytes).hexdigest()
+                or source.get("source") != {"kind": "fireflies", "id": meeting_id}):
+            return None
+        participants = source.get("participants")
+        if not isinstance(participants, list) or not all(
+                any(isinstance(p, dict) and p.get("email") == rec[field] and p.get("side") == side
+                    for p in participants) for field, side in (("account", "ours"), ("recipient", "theirs"))):
+            return None
+        if rec["scope"] == "recap_draft_created_and_surfaced":
+            return rec["scope"] if _draft_created_and_surfaced(rec, evidence, doc) else None
+        if evidence.get("schema") != "manual-recovery-identity/v1":
+            return None
+        identity_fields = ("source_ref", "draft_id", "gmail_message_id", "account", "recipient")
+        if any(evidence.get(k) != rec[k] for k in identity_fields):
+            return None
+        labels = evidence.get("label_ids")
+        if (not isinstance(labels, list) or not all(isinstance(label, str) for label in labels)
+                or "SENT" not in labels or "DRAFT" in labels):
+            return None
+        # Strict timezone-bearing timestamps: the legacy display parser's
+        # permissive fallback must not validate an attestation.
+        failed_at = datetime.fromisoformat(rec["error_at"].replace("Z", "+00:00"))
+        sent_at = datetime.fromisoformat(evidence["sent_at"].replace("Z", "+00:00"))
+        verified_at = datetime.fromisoformat(rec["verified_at"].replace("Z", "+00:00"))
+        if not all(d.tzinfo for d in (failed_at, sent_at, verified_at)) or not failed_at <= sent_at <= verified_at:
+            return None
+        return rec["scope"]
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return None
 
 
 def _processing_error_doc(meeting_id: str) -> dict | None:
@@ -172,13 +391,11 @@ def _processing_failure(meeting_id: str) -> str | None:
     return str(doc.get("message") or f"returncode={doc.get('returncode')}")[:200]
 
 
-def _is_active_failure(meeting_id: str, evidence_at: datetime | None, ack: dict) -> bool:
+def _is_active_failure(evidence_at: datetime | None, ack: dict) -> bool:
     cutover = _parse_iso(ack.get("cutover_at") or DEFAULT_CUTOVER_AT)
-    rec = (ack.get("superseded") or {}).get(meeting_id)
-    rec_at = _parse_iso(rec.get("error_at")) if isinstance(rec, dict) else None
+    # A legacy timestamp-only ACK cannot identify a post-cutover attempt.
+    # Those require the fingerprint + verified manual recovery chain above.
     if evidence_at is not None and cutover is not None and evidence_at <= cutover:
-        return False
-    if evidence_at is not None and rec_at is not None and evidence_at == rec_at:
         return False
     return True
 
@@ -222,11 +439,10 @@ def send_telegram(text: str) -> bool:
 
 
 def fireflies_section(args: argparse.Namespace) -> tuple[list[str], str | None, dict | None]:
-    """The original meeting-loop watch, logic byte-identical, now wrapped so
-    EVERY failure (missing key, list_transcripts raising, anything else)
+    """EVERY failure (missing key, list_transcripts raising, anything else)
     returns ([], err, None) instead of exiting main() early (G-07 / G0B-16).
-    Never persists ACK_PATH; main() writes fingerprints only on the authorized
-    non-dry-run path."""
+    Never persists ACK_PATH; main() writes historical ACKs only with --send.
+    Manual recovery evidence is read-only on every path."""
     try:
         # G-DIG-4 (G2A-6): the secrets file is THIS section's input and nothing
         # else's, so it is read inside this section's own guard. main() used to
@@ -247,6 +463,8 @@ def fireflies_section(args: argparse.Namespace) -> tuple[list[str], str | None, 
 
         missing, empty, incomplete, failed = [], [], [], []
         superseded = 0
+        recovered = 0
+        draft_reconciled = 0
         for row in sorted(recent, key=_occurred):
             mid = str(row.get("id"))
             if mid in have:
@@ -264,8 +482,15 @@ def fireflies_section(args: argparse.Namespace) -> tuple[list[str], str | None, 
                     failure = _processing_failure(mid)
                     entry = (_occurred(row).date().isoformat(), mid, str(row.get("title") or "")[:48])
                     if failure:
+                        recovery_scope = _verified_manual_recovery(mid, doc, ack)
+                        if recovery_scope:
+                            if recovery_scope == "recap_draft_created_and_surfaced":
+                                draft_reconciled += 1
+                            else:
+                                recovered += 1
+                            continue
                         evidence_at = _parse_iso((doc or {}).get("at"))
-                        if not _is_active_failure(mid, evidence_at, ack):
+                        if not _is_active_failure(evidence_at, ack):
                             _note_superseded(ack, mid, doc)
                             ack_dirty = True
                             superseded += 1
@@ -289,8 +514,8 @@ def fireflies_section(args: argparse.Namespace) -> tuple[list[str], str | None, 
             newest_line = (
                 f"Newest: {newest.date().isoformat() if newest else 'none'} · hub {hub} · bridge {bridge}"
             )
-            if superseded:
-                filed = len(recent) - len(empty) - superseded
+            if superseded or recovered or draft_reconciled:
+                filed = len(recent) - len(empty) - superseded - recovered - draft_reconciled
                 lines = [
                     f"Meeting loop OK — {filed} current transcript(s) in the last {args.days}d with receipts; "
                     f"{superseded} historical no-receipt item(s) superseded, not current.",
@@ -321,6 +546,14 @@ def fireflies_section(args: argparse.Namespace) -> tuple[list[str], str | None, 
             lines.append("\nCheck fetch/processing receipts and meeting-worker logs first. "
                          "If delivery is missing, check hub logs "
                          "(railway logs --service webhook-hub) for relay_failed.")
+        if recovered:
+            lines.append(f"{recovered} recap(s) manually recovered/superseded; "
+                         "canonical processing remains unverified. "
+                         "Separate proposal obligations are unchanged.")
+        if draft_reconciled:
+            lines.append("manually reconciled: CRM debrief complete; recap draft created/surfaced; "
+                         "not sent; proposals open.")
+            lines.append("canonical processing remains unverified.")
         return lines, None, pending_ack
     except Exception as exc:  # noqa: BLE001 — G0B-16: sections fail independently
         return [], f"{type(exc).__name__}: {exc}", None
@@ -348,7 +581,11 @@ def gmail_section_lines(args: argparse.Namespace) -> tuple[list[str], str | None
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(epilog=(
+        "Promotion requirement: update meeting-loop-watch and meeting-loop-watch-pm "
+        "to include --send atomically with watcher promotion. Default and --dry-run print only."
+    ))
+    parser.add_argument("--send", action="store_true", help="explicitly send Telegram and persist historical ACKs")
     parser.add_argument("--dry-run", action="store_true", help="print, do not send")
     parser.add_argument("--days", type=int, default=7, help="how far back to look (Fireflies)")
     args = parser.parse_args(argv)
@@ -366,7 +603,7 @@ def main(argv: list[str] | None = None) -> int:
 
     message = "\n\n".join(sections)
     print(message)
-    if args.dry_run:
+    if args.dry_run or not args.send:
         return 0
     if pending_ack is not None:
         _save_ack(pending_ack)

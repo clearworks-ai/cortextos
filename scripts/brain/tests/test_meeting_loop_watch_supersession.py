@@ -119,6 +119,25 @@ def _ack_frozen(path: Path, before: bytes | None) -> None:
         assert path.read_bytes() == before
 
 
+@pytest.mark.parametrize("flags", [[], ["--dry-run"]])
+def test_diagnostics_never_send_or_write_ack(flags, monkeypatch, tmp_path, capsys):
+    mid = LIVE_IDS[0]
+    envelopes, state = _seed_incomplete(
+        tmp_path, mid=mid, title="Historical failure", date_string="2026-09-29T20:30:00Z",
+        error_doc=_fixture_error(mid),
+    )
+    sent = _install_watch(
+        monkeypatch, tmp_path, envelopes=envelopes, state=state,
+        rows=[{"id": mid, "dateString": "2026-09-29T20:30:00Z"}],
+    )
+    writes = []
+    monkeypatch.setattr(mlw, "_save_ack", lambda doc: writes.append(doc))
+
+    assert mlw.main([*flags, "--days", "30"]) == 0
+    assert "superseded, not current" in capsys.readouterr().out
+    assert (sent, writes) == ([], [])
+
+
 def test_superseded_pre_cutover_processing_error_is_absent_from_outbound(
     monkeypatch, tmp_path, capsys
 ):
@@ -200,7 +219,7 @@ def test_post_cutover_processing_failure_alerts_on_dry_run_and_real_path(
     assert CREDIT not in dry_out
     assert sent == []
 
-    rc_real = mlw.main(["--days", "30"])
+    rc_real = mlw.main(["--send", "--days", "30"])
     real_out = capsys.readouterr().out
     assert rc_real == 0
     assert sent, "real watcher path must compose outbound content"
@@ -294,7 +313,7 @@ def test_real_path_persists_ack_without_error_text_dry_run_does_not(
     assert "Meeting loop OK" in dry_out
     assert "all filed (receipts present)" not in dry_out
 
-    rc = mlw.main(["--days", "30"])
+    rc = mlw.main(["--send", "--days", "30"])
     printed = capsys.readouterr().out
     assert rc == 0
     assert sent and _printed(printed) == sent[0]
@@ -386,7 +405,7 @@ def test_live_sep29_ids_credit_balance_absent_synthetic_processing_failure_alert
         assert mid not in dry_out
         assert _live_error_path(mid).read_bytes() == snapshots[mid]
 
-    rc_real = mlw.main(["--days", "30"])
+    rc_real = mlw.main(["--send", "--days", "30"])
     real_out = capsys.readouterr().out
     assert rc_real == 0
     assert sent and _printed(real_out) == sent[0]

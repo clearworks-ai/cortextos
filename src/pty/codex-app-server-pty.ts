@@ -1384,9 +1384,12 @@ export class CodexAppServerPTY {
 
   private removeSocket(): void {
     try {
-      if (existsSync(this._socketPath)) unlinkSync(this._socketPath);
+      // No existsSync guard: it follows symlinks, so a codex.sock symlink into
+      // a reboot-wiped /tmp dir reads as absent, survives, and codex app-server
+      // then fails every spawn with ENOENT.
+      unlinkSync(this._socketPath);
     } catch {
-      // Ignore stale socket cleanup failures.
+      // Ignore missing-socket / stale socket cleanup failures.
     }
   }
 

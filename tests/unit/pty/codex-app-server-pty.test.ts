@@ -116,6 +116,21 @@ describe('CodexAppServerPTY socket path policy', () => {
   });
 });
 
+describe('CodexAppServerPTY stale socket cleanup', () => {
+  it('unlinks codex.sock even when existsSync reports it absent (dangling symlink after reboot)', () => {
+    const pty = new CodexAppServerPTY(mockEnv, {});
+    fsMocks.existsSync.mockReturnValue(false);
+    (pty as unknown as { removeSocket: () => void }).removeSocket();
+    expect(fsMocks.unlinkSync).toHaveBeenCalledWith('/tmp/ctx/state/codex-app-agent/codex.sock');
+  });
+
+  it('tolerates a missing socket', () => {
+    const pty = new CodexAppServerPTY(mockEnv, {});
+    fsMocks.unlinkSync.mockImplementation(() => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); });
+    expect(() => (pty as unknown as { removeSocket: () => void }).removeSocket()).not.toThrow();
+  });
+});
+
 describe('CodexAppServerPTY command mapping', () => {
   function makeReadyPty() {
     const pty = new CodexAppServerPTY(mockEnv, {});

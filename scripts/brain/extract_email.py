@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from brain_rollup import _open_rows, _section_text
-from extract_meeting import _parse_claude_stdout, _require_single_line
+from extract_meeting import _parse_claude_stdout, _require_single_line, subscription_env
 from gmail_source import Message
 from observation_ledger import Ledger, ObservationRow, content_digest
 from resolve_meeting import quote_gate
@@ -275,7 +275,7 @@ def extract(
     """
     prompt = build_prompt(msg, context)
     try:
-        proc = runner.run(list(CLAUDE_ARGV), input=prompt)  # G-EXT-2
+        proc = runner.run(list(CLAUDE_ARGV), input=prompt, env=subscription_env())  # G-EXT-2
     except subprocess.TimeoutExpired as exc:
         raise ExtractionTransportError(f"claude timeout after {exc.timeout}s") from exc
     if proc.returncode != 0:

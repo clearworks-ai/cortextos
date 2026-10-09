@@ -283,20 +283,13 @@ def test_gmail_section_renders_each_change_line_type(tmp_path):
     lines = cs_digest.gmail_section(state, vault, ledger, now, window_days=3, runner=runner)
     text = "\n".join(lines)
 
-    assert "Client state (Gmail) — last 24h" in text
-    # G0B-17: the change lines come from the SHARED projection
-    # (client_state_projections.plan_digest_line) and carry the extraction
-    # summary -- the same rendering the dry-run preview uses.
-    assert "- Page: clients/acme.md (gmail:msg-a) — Marcos asked for the renewal quote" in text
-    assert "- CRM: crm:c-marcos (gmail:msg-a) — Marcos asked for the renewal quote" in text
-    assert "- Revision: gmail:msg-b supersedes digestb1" in text
+    # Josh 2026-10-09: routine filing is a count; only what needs a look is itemized.
+    assert lines[0] == "Client state (Gmail) — needs a look (5 routine updates in 24h)"
+    for routine in ("- Page:", "- CRM:", "- Revision:", "- Task suppressed", "- ignored", "- invariants: OK"):
+        assert routine not in text, routine
     assert "- evidence superseded — review: task:T-1 Send tacticals doc" in text
-    assert "- Task suppressed (tier 1): Send Alloi the tacticals doc matches 'Ship tacticals doc' (gmail:msg-c)" in text
     assert "- Escalated: gmail:msg-d — ambiguous:acme|widget-co" in text
-    assert "1 messages from 1 senders" in text
-    assert "unknown-co.com" in text
     assert "- truncated: 2026-09-12 (50 msgs, cap reached)" in text
-    assert "- invariants: OK" in text
 
 
 def test_reconciled_task_provenance_survives_audit_and_revision_review(tmp_path):
@@ -382,10 +375,8 @@ def test_gmail_section_renders_simulated_rows_from_planned_writes(tmp_path):
 
     lines = cs_digest.gmail_section(state, vault, ledger, now, window_days=3, runner=FakeRunner({}))
     text = "\n".join(lines)
-    assert "Client state (Gmail) OK — 0 changes" not in text   # NOT a zero-change digest
-    assert "- CRM: crm:<new:marcos@acme.org> (gmail:msg-s) — Marcos asked for the MSA [simulated]" in text
-    assert "- Page: clients/acme.md (gmail:msg-s) — Marcos asked for the MSA [simulated]" in text
-    assert "- Task created: Send MSA (gmail:msg-s) [simulated]" in text
+    # NOT a zero-change digest: the planned writes are counted, never itemized
+    assert lines == ["Client state (Gmail) OK — 3 routine updates in 24h, poller last success 2026-09-14T11:50:00+00:00"]
 
 
 def test_gmail_section_collapses_to_one_line_when_nothing_happened(tmp_path):
@@ -402,7 +393,7 @@ def test_gmail_section_collapses_to_one_line_when_nothing_happened(tmp_path):
 
     lines = cs_digest.gmail_section(state, vault, ledger, now, window_days=3, runner=FakeRunner({}))
     assert len(lines) == 1
-    assert lines[0].startswith("Client state (Gmail) OK — 0 changes in 24h, invariants OK, poller last success ")
+    assert lines[0].startswith("Client state (Gmail) OK — 0 routine updates in 24h, poller last success ")
     assert "2026-09-14T11:55:00+00:00" in lines[0]
 
 
@@ -419,7 +410,7 @@ def test_gmail_section_shows_gap_line_when_receipt_stale(tmp_path):
     _seed_baseline_ok(state, now)
 
     lines = cs_digest.gmail_section(state, vault, ledger, now, window_days=3, runner=FakeRunner({}))
-    assert lines[0] == "Client state (Gmail) — last 24h"
+    assert lines[0].startswith("Client state (Gmail) — needs a look")
     assert not lines[0].startswith("Client state (Gmail) OK")
     assert any("2026-09-01" in ln for ln in lines)
 
@@ -558,7 +549,7 @@ def test_gmail_section_still_collapses_for_a_healthy_receipt(tmp_path):
 
     lines = cs_digest.gmail_section(state, vault, ledger, now, window_days=3, runner=FakeRunner({}))
     assert len(lines) == 1
-    assert lines[0].startswith("Client state (Gmail) OK — 0 changes in 24h, invariants OK, poller last success ")
+    assert lines[0].startswith("Client state (Gmail) OK — 0 routine updates in 24h, poller last success ")
 
 
 # --- G2a-5: ONE source for every digest event line ---------------------------
@@ -603,10 +594,9 @@ def test_gmail_section_emits_each_event_exactly_once(tmp_path):
     escalation_lines = [ln for ln in lines if "escalat" in ln.lower()]
     page_lines = [ln for ln in lines if "clients/acme.md" in ln]
 
-    assert len(revision_lines) == 1, revision_lines
-    assert len(suppression_lines) == 1, suppression_lines
+    # revision / suppression / page writes are routine (counted, not itemized)
+    assert revision_lines == [] and suppression_lines == [] and page_lines == []
     assert len(escalation_lines) == 1, escalation_lines
-    assert len(page_lines) == 1, page_lines
     # the reason the loop's own line carried is not lost
     assert any("ambiguous:acme|alloi" in ln for ln in escalation_lines), escalation_lines
 

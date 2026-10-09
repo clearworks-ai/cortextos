@@ -31,6 +31,10 @@ from runner import Runner  # noqa: E402
 from writeback_render import org_brain_root  # noqa: E402
 
 BASELINE_FILE = "invariants-baseline.json"
+ROUTINE_PREFIXES = (
+    "- CRM:", "- Page:", "- Task created:", "- Task already satisfied:", "- Task reconciled:",
+    "- Task suppressed", "- Revision:", "- ignored (no-known-entity):",
+)
 _PAGE_FOLDERS = ("clients", "orgs", "projects")
 # "since forever" sentinel for a FULL ledger history read (G0B-15 — the row a
 # revision supersedes can be arbitrarily older than the digest's 24h window).
@@ -353,18 +357,24 @@ def gmail_section(
         if not invariant_lines:
             invariant_lines = ["- invariants: OK"]
 
+    # Josh 2026-10-09: routine filing (CRM/page/task writes, ignored senders) is
+    # a count, never an itemized list -- Telegram only itemizes what needs him.
+    routine = [ln for ln in change_lines if ln.startswith(ROUTINE_PREFIXES)]
+    attention = [ln for ln in change_lines if not ln.startswith(ROUTINE_PREFIXES)]
+    filed = sum(1 for ln in routine if not ln.startswith("- ignored"))
+
     # G-DIG-1: a silent watcher is indistinguishable from a dead one, so the
-    # single-line OK collapses ONLY when there is truly nothing to report
+    # single-line OK collapses ONLY when there is nothing that needs a look
     # (which also means a missing baseline NEVER collapses -- its error line
     # is not "- invariants: OK").
-    if not change_lines and gap is None and invariant_lines == ["- invariants: OK"]:
+    if not attention and gap is None and invariant_lines == ["- invariants: OK"]:
         last_success = (receipt or {}).get("last_success_at", "unknown")
-        return [f"Client state (Gmail) OK — 0 changes in 24h, invariants OK, poller last success {last_success}"]
+        return [f"Client state (Gmail) OK — {filed} routine updates in 24h, poller last success {last_success}"]
 
-    lines = ["Client state (Gmail) — last 24h", *change_lines]
+    lines = [f"Client state (Gmail) — needs a look ({filed} routine updates in 24h)", *attention]
     if gap:
         lines.append(gap)
-    lines.extend(invariant_lines)
+    lines.extend(ln for ln in invariant_lines if ln != "- invariants: OK")
     return lines
 
 

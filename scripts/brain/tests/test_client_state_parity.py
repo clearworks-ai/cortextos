@@ -27,6 +27,7 @@ if str(BRAIN) not in sys.path:
 from helpers_client_state import FakeRunner, make_crm_dir, make_vault  # noqa: E402
 
 import client_state_digest as cs_digest  # noqa: E402
+from client_state_projections import plan_digest_line  # noqa: E402
 import client_state_gmail as csg  # noqa: E402
 import client_state_projections as csp  # noqa: E402
 import single_flight  # noqa: E402
@@ -211,7 +212,14 @@ def test_digest_line_parity_preview_equals_real_digest_section(tmp_path):
         cfg_live.state_dir, cfg_live.vault, ledger,
         datetime(2026, 9, 14, 12, 30, tzinfo=timezone.utc), window_days=3, runner=FakeRunner(),
     )
-    live_change_lines = [l for l in lines if l.startswith("- ") and not l.startswith("- invariants")]
+    # The digest renders the SAME plan_digest_line output, but (Josh 2026-10-09)
+    # routine lines are a count and only the rest are itemized -- so parity is
+    # checked against the shared projection over the live ledger, and the
+    # digest must count/itemize exactly those lines.
+    live_change_lines = [l for row in ledger.rows_since("2026-09-13T12:30:00+00:00") for l in plan_digest_line(row)]
+    routine = [l for l in live_change_lines if l.startswith(cs_digest.ROUTINE_PREFIXES)]
+    assert f"{len(routine)} routine updates in 24h" in lines[0], lines
+    assert [l for l in live_change_lines if l not in routine] == [l for l in lines[1:] if l in live_change_lines]
 
     def canon(line: str) -> str:
         # live ids ('crm:lori-bodenhamer', 'task:task_...') vs the dry-run's

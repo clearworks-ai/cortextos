@@ -19,7 +19,7 @@ import preview
 import progress
 from adapt_meeting import main as adapt_main
 from atomic import atomic_write
-from extract_meeting import main as extract_main
+from extract_meeting import main as extract_main, subscription_env
 from fetch_fireflies import main as fetch_main
 from paths import DEFAULT_REPO_ROOT, DEFAULT_VAULT, envelope_dir, org_brain_root, safe_meeting_id
 from resolve_meeting import main as resolve_main
@@ -580,7 +580,7 @@ def _run_apply(meeting_id, vault, repo, source_dir, *, force, backfill=False,
 
 
 def _writeback_env(vault: Path) -> dict[str, str]:
-    env = os.environ.copy()
+    env = subscription_env()  # recap's `claude -p` must bill the Max plan, not an inherited API key
     env["ORG_ROOT"] = str(vault)
     env["LEDGER_FILE"] = str(vault / "raw/media/transcripts/_writeback-ledger.txt")
     env["CTX_TMP"] = str(vault / "raw/media/transcripts/_state" / "tmp")

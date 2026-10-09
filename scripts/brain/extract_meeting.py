@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -18,6 +19,16 @@ from paths import DEFAULT_VAULT
 
 HERE = Path(__file__).resolve().parent
 SCHEMA_PATH = HERE / "extraction.schema.json"
+
+# `claude -p` prefers an API key over the Max-plan keychain login. Agent .env
+# files (and, via pm2, the daemon env) carry ANTHROPIC_API_KEY, so an inherited
+# key silently billed the API account and extract died "Credit balance is too
+# low". Every model call in the meeting loop runs with these stripped.
+API_AUTH_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_API_KEY")
+
+
+def subscription_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    return {k: v for k, v in (os.environ if base is None else base).items() if k not in API_AUTH_VARS}
 PROMPT_TEMPLATE = """Extract meeting intelligence as JSON matching the schema.
 Unknown keys are forbidden. The string "unknown" is illegal for every enum.
 Quotes for decisions/commitments/promotions/open_questions must be normalized substrings of text_units. open_questions is optional — omit it or leave it empty when none exist.
@@ -377,6 +388,7 @@ def main(argv: list[str] | None = None) -> int:
                 cmd,
                 input=prompt,
                 cwd=cwd,
+                env=subscription_env(),
                 capture_output=True,
                 text=True,
                 check=False,

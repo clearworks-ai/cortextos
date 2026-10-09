@@ -80,6 +80,34 @@ def _claude_json(
     return json.dumps(wrapper)
 
 
+def test_claude_never_sees_an_inherited_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-10-09: an inherited ANTHROPIC_API_KEY made `claude -p` bill the API
+    account instead of the Max plan -> "Credit balance is too low" at extract."""
+    from extract_meeting import main
+
+    src = tmp_path / "env"
+    src.mkdir()
+    _write_source(src)
+    for var in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_API_KEY"):
+        monkeypatch.setenv(var, "sk-ant-api-fake")
+    envs: list[dict] = []
+
+    class Proc:
+        returncode = 0
+        stdout = _claude_json(_model_obj())
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        envs.append(kwargs.get("env"))
+        return Proc()
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    assert main(["--source", str(src)]) == 0
+    assert envs[0] is not None, "claude must get an explicit env, not the inherited one"
+    assert not {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_API_KEY"} & set(envs[0])
+    assert envs[0]["PATH"] == __import__("os").environ["PATH"]
+
+
 def test_missing_extraction_calls_claude(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from extract_meeting import main
 

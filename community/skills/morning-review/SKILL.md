@@ -167,7 +167,7 @@ jq --arg focus "user's stated focus" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 ### 1D: Cascade goals to each active agent
 
 For each agent in the roster:
-1. Determine 2-5 role-appropriate goals based on their function and today's focus
+1. Determine 2-5 role-appropriate goals based on their function and today's focus Write goals as 3-7 short plain lines in present tense: the current focus and the real goals. No task IDs, commit hashes, receipts, history, or "preserve / infer no" wording. Finished work belongs in the task record, not in goals.
 2. Write their `goals.json`:
    ```bash
    cat > $CTX_FRAMEWORK_ROOT/orgs/$CTX_ORG/agents/<agent>/goals.json << 'EOF'

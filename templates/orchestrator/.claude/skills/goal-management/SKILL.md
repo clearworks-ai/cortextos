@@ -48,7 +48,7 @@ jq --arg focus "the user's stated focus" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ
 
 For each active agent, based on their role and today's daily focus:
 
-1. Determine 2-5 role-appropriate goals
+1. Determine 2-5 role-appropriate goals Write goals as 3-7 short plain lines in present tense: the current focus and the real goals. No task IDs, commit hashes, receipts, history, or "preserve / infer no" wording. Finished work belongs in the task record, not in goals.
 2. Write their `goals.json`:
    ```bash
    cat > $CTX_FRAMEWORK_ROOT/orgs/$CTX_ORG/agents/<agent>/goals.json << 'EOF'

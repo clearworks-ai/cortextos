@@ -1522,6 +1522,24 @@ describe('CodexAppServerPTY kill-during-spawn race (RW-7)', () => {
     expect(fakePty.onExit).toHaveBeenCalledTimes(1);
   });
 
+  it('passes codex_config_overrides as -c flags before app-server', async () => {
+    const override = 'skills.config=[{path="/x/SKILL.md",enabled=false}]';
+    const pty = new CodexAppServerPTY(mockEnv, { codex_config_overrides: [override] });
+    const inner = pty as unknown as {
+      _alive: boolean;
+      _spawnFn: unknown;
+      startAppServer(): Promise<void>;
+    };
+    inner._alive = true;
+    let args: string[] = [];
+    inner._spawnFn = (_file: string, a: string[]) => { args = a; return Promise.resolve(makeFakePty()); };
+    fsMocks.existsSync.mockReturnValue(true);
+
+    await inner.startAppServer();
+
+    expect(args.slice(0, 3)).toEqual(['-c', override, 'app-server']);
+  });
+
   it('does not respawn on a dead adapter from the retry loop', async () => {
     const pty = new CodexAppServerPTY(mockEnv, {});
     const inner = pty as unknown as {

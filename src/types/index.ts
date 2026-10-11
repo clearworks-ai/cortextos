@@ -283,6 +283,14 @@ export interface AgentConfig {
    */
   codex_context_cap?: number;
   /**
+   * Extra `codex -c key=value` overrides passed when spawning the app-server
+   * (codex-app-server runtime only). Session-level overrides are the only
+   * per-agent way to set user-layer keys such as `skills.config`, which Codex
+   * ignores in project `.codex/config.toml`.
+   * e.g. ["skills.config=[{path=\"/x/SKILL.md\",enabled=false}]"]
+   */
+  codex_config_overrides?: string[];
+  /**
    * Fallback context window cap (tokens) for opencode agents when the OpenCode
    * model cache does not expose a context limit. Only applies to runtime:
    * 'opencode'.

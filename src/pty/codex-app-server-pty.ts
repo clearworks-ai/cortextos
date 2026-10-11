@@ -593,6 +593,7 @@ export class CodexAppServerPTY {
 
       const spawnFn = this._spawnFn!;
       Promise.resolve(spawnFn('codex', [
+        ...(this._config.codex_config_overrides ?? []).flatMap((o) => ['-c', o]),
         'app-server',
         '--enable', 'goals',
         '--listen', this._socketListenArg,

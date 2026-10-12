@@ -87,6 +87,28 @@ export function formatValidateError(result: Extract<ValidateCredentialsResult, {
   }
 }
 
+export const SEND_MAX_ATTEMPTS = 3;
+const SEND_RETRY_AFTER_MAX_MS = 30_000;
+
+/**
+ * Delay before retrying a failed (non-getUpdates) request, or null to give up.
+ * Retries only failures where Telegram did not accept the message: connection
+ * errors, 5xx gateways, and 429 (honoring a short `retry after N`). A 15s
+ * timeout is NOT retried — Telegram may already have delivered it, and a
+ * retry would duplicate the message.
+ */
+export function sendRetryDelayMs(message: string, attempt: number): number | null {
+  const retryAfter = message.match(/retry after (\d+)/i);
+  if (retryAfter) {
+    const ms = Math.max(1, parseInt(retryAfter[1], 10)) * 1000;
+    return ms <= SEND_RETRY_AFTER_MAX_MS ? ms : null;
+  }
+  if (/request failed: .*fetch failed|Bad Gateway|Gateway Timeout|Internal Server Error/i.test(message)) {
+    return 1000 * 2 ** (attempt - 1);
+  }
+  return null;
+}
+
 export class TelegramAPI {
   private baseUrl: string;
   private lastSendTime: Map<string, number> = new Map();
@@ -743,13 +765,33 @@ export class TelegramAPI {
   }
 
   /**
+   * POST with a short retry on transient failures for message-delivering
+   * methods, so one dropped connection or Telegram 502/429 does not lose an
+   * outbound message. Probes and getUpdates (poller owns its backoff) are not
+   * retried here.
+   */
+  private async post(method: string, data: object, signal?: AbortSignal): Promise<any> {
+    const maxAttempts = method === 'sendMessage' || method === 'editMessageText' ? SEND_MAX_ATTEMPTS : 1;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.postOnce(method, data, signal);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const delay = attempt < maxAttempts ? sendRetryDelayMs(msg, attempt) : null;
+        if (delay === null) throw err;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  /**
    * Make a POST request to the Telegram API.
    *
    * `signal` (currently only passed by getUpdates) lets a caller abort the
    * request early — combined with the standing 15s safety timeout via
    * AbortSignal.any so an external abort never removes that backstop.
    */
-  private async post(method: string, data: object, signal?: AbortSignal): Promise<any> {
+  private async postOnce(method: string, data: object, signal?: AbortSignal): Promise<any> {
     const timeoutSignal = AbortSignal.timeout(15000);
     try {
       const response = await fetch(`${this.baseUrl}/${method}`, {

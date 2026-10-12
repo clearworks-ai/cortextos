@@ -275,3 +275,36 @@ describe('TelegramAPI.sendMessage self_chat runtime safety net', () => {
     expect(caught?.message).toMatch(/bots can'?t send messages to bots/i);
   });
 });
+
+describe('TelegramAPI.sendMessage transient retry', () => {
+  it('retries a dropped connection and delivers once', async () => {
+    vi.useFakeTimers();
+    try {
+      queue({ throws: new TypeError('fetch failed') });
+      queue({ status: 200, body: { ok: true, result: { message_id: 7 } } });
+      const p = new TelegramAPI('111:AAA').sendMessage('chat1', 'hi');
+      await vi.runAllTimersAsync();
+      expect((await p)?.result?.message_id).toBe(7);
+      expect(callLog).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not retry a timeout (Telegram may already have delivered it)', async () => {
+    const err = new Error('timeout');
+    err.name = 'TimeoutError';
+    queue({ throws: err });
+    await expect(new TelegramAPI('111:AAA').sendMessage('chat1', 'hi')).rejects.toThrow(/timed out/);
+    expect(callLog).toHaveLength(1);
+  });
+
+  it('gives up after SEND_MAX_ATTEMPTS and on a long retry-after', async () => {
+    const { sendRetryDelayMs, SEND_MAX_ATTEMPTS } = await import('../../../src/telegram/api');
+    expect(SEND_MAX_ATTEMPTS).toBe(3);
+    expect(sendRetryDelayMs('Telegram API error: Too Many Requests: retry after 5', 1)).toBe(5000);
+    expect(sendRetryDelayMs('Telegram API error: Too Many Requests: retry after 300', 1)).toBeNull();
+    expect(sendRetryDelayMs('Telegram API error: Bad Gateway', 2)).toBe(2000);
+    expect(sendRetryDelayMs('Telegram API error: Bad Request: chat not found', 1)).toBeNull();
+  });
+});

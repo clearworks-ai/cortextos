@@ -231,6 +231,61 @@ def test_post_cutover_processing_failure_alerts_on_dry_run_and_real_path(
     _ack_frozen(ack_path, None)
 
 
+def test_pre_fix_credit_failure_is_labeled_historical_not_current_credit(
+    monkeypatch, tmp_path, capsys
+):
+    mid = "PRE_SUBSCRIPTION_ROUTE_FIX"
+    err = {
+        "at": "2026-10-08T12:00:00+00:00",
+        "class": "processing",
+        "message": "Credit balance is too low\nFAILED at extract: rc=3",
+        "returncode": 3,
+    }
+    envelopes, state = _seed_incomplete(
+        tmp_path, mid=mid, title="Historical route failure",
+        date_string="2026-10-08T12:00:00Z", error_doc=err,
+    )
+    _install_watch(
+        monkeypatch, tmp_path, envelopes=envelopes, state=state,
+        rows=[{"id": mid, "title": "Historical route failure", "dateString": "2026-10-08T12:00:00Z"}],
+    )
+
+    assert mlw.main(["--dry-run", "--days", "30"]) == 0
+    out = capsys.readouterr().out
+
+    assert "recorded processing failure" in out
+    assert mid in out
+    assert "historical extract failure from retired API-credit route" in out
+    assert "explicit retry required" in out
+    assert "Credit balance is too low" not in out
+
+
+def test_post_fix_credit_failure_remains_a_current_alert(monkeypatch, tmp_path, capsys):
+    mid = "POST_SUBSCRIPTION_ROUTE_FIX"
+    err = {
+        "at": "2026-10-10T12:00:00+00:00",
+        "class": "processing",
+        "message": "Credit balance is too low\nFAILED at extract: rc=3",
+        "returncode": 3,
+    }
+    envelopes, state = _seed_incomplete(
+        tmp_path, mid=mid, title="Current route failure",
+        date_string="2026-10-10T12:00:00Z", error_doc=err,
+    )
+    _install_watch(
+        monkeypatch, tmp_path, envelopes=envelopes, state=state,
+        rows=[{"id": mid, "title": "Current route failure", "dateString": "2026-10-10T12:00:00Z"}],
+    )
+
+    assert mlw.main(["--dry-run", "--days", "30"]) == 0
+    out = capsys.readouterr().out
+
+    assert "recorded processing failure" in out
+    assert mid in out
+    assert "Credit balance is too low" in out
+    assert "historical extract failure" not in out
+
+
 def test_acked_fingerprint_does_not_suppress_a_new_error_on_same_id(
     monkeypatch, tmp_path, capsys
 ):

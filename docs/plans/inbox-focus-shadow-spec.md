@@ -156,10 +156,10 @@ Every thread is judged. The lane only decides how much of it the judge sees.
 ### 4.5 Known acquisition ceilings (reported, not hidden)
 
 - `gws-dwd +triage` drops a row whose metadata fetch errors. Its `total` field is only Gmail's
-  `resultSizeEstimate`. When a sub-50 window has `total > len(rows)`, record the window in
-  `coverage.json` as `estimate_mismatch` (information only, because the estimate is unreliable).
-  Follow-up outside this repo: make `gws-dwd` fail loudly on per-message errors and support
-  `pageToken`.
+  `resultSizeEstimate`. **As built, v1 does not record `estimate_mismatch`.** `list_messages`
+  does not expose `total`, and the estimate is too unreliable to act on. This silent drop is the
+  one known acquisition gap. Follow-up outside this repo: make `gws-dwd` fail loudly on
+  per-message errors and support `pageToken`.
 - Floor-truncated windows (50 or more messages in 5 minutes) mark the run incomplete (§8).
 
 ## 5. Adaptive semantic judgment
@@ -176,9 +176,11 @@ One verdict per thread. These are categories with written meanings, not scores.
 | `fyi` | Worth knowing; no action. |
 | `noise` | Nothing for Josh. |
 
-Plus `unsure: bool`. When the judge cannot tell, it sets `unsure` and picks its best guess. Unsure
-threads are always shown in a "Check these" section, whatever their category. Doubt pushes a
-thread toward visibility, because recall comes first.
+Plus `unsure: bool`. When the judge cannot tell, it sets `unsure` and picks its best guess. An unsure
+thread whose best guess is `now` or `soon` stays in that section, marked "unsure". Every other
+unsure thread goes to a "Check these" section, whatever its best guess. Doubt pushes a thread
+toward visibility, because recall comes first. (Changed after the first real run, where one
+undifferentiated pile of 25 unsure items left Now and Soon empty.)
 
 ### 5.2 Context, assembled once per run and degrading on its own
 
@@ -350,7 +352,9 @@ Josh's interactive shell.
   `record_failure`.
 - `--max-usd` (default 3.0) is checked before each batch, using a running cost. When it would be
   exceeded, the remaining threads become `pending`, with the same honest report.
-- Any `GmailSourceError` during acquisition means there is no trustworthy candidate set. The run
+- A failed `+read` for one thread marks only that thread `failed` (the run is then incomplete) and
+  the run continues.
+- Any `GmailSourceError` while listing (the sweeps) means there is no trustworthy candidate set. The run
   writes no report claiming coverage. It calls `record_failure` and exits 3, with an "acquisition
   failed: <cause>" line in stdout.
 - Next run: pending and failed threads are simply cache misses. Finished threads are cache hits, so
@@ -449,7 +453,7 @@ unaffected because this is Python only, but run both before the PR.
 
 | File | Change | Size target |
 |---|---|---|
-| `scripts/brain/inbox_focus.py` | **new**: CLI, `ReadOnlyRunner`, acquisition orchestration, threads, context, batching, judge, cache, corrections, render, receipt | ≤ 600 lines |
+| `scripts/brain/inbox_focus.py` | **new**: CLI, `ReadOnlyRunner`, acquisition orchestration, threads, context, batching, judge, cache, corrections, render, receipt | ≈ 900 lines as built |
 | `scripts/brain/gmail_source.py` | **add** `adaptive_sweep()` only; no existing behaviour changes | +30 lines |
 | `scripts/brain/tests/test_inbox_focus.py` | **new**: tests 4–16 | — |
 | `scripts/brain/tests/test_gmail_source.py` | **add** tests 1–3 | — |

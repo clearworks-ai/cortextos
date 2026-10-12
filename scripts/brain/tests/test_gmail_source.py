@@ -570,3 +570,51 @@ def test_every_query_excludes_sent_and_drafts():
         assert "-in:sent" in q, q
         assert "-in:drafts" in q, q
         assert "-category:promotions" in q          # the exclusion clause is still composed
+
+
+# --- inbox focus: adaptive_sweep (docs/plans/inbox-focus-shadow-spec.md §4.2) ---
+
+
+class _EpochTriage:
+    """Honours epoch after:/before: EXCLUSIVELY (worst case) and the 50-row cap."""
+
+    use_logical_command_names = True
+
+    def __init__(self, stamps: dict[str, int]) -> None:
+        self.stamps = stamps
+        self.queries: list[str] = []
+
+    def run(self, argv, *, input=None, env=None, timeout=120):
+        import re
+        import subprocess
+
+        query = argv[argv.index("--query") + 1]
+        self.queries.append(query)
+        a = int(re.search(r"after:(\d+)", query).group(1))
+        b = int(re.search(r"before:(\d+)", query).group(1))
+        rows = [{"id": mid, "threadId": "t"} for mid, ts in sorted(self.stamps.items()) if a < ts < b]
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"emails": rows[:50], "total": len(rows)}), "")
+
+
+def test_adaptive_sweep_acquires_every_message_of_a_busy_day_including_one_on_the_split() -> None:
+    from gmail_source import adaptive_sweep
+
+    start, end = 1_000_000, 1_000_000 + 86_400
+    stamps = {f"m{i:03d}": start + 1 + i * 700 for i in range(120)}
+    stamps["on-split"] = (start + end) // 2
+    fake = _EpochTriage(stamps)
+    rows, truncated = adaptive_sweep(fake, "-in:sent", start, end)
+    assert {r["id"] for r in rows} == set(stamps)
+    assert len(rows) == len(stamps) and truncated == []
+    assert all(q.startswith("-in:sent after:") for q in fake.queries)
+
+
+def test_adaptive_sweep_reports_a_floor_window_still_at_the_cap_and_keeps_its_rows() -> None:
+    from gmail_source import adaptive_sweep
+
+    start, end = 2_000_000, 2_000_000 + 3_600
+    burst = {f"b{i:02d}": start + 1800 for i in range(60)}
+    rows, truncated = adaptive_sweep(_EpochTriage(burst), "", start, end, floor_s=300)
+    assert len(rows) == 50
+    assert len(truncated) == 1 and truncated[0]["count"] == 50
+    assert truncated[0]["before"] - truncated[0]["after"] <= 300

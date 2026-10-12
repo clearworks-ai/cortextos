@@ -352,6 +352,36 @@ def read_message(runner: "Runner", message_id: str) -> Message:
     return parse_message(obj)
 
 
+def adaptive_sweep(
+    runner: "Runner", terms: str, start: int, end: int, floor_s: int = 300
+) -> tuple[list[dict], list[dict]]:
+    """Every row in the epoch-second window [start, end), with NO exclusion
+    filter added (callers choose `terms`). A window that hits the 50-row cap is
+    split in half and both halves re-queried, recursively, until each piece is
+    under the cap or no wider than floor_s. A floor window still at the cap
+    keeps its rows and is reported as {"after", "before", "count"} -- bounded,
+    named loss, never an uncovered remainder. Halves overlap by one second so a
+    message stamped exactly on the split is never missed; rows union by id."""
+    seen: dict[str, dict] = {}
+    truncated: list[dict] = []
+    stack = [(start, end)]
+    while stack:
+        after, before = stack.pop()
+        query = " ".join(p for p in (terms, f"after:{after} before:{before}") if p)
+        rows = list_messages(runner, query, max_results=50)
+        if len(rows) >= 50:
+            if before - after > floor_s:
+                mid = (after + before) // 2
+                stack.extend([(mid, before), (after, mid + 1)])  # earlier half pops first
+                continue
+            truncated.append({"after": after, "before": before, "count": len(rows)})
+        for row in rows:
+            mid_ = str(row.get("id", ""))
+            if mid_ and mid_ not in seen:
+                seen[mid_] = row
+    return list(seen.values()), truncated
+
+
 def sweep(
     runner: "Runner", days: int, today: date, extra_query: str | None = None
 ) -> tuple[list[dict], list[dict]]:

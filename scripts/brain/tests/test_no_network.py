@@ -28,7 +28,7 @@ def test_no_shim_traps_during_focused_suite(tmp_path):
 
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "scripts/brain/tests", "-q", "-p", "no:cacheprovider",
-         "-k", "client_state or gmail or extract_email or single_flight"],
+         "-k", "client_state or gmail or extract_email or single_flight or inbox_focus"],
         cwd=str(REPO_ROOT), env=env, capture_output=True, text=True, timeout=600,
     )
     # G0A2-13: the BOUNDARY claim is asserted FIRST. Reading the shim log only

@@ -40,6 +40,7 @@ INBOUND_ONLY = "-in:sent -in:drafts"
 
 OURS_DOMAINS: frozenset[str] = frozenset({"clearworks.ai"})
 GWS_BIN = Path.home() / ".local" / "bin" / "gws"
+EMPTY_PROOF_PADDING_S = 7 * 24 * 3600
 
 _QUOTE_TAIL_RE = re.compile(r"^On .* wrote:$")
 
@@ -309,7 +310,13 @@ def parse_message(payload: dict) -> Message:
     return _parse_message_flat_shape(payload)
 
 
-def list_messages(runner: "Runner", query: str, max_results: int = 50) -> list[dict]:
+def _error_detail(value: Any) -> str:
+    if isinstance(value, dict):
+        return str(value.get("message") or json.dumps(value, sort_keys=True))
+    return str(value or "").strip()
+
+
+def _list_message_page(runner: "Runner", query: str, max_results: int) -> tuple[list[dict], int]:
     argv = _gws_argv(runner, "gmail", "+triage", "--query", query, "--format", "json", "--max", str(max_results))
     proc = runner.run(argv)
     if proc.returncode != 0:
@@ -319,13 +326,32 @@ def list_messages(runner: "Runner", query: str, max_results: int = 50) -> list[d
     except json.JSONDecodeError as exc:
         raise GmailSourceError(f"gws gmail +triage returned invalid JSON: {exc}") from exc  # G-SWEEP-6
     if isinstance(obj, list):
-        rows = list(obj)
-        envelope: dict = {}
+        rows, total, envelope = list(obj), len(obj), {}
     elif isinstance(obj, dict):
-        rows = list(obj.get("messages") or obj.get("emails") or [])  # G-SWEEP-8
-        envelope = obj
+        detail = _error_detail(obj.get("error"))
+        if detail:
+            raise GmailSourceError(f"gws gmail +triage returned an error: {detail}")
+        raw_rows = obj["messages"] if "messages" in obj else obj.get("emails")  # G-SWEEP-8
+        if not isinstance(raw_rows, list):
+            raise GmailSourceError("gws gmail +triage returned an invalid payload")
+        rows, envelope = list(raw_rows), obj
+        raw_total = obj.get("total", obj.get("resultSizeEstimate", len(rows)))
+        if isinstance(raw_total, bool) or not isinstance(raw_total, int) or raw_total < 0:
+            raise GmailSourceError("gws gmail +triage returned an invalid total")
+        total = raw_total
     else:
-        rows, envelope = [], {}
+        raise GmailSourceError("gws gmail +triage returned an invalid payload")
+    # gws-dwd obtains at most max_results message IDs, then fetches metadata for
+    # each ID. It silently skips a failed metadata fetch while retaining Gmail's
+    # resultSizeEstimate in `total`. The estimate is not an exact per-window
+    # count, but it does prove how many rows the capped ID page should have
+    # supplied: min(total, max_results). Never compare a recursively acquired
+    # union with `total`; use it only to detect loss inside this one wrapper call.
+    if len(rows) < min(total, max_results):
+        raise GmailSourceError(
+            f"gws gmail +triage page coverage mismatch: emitted {len(rows)} "
+            f"of at least {min(total, max_results)} listed rows"
+        )
     if not rows:
         # G-SWEEP-11: an EMPTY result is only believable when nothing else says
         # otherwise. The deployed `gws` routes this call to gws-dwd, whose
@@ -337,6 +363,11 @@ def list_messages(runner: "Runner", query: str, max_results: int = 50) -> list[d
         detail = str(envelope.get("error") or "").strip() or (proc.stderr or "").strip()
         if detail:
             raise GmailSourceError(f"gws gmail +triage returned no rows and reported: {detail}")
+    return rows, total
+
+
+def list_messages(runner: "Runner", query: str, max_results: int = 50) -> list[dict]:
+    rows, _ = _list_message_page(runner, query, max_results)
     return rows
 
 
@@ -349,7 +380,136 @@ def read_message(runner: "Runner", message_id: str) -> Message:
         obj = json.loads(proc.stdout)
     except json.JSONDecodeError as exc:
         raise GmailSourceError(f"gws gmail +read returned invalid JSON: {exc}") from exc  # G-SWEEP-6
-    return parse_message(obj)
+    if not isinstance(obj, dict):
+        raise GmailSourceError("gws gmail +read returned an empty or invalid payload")
+    detail = _error_detail(obj.get("error"))
+    if detail:
+        raise GmailSourceError(f"gws gmail +read returned an error for {message_id}: {detail}")
+    actual_id = str(obj.get("id") or "")
+    if not actual_id:
+        raise GmailSourceError(f"gws gmail +read returned missing message id for {message_id}")
+    if actual_id != message_id:
+        raise GmailSourceError(f"gws gmail +read returned mismatched message id {actual_id} for {message_id}")
+    nested = obj.get("payload")
+    nested_valid = isinstance(nested, dict) and (
+        bool(nested.get("headers"))
+        or (isinstance(nested.get("body"), dict) and bool(nested["body"].get("data")))
+        or bool(nested.get("parts"))
+    )
+    flat_valid = "body" in obj and any(
+        obj.get(key) for key in ("from", "to", "cc", "subject", "date", "headers", "labels", "snippet")
+    )
+    if not obj.get("threadId") or (nested is not None and not isinstance(nested, dict)) or not (
+        nested_valid or flat_valid
+    ):
+        raise GmailSourceError(f"gws gmail +read returned an empty or invalid payload for {message_id}")
+    message = parse_message(obj)
+    if message.id != message_id or not message.thread_id:
+        raise GmailSourceError(f"gws gmail +read returned an empty or invalid payload for {message_id}")
+    return message
+
+
+def adaptive_sweep(
+    runner: "Runner", terms: str, start: int, end: int, floor_s: int = 300
+) -> tuple[list[dict], list[dict]]:
+    """Every row in the epoch-second window [start, end), with NO exclusion
+    filter added (callers choose `terms`). A window that hits the 50-row cap is
+    split in half and both halves re-queried, recursively, until each piece is
+    under the cap or no wider than floor_s. A floor window still at the cap
+    keeps its rows and is reported as {"after", "before", "count"} -- bounded,
+    named loss, never an uncovered remainder. Halves overlap by one second so a
+    message stamped exactly on the split is never missed; rows union by id."""
+    truncated: list[dict] = []
+
+    def proof_ids(rows: list[dict]) -> set[str]:
+        ids: set[str] = set()
+        for row in rows:
+            message_id = str(row.get("id") or "") if isinstance(row, dict) else ""
+            if not message_id:
+                raise GmailSourceError("gws gmail +triage empty-window proof row has no valid id")
+            ids.add(message_id)
+        return ids
+
+    def exhaustive_proof(after: int, before: int, *, left: bool) -> set[str]:
+        outer = after - EMPTY_PROOF_PADDING_S if left else before + EMPTY_PROOF_PADDING_S
+
+        def query(boundary: int) -> list[dict]:
+            proof_after, proof_before = (boundary, before) if left else (after, boundary)
+            terms_with_window = " ".join(p for p in (
+                terms, f"after:{proof_after} before:{proof_before}",
+            ) if p)
+            rows, _ = _list_message_page(runner, terms_with_window, 50)
+            return rows
+
+        rows = query(outer)
+        if rows and len(rows) < 50:
+            return proof_ids(rows)
+        if not rows:
+            raise GmailSourceError("gws gmail +triage cannot prove an empty window")
+
+        # The outer superset is capped. Tighten only its added edge while the
+        # whole target remains included, looking for a non-empty exhaustive
+        # page. An empty candidate means the canary was excluded; a capped one
+        # still cannot prove coverage.
+        low, high = (outer, after) if left else (before, outer)
+        while low + 1 < high:
+            candidate = (low + high) // 2
+            rows = query(candidate)
+            if not rows:
+                if left:
+                    high = candidate
+                else:
+                    low = candidate
+            elif len(rows) < 50:
+                return proof_ids(rows)
+            elif left:
+                low = candidate
+            else:
+                high = candidate
+        raise GmailSourceError("gws gmail +triage cannot prove an empty window")
+
+    def prove_empty(after: int, before: int) -> None:
+        # Header Date is not Gmail's query-membership timestamp. Instead, use
+        # set conservation: the intersection of exhaustive [older + target]
+        # and [target + newer] queries is exactly the target query by Gmail's
+        # own search semantics, regardless of a message's RFC822 Date header.
+        left_ids = exhaustive_proof(after, before, left=True)
+        right_ids = exhaustive_proof(after, before, left=False)
+        if left_ids & right_ids:
+            raise GmailSourceError("gws gmail +triage returned a false-empty window")
+
+    def walk(after: int, before: int) -> tuple[dict[str, dict], bool]:
+        query = " ".join(p for p in (terms, f"after:{after} before:{before}") if p)
+        rows, _ = _list_message_page(runner, query, 50)
+        if not rows:
+            prove_empty(after, before)
+            retry_rows, _ = _list_message_page(runner, query, 50)
+            if retry_rows:
+                raise GmailSourceError("gws gmail +triage returned a false-empty window on retry")
+            return {}, True
+        if len(rows) >= 50:
+            if before - after > floor_s:
+                mid = (after + before) // 2
+                children, left_complete = walk(after, mid + 1)
+                right, right_complete = walk(mid, before)
+                children.update(right)
+                missing = {str(row.get("id") or "") for row in rows} - set(children)
+                if missing:
+                    raise GmailSourceError(
+                        f"gws gmail +triage bisected coverage mismatch: {len(missing)} parent rows disappeared"
+                    )
+                complete = left_complete and right_complete
+                return children, complete
+            truncated.append({"after": after, "before": before, "count": len(rows)})
+        seen: dict[str, dict] = {}
+        for row in rows:
+            mid_ = str(row.get("id", ""))
+            if mid_ and mid_ not in seen:
+                seen[mid_] = row
+        return seen, len(rows) < 50
+
+    seen, _ = walk(start, end)
+    return list(seen.values()), truncated
 
 
 def sweep(

@@ -341,9 +341,16 @@ def _list_message_page(runner: "Runner", query: str, max_results: int) -> tuple[
         total = raw_total
     else:
         raise GmailSourceError("gws gmail +triage returned an invalid payload")
-    if total < len(rows) or len(rows) < min(total, max_results):
+    # gws-dwd obtains at most max_results message IDs, then fetches metadata for
+    # each ID. It silently skips a failed metadata fetch while retaining Gmail's
+    # resultSizeEstimate in `total`. The estimate is not an exact per-window
+    # count, but it does prove how many rows the capped ID page should have
+    # supplied: min(total, max_results). Never compare a recursively acquired
+    # union with `total`; use it only to detect loss inside this one wrapper call.
+    if len(rows) < min(total, max_results):
         raise GmailSourceError(
-            f"gws gmail +triage coverage mismatch: emitted {len(rows)} of reported {total} rows"
+            f"gws gmail +triage page coverage mismatch: emitted {len(rows)} "
+            f"of at least {min(total, max_results)} listed rows"
         )
     if not rows:
         # G-SWEEP-11: an EMPTY result is only believable when nothing else says
@@ -414,20 +421,71 @@ def adaptive_sweep(
     message stamped exactly on the split is never missed; rows union by id."""
     truncated: list[dict] = []
 
-    def walk(after: int, before: int, *, root: bool = False) -> tuple[dict[str, dict], bool]:
+    def proof_ids(rows: list[dict]) -> set[str]:
+        ids: set[str] = set()
+        for row in rows:
+            message_id = str(row.get("id") or "") if isinstance(row, dict) else ""
+            if not message_id:
+                raise GmailSourceError("gws gmail +triage empty-window proof row has no valid id")
+            ids.add(message_id)
+        return ids
+
+    def exhaustive_proof(after: int, before: int, *, left: bool) -> set[str]:
+        outer = after - EMPTY_PROOF_PADDING_S if left else before + EMPTY_PROOF_PADDING_S
+
+        def query(boundary: int) -> list[dict]:
+            proof_after, proof_before = (boundary, before) if left else (after, boundary)
+            terms_with_window = " ".join(p for p in (
+                terms, f"after:{proof_after} before:{proof_before}",
+            ) if p)
+            rows, _ = _list_message_page(runner, terms_with_window, 50)
+            return rows
+
+        rows = query(outer)
+        if rows and len(rows) < 50:
+            return proof_ids(rows)
+        if not rows:
+            raise GmailSourceError("gws gmail +triage cannot prove an empty window")
+
+        # The outer superset is capped. Tighten only its added edge while the
+        # whole target remains included, looking for a non-empty exhaustive
+        # page. An empty candidate means the canary was excluded; a capped one
+        # still cannot prove coverage.
+        low, high = (outer, after) if left else (before, outer)
+        while low + 1 < high:
+            candidate = (low + high) // 2
+            rows = query(candidate)
+            if not rows:
+                if left:
+                    high = candidate
+                else:
+                    low = candidate
+            elif len(rows) < 50:
+                return proof_ids(rows)
+            elif left:
+                low = candidate
+            else:
+                high = candidate
+        raise GmailSourceError("gws gmail +triage cannot prove an empty window")
+
+    def prove_empty(after: int, before: int) -> None:
+        # Header Date is not Gmail's query-membership timestamp. Instead, use
+        # set conservation: the intersection of exhaustive [older + target]
+        # and [target + newer] queries is exactly the target query by Gmail's
+        # own search semantics, regardless of a message's RFC822 Date header.
+        left_ids = exhaustive_proof(after, before, left=True)
+        right_ids = exhaustive_proof(after, before, left=False)
+        if left_ids & right_ids:
+            raise GmailSourceError("gws gmail +triage returned a false-empty window")
+
+    def walk(after: int, before: int) -> tuple[dict[str, dict], bool]:
         query = " ".join(p for p in (terms, f"after:{after} before:{before}") if p)
-        rows, total = _list_message_page(runner, query, 50)
-        if root and not rows:
-            proof, proof_complete = walk(after - EMPTY_PROOF_PADDING_S, before + EMPTY_PROOF_PADDING_S)
-            if not proof or not proof_complete:
-                raise GmailSourceError("gws gmail +triage cannot prove an empty root window")
-            for row in proof.values():
-                iso = normalise_date_iso(row.get("date"))
-                if not iso:
-                    raise GmailSourceError("gws gmail +triage empty-window proof row has no valid date")
-                stamp = int(datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp())
-                if after < stamp < before:
-                    raise GmailSourceError("gws gmail +triage returned false-empty root window")
+        rows, _ = _list_message_page(runner, query, 50)
+        if not rows:
+            prove_empty(after, before)
+            retry_rows, _ = _list_message_page(runner, query, 50)
+            if retry_rows:
+                raise GmailSourceError("gws gmail +triage returned a false-empty window on retry")
             return {}, True
         if len(rows) >= 50:
             if before - after > floor_s:
@@ -441,10 +499,6 @@ def adaptive_sweep(
                         f"gws gmail +triage bisected coverage mismatch: {len(missing)} parent rows disappeared"
                     )
                 complete = left_complete and right_complete
-                if complete and len(children) < total:
-                    raise GmailSourceError(
-                        f"gws gmail +triage bisected coverage mismatch: acquired {len(children)} of reported {total} rows"
-                    )
                 return children, complete
             truncated.append({"after": after, "before": before, "count": len(rows)})
         seen: dict[str, dict] = {}
@@ -454,7 +508,7 @@ def adaptive_sweep(
                 seen[mid_] = row
         return seen, len(rows) < 50
 
-    seen, _ = walk(start, end, root=True)
+    seen, _ = walk(start, end)
     return list(seen.values()), truncated
 
 

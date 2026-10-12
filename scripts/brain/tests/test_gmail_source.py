@@ -512,31 +512,44 @@ def test_list_messages_accepts_a_genuinely_empty_day():
     assert gmail_source.list_messages(runner, "q") == []
 
 
-def test_adaptive_sweep_rejects_false_empty_root_when_independent_superset_finds_the_message():
+def test_adaptive_sweep_rejects_false_empty_when_both_supersets_find_same_id_despite_skewed_header_date():
     import gmail_source
 
     start, end = 1_700_000_000, 1_700_003_600
     target = f"after:{start} before:{end}"
-    proof = f"after:{start - gmail_source.EMPTY_PROOF_PADDING_S} before:{end + gmail_source.EMPTY_PROOF_PADDING_S}"
+    left = f"after:{start - gmail_source.EMPTY_PROOF_PADDING_S} before:{end}"
+    right = f"after:{start} before:{end + gmail_source.EMPTY_PROOF_PADDING_S}"
     found = {"id": "m1", "threadId": "t1", "date": datetime.fromtimestamp(
-        start + 60, timezone.utc
+        start - 60, timezone.utc
     ).strftime("%Y-%m-%dT%H:%M:%SZ")}
     runner = FakeRunner([
         (_triage_argv(target), _ok('{"emails": [], "total": 0}')),
-        (_triage_argv(proof), _ok(json.dumps({"emails": [found], "total": 1}))),
+        (_triage_argv(left), _ok(json.dumps({"emails": [found], "total": 1}))),
+        (_triage_argv(right), _ok(json.dumps({"emails": [found], "total": 1}))),
     ])
-    with pytest.raises(gmail_source.GmailSourceError, match="false-empty root window"):
+    with pytest.raises(gmail_source.GmailSourceError, match="false-empty window"):
         gmail_source.adaptive_sweep(runner, "", start, end)
-    assert runner.calls == [_triage_argv(target), _triage_argv(proof)]
+    assert runner.calls == [_triage_argv(target), _triage_argv(left), _triage_argv(right)]
 
 
-def test_list_messages_rejects_reported_total_not_covered_by_rows():
+def test_list_messages_does_not_treat_reported_total_as_an_exact_window_count():
     import gmail_source
 
+    rows = [{"id": f"m{i}", "threadId": f"t{i}"} for i in range(50)]
     runner = FakeRunner([(_triage_argv("q"), _ok(
-        '{"emails": [{"id": "m1", "threadId": "t1"}], "total": 2}'
+        json.dumps({"emails": rows, "total": 201})
     ))])
-    with pytest.raises(gmail_source.GmailSourceError, match="coverage mismatch"):
+    assert gmail_source.list_messages(runner, "q") == rows
+
+
+def test_list_messages_rejects_a_capped_id_page_that_lost_one_detail_row():
+    import gmail_source
+
+    rows = [{"id": f"m{i}", "threadId": f"t{i}"} for i in range(49)]
+    runner = FakeRunner([(_triage_argv("q"), _ok(
+        json.dumps({"emails": rows, "total": 201})
+    ))])
+    with pytest.raises(gmail_source.GmailSourceError, match="page coverage mismatch"):
         gmail_source.list_messages(runner, "q")
 
 
@@ -636,26 +649,74 @@ class _EpochTriage:
         self.queries.append(query)
         a = int(re.search(r"after:(\d+)", query).group(1))
         b = int(re.search(r"before:(\d+)", query).group(1))
-        rows = [{"id": mid, "threadId": "t"} for mid, ts in sorted(self.stamps.items()) if a < ts < b]
+        rows = [{"id": mid, "threadId": "t", "date": datetime.fromtimestamp(ts, timezone.utc).isoformat()}
+                for mid, ts in sorted(self.stamps.items()) if a < ts < b]
         return subprocess.CompletedProcess(argv, 0, json.dumps({"emails": rows[:50], "total": len(rows)}), "")
 
 
 class _LaterWindowFalseEmpty(_EpochTriage):
-    """The root and first child work; the later child and canary fail empty."""
+    """The root and first child work; one later child stays silently empty."""
 
     def __init__(self, stamps: dict[str, int]) -> None:
         super().__init__(stamps)
         self.window_calls = 0
 
     def run(self, argv, *, input=None, env=None, timeout=120):
+        import re
         import subprocess
 
         query = argv[argv.index("--query") + 1]
         self.window_calls += 1
-        if self.window_calls == 3:
+        a = int(re.search(r"after:(\d+)", query).group(1))
+        b = int(re.search(r"before:(\d+)", query).group(1))
+        lost = any(a < ts < b for mid, ts in self.stamps.items() if mid == "m59")
+        if self.window_calls >= 3 and lost:
             self.queries.append(query)
             return subprocess.CompletedProcess(argv, 0, '{"emails": [], "total": 0}', "")
         return super().run(argv, input=input, env=env, timeout=timeout)
+
+
+class _QueryEstimateTriage(_EpochTriage):
+    """Root resultSizeEstimate is query-wide/approximate, not an exact row count."""
+
+    def run(self, argv, *, input=None, env=None, timeout=120):
+        import re
+        import subprocess
+
+        query = argv[argv.index("--query") + 1]
+        self.queries.append(query)
+        a = int(re.search(r"after:(\d+)", query).group(1))
+        b = int(re.search(r"before:(\d+)", query).group(1))
+        rows = [{"id": mid, "threadId": "t", "date": datetime.fromtimestamp(ts, timezone.utc).isoformat()}
+                for mid, ts in sorted(self.stamps.items()) if a < ts < b]
+        total = 201 if len(self.queries) == 1 else len(rows)
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"emails": rows[:50], "total": total}), "")
+
+
+class _CappedProofTriage:
+    """The target is empty, while every containing proof page remains capped."""
+
+    use_logical_command_names = True
+
+    def __init__(self, target_after: int, target_before: int) -> None:
+        self.target_after = target_after
+        self.target_before = target_before
+
+    def run(self, argv, *, input=None, env=None, timeout=120):
+        import re
+        import subprocess
+
+        query = argv[argv.index("--query") + 1]
+        a = int(re.search(r"after:(\d+)", query).group(1))
+        b = int(re.search(r"before:(\d+)", query).group(1))
+        if (a, b) == (self.target_after, self.target_before):
+            rows, total = [], 0
+        else:
+            stamp = self.target_after - 1 if a < self.target_after else self.target_before + 1
+            date = datetime.fromtimestamp(stamp, timezone.utc).isoformat()
+            rows = [{"id": f"outside-{i}", "threadId": "t", "date": date} for i in range(50)]
+            total = 201
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"emails": rows, "total": total}), "")
 
 
 def test_adaptive_sweep_acquires_every_message_of_a_busy_day_including_one_on_the_split() -> None:
@@ -676,10 +737,10 @@ def test_adaptive_sweep_reports_a_floor_window_still_at_the_cap_and_keeps_its_ro
 
     start, end = 2_000_000, 2_000_000 + 3_600
     burst = {f"b{i:02d}": start + 1800 for i in range(60)}
-    rows, truncated = adaptive_sweep(_EpochTriage(burst), "", start, end, floor_s=300)
+    rows, truncated = adaptive_sweep(_EpochTriage(burst), "", start, end, floor_s=3_600)
     assert len(rows) == 50
     assert len(truncated) == 1 and truncated[0]["count"] == 50
-    assert truncated[0]["before"] - truncated[0]["after"] <= 300
+    assert truncated[0]["before"] - truncated[0]["after"] <= 3_600
 
 
 def test_adaptive_sweep_rejects_a_later_bisected_window_that_fails_false_empty() -> None:
@@ -687,5 +748,38 @@ def test_adaptive_sweep_rejects_a_later_bisected_window_that_fails_false_empty()
 
     start, end = 3_000_000, 3_000_000 + 3_600
     stamps = {f"m{i:02d}": start + 1 + i * 50 for i in range(60)}
-    with pytest.raises(GmailSourceError, match="bisected coverage mismatch"):
+    with pytest.raises(GmailSourceError, match="cannot prove an empty window"):
         adaptive_sweep(_LaterWindowFalseEmpty(stamps), "-in:sent", start, end)
+
+
+def test_adaptive_sweep_does_not_treat_query_estimate_as_exact_parent_count() -> None:
+    from gmail_source import adaptive_sweep
+
+    start, end = 4_000_000, 4_000_000 + 3_600
+    stamps = {f"m{i:02d}": start + 1 + i * 50 for i in range(64)}
+    rows, truncated = adaptive_sweep(_QueryEstimateTriage(stamps), "-in:sent", start, end)
+    assert len(rows) == 64
+    assert truncated == []
+
+
+def test_adaptive_sweep_rejects_empty_window_proof_without_a_message_id() -> None:
+    from gmail_source import EMPTY_PROOF_PADDING_S, GmailSourceError, adaptive_sweep
+
+    start, end = 5_000_000, 5_003_600
+    target = f"after:{start} before:{end}"
+    proof = f"after:{start - EMPTY_PROOF_PADDING_S} before:{end}"
+    proof_rows = [{"id": "", "threadId": "t"}]
+    runner = FakeRunner([
+        (_triage_argv(target), _ok('{"emails": [], "total": 0}')),
+        (_triage_argv(proof), _ok(json.dumps({"emails": proof_rows, "total": len(proof_rows)}))),
+    ])
+    with pytest.raises(GmailSourceError, match="proof row has no valid id"):
+        adaptive_sweep(runner, "", start, end)
+
+
+def test_adaptive_sweep_rejects_a_capped_empty_window_proof_that_cannot_be_narrowed() -> None:
+    from gmail_source import GmailSourceError, adaptive_sweep
+
+    start, end = 6_000_000, 6_003_600
+    with pytest.raises(GmailSourceError, match="cannot prove an empty window"):
+        adaptive_sweep(_CappedProofTriage(start, end), "", start, end)

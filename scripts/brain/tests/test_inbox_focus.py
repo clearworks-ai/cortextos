@@ -60,15 +60,16 @@ class InboxFake:
     use_logical_command_names = True
 
     def __init__(self, inbound=(), sent=(), bodies=None, judge=None, events=(), calendar_rc=0, tasks_rc=0,
-                 triage_rc=0, false_empty_after=None, read_payloads=None):
+                 triage_rc=0, false_empty_after=None, read_payloads=None, first_triage_total=None):
         self.inbound, self.sent = list(inbound), list(sent)
         self.bodies = bodies or {}
         self.read_payloads = read_payloads or {}
         self.judge = judge or policy(lambda tid, p: {})
         self.events, self.calendar_rc, self.tasks_rc, self.triage_rc = list(events), calendar_rc, tasks_rc, triage_rc
         self.false_empty_after = false_empty_after
+        self.first_triage_total = first_triage_total
         self.triage_calls = 0
-        self.empty_proof_pending: set[str] = set()
+        self.empty_windows: dict[str, tuple[int, int]] = {}
         self.calls: list[list[str]] = []
         self.prompts: list[str] = []
 
@@ -86,14 +87,21 @@ class InboxFake:
             pool = self.sent if key == "sent" else self.inbound
             rows = [r for r in pool
                     if a < datetime.fromisoformat(r["date"].replace("Z", "+00:00")).timestamp() < b]
-            if not rows and not pool:
-                if key in self.empty_proof_pending:
-                    self.empty_proof_pending.remove(key)
-                    rows = [{"id": f"{key}-proof", "threadId": f"{key}-proof", "from": "proof@example.com",
-                             "date": _iso(datetime.fromtimestamp(a + 1, timezone.utc))}]
-                else:
-                    self.empty_proof_pending.add(key)
-            return _ok(json.dumps({"emails": rows[:50], "total": len(rows)}))
+            pending = self.empty_windows.get(key)
+            if pending == (a, b):
+                self.empty_windows.pop(key)
+            elif not rows and pending is None:
+                self.empty_windows[key] = (a, b)
+            elif not rows and pending is not None:
+                target_after, target_before = pending
+                if a < target_after and b == target_before:
+                    rows = [{"id": f"{key}-left-proof", "threadId": f"{key}-left-proof",
+                             "from": "proof@example.com", "date": _iso(datetime.fromtimestamp(a + 1, timezone.utc))}]
+                elif a == target_after and b > target_before:
+                    rows = [{"id": f"{key}-right-proof", "threadId": f"{key}-right-proof",
+                             "from": "proof@example.com", "date": _iso(datetime.fromtimestamp(b - 1, timezone.utc))}]
+            total = self.first_triage_total if self.triage_calls == 1 and self.first_triage_total is not None else len(rows)
+            return _ok(json.dumps({"emails": rows[:50], "total": total}))
         if argv[:3] == ["gws", "gmail", "+read"]:
             mid = argv[4]
             if mid in self.read_payloads:
@@ -179,6 +187,29 @@ def test_false_empty_listing_can_never_turn_sixty_real_threads_into_complete_zer
     assert not (r.get("threads_total") == 0 and r.get("judged") == 0)
     output = capsys.readouterr().out
     assert "INCOMPLETE" in output and "Not clear" in output
+
+
+def test_query_estimate_201_allows_sixty_four_acquired_threads_to_reach_judgment(tmp_path):
+    rows = [row(f"m{i}", f"t{i}", ago_h=1 + i / 100) for i in range(64)]
+    canaries = [row("older-proof", "older-proof", ago_h=96),
+                row("newer-proof", "newer-proof", ago_h=-24)]
+    cfg = cfg_for(tmp_path)
+
+    assert inbox_focus.run(cfg, InboxFake(rows + canaries, first_triage_total=201)) == 0
+
+    r = receipt(cfg)
+    assert (r["threads_total"], r["judged"], r["complete"]) == (64, 64, True)
+
+
+def test_capped_id_page_with_one_missing_detail_can_never_be_complete(tmp_path):
+    rows = [row(f"m{i}", f"t{i}", ago_h=1 + i / 100) for i in range(49)]
+    cfg = cfg_for(tmp_path)
+
+    assert inbox_focus.run(cfg, InboxFake(rows, first_triage_total=201)) == 3
+
+    r = receipt(cfg)
+    assert r["complete"] is False
+    assert "page coverage mismatch" in r["error"]
 
 
 def test_invalid_read_payload_fails_only_that_thread_and_prevents_complete(tmp_path):

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -268,6 +268,23 @@ def test_read_message_nonzero_rc_raises_gmail_source_error() -> None:
     runner = FakeRunner([(["gws", "gmail", "+read"], _err(3, "gws timeout"))])
     with pytest.raises(GmailSourceError, match="gws timeout"):
         read_message(runner, "m001")
+
+
+@pytest.mark.parametrize(("payload", "match"), [
+    ({"error": {"code": 404, "message": "message vanished"}}, "message vanished"),
+    ({"threadId": "t001", "body": "hi"}, "missing message id"),
+    ({"id": "other", "threadId": "t001", "body": "hi"}, "mismatched message id"),
+    ({"id": "m001", "threadId": "t001"}, "empty or invalid payload"),
+    ({"id": "m001", "threadId": "t001", "body": ""}, "empty or invalid payload"),
+    ({"id": "m001", "threadId": "t001", "payload": {"body": {}}}, "empty or invalid payload"),
+    ({"id": "m001", "threadId": "t001", "labels": ["INBOX"]}, "empty or invalid payload"),
+])
+def test_read_message_rejects_invalid_success_payloads(payload, match) -> None:
+    from gmail_source import GmailSourceError, read_message
+
+    runner = FakeRunner([(["gws", "gmail", "+read"], _ok(json.dumps(payload)))])
+    with pytest.raises(GmailSourceError, match=match):
+        read_message(runner, "m001")
 # --- appended for Task 5 (reuses the TESTS_DIR sys.path insert + FakeRunner import above) ---
 
 
@@ -491,9 +508,36 @@ def test_list_messages_rejects_an_error_envelope():
 def test_list_messages_accepts_a_genuinely_empty_day():
     import gmail_source
 
-    runner = FakeRunner()
-    runner.record(("gws", "gmail", "+triage"), rc=0, stdout='{"emails": [], "total": 0}', stderr="")
+    runner = FakeRunner([(_triage_argv("q"), _ok('{"emails": [], "total": 0}'))])
     assert gmail_source.list_messages(runner, "q") == []
+
+
+def test_adaptive_sweep_rejects_false_empty_root_when_independent_superset_finds_the_message():
+    import gmail_source
+
+    start, end = 1_700_000_000, 1_700_003_600
+    target = f"after:{start} before:{end}"
+    proof = f"after:{start - gmail_source.EMPTY_PROOF_PADDING_S} before:{end + gmail_source.EMPTY_PROOF_PADDING_S}"
+    found = {"id": "m1", "threadId": "t1", "date": datetime.fromtimestamp(
+        start + 60, timezone.utc
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    runner = FakeRunner([
+        (_triage_argv(target), _ok('{"emails": [], "total": 0}')),
+        (_triage_argv(proof), _ok(json.dumps({"emails": [found], "total": 1}))),
+    ])
+    with pytest.raises(gmail_source.GmailSourceError, match="false-empty root window"):
+        gmail_source.adaptive_sweep(runner, "", start, end)
+    assert runner.calls == [_triage_argv(target), _triage_argv(proof)]
+
+
+def test_list_messages_rejects_reported_total_not_covered_by_rows():
+    import gmail_source
+
+    runner = FakeRunner([(_triage_argv("q"), _ok(
+        '{"emails": [{"id": "m1", "threadId": "t1"}], "total": 2}'
+    ))])
+    with pytest.raises(gmail_source.GmailSourceError, match="coverage mismatch"):
+        gmail_source.list_messages(runner, "q")
 
 
 def test_list_messages_ignores_stderr_when_rows_came_back():
@@ -596,6 +640,24 @@ class _EpochTriage:
         return subprocess.CompletedProcess(argv, 0, json.dumps({"emails": rows[:50], "total": len(rows)}), "")
 
 
+class _LaterWindowFalseEmpty(_EpochTriage):
+    """The root and first child work; the later child and canary fail empty."""
+
+    def __init__(self, stamps: dict[str, int]) -> None:
+        super().__init__(stamps)
+        self.window_calls = 0
+
+    def run(self, argv, *, input=None, env=None, timeout=120):
+        import subprocess
+
+        query = argv[argv.index("--query") + 1]
+        self.window_calls += 1
+        if self.window_calls == 3:
+            self.queries.append(query)
+            return subprocess.CompletedProcess(argv, 0, '{"emails": [], "total": 0}', "")
+        return super().run(argv, input=input, env=env, timeout=timeout)
+
+
 def test_adaptive_sweep_acquires_every_message_of_a_busy_day_including_one_on_the_split() -> None:
     from gmail_source import adaptive_sweep
 
@@ -618,3 +680,12 @@ def test_adaptive_sweep_reports_a_floor_window_still_at_the_cap_and_keeps_its_ro
     assert len(rows) == 50
     assert len(truncated) == 1 and truncated[0]["count"] == 50
     assert truncated[0]["before"] - truncated[0]["after"] <= 300
+
+
+def test_adaptive_sweep_rejects_a_later_bisected_window_that_fails_false_empty() -> None:
+    from gmail_source import GmailSourceError, adaptive_sweep
+
+    start, end = 3_000_000, 3_000_000 + 3_600
+    stamps = {f"m{i:02d}": start + 1 + i * 50 for i in range(60)}
+    with pytest.raises(GmailSourceError, match="bisected coverage mismatch"):
+        adaptive_sweep(_LaterWindowFalseEmpty(stamps), "-in:sent", start, end)

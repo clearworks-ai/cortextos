@@ -59,11 +59,16 @@ class InboxFake:
 
     use_logical_command_names = True
 
-    def __init__(self, inbound=(), sent=(), bodies=None, judge=None, events=(), calendar_rc=0, tasks_rc=0, triage_rc=0):
+    def __init__(self, inbound=(), sent=(), bodies=None, judge=None, events=(), calendar_rc=0, tasks_rc=0,
+                 triage_rc=0, false_empty_after=None, read_payloads=None):
         self.inbound, self.sent = list(inbound), list(sent)
         self.bodies = bodies or {}
+        self.read_payloads = read_payloads or {}
         self.judge = judge or policy(lambda tid, p: {})
         self.events, self.calendar_rc, self.tasks_rc, self.triage_rc = list(events), calendar_rc, tasks_rc, triage_rc
+        self.false_empty_after = false_empty_after
+        self.triage_calls = 0
+        self.empty_proof_pending: set[str] = set()
         self.calls: list[list[str]] = []
         self.prompts: list[str] = []
 
@@ -73,13 +78,26 @@ class InboxFake:
             if self.triage_rc:
                 return CompletedProcess(argv, self.triage_rc, "", "auth failed")
             q = argv[argv.index("--query") + 1]
+            self.triage_calls += 1
+            if self.false_empty_after is not None and self.triage_calls == self.false_empty_after:
+                return _ok('{"emails": [], "total": 0}')
             a, b = int(re.search(r"after:(\d+)", q).group(1)), int(re.search(r"before:(\d+)", q).group(1))
-            pool = self.sent if "in:sent" in q.split() else self.inbound
+            key = "sent" if "in:sent" in q.split() else "inbound"
+            pool = self.sent if key == "sent" else self.inbound
             rows = [r for r in pool
                     if a < datetime.fromisoformat(r["date"].replace("Z", "+00:00")).timestamp() < b]
+            if not rows and not pool:
+                if key in self.empty_proof_pending:
+                    self.empty_proof_pending.remove(key)
+                    rows = [{"id": f"{key}-proof", "threadId": f"{key}-proof", "from": "proof@example.com",
+                             "date": _iso(datetime.fromtimestamp(a + 1, timezone.utc))}]
+                else:
+                    self.empty_proof_pending.add(key)
             return _ok(json.dumps({"emails": rows[:50], "total": len(rows)}))
         if argv[:3] == ["gws", "gmail", "+read"]:
             mid = argv[4]
+            if mid in self.read_payloads:
+                return _ok(json.dumps(self.read_payloads[mid]))
             src = next((r for r in self.inbound if r["id"] == mid), None) or {"id": mid, "threadId": "?", "from": "",
                                                                              "subject": "", "date": _iso(NOW)}
             return _ok(json.dumps({"id": mid, "threadId": src["threadId"], "from": src["from"], "to": "josh@clearworks.ai",
@@ -148,6 +166,31 @@ def test_acquisition_failure_exits_3_and_writes_no_report(tmp_path):
     r = receipt(cfg)
     assert r["error"].startswith("acquisition failed") and r["complete"] is False
     assert not (cfg.state_dir / "runs").exists()
+
+
+def test_false_empty_listing_can_never_turn_sixty_real_threads_into_complete_zero_of_sixty(tmp_path, capsys):
+    rows = [row(f"m{i}", f"t{i}", ago_h=1 + i / 100) for i in range(60)]
+    cfg = cfg_for(tmp_path)
+
+    assert inbox_focus.run(cfg, InboxFake(rows, false_empty_after=1)) == 3
+
+    r = receipt(cfg)
+    assert r["complete"] is False
+    assert not (r.get("threads_total") == 0 and r.get("judged") == 0)
+    output = capsys.readouterr().out
+    assert "INCOMPLETE" in output and "Not clear" in output
+
+
+def test_invalid_read_payload_fails_only_that_thread_and_prevents_complete(tmp_path):
+    rows = [row("m1", "t1"), row("m2", "t2", ago_h=2)]
+    cfg = cfg_for(tmp_path)
+    fake = InboxFake(rows, read_payloads={"m1": {"error": {"message": "read denied"}}})
+
+    assert inbox_focus.run(cfg, fake) == 1
+
+    r = receipt(cfg)
+    assert (r["judged"], r["failed"], r["complete"]) == (1, 1, False)
+    assert "read denied" in section(report(cfg), "Failed")
 
 
 # --- no gates ------------------------------------------------------------------
@@ -326,6 +369,28 @@ def test_unchanged_threads_are_cache_hits_and_a_new_message_is_a_miss(tmp_path):
     assert ids_in(fake3.prompts[0]) == ["t2"]
 
 
+def test_prompt_version_changes_with_template_and_body_evidence_limits(monkeypatch):
+    baseline = inbox_focus.prompt_version()
+    for name, value in (("PROMPT_VERSION", "review-v-next"),
+                        ("BODY_CHARS", inbox_focus.BODY_CHARS + 1),
+                        ("EVIDENCE_CHARS", inbox_focus.EVIDENCE_CHARS + 1)):
+        with monkeypatch.context() as patch:
+            patch.setattr(inbox_focus, name, value)
+            assert inbox_focus.prompt_version() != baseline
+
+
+def test_prompt_version_change_rejudges_an_unchanged_fyi_thread(tmp_path, monkeypatch):
+    cfg = cfg_for(tmp_path)
+    rows = [row("m1", "t1")]
+    assert inbox_focus.run(cfg, InboxFake(rows)) == 0
+
+    monkeypatch.setattr(inbox_focus, "PROMPT_VERSION", "review-v-next")
+    fake = InboxFake(rows)
+    assert inbox_focus.run(cfg, fake) == 0
+    assert fake.claude_calls() == 1
+    assert (receipt(cfg)["judged"], receipt(cfg)["cached"]) == (1, 0)
+
+
 def test_correction_is_context_that_reaches_the_thread_and_its_domain_and_never_filters(tmp_path):
     cfg = cfg_for(tmp_path)
     rows = [row("m1", "t1", sender="Bones <bones@builddiff.co>", subject="Invoice 12"),
@@ -350,6 +415,53 @@ def test_downgrade_with_no_thread_change_is_shown_not_hidden(tmp_path):
     text = report(later)
     assert "Pay the deposit" in section(text, "Downgraded — check") and "was now, now fyi" in text
     assert "Pay the deposit" not in section(text, "FYI")
+
+
+def test_downgraded_action_is_carried_until_a_correction_resolves_it(tmp_path):
+    rows = [row("m1", "t1", subject="Pay the deposit")]
+    cfg = cfg_for(tmp_path)
+    inbox_focus.run(cfg, InboxFake(rows, judge=policy(lambda t, p: {"attention": "now"})))
+    downgraded = cfg_for(tmp_path, now=NOW + timedelta(hours=25))
+    inbox_focus.run(downgraded, InboxFake(rows, judge=policy(lambda t, p: {"attention": "fyi"})))
+
+    carried = cfg_for(tmp_path, now=NOW + timedelta(days=5))
+    assert inbox_focus.run(carried, InboxFake()) == 0
+    assert receipt(carried)["threads_total"] == 1
+    assert "Pay the deposit" in section(report(carried), "Downgraded — check")
+
+    assert inbox_focus.correct(carried.state_dir, "t1", "fyi", "resolved") == 0
+    resolved = cfg_for(tmp_path, now=NOW + timedelta(days=5, hours=1))
+    assert inbox_focus.run(resolved, InboxFake()) == 0
+    assert "Pay the deposit" in section(report(resolved), "FYI")
+    gone = cfg_for(tmp_path, now=NOW + timedelta(days=5, hours=2))
+    assert inbox_focus.run(gone, InboxFake()) == 0
+    assert receipt(gone)["threads_total"] == 0
+
+
+def test_downgraded_action_closes_when_josh_replies(tmp_path):
+    rows = [row("m1", "t1", subject="Pay the deposit")]
+    inbox_focus.run(cfg_for(tmp_path), InboxFake(rows, judge=policy(lambda t, p: {"attention": "now"})))
+    downgraded = cfg_for(tmp_path, now=NOW + timedelta(hours=25))
+    inbox_focus.run(downgraded, InboxFake(rows, judge=policy(lambda t, p: {"attention": "fyi"})))
+    sent = [{"id": "s1", "threadId": "t1", "from": "josh@clearworks.ai",
+             "date": _iso(NOW + timedelta(days=5, hours=1)), "subject": "Re", "labels": ["SENT"]}]
+
+    replied = cfg_for(tmp_path, now=NOW + timedelta(days=5, hours=2))
+    assert inbox_focus.run(replied, InboxFake(sent=sent)) == 0
+    assert receipt(replied)["threads_total"] == 0
+    assert judgments(replied)["t1"]["josh_replied"] is True
+
+
+def test_downgraded_action_remains_visible_when_it_becomes_stale(tmp_path):
+    rows = [row("m1", "t1", subject="Pay the deposit")]
+    inbox_focus.run(cfg_for(tmp_path), InboxFake(rows, judge=policy(lambda t, p: {"attention": "now"})))
+    downgraded = cfg_for(tmp_path, now=NOW + timedelta(hours=25))
+    inbox_focus.run(downgraded, InboxFake(rows, judge=policy(lambda t, p: {"attention": "fyi"})))
+
+    stale = cfg_for(tmp_path, now=NOW + timedelta(days=31))
+    assert inbox_focus.run(stale, InboxFake()) == 0
+    assert receipt(stale)["stale_open"] == ["t1"]
+    assert "Pay the deposit" in report(stale).split("## Stale open", 1)[1]
 
 
 def test_bulk_thread_asking_for_its_body_is_read_and_rejudged_in_the_same_run(tmp_path):
@@ -397,3 +509,17 @@ def test_unsure_now_or_soon_stays_in_its_lane_flagged_and_unsure_lower_goes_to_c
     assert "Missed call" in section(text, "Soon") and "· unsure" in section(text, "Soon")
     assert "Odd receipt" in section(text, "Check these (unsure)") and "best guess: fyi" in text
     assert "Missed call" not in section(text, "Check these (unsure)")
+
+
+def test_receipt_and_coverage_stamp_code_and_prompt_identity(tmp_path, monkeypatch):
+    roots = []
+    monkeypatch.setattr(inbox_focus, "_code_identity", lambda root: (roots.append(root) or ("abc123", True)))
+    cfg = cfg_for(tmp_path)
+    assert inbox_focus.run(cfg, InboxFake([row("m1", "t1")])) == 0
+
+    r = receipt(cfg)
+    coverage = json.loads((Path(r["report_path"]).parent / "coverage.json").read_text())
+    expected = {"code_sha": "abc123", "code_dirty": True, "prompt_version": inbox_focus.prompt_version()}
+    assert roots == [inbox_focus.CODE_REPO_ROOT]
+    assert {k: r[k] for k in expected} == expected
+    assert {k: coverage[k] for k in expected} == expected

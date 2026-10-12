@@ -25,6 +25,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 HERE = Path(__file__).resolve().parent
+CODE_REPO_ROOT = HERE.parents[1]
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
@@ -93,9 +94,23 @@ VERDICT_SCHEMA = {
         },
     }}},
 }
-PROMPT_VERSION = hashlib.sha256((RUBRIC + json.dumps(VERDICT_SCHEMA, sort_keys=True)).encode()).hexdigest()[:16]
+PROMPT_VERSION = "review-v2-validated-read-body"
 
 
+def prompt_version() -> str:
+    """Identity of every constant that can change judgment input or validation."""
+    inputs = {
+        "version": PROMPT_VERSION,
+        "rubric": RUBRIC,
+        "schema": VERDICT_SCHEMA,
+        "batch_chars": BATCH_CHARS,
+        "thread_overhead_chars": THREAD_OVERHEAD_CHARS,
+        "body_chars": BODY_CHARS,
+        "evidence_chars": EVIDENCE_CHARS,
+        "correction_chars": CORRECTION_CHARS,
+        "task_chars": TASK_CHARS,
+    }
+    return hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()[:16]
 # --- read-only boundary --------------------------------------------------------
 
 class ReadOnlyViolation(RuntimeError):
@@ -316,7 +331,7 @@ def _sha(obj) -> str:
 
 
 def cache_key(t: Thread, corrections: list[dict]) -> str:
-    return _sha([t.id, t.message_ids, t.josh_replied, PROMPT_VERSION, _relevant_corrections(t, corrections)])
+    return _sha([t.id, t.message_ids, t.josh_replied, prompt_version(), _relevant_corrections(t, corrections)])
 
 
 def _state_sig(t: Thread) -> str:
@@ -545,7 +560,30 @@ class Config:
 
 
 def _is_open(rec: dict) -> bool:
-    return _is_action(rec.get("verdict")) and not rec.get("josh_replied")
+    return not rec.get("josh_replied") and (
+        _is_action(rec.get("verdict")) or bool(rec.get("downgraded_from"))
+    )
+
+
+def _code_identity(repo_root: Path) -> tuple[str, bool]:
+    try:
+        head = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"], capture_output=True, text=True,
+            check=False, timeout=30,
+        )
+        status = subprocess.run(
+            ["git", "-C", str(repo_root), "status", "--porcelain", "--untracked-files=normal"],
+            capture_output=True, text=True, check=False, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "unknown", True
+    sha = head.stdout.strip() if head.returncode == 0 else "unknown"
+    return sha, status.returncode != 0 or bool(status.stdout.strip())
+
+
+def _build_identity() -> dict:
+    code_sha, code_dirty = _code_identity(CODE_REPO_ROOT)
+    return {"code_sha": code_sha, "code_dirty": code_dirty, "prompt_version": prompt_version()}
 
 
 def run(cfg: Config, runner) -> int:
@@ -577,13 +615,14 @@ def run(cfg: Config, runner) -> int:
 
 
 def _fail(cfg: Config, error: str) -> None:
-    record_failure(cfg.state_dir, error, complete=False)
+    record_failure(cfg.state_dir, error, complete=False, **_build_identity())
     os.chmod(cfg.state_dir / "run-receipt.json", 0o600)
     print(f"INCOMPLETE -- {error}. Not clear.")
 
 
 def _run_locked(cfg: Config, runner) -> int:
     started = datetime.now(timezone.utc)
+    identity = _build_identity()
     run_id = cfg.now.strftime("%Y%m%dT%H%M%SZ")
     run_dir = cfg.state_dir / "runs" / run_id
     jpath = cfg.state_dir / "judgments.json"
@@ -714,8 +753,10 @@ def _run_locked(cfg: Config, runner) -> int:
         "degraded_context": ctx.degraded, "cost_usd": round(cost, 6),
         "anthropic_api_key_in_env": bool(os.environ.get("ANTHROPIC_API_KEY")),
         "report_path": str(run_dir / "report.md"),
+        **identity,
     }
     _save(run_dir / "coverage.json", json.dumps({
+        **identity,
         "threads": {t.id: {"lane": t.lane, "status": status[t.id], **({"error": errors[t.id]} if t.id in errors else {})}
                     for t in threads},
         "truncated": truncated, "stale_open": sorted(stale),

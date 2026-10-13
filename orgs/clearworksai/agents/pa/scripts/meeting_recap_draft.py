@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -17,6 +18,7 @@ AGENT_DIR = SCRIPT_PATH.parent.parent
 ORG_DIR = AGENT_DIR.parent.parent
 DEFAULT_VOICE_PATH = ORG_DIR / "knowledge" / "voice.md"
 DEFAULT_VIP_PATH = ORG_DIR / "knowledge" / "vip-clients.txt"
+GWS_BIN = os.environ.get("CORTEXTOS_GWS_BIN", "/Users/joshweiss/.local/bin/gws")
 CLEARWORKS_DOMAINS = {"clearworks.ai"}
 SUPPRESSED_NAMES: tuple[str, ...] = ()  # Josh 2026-08-11: suppression removed — never drop a recap by name
 DEFAULT_TO = "josh@clearworks.ai"
@@ -568,7 +570,7 @@ def _draft_id_from_stdout(stdout: str) -> str | None:
 
 def run_gmail_draft(subject: str, body: str, runner: Runner, *, to: list[str], cc: list[str] | None = None) -> RunResult:
     args = [
-        "gws",
+        GWS_BIN,
         "gmail",
         "+draft",
         "--to",

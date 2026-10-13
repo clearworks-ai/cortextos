@@ -52,6 +52,10 @@ STATE = VAULT / "raw/media/transcripts/_state"
 # Post-subscription healthy path (e4021750 + 2026-09-30 activation). Failures
 # at-or-before this instant are historical, not current provider health.
 DEFAULT_CUTOVER_AT = "2026-10-01T00:00:00+00:00"
+# The API-credit failures recorded before this fix was authored came from the
+# retired inherited-key route. They still represent unprocessed meetings, but
+# they are not evidence that the current subscription route lacks credit.
+SUBSCRIPTION_ROUTE_FIX_AT = "2026-10-09T19:06:20+00:00"
 ACK_PATH = STATE / "meeting-loop-watch-ack.json"
 TELEGRAM_CHAT_ID = "6690120787"
 TELEGRAM_AGENT_DIR = REPO / "orgs/clearworksai/agents/pa-codex"
@@ -388,7 +392,13 @@ def _processing_failure(meeting_id: str) -> str | None:
         return "processing-error.json is unreadable"
     if doc.get("class") != "processing":
         return "processing failure evidence is malformed"
-    return str(doc.get("message") or f"returncode={doc.get('returncode')}")[:200]
+    message = str(doc.get("message") or f"returncode={doc.get('returncode')}")
+    evidence_at = _parse_iso(doc.get("at"))
+    route_fix_at = _parse_iso(SUBSCRIPTION_ROUTE_FIX_AT)
+    if ("Credit balance is too low" in message and evidence_at is not None
+            and route_fix_at is not None and evidence_at <= route_fix_at):
+        return "historical extract failure from retired API-credit route — explicit retry required"
+    return message[:200]
 
 
 def _is_active_failure(evidence_at: datetime | None, ack: dict) -> bool:

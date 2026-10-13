@@ -117,7 +117,7 @@ class ProcessMeetingsTests(unittest.TestCase):
 
         self.assertEqual(summary["drafts_created"], 1)
         self.assertEqual(summary["auto_filed"], 0)
-        gws_calls = [c for c in calls if c[:3] == ["gws", "gmail", "+draft"]]
+        gws_calls = [c for c in calls if c[:3] == [MODULE.GWS_BIN, "gmail", "+draft"]]
         self.assertEqual(len(gws_calls), 1)
         # the SENT body is the composed customer email, never the internal template
         body = gws_calls[0][gws_calls[0].index("--body") + 1]
@@ -193,7 +193,7 @@ class ProcessMeetingsTests(unittest.TestCase):
                     # Simulate a second recap worker winning the race: it
                     # calls gws +draft AND appends the ledger key before our
                     # own critical section starts.
-                    runner(["gws", "gmail", "+draft", "--other-worker"])
+                    runner([MODULE.GWS_BIN, "gmail", "+draft", "--other-worker"])
                     MODULE._append_ledger_locked(ledger_path, key, "Other worker's subject")
                 with real_lock(path):
                     yield
@@ -210,8 +210,8 @@ class ProcessMeetingsTests(unittest.TestCase):
             finally:
                 MODULE.client_file_lock = real_lock
 
-        draft_calls = [c for c in calls if c[:3] == ["gws", "gmail", "+draft"]]
-        self.assertEqual(draft_calls, [["gws", "gmail", "+draft", "--other-worker"]])
+        draft_calls = [c for c in calls if c[:3] == [MODULE.GWS_BIN, "gmail", "+draft"]]
+        self.assertEqual(draft_calls, [[MODULE.GWS_BIN, "gmail", "+draft", "--other-worker"]])
         self.assertEqual(summary["drafts_created"], 0)
         self.assertEqual(summary["skipped_ledger"], 1)
 
@@ -393,7 +393,7 @@ def test_apply_calls_gws_and_keys_ledger_by_source(tmp_path, monkeypatch):
     gws = bindir / "gws"
     gws.write_text(f'#!/bin/sh\necho "$@" >> {calls_file}\nexit 0\n')
     gws.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
+    monkeypatch.setattr(MODULE, "GWS_BIN", str(gws))
 
     payload = {
         "meetings": [
@@ -704,7 +704,7 @@ class ComposeCustomerEmailTests(unittest.TestCase):
             summary = MODULE.process_meetings([m], ledger_path=Path(tmp) / "l.txt", voice_guidance="", vip_list=set(),
                                               runner=fake_runner(calls, body=good), voice_prompt="Direct.")
         self.assertEqual(summary["drafts_created"], 1)
-        gws = [c for c in calls if c[:3] == ["gws", "gmail", "+draft"]][0]
+        gws = [c for c in calls if c[:3] == [MODULE.GWS_BIN, "gmail", "+draft"]][0]
         self.assertEqual(gws[gws.index("--body") + 1], good)
         self.assertEqual(gws[gws.index("--subject") + 1], "Following up on our Sep 15 conversation")
 
@@ -718,7 +718,7 @@ class ComposeCustomerEmailTests(unittest.TestCase):
             self.assertEqual(len(summary["draft_failures"]), 1)
             self.assertIn("compose:", summary["draft_failures"][0]["stderr"])
             self.assertFalse(ledger.exists() and ledger.read_text().strip())
-        self.assertEqual([c for c in calls if c[:3] == ["gws", "gmail", "+draft"]], [])
+        self.assertEqual([c for c in calls if c[:3] == [MODULE.GWS_BIN, "gmail", "+draft"]], [])
 
     def test_model_transport_failure_creates_no_draft_and_is_reported(self):
         calls = []
@@ -727,7 +727,7 @@ class ComposeCustomerEmailTests(unittest.TestCase):
                                               runner=fake_runner(calls, claude_rc=1), voice_prompt="Direct.")
         self.assertEqual(summary["drafts_created"], 0)
         self.assertIn("claude exit 1", summary["draft_failures"][0]["stderr"])
-        self.assertEqual([c for c in calls if c[:3] == ["gws", "gmail", "+draft"]], [])
+        self.assertEqual([c for c in calls if c[:3] == [MODULE.GWS_BIN, "gmail", "+draft"]], [])
 
 
 class VoiceBundleTests(unittest.TestCase):
@@ -827,7 +827,7 @@ class RecipientVerificationTests(unittest.TestCase):
             _client_meeting(),
             [{"name": ADA_NAME, "email": ADA_EMAIL}],
         )
-        gws = [c for c in calls if c[:3] == ["gws", "gmail", "+draft"]]
+        gws = [c for c in calls if c[:3] == [MODULE.GWS_BIN, "gmail", "+draft"]]
         self.assertEqual(len(gws), 1)
         self.assertEqual(gws[0][gws[0].index("--to") + 1], ADA_EMAIL)
         self.assertNotIn("josh@clearworks.ai", gws[0])
@@ -853,7 +853,7 @@ class RecipientVerificationTests(unittest.TestCase):
         for meeting, contacts in cases:
             with self.subTest(attendees=meeting["attendees"]):
                 summary, calls, _ = self._run(meeting, contacts)
-                self.assertEqual([c for c in calls if c[:3] == ["gws", "gmail", "+draft"]], [])
+                self.assertEqual([c for c in calls if c[:3] == [MODULE.GWS_BIN, "gmail", "+draft"]], [])
                 self.assertEqual(summary["drafts_created"], 0)
 
     def test_cli_dry_run_zero_match_returns_nonzero_with_diagnostics(self):
@@ -890,7 +890,7 @@ class RecipientVerificationTests(unittest.TestCase):
         for attendees in cases:
             with self.subTest(attendees=attendees):
                 summary, calls, _ = self._run(_client_meeting(attendees=attendees), contacts)
-                self.assertEqual([c for c in calls if c[:3] == ["gws", "gmail", "+draft"]], [])
+                self.assertEqual([c for c in calls if c[:3] == [MODULE.GWS_BIN, "gmail", "+draft"]], [])
                 self.assertEqual(summary["drafts_created"], 0)
 
     def test_name_only_malformed_canonical_contact_makes_zero_gws_calls(self):
@@ -898,7 +898,7 @@ class RecipientVerificationTests(unittest.TestCase):
             _client_meeting(attendees=[ADA_NAME]),
             [{"name": ADA_NAME, "email": "ada@clients.example,eve@clients.example"}],
         )
-        self.assertEqual([c for c in calls if c[:3] == ["gws", "gmail", "+draft"]], [])
+        self.assertEqual([c for c in calls if c[:3] == [MODULE.GWS_BIN, "gmail", "+draft"]], [])
         self.assertEqual(summary["drafts_created"], 0)
 
     def test_invalid_cc_and_send_path_never_reach_gws(self):
@@ -906,7 +906,7 @@ class RecipientVerificationTests(unittest.TestCase):
             _client_meeting(cc=["ops@clearworks.ai"]),
             [{"name": ADA_NAME, "email": ADA_EMAIL}],
         )
-        self.assertEqual([c for c in calls if c[:3] == ["gws", "gmail", "+draft"]], [])
+        self.assertEqual([c for c in calls if c[:3] == [MODULE.GWS_BIN, "gmail", "+draft"]], [])
         self.assertEqual(summary["drafts_created"], 0)
         self.assertFalse(any("send" in c for c in calls))
 

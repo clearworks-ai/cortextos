@@ -67,6 +67,7 @@ def _no_live_daemon(monkeypatch):
     cortextos` -> /opt/homebrew/bin/cortextos) and the task's binding G0
     fold rules require PATH-shimming cortextos/gws in every test."""
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setenv("CORTEXTOS_GWS_BIN", "gws")
 
 
 def _seed_signed_marker(vault: Path, meeting_id: str) -> None:

@@ -186,7 +186,6 @@ def adapt(source: dict[str, Any], validated: dict[str, Any], resolution: dict[st
             continue
         attendee_names.append(str(p.get("email") or p.get("name") or "").strip())
     attendee_names = [a for a in attendee_names if a]
-    recap_emails = _emails(source, externals_only=False)
     event_emails = _emails(source, externals_only=True)
     summary = validated.get("summary") or {}
     meeting_core = {
@@ -227,7 +226,6 @@ def adapt(source: dict[str, Any], validated: dict[str, Any], resolution: dict[st
         "open_items": open_items,
     }
     recap_meeting = dict(meeting_core)
-    recap_meeting["attendees"] = recap_emails
     writeback = {"meetings": [meeting_core]}
     recap = {"meetings": [recap_meeting]}
     event = {

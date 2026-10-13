@@ -12,7 +12,32 @@ if str(BRAIN) not in sys.path:
 def test_recap_recipients_are_josh_only() -> None:
     from preview import recap_recipients
 
-    assert recap_recipients({}) == {"to": ["josh@clearworks.ai"], "cc": []}
+    assert recap_recipients({}) == {"to": [], "cc": []}
+
+
+def test_recap_recipients_fail_closed_without_verified_external() -> None:
+    from preview import recap_recipients
+
+    assert recap_recipients({}) == {"to": [], "cc": []}
+
+
+def test_recap_recipients_name_only_unique_contact() -> None:
+    from preview import recap_recipients
+
+    payload = {
+        "meetings": [
+            {
+                "organizer": "josh@clearworks.ai",
+                "attendees": ["Ada External"],
+                "cc": [],
+            }
+        ]
+    }
+    contacts = [{"name": "Ada External", "email": "ada@clients.example"}]
+    assert recap_recipients(payload, contacts=contacts) == {
+        "to": ["ada@clients.example"],
+        "cc": [],
+    }
 
 
 def test_crm_interaction_preview_one_row_per_attendee() -> None:

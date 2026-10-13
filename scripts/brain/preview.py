@@ -5,10 +5,11 @@ truthful without invoking meeting-crm-sync.py or meeting-fanout.py."""
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 from typing import Any
 
-RECAP_TO = "josh@clearworks.ai"
+from resolve_email import _contact_emails, _normalize_email, load_contacts
 
 _CODE_ROOT = Path(__file__).resolve().parent.parent.parent
 _CRM_SYNC_PATH = _CODE_ROOT / "orgs/clearworksai/agents/crm/crm/meeting-crm-sync.py"
@@ -34,11 +35,90 @@ def _load_crm_sync_module():
 _crm_sync = _load_crm_sync_module()
 crm_attendees = _crm_sync.crm_attendees
 _select_meeting = _crm_sync._select_meeting
+_CLEARWORKS_DOMAINS = set(_crm_sync.INTERNAL_DOMAINS)
 
 
-def recap_recipients(_payload: dict[str, Any]) -> dict[str, list[str]]:
-    """FR-008 always drafts to Josh; no --to/--cc override exists yet (spec §11)."""
-    return {"to": [RECAP_TO], "cc": []}
+class _AmbiguousRecipient(Exception):
+    pass
+
+
+def _name_key(value: str) -> str:
+    return " ".join(value.casefold().split())
+
+
+def _is_email(value: str) -> bool:
+    text = (value or "").strip()
+    return bool(text.isprintable() and _crm_sync._is_email(text))
+
+
+def _blocked_recipient(email: str) -> bool:
+    if not email or "@" not in email:
+        return True
+    return email.split("@", 1)[1].lower() in _CLEARWORKS_DOMAINS
+
+
+def _canonical_contact_email(contact: dict[str, Any]) -> str | None:
+    emails: list[str] = []
+    for raw in _contact_emails(contact):
+        email = _normalize_email(raw)
+        if email and email not in emails:
+            emails.append(email)
+    return emails[0] if len(emails) == 1 and _is_email(emails[0]) else None
+
+
+def _load_recap_contacts(explicit: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    if explicit is not None:
+        return explicit
+    raw = os.environ.get("CRM_CONTACTS_PATH", "").strip()
+    if not raw:
+        return []
+    return load_contacts(Path(raw).parent)
+
+
+def _enrich_recipient(value: str, contacts: list[dict[str, Any]]) -> str | None:
+    raw = " ".join(str(value or "").split())
+    if not raw:
+        return None
+    if _is_email(raw):
+        return _normalize_email(raw)
+    key = _name_key(raw)
+    matches = [row for row in contacts if isinstance(row, dict) and _name_key(str(row.get("name") or "")) == key]
+    if len(matches) > 1:
+        raise _AmbiguousRecipient
+    if len(matches) != 1:
+        return None
+    return _canonical_contact_email(matches[0])
+
+
+def recap_recipients(payload: dict[str, Any], contacts: list[dict[str, Any]] | None = None) -> dict[str, list[str]]:
+    """Fail-closed To/Cc: unique verified external only. No Josh/Clearworks fallback."""
+    meeting: dict[str, Any] = payload if isinstance(payload, dict) else {}
+    meetings = meeting.get("meetings")
+    if isinstance(meetings, list) and meetings and isinstance(meetings[0], dict):
+        meeting = meetings[0]
+    rows = _load_recap_contacts(contacts)
+    try:
+        to: list[str] = []
+        seen: set[str] = set()
+        for raw in meeting.get("attendees") or []:
+            email = _enrich_recipient(str(raw), rows)
+            if not email or _blocked_recipient(email) or email in seen:
+                continue
+            seen.add(email)
+            to.append(email)
+        cc: list[str] = []
+        for raw in meeting.get("cc") or []:
+            email = _enrich_recipient(str(raw), rows)
+            if not email or _blocked_recipient(email):
+                return {"to": [], "cc": []}
+            if email not in seen:
+                seen.add(email)
+                cc.append(email)
+        if not to:
+            return {"to": [], "cc": []}
+        return {"to": to, "cc": cc}
+    except _AmbiguousRecipient:
+        return {"to": [], "cc": []}
 
 
 def crm_interaction_preview(

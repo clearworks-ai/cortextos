@@ -1120,6 +1120,43 @@ class FailureContractTests(unittest.TestCase):
         self.assertEqual(printed["items"], [])
         self.assertIn("credit balance too low", printed["error"])
 
+    def test_execute_openrouter_http_401_is_structured_rc1(self) -> None:
+        def failing_urlopen(request: object, timeout: int | None = None) -> FakeResponse:
+            url = request.full_url
+            if "fireflies" in url:
+                return FakeResponse(json.dumps({"data": {"transcripts": [self.make_transcript()]}}).encode("utf-8"))
+            if "openrouter" in url:
+                raise urllib.error.HTTPError(
+                    url=url,
+                    code=401,
+                    msg="Unauthorized",
+                    hdrs=None,
+                    fp=io.BytesIO(b'{"error":{"message":"User not found."}}'),
+                )
+            raise AssertionError(f"unexpected URL: {url}")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            stdout = io.StringIO()
+            env = dict(self.ENV)
+            with unittest.mock.patch.dict(os.environ, env, clear=True):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = MODULE.execute(
+                        limit=5,
+                        dry_run=False,
+                        meeting_id="",
+                        watermark_path=Path(tmp) / "watermark.json",
+                        urlopen=failing_urlopen,
+                    )
+                self.assertEqual(os.environ.get("OPENROUTER_API_KEY"), "or-test")
+                self.assertEqual(os.environ.get("FF_EXTRACTOR_MODEL"), None)
+                self.assertEqual(os.environ.get("FF_CLASSIFIER_MODEL"), None)
+
+        self.assertEqual(exit_code, 1)
+        printed = json.loads(stdout.getvalue())
+        self.assertEqual(printed["items"], [])
+        self.assertIn("OpenRouter HTTP 401", printed["error"])
+        self.assertNotIn("fallback", printed["error"].lower())
+
     def test_execute_marks_dry_run_in_error_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             stdout = io.StringIO()

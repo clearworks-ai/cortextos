@@ -229,6 +229,71 @@ def _fake_binary(tmp_path: Path, name: str, rc: int, stderr_msg: str) -> Path:
     return script
 
 
+def _rewrite_source_attendee(vault: Path, mid: str, *, name: str, email: str = "") -> None:
+    env = vault / "raw/media/transcripts/fireflies" / mid
+    source = json.loads((env / "source.json").read_text(encoding="utf-8"))
+    source["participants"] = [
+        source["participants"][0],
+        {
+            "name": name,
+            "email": email,
+            "side": "theirs",
+            "spoke": True,
+            "notetaker": False,
+            "handle": None,
+        },
+    ]
+    raw = json.dumps(source, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    (env / "source.json").write_bytes(raw)
+    sha = hashlib.sha256(raw).hexdigest()
+    (env / "source.sha256").write_text(sha + "\n", encoding="utf-8")
+    extraction = json.loads((env / "extraction.json").read_text(encoding="utf-8"))
+    extraction["inputSha"] = sha
+    (env / "extraction.json").write_text(json.dumps(extraction), encoding="utf-8")
+
+
+def _write_repo_contacts(repo: Path, rows: list[dict]) -> None:
+    crm_dir = repo / "orgs/clearworksai/agents/crm/crm"
+    crm_dir.mkdir(parents=True, exist_ok=True)
+    (crm_dir / "contacts.json").write_text(json.dumps({"contacts": rows}), encoding="utf-8")
+
+
+def test_dry_run_zero_match_recipients_exits_nonzero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    vault, repo, mid = _seed(tmp_path)
+    _rewrite_source_attendee(vault, mid, name="Zed Unknown")
+    _write_repo_contacts(repo, [{"name": "Ada External", "email": "ada@clients.example"}])
+    rc = _run_dry_with_fake_fetch_extract(monkeypatch, mid, repo, vault)
+    captured = capsys.readouterr()
+    assert rc == 9
+    assert "to: (none)" in captured.out
+    assert "attendees: josh@clearworks.ai, Zed Unknown" in captured.out
+    assert "FAILED at recap:" in captured.err
+    assert "recipients: missing or unverified external To" in captured.out + captured.err
+
+
+def test_dry_run_ambiguous_recipients_exits_nonzero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    vault, repo, mid = _seed(tmp_path)
+    _rewrite_source_attendee(vault, mid, name="Blair Twin")
+    _write_repo_contacts(
+        repo,
+        [
+            {"name": "Blair Twin", "email": "blair.a@clients.example"},
+            {"name": "Blair Twin", "email": "blair.b@clients.example"},
+        ],
+    )
+    rc = _run_dry_with_fake_fetch_extract(monkeypatch, mid, repo, vault)
+    captured = capsys.readouterr()
+    assert rc == 9
+    assert "to: (none)" in captured.out
+    assert "attendees: josh@clearworks.ai, Blair Twin" in captured.out
+    assert "FAILED at recap:" in captured.err
+    assert "recipients: missing or unverified external To" in captured.out + captured.err
+
+
 def _run_dry_with_fake_fetch_extract(monkeypatch: pytest.MonkeyPatch, mid: str, repo: Path, vault: Path):
     from run_meeting import main
 

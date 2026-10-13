@@ -109,6 +109,34 @@ def test_stable_ids_and_email_attendees(tmp_path) -> None:
     assert wb["meetings"][0]["resolution"]["counterparty"] == "alloi"
 
 
+def test_adapter_to_recipient_keeps_name_only_identity(tmp_path) -> None:
+    from adapt_meeting import main
+    from preview import recap_recipients
+
+    src = tmp_path / "env"
+    src.mkdir()
+    _payloads(src)
+    source = json.loads((src / "source.json").read_text(encoding="utf-8"))
+    source["participants"] = [
+        source["participants"][0],
+        {
+            "name": "Ada External",
+            "email": "",
+            "side": "theirs",
+            "spoke": True,
+            "notetaker": False,
+            "handle": None,
+        },
+    ]
+    (src / "source.json").write_text(json.dumps(source), encoding="utf-8")
+    assert main(["--source", str(src)]) == 0
+    recap = json.loads((src / "recap-payload.json").read_text(encoding="utf-8"))
+    assert recap["meetings"][0]["attendees"] == ["josh@clearworks.ai", "Ada External"]
+    assert recap_recipients(
+        recap, contacts=[{"name": "Ada External", "email": "ada@clients.example"}]
+    ) == {"to": ["ada@clients.example"], "cc": []}
+
+
 def test_owner_identity_regex_exits_12() -> None:
     from adapt_meeting import require_owner_identity
     import pytest

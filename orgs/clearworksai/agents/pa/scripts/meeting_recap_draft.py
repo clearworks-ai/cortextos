@@ -68,6 +68,7 @@ _BRAIN_DIR = Path(__file__).resolve().parents[5] / "scripts" / "brain"
 if str(_BRAIN_DIR) not in sys.path:
     sys.path.insert(0, str(_BRAIN_DIR))
 from atomic import atomic_write  # noqa: E402
+from preview import recap_recipients  # noqa: E402
 from writeback_render import _source_key  # noqa: E402
 
 # P1 (review 2026-09-05): reuse meeting_writeback.py's FR-008 per-file
@@ -565,20 +566,21 @@ def _draft_id_from_stdout(stdout: str) -> str | None:
     return None
 
 
-def run_gmail_draft(subject: str, body: str, runner: Runner) -> RunResult:
-    return runner(
-        [
-            "gws",
-            "gmail",
-            "+draft",
-            "--to",
-            DEFAULT_TO,
-            "--subject",
-            subject,
-            "--body",
-            body,
-        ]
-    )
+def run_gmail_draft(subject: str, body: str, runner: Runner, *, to: list[str], cc: list[str] | None = None) -> RunResult:
+    args = [
+        "gws",
+        "gmail",
+        "+draft",
+        "--to",
+        ",".join(to),
+        "--subject",
+        subject,
+        "--body",
+        body,
+    ]
+    if cc:
+        args.extend(["--cc", ",".join(cc)])
+    return runner(args)
 
 
 def default_runner(args: Sequence[str]) -> RunResult:
@@ -625,6 +627,19 @@ def process_meetings(
 
         tier, confidence, reason = determine_trust_tier(meeting, vip_list)
         subject = build_subject(meeting)
+        recipients = recap_recipients(meeting)
+        if tier != "L2" and not recipients["to"]:
+            if dry_run:
+                print("to: (none)")
+                print("cc: (none)")
+                attendees = [normalize_space(str(a)) for a in (meeting.get("attendees") or []) if normalize_space(str(a))]
+                print(f"attendees: {', '.join(attendees) or '(none)'}")
+                print(f"subject: {subject}")
+            summary["draft_failures"].append({
+                "meeting_id": meeting_id, "returncode": -1,
+                "stderr": "recipients: missing or unverified external To",
+            })
+            continue
         internal_summary = build_body(meeting, voice_guidance)  # internal shape: kept for the ledger/preview only
         if tier == "L2" and not dry_run:
             body = internal_summary  # auto-filed internal meetings never become a customer email
@@ -648,7 +663,6 @@ def process_meetings(
         )
 
         if dry_run:
-            recipients = {"to": [DEFAULT_TO], "cc": []}
             print(f"to: {', '.join(recipients['to'])}")
             print(f"cc: {', '.join(recipients['cc']) or '(none)'}")
             attendees = [normalize_space(str(a)) for a in (meeting.get("attendees") or []) if normalize_space(str(a))]
@@ -679,7 +693,7 @@ def process_meetings(
                 ledger_ids.add(key)
                 continue
 
-            result = run_gmail_draft(subject, body, runner)
+            result = run_gmail_draft(subject, body, runner, to=recipients["to"], cc=recipients["cc"])
             if result.returncode == 0:
                 _append_ledger_locked(ledger_path, key, subject)
                 summary["drafts_created"] += 1
@@ -688,6 +702,8 @@ def process_meetings(
                     "key": key,
                     "subject": subject,
                     "body": body,
+                    "to": list(recipients["to"]),
+                    "cc": list(recipients["cc"]),
                     "draft_id": draft_id,
                     "link": DRAFT_LINK_TEMPLATE.format(account=DEFAULT_TO, draft_id=draft_id) if draft_id else None,
                 })
@@ -730,7 +746,7 @@ def main(argv: list[str] | None = None) -> int:
         dry_run=args.dry_run,
     )
     print(json.dumps(summary))
-    return 0
+    return 1 if summary["draft_failures"] else 0
 
 
 if __name__ == "__main__":

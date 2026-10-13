@@ -234,6 +234,7 @@ def _run_dry(meeting_id: str, vault: Path, repo: Path, source_dir: Path,
         env["ORG_ROOT"] = str(vault)
         env["LEDGER_FILE"] = str(ledger)
         env["CTX_TMP"] = tmp
+        env = progress.crm_env(env, repo)
         wb_payload = source_dir / "writeback-payload.json"
         recap_payload = source_dir / "recap-payload.json"
         wb = subprocess.run(
@@ -829,7 +830,7 @@ def _apply_writes(
     if backfill:
         _backfill_skip("draft")
     elif not progress.step_done(doc, "draft"):
-        env = _writeback_env(vault)
+        env = progress.crm_env(_writeback_env(vault), repo)
         ledger_path = vault / "raw/media/transcripts/_recap-ledger.txt"
         try:
             rec = subprocess.run(
@@ -880,12 +881,14 @@ def _apply_writes(
                 subject = None
             if not subject:
                 subject = "(ledger-skipped)"
-        # Josh 2026-09-13: "i need those telegramed to me the links to the drafts and
-        # the copy every time." The draft itself is addressed to Josh in Gmail (FR-008),
-        # but he reads Telegram, so the link + full copy go to him there the moment the
-        # draft exists. Best-effort by design: a Telegram outage must never fail a
-        # meeting whose draft, CRM row and vault write all succeeded.
-        for _d in (rec_out.get("drafts") or []):
+        doc = progress.merge_progress(prog_path, "draft", {
+            "done": True, "subject": subject,
+            "created": bool(rec_out.get("drafts_created")), "skipped_ledger": skipped_ledger,
+            "drafts": rec_out.get("drafts") or [],
+        })
+        # Best-effort Telegram after the durable draft receipt. A Telegram
+        # outage must never erase, downgrade, or reorder that receipt.
+        for _d in (doc.get("draft") or {}).get("drafts") or []:
             _parts = [f"Recap draft ready — {_d.get('subject') or subject or 'Untitled'}"]
             if _d.get("link"):
                 _parts.append(_d["link"])
@@ -910,12 +913,6 @@ def _apply_writes(
                           file=sys.stderr)
             except (subprocess.TimeoutExpired, OSError) as exc:
                 print(f"warn: recap telegram failed: {exc}", file=sys.stderr)
-
-        doc = progress.merge_progress(prog_path, "draft", {
-            "done": True, "subject": subject,
-            "created": bool(rec_out.get("drafts_created")), "skipped_ledger": skipped_ledger,
-            "drafts": rec_out.get("drafts") or [],
-        })
 
     # Phase 3 (spec §12, FR-012 line 327): D-09 phase-3 re-sign check (Task
     # 5) -> FR-007 -> FR-011 -> FR-013, after FR-008 (draft), before the
